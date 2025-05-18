@@ -106,11 +106,11 @@ class CodeProcessor(BaseProcessor):
                 languages_to_try = []
                 
                 # Add languages based on heuristic detection
-                if heuristic_confidence >= 0.4:
+                if heuristic_confidence >= 0.3:
                     languages_to_try.append(heuristic_lang)
                 
                 # Add commonly used languages
-                common_langs = ['python', 'javascript', 'java', 'cpp', 'go']
+                common_langs = ['python', 'javascript', 'java', 'cpp', 'go', 'bash', 'rust']
                 for lang in common_langs:
                     if lang not in languages_to_try:
                         languages_to_try.append(lang)
@@ -118,23 +118,24 @@ class CodeProcessor(BaseProcessor):
                 best_language = None
                 best_score = 0
                 
-                for lang in languages_to_try[:5]:  # Limit to 5 attempts
+                for lang in languages_to_try[:7]:  # Try a few more languages
                     if get_supported_language(lang):
                         try:
                             metadata = extract_code_metadata(block.code, lang)
                             if metadata.get('tree_sitter_success') and not metadata.get('error'):
-                                # Score based on successful parsing and structure found
-                                score = 0.7  # Base score for successful parsing
+                                # Base score for successful parsing
+                                # Give higher base score for successful parsing even without functions/classes
+                                score = 0.6
                                 
                                 # Bonus for finding functions/classes
                                 if metadata.get('functions'):
-                                    score += 0.1 * min(len(metadata['functions']), 3)
+                                    score += 0.2 * min(len(metadata['functions']), 2)
                                 if metadata.get('classes'):
                                     score += 0.2 * min(len(metadata['classes']), 2)
                                     
                                 # Bonus if it matches heuristic detection
-                                if lang == heuristic_lang:
-                                    score += 0.1
+                                if lang == heuristic_lang and heuristic_confidence >= 0.3:
+                                    score += heuristic_confidence * 0.3
                                     
                                 if score > best_score:
                                     best_score = score
@@ -144,7 +145,7 @@ class CodeProcessor(BaseProcessor):
                             logger.debug(f"Error trying language {lang}: {e}")
                             continue
                 
-                if best_language and best_score >= self.min_confidence:
+                if best_language and best_score >= 0.5:  # Lower threshold for simple code
                     detected_language = best_language
                     confidence = min(best_score, 1.0)
                     
@@ -176,57 +177,146 @@ class CodeProcessor(BaseProcessor):
         This provides a quick estimation based on common patterns and keywords.
         Returns (language, confidence) tuple.
         """
+        # Check for data formats first (JSON, YAML, XML)
+        code_stripped = code.strip()
+        
+        # JSON detection
+        if code_stripped.startswith('{') and code_stripped.endswith('}'):
+            if '"' in code and ':' in code:
+                return 'json', 0.9
+        elif code_stripped.startswith('[') and code_stripped.endswith(']'):
+            if '"' in code or "'" in code:
+                return 'json', 0.8
+                
+        # XML/HTML detection
+        if code_stripped.startswith('<') and code_stripped.endswith('>'):
+            if '</' in code:
+                return 'xml', 0.9
+                
+        # Python type hints detection - check BEFORE YAML
+        if ('from typing' in code or 'import typing' in code):
+            if 'List[' in code or 'Dict[' in code or 'Optional[' in code:
+                return 'python', 0.95
+                
+        # YAML detection (simple heuristic)
+        lines = code.split('\n')
+        yaml_score = 0
+        has_type_annotations = False
+        
+        for line in lines[:5]:  # Check first 5 lines
+            stripped = line.strip()
+            if stripped and ':' in stripped and not line.lstrip().startswith('#'):
+                # Skip if it looks like Python type annotations
+                if 'List[' in line or 'Dict[' in line or ': int' in line or ': str' in line or ': float' in line:
+                    has_type_annotations = True
+                    continue
+                    
+                # Check for YAML-style key: value
+                if stripped.count(':') == 1 and not stripped.endswith(':'):
+                    yaml_score += 1
+                elif line.startswith(' ') or line.startswith('-'):
+                    yaml_score += 0.5
+        
+        # Don't identify as YAML if Python type annotations found
+        if yaml_score >= 2 and not has_type_annotations:
+            return 'yaml', min(yaml_score / 3, 1.0)
+        
+        # SQL detection
+        sql_keywords = ['SELECT', 'FROM', 'WHERE', 'INSERT', 'UPDATE', 'DELETE', 'CREATE', 'DROP', 'ALTER']
+        sql_score = 0
+        code_upper = code.upper()
+        for keyword in sql_keywords:
+            if keyword in code_upper:
+                sql_score += 1
+        if sql_score >= 2:
+            return 'sql', min(sql_score / 3, 1.0)
+        
+        # Check for shell scripts first
+        if code_stripped.startswith('#!/bin/bash') or code_stripped.startswith('#!/bin/sh'):
+            return 'bash', 1.0
+        
+        # Bash detection (improved - check earlier)
+        bash_indicators = ['echo ', 'cd ', 'export ', 'if [', ']; then', './', '#!/bin/bash']
+        bash_score = 0
+        for indicator in bash_indicators:
+            if indicator in code:
+                bash_score += 1
+        
+        if bash_score >= 2:
+            return 'bash', min(bash_score / 3, 0.9)
+                
+        # JavaScript detection (improved) - check for strong patterns early
+        if '=>' in code and ('const ' in code or 'let ' in code):
+            if not ('from typing' in code or 'List[' in code or 'Dict[' in code):
+                return 'javascript', 0.85
+                
+        # Check for TypeScript typing before Python typing
+        if (': string' in code or ': number' in code or ': boolean' in code):
+            if 'from typing' not in code and 'import typing' not in code:
+                return 'typescript', 0.85
+                
+        
         # Common patterns for different languages
         patterns = {
             'python': {
-                'keywords': ['def ', 'class ', 'import ', 'from ', 'if __name__', 'async def', 'self.', 'print('],
-                'patterns': [r'^\s*#', r'"""', r"'''", r'if __name__ == "__main__":', r'def \w+\(self'],
+                'keywords': ['def ', 'class ', 'import ', 'from ', 'if __name__', 'print(', 'elif ', 'lambda ', 'self.', '    return '],
+                'patterns': [r'^\s*#[^!]', r'"""', r"'''", r'if __name__ == "__main__":', r'def \w+\(', r':\s*$', r'^\s*@', r'import\s+\w+'],
                 'weight': 1.0
             },
             'javascript': {
-                'keywords': ['function', 'const ', 'let ', 'var ', 'return', 'console.', '.then(', '=>'],
-                'patterns': [r'===', r'!==', r'=>', r'\.then\s*\(', r'async\s+function', r'console\.log\('],
+                'keywords': ['function', 'const ', 'let ', 'var ', 'return', 'console.', '.then(', '=>', 'async ', 'await ', 'module.exports'],
+                'patterns': [r'===', r'!==', r'=>', r'\.then\s*\(', r'async\s+function', r'console\.log\(', r'\$\{', r'`'],
                 'weight': 0.95
             },
             'java': {
-                'keywords': ['public class', 'private', 'void', 'new ', 'extends', 'implements', 'System.out', 'public static'],
-                'patterns': [r'@Override', r'System\.out\.println', r'public\s+static\s+void\s+main', r'public\s+class'],
+                'keywords': ['public class', 'private', 'void', 'new ', 'extends', 'implements', 'System.out', 'public static', 'package '],
+                'patterns': [r'@Override', r'System\.out\.println', r'public\s+static\s+void\s+main', r'public\s+class', r';$'],
                 'weight': 1.0
             },
             'cpp': {
-                'keywords': ['#include', 'using namespace', 'std::', 'void ', 'int main', 'cout <<', 'cin >>'],
-                'patterns': [r'#include\s*<', r'std::', r'<<', r'>>', r'->', r'using\s+namespace\s+std'],
+                'keywords': ['#include', 'using namespace', 'std::', 'void ', 'int main', 'cout <<', 'cin >>', 'template'],
+                'patterns': [r'#include\s*<', r'std::', r'<<', r'>>', r'->', r'using\s+namespace\s+std', r'::'],
                 'weight': 0.95
             },
             'csharp': {
-                'keywords': ['using ', 'namespace ', 'public class', 'void ', 'new ', 'static ', 'async Task'],
-                'patterns': [r'\.NET', r'System\.', r'async\s+Task', r'public\s+class'],
+                'keywords': ['using ', 'namespace ', 'public class', 'void ', 'new ', 'static ', 'async Task', 'var '],
+                'patterns': [r'\.NET', r'System\.', r'async\s+Task', r'public\s+class', r';$'],
                 'weight': 0.9
             },
             'go': {
-                'keywords': ['package ', 'import', 'func ', 'type ', 'struct ', ':=', 'fmt.P'],
-                'patterns': [r'package\s+main', r':=', r'func\s+main\s*\(', r'fmt\.Print'],
+                'keywords': ['package ', 'import', 'func ', 'type ', 'struct ', ':=', 'fmt.', 'defer '],
+                'patterns': [r'package\s+main', r':=', r'func\s+main\s*\(', r'fmt\.Print', r'func\s+\w+\s*\('],
                 'weight': 0.95
             },
             'rust': {
-                'keywords': ['fn ', 'let ', 'mut ', 'use ', 'struct ', 'impl ', 'pub fn'],
-                'patterns': [r'fn\s+main\s*\(', r'&mut', r'Option<', r'Result<', r'println!\('],
+                'keywords': ['fn ', 'let ', 'mut ', 'use ', 'struct ', 'impl ', 'pub fn', 'match '],
+                'patterns': [r'fn\s+main\s*\(', r'&mut', r'Option<', r'Result<', r'println!\(', r'->'],
                 'weight': 0.9
             },
             'ruby': {
-                'keywords': ['def ', 'class ', 'module ', 'end', 'require ', 'puts '],
-                'patterns': [r'^\s*#', r'def\s+\w+', r'puts\s+', r'\.new'],
+                'keywords': ['def ', 'class ', 'module ', 'end', 'require ', 'puts ', 'elsif '],
+                'patterns': [r'^\s*#', r'def\s+\w+', r'puts\s+', r'\.new', r'@\w+'],
                 'weight': 0.85
             },
             'php': {
-                'keywords': ['<?php', 'function ', '$', 'echo ', 'class ', 'new '],
-                'patterns': [r'<\?php', r'\$this->', r'->', r'echo\s+'],
+                'keywords': ['<?php', 'function ', '$', 'echo ', 'class ', 'new ', 'namespace '],
+                'patterns': [r'<\?php', r'\$this->', r'->', r'echo\s+', r'\$\w+'],
                 'weight': 0.9
             },
             'swift': {
-                'keywords': ['func ', 'var ', 'let ', 'class ', 'struct ', 'import ', 'print('],
-                'patterns': [r'func\s+\w+', r'import\s+UIKit', r'import\s+Foundation'],
+                'keywords': ['func ', 'var ', 'let ', 'class ', 'struct ', 'import ', 'print(', 'guard '],
+                'patterns': [r'func\s+\w+', r'import\s+UIKit', r'import\s+Foundation', r'guard\s+let'],
                 'weight': 0.85
+            },
+            'bash': {
+                'keywords': ['#!/bin/bash', 'echo ', 'if [', 'then', 'fi', 'for ', 'do', 'done', 'export '],
+                'patterns': [r'^#!/bin/bash', r'^\s*#', r'\[\[', r'\]\]', r'\$\(', r'if\s+\['],
+                'weight': 0.9
+            },
+            'typescript': {
+                'keywords': ['interface ', 'type ', 'const ', 'let ', 'function', 'async ', 'await ', ': string', ': number'],
+                'patterns': [r':\s*(string|number|boolean)', r'interface\s+\w+', r'type\s+\w+', r'=>', r'export\s+'],
+                'weight': 0.9
             }
         }
         
@@ -258,7 +348,7 @@ class CodeProcessor(BaseProcessor):
                 match_ratio = matches / total_patterns
                 
                 # Boost confidence if many patterns match
-                if match_ratio > 0.5:
+                if match_ratio > 0.3:
                     normalized_score *= 1.2
                 
                 scores[lang] = min(normalized_score, 1.0)
