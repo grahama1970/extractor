@@ -1,0 +1,11 @@
+node_modules/ npm-debug.log yarn-error.log
+
+.env 
+config/vertex_ai_service_account.json
+
+output/
+archive
+
+.vscode/ .idea/ *.swp
+.DS_Store Thumbs.db
+

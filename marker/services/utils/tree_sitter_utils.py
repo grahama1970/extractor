@@ -1090,6 +1090,7 @@ if __name__ == "__main__":
             
         console.print(json.dumps(metadata, indent=2))
         
+        
     # Display usage if no arguments provided
     else:
         console.print("[yellow]Please provide either a file path or a language and code snippet.[/yellow]")

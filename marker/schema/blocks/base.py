@@ -30,7 +30,7 @@ class BlockOutput(BaseModel):
     polygon: PolygonBox
     id: BlockId
     children: List[BlockOutput] | None = None
-    section_hierarchy: Dict[int, BlockId] | None = None
+    section_hierarchy: Dict | None = None
 
 
 class BlockId(BaseModel):
@@ -177,11 +177,15 @@ class Block(BaseModel):
                 return ""
 
         text = ""
+        if document is None:
+            return getattr(self, 'text', "")
+            
         for block_id in self.structure:
             block = document.get_block(block_id)
-            text += block.raw_text(document)
-            if isinstance(block, Line) and not text.endswith("\n"):
-                text += "\n"
+            if block:
+                text += block.raw_text(document)
+                if isinstance(block, Line) and not text.endswith("\n"):
+                    text += "\n"
         return text
 
     def assemble_html(self, document: Document, child_blocks: List[BlockOutput], parent_structure: Optional[List[str]] = None):
@@ -199,13 +203,11 @@ class Block(BaseModel):
         return template
 
     def assign_section_hierarchy(self, section_hierarchy):
-        if self.block_type == BlockTypes.SectionHeader and self.heading_level:
-            levels = list(section_hierarchy.keys())
-            for level in levels:
-                if level >= self.heading_level:
-                    del section_hierarchy[level]
-            section_hierarchy[self.heading_level] = self.id
-
+        """
+        Default implementation for maintaining section hierarchy.
+        SectionHeader blocks override this with more metadata.
+        """
+        # Most blocks just pass through the section hierarchy unchanged
         return section_hierarchy
 
     def contained_blocks(self, document: Document, block_types: Sequence[BlockTypes] = None) -> List[Block]:

@@ -93,6 +93,10 @@ class BaseRenderer:
         }
         if document.debug_data_path is not None:
             metadata["debug_data_path"] = document.debug_data_path
+        
+        # Include document metadata if present (e.g., summaries added by processors)
+        if hasattr(document, 'metadata') and document.metadata:
+            metadata.update(document.metadata)
 
         return metadata
 

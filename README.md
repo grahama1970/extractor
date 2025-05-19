@@ -329,6 +329,7 @@ When running with the `--use_llm` flag, you have a choice of services you can us
 - `Ollama` - this will use local models.  You can configure `--ollama_base_url` and `--ollama_model`. To use it, set `--llm_service=marker.services.ollama.OllamaService`.
 - `Claude` - this will use the anthropic API.  You can configure `--claude_api_key`, and `--claude_model_name`.  To use it, set `--llm_service=marker.services.claude.ClaudeService`.
 - `OpenAI` - this supports any openai-like endpoint. You can configure `--openai_api_key`, `--openai_model`, and `--openai_base_url`. To use it, set `--llm_service=marker.services.openai.OpenAIService`.
+- `LiteLLM` - this supports any model provider through LiteLLM. You can configure `--litellm_api_key`, `--litellm_model` (in provider/model format like 'openai/gpt-4o-mini' or 'vertex/gemini-pro-vision'), `--enable_cache` (for response caching), and optionally `--litellm_base_url`. To use it, set `--llm_service=marker.services.litellm.LiteLLMService`.
 
 These services may have additional optional configuration as well - you can see it by viewing the classes.
 
@@ -489,6 +490,54 @@ Marker is a pipeline of deep learning models:
 - Combine blocks and postprocess complete text
 
 It only uses models where necessary, which improves speed and accuracy.
+
+# ArangoDB Integration
+
+Marker includes built-in support for exporting document data to ArangoDB, a multi-model database system ideal for storing and querying document content with its hierarchical structure:
+
+1. **ArangoDBRenderer**: The `marker.renderers.arangodb_json.ArangoDBRenderer` converts marker documents to ArangoDB-ready JSON format, preserving section hierarchy and relationships.
+
+2. **Import Utility**: Use `examples/arangodb_import.py` to process documents and prepare them for ArangoDB import.
+
+3. **Verification Script**: `examples/simple/arangodb_operations_debug.py` provides a comprehensive test of all ArangoDB operations, confirming that the marker system can properly interact with ArangoDB.
+
+### ArangoDB Setup
+
+1. **Install ArangoDB**: Follow the [official installation instructions](https://www.arangodb.com/download-major/) for your platform.
+
+2. **Configure Credentials**: Set the following environment variables or default to the values below:
+   ```
+   ARANGO_HOST=localhost
+   ARANGO_USERNAME=root
+   ARANGO_PASSWORD=openSesame
+   ```
+
+3. **Verify Installation**: Run the verification script to confirm proper setup:
+   ```shell
+   python examples/simple/arangodb_operations_debug.py
+   ```
+
+### Exporting to ArangoDB
+
+1. Convert documents to ArangoDB format:
+   ```shell
+   python examples/arangodb_import.py /path/to/file.pdf --collection document_objects
+   ```
+
+2. Use ArangoDB's `arangoimport` to import the generated files:
+   ```shell
+   arangoimport --collection document_objects --file output/document_objects_*.jsonl --type jsonl
+   arangoimport --collection documents --file output/documents_*.json --type json
+   ```
+
+3. Query content using ArangoDB's AQL language, for example:
+   ```
+   FOR doc IN document_objects
+   FILTER doc._type == "text" AND doc.section_hash == "introduction_123"
+   RETURN doc
+   ```
+
+The ArangoDB integration makes it easy to store, query, and analyze document content with full section context.
 
 # Limitations
 

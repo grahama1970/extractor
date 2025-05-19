@@ -18,8 +18,7 @@ class MarkerMethod(BaseMethod):
                 "disable_tqdm": True,
                 "use_llm": self.use_llm,
                 "redo_inline_math": self.use_llm,
-                "llm_service": "marker.services.vertex.GoogleVertexService",
-                "vertex_project_id": os.getenv("VERTEX_PROJECT_ID"),
+                "llm_service": "marker.services.litellm.LiteLLMService",
             })
 
         block_converter = PdfConverter(

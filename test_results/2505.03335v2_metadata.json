@@ -1,0 +1,13 @@
+{
+  "filename": "2505.03335v2.pdf",
+  "page_range": "0-2",
+  "conversion_time": "25.39 seconds",
+  "num_images": 3,
+  "output_path": "test_results/2505.03335v2_pages_0to2.md",
+  "features_used": {
+    "camelot_table_extraction": false,
+    "async_batch_image_description": true,
+    "tree_sitter_code_detection": true
+  },
+  "table_metrics": []
+}

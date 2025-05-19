@@ -27,6 +27,7 @@ class CodeProcessor(BaseProcessor):
     detection_timeout = 1.0
     min_confidence = 0.7
     fallback_language = 'text'
+    store_tree_sitter_metadata = True  # Store extracted functions/classes/etc
     
     def __init__(self, config=None):
         super().__init__(config)
@@ -117,6 +118,7 @@ class CodeProcessor(BaseProcessor):
                 
                 best_language = None
                 best_score = 0
+                best_metadata = None
                 
                 for lang in languages_to_try[:7]:  # Try a few more languages
                     if get_supported_language(lang):
@@ -140,6 +142,8 @@ class CodeProcessor(BaseProcessor):
                                 if score > best_score:
                                     best_score = score
                                     best_language = lang
+                                    # Store the metadata for later use
+                                    best_metadata = metadata
                                     
                         except Exception as e:
                             logger.debug(f"Error trying language {lang}: {e}")
@@ -167,6 +171,20 @@ class CodeProcessor(BaseProcessor):
         # Set the language on the block
         block.language = detected_language
         logger.debug(f"Detected language: {detected_language} (confidence: {confidence})")
+        
+        # Store tree-sitter metadata if available and enabled
+        if (self.store_tree_sitter_metadata and 
+            'best_metadata' in locals() and 
+            best_metadata and 
+            best_metadata.get('tree_sitter_success')):
+            # Store directly on the block as a custom attribute
+            # Since Code blocks are Pydantic models, we need to use __dict__ directly
+            block.__dict__['tree_sitter_metadata'] = best_metadata
+            
+            # Log what we stored
+            functions = best_metadata.get('functions', [])
+            classes = best_metadata.get('classes', [])
+            logger.debug(f"Stored tree-sitter metadata: {len(functions)} functions, {len(classes)} classes")
         
         return detected_language
     

@@ -1,0 +1,55 @@
+{
+  "code_blocks": [
+    {
+      "language": "python",
+      "code": "def hello_world():\n    print('Hello, World\\!')",
+      "detected_language": "python",
+      "confidence": 0.95
+    },
+    {
+      "language": "javascript",
+      "code": "function greet() {\n    console.log('Hello\\!');\n}",
+      "detected_language": "javascript",
+      "confidence": 0.92
+    }
+  ],
+  "sections": [
+    {
+      "title": "Introduction",
+      "level": 1,
+      "hash": "intro_123"
+    },
+    {
+      "title": "Background",
+      "level": 2,
+      "hash": "background_456",
+      "parent": "intro_123"
+    },
+    {
+      "title": "Methods",
+      "level": 1,
+      "hash": "methods_789"
+    },
+    {
+      "title": "Results",
+      "level": 1,
+      "hash": "results_012"
+    },
+    {
+      "title": "Discussion",
+      "level": 1,
+      "hash": "discussion_345"
+    }
+  ],
+  "images": [
+    {
+      "id": "img1",
+      "description": "A graph showing the performance of different models."
+    },
+    {
+      "id": "img2",
+      "description": "An architecture diagram with input and output components."
+    }
+  ],
+  "simulated": true
+}

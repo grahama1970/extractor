@@ -1,8 +1,9 @@
 import re
 import html
+import os
 from collections import defaultdict
 from copy import deepcopy
-from typing import Annotated, List
+from typing import Annotated, List, Optional
 from collections import Counter
 
 from ftfy import fix_text
@@ -11,6 +12,14 @@ from surya.recognition import RecognitionPredictor, OCRResult
 from surya.table_rec import TableRecPredictor
 from surya.table_rec.schema import TableResult, TableCell as SuryaTableCell
 from pdftext.extraction import table_output
+
+# Import camelot for heuristic table extraction fallback
+try:
+    import camelot
+    import cv2
+    CAMELOT_AVAILABLE = True
+except ImportError:
+    CAMELOT_AVAILABLE = False
 
 from marker.processors import BaseProcessor
 from marker.schema import BlockTypes
@@ -61,6 +70,22 @@ class TableProcessor(BaseProcessor):
         bool,
         "Whether to disable the tqdm progress bar.",
     ] = False
+    use_camelot_fallback: Annotated[
+        bool,
+        "Whether to use Camelot as a fallback for table extraction when the primary method fails or produces poor results.",
+    ] = True
+    camelot_min_cell_threshold: Annotated[
+        int,
+        "Minimum number of cells required in a table. If below this threshold, try Camelot as fallback.",
+    ] = 4
+    camelot_flavor: Annotated[
+        str,
+        "The Camelot flavor to use: 'lattice' or 'stream'. Lattice works better for tables with borders, stream for borderless tables.",
+    ] = "lattice"
+    camelot_line_width: Annotated[
+        int,
+        "The line width parameter for Camelot. Higher values (10-20) work better for tables with thick borders.",
+    ] = 15
 
     def __init__(
         self,
@@ -91,6 +116,7 @@ class TableProcessor(BaseProcessor):
                     "table_bbox": image_poly.bbox,
                     "img_size": page.get_image(highres=True).size,
                     "ocr_block": page.text_extraction_method == "surya",
+                    "block": block,  # Store reference to the original block
                 })
 
         extract_blocks = [t for t in table_data if not t["ocr_block"]]
@@ -109,34 +135,53 @@ class TableProcessor(BaseProcessor):
         self.split_combined_rows(tables) # Split up rows that were combined
         self.combine_dollar_column(tables) # Combine columns that are just dollar signs
 
+        # Track tables that need fallback processing
+        fallback_tables = []
+
         # Assign table cells to the table
         table_idx = 0
         for page in document.pages:
             for block in page.contained_blocks(document, self.block_types):
                 block.structure = [] # Remove any existing lines, spans, etc.
                 cells: List[SuryaTableCell] = tables[table_idx].cells
-                for cell in cells:
-                    # Rescale the cell polygon to the page size
-                    cell_polygon = PolygonBox(polygon=cell.polygon).rescale(page.get_image(highres=True).size, page.polygon.size)
 
-                    # Rescale cell polygon to be relative to the page instead of the table
-                    for corner in cell_polygon.polygon:
-                        corner[0] += block.polygon.bbox[0]
-                        corner[1] += block.polygon.bbox[1]
+                # Check if we should use Camelot fallback
+                if (self.use_camelot_fallback and CAMELOT_AVAILABLE and
+                    (len(cells) < self.camelot_min_cell_threshold)):
+                    fallback_tables.append({
+                        "page": page,
+                        "block": block,
+                        "page_idx": page.page_id,
+                        "table_data": table_data[table_idx]
+                    })
+                else:
+                    # Process with default method
+                    for cell in cells:
+                        # Rescale the cell polygon to the page size
+                        cell_polygon = PolygonBox(polygon=cell.polygon).rescale(page.get_image(highres=True).size, page.polygon.size)
 
-                    cell_block = TableCell(
-                        polygon=cell_polygon,
-                        text_lines=self.finalize_cell_text(cell),
-                        rowspan=cell.rowspan,
-                        colspan=cell.colspan,
-                        row_id=cell.row_id,
-                        col_id=cell.col_id,
-                        is_header=bool(cell.is_header),
-                        page_id=page.page_id,
-                    )
-                    page.add_full_block(cell_block)
-                    block.add_structure(cell_block)
+                        # Rescale cell polygon to be relative to the page instead of the table
+                        for corner in cell_polygon.polygon:
+                            corner[0] += block.polygon.bbox[0]
+                            corner[1] += block.polygon.bbox[1]
+
+                        cell_block = TableCell(
+                            polygon=cell_polygon,
+                            text_lines=self.finalize_cell_text(cell),
+                            rowspan=cell.rowspan,
+                            colspan=cell.colspan,
+                            row_id=cell.row_id,
+                            col_id=cell.col_id,
+                            is_header=bool(cell.is_header),
+                            page_id=page.page_id,
+                        )
+                        page.add_full_block(cell_block)
+                        block.add_structure(cell_block)
                 table_idx += 1
+
+        # Process fallback tables with Camelot if needed
+        if fallback_tables:
+            self.process_with_camelot_fallback(document, filepath, fallback_tables)
 
         # Clean out other blocks inside the table
         # This can happen with stray text blocks inside the table post-merging
@@ -425,3 +470,127 @@ class TableProcessor(BaseProcessor):
         elif settings.TORCH_DEVICE_MODEL == "cuda":
             return 32
         return 32
+
+    def process_with_camelot_fallback(self, document: Document, filepath: str, fallback_tables: List[dict]):
+        """
+        Process tables using Camelot as a fallback when the primary method fails or produces poor results.
+
+        Args:
+            document: The document object
+            filepath: Path to the original PDF file
+            fallback_tables: List of tables that need fallback processing
+        """
+        if not CAMELOT_AVAILABLE or not fallback_tables:
+            return
+
+        try:
+            for table_info in fallback_tables:
+                page = table_info["page"]
+                block = table_info["block"]
+                page_idx = table_info["page_idx"]
+
+                # Camelot is 1-indexed for pages
+                camelot_page_idx = page_idx + 1
+
+                # Get the bbox coordinates in PDF coordinates (top-left origin)
+                bbox = block.polygon.bbox
+                page_height = page.polygon.height
+
+                # Convert to Camelot format [left, top, right, bottom] in PDF coordinates
+                # Camelot expects coordinates as a percentage of the page
+                page_width = page.polygon.width
+                camelot_bbox = [
+                    bbox[0] / page_width,
+                    (page_height - bbox[3]) / page_height,  # Flip Y coordinate (PDF origin is bottom-left)
+                    bbox[2] / page_width,
+                    (page_height - bbox[1]) / page_height,  # Flip Y coordinate
+                ]
+
+                # Try Camelot with the specified flavor
+                try:
+                    tables = camelot.read_pdf(
+                        filepath,
+                        pages=str(camelot_page_idx),
+                        flavor=self.camelot_flavor,
+                        table_areas=[camelot_bbox],
+                        line_scale=self.camelot_line_width
+                    )
+
+                    # If no tables or empty tables, try the other flavor
+                    if len(tables) == 0 or tables[0].df.empty:
+                        alt_flavor = "stream" if self.camelot_flavor == "lattice" else "lattice"
+                        tables = camelot.read_pdf(
+                            filepath,
+                            pages=str(camelot_page_idx),
+                            flavor=alt_flavor,
+                            table_areas=[camelot_bbox],
+                            line_scale=self.camelot_line_width
+                        )
+
+                    # Process the extracted table
+                    if len(tables) > 0 and not tables[0].df.empty:
+                        camelot_table = tables[0]
+                        self.camelot_table_to_cells(document, page, block, camelot_table)
+                        block.update_metadata(extraction_method="camelot")
+                except Exception as e:
+                    print(f"Camelot fallback error: {e}")
+                    continue
+
+        except Exception as e:
+            print(f"Camelot processing error: {e}")
+
+    def camelot_table_to_cells(self, document: Document, page, block, camelot_table):
+        """
+        Convert a Camelot table to TableCell objects and add them to the document.
+
+        Args:
+            document: The document object
+            page: The page object
+            block: The table block
+            camelot_table: The Camelot table object
+        """
+        # Clear any existing structure
+        block.structure = []
+
+        # Get the table dataframe
+        df = camelot_table.df
+
+        # Create cells for each cell in the dataframe
+        for row_id, row in enumerate(df.index):
+            for col_id, col in enumerate(df.columns):
+                cell_text = df.iloc[row_id, col_id]
+
+                # Skip empty cells
+                if not cell_text or cell_text.strip() == "":
+                    continue
+
+                # Calculate cell position - divide the table block into a grid
+                rows, cols = df.shape
+                cell_width = block.polygon.width / cols
+                cell_height = block.polygon.height / rows
+
+                # Calculate cell bbox
+                x_start = block.polygon.bbox[0] + (col_id * cell_width)
+                y_start = block.polygon.bbox[1] + (row_id * cell_height)
+                x_end = x_start + cell_width
+                y_end = y_start + cell_height
+
+                # Create cell polygon
+                cell_polygon = PolygonBox.from_bbox([x_start, y_start, x_end, y_end])
+
+                # Create TableCell object
+                is_header = row_id == 0  # Assume first row is header
+                cell_block = TableCell(
+                    polygon=cell_polygon,
+                    text_lines=[cell_text.strip()],
+                    rowspan=1,  # Camelot doesn't preserve rowspan/colspan information
+                    colspan=1,
+                    row_id=row_id,
+                    col_id=col_id,
+                    is_header=is_header,
+                    page_id=page.page_id,
+                )
+
+                # Add cell to page and table
+                page.add_full_block(cell_block)
+                block.add_structure(cell_block)

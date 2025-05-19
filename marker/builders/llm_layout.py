@@ -21,10 +21,6 @@ class LLMLayoutBuilder(LayoutBuilder):
     A builder for relabelling blocks to improve the quality of the layout.
     """
 
-    google_api_key: Annotated[
-        str,
-        "The Google API key to use for the Gemini model.",
-    ] = settings.GOOGLE_API_KEY
     confidence_threshold: Annotated[
         float,
         "The confidence threshold to use for relabeling (anything below is relabeled).",
@@ -33,10 +29,6 @@ class LLMLayoutBuilder(LayoutBuilder):
         float,
         "The height threshold for pictures that may actually be complex regions. (anything above this ratio against the page is relabeled)",
     ] = 0.8
-    model_name: Annotated[
-        str,
-        "The name of the Gemini model to use.",
-    ] = "gemini-2.0-flash"
     max_concurrency: Annotated[
         int,
         "The maximum number of concurrent requests to make to the Gemini model.",

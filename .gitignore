@@ -2,7 +2,9 @@ private.py
 .DS_Store
 local.env
 experiments
+examples
 test_data
+repos
 training
 wandb
 *.dat
@@ -14,6 +16,9 @@ temp
 conversion_results
 uploads
 /cache
+
+# My Marker Fork ignores
+repos
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -177,3 +182,4 @@ cython_debug/
 .idea/
 
 .vscode/
+**/.claude/settings.local.json

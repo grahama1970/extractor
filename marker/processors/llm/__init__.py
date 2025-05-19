@@ -34,14 +34,10 @@ class BaseLLMProcessor(BaseProcessor):
     """
     A processor for using LLMs to convert blocks.
     """
-    google_api_key: Annotated[
-        str,
-        "The Google API key to use for the Gemini model.",
-    ] = settings.GOOGLE_API_KEY
     model_name: Annotated[
         str,
-        "The name of the Gemini model to use.",
-    ] = "gemini-2.0-flash"
+        "The model name to use in provider/model format (e.g., 'gemini/gemini-2.0-flash' or 'openai/gpt-4o-mini').",
+    ] = "gemini/gemini-2.0-flash"
     max_concurrency: Annotated[
         int,
         "The maximum number of concurrent requests to make to the Gemini model.",

@@ -1,0 +1,252 @@
+{
+  "objects": [
+    {
+      "_key": "section_intro_123",
+      "_type": "section",
+      "content": {
+        "title": "Introduction",
+        "level": 1,
+        "hash": "intro_123"
+      },
+      "text": "Introduction",
+      "page_id": 1,
+      "position": {
+        "left": 50,
+        "top": 100,
+        "right": 200,
+        "bottom": 120
+      },
+      "section_id": "1.1",
+      "section_hash": "intro_123",
+      "section_title": "Introduction",
+      "section_level": 1,
+      "section_path": [],
+      "section_path_titles": [],
+      "metadata": {
+        "block_id": "block_1_1"
+      }
+    },
+    {
+      "_key": "section_methods_456",
+      "_type": "section",
+      "content": {
+        "title": "Methods",
+        "level": 1,
+        "hash": "methods_456"
+      },
+      "text": "Methods",
+      "page_id": 2,
+      "position": {
+        "left": 50,
+        "top": 100,
+        "right": 200,
+        "bottom": 120
+      },
+      "section_id": "2.1",
+      "section_hash": "methods_456",
+      "section_title": "Methods",
+      "section_level": 1,
+      "section_path": [],
+      "section_path_titles": [],
+      "metadata": {
+        "block_id": "block_2_1"
+      }
+    },
+    {
+      "_key": "section_algos_789",
+      "_type": "section",
+      "content": {
+        "title": "Algorithms",
+        "level": 2,
+        "hash": "algos_789"
+      },
+      "text": "Algorithms",
+      "page_id": 2,
+      "position": {
+        "left": 50,
+        "top": 150,
+        "right": 200,
+        "bottom": 170
+      },
+      "section_id": "2.2",
+      "section_hash": "algos_789",
+      "section_title": "Algorithms",
+      "section_level": 2,
+      "section_path": [
+        {
+          "title": "Methods",
+          "hash": "methods_456",
+          "level": 1
+        }
+      ],
+      "section_path_titles": [
+        "Methods"
+      ],
+      "metadata": {
+        "block_id": "block_2_2"
+      }
+    },
+    {
+      "_key": "text_1_2",
+      "_type": "text",
+      "content": "This is introduction text with context.",
+      "text": "This is introduction text with context.",
+      "page_id": 1,
+      "position": {
+        "left": 50,
+        "top": 130,
+        "right": 500,
+        "bottom": 150
+      },
+      "section_id": "1.1",
+      "section_hash": "intro_123",
+      "section_title": "Introduction",
+      "section_level": 1,
+      "section_path": [],
+      "section_path_titles": [],
+      "metadata": {
+        "block_id": "block_1_2"
+      }
+    },
+    {
+      "_key": "image_1_3",
+      "_type": "image",
+      "content": {
+        "caption": "Figure 1: Overview diagram",
+        "description": "This image shows an overview of the system architecture."
+      },
+      "text": "Figure 1: Overview diagram\n\nThis image shows an overview of the system architecture.",
+      "page_id": 1,
+      "position": {
+        "left": 50,
+        "top": 180,
+        "right": 400,
+        "bottom": 300
+      },
+      "section_id": "1.1",
+      "section_hash": "intro_123",
+      "section_title": "Introduction",
+      "section_level": 1,
+      "section_path": [],
+      "section_path_titles": [],
+      "metadata": {
+        "block_id": "block_1_3"
+      }
+    },
+    {
+      "_key": "text_2_3",
+      "_type": "text",
+      "content": "This describes our methodology.",
+      "text": "This describes our methodology.",
+      "page_id": 2,
+      "position": {
+        "left": 50,
+        "top": 130,
+        "right": 500,
+        "bottom": 150
+      },
+      "section_id": "2.1",
+      "section_hash": "methods_456",
+      "section_title": "Methods",
+      "section_level": 1,
+      "section_path": [],
+      "section_path_titles": [],
+      "metadata": {
+        "block_id": "block_2_3"
+      }
+    },
+    {
+      "_key": "code_2_4",
+      "_type": "code",
+      "content": {
+        "code": "def process_data(input):\n    return input * 2",
+        "language": "python"
+      },
+      "text": "def process_data(input):\n    return input * 2",
+      "page_id": 2,
+      "position": {
+        "left": 50,
+        "top": 200,
+        "right": 400,
+        "bottom": 250
+      },
+      "section_id": "2.2",
+      "section_hash": "algos_789",
+      "section_title": "Algorithms",
+      "section_level": 2,
+      "section_path": [
+        {
+          "title": "Methods",
+          "hash": "methods_456",
+          "level": 1
+        }
+      ],
+      "section_path_titles": [
+        "Methods"
+      ],
+      "metadata": {
+        "block_id": "block_2_4"
+      }
+    },
+    {
+      "_key": "table_2_5",
+      "_type": "table",
+      "content": {
+        "csv": "Algorithm,Runtime,Space\nQuicksort,O(n log n),O(log n)\nMergesort,O(n log n),O(n)",
+        "json": [
+          {
+            "Algorithm": "Quicksort",
+            "Runtime": "O(n log n)",
+            "Space": "O(log n)"
+          },
+          {
+            "Algorithm": "Mergesort",
+            "Runtime": "O(n log n)",
+            "Space": "O(n)"
+          }
+        ],
+        "text": "Algorithm | Runtime | Space\n-----------|----------|---------\nQuicksort | O(n log n) | O(log n)\nMergesort | O(n log n) | O(n)"
+      },
+      "text": "Algorithm | Runtime | Space\n-----------|----------|---------\nQuicksort | O(n log n) | O(log n)\nMergesort | O(n log n) | O(n)",
+      "page_id": 2,
+      "position": {
+        "left": 50,
+        "top": 280,
+        "right": 500,
+        "bottom": 350
+      },
+      "section_id": "2.2",
+      "section_hash": "algos_789",
+      "section_title": "Algorithms",
+      "section_level": 2,
+      "section_path": [
+        {
+          "title": "Methods",
+          "hash": "methods_456",
+          "level": 1
+        }
+      ],
+      "section_path_titles": [
+        "Methods"
+      ],
+      "metadata": {
+        "block_id": "block_2_5"
+      }
+    }
+  ],
+  "document_metadata": {
+    "filepath": "simulated.pdf",
+    "page_count": 5,
+    "block_counts": {
+      "SectionHeader": 3,
+      "Text": 2,
+      "Picture": 1,
+      "Code": 1,
+      "Table": 1
+    },
+    "section_counts": {
+      "1": 2,
+      "2": 1
+    }
+  }
+}

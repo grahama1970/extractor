@@ -1,0 +1,724 @@
+Loaded layout model s3://layout/2025_02_18 on device cuda with dtype torch.float16
+Loaded texify model s3://texify/2025_02_18 on device cuda with dtype torch.float16
+Loaded recognition model s3://text_recognition/2025_02_18 on device cuda with dtype torch.float16
+Loaded table recognition model s3://table_recognition/2025_02_18 on device cuda with dtype torch.float16
+Loaded detection model s3://text_detection/2025_02_28 on device cuda with dtype torch.float16
+Loaded detection model s3://inline_math_detection/2025_02_24 on device cuda with dtype torch.float16
+Converting repos/camelot/docs/_static/pdf/column_separators.pdf...
+Dumped layout debug images to /home/graham/workspace/experiments/marker/conversion_results
+Dumped PDF debug images to /home/graham/workspace/experiments/marker/conversion_results
+Dumped block debug data to /home/graham/workspace/experiments/marker/conversion_results
+{
+  "markdown": "## ALPHABETIC LISTING BY TYPE OF ACTIVE LICENSES OKLAHOMA ABLE 
+COMMISSION\n<!-- SECTION_BREADCRUMB: [{\"level\": 2, \"title\": \"ALPHABETIC 
+LISTING BY TYPE OF ACTIVE LICENSES OKLAHOMA ABLE COMMISSION\", \"hash\": 
+\"e3b0c44298fc1c14\"}] -->\n\n| LI<br>C<br>EN<br>S<br>E               |         
+|                                                                           | 
+PR<br>EM<br>I<br>S<br>E                                                  |      
+|        |                       |                                              
+|\n|---------------------------------------|------------------------------------
+------------------------------|-------------------------------------------------
+--------------------------|-----------------------------------------------------
+---------------------|--------------------------------------|--------|----------
+-------------|------------------------------------------------------------------
+---------------------------------------|\n| NU<br>MB<br>ER<br>TY<br>PE          
+| DB<br>A<br>NA<br>ME                                              | 
+LI<br>C<br>EN<br>S<br>EE<br>N<br>AM<br>E                                  | 
+AD<br>DR<br>E<br>S<br>S                                                  | 
+C<br>ITY                             | S<br>T | ZI<br>P               | 
+PH<br>O<br>NE<br>N<br>U<br>MB<br>ER<br>EX<br>PI<br>RE<br>S                      
+|\n| 6<br>4<br>87<br>65<br>AA<br>A         | AL<br>LE<br>G<br>IAN<br>T A<br>IR  
+| AL<br>LE<br>G<br>IAN<br>T A<br>IR<br>LL<br>C                              | 
+7<br>1<br>0<br>0<br>TE<br>RM<br>INA<br>L D<br>RIV<br>E                   | 
+O<br>KL<br>AH<br>O<br>MA<br>C<br>ITY | O<br>K | 7<br>3<br>15<br>9     | 
+2<br>0<br>14<br>/<br>1<br>2<br>/<br>0<br>3<br>-                                 
+|\n|                                       |                                    
+|                                                                           | 
+S<br>C<br>77<br>77<br>E<br>A<br>T A<br>PA<br>HE                          |      
+|        |                       |                                              
+|\n| 6<br>4<br>87<br>6<br>6<br>AA<br>A     | AL<br>LE<br>G<br>IAN<br>T A<br>IR  
+| AL<br>LE<br>G<br>IAN<br>T A<br>IR<br>LL<br>C                              | 
+S<br>TR<br>EE<br>T                                                       | 
+S<br>TU<br>L<br>A                    | O<br>K | 74<br>1<br>15         | 
+/<br>/<br>2<br>0<br>14<br>1<br>2<br>1<br>6<br>-                                 
+|\n| 8<br>2<br>0<br>3<br>0<br>AA<br>A      | 
+AM<br>ER<br>I<br>C<br>AN<br>A<br>IR<br>LIN<br>E<br>S             | 
+AM<br>ER<br>I<br>C<br>AN<br>A<br>IR<br>LIN<br>E<br>S<br>IN<br>C           | 
+7<br>1<br>0<br>0<br>TE<br>RM<br>INA<br>L D<br>RIV<br>E                   | 
+O<br>O<br>C<br>KL<br>AH<br>MA<br>ITY | O<br>K | 3<br>15<br>9<br>7     | 
+(<br>05<br>)<br>6<br>8<br>0-<br>3<br>0<br>1<br>2<br>0<br>14<br>/<br>0<br>9<br>/<
+br>14<br>4<br>7         |\n|                                       |            
+|                                                                           |   
+|                                      |        |                       |       
+|\n| 5<br>0<br>9<br>4<br>6<br>2<br>AA<br>A | 
+AM<br>ER<br>I<br>C<br>AN<br>A<br>IR<br>LIN<br>E<br>S             | 
+AM<br>ER<br>I<br>C<br>AN<br>A<br>IR<br>LIN<br>E<br>S<br>IN<br>C           | 
+77<br>77<br>E<br>A<br>S<br>T A<br>PA<br>C<br>HE<br>D<br>RIV<br>E         | 
+TU<br>L<br>S<br>A                    | O<br>K | 74<br>1<br>15         | 
+(<br>9<br>1<br>8<br>)<br>8<br>3<br>1-<br>6<br>3<br>0<br>2<br>2<br>0<br>14<br>/<b
+r>0<br>8<br>/<br>1<br>9 |\n|                                       |            
+| C<br>G<br>AM<br>ER<br>I<br>AN<br>E<br>A<br>LE                             |   
+|                                      |        |                       |       
+|\n| 5<br>0<br>9<br>6<br>0<br>9<br>AA<br>A | 
+AM<br>ER<br>I<br>C<br>AN<br>E<br>A<br>G<br>LE                    | 
+AI<br>RL<br>IN<br>E<br>S<br>IN<br>C                                       | 
+1<br>0<br>0<br>TE<br>RM<br>INA<br>L D<br>RIV<br>E<br>7                   | 
+O<br>O<br>C<br>KL<br>AH<br>MA<br>ITY | O<br>K | 7<br>3<br>15<br>9     | 
+(<br>)<br>/<br>/<br>4<br>05<br>6<br>8<br>0-<br>3<br>7<br>0<br>1<br>2<br>0<br>14<
+br>0<br>8<br>1<br>9     |\n|                                       |            
+| AM<br>ER<br>I<br>C<br>AN<br>E<br>A<br>G<br>LE                             |   
+|                                      |        |                       |       
+|\n| 4<br>0<br>2<br>9<br>8<br>6<br>AA<br>A | 
+AM<br>ER<br>I<br>C<br>AN<br>E<br>A<br>G<br>LE                    | 
+AI<br>RL<br>IN<br>E<br>S<br>IN<br>C                                       | 
+77<br>77<br>E<br>A<br>S<br>T A<br>PA<br>C<br>HE<br>D<br>RIV<br>E         | 
+TU<br>L<br>S<br>A                    | O<br>K | 74<br>1<br>15         | 
+(<br>85<br>9<br>)<br>7<br>67<br>-3<br>74<br>7<br>2<br>0<br>14<br>/<br>1<br>0<br>
+/<br>2<br>2             |\n|                                       |            
+|                                                                           | 
+O<br>O<br>W<br>ILL<br>R<br>G<br>ER<br>S<br>AI<br>RP<br>RT                |      
+|        |                       |                                              
+|\n| 7<br>9<br>14<br>5<br>AA<br>A          | 
+S<br>DE<br>LT<br>A<br>AI<br>R<br>LIN<br>E                        | 
+S<br>C<br>DE<br>LT<br>A<br>AI<br>R<br>LIN<br>E<br>IN                      | 
+O<br>9<br>97<br>B<br>X<br>5<br>5                                         | 
+O<br>KL<br>AH<br>O<br>MA<br>C<br>ITY | O<br>K | 7<br>3<br>15<br>9     | 
+(<br>4<br>0<br>4<br>)<br>77<br>3-<br>97<br>45<br>2<br>0<br>14<br>/<br>05<br>/<br
+>1<br>1                 |\n| 6<br>0<br>0<br>9<br>4<br>1<br>AA<br>A | 
+EN<br>DE<br>AV<br>O<br>R A<br>IR                                 | 
+EN<br>DE<br>AV<br>O<br>R A<br>IR<br>IN<br>C                               | 
+7<br>1<br>0<br>0<br>TE<br>RM<br>INA<br>L D<br>RIV<br>E                   | 
+O<br>O<br>C<br>KL<br>AH<br>MA<br>ITY | O<br>K | 7<br>3<br>15<br>9     | 
+(<br>)<br>/<br>/<br>9<br>0<br>1<br>3<br>4<br>8-<br>4<br>1<br>0<br>0<br>2<br>0<br
+>15<br>0<br>3<br>2<br>6 |\n|                                       |            
+|                                                                           | 
+7<br>1<br>0<br>0<br>TE<br>RM<br>INA<br>L D<br>RIV<br>E                   |      
+|        |                       |                                              
+|\n| 47<br>8<br>4<br>8<br>2<br>AA<br>A     | 
+EX<br>PR<br>E<br>S<br>S<br>J<br>ET<br>A<br>IR<br>LIN<br>E<br>S   | 
+EX<br>PR<br>E<br>S<br>S<br>J<br>ET<br>A<br>IR<br>LIN<br>E<br>S<br>IN<br>C | 
+W<br>ILL<br>R<br>O<br>G<br>ER<br>S<br>AI<br>RP<br>O<br>RT                | 
+O<br>KL<br>AH<br>O<br>MA<br>C<br>ITY | O<br>K | 7<br>3<br>15<br>9     | 
+(<br>8<br>3<br>2<br>)<br>35<br>3-<br>1<br>2<br>0<br>1<br>2<br>0<br>14<br>/<br>05
+<br>/<br>0<br>8         |\n| 5<br>05<br>9<br>8<br>1<br>AA<br>A     | 
+S<br>S<br>S<br>KY<br>W<br>E<br>T A<br>IR<br>LIN<br>E             | 
+S<br>S<br>C<br>KY<br>W<br>E<br>T<br>IN                                    | 
+7<br>1<br>0<br>0<br>TE<br>RM<br>INA<br>L D<br>RIV<br>E                   | 
+O<br>KL<br>AH<br>O<br>MA<br>C<br>ITY | O<br>K | 7<br>3<br>15<br>9     | 
+(<br>4<br>05<br>)<br>6<br>3<br>4-<br>3<br>0<br>0<br>0<br>2<br>0<br>14<br>/<br>05
+<br>/<br>2<br>8         |\n|                                       |            
+|                                                                           |   
+|                                      |        |                       |       
+|\n| 4<br>2<br>97<br>4<br>AA<br>A<br>5     | 
+S<br>O<br>U<br>TH<br>W<br>E<br>S<br>T A<br>IR<br>LIN<br>E<br>S   | 
+S<br>O<br>U<br>TH<br>W<br>E<br>S<br>T A<br>IR<br>LIN<br>E<br>S<br>C<br>O  | 
+7<br>1<br>0<br>0<br>TE<br>RM<br>INA<br>L D<br>RIV<br>E                   | 
+O<br>KL<br>AH<br>O<br>MA<br>C<br>ITY | O<br>K | 3<br>15<br>9<br>7     | 
+(<br>4<br>05<br>)<br>6<br>8<br>2-4<br>1<br>8<br>3<br>2<br>0<br>15<br>/<br>0<br>2
+<br>/<br>15             |\n|                                       | 
+TU<br>L<br>S<br>A<br>IN<br>TE<br>RN<br>AT<br>I<br>O<br>NA<br>L   |              
+|                                                                          |    
+|        |                       |                                              
+|\n| 4<br>2<br>97<br>55<br>AA<br>A         | AI<br>RP<br>O<br>RT                
+| S<br>O<br>U<br>TH<br>W<br>E<br>S<br>T A<br>IR<br>LIN<br>E<br>S<br>C<br>O  | 
+77<br>77<br>E<br>A<br>S<br>T A<br>PA<br>C<br>HE<br>D<br>RIV<br>E         | 
+TU<br>L<br>S<br>A                    | O<br>K | 74<br>1<br>15         | 
+(<br>9<br>1<br>8<br>)<br>8<br>3<br>4-4<br>4<br>95<br>2<br>0<br>15<br>/<br>0<br>2
+<br>/<br>1<br>6         |\n|                                       |            
+|                                                                           |   
+|                                      |        |                       |       
+|\n| 4<br>15<br>05<br>1<br>AA<br>A         | U<br>NI<br>TE<br>D 
+A<br>IR<br>LIN<br>E<br>S                      | U<br>NI<br>TE<br>D 
+A<br>IR<br>LIN<br>E<br>S<br>IN<br>C                    | E<br>A<br>S<br>T 
+A<br>PA<br>C<br>HE<br>D<br>RIV<br>E<br>77<br>77         | S<br>TU<br>L<br>A     
+| O<br>K | 74<br>1<br>15         | 
+(<br>)<br>/<br>/<br>87<br>2<br>8<br>25<br>-8<br>3<br>0<br>9<br>2<br>0<br>14<br>0
+5<br>1<br>2             |\n| 1<br>0<br>67<br>1<br>9<br>AA<br>A     | 
+U<br>NI<br>TE<br>D A<br>IR<br>LIN<br>E<br>S                      | 
+U<br>NI<br>TE<br>D A<br>IR<br>LIN<br>E<br>S<br>IN<br>C                    | 
+W<br>ILL<br>R<br>O<br>G<br>ER<br>S<br>AI<br>RP<br>O<br>RT                | 
+O<br>KL<br>AH<br>O<br>MA<br>C<br>ITY | O<br>K | 3<br>15<br>9<br>7     | 
+(<br>87<br>2<br>)<br>8<br>25<br>-8<br>3<br>0<br>9<br>2<br>0<br>14<br>/<br>0<br>4
+<br>/<br>1<br>1         |\n|                                       | 
+A<br>S<br>EN<br>S<br>U<br>J<br>AP<br>AN<br>E<br>S<br>E           |              
+| 7<br>1<br>2<br>3<br>S<br>O<br>U<br>TH<br>9<br>2N<br>D<br>EA<br>S<br>T    |    
+|        |                       |                                              
+|\n| 6<br>25<br>4<br>2<br>2<br>BA<br>W     | RE<br>S<br>TA<br>U<br>RA<br>NT     
+| IN<br>F<br>O<br>RM<br>AL<br>P<br>AR<br>TN<br>ER<br>S<br>HI<br>P           | 
+AV<br>EN<br>U<br>E<br>S<br>U<br>ITE<br>J                                 | 
+TU<br>L<br>S<br>A                    | O<br>K | 74<br>1<br>3<br>3     | 
+(<br>9<br>1<br>8<br>)<br>25<br>2-<br>0<br>3<br>3<br>3<br>2<br>0<br>15<br>/<br>0<
+br>2<br>/<br>14         |\n|                                       | 
+O<br>'S<br>O<br>6<br>6<br>AD<br>AM<br>R<br>U<br>TE               |              
+| 2<br>1<br>3<br>2 W<br>S<br>G<br>E<br>T<br>AR<br>Y                        |    
+|        |                       |                                              
+|\n| 4<br>6<br>4<br>8<br>2<br>8<br>BA<br>W | ITA<br>LIA<br>N V<br>ILL<br>A      
+| TA<br>DJ<br>IN<br>C                                                       | 
+B<br>O<br>U<br>LE<br>VA<br>RD                                            | 
+C<br>O<br>LIN<br>T<br>N              | O<br>K | 7<br>3<br>6<br>0<br>1 | 
+(<br>8<br>0<br>)<br>3<br>2<br>3-5<br>9<br>0<br>0<br>2<br>0<br>15<br>/<br>0<br>2<
+br>/<br>1<br>1<br>5     |\n|                                       |            
+|                                                                           | 
+1<br>2<br>2<br>15<br>N<br>O<br>RT<br>H                                   |      
+|        |                       |                                              
+|\n| 1<br>8<br>4<br>0<br>6<br>6<br>BA<br>W | AJ<br>AN<br>TA                     
+| C<br>AB<br>AB<br>N<br>'<br>C<br>U<br>RR<br>Y<br>IN<br>C                   | 
+PE<br>NN<br>S<br>YL<br>VA<br>NIA                                         | 
+O<br>KL<br>AH<br>O<br>MA<br>C<br>ITY | O<br>K | 7<br>3<br>1<br>2<br>0 | 
+(<br>4<br>05<br>)<br>75<br>2-5<br>2<br>8<br>3<br>2<br>0<br>14<br>/<br>07<br>/<br
+>27                     |\n|                                       |            
+| S<br>O<br>G<br>G<br>AY<br>RE<br>L<br>D<br>IN                              |   
+|                                      |        |                       |       
+|\n| 5<br>47<br>6<br>9<br>3<br>BA<br>W     | 
+AM<br>ER<br>I<br>C<br>IN<br>N<br>O<br>F<br>S<br>AY<br>RE         | 
+EN<br>TE<br>RP<br>RI<br>S<br>E<br>S<br>LL<br>C                            | 
+24<br>05<br>S<br>O<br>U<br>TH<br>E<br>L<br>C<br>AM<br>IN<br>O            | 
+S<br>AY<br>RE                        | O<br>K | 7<br>3<br>6<br>6<br>2 | 
+(<br>)<br>/<br>/<br>5<br>8<br>0<br>9<br>2<br>8-<br>27<br>0<br>0<br>2<br>0<br>14<
+br>0<br>9<br>0<br>8     |\n|                                       | 
+AN<br>D<br>O<br>LIN<br>I'<br>S<br>PIZ<br>ZE<br>RIA<br>&          |              
+| 1<br>2<br>14<br>0<br>EA<br>S<br>T<br>9<br>6<br>TH<br>S<br>TR<br>EE<br>T  |    
+|        |                       |                                              
+|\n| 4<br>2<br>8<br>3<br>77<br>BA<br>W     | 
+ITA<br>LIA<br>N<br>RE<br>S<br>TA<br>U<br>RA<br>NT                | 
+AN<br>D<br>O<br>LIN<br>I'<br>S<br>LL<br>C                                 | 
+N<br>O<br>RT<br>H<br>#<br>1<br>0<br>6                                    | 
+O<br>W<br>A<br>S<br>S<br>O           | O<br>K | 74<br>05<br>5         | 
+(<br>9<br>1<br>8<br>)<br>27<br>2-<br>9<br>3<br>25<br>2<br>0<br>15<br>/<br>0<br>2
+<br>/<br>1<br>0         |\n|                                       | 
+A<br>S<br>AH<br>I J<br>AP<br>AN<br>E<br>S<br>E                   |              
+|                                                                          |    
+|        |                       |                                              
+|\n| 44<br>6<br>95<br>7<br>BA<br>W         | S<br>RE<br>TA<br>U<br>RA<br>NT     
+| C<br>O<br>O<br>O<br>J<br>IN<br>RP<br>RA<br>TI<br>N                        | 
+8<br>3<br>1 E<br>S<br>1<br>S<br>S<br>7<br>A<br>T 7<br>T<br>TR<br>EE<br>T | 
+TU<br>L<br>S<br>A                    | O<br>K | 74<br>1<br>3<br>3     | 
+(<br>9<br>1<br>8<br>)<br>3<br>07<br>-9<br>15<br>1<br>2<br>0<br>14<br>/<br>1<br>2
+<br>/<br>2<br>2         |\n|                                       |            
+| S<br>M<br>O<br>KE<br>H<br>O<br>U<br>S<br>E                                |   
+|                                      |        |                       |       
+|\n| 6<br>3<br>25<br>0<br>1<br>BA<br>W     | 
+BA<br>C<br>K<br>D<br>O<br>O<br>R<br>BA<br>RB<br>E<br>C<br>U<br>E | 
+A<br>S<br>S<br>O<br>C<br>IAT<br>E<br>S<br>IN<br>C                         | 
+3<br>15<br>N<br>O<br>RT<br>HW<br>E<br>S<br>T<br>2<br>3<br>RD             | 
+O<br>KL<br>AH<br>O<br>MA<br>C<br>ITY | O<br>K | 3<br>1<br>0<br>3<br>7 | 
+2<br>0<br>14<br>/<br>0<br>8<br>/<br>0<br>1<br>-                                 
+|\n|                                       |                                    
+|                                                                           |   
+|                                      |        |                       |       
+|\n| 5<br>9<br>85<br>15<br>BA<br>W         | 
+O<br>O<br>S<br>O<br>BA<br>MB<br>TH<br>AI<br>B<br>I<br>TR         | 
+O<br>O<br>S<br>O<br>C<br>BA<br>MB<br>TH<br>AI<br>B<br>I<br>TR<br>IN       | 
+S<br>O<br>5<br>07<br>9<br>U<br>TH<br>Y<br>AL<br>E A<br>VE<br>NU<br>E     | 
+TU<br>L<br>S<br>A                    | O<br>K | 74<br>1<br>35         | 
+(<br>9<br>1<br>8<br>)<br>8<br>2<br>8-<br>07<br>4<br>0<br>2<br>0<br>15<br>/<br>0<
+br>3<br>/<br>1<br>1     |\n|                                       | 
+BA<br>ND<br>AN<br>A<br>RE<br>D'<br>S                             |              
+|                                                                          |    
+|        |                       |                                              
+|\n| 6<br>1<br>8<br>6<br>9<br>3<br>BA<br>W | 
+S<br>TE<br>AK<br>H<br>O<br>U<br>S<br>E                           | 
+BR<br>AD<br>S<br>HA<br>W<br>S<br>TE<br>VE<br>LE<br>N<br>,<br>_            | 
+3<br>7<br>8<br>0<br>8<br>O<br>LD<br>H<br>I<br>G<br>HW<br>AY<br>27<br>0   | 
+S<br>HA<br>W<br>NE<br>E              | O<br>K | 74<br>8<br>0<br>4     | 
+2<br>0<br>14<br>/<br>0<br>8<br>/<br>2<br>0<br>-                                 
+|\n|                                       |                                    
+|                                                                           | 
+15<br>2<br>2 W<br>E<br>S<br>T<br>LIN<br>D<br>S<br>EY                     |      
+|        |                       |                                              
+|\n| 6<br>3<br>25<br>75<br>BA<br>W         | 
+BA<br>S<br>HU<br>LE<br>G<br>EN<br>D<br>S                         | 
+HY<br>H<br>HE<br>C<br>HU<br>AN<br>G<br>LL<br>C                            | 
+S<br>TR<br>EE<br>T                                                       | 
+N<br>O<br>RM<br>AN                   | O<br>K | 7<br>3<br>0<br>6<br>9 | 
+2<br>0<br>14<br>/<br>07<br>/<br>2<br>1<br>-                                     
+|\n|                                       |                                    
+| O<br>O<br>G<br>S<br>DE<br>EP<br>F<br>RK<br>H<br>LD<br>IN                  |   
+|                                      |        |                       |       
+|\n| 5<br>4<br>3<br>14<br>9<br>BA<br>W     | 
+BE<br>DL<br>AM<br>B<br>AR<br>-B<br>-Q                            | LL<br>C      
+| 6<br>1<br>0<br>N<br>O<br>RT<br>HE<br>A<br>S<br>T 5<br>0<br>TH            | 
+O<br>O<br>C<br>KL<br>AH<br>MA<br>ITY | O<br>K | 7<br>3<br>1<br>05     | 
+(<br>)<br>/<br>/<br>4<br>05<br>5<br>2<br>8-7<br>4<br>27<br>2<br>0<br>15<br>0<br>
+2<br>2<br>3             |\n\nLI C EN S E,,,PR EM I S E,,,,\r\nNU MB ER TY PE,DB 
+A NA ME,LI C EN S EE N AM E,AD DR E S S,C ITY,S T,ZI P,PH O NE N U MB ER EX PI 
+RE S\r\n6 4 87 65 AA A,AL LE G IAN T A IR,AL LE G IAN T A IR LL C,7 1 0 0 TE RM 
+INA L D RIV E,O KL AH O MA C ITY,O K,7 3 15 9,2 0 14 / 1 2 / 0 3 -\r\n,,,S C 77 
+77 E A T A PA HE,,,,\r\n6 4 87 6 6 AA A,AL LE G IAN T A IR,AL LE G IAN T A IR LL
+C,S TR EE T,S TU L A,O K,74 1 15,/ / 2 0 14 1 2 1 6 -\r\n8 2 0 3 0 AA A,AM ER I 
+C AN A IR LIN E S,AM ER I C AN A IR LIN E S IN C,7 1 0 0 TE RM INA L D RIV E,O O
+C KL AH MA ITY,O K,3 15 9 7,( 05 ) 6 8 0- 3 0 1 2 0 14 / 0 9 / 14 4 
+7\r\n,,,,,,,\r\n5 0 9 4 6 2 AA A,AM ER I C AN A IR LIN E S,AM ER I C AN A IR LIN
+E S IN C,77 77 E A S T A PA C HE D RIV E,TU L S A,O K,74 1 15,( 9 1 8 ) 8 3 1- 6
+3 0 2 2 0 14 / 0 8 / 1 9\r\n,,C G AM ER I AN E A LE,,,,,\r\n5 0 9 6 0 9 AA A,AM 
+ER I C AN E A G LE,AI RL IN E S IN C,1 0 0 TE RM INA L D RIV E 7,O O C KL AH MA 
+ITY,O K,7 3 15 9,( ) / / 4 05 6 8 0- 3 7 0 1 2 0 14 0 8 1 9\r\n,,AM ER I C AN E 
+A G LE,,,,,\r\n4 0 2 9 8 6 AA A,AM ER I C AN E A G LE,AI RL IN E S IN C,77 77 E 
+A S T A PA C HE D RIV E,TU L S A,O K,74 1 15,( 85 9 ) 7 67 -3 74 7 2 0 14 / 1 0 
+/ 2 2\r\n,,,O O W ILL R G ER S AI RP RT,,,,\r\n7 9 14 5 AA A,S DE LT A AI R LIN 
+E,S C DE LT A AI R LIN E IN,O 9 97 B X 5 5,O KL AH O MA C ITY,O K,7 3 15 9,( 4 0
+4 ) 77 3- 97 45 2 0 14 / 05 / 1 1\r\n6 0 0 9 4 1 AA A,EN DE AV O R A IR,EN DE AV
+O R A IR IN C,7 1 0 0 TE RM INA L D RIV E,O O C KL AH MA ITY,O K,7 3 15 9,( ) / 
+/ 9 0 1 3 4 8- 4 1 0 0 2 0 15 0 3 2 6\r\n,,,7 1 0 0 TE RM INA L D RIV 
+E,,,,\r\n47 8 4 8 2 AA A,EX PR E S S J ET A IR LIN E S,EX PR E S S J ET A IR LIN
+E S IN C,W ILL R O G ER S AI RP O RT,O KL AH O MA C ITY,O K,7 3 15 9,( 8 3 2 ) 
+35 3- 1 2 0 1 2 0 14 / 05 / 0 8\r\n5 05 9 8 1 AA A,S S S KY W E T A IR LIN E,S S
+C KY W E T IN,7 1 0 0 TE RM INA L D RIV E,O KL AH O MA C ITY,O K,7 3 15 9,( 4 05
+) 6 3 4- 3 0 0 0 2 0 14 / 05 / 2 8\r\n,,,,,,,\r\n4 2 97 4 AA A 5,S O U TH W E S 
+T A IR LIN E S,S O U TH W E S T A IR LIN E S C O,7 1 0 0 TE RM INA L D RIV E,O 
+KL AH O MA C ITY,O K,3 15 9 7,( 4 05 ) 6 8 2-4 1 8 3 2 0 15 / 0 2 / 15\r\n,TU L 
+S A IN TE RN AT I O NA L,,,,,,\r\n4 2 97 55 AA A,AI RP O RT,S O U TH W E S T A 
+IR LIN E S C O,77 77 E A S T A PA C HE D RIV E,TU L S A,O K,74 1 15,( 9 1 8 ) 8 
+3 4-4 4 95 2 0 15 / 0 2 / 1 6\r\n,,,,,,,\r\n4 15 05 1 AA A,U NI TE D A IR LIN E 
+S,U NI TE D A IR LIN E S IN C,E A S T A PA C HE D RIV E 77 77,S TU L A,O K,74 1 
+15,( ) / / 87 2 8 25 -8 3 0 9 2 0 14 05 1 2\r\n1 0 67 1 9 AA A,U NI TE D A IR 
+LIN E S,U NI TE D A IR LIN E S IN C,W ILL R O G ER S AI RP O RT,O KL AH O MA C 
+ITY,O K,3 15 9 7,( 87 2 ) 8 25 -8 3 0 9 2 0 14 / 0 4 / 1 1\r\n,A S EN S U J AP 
+AN E S E,,7 1 2 3 S O U TH 9 2N D EA S T,,,,\r\n6 25 4 2 2 BA W,RE S TA U RA 
+NT,IN F O RM AL P AR TN ER S HI P,AV EN U E S U ITE J,TU L S A,O K,74 1 3 3,( 9 
+1 8 ) 25 2- 0 3 3 3 2 0 15 / 0 2 / 14\r\n,O 'S O 6 6 AD AM R U TE,,2 1 3 2 W S G
+E T AR Y,,,,\r\n4 6 4 8 2 8 BA W,ITA LIA N V ILL A,TA DJ IN C,B O U LE VA RD,C O
+LIN T N,O K,7 3 6 0 1,( 8 0 ) 3 2 3-5 9 0 0 2 0 15 / 0 2 / 1 1 5\r\n,,,1 2 2 15 
+N O RT H,,,,\r\n1 8 4 0 6 6 BA W,AJ AN TA,C AB AB N ' C U RR Y IN C,PE NN S YL 
+VA NIA,O KL AH O MA C ITY,O K,7 3 1 2 0,( 4 05 ) 75 2-5 2 8 3 2 0 14 / 07 / 
+27\r\n,,S O G G AY RE L D IN,,,,,\r\n5 47 6 9 3 BA W,AM ER I C IN N O F S AY 
+RE,EN TE RP RI S E S LL C,24 05 S O U TH E L C AM IN O,S AY RE,O K,7 3 6 6 2,( )
+/ / 5 8 0 9 2 8- 27 0 0 2 0 14 0 9 0 8\r\n,AN D O LIN I' S PIZ ZE RIA &,,1 2 14 
+0 EA S T 9 6 TH S TR EE T,,,,\r\n4 2 8 3 77 BA W,ITA LIA N RE S TA U RA NT,AN D 
+O LIN I' S LL C,N O RT H # 1 0 6,O W A S S O,O K,74 05 5,( 9 1 8 ) 27 2- 9 3 25 
+2 0 15 / 0 2 / 1 0\r\n,A S AH I J AP AN E S E,,,,,,\r\n44 6 95 7 BA W,S RE TA U 
+RA NT,C O O O J IN RP RA TI N,8 3 1 E S 1 S S 7 A T 7 T TR EE T,TU L S A,O K,74 
+1 3 3,( 9 1 8 ) 3 07 -9 15 1 2 0 14 / 1 2 / 2 2\r\n,,S M O KE H O U S 
+E,,,,,\r\n6 3 25 0 1 BA W,BA C K D O O R BA RB E C U E,A S S O C IAT E S IN C,3 
+15 N O RT HW E S T 2 3 RD,O KL AH O MA C ITY,O K,3 1 0 3 7,2 0 14 / 0 8 / 0 1 
+-\r\n,,,,,,,\r\n5 9 85 15 BA W,O O S O BA MB TH AI B I TR,O O S O C BA MB TH AI 
+B I TR IN,S O 5 07 9 U TH Y AL E A VE NU E,TU L S A,O K,74 1 35,( 9 1 8 ) 8 2 8-
+07 4 0 2 0 15 / 0 3 / 1 1\r\n,BA ND AN A RE D' S,,,,,,\r\n6 1 8 6 9 3 BA W,S TE 
+AK H O U S E,\"BR AD S HA W S TE VE LE N , \\_\",3 7 8 0 8 O LD H I G HW AY 27 
+0,S HA W NE E,O K,74 8 0 4,2 0 14 / 0 8 / 2 0 -\r\n,,,15 2 2 W E S T LIN D S 
+EY,,,,\r\n6 3 25 75 BA W,BA S HU LE G EN D S,HY H HE C HU AN G LL C,S TR EE T,N 
+O RM AN,O K,7 3 0 6 9,2 0 14 / 07 / 2 1 -\r\n,,O O G S DE EP F RK H LD 
+IN,,,,,\r\n5 4 3 14 9 BA W,BE DL AM B AR -B -Q,LL C,6 1 0 N O RT HE A S T 5 0 
+TH,O O C KL AH MA ITY,O K,7 3 1 05,( ) / / 4 05 5 2 8-7 4 27 2 0 15 0 2 2 
+3\r\n{\n \"headers\": [\n \"LI C EN S E\",\n \"\",\n \"\",\n \"PR EM I S E\",\n 
+\"\",\n \"\",\n \"\",\n \"\"\n ],\n \"rows\": [\n {\n \"LI C EN S E\": \"NU MB 
+ER TY PE\",\n \"\": \"PH O NE N U MB ER EX PI RE S\",\n \"PR EM I S E\": \"AD DR
+E S S\"\n },\n {\n \"LI C EN S E\": \"6 4 87 65 AA A\",\n \"\": \"2 0 14 / 1 2 /
+0 3 -\",\n \"PR EM I S E\": \"7 1 0 0 TE RM INA L D RIV E\"\n },\n {\n \"LI C EN
+S E\": \"\",\n \"\": \"\",\n \"PR EM I S E\": \"S C 77 77 E A T A PA HE\"\n },\n
+{\n \"LI C EN S E\": \"6 4 87 6 6 AA A\",\n \"\": \"/ / 2 0 14 1 2 1 6 -\",\n 
+\"PR EM I S E\": \"S TR EE T\"\n },\n {\n \"LI C EN S E\": \"8 2 0 3 0 AA A\",\n
+\"\": \"( 05 ) 6 8 0- 3 0 1 2 0 14 / 0 9 / 14 4 7\",\n \"PR EM I S E\": \"7 1 0 
+0 TE RM INA L D RIV E\"\n },\n {\n \"LI C EN S E\": \"\",\n \"\": \"\",\n \"PR 
+EM I S E\": \"\"\n },\n {\n \"LI C EN S E\": \"5 0 9 4 6 2 AA A\",\n \"\": \"( 9
+1 8 ) 8 3 1- 6 3 0 2 2 0 14 / 0 8 / 1 9\",\n \"PR EM I S E\": \"77 77 E A S T A 
+PA C HE D RIV E\"\n },\n {\n \"LI C EN S E\": \"\",\n \"\": \"\",\n \"PR EM I S 
+E\": \"\"\n },\n {\n \"LI C EN S E\": \"5 0 9 6 0 9 AA A\",\n \"\": \"( ) / / 4 
+05 6 8 0- 3 7 0 1 2 0 14 0 8 1 9\",\n \"PR EM I S E\": \"1 0 0 TE RM INA L D RIV
+E 7\"\n },\n {\n \"LI C EN S E\": \"\",\n \"\": \"\",\n \"PR EM I S E\": \"\"\n 
+},\n {\n \"LI C EN S E\": \"4 0 2 9 8 6 AA A\",\n \"\": \"( 85 9 ) 7 67 -3 74 7 
+2 0 14 / 1 0 / 2 2\",\n \"PR EM I S E\": \"77 77 E A S T A PA C HE D RIV E\"\n 
+},\n {\n \"LI C EN S E\": \"\",\n \"\": \"\",\n \"PR EM I S E\": \"O O W ILL R G
+ER S AI RP RT\"\n },\n {\n \"LI C EN S E\": \"7 9 14 5 AA A\",\n \"\": \"( 4 0 4
+) 77 3- 97 45 2 0 14 / 05 / 1 1\",\n \"PR EM I S E\": \"O 9 97 B X 5 5\"\n },\n 
+{\n \"LI C EN S E\": \"6 0 0 9 4 1 AA A\",\n \"\": \"( ) / / 9 0 1 3 4 8- 4 1 0 
+0 2 0 15 0 3 2 6\",\n \"PR EM I S E\": \"7 1 0 0 TE RM INA L D RIV E\"\n },\n 
+{\n \"LI C EN S E\": \"\",\n \"\": \"\",\n \"PR EM I S E\": \"7 1 0 0 TE RM INA 
+L D RIV E\"\n },\n {\n \"LI C EN S E\": \"47 8 4 8 2 AA A\",\n \"\": \"( 8 3 2 )
+35 3- 1 2 0 1 2 0 14 / 05 / 0 8\",\n \"PR EM I S E\": \"W ILL R O G ER S AI RP O
+RT\"\n },\n {\n \"LI C EN S E\": \"5 05 9 8 1 AA A\",\n \"\": \"( 4 05 ) 6 3 4- 
+3 0 0 0 2 0 14 / 05 / 2 8\",\n \"PR EM I S E\": \"7 1 0 0 TE RM INA L D RIV 
+E\"\n },\n {\n \"LI C EN S E\": \"\",\n \"\": \"\",\n \"PR EM I S E\": \"\"\n 
+},\n {\n \"LI C EN S E\": \"4 2 97 4 AA A 5\",\n \"\": \"( 4 05 ) 6 8 2-4 1 8 3 
+2 0 15 / 0 2 / 15\",\n \"PR EM I S E\": \"7 1 0 0 TE RM INA L D RIV E\"\n },\n 
+{\n \"LI C EN S E\": \"\",\n \"\": \"\",\n \"PR EM I S E\": \"\"\n },\n {\n \"LI
+C EN S E\": \"4 2 97 55 AA A\",\n \"\": \"( 9 1 8 ) 8 3 4-4 4 95 2 0 15 / 0 2 / 
+1 6\",\n \"PR EM I S E\": \"77 77 E A S T A PA C HE D RIV E\"\n },\n {\n \"LI C 
+EN S E\": \"\",\n \"\": \"\",\n \"PR EM I S E\": \"\"\n },\n {\n \"LI C EN S 
+E\": \"4 15 05 1 AA A\",\n \"\": \"( ) / / 87 2 8 25 -8 3 0 9 2 0 14 05 1 2\",\n
+\"PR EM I S E\": \"E A S T A PA C HE D RIV E 77 77\"\n },\n {\n \"LI C EN S E\":
+\"1 0 67 1 9 AA A\",\n \"\": \"( 87 2 ) 8 25 -8 3 0 9 2 0 14 / 0 4 / 1 1\",\n 
+\"PR EM I S E\": \"W ILL R O G ER S AI RP O RT\"\n },\n {\n \"LI C EN S E\": 
+\"\",\n \"\": \"\",\n \"PR EM I S E\": \"7 1 2 3 S O U TH 9 2N D EA S T\"\n },\n
+{\n \"LI C EN S E\": \"6 25 4 2 2 BA W\",\n \"\": \"( 9 1 8 ) 25 2- 0 3 3 3 2 0 
+15 / 0 2 / 14\",\n \"PR EM I S E\": \"AV EN U E S U ITE J\"\n },\n {\n \"LI C EN
+S E\": \"\",\n \"\": \"\",\n \"PR EM I S E\": \"2 1 3 2 W S G E T AR Y\"\n },\n 
+{\n \"LI C EN S E\": \"4 6 4 8 2 8 BA W\",\n \"\": \"( 8 0 ) 3 2 3-5 9 0 0 2 0 
+15 / 0 2 / 1 1 5\",\n \"PR EM I S E\": \"B O U LE VA RD\"\n },\n {\n \"LI C EN S
+E\": \"\",\n \"\": \"\",\n \"PR EM I S E\": \"1 2 2 15 N O RT H\"\n },\n {\n 
+\"LI C EN S E\": \"1 8 4 0 6 6 BA W\",\n \"\": \"( 4 05 ) 75 2-5 2 8 3 2 0 14 / 
+07 / 27\",\n \"PR EM I S E\": \"PE NN S YL VA NIA\"\n },\n {\n \"LI C EN S E\": 
+\"\",\n \"\": \"\",\n \"PR EM I S E\": \"\"\n },\n {\n \"LI C EN S E\": \"5 47 6
+9 3 BA W\",\n \"\": \"( ) / / 5 8 0 9 2 8- 27 0 0 2 0 14 0 9 0 8\",\n \"PR EM I 
+S E\": \"24 05 S O U TH E L C AM IN O\"\n },\n {\n \"LI C EN S E\": \"\",\n 
+\"\": \"\",\n \"PR EM I S E\": \"1 2 14 0 EA S T 9 6 TH S TR EE T\"\n },\n {\n 
+\"LI C EN S E\": \"4 2 8 3 77 BA W\",\n \"\": \"( 9 1 8 ) 27 2- 9 3 25 2 0 15 / 
+0 2 / 1 0\",\n \"PR EM I S E\": \"N O RT H # 1 0 6\"\n },\n {\n \"LI C EN S E\":
+\"\",\n \"\": \"\",\n \"PR EM I S E\": \"\"\n },\n {\n \"LI C EN S E\": \"44 6 
+95 7 BA W\",\n \"\": \"( 9 1 8 ) 3 07 -9 15 1 2 0 14 / 1 2 / 2 2\",\n \"PR EM I 
+S E\": \"8 3 1 E S 1 S S 7 A T 7 T TR EE T\"\n },\n {\n \"LI C EN S E\": \"\",\n
+\"\": \"\",\n \"PR EM I S E\": \"\"\n },\n {\n \"LI C EN S E\": \"6 3 25 0 1 BA 
+W\",\n \"\": \"2 0 14 / 0 8 / 0 1 -\",\n \"PR EM I S E\": \"3 15 N O RT HW E S T
+2 3 RD\"\n },\n {\n \"LI C EN S E\": \"\",\n \"\": \"\",\n \"PR EM I S E\": 
+\"\"\n },\n {\n \"LI C EN S E\": \"5 9 85 15 BA W\",\n \"\": \"( 9 1 8 ) 8 2 8- 
+07 4 0 2 0 15 / 0 3 / 1 1\",\n \"PR EM I S E\": \"S O 5 07 9 U TH Y AL E A VE NU
+E\"\n },\n {\n \"LI C EN S E\": \"\",\n \"\": \"\",\n \"PR EM I S E\": \"\"\n 
+},\n {\n \"LI C EN S E\": \"6 1 8 6 9 3 BA W\",\n \"\": \"2 0 14 / 0 8 / 2 0 
+-\",\n \"PR EM I S E\": \"3 7 8 0 8 O LD H I G HW AY 27 0\"\n },\n {\n \"LI C EN
+S E\": \"\",\n \"\": \"\",\n \"PR EM I S E\": \"15 2 2 W E S T LIN D S EY\"\n 
+},\n {\n \"LI C EN S E\": \"6 3 25 75 BA W\",\n \"\": \"2 0 14 / 07 / 2 1 -\",\n
+\"PR EM I S E\": \"S TR EE T\"\n },\n {\n \"LI C EN S E\": \"\",\n \"\": \"\",\n
+\"PR EM I S E\": \"\"\n },\n {\n \"LI C EN S E\": \"5 4 3 14 9 BA W\",\n \"\": 
+\"( ) / / 4 05 5 2 8-7 4 27 2 0 15 0 2 2 3\",\n \"PR EM I S E\": \"6 1 0 N O RT 
+HE A S T 5 0 TH\"\n }\n ]\n}\n\n|    |                                          
+|                                                                               
+|                                                                               
+| O<br>F 
+A<br>C<br>TIV<br>E<br>LI<br>C<br>EN<br>S<br>E<br>S<br>O<br>KL<br>AH<br>O<br>MA<b
+r>A<br>BL<br>E<br>C<br>O<br>MM<br>I<br>S                | S<br>I<br>O<br>N      
+|                  |                       |                                    
+| 3<br>/<br>1<br>9<br>/<br>2<br>0<br>14      
+|\n|----|-------------------------------------------------|---------------------
+--------------------------------------------------------------------------------
+--|-----------------------------------------------------------------------------
+--------------------------------------------------|-----------------------------
+--------------------------------------------------------------------------------
+-----------------------------------|----------------------------------------|---
+---------------|-----------------------|----------------------------------------
+-------------------|--------------------------------------------|\n| LI | 
+C<br>EN<br>S<br>E<br>NU<br>MB<br>ER<br>TY<br>PE | DB<br>A<br>NA<br>ME           
+| LI<br>C<br>EN<br>S<br>EE<br>N<br>AM<br>E                                      
+| PR<br>EM<br>I<br>S<br>E<br>AD<br>DR<br>E<br>S<br>S                            
+| C<br>ITY                               | S<br>T           | ZI<br>P<br>PH     
+| O<br>NE<br>N<br>U<br>MB<br>ER                             | 
+EX<br>PI<br>RE<br>S                        |\n|    | 
+6<br>3<br>24<br>2<br>6<br>BA<br>W               | 
+BE<br>LL<br>AR<br>O<br>MA<br>LL<br>C                                            
+| BE<br>LL<br>AR<br>O<br>MA<br>LL<br>C                                          
+| O<br>S<br>C<br>C<br>1<br>8<br>3<br>1 
+N<br>RT<br>HW<br>E<br>T<br>A<br>HE<br>R<br>O<br>AD                              
+| LA<br>W<br>T<br>O<br>N                 | O<br>K           | 7<br>35<br>07     
+| -                                                         | 
+2<br>0<br>14<br>/<br>05<br>/<br>1<br>6     |\n|    | 
+6<br>4<br>1<br>3<br>87<br>BA<br>W               | 
+BL<br>U<br>E<br>BE<br>LL<br>E<br>S<br>AL<br>O<br>O<br>N                         
+| 
+BL<br>U<br>E<br>BE<br>LL<br>E<br>EN<br>TE<br>RT<br>AI<br>NM<br>EN<br>T<br>LL<br>
+C                                             | 
+2<br>24<br>W<br>E<br>S<br>T<br>HA<br>RR<br>I<br>S<br>O<br>N<br>AV<br>EN<br>U<br>
+E                                                              | 
+G<br>U<br>TH<br>RI<br>E                | O<br>K           | 7<br>3<br>0<br>44   
+| -                                                         | 
+2<br>0<br>14<br>/<br>0<br>8<br>/<br>27     |\n|    | 
+2<br>3<br>8<br>8<br>9<br>2<br>BA<br>W           | 
+O<br>S<br>O<br>&<br>G<br>B<br>T<br>N<br>DE<br>LI<br>RI<br>LL                    
+| O<br>S<br>O<br>&<br>G<br>C<br>B<br>T<br>N<br>DE<br>LI<br>RI<br>LL<br>IN       
+| 6<br>2<br>3<br>1 
+E<br>A<br>S<br>T<br>6<br>1<br>S<br>T<br>S<br>TR<br>EE<br>T<br>S<br>O<br>U<br>TH 
+| TU<br>L<br>S<br>A                      | O<br>K           | 74<br>1<br>3<br>6 
+| (<br>9<br>1<br>8<br>)<br>4<br>9<br>2-4<br>74<br>5         | 
+2<br>0<br>14<br>/<br>05<br>/<br>0<br>8     |\n|    | 
+2<br>8<br>8<br>0<br>3<br>BA<br>W<br>7           | 
+C<br>AF<br>FE<br>P<br>RA<br>NZ<br>O                                             
+| MA<br>ZE<br>L T<br>O<br>V<br>IN<br>C                                          
+| 9<br>6<br>2<br>0<br>&<br>9<br>6<br>2<br>2 
+N<br>O<br>RT<br>H<br>MA<br>Y<br>AV<br>EN<br>U<br>E                              
+| VI<br>LL<br>A<br>G<br>E                | O<br>K           | 
+3<br>1<br>2<br>0<br>7 | (<br>4<br>05<br>)<br>35<br>75<br>5-<br>77               
+| 2<br>0<br>15<br>/<br>0<br>3<br>/<br>0<br>2 |\n|    | 
+3<br>7<br>3<br>3<br>4<br>0<br>BA<br>W           | 
+C<br>A<br>S<br>A<br>S<br>AN<br>M<br>AR<br>C<br>O<br>S<br>C<br>O<br>C<br>ED<br>AR
+<br>R<br>K<br>IN<br>N | 
+M<br>O<br>RA<br>E<br>NT<br>ER<br>PR<br>I<br>S<br>E<br>S<br>IN<br>C<br>C<br>O<br>
+C<br>C<br>ED<br>AR<br>R<br>K<br>IN<br>N<br>LL | 
+2<br>17<br>0<br>S<br>O<br>U<br>TH<br>G<br>AR<br>NE<br>TT<br>R<br>O<br>AD<br>S<br
+>1<br>S<br>S<br>4<br>47<br>W<br>E<br>T 4<br>T<br>TR<br>EE<br>T | 
+TU<br>L<br>S<br>A                      | O<br>K<br>O<br>K | 74<br>1<br>2<br>9   
+| (<br>9<br>1<br>8<br>)<br>4<br>3<br>7-<br>17<br>1<br>8     | 
+2<br>0<br>14<br>/<br>07<br>/<br>2<br>3     |\n|    | 
+44<br>35<br>9<br>0<br>BA<br>W                   |                               
+|                                                                               
+| 3<br>27<br>27<br>W<br>E<br>S<br>T<br>ME<br>M<br>O<br>RIA<br>L                 
+| TU<br>L<br>S<br>A                      |                  | 74<br>1<br>07     
+| (<br>9<br>1<br>8<br>)<br>44<br>7-4<br>4<br>9<br>3         | 
+2<br>0<br>14<br>/<br>1<br>1<br>/<br>0<br>6 |\n|    | 
+4<br>0<br>6<br>4<br>87<br>BA<br>W               | 
+C<br>HE<br>F<br>S<br>DI<br>D<br>O<br>MA<br>NI                                   
+| EN<br>G<br>AR<br>D<br>IN<br>C                                                 
+| R<br>O<br>AD                                                                  
+| O<br>KL<br>AH<br>O<br>MA<br>C<br>ITY   | O<br>K           | 
+3<br>1<br>3<br>4<br>7 | (<br>4<br>05<br>)<br>74<br>9-<br>24<br>3<br>3           
+| 2<br>0<br>15<br>/<br>0<br>1<br>/<br>2<br>6 |\n|    | 
+4<br>87<br>0<br>1<br>6<br>BA<br>W               | 
+C<br>S<br>S<br>C<br>C<br>G<br>O<br>G<br>LA<br>I<br>I<br>AR<br>L<br>U<br>N<br>E  
+| O<br>S<br>IN<br>F<br>RM<br>AL<br>P<br>AR<br>TN<br>ER<br>HI<br>P               
+| 
+87<br>0<br>3<br>N<br>O<br>RT<br>H<br>O<br>W<br>A<br>S<br>S<br>O<br>S<br>S<br>#<b
+r>O<br>EX<br>PR<br>E<br>W<br>AY                                | 
+O<br>W<br>A<br>S<br>S<br>O             | O<br>K           | 74<br>05<br>5       
+| (<br>9<br>1<br>8<br>)<br>27<br>4-<br>8<br>1<br>9<br>1     | 
+2<br>0<br>15<br>/<br>0<br>2<br>/<br>1<br>0 |\n|    | 
+6<br>17<br>27<br>6<br>BA<br>W                   | 
+C<br>O<br>FF<br>EE<br>C<br>U<br>P                                               
+| C<br>O<br>FF<br>EE<br>C<br>U<br>P<br>LL<br>C                                  
+| 4<br>0<br>1 
+N<br>O<br>RT<br>H<br>BR<br>O<br>AD<br>W<br>AY<br>S<br>TR<br>EE<br>T             
+| O<br>P<br>TE<br>AU                     | O<br>K           | 95<br>3<br>74     
+| (<br>9<br>1<br>8<br>)<br>6<br>-2<br>6<br>2<br>2<br>47     | 
+2<br>0<br>14<br>/<br>1<br>0<br>/<br>25     |\n|    | 
+6<br>0<br>3<br>77<br>1<br>BA<br>W               | 
+C<br>O<br>O<br>L<br>G<br>RE<br>EN<br>S                                          
+| 
+C<br>O<br>O<br>L<br>G<br>RE<br>EN<br>S<br>BE<br>ER<br>A<br>ND<br>W<br>IN<br>E<br
+>LL<br>C                                      | 14<br>2<br>0<br>1 
+N<br>O<br>RT<br>H<br>MA<br>Y<br>AV<br>EN<br>U                                   
+| E O<br>KL<br>AH<br>O<br>MA<br>C<br>ITY | O<br>K           | 
+7<br>3<br>1<br>3<br>4 | (<br>4<br>05<br>)<br>2<br>8<br>6-<br>9<br>3<br>0<br>4   
+| 2<br>0<br>14<br>/<br>07<br>/<br>0<br>2     |\n|    | 
+6<br>0<br>3<br>77<br>2<br>BA<br>W               | 
+C<br>O<br>O<br>L<br>G<br>RE<br>EN<br>S                                          
+| 
+C<br>O<br>O<br>G<br>S<br>L<br>RE<br>EN<br>BE<br>ER<br>A<br>ND<br>W<br>IN<br>E<br
+>LL<br>C                                      | 
+1<br>1<br>8<br>9<br>EA<br>S<br>T<br>15<br>TH<br>S<br>U<br>ITE<br>15<br>6        
+| O<br>ED<br>M<br>ND                     | O<br>K           | 
+7<br>3<br>0<br>1<br>3 | (<br>)<br>4<br>05<br>5<br>6<br>2-<br>1<br>0<br>2<br>2   
+| /<br>/<br>2<br>0<br>14<br>07<br>0<br>2     |\n|    | 
+6<br>0<br>3<br>77<br>3<br>BA<br>W               | 
+C<br>O<br>O<br>L<br>G<br>RE<br>EN<br>S                                          
+| 
+C<br>O<br>O<br>L<br>G<br>RE<br>EN<br>S<br>BE<br>ER<br>A<br>ND<br>W<br>IN<br>E<br
+>LL<br>C                                      | 2<br>0<br>4 
+N<br>O<br>RT<br>H<br>R<br>O<br>BI<br>N<br>S<br>O<br>N<br>S<br>U<br>ITE<br>15<br>
+0                                                  | 
+O<br>KL<br>AH<br>O<br>MA<br>C<br>ITY   | O<br>K           | 
+7<br>3<br>1<br>0<br>2 | (<br>4<br>05<br>)<br>6<br>0<br>0-<br>6<br>44<br>4       
+| 2<br>0<br>14<br>/<br>0<br>6<br>/<br>25     |\n|    | 
+6<br>0<br>3<br>77<br>0<br>BA<br>W               | 
+C<br>O<br>O<br>G<br>S<br>L<br>RE<br>EN                                          
+| 
+O<br>O<br>C<br>L<br>G<br>RE<br>EN<br>S<br>BE<br>ER<br>A<br>ND<br>C<br>W<br>IN<br
+>E<br>LL                                      | 
+3<br>0<br>0<br>S<br>O<br>S<br>O<br>7<br>W<br>E<br>T<br>R<br>BI<br>N<br>N        
+| N<br>O<br>RM<br>AN                     | O<br>K           | 7<br>3<br>07<br>2 
+| (<br>4<br>05<br>)<br>7<br>0<br>1-5<br>0<br>0<br>0         | 
+2<br>0<br>14<br>/<br>0<br>6<br>/<br>1<br>8 |\n|    | 
+6<br>4<br>3<br>4<br>3<br>3<br>BA<br>W           | 
+C<br>O<br>W<br>C<br>RE<br>EK<br>C<br>AF<br>E                                    
+| O<br>EM<br>E<br>LL<br>C                                                       
+| 
+3<br>87<br>S<br>O<br>U<br>TH<br>C<br>O<br>MM<br>ER<br>C<br>IAL<br>S<br>TR<br>EE<
+br>T                                                           | 
+W<br>EL<br>C<br>H                      | O<br>K           | 74<br>3<br>6<br>9   
+| (<br>9<br>1<br>8<br>)<br>8<br>8-<br>3<br>6<br>8<br>3<br>7 | 
+2<br>0<br>15<br>/<br>0<br>2<br>/<br>2<br>3 |\n|    |                            
+| DA<br>VI<br>N<br>C<br>I'<br>S<br>ITA<br>LIA<br>N                              
+| NA<br>P<br>O<br>LI'<br>S<br>O<br>F<br>S<br>TI<br>LL<br>W<br>AT<br>ER          
+| 2<br>2<br>8<br>0<br>N<br>O<br>RT<br>H<br>PE<br>RK<br>IN<br>S                  
+|                                        |                  |                   
+|                                                           |                   
+|\n|    | 5<br>6<br>1<br>2<br>1<br>8<br>BA<br>W           | 
+S<br>RE<br>TA<br>U<br>RA<br>NT                                                  
+| C<br>IN                                                                       
+| O<br>R<br>AD                                                                  
+| S<br>TI<br>LL<br>W<br>AT<br>ER         | O<br>K           | 74<br>07<br>5     
+| (<br>4<br>05<br>)<br>3<br>7<br>2-<br>0<br>3<br>0<br>0     | 
+2<br>0<br>14<br>/<br>1<br>0<br>/<br>2<br>0 |\n|    | 
+6<br>35<br>5<br>27<br>BA<br>W                   | DIA<br>RT<br>I 
+IT<br>AL<br>IAN<br>C<br>AF<br>E                                                 
+| DIA<br>RT<br>I IT<br>AL<br>IAN<br>C<br>AF<br>E<br>LL<br>C                     
+| 2<br>8<br>0<br>8<br>8<br>TH<br>S<br>TR<br>EE<br>T                             
+| O<br>O<br>W<br>DW<br>AR<br>D           | O<br>K           | 
+7<br>3<br>8<br>0<br>1 | -                                                       
+| /<br>/<br>2<br>0<br>14<br>07<br>1<br>8     |\n|    | 
+6<br>2<br>3<br>8<br>2<br>3<br>BA<br>W           | 
+D<br>O<br>ME<br>NI<br>C<br>A<br>ITA<br>LIA<br>KIT<br>C<br>HE<br>N               
+| MA<br>RI<br>NI<br>D<br>O<br>ME<br>NI<br>C<br>A<br>,                           
+| 
+2<br>0<br>3<br>3<br>N<br>O<br>RT<br>H<br>KI<br>C<br>KA<br>P<br>O<br>O<br>AV<br>E
+N<br>U<br>E                                                    | 
+S<br>HA<br>W<br>NE<br>E                | O<br>K           | 74<br>8<br>0<br>4   
+| -                                                         | 
+2<br>0<br>14<br>/<br>0<br>6<br>/<br>1<br>0 |\n|    | 
+6<br>3<br>3<br>24<br>6<br>BA<br>W               | 
+S<br>G<br>EL<br>EM<br>EN<br>T<br>AR<br>T<br>AL<br>LE<br>RY                      
+| EL<br>EM<br>EN<br>T<br>S<br>AR<br>T<br>G<br>AL<br>LE<br>RY<br>C<br>LL         
+| S<br>S<br>1<br>25<br>W<br>E<br>T<br>MA<br>IN<br>TR<br>EE<br>T                 
+| DU<br>RA<br>NT                         | O<br>K           | 74<br>7<br>0<br>1 
+| -                                                         | 
+2<br>0<br>14<br>/<br>0<br>6<br>/<br>05     |\n|    | 
+4<br>9<br>47<br>1<br>BA<br>W<br>5               | 
+FA<br>T<br>G<br>U<br>Y'<br>S<br>BU<br>R<br>G<br>ER<br>J<br>O<br>IN<br>T         
+| AL<br>S<br>O<br>K<br>C<br>LL<br>C                                             
+| 
+14<br>0<br>N<br>O<br>RT<br>H<br>G<br>RE<br>EN<br>W<br>O<br>O<br>D<br>AV<br>EN<br
+>U<br>E                                                        | 
+TU<br>L<br>S<br>A                      | O<br>K           | 74<br>1<br>2<br>0   
+| (<br>9<br>1<br>8<br>)<br>9<br>4-7<br>8<br>2<br>7<br>7     | 
+2<br>0<br>15<br>/<br>0<br>4<br>/<br>0<br>1 |\n|    | 
+6<br>14<br>3<br>77<br>BA<br>W                   | 
+FA<br>T<br>G<br>U<br>Y'<br>S<br>BU<br>R<br>G<br>ER<br>O<br>J<br>IN<br>T         
+| O<br>AL<br>S<br>K<br>C<br>LL<br>C                                             
+| 7<br>9<br>45<br>S<br>O<br>U<br>TH<br>M<br>EM<br>O<br>RIA<br>L<br>DR<br>IV<br>E
+| TU<br>L<br>S<br>A                      | O<br>K           | 74<br>1<br>3<br>3 
+| (<br>9<br>1<br>8<br>)<br>8<br>9<br>3-<br>2<br>2<br>3<br>2 | 
+2<br>0<br>14<br>/<br>0<br>9<br>/<br>1<br>9 |\n|    | 
+6<br>3<br>2<br>3<br>0<br>0<br>BA<br>W           | 
+O<br>F<br>NT<br>AN<br>A<br>ITA<br>LIA<br>N<br>RE<br>S<br>TA<br>U<br>RA<br>NT    
+| U<br>LA<br>J,<br>G<br>EZ<br>IM                                                
+| 85<br>O<br>S<br>1<br>2T<br>4 
+N<br>RT<br>HW<br>E<br>T<br>H<br>S<br>TR<br>EE<br>T                              
+| O<br>O<br>M<br>RE                      | O<br>K           | 
+3<br>1<br>6<br>0<br>7 | (<br>05<br>)<br>0<br>3-<br>0<br>9<br>1<br>1<br>4<br>7   
+| 2<br>0<br>14<br>/<br>05<br>/<br>07         |\n|    |                          
+|                                                                               
+|                                                                               
+| 1<br>9<br>45<br>N<br>O<br>RT<br>H<br>KI<br>C<br>KA<br>P<br>O<br>O             
+|                                        |                  |                   
+|                                                           |                   
+|\n|    | 5<br>07<br>87<br>5<br>BA<br>W                   | 
+FR<br>AT<br>EL<br>I'<br>S                                                       
+| FR<br>AT<br>LI'<br>S<br>IN<br>C                                               
+| 
+AV<br>EN<br>U<br>E<br>O<br>O<br>1<br>0<br>1<br>0<br>L<br>NN<br>IE<br>AB<br>B<br>
+TT                                                             | 
+S<br>HA<br>W<br>NE<br>E                | O<br>K           | 74<br>8<br>0<br>4   
+| (<br>4<br>05<br>)<br>27<br>5-<br>6<br>1<br>0<br>3         | 
+2<br>0<br>14<br>/<br>0<br>8<br>/<br>2<br>8 |\n|    | 
+6<br>0<br>4<br>9<br>4<br>1<br>BA<br>W           | 
+FR<br>E<br>S<br>C<br>O<br>S<br>ME<br>XI<br>C<br>AN<br>G<br>RI<br>LL             
+| 1<br>9<br>IN<br>C                                                             
+| B<br>O<br>U<br>LE<br>VA<br>RD                                                 
+| AD<br>A                                | O<br>K           | 74<br>8<br>2<br>0 
+| (<br>)<br>5<br>8<br>0<br>3<br>3<br>2-<br>2<br>95<br>9     | 
+/<br>/<br>2<br>0<br>14<br>07<br>15         |\n\n,,,,O F A C TIV E LI C EN S E S 
+O KL AH O MA A BL E C O MM I S,S I O N,,,,3 / 1 9 / 2 0 14\r\nLI,C EN S E NU MB 
+ER TY PE,DB A NA ME,LI C EN S EE N AM E,PR EM I S E AD DR E S S,C ITY,S T,ZI P 
+PH,O NE N U MB ER,EX PI RE S\r\n,6 3 24 2 6 BA W,BE LL AR O MA LL C,BE LL AR O 
+MA LL C,O S C C 1 8 3 1 N RT HW E T A HE R O AD,LA W T O N,O K,7 35 07,-,2 0 14 
+/ 05 / 1 6\r\n,6 4 1 3 87 BA W,BL U E BE LL E S AL O O N,BL U E BE LL E EN TE RT
+AI NM EN T LL C,2 24 W E S T HA RR I S O N AV EN U E,G U TH RI E,O K,7 3 0 
+44,-,2 0 14 / 0 8 / 27\r\n,2 3 8 8 9 2 BA W,O S O & G B T N DE LI RI LL,O S O & 
+G C B T N DE LI RI LL IN,6 2 3 1 E A S T 6 1 S T S TR EE T S O U TH,TU L S A,O 
+K,74 1 3 6,( 9 1 8 ) 4 9 2-4 74 5,2 0 14 / 05 / 0 8\r\n,2 8 8 0 3 BA W 7,C AF FE
+P RA NZ O,MA ZE L T O V IN C,9 6 2 0 & 9 6 2 2 N O RT H MA Y AV EN U E,VI LL A G
+E,O K,3 1 2 0 7,( 4 05 ) 35 75 5- 77,2 0 15 / 0 3 / 0 2\r\n,3 7 3 3 4 0 BA W,C A
+S A S AN M AR C O S C O C ED AR R K IN N,M O RA E NT ER PR I S E S IN C C O C C 
+ED AR R K IN N LL,2 17 0 S O U TH G AR NE TT R O AD S 1 S S 4 47 W E T 4 T TR EE
+T,TU L S A,O K O K,74 1 2 9,( 9 1 8 ) 4 3 7- 17 1 8,2 0 14 / 07 / 2 3\r\n,44 35 
+9 0 BA W,,,3 27 27 W E S T ME M O RIA L,TU L S A,,74 1 07,( 9 1 8 ) 44 7-4 4 9 
+3,2 0 14 / 1 1 / 0 6\r\n,4 0 6 4 87 BA W,C HE F S DI D O MA NI,EN G AR D IN C,R 
+O AD,O KL AH O MA C ITY,O K,3 1 3 4 7,( 4 05 ) 74 9- 24 3 3,2 0 15 / 0 1 / 2 
+6\r\n,4 87 0 1 6 BA W,C S S C C G O G LA I I AR L U N E,O S IN F RM AL P AR TN 
+ER HI P,87 0 3 N O RT H O W A S S O S S # O EX PR E W AY,O W A S S O,O K,74 05 
+5,( 9 1 8 ) 27 4- 8 1 9 1,2 0 15 / 0 2 / 1 0\r\n,6 17 27 6 BA W,C O FF EE C U 
+P,C O FF EE C U P LL C,4 0 1 N O RT H BR O AD W AY S TR EE T,O P TE AU,O K,95 3 
+74,( 9 1 8 ) 6 -2 6 2 2 47,2 0 14 / 1 0 / 25\r\n,6 0 3 77 1 BA W,C O O L G RE EN
+S,C O O L G RE EN S BE ER A ND W IN E LL C,14 2 0 1 N O RT H MA Y AV EN U,E O KL
+AH O MA C ITY,O K,7 3 1 3 4,( 4 05 ) 2 8 6- 9 3 0 4,2 0 14 / 07 / 0 2\r\n,6 0 3 
+77 2 BA W,C O O L G RE EN S,C O O G S L RE EN BE ER A ND W IN E LL C,1 1 8 9 EA 
+S T 15 TH S U ITE 15 6,O ED M ND,O K,7 3 0 1 3,( ) 4 05 5 6 2- 1 0 2 2,/ / 2 0 
+14 07 0 2\r\n,6 0 3 77 3 BA W,C O O L G RE EN S,C O O L G RE EN S BE ER A ND W 
+IN E LL C,2 0 4 N O RT H R O BI N S O N S U ITE 15 0,O KL AH O MA C ITY,O K,7 3 
+1 0 2,( 4 05 ) 6 0 0- 6 44 4,2 0 14 / 0 6 / 25\r\n,6 0 3 77 0 BA W,C O O G S L 
+RE EN,O O C L G RE EN S BE ER A ND C W IN E LL,3 0 0 S O S O 7 W E T R BI N N,N 
+O RM AN,O K,7 3 07 2,( 4 05 ) 7 0 1-5 0 0 0,2 0 14 / 0 6 / 1 8\r\n,6 4 3 4 3 3 
+BA W,C O W C RE EK C AF E,O EM E LL C,3 87 S O U TH C O MM ER C IAL S TR EE T,W 
+EL C H,O K,74 3 6 9,( 9 1 8 ) 8 8- 3 6 8 3 7,2 0 15 / 0 2 / 2 3\r\n,,DA VI N C 
+I' S ITA LIA N,NA P O LI' S O F S TI LL W AT ER,2 2 8 0 N O RT H PE RK IN 
+S,,,,,\r\n,5 6 1 2 1 8 BA W,S RE TA U RA NT,C IN,O R AD,S TI LL W AT ER,O K,74 
+07 5,( 4 05 ) 3 7 2- 0 3 0 0,2 0 14 / 1 0 / 2 0\r\n,6 35 5 27 BA W,DIA RT I IT 
+AL IAN C AF E,DIA RT I IT AL IAN C AF E LL C,2 8 0 8 8 TH S TR EE T,O O W DW AR 
+D,O K,7 3 8 0 1,-,/ / 2 0 14 07 1 8\r\n,6 2 3 8 2 3 BA W,D O ME NI C A ITA LIA 
+KIT C HE N,\"MA RI NI D O ME NI C A ,\",2 0 3 3 N O RT H KI C KA P O O AV EN U 
+E,S HA W NE E,O K,74 8 0 4,-,2 0 14 / 0 6 / 1 0\r\n,6 3 3 24 6 BA W,S G EL EM EN
+T AR T AL LE RY,EL EM EN T S AR T G AL LE RY C LL,S S 1 25 W E T MA IN TR EE 
+T,DU RA NT,O K,74 7 0 1,-,2 0 14 / 0 6 / 05\r\n,4 9 47 1 BA W 5,FA T G U Y' S BU
+R G ER J O IN T,AL S O K C LL C,14 0 N O RT H G RE EN W O O D AV EN U E,TU L S 
+A,O K,74 1 2 0,( 9 1 8 ) 9 4-7 8 2 7 7,2 0 15 / 0 4 / 0 1\r\n,6 14 3 77 BA W,FA 
+T G U Y' S BU R G ER O J IN T,O AL S K C LL C,7 9 45 S O U TH M EM O RIA L DR IV
+E,TU L S A,O K,74 1 3 3,( 9 1 8 ) 8 9 3- 2 2 3 2,2 0 14 / 0 9 / 1 9\r\n,6 3 2 3 
+0 0 BA W,O F NT AN A ITA LIA N RE S TA U RA NT,\"U LA J, G EZ IM\",85 O S 1 2T 4
+N RT HW E T H S TR EE T,O O M RE,O K,3 1 6 0 7,( 05 ) 0 3- 0 9 1 1 4 7,2 0 14 / 
+05 / 07\r\n,,,,1 9 45 N O RT H KI C KA P O O,,,,,\r\n,5 07 87 5 BA W,FR AT EL I'
+S,FR AT LI' S IN C,AV EN U E O O 1 0 1 0 L NN IE AB B TT,S HA W NE E,O K,74 8 0 
+4,( 4 05 ) 27 5- 6 1 0 3,2 0 14 / 0 8 / 2 8\r\n,6 0 4 9 4 1 BA W,FR E S C O S ME
+XI C AN G RI LL,1 9 IN C,B O U LE VA RD,AD A,O K,74 8 2 0,( ) 5 8 0 3 3 2- 2 95 
+9,/ / 2 0 14 07 15\r\n{\n \"headers\": [\n \"\",\n \"\",\n \"\",\n \"\",\n \"O F
+A C TIV E LI C EN S E S O KL AH O MA A BL E C O MM I S\",\n \"S I O N\",\n 
+\"\",\n \"\",\n \"\",\n \"3 / 1 9 / 2 0 14\"\n ],\n \"rows\": [\n {\n \"\": \"O 
+NE N U MB ER\",\n \"O F A C TIV E LI C EN S E S O KL AH O MA A BL E C O MM I 
+S\": \"PR EM I S E AD DR E S S\",\n \"S I O N\": \"C ITY\",\n \"3 / 1 9 / 2 0 
+14\": \"EX PI RE S\"\n },\n {\n \"\": \"-\",\n \"O F A C TIV E LI C EN S E S O 
+KL AH O MA A BL E C O MM I S\": \"O S C C 1 8 3 1 N RT HW E T A HE R O AD\",\n 
+\"S I O N\": \"LA W T O N\",\n \"3 / 1 9 / 2 0 14\": \"2 0 14 / 05 / 1 6\"\n 
+},\n {\n \"\": \"-\",\n \"O F A C TIV E LI C EN S E S O KL AH O MA A BL E C O MM
+I S\": \"2 24 W E S T HA RR I S O N AV EN U E\",\n \"S I O N\": \"G U TH RI 
+E\",\n \"3 / 1 9 / 2 0 14\": \"2 0 14 / 0 8 / 27\"\n },\n {\n \"\": \"( 9 1 8 ) 
+4 9 2-4 74 5\",\n \"O F A C TIV E LI C EN S E S O KL AH O MA A BL E C O MM I 
+S\": \"6 2 3 1 E A S T 6 1 S T S TR EE T S O U TH\",\n \"S I O N\": \"TU L S 
+A\",\n \"3 / 1 9 / 2 0 14\": \"2 0 14 / 05 / 0 8\"\n },\n {\n \"\": \"( 4 05 ) 
+35 75 5- 77\",\n \"O F A C TIV E LI C EN S E S O KL AH O MA A BL E C O MM I S\":
+\"9 6 2 0 & 9 6 2 2 N O RT H MA Y AV EN U E\",\n \"S I O N\": \"VI LL A G E\",\n
+\"3 / 1 9 / 2 0 14\": \"2 0 15 / 0 3 / 0 2\"\n },\n {\n \"\": \"( 9 1 8 ) 4 3 7-
+17 1 8\",\n \"O F A C TIV E LI C EN S E S O KL AH O MA A BL E C O MM I S\": \"2 
+17 0 S O U TH G AR NE TT R O AD S 1 S S 4 47 W E T 4 T TR EE T\",\n \"S I O N\":
+\"TU L S A\",\n \"3 / 1 9 / 2 0 14\": \"2 0 14 / 07 / 2 3\"\n },\n {\n \"\": \"(
+9 1 8 ) 44 7-4 4 9 3\",\n \"O F A C TIV E LI C EN S E S O KL AH O MA A BL E C O 
+MM I S\": \"3 27 27 W E S T ME M O RIA L\",\n \"S I O N\": \"TU L S A\",\n \"3 /
+1 9 / 2 0 14\": \"2 0 14 / 1 1 / 0 6\"\n },\n {\n \"\": \"( 4 05 ) 74 9- 24 3 
+3\",\n \"O F A C TIV E LI C EN S E S O KL AH O MA A BL E C O MM I S\": \"R O 
+AD\",\n \"S I O N\": \"O KL AH O MA C ITY\",\n \"3 / 1 9 / 2 0 14\": \"2 0 15 / 
+0 1 / 2 6\"\n },\n {\n \"\": \"( 9 1 8 ) 27 4- 8 1 9 1\",\n \"O F A C TIV E LI C
+EN S E S O KL AH O MA A BL E C O MM I S\": \"87 0 3 N O RT H O W A S S O S S # O
+EX PR E W AY\",\n \"S I O N\": \"O W A S S O\",\n \"3 / 1 9 / 2 0 14\": \"2 0 15
+/ 0 2 / 1 0\"\n },\n {\n \"\": \"( 9 1 8 ) 6 -2 6 2 2 47\",\n \"O F A C TIV E LI
+C EN S E S O KL AH O MA A BL E C O MM I S\": \"4 0 1 N O RT H BR O AD W AY S TR 
+EE T\",\n \"S I O N\": \"O P TE AU\",\n \"3 / 1 9 / 2 0 14\": \"2 0 14 / 1 0 / 
+25\"\n },\n {\n \"\": \"( 4 05 ) 2 8 6- 9 3 0 4\",\n \"O F A C TIV E LI C EN S E
+S O KL AH O MA A BL E C O MM I S\": \"14 2 0 1 N O RT H MA Y AV EN U\",\n \"S I 
+O N\": \"E O KL AH O MA C ITY\",\n \"3 / 1 9 / 2 0 14\": \"2 0 14 / 07 / 0 2\"\n
+},\n {\n \"\": \"( ) 4 05 5 6 2- 1 0 2 2\",\n \"O F A C TIV E LI C EN S E S O KL
+AH O MA A BL E C O MM I S\": \"1 1 8 9 EA S T 15 TH S U ITE 15 6\",\n \"S I O 
+N\": \"O ED M ND\",\n \"3 / 1 9 / 2 0 14\": \"/ / 2 0 14 07 0 2\"\n },\n {\n 
+\"\": \"( 4 05 ) 6 0 0- 6 44 4\",\n \"O F A C TIV E LI C EN S E S O KL AH O MA A
+BL E C O MM I S\": \"2 0 4 N O RT H R O BI N S O N S U ITE 15 0\",\n \"S I O 
+N\": \"O KL AH O MA C ITY\",\n \"3 / 1 9 / 2 0 14\": \"2 0 14 / 0 6 / 25\"\n 
+},\n {\n \"\": \"( 4 05 ) 7 0 1-5 0 0 0\",\n \"O F A C TIV E LI C EN S E S O KL 
+AH O MA A BL E C O MM I S\": \"3 0 0 S O S O 7 W E T R BI N N\",\n \"S I O N\": 
+\"N O RM AN\",\n \"3 / 1 9 / 2 0 14\": \"2 0 14 / 0 6 / 1 8\"\n },\n {\n \"\": 
+\"( 9 1 8 ) 8 8- 3 6 8 3 7\",\n \"O F A C TIV E LI C EN S E S O KL AH O MA A BL 
+E C O MM I S\": \"3 87 S O U TH C O MM ER C IAL S TR EE T\",\n \"S I O N\": \"W 
+EL C H\",\n \"3 / 1 9 / 2 0 14\": \"2 0 15 / 0 2 / 2 3\"\n },\n {\n \"\": 
+\"\",\n \"O F A C TIV E LI C EN S E S O KL AH O MA A BL E C O MM I S\": \"2 2 8 
+0 N O RT H PE RK IN S\",\n \"S I O N\": \"\",\n \"3 / 1 9 / 2 0 14\": \"\"\n 
+},\n {\n \"\": \"( 4 05 ) 3 7 2- 0 3 0 0\",\n \"O F A C TIV E LI C EN S E S O KL
+AH O MA A BL E C O MM I S\": \"O R AD\",\n \"S I O N\": \"S TI LL W AT ER\",\n 
+\"3 / 1 9 / 2 0 14\": \"2 0 14 / 1 0 / 2 0\"\n },\n {\n \"\": \"-\",\n \"O F A C
+TIV E LI C EN S E S O KL AH O MA A BL E C O MM I S\": \"2 8 0 8 8 TH S TR EE 
+T\",\n \"S I O N\": \"O O W DW AR D\",\n \"3 / 1 9 / 2 0 14\": \"/ / 2 0 14 07 1
+8\"\n },\n {\n \"\": \"-\",\n \"O F A C TIV E LI C EN S E S O KL AH O MA A BL E 
+C O MM I S\": \"2 0 3 3 N O RT H KI C KA P O O AV EN U E\",\n \"S I O N\": \"S 
+HA W NE E\",\n \"3 / 1 9 / 2 0 14\": \"2 0 14 / 0 6 / 1 0\"\n },\n {\n \"\": 
+\"-\",\n \"O F A C TIV E LI C EN S E S O KL AH O MA A BL E C O MM I S\": \"S S 1
+25 W E T MA IN TR EE T\",\n \"S I O N\": \"DU RA NT\",\n \"3 / 1 9 / 2 0 14\": 
+\"2 0 14 / 0 6 / 05\"\n },\n {\n \"\": \"( 9 1 8 ) 9 4-7 8 2 7 7\",\n \"O F A C 
+TIV E LI C EN S E S O KL AH O MA A BL E C O MM I S\": \"14 0 N O RT H G RE EN W 
+O O D AV EN U E\",\n \"S I O N\": \"TU L S A\",\n \"3 / 1 9 / 2 0 14\": \"2 0 15
+/ 0 4 / 0 1\"\n },\n {\n \"\": \"( 9 1 8 ) 8 9 3- 2 2 3 2\",\n \"O F A C TIV E 
+LI C EN S E S O KL AH O MA A BL E C O MM I S\": \"7 9 45 S O U TH M EM O RIA L 
+DR IV E\",\n \"S I O N\": \"TU L S A\",\n \"3 / 1 9 / 2 0 14\": \"2 0 14 / 0 9 /
+1 9\"\n },\n {\n \"\": \"( 05 ) 0 3- 0 9 1 1 4 7\",\n \"O F A C TIV E LI C EN S 
+E S O KL AH O MA A BL E C O MM I S\": \"85 O S 1 2T 4 N RT HW E T H S TR EE 
+T\",\n \"S I O N\": \"O O M RE\",\n \"3 / 1 9 / 2 0 14\": \"2 0 14 / 05 / 07\"\n
+},\n {\n \"\": \"\",\n \"O F A C TIV E LI C EN S E S O KL AH O MA A BL E C O MM 
+I S\": \"1 9 45 N O RT H KI C KA P O O\",\n \"S I O N\": \"\",\n \"3 / 1 9 / 2 0
+14\": \"\"\n },\n {\n \"\": \"( 4 05 ) 27 5- 6 1 0 3\",\n \"O F A C TIV E LI C 
+EN S E S O KL AH O MA A BL E C O MM I S\": \"AV EN U E O O 1 0 1 0 L NN IE AB B 
+TT\",\n \"S I O N\": \"S HA W NE E\",\n \"3 / 1 9 / 2 0 14\": \"2 0 14 / 0 8 / 2
+8\"\n },\n {\n \"\": \"( ) 5 8 0 3 3 2- 2 95 9\",\n \"O F A C TIV E LI C EN S E 
+S O KL AH O MA A BL E C O MM I S\": \"B O U LE VA RD\",\n \"S I O N\": \"AD 
+A\",\n \"3 / 1 9 / 2 0 14\": \"/ / 2 0 14 07 15\"\n }\n ]\n}ALPHABETIC LISTING 
+BY TYPE\n\nABLPDM27\n\nFEBRUARY 2014 M27 (BUS)",
+  "images": {}
+}

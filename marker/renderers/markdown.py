@@ -1,14 +1,18 @@
 import re
+import json
+import hashlib
 from collections import defaultdict
-from typing import Annotated, Tuple
+from typing import Annotated, Dict, List, Tuple, Optional
 
 import regex
-from bs4 import NavigableString
+import uuid
+from bs4 import NavigableString, BeautifulSoup
 from markdownify import MarkdownConverter
 from pydantic import BaseModel
 
 from marker.renderers.html import HTMLRenderer
 from marker.schema import BlockTypes
+from marker.schema.blocks import BlockId
 from marker.schema.document import Document
 
 
@@ -50,6 +54,37 @@ def get_formatted_table_text(element):
     return full_text
 
 
+class SectionBreadcrumb:
+    """Class to track section hierarchy for breadcrumb generation"""
+    def __init__(self):
+        self.hierarchy = {}  # level -> (title, hash)
+
+    def update_hierarchy(self, level: int, title: str, section_hash: str):
+        # Remove all higher or equal level sections
+        keys_to_remove = [k for k in self.hierarchy.keys() if k >= level]
+        for k in keys_to_remove:
+            del self.hierarchy[k]
+
+        # Add this section to the hierarchy
+        self.hierarchy[level] = (title, section_hash)
+
+    def get_breadcrumb_path(self) -> List[Dict[str, str]]:
+        """Generate a breadcrumb path from the current hierarchy"""
+        path = []
+        for level in sorted(self.hierarchy.keys()):
+            title, section_hash = self.hierarchy[level]
+            path.append({
+                "level": level,
+                "title": title,
+                "hash": section_hash
+            })
+        return path
+
+    def generate_breadcrumb_json(self) -> str:
+        """Generate a JSON representation of the breadcrumb path"""
+        return json.dumps(self.get_breadcrumb_path(), ensure_ascii=False)
+
+
 class Markdownify(MarkdownConverter):
     def __init__(self, paginate_output, page_separator, inline_math_delimiters, block_math_delimiters, **kwargs):
         super().__init__(**kwargs)
@@ -57,6 +92,8 @@ class Markdownify(MarkdownConverter):
         self.page_separator = page_separator
         self.inline_math_delimiters = inline_math_delimiters
         self.block_math_delimiters = block_math_delimiters
+        self.section_breadcrumb = SectionBreadcrumb()
+        self.include_breadcrumbs = True
 
     def convert_div(self, el, text, convert_as_inline):
         is_page = el.has_attr('class') and el['class'][0] == 'page'
@@ -87,8 +124,60 @@ class Markdownify(MarkdownConverter):
         else:
             return " " + self.inline_math_delimiters[0] + text + self.inline_math_delimiters[1] + " "
 
+    def convert_h1(self, el, text, convert_as_inline):
+        return self._convert_heading(el, text, 1)
+
+    def convert_h2(self, el, text, convert_as_inline):
+        return self._convert_heading(el, text, 2)
+
+    def convert_h3(self, el, text, convert_as_inline):
+        return self._convert_heading(el, text, 3)
+
+    def convert_h4(self, el, text, convert_as_inline):
+        return self._convert_heading(el, text, 4)
+
+    def convert_h5(self, el, text, convert_as_inline):
+        return self._convert_heading(el, text, 5)
+
+    def convert_h6(self, el, text, convert_as_inline):
+        return self._convert_heading(el, text, 6)
+
+    def _convert_heading(self, el, text, level):
+        """Convert a heading and add breadcrumb data"""
+        # Get section hash from element
+        section_hash = el.get('data-section-hash', hashlib.sha256(text.encode('utf-8')).hexdigest()[:16])
+
+        # Update breadcrumb hierarchy
+        self.section_breadcrumb.update_hierarchy(level, text, section_hash)
+
+        # Create heading markdown
+        heading = '#' * level + ' ' + text + '\n'
+
+        # Add breadcrumb data if enabled
+        if self.include_breadcrumbs:
+            breadcrumb_json = self.section_breadcrumb.generate_breadcrumb_json()
+            # Format as HTML comment for easy extraction but invisible in rendered markdown
+            breadcrumb_data = f"<!-- SECTION_BREADCRUMB: {breadcrumb_json} -->\n\n"
+            return heading + breadcrumb_data
+        else:
+            return heading
+
 
     def convert_table(self, el, text, convert_as_inline):
+        # Check for CSV and JSON data
+        csv_div = el.find('div', class_='table-csv')
+        json_div = el.find('div', class_='table-json')
+
+        csv_content = csv_div.text if csv_div else None
+        json_content = json_div.text if json_div else None
+
+        # Remove CSV and JSON divs from the table element before normal processing
+        if csv_div:
+            csv_div.extract()
+        if json_div:
+            json_div.extract()
+
+        # Process the table normally
         total_rows = len(el.find_all('tr'))
         colspans = []
         rowspan_cols = defaultdict(int)
@@ -169,7 +258,16 @@ class Markdownify(MarkdownConverter):
             add_header_line()
 
         table_md = '\n'.join(markdown_lines)
-        return "\n\n" + table_md + "\n\n"
+        result = "\n\n" + table_md + "\n\n"
+
+        # Add CSV and JSON data as HTML comments
+        if csv_content:
+            result += f"<!-- TABLE_CSV:\n{csv_content}\n-->\n\n"
+
+        if json_content:
+            result += f"<!-- TABLE_JSON:\n{json_content}\n-->\n\n"
+
+        return result
 
     def convert_a(self, el, text, convert_as_inline):
         text = self.escape(text)
@@ -182,6 +280,20 @@ class Markdownify(MarkdownConverter):
             return f'<span id="{el["id"]}">{text}</span>'
         else:
             return text
+
+    def convert_code(self, el, text, convert_as_inline):
+        """Convert code blocks with language attribute."""
+        language = ""
+        if el.has_attr('class'):
+            for cls in el['class']:
+                if cls.startswith('language-'):
+                    language = cls[9:]  # Extract language from class
+                    break
+
+        if language:
+            return f"`{text}`" if convert_as_inline else f"```{language}\n{text}\n```"
+        else:
+            return super().convert_code(el, text, convert_as_inline)
 
     def escape(self, text):
         text = super().escape(text)
@@ -199,10 +311,11 @@ class MarkdownRenderer(HTMLRenderer):
     page_separator: Annotated[str, "The separator to use between pages.", "Default is '-' * 48."] = "-" * 48
     inline_math_delimiters: Annotated[Tuple[str], "The delimiters to use for inline math."] = ("$", "$")
     block_math_delimiters: Annotated[Tuple[str], "The delimiters to use for block math."] = ("$$", "$$")
+    include_breadcrumbs: Annotated[bool, "Whether to include section breadcrumbs in the output."] = True
 
     @property
     def md_cls(self):
-        return Markdownify(
+        md = Markdownify(
             self.paginate_output,
             self.page_separator,
             heading_style="ATX",
@@ -216,6 +329,8 @@ class MarkdownRenderer(HTMLRenderer):
             inline_math_delimiters=self.inline_math_delimiters,
             block_math_delimiters=self.block_math_delimiters
         )
+        md.include_breadcrumbs = self.include_breadcrumbs
+        return md
 
 
     def __call__(self, document: Document) -> MarkdownOutput:

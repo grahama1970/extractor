@@ -1,0 +1,284 @@
+{
+  "file_metadata": {
+    "filepath": "test_document.pdf",
+    "file_size": 0,
+    "file_hash": "",
+    "creation_date": null,
+    "modification_date": null,
+    "mime_type": "application/pdf"
+  },
+  "processing_metadata": {
+    "extraction_date": "2025-05-17 19:07:31.207575",
+    "extraction_duration": 0.0,
+    "processor_version": "1.0.0",
+    "ocr_engine": null,
+    "quality_metrics": {},
+    "errors_encountered": [],
+    "processing_config": {}
+  },
+  "document_metadata": {
+    "title": null,
+    "author": null,
+    "subject": null,
+    "keywords": [],
+    "language": "en",
+    "page_count": 1,
+    "document_summary": null,
+    "total_sections": 3,
+    "total_words": 0,
+    "total_images": 1,
+    "total_tables": 1,
+    "estimated_reading_time": 1
+  },
+  "table_of_contents": [
+    {
+      "id": "section_0_1",
+      "title": "1. Introduction",
+      "section_number": "1",
+      "depth_level": 0,
+      "page_number": 0,
+      "has_subsections": true,
+      "hierarchy": [
+        "1. Introduction"
+      ],
+      "section_hash": "6e62ee82e3df2a7d",
+      "subsections": [
+        {
+          "id": "section_0_5",
+          "title": "1.1 Background",
+          "section_number": "1.1",
+          "depth_level": 1,
+          "page_number": 0,
+          "has_subsections": false,
+          "hierarchy": [
+            "1. Introduction",
+            "1.1 Background"
+          ],
+          "section_hash": "f12902b591010af4"
+        }
+      ]
+    },
+    {
+      "id": "section_0_9",
+      "title": "2. Methods",
+      "section_number": "2",
+      "depth_level": 0,
+      "page_number": 0,
+      "has_subsections": false,
+      "hierarchy": [
+        "2. Methods"
+      ],
+      "section_hash": "5c5a0cd20bce9dda"
+    }
+  ],
+  "sections": [
+    {
+      "id": "section_0_1",
+      "section_hash": "6e62ee82e3df2a7d",
+      "header": {
+        "text": "1. Introduction",
+        "page_id": 0,
+        "heading_level": 1,
+        "bbox": [
+          50.0,
+          50.0,
+          500.0,
+          70.0
+        ]
+      },
+      "metadata": {
+        "summary": "Introduction section demonstrating mixed content types including text and images.",
+        "section_number": "1",
+        "depth_level": 0,
+        "hierarchy_titles": [
+          "1. Introduction"
+        ],
+        "hierarchy_hashes": [
+          "6e62ee82e3df2a7d"
+        ],
+        "word_count": 0,
+        "content_types": {
+          "has_images": true,
+          "has_tables": false,
+          "has_equations": false,
+          "has_code": false
+        },
+        "counts": {
+          "text_blocks": 2,
+          "images": 1,
+          "tables": 0
+        }
+      },
+      "content_blocks": [
+        {
+          "id": "/page/0/Text/2",
+          "type": "Text",
+          "page_id": 0,
+          "bbox": [
+            50.0,
+            80.0,
+            500.0,
+            100.0
+          ],
+          "html": "This document demonstrates the hierarchical structure with mixed content types."
+        },
+        {
+          "id": "/page/0/Picture/3",
+          "type": "Picture",
+          "page_id": 0,
+          "bbox": [
+            50.0,
+            110.0,
+            300.0,
+            250.0
+          ]
+        },
+        {
+          "id": "/page/0/Text/4",
+          "type": "Text",
+          "page_id": 0,
+          "bbox": [
+            50.0,
+            260.0,
+            500.0,
+            280.0
+          ],
+          "html": "The image above shows the system architecture."
+        }
+      ],
+      "subsections": [
+        {
+          "id": "section_0_5",
+          "section_hash": "f12902b591010af4",
+          "header": {
+            "text": "1.1 Background",
+            "page_id": 0,
+            "heading_level": 2,
+            "bbox": [
+              50.0,
+              300.0,
+              500.0,
+              320.0
+            ]
+          },
+          "metadata": {
+            "summary": "Background subsection containing text and tabular data showing growth trends.",
+            "section_number": "1.1",
+            "depth_level": 1,
+            "hierarchy_titles": [
+              "1. Introduction",
+              "1.1 Background"
+            ],
+            "hierarchy_hashes": [
+              "6e62ee82e3df2a7d",
+              "f12902b591010af4"
+            ],
+            "word_count": 0,
+            "content_types": {
+              "has_images": false,
+              "has_tables": true,
+              "has_equations": false,
+              "has_code": false
+            },
+            "counts": {
+              "text_blocks": 2,
+              "images": 0,
+              "tables": 1
+            }
+          },
+          "content_blocks": [
+            {
+              "id": "/page/0/Text/6",
+              "type": "Text",
+              "page_id": 0,
+              "bbox": [
+                50.0,
+                330.0,
+                500.0,
+                350.0
+              ],
+              "html": "This subsection provides background information about the topic."
+            },
+            {
+              "id": "/page/0/Table/7",
+              "type": "Table",
+              "page_id": 0,
+              "bbox": [
+                50.0,
+                360.0,
+                500.0,
+                450.0
+              ]
+            },
+            {
+              "id": "/page/0/Text/8",
+              "type": "Text",
+              "page_id": 0,
+              "bbox": [
+                50.0,
+                460.0,
+                500.0,
+                480.0
+              ],
+              "html": "The table shows steady growth over the years."
+            }
+          ],
+          "subsections": []
+        }
+      ]
+    },
+    {
+      "id": "section_0_9",
+      "section_hash": "5c5a0cd20bce9dda",
+      "header": {
+        "text": "2. Methods",
+        "page_id": 0,
+        "heading_level": 1,
+        "bbox": [
+          50.0,
+          500.0,
+          500.0,
+          520.0
+        ]
+      },
+      "metadata": {
+        "summary": "Methods section describing the research methodology.",
+        "section_number": "2",
+        "depth_level": 0,
+        "hierarchy_titles": [
+          "2. Methods"
+        ],
+        "hierarchy_hashes": [
+          "5c5a0cd20bce9dda"
+        ],
+        "word_count": 0,
+        "content_types": {
+          "has_images": false,
+          "has_tables": false,
+          "has_equations": false,
+          "has_code": false
+        },
+        "counts": {
+          "text_blocks": 1,
+          "images": 0,
+          "tables": 0
+        }
+      },
+      "content_blocks": [
+        {
+          "id": "/page/0/Text/10",
+          "type": "Text",
+          "page_id": 0,
+          "bbox": [
+            50.0,
+            530.0,
+            500.0,
+            550.0
+          ],
+          "html": "This section describes the methodology used in our research."
+        }
+      ],
+      "subsections": []
+    }
+  ]
+}

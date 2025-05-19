@@ -1,0 +1,65 @@
+[
+  {
+    "index": 0,
+    "page": null,
+    "language": "python",
+    "code": "Parameters\n----------\nfilename : str\ncopy : bool\ndtype : data-type\niterable : iterable object\nshape : int or tuple of int\nfiles : list of str",
+    "block_id": "/page/6/Code/5",
+    "page_id": "6",
+    "block_type": "Code"
+  },
+  {
+    "index": 1,
+    "page": null,
+    "language": "python",
+    "code": "def func(inputs: Union[str, List[str]],\n         enabled: Dict[str, bool]) -> Iterable[str]:\n    ...",
+    "block_id": "/page/7/Code/3",
+    "page_id": "7",
+    "block_type": "Code"
+  },
+  {
+    "index": 2,
+    "page": null,
+    "language": "python",
+    "code": "def doit(inputs, enabled):\n    # (Union[str, List[str]], Dict[str, bool]) -> Iterable[str]\n    \"Do something with those inputs\"\n    ...",
+    "block_id": "/page/8/Code/7",
+    "page_id": "8",
+    "block_type": "Code"
+  },
+  {
+    "index": 3,
+    "page": null,
+    "language": "python",
+    "code": "def doit(inputs, # type: Union[str, List[str]]\n        enabled # type: Dict[str, bool]\n        ):\n   # type: (...) -> Iterable[str]\n   \"Do something with those inputs\"\n   ...",
+    "block_id": "/page/8/Code/10",
+    "page_id": "8",
+    "block_type": "Code"
+  },
+  {
+    "index": 4,
+    "page": null,
+    "language": "python",
+    "code": "def doit(inputs, enabled):\n    \"\"\"Do something with those inputs\n    :param inputs: input names\n    :type inputs: Union[str, List[str]]\n    :param enabled: mapping of input names to enabled status\n    :type enabled: Dict[str, bool]\n    :rtype: Iterable[str]\n    \"\"\"\n    ...",
+    "block_id": "/page/9/Code/5",
+    "page_id": "9",
+    "block_type": "Code"
+  },
+  {
+    "index": 5,
+    "page": null,
+    "language": "python",
+    "code": "def doit(inputs, enabled):\n    \"\"\"Do something with those inputs\n    Args:\n        inputs (Union[str, List[str]]): input names\n        enabled (Dict[str, bool]): mapping of input names to\n            enabled status\n    Returns:\n        Iterable[str]: enabled inputs\n    \"\"\"\n    ...",
+    "block_id": "/page/9/Code/8",
+    "page_id": "9",
+    "block_type": "Code"
+  },
+  {
+    "index": 6,
+    "page": null,
+    "language": "python",
+    "code": "def doit(inputs, enabled):\n    \"\"\"Do something with those inputs\n    Parameters\n    ----------\n    inputs : Union[str, List[str]]\n        input names\n    enabled: Dict[str, bool]\n        mapping of input names to enabled status\n    Returns\n    -------\n    Iterable[str]\n        enabled inputs\n    \"\"\"\n    ...",
+    "block_id": "/page/9/Code/11",
+    "page_id": "9",
+    "block_type": "Code"
+  }
+]

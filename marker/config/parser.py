@@ -1,10 +1,11 @@
 import json
 import os
-from typing import Dict
+from typing import Dict, Any, Optional
 
 import click
 
 from marker.config.crawler import crawler
+from marker.config.table_parser import parse_table_config, table_options
 from marker.converters.pdf import PdfConverter
 from marker.renderers.html import HTMLRenderer
 from marker.renderers.json import JSONRenderer
@@ -41,10 +42,17 @@ class ConfigParser:
         # we put common options here
         fn = click.option("--use_llm", default=False, help="Enable higher quality processing with LLMs.")(fn)
         fn = click.option("--converter_cls", type=str, default=None, help="Converter class to use.  Defaults to PDF converter.")(fn)
-        fn = click.option("--llm_service", type=str, default=None, help="LLM service to use - should be full import path, like marker.services.gemini.GoogleGeminiService")(fn)
+        fn = click.option("--llm_service", type=str, default=None, help="LLM service to use - should be full import path, like marker.services.litellm.LiteLLMService")(fn)
 
         # enum options
         fn = click.option("--force_layout_block", type=click.Choice(choices=[t.name for t in BlockTypes]), default=None,)(fn)
+        
+        # Add summarization option
+        fn = click.option("--add_summaries", is_flag=True, default=False, help="Add LLM-generated summaries to sections and document.")(fn)
+        
+        # Add table-specific options
+        fn = table_options(fn)
+        
         return fn
 
     def generate_config_dict(self) -> Dict[str, any]:
@@ -78,6 +86,10 @@ class ConfigParser:
         # Backward compatibility for google_api_key
         if settings.GOOGLE_API_KEY:
             config["gemini_api_key"] = settings.GOOGLE_API_KEY
+            
+        # Parse table-specific configuration
+        table_config = parse_table_config(self.cli_options)
+        config["table"] = table_config
 
         return config
 
@@ -88,7 +100,7 @@ class ConfigParser:
 
         service_cls = self.cli_options.get("llm_service", None)
         if service_cls is None:
-            service_cls = "marker.services.gemini.GoogleGeminiService"
+            service_cls = "marker.services.litellm.LiteLLMService"
         return service_cls
 
     def get_renderer(self):
@@ -113,8 +125,16 @@ class ConfigParser:
                 except Exception as e:
                     print(f"Error loading processor: {p} with error: {e}")
                     raise
-
-        return processors
+            return processors
+        
+        # If no custom processors specified, return None to use the default ones
+        # but indicate if we need to add the summarizer
+        if self.cli_options.get("add_summaries", False):
+            # We'll need to append the summarizer to the default processors
+            # by using a special marker that the PdfConverter can check
+            return "default+marker.processors.simple_summarizer.SimpleSectionSummarizer"
+        
+        return None
 
     def get_converter_cls(self):
         converter_cls = self.cli_options.get("converter_cls", None)

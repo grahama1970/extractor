@@ -1,7 +1,7 @@
 import inspect
 import os
 from importlib import import_module
-from typing import List, Annotated
+from typing import List, Annotated, Optional
 
 import numpy as np
 import requests
@@ -34,8 +34,15 @@ def verify_config_keys(obj):
     none_vals = ""
     for attr_name, annotation in annotations.items():
         if isinstance(annotation, type(Annotated[str, ""])):
+            # Check if it's an Optional field
+            is_optional = False
+            if hasattr(annotation, "__origin__") and annotation.__origin__ is Optional:
+                is_optional = True
+
             value = getattr(obj, attr_name)
-            if value is None:
+            # Only add to none_vals if the value is None (not if it's an empty string)
+            # and the field is not Optional
+            if value is None and not is_optional:
                 none_vals += f"{attr_name}, "
 
     assert len(none_vals) == 0, f"In order to use {obj.__class__.__name__}, you must set the configuration values `{none_vals}`."

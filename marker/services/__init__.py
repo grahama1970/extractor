@@ -33,3 +33,6 @@ class BaseService:
         timeout: int | None = None
      ):
         raise NotImplementedError
+
+# Import services for module-level access
+from marker.services.litellm import LiteLLMService
