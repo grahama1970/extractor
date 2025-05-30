@@ -51,7 +51,7 @@ dependencies = [
     "claude-test-reporter @ git+https://github.com/grahama1970/claude-test-reporter.git@main",
 ]"
 
-[project.optional-dependencies]
+[project.optional-dependencies]"
 full = [
     "mammoth>=1.9.0,<2",
     "openpyxl>=3.1.5,<4",
@@ -89,24 +89,24 @@ dev = [
     "playwright>=1.49.1,<2",
 ]"
 
-[tool.hatch.build]
+[tool.hatch.build]"
 sources = ["src"]"
 
-[tool.hatch.build.targets.sdist]
+[tool.hatch.build.targets.sdist]"
 include = [
     "src/marker",
     "src/marker/core/scripts/*.sh",
     "src/marker/core/scripts/*.html",
 ]"
 
-[tool.hatch.build.targets.wheel]
+[tool.hatch.build.targets.wheel]"
 packages = ["src/marker"]"
 include = [
     "src/marker/core/scripts/*.sh",
     "src/marker/core/scripts/*.html",
 ]"
 
-[build-system]
+[build-system]"
 requires = ["hatchling"]"
 build-backend = "hatchling.build"
 
