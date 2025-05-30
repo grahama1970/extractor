@@ -600,6 +600,11 @@ wheels = [
 ]
 
 [[package]]
+name = "claude-test-reporter"
+version = "0.2.1"
+source = { git = "https://github.com/grahama1970/claude-test-reporter.git?rev=main#421428356b8d52f16581d45eaf62f4c8676369ed" }
+
+[[package]]
 name = "click"
 version = "8.2.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1904,6 +1909,7 @@ dependencies = [
     { name = "anthropic" },
     { name = "asyncio" },
     { name = "camelot-py" },
+    { name = "claude-test-reporter" },
     { name = "click" },
     { name = "cv2-tools" },
     { name = "filetype" },
@@ -1967,6 +1973,7 @@ requires-dist = [
     { name = "anthropic", specifier = ">=0.46.0,<0.47" },
     { name = "asyncio", specifier = ">=3.4.3,<4" },
     { name = "camelot-py", specifier = ">=0.11.0,<0.12" },
+    { name = "claude-test-reporter", git = "https://github.com/grahama1970/claude-test-reporter.git?rev=main" },
     { name = "click", specifier = ">=8.1.7,<9" },
     { name = "cv2-tools" },
     { name = "ebooklib", marker = "extra == 'full'", specifier = ">=0.18,<0.19" },
