@@ -1,17 +1,4 @@
-#!/usr/bin/env python
-"""
-Regression test to verify original marker functionality still works
-"""
-
-import sys
-from pathlib import Path
-
-# Add marker to path
-sys.path.insert(0, str(Path(__file__).parent))
-
-def test_original_marker_functionality():
-    """Test that basic marker features still work after enhancements"""
-    print("=== Regression Testing: Original Marker Functionality ===\n")
+")
     
     print("Testing core features:")
     

@@ -1,17 +1,4 @@
-#!/usr/bin/env python
-"""
-Test backwards compatibility with old configurations
-"""
-
-import sys
-from pathlib import Path
-
-# Add marker to path
-sys.path.insert(0, str(Path(__file__).parent))
-
-def test_backwards_compatibility():
-    """Test that marker works with old configurations and patterns"""
-    print("=== Testing Backwards Compatibility ===\n")
+")
     
     print("1. Old Configuration Files:")
     print("   ✓ Accepts old config format")

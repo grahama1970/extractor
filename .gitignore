@@ -17,6 +17,8 @@ conversion_results
 uploads
 /cache
 
+vertex_ai_service_account.json
+
 # My Marker Fork ignores
 repos
 
@@ -72,6 +74,10 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 cover/
+
+archive
+repos
+examples
 
 # Translations
 *.mo

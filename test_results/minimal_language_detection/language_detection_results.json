@@ -1,0 +1,57 @@
+{
+  "total_samples": 6,
+  "successful_extractions": 6,
+  "success_rate": 1.0,
+  "total_functions": 10,
+  "total_classes": 5,
+  "results": [
+    {
+      "language": "python",
+      "success": true,
+      "functions_found": 3,
+      "classes_found": 1,
+      "error": null,
+      "code_preview": "\\ndef factorial(n):\\n    \"\"\"Calculate factorial of n\"\"\"\\n    if n <= 1:\\n        return 1\\n    return n *..."
+    },
+    {
+      "language": "javascript",
+      "success": true,
+      "functions_found": 1,
+      "classes_found": 0,
+      "error": null,
+      "code_preview": "\\nfunction fetchData(url) {\\n    return fetch(url)\\n        .then(response => response.json())\\n        ..."
+    },
+    {
+      "language": "java",
+      "success": true,
+      "functions_found": 2,
+      "classes_found": 2,
+      "error": null,
+      "code_preview": "\\npublic class Main {\\n    public static void main(String[] args) {\\n        System.out.println(\"Hello,..."
+    },
+    {
+      "language": "cpp",
+      "success": true,
+      "functions_found": 1,
+      "classes_found": 1,
+      "error": null,
+      "code_preview": "\\n#include <iostream>\\n#include <vector>\\n\\nusing namespace std;\\n\\nclass Shape {\\npublic:\\n    virtual doub..."
+    },
+    {
+      "language": "ruby",
+      "success": true,
+      "functions_found": 1,
+      "classes_found": 1,
+      "error": null,
+      "code_preview": "\\nclass Person\\n  attr_accessor :name, :age\\n  \\n  def initialize(name, age)\\n    @name = name\\n    @age =..."
+    },
+    {
+      "language": "go",
+      "success": true,
+      "functions_found": 2,
+      "classes_found": 0,
+      "error": null,
+      "code_preview": "\\npackage main\\n\\nimport (\\n    \"fmt\"\\n    \"strings\"\\n)\\n\\ntype Person struct {\\n    Name string\\n    Age  int..."
+    }
+  ]
+}

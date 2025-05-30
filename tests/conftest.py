@@ -1,4 +1,4 @@
-from marker.providers.pdf import PdfProvider
+from marker.core.providers.pdf import PdfProvider
 import tempfile
 from typing import Dict, Type
 
@@ -7,20 +7,20 @@ from PIL import Image, ImageDraw
 import datasets
 import pytest
 
-from marker.builders.document import DocumentBuilder
-from marker.builders.layout import LayoutBuilder
-from marker.builders.line import LineBuilder
-from marker.builders.ocr import OcrBuilder
-from marker.converters.pdf import PdfConverter
-from marker.models import create_model_dict
-from marker.providers.registry import provider_from_filepath
-from marker.schema import BlockTypes
-from marker.schema.blocks import Block
-from marker.renderers.markdown import MarkdownRenderer
-from marker.renderers.json import JSONRenderer
-from marker.schema.registry import register_block_class
-from marker.services.gemini import GoogleGeminiService
-from marker.util import classes_to_strings, strings_to_classes
+from marker.core.builders.document import DocumentBuilder
+from marker.core.builders.layout import LayoutBuilder
+from marker.core.builders.line import LineBuilder
+from marker.core.builders.ocr import OcrBuilder
+from marker.core.converters.pdf import PdfConverter
+from marker.core.models import create_model_dict
+from marker.core.providers.registry import provider_from_filepath
+from marker.core.schema import BlockTypes
+from marker.core.schema.blocks import Block
+from marker.core.renderers.markdown import MarkdownRenderer
+from marker.core.renderers.json import JSONRenderer
+from marker.core.schema.registry import register_block_class
+from marker.core.services.gemini import GoogleGeminiService
+from marker.core.util import classes_to_strings, strings_to_classes
 
 
 @pytest.fixture(scope="session")

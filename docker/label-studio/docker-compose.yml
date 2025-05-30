@@ -1,0 +1,103 @@
+version: '3.8'
+
+services:
+  label-studio:
+    image: heartexlabs/label-studio:latest
+    container_name: marker-label-studio
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    depends_on:
+      - postgres
+    environment:
+      - DJANGO_DB=postgres
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - POSTGRES_DB=${POSTGRES_DB:-labelstudio}
+      - LABEL_STUDIO_HOST=${LABEL_STUDIO_HOST:-http://localhost:8080}
+      - LABEL_STUDIO_USERNAME=${LABEL_STUDIO_USERNAME:-admin@example.com}
+      - LABEL_STUDIO_PASSWORD=${LABEL_STUDIO_PASSWORD:-admin}
+      - LABEL_STUDIO_DISABLE_SIGNUP_WITHOUT_LINK=${LABEL_STUDIO_DISABLE_SIGNUP_WITHOUT_LINK:-true}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      # Performance configuration
+      - LABEL_STUDIO_WORKERS=${LABEL_STUDIO_WORKERS:-4}
+      - LABEL_STUDIO_THREADS_PER_WORKER=${LABEL_STUDIO_THREADS_PER_WORKER:-8}
+      # Optional Redis configuration
+      - REDIS_LOCATION=${REDIS_LOCATION:-redis://redis:6379/1}
+      # Add this for storage persistence
+      - LABEL_STUDIO_BASE_DATA_DIR=/label-studio/data
+    volumes:
+      - label-studio-data:/label-studio/data
+    networks:
+      - label-studio-network
+
+  postgres:
+    image: postgres:13
+    container_name: marker-label-studio-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - POSTGRES_DB=${POSTGRES_DB:-labelstudio}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - label-studio-network
+
+  # Optional Redis for caching and background tasks
+  redis:
+    image: redis:7
+    container_name: marker-label-studio-redis
+    restart: unless-stopped
+    volumes:
+      - redisdata:/data
+    networks:
+      - label-studio-network
+
+  # ML backend for OCR pre-annotation
+  ocr-ml-backend:
+    image: python:3.10-slim
+    container_name: marker-ocr-ml-backend
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - MARKER_MODEL_PATH=${MARKER_MODEL_PATH:-/models}
+      - CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
+      # Customize OCR behavior
+      - OCR_BATCH_SIZE=${OCR_BATCH_SIZE:-8}
+      - OCR_CONFIDENCE_THRESHOLD=${OCR_CONFIDENCE_THRESHOLD:-0.5}
+    volumes:
+      - ../..:/workspace # Mount marker repo
+      - ./ml-backend/:/app # Mount ML backend code
+      - ./models:/models # Mount fine-tuned models
+    command: >
+      bash -c "
+        cd /app &&
+        pip install -r requirements.txt &&
+        cd /workspace &&
+        pip install -e . &&
+        cd /app &&
+        python server.py --port 9090
+      "
+    networks:
+      - label-studio-network
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+volumes:
+  pgdata:
+  redisdata:
+  label-studio-data:
+
+networks:
+  label-studio-network:
+    driver: bridge

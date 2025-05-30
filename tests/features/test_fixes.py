@@ -1,33 +1,4 @@
-#!/usr/bin/env python
-"""
-Test script to verify the fixes for:
-1. Async image processing with Vertex AI Gemini 2.0 Flash
-2. API timeout issues
-3. Table merging error
-"""
-
-import asyncio
-import os
-import sys
-from pathlib import Path
-
-# Set environment variable for Vertex AI authentication
-os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(Path.home() / "workspace/experiments/marker/vertex_ai_service_account.json")
-
-# Add marker to path
-sys.path.insert(0, str(Path(__file__).parent))
-
-from marker.services.litellm import LiteLLMService
-from marker.schema.document import Document
-from marker.schema.blocks import Block
-# Skip async processor test - has import issues
-# from marker.processors.llm.llm_image_description_async import LLMImageDescriptionAsyncProcessor
-from marker.utils.table_merger import TableMerger
-from marker.schema import BlockTypes
-
-def test_litellm_vertex_ai():
-    """Test LiteLLM service with Vertex AI Gemini 2.0 Flash"""
-    print("\n=== Testing LiteLLM with Vertex AI Gemini 2.0 Flash ===")
+=== Testing LiteLLM with Vertex AI Gemini 2.0 Flash ===")
     
     try:
         service = LiteLLMService()
@@ -90,21 +61,28 @@ def test_table_merging():
         print(f"❌ Table merging test failed: {e}")
 
 def main():
-    """Run all tests"""
+    """Run all sync tests"""
     print("Testing Marker Changelog Feature Fixes")
     print("=" * 40)
     
     # Test LiteLLM configuration
     test_litellm_vertex_ai()
     
-    # Test async image processing
-    asyncio.run(test_async_image_processing())
-    
     # Test table merging
     test_table_merging()
     
     print("\n" + "=" * 40)
-    print("All tests completed!")
+    print("Sync tests completed!")
+
+async def main_async():
+    """Run all async tests"""
+    print("\nTesting async image processing...")
+    await test_async_image_processing()
+    print("Async tests completed!")
 
 if __name__ == "__main__":
+    # Run sync tests first
     main()
+    
+    # Then run async tests
+    asyncio.run(main_async())

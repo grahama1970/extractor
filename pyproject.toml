@@ -46,6 +46,9 @@ dependencies = [
     "tree-sitter-language-pack>=0.7.3",
     "numpy>=1.24.0,<2",
     "loguru>=0.7.0,<0.8",
+    # "claude-comms @ {editable=true, path='./comms'}",
+    "ghostscript>=0.7",
+    "claude-test-reporter @ git+https://github.com/grahama1970/claude-test-reporter.git@main",
 ]
 
 [project.optional-dependencies]
@@ -62,7 +65,7 @@ Repository = "https://github.com/grahama1970/marker"
 Forked-From = "https://github.com/VikParuchuri/marker"
 
 [project.scripts]
-marker = "marker.scripts.convert:convert_cli"
+marker-cli = "marker.cli.main:app"
 marker_single = "marker.scripts.convert_single:convert_single_cli"
 marker_chunk_convert = "marker.scripts.chunk_convert:chunk_convert_cli"
 marker_gui = "marker.scripts.run_streamlit_app:streamlit_app_cli"
@@ -86,18 +89,21 @@ dev = [
     "playwright>=1.49.1,<2",
 ]
 
+[tool.hatch.build]
+sources = ["src"]
+
 [tool.hatch.build.targets.sdist]
 include = [
-    "marker",
-    "marker/scripts/*.sh",
-    "marker/scripts/*.html",
+    "src/marker",
+    "src/marker/core/scripts/*.sh",
+    "src/marker/core/scripts/*.html",
 ]
 
 [tool.hatch.build.targets.wheel]
+packages = ["src/marker"]
 include = [
-    "marker",
-    "marker/scripts/*.sh",
-    "marker/scripts/*.html",
+    "src/marker/core/scripts/*.sh",
+    "src/marker/core/scripts/*.html",
 ]
 
 [build-system]

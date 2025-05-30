@@ -1,0 +1,78 @@
+{
+  "document": {
+    "id": "Arango_AQL_Example_e4036fdf",
+    "pages": [
+      {
+        "blocks": [
+          {
+            "type": "image",
+            "text": "(https://www.arangodb.com/)",
+            "level": null,
+            "language": null,
+            "csv": null,
+            "json_data": null,
+            "breadcrumbs": null
+          },
+          {
+            "type": "text",
+            "text": "3.12",
+            "level": null,
+            "language": null,
+            "csv": null,
+            "json_data": null,
+            "breadcrumbs": null
+          },
+          {
+            "type": "pageheader",
+            "text": "3.12.4 /stable/)  AQL /stable/aql/)  Fundamentals (/stable/aql/fundamentals/)  Subqueries (/stable/aql/fundamentals/subq",
+            "level": null,
+            "language": null,
+            "csv": null,
+            "json_data": null,
+            "breadcrumbs": null
+          },
+          {
+            "type": "pagefooter",
+            "text": "Ask AI",
+            "level": null,
+            "language": null,
+            "csv": null,
+            "json_data": null,
+            "breadcrumbs": null
+          }
+        ]
+      }
+    ]
+  },
+  "metadata": {
+    "title": "Arango_AQL_Example",
+    "filepath": "data/input/Arango_AQL_Example.pdf",
+    "page_count": 1,
+    "author": null,
+    "creation_date": null,
+    "modification_date": null,
+    "language": "en",
+    "subject": null,
+    "keywords": [],
+    "producer": null,
+    "creator": null
+  },
+  "validation": {
+    "corpus_validation": {
+      "performed": false,
+      "threshold": null,
+      "raw_corpus_length": null
+    }
+  },
+  "raw_corpus": {
+    "full_text": "(https://www.arangodb.com/)\n\n3.12\n\n3.12\n\n3.12\n\n(https://www.arangodb.com/)\n\n(https://www.arangodb.com/)\n\n3.12.4 /stable/)  AQL /stable/aql/)  Fundamentals (/stable/aql/fundamentals/)  Subqueries (/stable/aql/fundamentals/subq\n\n3.12.4 /stable/)  AQL /stable/aql/)  Fundamentals (/stable/aql/fundamentals/)  Subqueries (/stable/aql/fundamentals/subq\n\n3.12.4\n\n/stable/)\n\nAQL\n\n/stable/aql/)\n\nFundamentals\n\n(/stable/aql/fundamentals/)\n\nSubqueries\n\n(/stable/aql/fundamentals/subq\n\nAsk AI\n\nAsk AI\n\nAsk\n\nAI",
+    "pages": [
+      {
+        "page_num": 0,
+        "text": "(https://www.arangodb.com/)\n\n3.12\n\n3.12\n\n3.12\n\n(https://www.arangodb.com/)\n\n(https://www.arangodb.com/)\n\n3.12.4 /stable/)  AQL /stable/aql/)  Fundamentals (/stable/aql/fundamentals/)  Subqueries (/stable/aql/fundamentals/subq\n\n3.12.4 /stable/)  AQL /stable/aql/)  Fundamentals (/stable/aql/fundamentals/)  Subqueries (/stable/aql/fundamentals/subq\n\n3.12.4\n\n/stable/)\n\nAQL\n\n/stable/aql/)\n\nFundamentals\n\n(/stable/aql/fundamentals/)\n\nSubqueries\n\n(/stable/aql/fundamentals/subq\n\nAsk AI\n\nAsk AI\n\nAsk\n\nAI",
+        "tables": []
+      }
+    ],
+    "total_pages": 1
+  }
+}

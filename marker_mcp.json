@@ -1,0 +1,31 @@
+{
+  "name": "marker",
+  "version": "1.0.0",
+  "description": "MCP server for marker",
+  "server": {
+    "command": "/home/graham/workspace/experiments/marker/.venv/bin/python",
+    "args": [
+      "scripts/cli/marker_cli_mcp.py",
+      "serve-mcp",
+      "--host",
+      "localhost",
+      "--port",
+      "5000"
+    ]
+  },
+  "tools": {
+    "version": {
+      "description": "Display version information for Marker.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    }
+  },
+  "capabilities": {
+    "tools": true,
+    "prompts": false,
+    "resources": false
+  }
+}

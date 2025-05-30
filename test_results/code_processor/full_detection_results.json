@@ -1,0 +1,49 @@
+{
+  "total_samples": 6,
+  "correct_detections": 5,
+  "match_rate": 0.8333333333333334,
+  "results": [
+    {
+      "sample": "python",
+      "detected_language": "python",
+      "metadata": null,
+      "match": true,
+      "code_preview": "\\ndef factorial(n):\\n    \"\"\"Calculate factorial of n\"\"\"\\n    if n <= 1:\\n        return 1\\n    return n *..."
+    },
+    {
+      "sample": "javascript",
+      "detected_language": "javascript",
+      "metadata": null,
+      "match": true,
+      "code_preview": "\\nfunction fetchData(url) {\\n    return fetch(url)\\n        .then(response => response.json())\\n        ..."
+    },
+    {
+      "sample": "java",
+      "detected_language": "java",
+      "metadata": null,
+      "match": true,
+      "code_preview": "\\npublic class Main {\\n    public static void main(String[] args) {\\n        System.out.println(\"Hello,..."
+    },
+    {
+      "sample": "cpp",
+      "detected_language": "typescript",
+      "metadata": null,
+      "match": false,
+      "code_preview": "\\n#include <iostream>\\n#include <vector>\\n\\nusing namespace std;\\n\\nclass Shape {\\npublic:\\n    virtual doub..."
+    },
+    {
+      "sample": "yaml",
+      "detected_language": "yaml",
+      "metadata": null,
+      "match": true,
+      "code_preview": "\\nversion: '3'\\nservices:\\n  app:\\n    image: my-app:latest\\n    ports:\\n      - \"8080:8080\"\\n    environme..."
+    },
+    {
+      "sample": "sql",
+      "detected_language": "sql",
+      "metadata": null,
+      "match": true,
+      "code_preview": "\\nSELECT \\n    customers.name, \\n    orders.order_id,\\n    products.name as product_name,\\n    products.p..."
+    }
+  ]
+}

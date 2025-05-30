@@ -1,0 +1,138 @@
+{
+  "total_tables": 9,
+  "merge_candidates": 4,
+  "analyses": [
+    {
+      "table1_id": "/page/11/Table/0",
+      "table2_id": "/page/11/Table/1",
+      "should_merge": true,
+      "confidence": 0.9,
+      "merge_type": "vertical_append",
+      "table_title": {
+        "found": false,
+        "text": null,
+        "source": "none",
+        "is_inferred": false,
+        "inference_context": null
+      },
+      "column_analysis": {
+        "table1_columns": 1,
+        "table2_columns": 1,
+        "columns_match": true
+      },
+      "content_analysis": {
+        "appears_continuous": false,
+        "extraction_methods": [
+          "surya",
+          "surya"
+        ]
+      },
+      "reasoning": "Heuristic analysis: Same column count, does not appear continuous",
+      "warnings": [],
+      "merge_instructions": {
+        "operation": "append_rows",
+        "preserve_headers": "from_table1",
+        "data_modification": "NONE"
+      }
+    },
+    {
+      "table1_id": "/page/21/Table/0",
+      "table2_id": "/page/21/Table/1",
+      "should_merge": true,
+      "confidence": 0.9,
+      "merge_type": "vertical_append",
+      "table_title": {
+        "found": false,
+        "text": null,
+        "source": "none",
+        "is_inferred": false,
+        "inference_context": null
+      },
+      "column_analysis": {
+        "table1_columns": 1,
+        "table2_columns": 1,
+        "columns_match": true
+      },
+      "content_analysis": {
+        "appears_continuous": false,
+        "extraction_methods": [
+          "surya",
+          "surya"
+        ]
+      },
+      "reasoning": "Heuristic analysis: Same column count, does not appear continuous",
+      "warnings": [],
+      "merge_instructions": {
+        "operation": "append_rows",
+        "preserve_headers": "from_table1",
+        "data_modification": "NONE"
+      }
+    },
+    {
+      "table1_id": "/page/21/Table/1",
+      "table2_id": "/page/21/Table/3",
+      "should_merge": true,
+      "confidence": 0.9,
+      "merge_type": "vertical_append",
+      "table_title": {
+        "found": false,
+        "text": null,
+        "source": "none",
+        "is_inferred": false,
+        "inference_context": null
+      },
+      "column_analysis": {
+        "table1_columns": 1,
+        "table2_columns": 1,
+        "columns_match": true
+      },
+      "content_analysis": {
+        "appears_continuous": false,
+        "extraction_methods": [
+          "surya",
+          "surya"
+        ]
+      },
+      "reasoning": "Heuristic analysis: Same column count, does not appear continuous",
+      "warnings": [],
+      "merge_instructions": {
+        "operation": "append_rows",
+        "preserve_headers": "from_table1",
+        "data_modification": "NONE"
+      }
+    },
+    {
+      "table1_id": "/page/20/Table/12",
+      "table2_id": "/page/21/Table/0",
+      "should_merge": true,
+      "confidence": 0.9,
+      "merge_type": "vertical_append",
+      "table_title": {
+        "found": false,
+        "text": null,
+        "source": "none",
+        "is_inferred": false,
+        "inference_context": null
+      },
+      "column_analysis": {
+        "table1_columns": 1,
+        "table2_columns": 1,
+        "columns_match": true
+      },
+      "content_analysis": {
+        "appears_continuous": false,
+        "extraction_methods": [
+          "surya",
+          "surya"
+        ]
+      },
+      "reasoning": "Heuristic analysis: Same column count, does not appear continuous",
+      "warnings": [],
+      "merge_instructions": {
+        "operation": "append_rows",
+        "preserve_headers": "from_table1",
+        "data_modification": "NONE"
+      }
+    }
+  ]
+}

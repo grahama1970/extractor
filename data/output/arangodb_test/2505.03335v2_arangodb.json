@@ -1,0 +1,345 @@
+{
+  "document": {
+    "id": "doc_f30e64164766",
+    "pages": [
+      {
+        "blocks": [
+          {
+            "type": "section_header",
+            "text": "Efficient Machine Learning for On-Device Document Intelligence",
+            "level": 1,
+            "id": "section_header_001"
+          },
+          {
+            "type": "text",
+            "text": "We present a novel approach to processing documents directly on edge devices using lightweight machine learning models.",
+            "id": "text_001"
+          },
+          {
+            "type": "section_header",
+            "text": "1. Introduction",
+            "level": 2,
+            "id": "section_header_002"
+          },
+          {
+            "type": "text",
+            "text": "Document processing has traditionally relied on server-side processing due to computational requirements. However, privacy concerns and latency requirements are driving the need for on-device solutions.",
+            "id": "text_002"
+          }
+        ]
+      },
+      {
+        "blocks": [
+          {
+            "type": "section_header",
+            "text": "2. Related Work",
+            "level": 2,
+            "id": "section_header_003"
+          },
+          {
+            "type": "text",
+            "text": "Previous approaches to document understanding have focused on cloud-based solutions...",
+            "id": "text_003"
+          },
+          {
+            "type": "code",
+            "text": "def process_document(doc):\n    # Extract features\n    features = extract_features(doc)\n    # Run inference\n    return model.predict(features)",
+            "language": "python",
+            "id": "code_001"
+          }
+        ]
+      },
+      {
+        "blocks": [
+          {
+            "type": "section_header",
+            "text": "3. Methodology",
+            "level": 2,
+            "id": "section_header_004"
+          },
+          {
+            "type": "text",
+            "text": "Our approach consists of three main components:",
+            "id": "text_004"
+          },
+          {
+            "type": "table",
+            "text": "Component | Description | Performance\nFeature Extractor | Lightweight CNN | 95ms\nClassifier | MobileNet | 120ms\nPost-processor | Rule-based | 15ms",
+            "csv": "Component,Description,Performance\nFeature Extractor,Lightweight CNN,95ms\nClassifier,MobileNet,120ms\nPost-processor,Rule-based,15ms",
+            "json_data": [
+              [
+                "Component",
+                "Description",
+                "Performance"
+              ],
+              [
+                "Feature Extractor",
+                "Lightweight CNN",
+                "95ms"
+              ],
+              [
+                "Classifier",
+                "MobileNet",
+                "120ms"
+              ],
+              [
+                "Post-processor",
+                "Rule-based",
+                "15ms"
+              ]
+            ],
+            "id": "table_001",
+            "metadata": {
+              "extraction_method": "surya",
+              "extraction_details": {
+                "model": "surya-table",
+                "confidence": 0.95
+              },
+              "quality_score": 95.0,
+              "quality_metrics": {
+                "structure_score": 0.95,
+                "content_score": 0.98
+              },
+              "merge_info": null
+            }
+          }
+        ]
+      },
+      {
+        "blocks": [
+          {
+            "type": "section_header",
+            "text": "4. Experimental Results",
+            "level": 2,
+            "id": "section_header_005"
+          },
+          {
+            "type": "text",
+            "text": "We evaluated our approach on three benchmark datasets:",
+            "id": "text_005"
+          },
+          {
+            "type": "list",
+            "text": "• DocVQA: 83.2% accuracy\n• FUNSD: 91.5% F1 score\n• CORD: 89.7% accuracy",
+            "id": "list_001"
+          }
+        ]
+      },
+      {
+        "blocks": [
+          {
+            "type": "table",
+            "text": "Dataset | Our Method | Baseline | Improvement\nDocVQA | 83.2% | 78.5% | +4.7%\nFUNSD | 91.5% | 87.3% | +4.2%\nCORD | 89.7% | 85.1% | +4.6%",
+            "csv": "Dataset,Our Method,Baseline,Improvement\nDocVQA,83.2%,78.5%,+4.7%\nFUNSD,91.5%,87.3%,+4.2%\nCORD,89.7%,85.1%,+4.6%",
+            "json_data": [
+              [
+                "Dataset",
+                "Our Method",
+                "Baseline",
+                "Improvement"
+              ],
+              [
+                "DocVQA",
+                "83.2%",
+                "78.5%",
+                "+4.7%"
+              ],
+              [
+                "FUNSD",
+                "91.5%",
+                "87.3%",
+                "+4.2%"
+              ],
+              [
+                "CORD",
+                "89.7%",
+                "85.1%",
+                "+4.6%"
+              ]
+            ],
+            "id": "table_002",
+            "metadata": {
+              "extraction_method": "camelot",
+              "extraction_details": {
+                "model": "camelot",
+                "method": "heuristic",
+                "flavor": "lattice",
+                "line_scale": 40,
+                "line_width": 3,
+                "shift_text": false,
+                "split_text": true,
+                "accuracy": 97
+              },
+              "quality_score": 98.0,
+              "quality_metrics": {
+                "structure_score": 0.98,
+                "content_score": 0.99,
+                "alignment_score": 0.97
+              },
+              "merge_info": {
+                "was_merged": true,
+                "merge_reason": "Adjacent tables with same structure",
+                "original_tables": [
+                  {
+                    "id": "table_002a",
+                    "rows": 2,
+                    "cols": 4
+                  },
+                  {
+                    "id": "table_002b",
+                    "rows": 2,
+                    "cols": 4
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "blocks": [
+          {
+            "type": "section_header",
+            "text": "5. Discussion",
+            "level": 2,
+            "id": "section_header_006"
+          },
+          {
+            "type": "text",
+            "text": "The results demonstrate that efficient on-device processing is feasible with carefully designed models.",
+            "id": "text_006"
+          },
+          {
+            "type": "code",
+            "text": "# Model architecture\nmodel = Sequential([\n    Conv2D(32, (3, 3), activation='relu'),\n    MaxPooling2D((2, 2)),\n    Conv2D(64, (3, 3), activation='relu'),\n    GlobalAveragePooling2D(),\n    Dense(128, activation='relu'),\n    Dense(num_classes, activation='softmax')\n])",
+            "language": "python",
+            "id": "code_002"
+          }
+        ]
+      },
+      {
+        "blocks": [
+          {
+            "type": "section_header",
+            "text": "6. Conclusion",
+            "level": 2,
+            "id": "section_header_007"
+          },
+          {
+            "type": "text",
+            "text": "We have presented an efficient approach for on-device document intelligence that achieves competitive accuracy while maintaining low latency.",
+            "id": "text_007"
+          }
+        ]
+      },
+      {
+        "blocks": [
+          {
+            "type": "section_header",
+            "text": "References",
+            "level": 2,
+            "id": "section_header_008"
+          },
+          {
+            "type": "reference",
+            "text": "[1] Smith et al., \"Document Understanding with Deep Learning\", CVPR 2024.",
+            "id": "ref_001"
+          },
+          {
+            "type": "reference",
+            "text": "[2] Johnson et al., \"Efficient Neural Networks for Mobile Devices\", NeurIPS 2023.",
+            "id": "ref_002"
+          }
+        ]
+      },
+      {
+        "blocks": [
+          {
+            "type": "section_header",
+            "text": "Appendix A: Implementation Details",
+            "level": 2,
+            "id": "section_header_009"
+          },
+          {
+            "type": "text",
+            "text": "Additional implementation details and hyperparameters used in our experiments.",
+            "id": "text_008"
+          }
+        ]
+      }
+    ]
+  },
+  "metadata": {
+    "title": "2505.03335v2",
+    "filepath": "/home/graham/workspace/experiments/marker/data/input/2505.03335v2.pdf",
+    "page_count": 9,
+    "processing_time": 23.45,
+    "author": null,
+    "creation_date": null,
+    "language": "en",
+    "keywords": [],
+    "document_summary": "A paper discussing efficient machine learning methods for on-device document intelligence."
+  },
+  "validation": {
+    "corpus_validation": {
+      "performed": true,
+      "threshold": 97,
+      "raw_corpus_length": 1973
+    }
+  },
+  "raw_corpus": {
+    "full_text": "Efficient Machine Learning for On-Device Document Intelligence We present a novel approach to processing documents directly on edge devices using lightweight machine learning models. 1. Introduction Document processing has traditionally relied on server-side processing due to computational requirements. However, privacy concerns and latency requirements are driving the need for on-device solutions.  2. Related Work Previous approaches to document understanding have focused on cloud-based solutions... def process_document(doc):\n    # Extract features\n    features = extract_features(doc)\n    # Run inference\n    return model.predict(features)  3. Methodology Our approach consists of three main components: Component | Description | Performance\nFeature Extractor | Lightweight CNN | 95ms\nClassifier | MobileNet | 120ms\nPost-processor | Rule-based | 15ms  4. Experimental Results We evaluated our approach on three benchmark datasets: • DocVQA: 83.2% accuracy\n• FUNSD: 91.5% F1 score\n• CORD: 89.7% accuracy  Dataset | Our Method | Baseline | Improvement\nDocVQA | 83.2% | 78.5% | +4.7%\nFUNSD | 91.5% | 87.3% | +4.2%\nCORD | 89.7% | 85.1% | +4.6%  5. Discussion The results demonstrate that efficient on-device processing is feasible with carefully designed models. # Model architecture\nmodel = Sequential([\n    Conv2D(32, (3, 3), activation='relu'),\n    MaxPooling2D((2, 2)),\n    Conv2D(64, (3, 3), activation='relu'),\n    GlobalAveragePooling2D(),\n    Dense(128, activation='relu'),\n    Dense(num_classes, activation='softmax')\n])  6. Conclusion We have presented an efficient approach for on-device document intelligence that achieves competitive accuracy while maintaining low latency.  References [1] Smith et al., \"Document Understanding with Deep Learning\", CVPR 2024. [2] Johnson et al., \"Efficient Neural Networks for Mobile Devices\", NeurIPS 2023.  Appendix A: Implementation Details Additional implementation details and hyperparameters used in our experiments.",
+    "pages": [
+      {
+        "page_num": 0,
+        "text": "Efficient Machine Learning for On-Device Document Intelligence We present a novel approach to processing documents directly on edge devices using lightweight machine learning models. 1. Introduction Document processing has traditionally relied on server-side processing due to computational requirements. However, privacy concerns and latency requirements are driving the need for on-device solutions.",
+        "tables": []
+      },
+      {
+        "page_num": 1,
+        "text": "2. Related Work Previous approaches to document understanding have focused on cloud-based solutions... def process_document(doc):\n    # Extract features\n    features = extract_features(doc)\n    # Run inference\n    return model.predict(features)",
+        "tables": []
+      },
+      {
+        "page_num": 2,
+        "text": "3. Methodology Our approach consists of three main components: Component | Description | Performance\nFeature Extractor | Lightweight CNN | 95ms\nClassifier | MobileNet | 120ms\nPost-processor | Rule-based | 15ms",
+        "tables": [
+          "table_001"
+        ]
+      },
+      {
+        "page_num": 3,
+        "text": "4. Experimental Results We evaluated our approach on three benchmark datasets: • DocVQA: 83.2% accuracy\n• FUNSD: 91.5% F1 score\n• CORD: 89.7% accuracy",
+        "tables": []
+      },
+      {
+        "page_num": 4,
+        "text": "Dataset | Our Method | Baseline | Improvement\nDocVQA | 83.2% | 78.5% | +4.7%\nFUNSD | 91.5% | 87.3% | +4.2%\nCORD | 89.7% | 85.1% | +4.6%",
+        "tables": [
+          "table_002"
+        ]
+      },
+      {
+        "page_num": 5,
+        "text": "5. Discussion The results demonstrate that efficient on-device processing is feasible with carefully designed models. # Model architecture\nmodel = Sequential([\n    Conv2D(32, (3, 3), activation='relu'),\n    MaxPooling2D((2, 2)),\n    Conv2D(64, (3, 3), activation='relu'),\n    GlobalAveragePooling2D(),\n    Dense(128, activation='relu'),\n    Dense(num_classes, activation='softmax')\n])",
+        "tables": []
+      },
+      {
+        "page_num": 6,
+        "text": "6. Conclusion We have presented an efficient approach for on-device document intelligence that achieves competitive accuracy while maintaining low latency.",
+        "tables": []
+      },
+      {
+        "page_num": 7,
+        "text": "References [1] Smith et al., \"Document Understanding with Deep Learning\", CVPR 2024. [2] Johnson et al., \"Efficient Neural Networks for Mobile Devices\", NeurIPS 2023.",
+        "tables": []
+      },
+      {
+        "page_num": 8,
+        "text": "Appendix A: Implementation Details Additional implementation details and hyperparameters used in our experiments.",
+        "tables": []
+      }
+    ],
+    "total_pages": 9
+  }
+}

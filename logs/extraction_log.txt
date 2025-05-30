@@ -1,0 +1,19 @@
+2025-05-25 08:20:08.469 | INFO     | marker.utils.embedding_utils:<module>:20 - Transformers library is available for embeddings
+Loading models...
+Loaded layout model s3://layout/2025_02_18 on device cuda with dtype torch.float16
+Loaded texify model s3://texify/2025_02_18 on device cuda with dtype torch.float16
+Loaded recognition model s3://text_recognition/2025_02_18 on device cuda with dtype torch.float16
+Loaded table recognition model s3://table_recognition/2025_02_18 on device cuda with dtype torch.float16
+Loaded detection model s3://text_detection/2025_02_28 on device cuda with dtype torch.float16
+Loaded detection model s3://inline_math_detection/2025_02_24 on device cuda with dtype torch.float16
+Setting up configuration...
+Traceback (most recent call last):
+  File "/home/graham/workspace/experiments/marker/test_real_extraction_v2.py", line 131, in <module>
+    main()
+  File "/home/graham/workspace/experiments/marker/test_real_extraction_v2.py", line 38, in main
+    converter = PdfConverter(
+  File "/home/graham/workspace/experiments/marker/marker/converters/pdf.py", line 129, in __init__
+    renderer = strings_to_classes([renderer])[0]
+  File "/home/graham/workspace/experiments/marker/marker/util.py", line 17, in strings_to_classes
+    module_name, class_name = item.rsplit('.', 1)
+ValueError: not enough values to unpack (expected 2, got 1)

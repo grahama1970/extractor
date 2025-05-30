@@ -1,0 +1,1 @@
+"""Tests for marker MCP server functionality."""

@@ -1,0 +1,11 @@
+include README.md
+include LICENSE
+include pyproject.toml
+recursive-include marker/llm_call *.py
+recursive-include examples *.py *.md
+recursive-include docs *.md
+recursive-exclude * __pycache__
+recursive-exclude * *.pyc
+recursive-exclude * *.pyo
+recursive-exclude * *.swp
+recursive-exclude * .DS_Store

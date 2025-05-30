@@ -1,0 +1,108 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "llm-validation-loop"
+version = "0.1.0"
+description = "A flexible validation loop system for LLM calls with retry and plugin support"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+authors = [
+    {name = "Marker Contributors", email = "marker@example.com"},
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+dependencies = [
+    "litellm>=1.0.0",
+    "pydantic>=2.0.0",
+    "loguru>=0.6.0",
+    "rapidfuzz>=3.0.0",
+    "redis>=4.0.0",
+    "typer>=0.9.0",
+    "rich>=13.0.0",
+    "beautifulsoup4>=4.12.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.20.0",
+    "black>=22.0.0",
+    "isort>=5.0.0",
+    "mypy>=1.0.0",
+]
+docs = [
+    "sphinx>=5.0.0",
+    "sphinx-rtd-theme>=1.0.0",
+    "sphinx-autodoc-typehints>=1.0.0",
+]
+
+[project.scripts]
+llm-validate = "marker.llm_call.cli.app:app"
+
+[project.urls]
+Homepage = "https://github.com/VikParuchuri/marker"
+Documentation = "https://github.com/VikParuchuri/marker/tree/main/marker/llm_call"
+Repository = "https://github.com/VikParuchuri/marker"
+"Bug Tracker" = "https://github.com/VikParuchuri/marker/issues"
+
+[tool.setuptools]
+packages = ["marker.llm_call"]
+
+[tool.setuptools.package-data]
+"marker.llm_call" = ["*.md", "*.txt"]
+
+[tool.black]
+line-length = 88
+target-version = ['py39', 'py310', 'py311', 'py312']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | _build
+  | buck-out
+  | build
+  | dist
+)/
+'''
+
+[tool.isort]
+profile = "black"
+multi_line_output = 3
+include_trailing_comma = true
+force_grid_wrap = 0
+use_parentheses = true
+ensure_newline_before_comments = true
+line_length = 88
+
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = "-ra -q"
+testpaths = [
+    "tests",
+]
+asyncio_mode = "auto"

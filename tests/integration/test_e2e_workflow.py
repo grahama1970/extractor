@@ -1,18 +1,4 @@
-#!/usr/bin/env python
-"""
-Test end-to-end workflow with all features enabled
-"""
-
-import sys
-import time
-from pathlib import Path
-
-# Add marker to path
-sys.path.insert(0, str(Path(__file__).parent))
-
-def test_end_to_end_workflow():
-    """Test processing a real PDF with all features enabled"""
-    print("=== Testing End-to-End Workflow ===\n")
+")
     
     # List all enhanced features
     features = [

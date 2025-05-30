@@ -1,0 +1,193 @@
+{
+  "document": {
+    "id": "Arango_AQL_Example_31d163b4",
+    "pages": [
+      {
+        "blocks": [
+          {
+            "type": "image",
+            "text": "(https://www.arangodb.com/)",
+            "level": null,
+            "language": null,
+            "csv": null,
+            "json_data": null
+          },
+          {
+            "type": "text",
+            "text": "3.12",
+            "level": null,
+            "language": null,
+            "csv": null,
+            "json_data": null
+          },
+          {
+            "type": "line",
+            "text": "3.12",
+            "level": null,
+            "language": null,
+            "csv": null,
+            "json_data": null
+          },
+          {
+            "type": "span",
+            "text": "3.12",
+            "level": null,
+            "language": null,
+            "csv": null,
+            "json_data": null
+          },
+          {
+            "type": "line",
+            "text": "(https://www.arangodb.com/)",
+            "level": null,
+            "language": null,
+            "csv": null,
+            "json_data": null
+          },
+          {
+            "type": "span",
+            "text": "(https://www.arangodb.com/)",
+            "level": null,
+            "language": null,
+            "csv": null,
+            "json_data": null
+          },
+          {
+            "type": "pageheader",
+            "text": "3.12.4 /stable/)  AQL /stable/aql/)  Fundamentals (/stable/aql/fundamentals/)  Subqueries (/stable/aql/fundamentals/subq",
+            "level": null,
+            "language": null,
+            "csv": null,
+            "json_data": null
+          },
+          {
+            "type": "line",
+            "text": "3.12.4 /stable/)  AQL /stable/aql/)  Fundamentals (/stable/aql/fundamentals/)  Subqueries (/stable/aql/fundamentals/subq",
+            "level": null,
+            "language": null,
+            "csv": null,
+            "json_data": null
+          },
+          {
+            "type": "span",
+            "text": "3.12.4",
+            "level": null,
+            "language": null,
+            "csv": null,
+            "json_data": null
+          },
+          {
+            "type": "span",
+            "text": "/stable/)",
+            "level": null,
+            "language": null,
+            "csv": null,
+            "json_data": null
+          },
+          {
+            "type": "span",
+            "text": "AQL",
+            "level": null,
+            "language": null,
+            "csv": null,
+            "json_data": null
+          },
+          {
+            "type": "span",
+            "text": "/stable/aql/)",
+            "level": null,
+            "language": null,
+            "csv": null,
+            "json_data": null
+          },
+          {
+            "type": "span",
+            "text": "Fundamentals",
+            "level": null,
+            "language": null,
+            "csv": null,
+            "json_data": null
+          },
+          {
+            "type": "span",
+            "text": "(/stable/aql/fundamentals/)",
+            "level": null,
+            "language": null,
+            "csv": null,
+            "json_data": null
+          },
+          {
+            "type": "span",
+            "text": "Subqueries",
+            "level": null,
+            "language": null,
+            "csv": null,
+            "json_data": null
+          },
+          {
+            "type": "span",
+            "text": "(/stable/aql/fundamentals/subq",
+            "level": null,
+            "language": null,
+            "csv": null,
+            "json_data": null
+          },
+          {
+            "type": "pagefooter",
+            "text": "Ask AI",
+            "level": null,
+            "language": null,
+            "csv": null,
+            "json_data": null
+          },
+          {
+            "type": "line",
+            "text": "Ask AI",
+            "level": null,
+            "language": null,
+            "csv": null,
+            "json_data": null
+          },
+          {
+            "type": "span",
+            "text": "Ask",
+            "level": null,
+            "language": null,
+            "csv": null,
+            "json_data": null
+          },
+          {
+            "type": "span",
+            "text": "AI",
+            "level": null,
+            "language": null,
+            "csv": null,
+            "json_data": null
+          }
+        ]
+      }
+    ]
+  },
+  "metadata": {
+    "title": "Arango_AQL_Example",
+    "filepath": "data/input/Arango_AQL_Example.pdf"
+  },
+  "validation": {
+    "corpus_validation": {
+      "performed": false,
+      "threshold": null,
+      "raw_corpus_length": null
+    }
+  },
+  "raw_corpus": {
+    "full_text": "(https://www.arangodb.com/)\n\n3.12\n\n3.12\n\n3.12\n\n(https://www.arangodb.com/)\n\n(https://www.arangodb.com/)\n\n3.12.4 /stable/)  AQL /stable/aql/)  Fundamentals (/stable/aql/fundamentals/)  Subqueries (/stable/aql/fundamentals/subq\n\n3.12.4 /stable/)  AQL /stable/aql/)  Fundamentals (/stable/aql/fundamentals/)  Subqueries (/stable/aql/fundamentals/subq\n\n3.12.4\n\n/stable/)\n\nAQL\n\n/stable/aql/)\n\nFundamentals\n\n(/stable/aql/fundamentals/)\n\nSubqueries\n\n(/stable/aql/fundamentals/subq\n\nAsk AI\n\nAsk AI\n\nAsk\n\nAI",
+    "pages": [
+      {
+        "page_num": 0,
+        "text": "(https://www.arangodb.com/)\n\n3.12\n\n3.12\n\n3.12\n\n(https://www.arangodb.com/)\n\n(https://www.arangodb.com/)\n\n3.12.4 /stable/)  AQL /stable/aql/)  Fundamentals (/stable/aql/fundamentals/)  Subqueries (/stable/aql/fundamentals/subq\n\n3.12.4 /stable/)  AQL /stable/aql/)  Fundamentals (/stable/aql/fundamentals/)  Subqueries (/stable/aql/fundamentals/subq\n\n3.12.4\n\n/stable/)\n\nAQL\n\n/stable/aql/)\n\nFundamentals\n\n(/stable/aql/fundamentals/)\n\nSubqueries\n\n(/stable/aql/fundamentals/subq\n\nAsk AI\n\nAsk AI\n\nAsk\n\nAI",
+        "tables": []
+      }
+    ],
+    "total_pages": 1
+  }
+}
