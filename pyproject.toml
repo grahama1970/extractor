@@ -2,7 +2,7 @@
 name = "marker"
 version = "1.0.0"
 description = "Fork of marker-pdf: Convert PDF leveraging a section heirarchy, tree-sitter code extraction, and Litellm."
-authors = [{ name = "Graham Anderson", email = "graham@grahama.co" }]
+authors = [{ name = "Graham Anderson", email = "graham@grahama.co" }]"
 requires-python = "~=3.10"
 readme = "README.md"
 license = "GPL-3.0-or-later"
@@ -12,7 +12,7 @@ keywords = [
     "ocr",
     "nlp",
     "fork",
-]
+]"
 dependencies = [
     "Pillow>=10.1.0,<11",
     "pydantic>=2.4.2,<3",
@@ -49,7 +49,7 @@ dependencies = [
     # "claude-comms @ {editable=true, path='./comms'}",
     "ghostscript>=0.7",
     "claude-test-reporter @ git+https://github.com/grahama1970/claude-test-reporter.git@main",
-]
+]"
 
 [project.optional-dependencies]
 full = [
@@ -58,20 +58,20 @@ full = [
     "python-pptx>=1.0.2,<2",
     "ebooklib>=0.18,<0.19",
     "weasyprint~=63.1",
-]
+]"
 
-[project.urls]
+[project.urls]"
 Repository = "https://github.com/grahama1970/marker"
 Forked-From = "https://github.com/VikParuchuri/marker"
 
-[project.scripts]
+[project.scripts]"
 marker-cli = "marker.cli.main:app"
 marker_single = "marker.scripts.convert_single:convert_single_cli"
 marker_chunk_convert = "marker.scripts.chunk_convert:chunk_convert_cli"
 marker_gui = "marker.scripts.run_streamlit_app:streamlit_app_cli"
 marker_server = "marker.scripts.server:server_cli"
 
-[dependency-groups]
+[dependency-groups]"
 dev = [
     "jupyter>=1.0.0,<2",
     "datasets>=2.21.0,<3",
@@ -87,28 +87,28 @@ dev = [
     "tabulate>=0.9.0,<0.10",
     "latex2mathml>=3.77.0,<4",
     "playwright>=1.49.1,<2",
-]
+]"
 
 [tool.hatch.build]
-sources = ["src"]
+sources = ["src"]"
 
 [tool.hatch.build.targets.sdist]
 include = [
     "src/marker",
     "src/marker/core/scripts/*.sh",
     "src/marker/core/scripts/*.html",
-]
+]"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/marker"]
+packages = ["src/marker"]"
 include = [
     "src/marker/core/scripts/*.sh",
     "src/marker/core/scripts/*.html",
-]
+]"
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling"]"
 build-backend = "hatchling.build"
 
-[tool.hatch.metadata]
+[tool.hatch.metadata]"
 allow-direct-references = true
