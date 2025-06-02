@@ -1,0 +1,12 @@
+# 01 Architecture
+
+> System architecture and design documentation
+
+## Contents
+
+- [3_LAYER_ARCHITECTURE](./architecture/3_LAYER_ARCHITECTURE.md)
+- [DOCUMENT_MODEL_IMPROVEMENTS](./architecture/DOCUMENT_MODEL_IMPROVEMENTS.md)
+- [HIERARCHICAL_DOCUMENT_MODEL](./architecture/HIERARCHICAL_DOCUMENT_MODEL.md)
+- [MARKER_INTERNALS](./architecture/MARKER_INTERNALS.md)
+- [PDF_PROCESSING_PIPELINE](./architecture/PDF_PROCESSING_PIPELINE.md)
+- [SUMMARIZER_IMPLEMENTATION](./architecture/SUMMARIZER_IMPLEMENTATION.md)

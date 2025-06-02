@@ -1,0 +1,36 @@
+# 99 Tasks
+
+> Task lists and project planning
+
+## Contents
+
+- [000_Master_Task_List](./tasks/000_Master_Task_List.md)
+- [000_Master_Task_List_Old](./tasks/000_Master_Task_List_Old.md)
+- [000_Task_Index](./tasks/000_Task_Index.md)
+- [001_Integrate_Slash_MCP_Mixin](./tasks/001_Integrate_Slash_MCP_Mixin.md)
+- [001_Marker_Debug_Scripts_Validation](./tasks/001_Marker_Debug_Scripts_Validation.md)
+- [001_Natrium_MCP_Integration](./tasks/001_Natrium_MCP_Integration.md)
+- [001_Natrium_MCP_Integration_REVISED](./tasks/001_Natrium_MCP_Integration_REVISED.md)
+- [002_Fix_Import_Structure](./tasks/002_Fix_Import_Structure.md)
+- [002_Test_Marker_Changelog_Features](./tasks/002_Test_Marker_Changelog_Features.md)
+- [003_Complete_Codebase_Documentation](./tasks/003_Complete_Codebase_Documentation.md)
+- [004_Documentation_Completion_Recommendations](./tasks/004_Documentation_Completion_Recommendations.md)
+- [004_Verify_Corpus_Generator_And_Tree_Sitter](./tasks/004_Verify_Corpus_Generator_And_Tree_Sitter.md)
+- [005_QA_Generation_Comparison](./tasks/005_QA_Generation_Comparison.md)
+- [005_QA_Generation_Module](./tasks/005_QA_Generation_Module.md)
+- [005_QA_Generation_Module_REVISED](./tasks/005_QA_Generation_Module_REVISED.md)
+- [006_Tree_Sitter_Language_Detection_Integration](./tasks/006_Tree_Sitter_Language_Detection_Integration.md)
+- [007_LiteLLM_Validation_Loop_Integration](./tasks/007_LiteLLM_Validation_Loop_Integration.md)
+- [008_CLI_Commands_Comprehensive_Testing](./tasks/008_CLI_Commands_Comprehensive_Testing.md)
+- [009_ArangoDB_Vector_Search_Integration](./tasks/009_ArangoDB_Vector_Search_Integration.md)
+- [010_Human_in_the_Loop_OCR_Finetuning](./tasks/010_Human_in_the_Loop_OCR_Finetuning.md)
+- [032_ArangoDB_Marker_Integration](./tasks/032_ArangoDB_Marker_Integration.md)
+- [033_Module_Communication_System](./tasks/033_Module_Communication_System.md)
+- [034_Claude_Module_Communicator_Integration](./tasks/034_Claude_Module_Communicator_Integration.md)
+- [034_Claude_Module_Communicator_Integration_Task_Details](./tasks/034_Claude_Module_Communicator_Integration_Task_Details.md)
+- [034_Complete_Claude_Features_Implementation](./tasks/034_Complete_Claude_Features_Implementation.md)
+- [035_Sparta_Slash_Commands_Integration](./tasks/035_Sparta_Slash_Commands_Integration.md)
+- [036_Post_Cleanup_Verification](./tasks/036_Post_Cleanup_Verification.md)
+- [100_MCP_Implementation_Index](./tasks/100_MCP_Implementation_Index.md)
+- [101_Setup_CLI_With_Slash_MCP](./tasks/101_Setup_CLI_With_Slash_MCP.md)
+- [110_Verify_Hierarchical_JSON_Export](./tasks/110_Verify_Hierarchical_JSON_Export.md)
