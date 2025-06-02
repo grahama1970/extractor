@@ -189,3 +189,9 @@ cython_debug/
 
 .vscode/
 **/.claude/settings.local.json
+
+# Sensitive files
+.env.bak
+**/vertex_ai_service_account.json
+**/*_service_account.json
+**/*credentials*.json
