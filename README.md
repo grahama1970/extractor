@@ -324,27 +324,34 @@ Marker is a spoke module in the Granger hub-and-spoke architecture, part of a co
 
 ### Complete Architecture
 ```
-                    ┌─────────────────────────────┐
+         ┌─────────────┐                    ┌──────────────┐
+         │    Chat     │                    │Marker Ground │ ← User Interface Layer
+         │ (MCP Chat)  │                    │    Truth     │
+         └──────┬──────┘                    └──────┬───────┘
+                │                                  │
+                └──────────────┬───────────────────┘
+                               │
+                    ┌──────────▼──────────────────┐
                     │  claude-module-communicator │ ← HUB (Central Orchestrator)
                     └─────────────┬───────────────┘
                                   │
                 ┌─────────────────┼─────────────────┐
                 │                 │                 │
          ┌──────▼──────┐   ┌──────▼──────┐   ┌────▼─────┐
-         │ RL Commons  │   │Test Reporter│   │ Shared   │ ← Shared Modules
+         │ RL Commons  │   │Test Reporter│   │ Shared   │ ← Shared Services
          │  (Learning) │   │   Engine    │   │ Services │
          └─────────────┘   └─────────────┘   └──────────┘
                                   │
     ┌────────────────────────────┼────────────────────────────┐
     │                            │                            │
-┌───▼───┐ ┌────────┐ ┌──────┐ ┌─▼────┐ ┌──────┐ ┌──────┐ ┌─▼────┐
-│Marker │ │GitGet  │ │SPARTA│ │ArXiv │ │Aider │ │ Chat │ │DARPA │ ← Spoke Modules
-└───┬───┘ └────┬───┘ └──┬───┘ └──┬───┘ └──┬───┘ └──┬───┘ └──┬───┘
-    │          │        │        │        │        │        │
-┌───▼───┐ ┌────▼────┐ ┌─▼──┐ ┌──▼───┐ ┌──▼──┐ ┌──▼───┐ ┌──▼───┐
-│YouTube│ │ArangoDB │ │MCP │ │Claude│ │Ground│ │Unsloth│ │ ...  │
-│Trans. │ │(Storage)│ │Shot│ │ Max  │ │Truth │ │ Fine │ │      │
-└───────┘ └─────────┘ └────┘ └──────┘ └──────┘ └──────┘ └──────┘
+┌───▼───┐ ┌────────┐ ┌──────┐ ┌─▼────┐ ┌──────┐ ┌─────┐ ┌─▼────┐
+│Marker │ │GitGet  │ │SPARTA│ │ArXiv │ │Aider │ │ MCP │ │DARPA │ ← Spoke Modules
+└───┬───┘ └────┬───┘ └──┬───┘ └──┬───┘ └──┬───┘ │Shot │ └──┬───┘
+    │          │        │        │        │      └─────┘    │
+┌───▼───┐ ┌────▼────┐ ┌─▼────┐ ┌─▼────┐ ┌─▼────┐ ┌──────┐ ┌▼──┐
+│YouTube│ │ArangoDB │ │Claude│ │Unsloth│ │ ...  │ │ ...  │ │...│
+│Trans. │ │(Storage)│ │ Max  │ │ Fine  │ │      │ │      │ │   │
+└───────┘ └─────────┘ └──────┘ └──────┘ └──────┘ └──────┘ └───┘
 ```
 
 ### Module Categories
@@ -357,6 +364,10 @@ Marker is a spoke module in the Granger hub-and-spoke architecture, part of a co
 - **Test Reporter**: Universal test reporting across all modules
 - **Shared Docs**: Common documentation and standards
 
+#### User Interface Modules
+- **Chat**: Universal MCP chat interface for user interactions
+- **Marker Ground Truth**: Label Studio UI for benchmark data generation
+
 #### Spoke Modules (Document/Content)
 - **Marker**: Multi-format document extraction (PDF, DOCX, PPTX, XML)
 - **SPARTA**: Space cybersecurity document processing
@@ -367,12 +378,10 @@ Marker is a spoke module in the Granger hub-and-spoke architecture, part of a co
 - **GitGet**: GitHub repository analysis with tree-sitter
 - **Aider Daemon**: AI-powered code assistance
 - **Unsloth**: LLM fine-tuning workflows
-- **Marker Ground Truth**: Benchmark data generation
 
 #### Spoke Modules (Infrastructure)
 - **ArangoDB**: Graph database for knowledge storage
 - **Claude Max Proxy**: Unified LLM interface
-- **Chat**: Universal MCP chat interface
 - **MCP Screenshot**: Screen capture tools
 - **DARPA Crawl**: Web crawling and data collection
 
