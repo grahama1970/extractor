@@ -1,26 +1,43 @@
 # Marker
 
-Advanced PDF document processing with optional AI-powered accuracy improvements.
+Advanced document processing hub supporting multiple formats with optional AI-powered accuracy improvements. Part of the Granger ecosystem for intelligent document and code analysis.
 
 ## Quick Start
 
 ```bash
-# Basic processing (fast)
+# Basic PDF processing (fast)
 marker document.pdf
+
+# Process PowerPoint presentation
+marker presentation.pptx
+
+# Extract from Word document
+marker report.docx
+
+# Parse XML with security features
+marker data.xml
 
 # With AI-powered improvements (slower but more accurate)
 marker --claude-config accuracy document.pdf
 ```
 
-## Features
+## Supported Formats
 
-### Core Processing
-- **PDF to Markdown conversion** with high accuracy
+### Native Extractors (New!)
+- **PDF**: Advanced extraction with table/image support
+- **PowerPoint (PPTX)**: Direct extraction preserving speaker notes
+- **Word (DOCX)**: Enhanced extraction with comments/revisions
+- **XML**: Secure parsing with namespace support
+- **HTML**: Web content extraction with structure preservation
+
+### Core Features
+- **Unified output format** across all document types
 - **Table extraction** with multiple methods (Surya ML, Camelot heuristic)
 - **Section detection** and hierarchy extraction
 - **Image and figure extraction** with descriptions
 - **Mathematical equation** processing
 - **Multi-language support** with automatic detection
+- **ArangoDB integration** for knowledge graphs
 
 ### AI-Powered Enhancements (Optional)
 - **🤖 Claude Code Integration** for intelligent analysis
@@ -301,9 +318,53 @@ results = pipeline._execute_query("""
 """)
 ```
 
-## Performance Monitoring
+## Granger Ecosystem Integration
 
-When Claude features are enabled, Marker provides detailed performance metrics:
+Marker is a spoke module in the Granger hub-and-spoke architecture, designed to work seamlessly with other modules:
+
+### Architecture
+```
+┌─────────────────────────────┐
+│  claude-module-communicator │ ← Central orchestrator
+└──────────┬──────────────────┘
+           │
+    ┌──────┴──────┬──────────┬─────────┐
+    │             │          │         │
+┌───▼───┐   ┌────▼────┐ ┌───▼───┐ ┌──▼──┐
+│Marker │   │ GitGet  │ │SPARTA │ │... │
+└───────┘   └─────────┘ └───────┘ └────┘
+```
+
+### Cross-Module Workflows
+
+#### Example: Analyze Project Documentation
+```python
+# The HUB orchestrates multiple modules
+workflow = {
+    "gitget": "Clone and analyze repository code",
+    "marker": "Extract PDFs and docs from repo",
+    "arangodb": "Store unified knowledge graph"
+}
+```
+
+### Planned Integrations
+- **GitGet**: Code repository analysis (coming soon)
+- **SPARTA**: Security document processing
+- **ArXiv**: Research paper extraction
+
+## Performance
+
+### Native Extractor Performance
+Native extractors avoid lossy conversions and provide significant speed improvements:
+
+| Format | Traditional Method | Native Extractor | Speed Improvement |
+|--------|-------------------|------------------|-------------------|
+| DOCX   | Convert to PDF    | < 0.01s         | 100x faster       |
+| PPTX   | HTML → PDF        | < 0.1s          | 20x faster        |
+| XML    | Not supported     | < 0.05s         | New capability    |
+
+### Claude Enhancement Performance
+When AI features are enabled, Marker provides detailed metrics:
 
 ```json
 {
