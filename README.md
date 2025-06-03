@@ -320,37 +320,86 @@ results = pipeline._execute_query("""
 
 ## Granger Ecosystem Integration
 
-Marker is a spoke module in the Granger hub-and-spoke architecture, designed to work seamlessly with other modules:
+Marker is a spoke module in the Granger hub-and-spoke architecture, part of a comprehensive AI-powered document and code analysis ecosystem:
 
-### Architecture
+### Complete Architecture
 ```
-┌─────────────────────────────┐
-│  claude-module-communicator │ ← Central orchestrator
-└──────────┬──────────────────┘
-           │
-    ┌──────┴──────┬──────────┬─────────┐
-    │             │          │         │
-┌───▼───┐   ┌────▼────┐ ┌───▼───┐ ┌──▼──┐
-│Marker │   │ GitGet  │ │SPARTA │ │... │
-└───────┘   └─────────┘ └───────┘ └────┘
+                    ┌─────────────────────────────┐
+                    │  claude-module-communicator │ ← HUB (Central Orchestrator)
+                    └─────────────┬───────────────┘
+                                  │
+                ┌─────────────────┼─────────────────┐
+                │                 │                 │
+         ┌──────▼──────┐   ┌──────▼──────┐   ┌────▼─────┐
+         │ RL Commons  │   │Test Reporter│   │ Shared   │ ← Shared Modules
+         │  (Learning) │   │   Engine    │   │ Services │
+         └─────────────┘   └─────────────┘   └──────────┘
+                                  │
+    ┌────────────────────────────┼────────────────────────────┐
+    │                            │                            │
+┌───▼───┐ ┌────────┐ ┌──────┐ ┌─▼────┐ ┌──────┐ ┌──────┐ ┌─▼────┐
+│Marker │ │GitGet  │ │SPARTA│ │ArXiv │ │Aider │ │ Chat │ │DARPA │ ← Spoke Modules
+└───┬───┘ └────┬───┘ └──┬───┘ └──┬───┘ └──┬───┘ └──┬───┘ └──┬───┘
+    │          │        │        │        │        │        │
+┌───▼───┐ ┌────▼────┐ ┌─▼──┐ ┌──▼───┐ ┌──▼──┐ ┌──▼───┐ ┌──▼───┐
+│YouTube│ │ArangoDB │ │MCP │ │Claude│ │Ground│ │Unsloth│ │ ...  │
+│Trans. │ │(Storage)│ │Shot│ │ Max  │ │Truth │ │ Fine │ │      │
+└───────┘ └─────────┘ └────┘ └──────┘ └──────┘ └──────┘ └──────┘
 ```
+
+### Module Categories
+
+#### Central HUB
+- **claude-module-communicator**: Intelligent orchestration with RL integration
+
+#### Shared Services
+- **RL Commons**: Reinforcement learning algorithms for HUB intelligence
+- **Test Reporter**: Universal test reporting across all modules
+- **Shared Docs**: Common documentation and standards
+
+#### Spoke Modules (Document/Content)
+- **Marker**: Multi-format document extraction (PDF, DOCX, PPTX, XML)
+- **SPARTA**: Space cybersecurity document processing
+- **ArXiv**: Research paper search and analysis
+- **YouTube Transcripts**: Video transcript extraction
+
+#### Spoke Modules (Code/Development)
+- **GitGet**: GitHub repository analysis with tree-sitter
+- **Aider Daemon**: AI-powered code assistance
+- **Unsloth**: LLM fine-tuning workflows
+- **Marker Ground Truth**: Benchmark data generation
+
+#### Spoke Modules (Infrastructure)
+- **ArangoDB**: Graph database for knowledge storage
+- **Claude Max Proxy**: Unified LLM interface
+- **Chat**: Universal MCP chat interface
+- **MCP Screenshot**: Screen capture tools
+- **DARPA Crawl**: Web crawling and data collection
 
 ### Cross-Module Workflows
 
-#### Example: Analyze Project Documentation
+#### Example 1: Complete Project Analysis
 ```python
-# The HUB orchestrates multiple modules
+# HUB orchestrates multiple modules for comprehensive analysis
 workflow = {
-    "gitget": "Clone and analyze repository code",
-    "marker": "Extract PDFs and docs from repo",
-    "arangodb": "Store unified knowledge graph"
+    "gitget": "Clone and analyze repository structure",
+    "marker": "Extract all documentation (PDFs, DOCX)",
+    "youtube_transcripts": "Get related tutorial videos",
+    "arangodb": "Store unified knowledge graph",
+    "rl_commons": "Optimize future similar requests"
 }
 ```
 
-### Planned Integrations
-- **GitGet**: Code repository analysis (coming soon)
-- **SPARTA**: Security document processing
-- **ArXiv**: Research paper extraction
+#### Example 2: Research Paper Pipeline
+```python
+workflow = {
+    "arxiv": "Search for relevant papers",
+    "marker": "Extract paper content with tables/figures",
+    "sparta": "Check security implications",
+    "arangodb": "Build citation network",
+    "test_reporter": "Generate analysis report"
+}
+```
 
 ## Performance
 
