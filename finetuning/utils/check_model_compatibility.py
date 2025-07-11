@@ -1,3 +1,17 @@
+"""
+Module: check_model_compatibility.py
+Description: Implementation of check model compatibility functionality
+
+Sample Input:
+>>> # See function docstrings for specific examples
+
+Expected Output:
+>>> # See function docstrings for expected results
+
+Example Usage:
+>>> # Import and use as needed based on module functionality
+"""
+
 === Analyzing Surya {model_type} model for Unsloth compatibility ===\n")
     
     # Create models dictionary

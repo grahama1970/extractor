@@ -1,3 +1,17 @@
+"""
+Module: llm.py
+Description: Large Language Model integration and management
+
+Sample Input:
+>>> # See function docstrings for specific examples
+
+Expected Output:
+>>> # See function docstrings for expected results
+
+Example Usage:
+>>> # Import and use as needed based on module functionality
+"""
+
 import json
 import os
 import tempfile
@@ -14,14 +28,14 @@ from marker.settings import settings
 
 rating_prompt = """
 You're a document analysis expert who is comparing some markdown to an image to make sure the markdown is correct. You're rating how effectively the provided markdown represents the full text and formatting in the image provided.
-You're given an image, along with the extracted markdown:
+You're given an image, along with the extracted markdown:'
 - Some parts of the page may have been recognized as images and linked from the markdown, like `![](_page_0_Picture_0.jpeg)`.
 - Tables will be formatted as Github flavored markdown.
 - Block equations will be in LaTeX.
 - The image and markdown may be in any language.
 - The markdown is based on the text extracted from the document, and sometimes the document may have had bad OCR applied to it, resulting in gibberish text.
 
-The markdown should fully capture the meaning and formatting of the text in the image. You'll evaluate the markdown based on the image provided.
+The markdown should fully capture the meaning and formatting of the text in the image. You'll evaluate the markdown based on the image provided.'
 
 **Instructions**
 Follow this process to evaluate the markdown:
@@ -44,7 +58,7 @@ Depending on which elements are present in the markdown, you will assign element
 - Images - if images are identified and placed correctly.
 
 Notes on scoring:
-- To get a 5/5, all of the important text from the image must appear in the markdown, and the formatting should be correct (minor mistakes okay).  It's okay to omit some text that isn't important to the meaning, like page numbers and chapter headings.  If the entire page is an image, it's okay if the markdown is just a link to the image, unless the image would be better represented as text.
+- To get a 5/5, all of the important text from the image must appear in the markdown, and the formatting should be correct (minor mistakes okay).  It's okay to omit some text that isn't important to the meaning, like page numbers and chapter headings.  If the entire page is an image, it's okay if the markdown is just a link to the image, unless the image would be better represented as text.'
 - A 3/5 may have small missing text elements from the markdown and/or moderate formatting issues.
 - A 1/5 will have major missing text segments from the markdown or completely unreadable formatting.
 - Use 0/5 if a field isn't applicable, like if the image doesn't contain a table.

@@ -1,9 +1,15 @@
 """
-Configuration for fine-tuning Surya OCR model.
+Module: ocr_config.py
+Description: Configuration management and settings
 
-This file defines the configuration parameters for fine-tuning
-the OCR (Recognition) model from Surya. Modify these values based 
-on your specific dataset and requirements.
+Sample Input:
+>>> # See function docstrings for specific examples
+
+Expected Output:
+>>> # See function docstrings for expected results
+
+Example Usage:
+>>> # Import and use as needed based on module functionality
 """
 
 # OCR model fine-tuning configuration

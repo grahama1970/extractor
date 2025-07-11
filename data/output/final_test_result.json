@@ -1,0 +1,11 @@
+{
+  "total_sections": 1,
+  "content_sections": 1,
+  "extraction_method": "marker-pdf-core",
+  "sample_sections": [
+    {
+      "title": "Document Content",
+      "level": 1
+    }
+  ]
+}

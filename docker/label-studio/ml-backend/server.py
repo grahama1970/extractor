@@ -1,9 +1,27 @@
+"""
+Module: server.py
+
+External Dependencies:
+- numpy: https://numpy.org/doc/
+- torch: https://pytorch.org/docs/
+- requests: https://docs.python-requests.org/
+
+Sample Input:
+>>> # See function docstrings for specific examples
+
+Expected Output:
+>>> # See function docstrings for expected results
+
+Example Usage:
+>>> # Import and use as needed based on module functionality
+"""
+
 #!/usr/bin/env python
 """
 Label Studio ML Backend for Marker OCR Pre-annotation
 
 This script provides an ML backend for Label Studio that integrates
-Marker's OCR models for pre-annotation of OCR tasks. It automatically
+Marker's OCR models for pre-annotation of OCR tasks. It automatically'
 detects text in images and provides transcriptions to accelerate the 
 annotation process.
 

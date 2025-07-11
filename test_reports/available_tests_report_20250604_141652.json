@@ -1,0 +1,60 @@
+{
+  "timestamp": "20250604_141652",
+  "summary": {
+    "passed": 11,
+    "failed": 1,
+    "errors": 1,
+    "total": 13
+  },
+  "results": [
+    {
+      "category": "Basic Tests",
+      "test": "tests/test_basic.py",
+      "status": "passed",
+      "summary": "============================== 2 passed in 0.02s ===============================",
+      "return_code": 0
+    },
+    {
+      "category": "Level 0 Tests",
+      "test": "tests/level_0/",
+      "status": "passed",
+      "summary": "tests/level_0/test_marker_standardized.py::TestMarkerStandardized::test_error_response_format PASSED [ 27%]",
+      "return_code": 0
+    },
+    {
+      "category": "Schema Tests",
+      "test": "tests/schema/",
+      "status": "passed",
+      "summary": "============================== 9 passed in 0.05s ===============================",
+      "return_code": 0
+    },
+    {
+      "category": "Package Tests",
+      "test": "tests/package/",
+      "status": "failed",
+      "summary": null,
+      "return_code": 5
+    },
+    {
+      "category": "MCP Tests",
+      "test": "tests/mcp/",
+      "status": "failed",
+      "summary": "========================= 1 failed, 4 passed in 0.11s ==========================",
+      "return_code": 1
+    },
+    {
+      "category": "Utils Tests",
+      "test": "tests/utils/",
+      "status": "failed",
+      "summary": null,
+      "return_code": 5
+    },
+    {
+      "category": "Metadata Tests",
+      "test": "tests/metadata/",
+      "status": "failed",
+      "summary": "collecting ... collected 0 items / 1 error",
+      "return_code": 2
+    }
+  ]
+}

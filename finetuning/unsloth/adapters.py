@@ -1,8 +1,18 @@
 """
-Adapter configurations for efficient fine-tuning of Surya models with Unsloth.
+Module: adapters.py
 
-This module provides adapter configurations for different Surya models,
-optimized for 4-bit QLoRA fine-tuning using Unsloth.
+External Dependencies:
+- torch: https://pytorch.org/docs/
+- transformers: https://huggingface.co/docs/transformers/
+
+Sample Input:
+>>> # See function docstrings for specific examples
+
+Expected Output:
+>>> # See function docstrings for expected results
+
+Example Usage:
+>>> # Import and use as needed based on module functionality
 """
 
 import os
@@ -137,7 +147,7 @@ def create_qlora_model(
     quantization_config: Optional[Dict[str, Any]] = None,
 ) -> Tuple[PreTrainedModel, Dict[str, Any]]:
     """
-    Apply QLoRA to a base model using Unsloth's optimizations.
+    Apply QLoRA to a base model using Unsloth's optimizations.'
     
     Args:
         base_model: Base pre-trained model

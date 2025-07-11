@@ -1,0 +1,31 @@
+{
+  "timestamp": "2025-06-10T17:12:27.900466",
+  "tests_run": 7,
+  "bugs_found": 4,
+  "bugs": [
+    {
+      "test": "import_speed",
+      "bug": "extractor.core.converters.pdf imports too fast (0.000010s) - might be empty",
+      "error": null,
+      "timestamp": "2025-06-10T17:12:20.413160"
+    },
+    {
+      "test": "import_speed",
+      "bug": "extractor.core.schema.document imports too fast (0.000009s) - might be empty",
+      "error": null,
+      "timestamp": "2025-06-10T17:12:20.413182"
+    },
+    {
+      "test": "import_speed",
+      "bug": "extractor.core.renderers.json imports too fast (0.000009s) - might be empty",
+      "error": null,
+      "timestamp": "2025-06-10T17:12:20.413194"
+    },
+    {
+      "test": "syntax_error",
+      "bug": "Syntax error in extractor.cli.main",
+      "error": "invalid syntax (litellm_enhanced.py, line 3)",
+      "timestamp": "2025-06-10T17:12:21.323693"
+    }
+  ]
+}

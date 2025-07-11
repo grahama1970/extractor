@@ -1,8 +1,14 @@
 """
-Driver script for testing the enhanced Camelot table extraction functionality.
+Module: extract_table_driver.py
 
-This script extracts tables from a PDF using both the standard and enhanced table processors,
-and compares the results.
+Sample Input:
+>>> # See function docstrings for specific examples
+
+Expected Output:
+>>> # See function docstrings for expected results
+
+Example Usage:
+>>> # Import and use as needed based on module functionality
 """
 
 import os

@@ -1,8 +1,19 @@
 """
-Custom training loops and utilities for fine-tuning Surya models with Unsloth.
+Module: trainers.py
+Description: Implementation of trainers functionality
 
-This module provides specialized trainers for different Surya models,
-incorporating Unsloth's optimizations for faster and more efficient fine-tuning.
+External Dependencies:
+- torch: https://pytorch.org/docs/
+- transformers: https://huggingface.co/docs/transformers/
+
+Sample Input:
+>>> # See function docstrings for specific examples
+
+Expected Output:
+>>> # See function docstrings for expected results
+
+Example Usage:
+>>> # Import and use as needed based on module functionality
 """
 
 import os

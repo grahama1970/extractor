@@ -1,3 +1,19 @@
+"""
+Module: gemini.py
+
+External Dependencies:
+- pydantic: https://docs.pydantic.dev/
+
+Sample Input:
+>>> # See function docstrings for specific examples
+
+Expected Output:
+>>> # See function docstrings for expected results
+
+Example Usage:
+>>> # Import and use as needed based on module functionality
+"""
+
 import json
 from PIL import Image
 from google import genai
@@ -8,7 +24,7 @@ from pydantic import BaseModel
 from marker.settings import settings
 
 prompt = """
-You're an expert document analyst who is good at turning tables in documents into HTML.  Analyze the provided image, and convert it to a faithful HTML representation.
+You're an expert document analyst who is good at turning tables in documents into HTML.  Analyze the provided image, and convert it to a faithful HTML representation.'
  
 Guidelines:
 - Keep the HTML simple and concise.

@@ -1,3 +1,20 @@
+"""
+Module: cli.py
+Description: Command line interface functionality
+
+External Dependencies:
+- loguru: https://loguru.readthedocs.io/
+
+Sample Input:
+>>> # See function docstrings for specific examples
+
+Expected Output:
+>>> # See function docstrings for expected results
+
+Example Usage:
+>>> # Import and use as needed based on module functionality
+"""
+
 #!/usr/bin/env python3
 """
 Marker Typer-based CLI
@@ -476,10 +493,10 @@ def convert_single(
             base_name = config_parser.get_base_filename(str(filepath))
             save_output(rendered, out_folder, base_name)
             
-            console.print(f"[green]✓[/green] Saved output to {out_folder}")
-            console.print(f"[green]✓[/green] Base filename: {base_name}")
-            console.print(f"[green]✓[/green] Format: {renderer_format}")
-            console.print(f"[green]✓[/green] Processing time: {time.time() - start_time:.2f}s")
+            console.print(f"[green][/green] Saved output to {out_folder}")
+            console.print(f"[green][/green] Base filename: {base_name}")
+            console.print(f"[green][/green] Format: {renderer_format}")
+            console.print(f"[green][/green] Processing time: {time.time() - start_time:.2f}s")
         
     except Exception as e:
         if debug:

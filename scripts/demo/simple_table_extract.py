@@ -1,5 +1,14 @@
 """
-Simple script to test enhanced table extraction.
+Module: simple_table_extract.py
+
+Sample Input:
+>>> # See function docstrings for specific examples
+
+Expected Output:
+>>> # See function docstrings for expected results
+
+Example Usage:
+>>> # Import and use as needed based on module functionality
 """
 
 import sys
@@ -51,7 +60,7 @@ def main():
     ]
     
     for feature in features:
-        print(f"  ✓ {feature}")
+        print(f"   {feature}")
     
     print("\nPreset Options:")
     print("  - high_accuracy: Best quality, most compute")

@@ -1,0 +1,24 @@
+{
+  "immutable_facts": {
+    "timestamp": "2025-06-09T14:37:38.677608",
+    "total_tests": 6,
+    "passed_count": 6,
+    "failed_count": 0,
+    "skipped_count": 0,
+    "exact_success_rate": 100.0,
+    "exact_failure_rate": 0.0,
+    "has_failures": false,
+    "all_tests_passed": true
+  },
+  "failed_test_details": [],
+  "deployment_decision": {
+    "can_deploy": true,
+    "reason": "All tests passed",
+    "blocked_by": []
+  },
+  "verification": {
+    "version": "1.0",
+    "algorithm": "sha256",
+    "hash": "43255840a507941249111b47885db28adad2b38b36396f5f196e1498dfcf2396"
+  }
+}

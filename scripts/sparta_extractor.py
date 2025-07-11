@@ -1,3 +1,17 @@
+"""
+Module: sparta_extractor.py
+Description: Implementation of sparta extractor functionality
+
+Sample Input:
+>>> # See function docstrings for specific examples
+
+Expected Output:
+>>> # See function docstrings for expected results
+
+Example Usage:
+>>> # Import and use as needed based on module functionality
+"""
+
 ')
         
         # Keywords to find context around

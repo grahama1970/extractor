@@ -1,0 +1,50 @@
+{
+  "total_passed": 22,
+  "total_failed": 0,
+  "total_error": 0,
+  "total_skipped": 0,
+  "categories": {
+    "Unit Tests": {
+      "passed": 2,
+      "failed": 0,
+      "error": 0,
+      "skipped": 0,
+      "tests": []
+    },
+    "Core Tests": {
+      "passed": 0,
+      "failed": 0,
+      "error": 0,
+      "skipped": 0,
+      "tests": []
+    },
+    "Feature Tests": {
+      "passed": 0,
+      "failed": 0,
+      "error": 0,
+      "skipped": 0,
+      "tests": []
+    },
+    "Integration Tests": {
+      "passed": 0,
+      "failed": 0,
+      "error": 0,
+      "skipped": 0,
+      "tests": []
+    },
+    "Schema Tests": {
+      "passed": 9,
+      "failed": 0,
+      "error": 0,
+      "skipped": 0,
+      "tests": []
+    },
+    "Level 0 Tests": {
+      "passed": 11,
+      "failed": 0,
+      "error": 0,
+      "skipped": 0,
+      "tests": []
+    }
+  }
+}

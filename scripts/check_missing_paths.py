@@ -1,4 +1,16 @@
-"""Check what's at the paths where tables are missing."""
+"""
+Module: check_missing_paths.py
+
+Sample Input:
+>>> # See function docstrings for specific examples
+
+Expected Output:
+>>> # See function docstrings for expected results
+
+Example Usage:
+>>> # Import and use as needed based on module functionality
+"""
+
 import json
 from pathlib import Path
 

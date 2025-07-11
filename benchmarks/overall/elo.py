@@ -1,3 +1,19 @@
+"""
+Module: elo.py
+
+External Dependencies:
+- pydantic: https://docs.pydantic.dev/
+
+Sample Input:
+>>> # See function docstrings for specific examples
+
+Expected Output:
+>>> # See function docstrings for expected results
+
+Example Usage:
+>>> # Import and use as needed based on module functionality
+"""
+
 import json
 import random
 import time
@@ -18,7 +34,7 @@ from tqdm import tqdm
 from marker.settings import settings
 
 rating_prompt = """
-You're a document analysis expert who is comparing two different markdown samples to an image to see which one represents the content of the image better. The markdown will be called version A and version B.
+You're a document analysis expert who is comparing two different markdown samples to an image to see which one represents the content of the image better. The markdown will be called version A and version B.'
 
 Here are some notes on the image and markdown:
 - Some parts of the page may have been recognized as images and linked from the markdown, like `![](_page_0_Picture_0.jpeg)`.
@@ -27,7 +43,7 @@ Here are some notes on the image and markdown:
 - The image and markdown may be in any language.
 - The markdown is based on the text extracted from the document, and sometimes the document may have had bad OCR applied to it, resulting in gibberish text.
 
-The markdown should fully capture the meaning and formatting of the text in the image. You'll evaluate the markdown based on the image provided.
+The markdown should fully capture the meaning and formatting of the text in the image. You'll evaluate the markdown based on the image provided.'
 
 **Instructions**
 Follow this process to evaluate the markdown:
@@ -50,7 +66,7 @@ Use these criteria when judging the markdown:
 - Images - if images are identified and placed correctly.
 
 Notes on scoring:
-- Perfect markdown will include all of the important text from the image, and the formatting will be correct (minor mistakes okay).  It's okay to omit some text that isn't important to the meaning, like page numbers and chapter headings.  If the entire page is an image, it's okay if the markdown is just a link to the image, unless the image would be better represented as text.
+- Perfect markdown will include all of the important text from the image, and the formatting will be correct (minor mistakes okay).  It's okay to omit some text that isn't important to the meaning, like page numbers and chapter headings.  If the entire page is an image, it's okay if the markdown is just a link to the image, unless the image would be better represented as text.'
 - Bad markdown will have major missing text segments from the markdown or completely unreadable formatting.  It may also have key values that are different from the values in the image.
 
 Output json, like in the example below.

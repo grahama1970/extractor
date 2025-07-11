@@ -1,0 +1,2153 @@
+{
+  "pages": [],
+  "sections": [
+    {
+      "title": "arXiv:2505.03335v2  [cs.LG]  7 May 2025",
+      "page": 1
+    },
+    {
+      "title": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data",
+      "page": 1
+    },
+    {
+      "title": "Andrew Zhao",
+      "page": 1
+    },
+    {
+      "title": ",",
+      "page": 1
+    },
+    {
+      "title": "Yiran Wu",
+      "page": 1
+    },
+    {
+      "title": ",",
+      "page": 1
+    },
+    {
+      "title": "Yang Yue",
+      "page": 1
+    },
+    {
+      "title": ",",
+      "page": 1
+    },
+    {
+      "title": "Tong Wu",
+      "page": 1
+    },
+    {
+      "title": ",",
+      "page": 1
+    },
+    {
+      "title": "Quentin Xu",
+      "page": 1
+    },
+    {
+      "title": ",",
+      "page": 1
+    },
+    {
+      "title": "Yang Yue",
+      "page": 1
+    },
+    {
+      "title": ",",
+      "page": 1
+    },
+    {
+      "title": "Matthieu Lin",
+      "page": 1
+    },
+    {
+      "title": ",",
+      "page": 1
+    },
+    {
+      "title": "Shenzhi Wang",
+      "page": 1
+    },
+    {
+      "title": ", Qingyun Wu",
+      "page": 1
+    },
+    {
+      "title": ", Zilong Zheng",
+      "page": 1
+    },
+    {
+      "title": "and Gao Huang",
+      "page": 1
+    },
+    {
+      "title": "Code",
+      "page": 1
+    },
+    {
+      "title": "Project Page",
+      "page": 1
+    },
+    {
+      "title": "Logs",
+      "page": 1
+    },
+    {
+      "title": "Models",
+      "page": 1
+    },
+    {
+      "title": "Absolute Zero Reasoner (AZR) achieves state-of-the-art performance with",
+      "page": 1
+    },
+    {
+      "title": "ZERO DATA",
+      "page": 1
+    },
+    {
+      "title": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data",
+      "page": 2
+    },
+    {
+      "title": "Absolute Zero Paradigm.",
+      "page": 2
+    },
+    {
+      "title": "Supervised learning",
+      "page": 2
+    },
+    {
+      "title": "Reinforcement",
+      "page": 2
+    },
+    {
+      "title": "learning from verified rewards",
+      "page": 2
+    },
+    {
+      "title": "Absolute",
+      "page": 2
+    },
+    {
+      "title": "Zero",
+      "page": 2
+    },
+    {
+      "title": "1. Introduction",
+      "page": 2
+    },
+    {
+      "title": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data",
+      "page": 3
+    },
+    {
+      "title": "Code priors amplify reasoning.",
+      "page": 3
+    },
+    {
+      "title": "Cross domain transfer is more pronounced for AZR.",
+      "page": 3
+    },
+    {
+      "title": "Bigger bases yield bigger gains.",
+      "page": 3
+    },
+    {
+      "title": "Comments as intermediate plans emerge naturally.",
+      "page": 3
+    },
+    {
+      "title": "Cognitive Behaviors and Token length depends on reasoning mode.",
+      "page": 3
+    },
+    {
+      "title": "Safety alarms ringing.",
+      "page": 3
+    },
+    {
+      "title": "2. The Absolute Zero Paradigm",
+      "page": 3
+    },
+    {
+      "title": "2.1. Preliminaries",
+      "page": 3
+    },
+    {
+      "title": "Supervised Fine-Tuning (SFT).",
+      "page": 3
+    },
+    {
+      "title": "Reinforcement Learning with Verifiable Rewards (RLVR).",
+      "page": 3
+    },
+    {
+      "title": "2.2. Absolute Zero",
+      "page": 3
+    },
+    {
+      "title": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data",
+      "page": 4
+    },
+    {
+      "title": "The Absolute Zero Loop.",
+      "page": 4
+    },
+    {
+      "title": "3. Absolute Zero Reasoner",
+      "page": 4
+    },
+    {
+      "title": "3.1. Two Roles in One: Proposer and Solver",
+      "page": 4
+    },
+    {
+      "title": "Reward Design.",
+      "page": 4
+    },
+    {
+      "title": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data",
+      "page": 5
+    },
+    {
+      "title": "Absolute Zero Reasoner Training Overview.",
+      "page": 5
+    },
+    {
+      "title": "PROPOSES",
+      "page": 5
+    },
+    {
+      "title": "SOLVES",
+      "page": 5
+    },
+    {
+      "title": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data",
+      "page": 6
+    },
+    {
+      "title": "3.2. Learning Different Modes of Reasoning: Deduction, Induction, and Abduction",
+      "page": 6
+    },
+    {
+      "title": "Deduction",
+      "page": 6
+    },
+    {
+      "title": "Abduction",
+      "page": 6
+    },
+    {
+      "title": "Induction:",
+      "page": 6
+    },
+    {
+      "title": "Program Triplet",
+      "page": 6
+    },
+    {
+      "title": "Input:",
+      "page": 6
+    },
+    {
+      "title": "def",
+      "page": 6
+    },
+    {
+      "title": "return",
+      "page": 6
+    },
+    {
+      "title": "Output:",
+      "page": 6
+    },
+    {
+      "title": "The Seed AZR Zero Triplet.",
+      "page": 6
+    },
+    {
+      "title": "3.3. Absolute Zero Reasoner Learning Algorithm",
+      "page": 6
+    },
+    {
+      "title": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data",
+      "page": 7
+    },
+    {
+      "title": "Algorithm 1",
+      "page": 7
+    },
+    {
+      "title": "Require:",
+      "page": 7
+    },
+    {
+      "title": "for",
+      "page": 7
+    },
+    {
+      "title": "do",
+      "page": 7
+    },
+    {
+      "title": "for",
+      "page": 7
+    },
+    {
+      "title": "do",
+      "page": 7
+    },
+    {
+      "title": "PROPOSE PHASE",
+      "page": 7
+    },
+    {
+      "title": "if",
+      "page": 7
+    },
+    {
+      "title": "then",
+      "page": 7
+    },
+    {
+      "title": "for",
+      "page": 7
+    },
+    {
+      "title": "do",
+      "page": 7
+    },
+    {
+      "title": "if",
+      "page": 7
+    },
+    {
+      "title": "then",
+      "page": 7
+    },
+    {
+      "title": "for all",
+      "page": 7
+    },
+    {
+      "title": "do",
+      "page": 7
+    },
+    {
+      "title": "SOLVE PHASE",
+      "page": 7
+    },
+    {
+      "title": "Reward:",
+      "page": 7
+    },
+    {
+      "title": "RL update:",
+      "page": 7
+    },
+    {
+      "title": "Proposal Task Validation.",
+      "page": 7
+    },
+    {
+      "title": "task",
+      "page": 7
+    },
+    {
+      "title": "validation procedure",
+      "page": 7
+    },
+    {
+      "title": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data",
+      "page": 8
+    },
+    {
+      "title": "Solving Task Construction.",
+      "page": 8
+    },
+    {
+      "title": "Task-Relative REINFORCE++ (TRR++)",
+      "page": 8
+    },
+    {
+      "title": "4. Experiments",
+      "page": 8
+    },
+    {
+      "title": "4.1. Experiment Setup",
+      "page": 8
+    },
+    {
+      "title": "Training Details.",
+      "page": 8
+    },
+    {
+      "title": "Evaluation Protocol.",
+      "page": 8
+    },
+    {
+      "title": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data",
+      "page": 9
+    },
+    {
+      "title": "Model",
+      "page": 9
+    },
+    {
+      "title": "Base",
+      "page": 9
+    },
+    {
+      "title": "#data",
+      "page": 9
+    },
+    {
+      "title": "CAvg",
+      "page": 9
+    },
+    {
+      "title": "MAvg",
+      "page": 9
+    },
+    {
+      "title": "AVG",
+      "page": 9
+    },
+    {
+      "title": "Base Models",
+      "page": 9
+    },
+    {
+      "title": "Zero-Style Reasoners Trained on Curated Coding Data",
+      "page": 9
+    },
+    {
+      "title": "Zero-Style Reasoners Trained on Curated Math Data",
+      "page": 9
+    },
+    {
+      "title": "45.8",
+      "page": 9
+    },
+    {
+      "title": "Absolute Zero Training w/ No Curated Data (Ours)",
+      "page": 9
+    },
+    {
+      "title": "0",
+      "page": 9
+    },
+    {
+      "title": "0",
+      "page": 9
+    },
+    {
+      "title": "61.6",
+      "page": 9
+    },
+    {
+      "title": "50.4",
+      "page": 9
+    },
+    {
+      "title": "Performance of RL-Trained Reasoner on Reasoning Benchmarks Based on Qwen2.5-7B Models.",
+      "page": 9
+    },
+    {
+      "title": "Baselines.",
+      "page": 9
+    },
+    {
+      "title": "4.2. Results",
+      "page": 9
+    },
+    {
+      "title": "Research Question 1: How does AZR compare to other zero setting models trained with human expert",
+      "page": 9
+    },
+    {
+      "title": "data?",
+      "page": 9
+    },
+    {
+      "title": "Strong Cross-domain Generalization.",
+      "page": 9
+    },
+    {
+      "title": "Research Question 2: How do initializing from different base model variants (base vs. coder) affect",
+      "page": 9
+    },
+    {
+      "title": "performance?",
+      "page": 9
+    },
+    {
+      "title": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data",
+      "page": 10
+    },
+    {
+      "title": "(a)",
+      "page": 10
+    },
+    {
+      "title": "Model Family",
+      "page": 10
+    },
+    {
+      "title": "Variant",
+      "page": 10
+    },
+    {
+      "title": "Code Avg",
+      "page": 10
+    },
+    {
+      "title": "Math Avg",
+      "page": 10
+    },
+    {
+      "title": "Total Avg",
+      "page": 10
+    },
+    {
+      "title": "(b)",
+      "page": 10
+    },
+    {
+      "title": "(a) In-Distribution & (b) Out-of-Distribution Reasoning Task Performances. (a)",
+      "page": 10
+    },
+    {
+      "title": "(b)",
+      "page": 10
+    },
+    {
+      "title": "Research Question 3: How does varying model size effect AZR\u2019s in-distribution and out-of-distribution",
+      "page": 10
+    },
+    {
+      "title": "capabilities?",
+      "page": 10
+    },
+    {
+      "title": "Research Question 4: Any interesting observations by changing the model class?",
+      "page": 10
+    },
+    {
+      "title": "Research Question 5: Any interesting behaviors or patterns observed during AZR training?",
+      "page": 10
+    },
+    {
+      "title": "Intermediate Planning During Code Response.",
+      "page": 10
+    },
+    {
+      "title": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data",
+      "page": 11
+    },
+    {
+      "title": "Model-proposed Task",
+      "page": 11
+    },
+    {
+      "title": "Response of Predict Input",
+      "page": 11
+    },
+    {
+      "title": "\u2026(analysis)",
+      "page": 11
+    },
+    {
+      "title": "\u2026(analysis)",
+      "page": 11
+    },
+    {
+      "title": "Let\u2019s consider a simple example:  numbers = [1, 2], target = 1",
+      "page": 11
+    },
+    {
+      "title": "Here\u2019s the step-by-step calculation:",
+      "page": 11
+    },
+    {
+      "title": "\u2026(Tried 3 more examples)",
+      "page": 11
+    },
+    {
+      "title": "Given the complexity and the fact that no simple example seems to work, let\u2019s",
+      "page": 11
+    },
+    {
+      "title": "try a more complex scenario: numbers = [2, -1, 1], target = 1",
+      "page": 11
+    },
+    {
+      "title": "The pair (i=1, j=2) satisfies the condition, and the function returns the first",
+      "page": 11
+    },
+    {
+      "title": "accumulated value in this pair, which is 1. This matches our output.",
+      "page": 11
+    },
+    {
+      "title": "Example of a Model-Proposed Task and Its Response for Solving an Abduction Task.",
+      "page": 11
+    },
+    {
+      "title": "Cognitive Behavior in Llama.",
+      "page": 11
+    },
+    {
+      "title": "Token Length Increase Depends on Task Type.",
+      "page": 11
+    },
+    {
+      "title": "Research Question 6: Are all task types essential for good performance (Ablation)?",
+      "page": 11
+    },
+    {
+      "title": "Research Question 7: How much do the designs of proposer contribute to the overall performance",
+      "page": 11
+    },
+    {
+      "title": "(Ablation)?",
+      "page": 11
+    },
+    {
+      "title": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data",
+      "page": 12
+    },
+    {
+      "title": "Code Avg.",
+      "page": 12
+    },
+    {
+      "title": "Math Avg.",
+      "page": 12
+    },
+    {
+      "title": "Overall Avg.",
+      "page": 12
+    },
+    {
+      "title": "Ours",
+      "page": 12
+    },
+    {
+      "title": "55.2",
+      "page": 12
+    },
+    {
+      "title": "38.4",
+      "page": 12
+    },
+    {
+      "title": "46.8",
+      "page": 12
+    },
+    {
+      "title": "Ablation Results.",
+      "page": 12
+    },
+    {
+      "title": "Additional Results.",
+      "page": 12
+    },
+    {
+      "title": "5. Related Work",
+      "page": 12
+    },
+    {
+      "title": "Reasoning with RL.",
+      "page": 12
+    },
+    {
+      "title": "Self-play.",
+      "page": 12
+    },
+    {
+      "title": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data",
+      "page": 13
+    },
+    {
+      "title": "Weak-to-Strong Supervision.",
+      "page": 13
+    },
+    {
+      "title": "6. Conclusion and Discussion",
+      "page": 13
+    },
+    {
+      "title": "Conclusion.",
+      "page": 13
+    },
+    {
+      "title": "Discussion.",
+      "page": 13
+    },
+    {
+      "title": "\u201cwelcome to the era of experience\u201d",
+      "page": 13
+    },
+    {
+      "title": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data",
+      "page": 14
+    },
+    {
+      "title": "References",
+      "page": 14
+    },
+    {
+      "title": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data",
+      "page": 15
+    },
+    {
+      "title": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data",
+      "page": 16
+    },
+    {
+      "title": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data",
+      "page": 17
+    },
+    {
+      "title": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data",
+      "page": 18
+    },
+    {
+      "title": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data",
+      "page": 19
+    },
+    {
+      "title": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data",
+      "page": 20
+    },
+    {
+      "title": "Appendix",
+      "page": 20
+    },
+    {
+      "title": "Appendix Contents",
+      "page": 20
+    },
+    {
+      "title": "A Reinforcement Learning with Verifiable Rewards.",
+      "page": 20
+    },
+    {
+      "title": "21",
+      "page": 20
+    },
+    {
+      "title": "B",
+      "page": 20
+    },
+    {
+      "title": "Implementation Details",
+      "page": 20
+    },
+    {
+      "title": "21",
+      "page": 20
+    },
+    {
+      "title": "C More Results",
+      "page": 20
+    },
+    {
+      "title": "22",
+      "page": 20
+    },
+    {
+      "title": "D Alternative Approaches Considered",
+      "page": 20
+    },
+    {
+      "title": "49",
+      "page": 20
+    },
+    {
+      "title": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data",
+      "page": 21
+    },
+    {
+      "title": "A. Reinforcement Learning with Verifiable Rewards.",
+      "page": 21
+    },
+    {
+      "title": "B. Implementation Details",
+      "page": 21
+    },
+    {
+      "title": "Training Hyperparameters.",
+      "page": 21
+    },
+    {
+      "title": "Parameter",
+      "page": 21
+    },
+    {
+      "title": "Value",
+      "page": 21
+    },
+    {
+      "title": "Model Configuration",
+      "page": 21
+    },
+    {
+      "title": "Training Settings",
+      "page": 21
+    },
+    {
+      "title": "RL Settings",
+      "page": 21
+    },
+    {
+      "title": "Hyperparameters Used During AZR Self-play Training.",
+      "page": 21
+    },
+    {
+      "title": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data",
+      "page": 22
+    },
+    {
+      "title": "Model",
+      "page": 22
+    },
+    {
+      "title": "Data Curation",
+      "page": 22
+    },
+    {
+      "title": "Base Model",
+      "page": 22
+    },
+    {
+      "title": "No data",
+      "page": 22
+    },
+    {
+      "title": "No data",
+      "page": 22
+    },
+    {
+      "title": "Reasoner Training Data Source and Base Model.",
+      "page": 22
+    },
+    {
+      "title": "Forbidden Python Modules.",
+      "page": 22
+    },
+    {
+      "title": "C. More Results",
+      "page": 22
+    },
+    {
+      "title": "C.1. Out-of-Distribution Performance Breakdown",
+      "page": 22
+    },
+    {
+      "title": "C.2. In-Distribution Results",
+      "page": 22
+    },
+    {
+      "title": "C.3. Interplay Between Propose and Solve Roles",
+      "page": 22
+    },
+    {
+      "title": "exec",
+      "page": 22
+    },
+    {
+      "title": "Python Program to Check Valid Code.",
+      "page": 22
+    },
+    {
+      "title": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data",
+      "page": 23
+    },
+    {
+      "title": "exec",
+      "page": 23
+    },
+    {
+      "title": "Python Code to Check Agent Input Abduction Correctness.",
+      "page": 23
+    },
+    {
+      "title": "exec",
+      "page": 23
+    },
+    {
+      "title": "Python Code to Check Agent Output Deduction Correctness.",
+      "page": 23
+    },
+    {
+      "title": "exec",
+      "page": 23
+    },
+    {
+      "title": "Python Code to Check Agent Function Induction Correctness.",
+      "page": 23
+    },
+    {
+      "title": "exec",
+      "page": 23
+    },
+    {
+      "title": "Python Code to Check Deterministic Program.",
+      "page": 23
+    },
+    {
+      "title": "In-distribution Benchmark Score During Training.",
+      "page": 23
+    },
+    {
+      "title": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data",
+      "page": 24
+    },
+    {
+      "title": "Abduction Task Reward and Token Lengths.",
+      "page": 24
+    },
+    {
+      "title": "Induction Task Reward and Token Lengths.",
+      "page": 24
+    },
+    {
+      "title": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data",
+      "page": 25
+    },
+    {
+      "title": "Deduction Task Reward and Token Lengths.",
+      "page": 25
+    },
+    {
+      "title": "Task: Propose Deduction Task",
+      "page": 25
+    },
+    {
+      "title": "Model Input:",
+      "page": 25
+    },
+    {
+      "title": "Model Output:",
+      "page": 25
+    },
+    {
+      "title": "def",
+      "page": 25
+    },
+    {
+      "title": "for",
+      "page": 25
+    },
+    {
+      "title": "in",
+      "page": 25
+    },
+    {
+      "title": "for",
+      "page": 25
+    },
+    {
+      "title": "in",
+      "page": 25
+    },
+    {
+      "title": "if",
+      "page": 25
+    },
+    {
+      "title": "return",
+      "page": 25
+    },
+    {
+      "title": "if",
+      "page": 25
+    },
+    {
+      "title": "else",
+      "page": 25
+    },
+    {
+      "title": "Input:",
+      "page": 25
+    },
+    {
+      "title": "Propose Deduction Task Example.",
+      "page": 25
+    },
+    {
+      "title": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data",
+      "page": 26
+    },
+    {
+      "title": "def",
+      "page": 26
+    },
+    {
+      "title": "for",
+      "page": 26
+    },
+    {
+      "title": "in",
+      "page": 26
+    },
+    {
+      "title": "if",
+      "page": 26
+    },
+    {
+      "title": "for",
+      "page": 26
+    },
+    {
+      "title": "in",
+      "page": 26
+    },
+    {
+      "title": "for",
+      "page": 26
+    },
+    {
+      "title": "in",
+      "page": 26
+    },
+    {
+      "title": "for",
+      "page": 26
+    },
+    {
+      "title": "in",
+      "page": 26
+    },
+    {
+      "title": "if",
+      "page": 26
+    },
+    {
+      "title": "else",
+      "page": 26
+    },
+    {
+      "title": "return",
+      "page": 26
+    },
+    {
+      "title": "Learned \u201cReAct\u201d style program generation.",
+      "page": 26
+    },
+    {
+      "title": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data",
+      "page": 27
+    },
+    {
+      "title": "Task: Propose Abduction Task",
+      "page": 27
+    },
+    {
+      "title": "Model Input:",
+      "page": 27
+    },
+    {
+      "title": "Model Output:",
+      "page": 27
+    },
+    {
+      "title": "def",
+      "page": 27
+    },
+    {
+      "title": "if",
+      "page": 27
+    },
+    {
+      "title": "not",
+      "page": 27
+    },
+    {
+      "title": "return",
+      "page": 27
+    },
+    {
+      "title": "if",
+      "page": 27
+    },
+    {
+      "title": "if",
+      "page": 27
+    },
+    {
+      "title": "for",
+      "page": 27
+    },
+    {
+      "title": "in",
+      "page": 27
+    },
+    {
+      "title": "for",
+      "page": 27
+    },
+    {
+      "title": "in",
+      "page": 27
+    },
+    {
+      "title": "for",
+      "page": 27
+    },
+    {
+      "title": "in",
+      "page": 27
+    },
+    {
+      "title": "if",
+      "page": 27
+    },
+    {
+      "title": "for",
+      "page": 27
+    },
+    {
+      "title": "in",
+      "page": 27
+    },
+    {
+      "title": "else",
+      "page": 27
+    },
+    {
+      "title": "for",
+      "page": 27
+    },
+    {
+      "title": "in",
+      "page": 27
+    },
+    {
+      "title": "for",
+      "page": 27
+    },
+    {
+      "title": "in",
+      "page": 27
+    },
+    {
+      "title": "for",
+      "page": 27
+    },
+    {
+      "title": "in",
+      "page": 27
+    },
+    {
+      "title": "return",
+      "page": 27
+    },
+    {
+      "title": "Output:",
+      "page": 27
+    },
+    {
+      "title": "Propose Abduction Task Example.",
+      "page": 27
+    },
+    {
+      "title": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data",
+      "page": 28
+    },
+    {
+      "title": "Task: Propose Induction Task",
+      "page": 28
+    },
+    {
+      "title": "Model Input:",
+      "page": 28
+    },
+    {
+      "title": "def",
+      "page": 28
+    },
+    {
+      "title": "return",
+      "page": 28
+    },
+    {
+      "title": "for",
+      "page": 28
+    },
+    {
+      "title": "in",
+      "page": 28
+    },
+    {
+      "title": "Model Output:",
+      "page": 28
+    },
+    {
+      "title": "Inputs",
+      "page": 28
+    },
+    {
+      "title": "Message",
+      "page": 28
+    },
+    {
+      "title": "Outputs",
+      "page": 28
+    },
+    {
+      "title": "Propose Induction Task Example.",
+      "page": 28
+    },
+    {
+      "title": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data",
+      "page": 29
+    },
+    {
+      "title": "Task: Solve Abduction Task",
+      "page": 29
+    },
+    {
+      "title": "Model Input:",
+      "page": 29
+    },
+    {
+      "title": "def",
+      "page": 29
+    },
+    {
+      "title": "for",
+      "page": 29
+    },
+    {
+      "title": "in",
+      "page": 29
+    },
+    {
+      "title": "for",
+      "page": 29
+    },
+    {
+      "title": "in",
+      "page": 29
+    },
+    {
+      "title": "for",
+      "page": 29
+    },
+    {
+      "title": "in",
+      "page": 29
+    },
+    {
+      "title": "if",
+      "page": 29
+    },
+    {
+      "title": "return",
+      "page": 29
+    },
+    {
+      "title": "return",
+      "page": 29
+    },
+    {
+      "title": "Model Output:",
+      "page": 29
+    },
+    {
+      "title": "Solve Abduction Task Example.",
+      "page": 29
+    },
+    {
+      "title": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data",
+      "page": 30
+    },
+    {
+      "title": "Task: Solve Deduction Task (Example 1)",
+      "page": 30
+    },
+    {
+      "title": "Model Input:",
+      "page": 30
+    },
+    {
+      "title": "def",
+      "page": 30
+    },
+    {
+      "title": "for",
+      "page": 30
+    },
+    {
+      "title": "in",
+      "page": 30
+    },
+    {
+      "title": "if",
+      "page": 30
+    },
+    {
+      "title": "not in",
+      "page": 30
+    },
+    {
+      "title": "while",
+      "page": 30
+    },
+    {
+      "title": "if",
+      "page": 30
+    },
+    {
+      "title": "del",
+      "page": 30
+    },
+    {
+      "title": "return",
+      "page": 30
+    },
+    {
+      "title": "Input:",
+      "page": 30
+    },
+    {
+      "title": "Model Output:",
+      "page": 30
+    },
+    {
+      "title": "Solve Deduction Task Example.",
+      "page": 30
+    },
+    {
+      "title": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data",
+      "page": 31
+    },
+    {
+      "title": "Task: Solve Induction Task",
+      "page": 31
+    },
+    {
+      "title": "Model Input:",
+      "page": 31
+    },
+    {
+      "title": "Input Description:",
+      "page": 31
+    },
+    {
+      "title": "Inputs:",
+      "page": 31
+    },
+    {
+      "title": "Outputs:",
+      "page": 31
+    },
+    {
+      "title": "def",
+      "page": 31
+    },
+    {
+      "title": "for",
+      "page": 31
+    },
+    {
+      "title": "in",
+      "page": 31
+    },
+    {
+      "title": "return",
+      "page": 31
+    },
+    {
+      "title": "Model Output:",
+      "page": 31
+    },
+    {
+      "title": "shortened",
+      "page": 31
+    },
+    {
+      "title": "...(shortened)",
+      "page": 31
+    },
+    {
+      "title": "...(shortened)",
+      "page": 31
+    },
+    {
+      "title": "def",
+      "page": 31
+    },
+    {
+      "title": "for",
+      "page": 31
+    },
+    {
+      "title": "in",
+      "page": 31
+    },
+    {
+      "title": "return",
+      "page": 31
+    },
+    {
+      "title": "(repeat the program above)",
+      "page": 31
+    },
+    {
+      "title": "Solve Induction Task Example.",
+      "page": 31
+    },
+    {
+      "title": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data",
+      "page": 32
+    },
+    {
+      "title": "Model",
+      "page": 32
+    },
+    {
+      "title": "Detailed Breakdown of Evaluation Benchmarks for Other Model Sizes and Types.",
+      "page": 32
+    },
+    {
+      "title": "C.4. Complexity and Diversity Metrics of AZR Proposed Tasks",
+      "page": 32
+    },
+    {
+      "title": "C.5. Generated Code Complexity Dynamics Between Abd/Ded and Ind.",
+      "page": 32
+    },
+    {
+      "title": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data",
+      "page": 33
+    },
+    {
+      "title": "Task: Solve Deduction Task (Example 2)",
+      "page": 33
+    },
+    {
+      "title": "Model Input:",
+      "page": 33
+    },
+    {
+      "title": "def",
+      "page": 33
+    },
+    {
+      "title": "for",
+      "page": 33
+    },
+    {
+      "title": "in",
+      "page": 33
+    },
+    {
+      "title": "for",
+      "page": 33
+    },
+    {
+      "title": "in",
+      "page": 33
+    },
+    {
+      "title": "if",
+      "page": 33
+    },
+    {
+      "title": "return",
+      "page": 33
+    },
+    {
+      "title": "Input:",
+      "page": 33
+    },
+    {
+      "title": "Output:",
+      "page": 33
+    },
+    {
+      "title": "Model Output:",
+      "page": 33
+    },
+    {
+      "title": "\u907f\u514d\u91cd\u590d\u548c\u53cd\u5411\u7684\u5bf9\u5b50\uff0c\u4f8b\u5982",
+      "page": 33
+    },
+    {
+      "title": "(2, 3)",
+      "page": 33
+    },
+    {
+      "title": "\u548c",
+      "page": 33
+    },
+    {
+      "title": "(3, 2)",
+      "page": 33
+    },
+    {
+      "title": "Mixed Language CoT Example.",
+      "page": 33
+    },
+    {
+      "title": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data",
+      "page": 34
+    },
+    {
+      "title": "Task: Solve Deduction Task (Llama 8B)",
+      "page": 34
+    },
+    {
+      "title": "Model Input:",
+      "page": 34
+    },
+    {
+      "title": "def",
+      "page": 34
+    },
+    {
+      "title": "if",
+      "page": 34
+    },
+    {
+      "title": "return True",
+      "page": 34
+    },
+    {
+      "title": "if",
+      "page": 34
+    },
+    {
+      "title": "return False",
+      "page": 34
+    },
+    {
+      "title": "return False",
+      "page": 34
+    },
+    {
+      "title": "Input:",
+      "page": 34
+    },
+    {
+      "title": "Output:",
+      "page": 34
+    },
+    {
+      "title": "Model Output:",
+      "page": 34
+    },
+    {
+      "title": "Absolute Zero Reasoner-Llama3.1-8b CoT Example on Solving Output Deduction Task.",
+      "page": 34
+    },
+    {
+      "title": "Metrics on Proposed Tasks.",
+      "page": 34
+    },
+    {
+      "title": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data",
+      "page": 35
+    },
+    {
+      "title": "Absolute Zero Reasoner-base-7b OOD Performance Breakdown.",
+      "page": 35
+    },
+    {
+      "title": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data",
+      "page": 36
+    },
+    {
+      "title": "Absolute Zero Reasoner-Coder-7b OOD Performance Breakdown.",
+      "page": 36
+    },
+    {
+      "title": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data",
+      "page": 37
+    },
+    {
+      "title": "Absolute Zero Reasoner-base-14b OOD Performance Breakdown.",
+      "page": 37
+    },
+    {
+      "title": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data",
+      "page": 38
+    },
+    {
+      "title": "Absolute Zero Reasoner-Coder-14b OOD Performance Breakdown.",
+      "page": 38
+    },
+    {
+      "title": "Absolute Zero Reasoner \u2013 Llama3.1-8B \u201cUh-oh Moment.\u201d",
+      "page": 38
+    },
+    {
+      "title": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data",
+      "page": 39
+    },
+    {
+      "title": "Deepseek R1 Template.",
+      "page": 39
+    },
+    {
+      "title": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data",
+      "page": 40
+    },
+    {
+      "title": "Program Input Abduction Task\u2014Problem Proposal Instruction.",
+      "page": 40
+    },
+    {
+      "title": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data",
+      "page": 41
+    },
+    {
+      "title": "Program Output Deduction Task\u2014Problem Generation Instruction.",
+      "page": 41
+    },
+    {
+      "title": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data",
+      "page": 42
+    },
+    {
+      "title": "Program Induction Task\u2014Problem Proposal Instruction.",
+      "page": 42
+    },
+    {
+      "title": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data",
+      "page": 43
+    },
+    {
+      "title": "Program Input Abduction Task\u2014Problem Solving Prompt.",
+      "page": 43
+    },
+    {
+      "title": "Program Output Deduction Task\u2014Problem Solving Prompt.",
+      "page": 43
+    },
+    {
+      "title": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data",
+      "page": 44
+    },
+    {
+      "title": "Program Induction Task\u2014Problem Solving Prompt.",
+      "page": 44
+    },
+    {
+      "title": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data",
+      "page": 45
+    },
+    {
+      "title": "Task: Manual Constructed Sudoku Abduction Task",
+      "page": 45
+    },
+    {
+      "title": "Model",
+      "page": 45
+    },
+    {
+      "title": "Input:",
+      "page": 45
+    },
+    {
+      "title": "import",
+      "page": 45
+    },
+    {
+      "title": "random",
+      "page": 45
+    },
+    {
+      "title": "from",
+      "page": 45
+    },
+    {
+      "title": "typing",
+      "page": 45
+    },
+    {
+      "title": "import",
+      "page": 45
+    },
+    {
+      "title": "import",
+      "page": 45
+    },
+    {
+      "title": "copy",
+      "page": 45
+    },
+    {
+      "title": "def",
+      "page": 45
+    },
+    {
+      "title": "def",
+      "page": 45
+    },
+    {
+      "title": "return",
+      "page": 45
+    },
+    {
+      "title": "for",
+      "page": 45
+    },
+    {
+      "title": "in",
+      "page": 45
+    },
+    {
+      "title": "for",
+      "page": 45
+    },
+    {
+      "title": "in",
+      "page": 45
+    },
+    {
+      "title": "if",
+      "page": 45
+    },
+    {
+      "title": "not",
+      "page": 45
+    },
+    {
+      "title": "return False",
+      "page": 45
+    },
+    {
+      "title": "for",
+      "page": 45
+    },
+    {
+      "title": "in",
+      "page": 45
+    },
+    {
+      "title": "if",
+      "page": 45
+    },
+    {
+      "title": "not",
+      "page": 45
+    },
+    {
+      "title": "return False",
+      "page": 45
+    },
+    {
+      "title": "for",
+      "page": 45
+    },
+    {
+      "title": "in",
+      "page": 45
+    },
+    {
+      "title": "for",
+      "page": 45
+    },
+    {
+      "title": "in",
+      "page": 45
+    },
+    {
+      "title": "for",
+      "page": 45
+    },
+    {
+      "title": "in",
+      "page": 45
+    },
+    {
+      "title": "for",
+      "page": 45
+    },
+    {
+      "title": "in",
+      "page": 45
+    },
+    {
+      "title": "if",
+      "page": 45
+    },
+    {
+      "title": "not",
+      "page": 45
+    },
+    {
+      "title": "return False",
+      "page": 45
+    },
+    {
+      "title": "return True",
+      "page": 45
+    },
+    {
+      "title": "def",
+      "page": 45
+    },
+    {
+      "title": "for",
+      "page": 45
+    },
+    {
+      "title": "in",
+      "page": 45
+    },
+    {
+      "title": "for",
+      "page": 45
+    },
+    {
+      "title": "in",
+      "page": 45
+    },
+    {
+      "title": "if",
+      "page": 45
+    },
+    {
+      "title": "raise",
+      "page": 45
+    },
+    {
+      "title": "ValueError",
+      "page": 45
+    },
+    {
+      "title": "if",
+      "page": 45
+    },
+    {
+      "title": "not",
+      "page": 45
+    },
+    {
+      "title": "raise",
+      "page": 45
+    },
+    {
+      "title": "ValueError",
+      "page": 45
+    },
+    {
+      "title": "for",
+      "page": 45
+    },
+    {
+      "title": "in",
+      "page": 45
+    },
+    {
+      "title": "for",
+      "page": 45
+    },
+    {
+      "title": "in",
+      "page": 45
+    },
+    {
+      "title": "for",
+      "page": 45
+    },
+    {
+      "title": "in",
+      "page": 45
+    },
+    {
+      "title": "return",
+      "page": 45
+    },
+    {
+      "title": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data",
+      "page": 46
+    },
+    {
+      "title": "Model Output:",
+      "page": 46
+    },
+    {
+      "title": "Vibe Check 1: Sudoku Solver.",
+      "page": 46
+    },
+    {
+      "title": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data",
+      "page": 47
+    },
+    {
+      "title": "Task: Manually Constructed Sum Product Game Solve Abduction Task",
+      "page": 47
+    },
+    {
+      "title": "Model Input:",
+      "page": 47
+    },
+    {
+      "title": "def",
+      "page": 47
+    },
+    {
+      "title": "return",
+      "page": 47
+    },
+    {
+      "title": "for",
+      "page": 47
+    },
+    {
+      "title": "in",
+      "page": 47
+    },
+    {
+      "title": "for",
+      "page": 47
+    },
+    {
+      "title": "in",
+      "page": 47
+    },
+    {
+      "title": "if",
+      "page": 47
+    },
+    {
+      "title": "def",
+      "page": 47
+    },
+    {
+      "title": "for",
+      "page": 47
+    },
+    {
+      "title": "in",
+      "page": 47
+    },
+    {
+      "title": "return",
+      "page": 47
+    },
+    {
+      "title": "def",
+      "page": 47
+    },
+    {
+      "title": "for",
+      "page": 47
+    },
+    {
+      "title": "in",
+      "page": 47
+    },
+    {
+      "title": "return",
+      "page": 47
+    },
+    {
+      "title": "def",
+      "page": 47
+    },
+    {
+      "title": "for",
+      "page": 47
+    },
+    {
+      "title": "in",
+      "page": 47
+    },
+    {
+      "title": "if",
+      "page": 47
+    },
+    {
+      "title": "for",
+      "page": 47
+    },
+    {
+      "title": "in",
+      "page": 47
+    },
+    {
+      "title": "for",
+      "page": 47
+    },
+    {
+      "title": "in",
+      "page": 47
+    },
+    {
+      "title": "if",
+      "page": 47
+    },
+    {
+      "title": "in",
+      "page": 47
+    },
+    {
+      "title": "for",
+      "page": 47
+    },
+    {
+      "title": "in",
+      "page": 47
+    },
+    {
+      "title": "if",
+      "page": 47
+    },
+    {
+      "title": "for",
+      "page": 47
+    },
+    {
+      "title": "in",
+      "page": 47
+    },
+    {
+      "title": "for",
+      "page": 47
+    },
+    {
+      "title": "in",
+      "page": 47
+    },
+    {
+      "title": "if",
+      "page": 47
+    },
+    {
+      "title": "and",
+      "page": 47
+    },
+    {
+      "title": "in",
+      "page": 47
+    },
+    {
+      "title": "if",
+      "page": 47
+    },
+    {
+      "title": "return",
+      "page": 47
+    },
+    {
+      "title": "def",
+      "page": 47
+    },
+    {
+      "title": "if",
+      "page": 47
+    },
+    {
+      "title": "not",
+      "page": 47
+    },
+    {
+      "title": "and",
+      "page": 47
+    },
+    {
+      "title": "return False",
+      "page": 47
+    },
+    {
+      "title": "if",
+      "page": 47
+    },
+    {
+      "title": "or",
+      "page": 47
+    },
+    {
+      "title": "or",
+      "page": 47
+    },
+    {
+      "title": "or",
+      "page": 47
+    },
+    {
+      "title": "return False",
+      "page": 47
+    },
+    {
+      "title": "return",
+      "page": 47
+    },
+    {
+      "title": "and",
+      "page": 47
+    },
+    {
+      "title": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data",
+      "page": 48
+    },
+    {
+      "title": "Model Output:",
+      "page": 48
+    },
+    {
+      "title": "Vibe Check 2: Sum Product Game.",
+      "page": 48
+    },
+    {
+      "title": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data",
+      "page": 49
+    },
+    {
+      "title": "D. Alternative Approaches Considered",
+      "page": 49
+    },
+    {
+      "title": "D.1. Error Deduction Task",
+      "page": 49
+    },
+    {
+      "title": "D.2. Composite Functions as Curriculum Learning",
+      "page": 49
+    },
+    {
+      "title": "D.3. Toying with the Initial",
+      "page": 49
+    },
+    {
+      "title": "D.4. Extra Rewards",
+      "page": 49
+    },
+    {
+      "title": "Complexity Rewards.",
+      "page": 49
+    },
+    {
+      "title": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data",
+      "page": 50
+    },
+    {
+      "title": "Diversity Rewards.",
+      "page": 50
+    },
+    {
+      "title": "Reward Aggregation.",
+      "page": 50
+    },
+    {
+      "title": "D.5. Environment Transition",
+      "page": 50
+    },
+    {
+      "title": "Removing Comments and Docstrings",
+      "page": 50
+    },
+    {
+      "title": "Removing Global Variables.",
+      "page": 50
+    }
+  ]
+}

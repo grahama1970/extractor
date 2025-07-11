@@ -1,0 +1,427 @@
+{
+  "gold_standard": {
+    "title": "1 Absolute Zero Reasoner (AZR) achieves state-of-the-art performance with ZERO DATA. Without relying on any gold labels or human-defined queries, Absolute Zero Reasoner trained using our proposed self-play approach demonstrates impressive general reasoning capabilities improvements in both math and coding, despite operating entirely out-of-distribution. Remarkably, AZR surpasses models trained on tens of thousands of expert-labeled in-domain examples in the combined average score across both domains.",
+    "abstract": "http://papers.nips.cc/paper_files/paper/2024/hash/e4be7e9867ef163563f4a5e90cec478f-Abstract-Conference.html",
+    "sections": [
+      {
+        "title": "1Introduction",
+        "level": 2,
+        "content_preview": "Large language models (LLMs) have recently achieved remarkable improvements in reasoning capabilities by employing Reinforcement Learning with Verifiable Rewards (RLVR)(Lambert et\u00a0al.,2024). Unlike methods that explicitly imitate intermediate reasoning steps, RLVR uses only outcome-based feedback, enabling large-scale reinforcement learning over vast task datasets(DeepSeek-AI et\u00a0al.,2025;Team et\u00a0al.,2025;Jaech et\u00a0al.,2024;OpenAI,2025b;a). A particularly compelling variant is the\u201czero\u201dRLVR paradi"
+      },
+      {
+        "title": "2The Absolute Zero Paradigm",
+        "level": 2,
+        "content_preview": "SFT requires the datasets of task-rationale-answer demonstrations\ud835\udc9f={(x,c\u22c6,y\u22c6)}\ud835\udc9f\ud835\udc65superscript\ud835\udc50\u22c6superscript\ud835\udc66\u22c6\\mathcal{D}=\\{(x,c^{\\star},y^{\\star})\\}caligraphic_D = { ( italic_x , italic_c start_POSTSUPERSCRIPT \u22c6 end_POSTSUPERSCRIPT , italic_y start_POSTSUPERSCRIPT \u22c6 end_POSTSUPERSCRIPT ) }, wherex\ud835\udc65xitalic_xis the query,c\u22c6superscript\ud835\udc50\u22c6c^{\\star}italic_c start_POSTSUPERSCRIPT \u22c6 end_POSTSUPERSCRIPTis the gold chain-of-thought (CoT)) andy\u22c6superscript\ud835\udc66\u22c6y^{\\star}italic_y start_POSTSUPERSCRIPT \u22c6 end_POSTSU"
+      },
+      {
+        "title": "2.1Preliminaries",
+        "level": 3,
+        "content_preview": "SFT requires the datasets of task-rationale-answer demonstrations\ud835\udc9f={(x,c\u22c6,y\u22c6)}\ud835\udc9f\ud835\udc65superscript\ud835\udc50\u22c6superscript\ud835\udc66\u22c6\\mathcal{D}=\\{(x,c^{\\star},y^{\\star})\\}caligraphic_D = { ( italic_x , italic_c start_POSTSUPERSCRIPT \u22c6 end_POSTSUPERSCRIPT , italic_y start_POSTSUPERSCRIPT \u22c6 end_POSTSUPERSCRIPT ) }, wherex\ud835\udc65xitalic_xis the query,c\u22c6superscript\ud835\udc50\u22c6c^{\\star}italic_c start_POSTSUPERSCRIPT \u22c6 end_POSTSUPERSCRIPTis the gold chain-of-thought (CoT)) andy\u22c6superscript\ud835\udc66\u22c6y^{\\star}italic_y start_POSTSUPERSCRIPT \u22c6 end_POSTSU"
+      },
+      {
+        "title": "2.2Absolute Zero",
+        "level": 3,
+        "content_preview": "We propose the Absolute Zero paradigm, where during training, the model simultaneously proposes tasks, solves them, and learns from both stages. No external data is required and the model learns entirely through self-play and experience, aided by some environment. We illustrate this paradigm inFigure2, which contrasts Absolute Zero with supervised learning and RLVR, highlighting how our approach eliminates the need for any human-curated data by enabling self-improving task proposal and solution "
+      },
+      {
+        "title": "3Absolute Zero Reasoner",
+        "level": 2,
+        "content_preview": "In this section, we presentAbsolute Zero Reasoner(AZR) as the first attempt to embrace the Absolute Zero Paradigm. In AZR, an unified LLM serves as both a proposer and a solver: it generates tasks to evolve its learning curriculum and attempts to solve them to improve its reasoning capabilities. The model is trained jointly with both roles, learning to create tasks that push the boundary of reasoning capacity while enhancing its ability to solve them effectively\u00a0(Section3.1). Within this self-pl"
+      },
+      {
+        "title": "3.1Two Roles in One: Proposer and Solver",
+        "level": 3,
+        "content_preview": "Large language models are naturally suited for implementing AZR in a multitask learning context(Radford et\u00a0al.,2019), as both the formulation of reasoning tasks and their solutions occur within a unified language space. To this end, we propose rewarding a single model for both generating high learning potential tasks and solving them effectively, as specified by the Absolute Zero objective inEquation3. At each iteration of the online rollout, AZR proposes new reasoning tasks by conditioning on t"
+      },
+      {
+        "title": "3.2Learning Different Modes of Reasoning: Deduction, Induction, and Abduction",
+        "level": 3,
+        "content_preview": "AZR uses code executor as both a flexible interface and a verifiable environment. This setup enables automatic construction, execution, and validation of code reasoning tasks(Stuart,2015;Aryabumi et\u00a0al.,2024). Give program space\ud835\udcab\ud835\udcab\\mathscr{P}script_P, input space\u2110\u2110\\mathscr{I}script_Iand output space\ud835\udcaa\ud835\udcaa\\mathscr{O}script_Oof a coding language, we define an AZR reasoning task as a triplet(p,i,o)\ud835\udc5d\ud835\udc56\ud835\udc5c(p,i,o)( italic_p , italic_i , italic_o ), wherep\u2208\ud835\udcab\ud835\udc5d\ud835\udcabp\\in\\mathscr{P}italic_p \u2208 script_Pis a program,i\u2208\u2110\ud835\udc56"
+      },
+      {
+        "title": "3.3Absolute Zero Reasoner Learning Algorithm",
+        "level": 3,
+        "content_preview": "In this section, we will discuss details of our AZR self-play algorithm, including initialization of buffers3.3.1, usage of thse buffers3.3.2, construction of valid tasks3.3.3, validating solutions3.3.4, and finally advantage estimator calculation3.3.5. We outline the overall recipe of the self-play procedure of AZR inAlgorithm1."
+      },
+      {
+        "title": "4Experiments",
+        "level": 2,
+        "content_preview": "For all experiments, we initialize the buffers as described inSection3.1. AZR models are trained using a batch size of64\u00d7664664\\times 664 \u00d7 6(2 roles\u00d7\\times\u00d73 task types). We use constant learning rate=1\u2062e\u22126absent1\ud835\udc526=1e{-6}= 1 italic_e - 6and the AdamW optimizer(Loshchilov & Hutter,2019). Complete list of hyperparameters is provided inTable3."
+      },
+      {
+        "title": "4.1Experiment Setup",
+        "level": 3,
+        "content_preview": "For all experiments, we initialize the buffers as described inSection3.1. AZR models are trained using a batch size of64\u00d7664664\\times 664 \u00d7 6(2 roles\u00d7\\times\u00d73 task types). We use constant learning rate=1\u2062e\u22126absent1\ud835\udc526=1e{-6}= 1 italic_e - 6and the AdamW optimizer(Loshchilov & Hutter,2019). Complete list of hyperparameters is provided inTable3."
+      },
+      {
+        "title": "4.2Results",
+        "level": 3,
+        "content_preview": "We present the main results of reasoning models trained under both the standard zero and our proposed absolute zero settings inTable1. Notably,Absolute Zero Reasoner-Coder-7Bachieves state-of-the-art performance in both the 7B overall average and the coding average categories. Despite being entirely out-of-distribution for both math and code reasoning benchmarks, it surpasses the previous best model by 1.8 absolute percentages. Even more strikingly, it outperforms models trained with expert-cura"
+      },
+      {
+        "title": "5Related Work",
+        "level": 2,
+        "content_preview": "Using RL to enhance reasoning capabilities has recently emerged as an important step in the post-training process of strong reasoning-focused large language models(Lambert et\u00a0al.,2024). One of the first works to explore a self-bootstrapping approach to improving LLM reasoning is STaR, which employs expert iteration and rejection sampling of outcome-verified responses to iteratively improve the model\u2019s CoT. A monumental work, o1(Jaech et\u00a0al.,2024), was among the first to deploy this idea on a sca"
+      },
+      {
+        "title": "6Conclusion and Discussion",
+        "level": 2,
+        "content_preview": "In this work, we proposed the Absolute Zero paradigm, a novel setting that addresses the data limitations of existing RLVR frameworks. In this paradigm, reasoning agents are tasked with generating their own learning task distributions and improving their reasoning abilities with environmental guidance. We then presented our own instantiation, the Absolute Zero Reasoner (AZR), which is trained by having them propose and solve code-related reasoning tasks grounded by code executor."
+      },
+      {
+        "title": "C.1Out-of-Distribution Performance Breakdown",
+        "level": 3,
+        "content_preview": "We plot the out-of-distribution performance, broken down by each benchmark and in aggregate, across training steps for our 7B, 7B-Coder, 14B, and 14B-Coder models inFigures28,29,30and31. We observe a strong correlation between training using AZR and improvements in both mathematical and coding reasoning capabilities. Moreover, our models are trained for more steps than typical zero-style reasoners; while overfitting can occur with static datasets, it is less likely in AZR due to dynamically prop"
+      },
+      {
+        "title": "C.2In-Distribution Results",
+        "level": 3,
+        "content_preview": "Since we have defined the task domains as input prediction and output prediction, we can directly evaluate our model\u2019s capabilities in these areas using popular code reasoning benchmarks: CruxEval-I(nput), CruxEval-O(utput), and LiveCodeBench-Execution (LCB-E)(Gu et\u00a0al.,2024;Jain et\u00a0al.,2024), where CruxEval-O and LCB-E is solving the deduction task, and CruxEval-I is solving the abduction task. InFigure14, we visualize the evolution of these metrics during the training ofAbsolute Zero Reasoner-"
+      },
+      {
+        "title": "C.3Interplay Between Propose and Solve Roles",
+        "level": 3,
+        "content_preview": "We visualize the training dynamics between the propose and solve roles over training steps inFigures15,17and16. We observe that, in general, the solve roles produce more output tokens than the propose role. Intuitively, this makes sense: the propose role emphasizes creativity and generation of novel tasks, whereas the solve role requires deeper reasoning, which naturally leads to longer outputs."
+      },
+      {
+        "title": "C.4Complexity and Diversity Metrics of AZR Proposed Tasks",
+        "level": 3,
+        "content_preview": "We outline several metrics used to probe characteristics of the tasks proposed during the training of AZR from the base model. Specifically, we log two sets of metrics: program complexity and task diversity. For complexity, we employ two proxy measures\u2014ComplexiPy score and the Halstead metric. To assess diversity, we compute the average abstract syntax tree (AST) edit distance between the proposed program and a set ofK\ud835\udc3eKitalic_Kreference programs, and an answer diversity metric. We calculate thi"
+      },
+      {
+        "title": "C.5Generated Code Complexity Dynamics Between Abd/Ded and Ind.",
+        "level": 3,
+        "content_preview": "We use theComplexiPypackage to measure code complexity. For each generated program in the induction task, we compute the cognitive complexity difference from the corresponding \u201cgold\u201d code,i.e.complexipy\u2062(p\u03c0{abduction,deduction}propose)\u2212complexipy\u2062(p\u03c0inductionsolve)complexipysubscript\ud835\udc5dsubscriptsuperscript\ud835\udf0bpropose{abduction,deduction}complexipysubscript\ud835\udc5dsubscriptsuperscript\ud835\udf0bsolveinduction\\text{complexipy}(p_{\\pi^{\\text{propose}}_{\\text{\\{abduction,deduction\\}}}})-%\n\\text{complexipy}(p_{\\pi^{\\text{"
+      },
+      {
+        "title": "D.1Error Deduction Task",
+        "level": 3,
+        "content_preview": "Since programming languages often have error messages, and these messages contain a lot of information about how someone might expect a program to run, we also came up with another task domain: allowing the learner to propose a programthat will produce an error, and requiring the solver todeduce what kind of error is raisedwhen executing this code. We experimented with this additional task alongside the induction (f\ud835\udc53fitalic_f), deduction (o\ud835\udc5coitalic_o), and abduction (i\ud835\udc56iitalic_i) tasks. Unfortun"
+      },
+      {
+        "title": "D.2Composite Functions as Curriculum Learning",
+        "level": 3,
+        "content_preview": "One valuable property we can leverage from programming languages is the ability to compose functions\u2014that is, to define a function as a composite of other functions, i.e.,f\u2062(g\u2062(x))\ud835\udc53\ud835\udc54\ud835\udc65f(g(x))italic_f ( italic_g ( italic_x ) ). In our setting, when generating a program, we can not only require the output to be a valid program but also constrain the LLM to utilize a predefined set of programs within its main function. For example, if the target program to be generated isf\u2062(\u22c5)\ud835\udc53\u22c5f(\\cdot)italic_f ( \u22c5 "
+      },
+      {
+        "title": "D.3Toying with the Initialp\u2062(z)\ud835\udc5d\ud835\udc67p(z)italic_p ( italic_z )",
+        "level": 3,
+        "content_preview": "We investigated a setting where the initial seed buffer (seeSection3.3.1on how we generated these),i.e.p\u2062(z)\ud835\udc5d\ud835\udc67p(z)italic_p ( italic_z )inEquation3, is not self-generated by the base model, but instead sourced from theLeetCode Dataset. We only modified this component and ran AZR using the same procedure as before, continuing to add new valid programs to the initialized buffer. We observed an increase in initial performance on coding benchmarks; however, the performance plateaued at roughly the sa"
+      },
+      {
+        "title": "D.4Extra Rewards",
+        "level": 3,
+        "content_preview": "Code complexity is well studied in software science and could potentially be a good proxy for measuring how hard it is to infer the properties of a piece of code for our reasoning learner. Therefore, for the problem proposer, we can add various measures of complexity\u2014such as Cyclomatic Complexity(Ebert et\u00a0al.,2016), maintainability, etc.\u2014to the reward function to incentivize the proposer to produce more complex programs. For illustration purposes, we tried using the Maintainability measure and t"
+      },
+      {
+        "title": "D.5Environment Transition",
+        "level": 3,
+        "content_preview": "We investigated how the transition function in our coding environment for the proposer. Specifically, after generating a piece of code, we can apply a transformation function on it before giving it making it an valid tuple in our dataset. We investigated two"
+      }
+    ],
+    "equations": [
+      "p\u2062(z)\ud835\udc5d\ud835\udc67p(z)italic_p ( italic_z )",
+      "2,\u27092\u2709{}^{\\,2,\\textrm{{\\char 0\\relax}}}start_FLOATSUPERSCRIPT 2 , \u2709 end_FLOATSUPERSCRIPT",
+      "1,\u27091\u2709{}^{\\,1,\\textrm{{\\char 0\\relax}}}start_FLOATSUPERSCRIPT 1 , \u2709 end_FLOATSUPERSCRIPT",
+      "11{}^{1\\,}start_FLOATSUPERSCRIPT 1 end_FLOATSUPERSCRIPT",
+      "22{}^{2\\,}start_FLOATSUPERSCRIPT 2 end_FLOATSUPERSCRIPT",
+      "33{}^{3\\,}start_FLOATSUPERSCRIPT 3 end_FLOATSUPERSCRIPT",
+      "\ud835\udc9f={(x,c\u22c6,y\u22c6)}\ud835\udc9f\ud835\udc65superscript\ud835\udc50\u22c6superscript\ud835\udc66\u22c6\\mathcal{D}=\\{(x,c^{\\star},y^{\\star})\\}caligraphic_D = { ( italic_x , italic_c start_POSTSUPERSCRIPT \u22c6 end_POSTSUPERSCRIPT , italic_y start_POSTSUPERSCRIPT \u22c6 end_POSTSUPERSCRIPT ) }",
+      "x\ud835\udc65xitalic_x",
+      "c\u22c6superscript\ud835\udc50\u22c6c^{\\star}italic_c start_POSTSUPERSCRIPT \u22c6 end_POSTSUPERSCRIPT",
+      "y\u22c6superscript\ud835\udc66\u22c6y^{\\star}italic_y start_POSTSUPERSCRIPT \u22c6 end_POSTSUPERSCRIPT"
+    ],
+    "tables": [
+      {
+        "caption": "No caption",
+        "rows": 1
+      },
+      {
+        "caption": "No caption",
+        "rows": 1
+      },
+      {
+        "caption": "No caption",
+        "rows": 1
+      },
+      {
+        "caption": "No caption",
+        "rows": 1
+      },
+      {
+        "caption": "No caption",
+        "rows": 1
+      }
+    ],
+    "total_sections": 23
+  },
+  "marker_result": {
+    "error": "marker-pdf failed",
+    "stderr": "/tmp/tmpkjirb1xh.py:4: DeprecationWarning: The 'marker' package has been renamed to 'extractor'. Please update your imports to use 'from extractor import ...' instead. This compatibility layer will be removed in version 2.0.0\n  from marker.convert import convert_single_pdf\n2025-06-12 06:31:39.439 | INFO     | granger_common.rate_limiter:__init__:89 - RateLimiter 'NVD_API' initialized: 3.0 calls/sec, burst=10\n2025-06-12 06:31:39.439 | INFO     | granger_common.rate_limiter:__init__:89 - RateLimiter 'ArXiv_API' initialized: 3.0 calls/sec, burst=10\n2025-06-12 06:31:39.439 | INFO     | granger_common.rate_limiter:__init__:89 - RateLimiter 'YouTube_API' initialized: 10.0 calls/sec, burst=50\n2025-06-12 06:31:39.440 | INFO     | granger_common.rate_limiter:__init__:89 - RateLimiter 'GitHub_API' initialized: 5.0 calls/sec, burst=20\n2025-06-12 06:31:39.440 | WARNING  | granger_common.pdf_handler:<module>:48 - PyPDF2 not installed, PDF processing will fail\n2025-06-12 06:31:41.741 | INFO     | extractor.core.utils.embedding_utils:<module>:41 - Transformers library is available for embeddings\nTraceback (most recent call last):\n  File \"/tmp/tmpkjirb1xh.py\", line 4, in <module>\n    from marker.convert import convert_single_pdf\nModuleNotFoundError: No module named 'marker.convert'\n"
+  },
+  "extractor_result": {
+    "title": "2505.03335v2",
+    "sections": [
+      {
+        "title": "2505.03335v2",
+        "level": 1,
+        "content_preview": ""
+      },
+      {
+        "title": "Page 1",
+        "level": 2,
+        "content_preview": "arXiv:2505.03335v2  [cs.LG]  7 May 2025 May 9, 2025 Absolute Zero: Reinforced Self-play Reasoning with Zero Data Andrew Zhao 1, Yiran Wu 3, Yang Yue 1, Tong Wu 2, Quentin Xu 1, Yang Yue 1, Matthieu Lin 1, Shenzhi Wang 1, Qingyun Wu 3, Zilong Zheng 2,\u0000 and Gao Huang 1,\u00001 Tsinghua University 2 Be\u0133ing Institute for General Artificial Intelligence 3 Pennsylvania State University zqc21@mails.tsinghua.edu.cn, yiran.wu@psu.edu, zlzheng@bigai.ai, gaohuang@tsinghua.edu.cn Reinforcement learning with veri"
+      },
+      {
+        "title": "Page 2",
+        "level": 2,
+        "content_preview": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data Reinforcement Learning with Verifiable Rewards Absolute Zero (Ours) Supervised Learning Less Human Supervision Figure 2. Absolute Zero Paradigm. Supervised learning relies on human-curated reasoning traces for behavior cloning. Reinforcement learning from verified rewards, enables agents to self-learn reasoning, but still depends on expert-defined learning distribution and a respective set of curated QA pairs, demanding domain expertis"
+      },
+      {
+        "title": "Page 3",
+        "level": 2,
+        "content_preview": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data compared to models trained in the \u201czero\u201d setting using in-domain data. These surprising results highlight that general reasoning skills can emerge without human-curated domain targeted data, positioning Absolute Zero as an promising research direction and AZR as a first pivotal milestone. Besides the remarkable results AZR achieved with zero human data for reasoning, we also make very interesting findings summarized below: \u2022 Code prior"
+      },
+      {
+        "title": "Page 4",
+        "level": 2,
+        "content_preview": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data Language Model \ud835\udf0b!\"#!$%& \ud835\udf0b'#()* \ud835\udf0f \ud835\udc65, \ud835\udc66\u22c6, \ud835\udc5f\"#$\"$%& \ud835\udc66 Environment \ud835\udc52, \ud835\udc53 \ud835\udc5f%$'(& Environment \ud835\udc52 Figure 3. The Absolute Zero Loop. The Absolute Zero loop begins with the agent \u03c0 proposing task \u03c4, which is transformed by f with the environment e into a validated problem (x, y\u22c6), and also emits a reward rpropose for learnability. Then, a standard RL step follows: the agent solves x by producing y, receiving reward rsolve from e by matching with "
+      },
+      {
+        "title": "Page 5",
+        "level": 2,
+        "content_preview": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data model reward model input/output rogram P utput O nput I (                 ,               ,                 ) Learnability Reward Accuracy Reward Absolute Zero Reasoner Absolute Zero Reasoner Verify Construct & Estimate PROPOSE Self-play SOLVE Joint Update Task Types Induction: Abduction: Deduction: ? X = F  (     ) P O ? X =   (     ) O I ?  = F  (     ) P I Figure 4. Absolute Zero Reasoner Training Overview. At every iteration, Absol"
+      },
+      {
+        "title": "Page 6",
+        "level": 2,
+        "content_preview": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data 3.2. Learning Different Modes of Reasoning: Deduction, Induction, and Abduction AZR uses code executor as both a flexible interface and a verifiable environment. This setup enables automatic construction, execution, and validation of code reasoning tasks (Stuart, 2015; Aryabumi et al., 2024). Give program space P, input space I and output space O of a coding language, we define an AZR reasoning task as a triplet (p, i, o), where p \u2208P i"
+      },
+      {
+        "title": "Page 7",
+        "level": 2,
+        "content_preview": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data Algorithm 1 Self-Play Training of Absolute Zero Reasoner (AZR) Require: Pretrained base LLM \u03c0\u03b8; batch size B; #references K; iterations T 1: Dded, Dabd, Dind \u2190InitSeeding(\u03c0\u03b8) \u25b7see \u00a73.3.1 2: for t \u21901 to T do 3: for b \u21901 to B do \u25b7PROPOSE PHASE 4: p \u223cDabd \u222aDded \u25b7sample a program for induction task proposal 5: \bin \u03c0 N n=1, m\u03c0 \u2190\u03c0propose \u03b8 (ind, p) \u25b7generate N inputs and a description 6: if \b(in \u03c0, on \u03c0) N n=1 \u2190ValidateByExecuting \u0000p, {in \u03c0}"
+      },
+      {
+        "title": "Page 8",
+        "level": 2,
+        "content_preview": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data \u2200p \u2208Pdeterministic, \u2200i \u2208I , \u0012 lim j\u2192\u221ep(i)(1) = p(i)(2) = \u00b7 \u00b7 \u00b7 = p(i)(j) \u0013 , (7) where (j) indexes repeated independent executions of the program. That is, for all inputs i, the output of p(i) remains identical with any independent execution of the program. A valid program/input/output triplet (p, i, o) is defined such that o = p(i), where p \u2208Pdeterministic. Since the output of probabilistic programs can vary on every individual run, i"
+      },
+      {
+        "title": "Page 9",
+        "level": 2,
+        "content_preview": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data Model Base #data HEval+ MBPP+ LCBv1-5 AME24 AME25 AMC M500 Minva Olypiad CAvg MAvg AVG Base Models Qwen2.5-7B[73] - - 73.2 65.3 17.5 6.7 3.3 37.5 64.8 25.0 27.7 52.0 27.5 39.8 Qwen2.5-7B-Ins[73] - - 75.0 68.5 25.5 13.3 6.7 52.5 76.4 35.7 37.6 56.3 37.0 46.7 Qwen2.5-7B-Coder[26] - - 80.5 69.3 19.9 6.7 3.3 40.0 54.0 17.3 21.9 56.6 23.9 40.2 Qwen2.5-7B-Math[74] - - 61.0 57.9 16.2 10.0 16.7 42.5 64.2 15.4 28.0 45.0 29.5 37.3 Zero-Style Rea"
+      },
+      {
+        "title": "Page 10",
+        "level": 2,
+        "content_preview": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data 50 75 100 125 150 175 200 225 250 Training Steps 0.30 0.35 0.40 0.45 0.50 0.55 0.60 0.65 0.70 In-Distribution Accuracy AZR-Llama3.1-8b AZR-3B-Coder AZR-7B-Coder AZR-14B-Coder (a) Model Family Variant Code Avg Math Avg Total Avg Llama3.1-8b 28.5 3.4 16.0 Llama3.1-8b + SimpleRL[85] 33.7+5.2 7.2+3.8 20.5+4.5 Llama3.1-8b + AZR (Ours) 31.6+3.1 6.8+3.4 19.2+3.2 Qwen2.5-3B Coder 51.2 18.8 35.0 Qwen2.5-3B Coder + AZR (Ours) 54.9+3.7 26.5+7.7 4"
+      },
+      {
+        "title": "Page 11",
+        "level": 2,
+        "content_preview": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data Input: [1,2,3,4,5], 5 Output: 1 Model-proposed Task Response of Predict Input Let\u2019s analyze the code snippet \u2026(analysis) To find one possible input that produces the output 1, we need to find a scenario where \u2026(analysis) Let\u2019s consider a simple example:  numbers = [1, 2], target = 1 Here\u2019s the step-by-step calculation: 1. current_sum = 0 + 1 = 1, accumulated_values = [1] 2. current_sum = 1 + 2 = 3, accumulated_values = [1, 3] -Check fo"
+      },
+      {
+        "title": "Page 12",
+        "level": 2,
+        "content_preview": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data Experiment Task Type Gen Reference Trained Roles Code Avg. Math Avg. Overall Avg. Deduction only Ded / / 54.6 32.0 43.3 w/o Induction Abd, Ded / / 54.2 33.3 43.8 w/o Gen Reference / 0 / 54.4 33.1 43.8 Train Solver Only / / Solve Only 54.8 36.0 45.4 Ours Abd, Ded, Ind K Propose & Solve 55.2 38.4 46.8 Table 2. Ablation Results. We ablate task types and the proposer role in the Absolute Zero Reasoner using the 7B base model. A \u2018/\u2019 indicat"
+      },
+      {
+        "title": "Page 13",
+        "level": 2,
+        "content_preview": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data 2025) used self-play to train on human-curated tasks to increase the critic capabilities and SPAG (Cheng et al., 2024) trained using self-play in specific game of Adversarial Taboo. Concurrent works\u2014Genius, EMPO, and TTRL (Xu et al., 2025; Zhang et al., 2025b; Zuo et al., 2025)\u2014leverage human-curated language queries without labels to train reinforcement learning agents, but still rely on a fixed human defined learning task distributio"
+      },
+      {
+        "title": "Page 14",
+        "level": 2,
+        "content_preview": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data References Aryabumi, V., Su, Y., Ma, R., Morisot, A., Zhang, I., Locatelli, A., Fadaee, M., \u00dcst\u00fcn, A., and Hooker, S. To code, or not to code? exploring impact of code in pre-training. CoRR, abs/2408.10914, 2024. doi: 10.48550/ARXIV.2408.10914. URL https://doi.org/10.48550/arXiv.2408.10914. Burns, C., Izmailov, P., Kirchner, J. H., Baker, B., Gao, L., Aschenbrenner, L., Chen, Y., Ecoffet, A., Joglekar, M., Leike, J., Sutskever, I., and"
+      },
+      {
+        "title": "Page 15",
+        "level": 2,
+        "content_preview": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data K., Stone, K., and et al. The llama 3 herd of models. CoRR, abs/2407.21783, 2024. doi: 10.48550/ARXIV.2407.21783. URL https://doi.org/10.48550/arXiv.2407.21783. Ebert, C., Cain, J., Antoniol, G., Counsell, S., and Laplante, P. Cyclomatic complexity. IEEE software, 33(6):27\u201329, 2016. Florensa, C., Held, D., Geng, X., and Abbeel, P. Automatic goal generation for reinforcement learning agents. In Dy, J. G. and Krause, A. (eds.), Proceedin"
+      },
+      {
+        "title": "Page 16",
+        "level": 2,
+        "content_preview": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data Lambert, N., Morrison, J., Pyatkin, V., Huang, S., Ivison, H., Brahman, F., Miranda, L. J. V., Liu, A., Dziri, N., Lyu, S., Gu, Y., Malik, S., Graf, V., Hwang, J. D., Yang, J., Bras, R. L., Tafjord, O., Wilhelm, C., Soldaini, L., Smith, N. A., Wang, Y., Dasigi, P., and Hajishirzi, H. T\u00fclu 3: Pushing frontiers in open language model post-training. CoRR, abs/2411.15124, 2024. doi: 10.48550/ARXIV.2411.15124. URL https://doi.org/10.48550/a"
+      },
+      {
+        "title": "Page 17",
+        "level": 2,
+        "content_preview": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data Schmidhuber, J. Exploring the predictable. In Advances in evolutionary computing: theory and applications, pp. 579\u2013612. Springer, 2003. Schmidhuber, J. POWERPLAY: training an increasingly general problem solver by continually searching for the simplest still unsolvable problem. CoRR, abs/1112.5309, 2011. URL http://arxiv.org/abs/1112.5309. Shao, Z., Wang, P., Zhu, Q., Xu, R., Song, J., Zhang, M., Li, Y. K., Wu, Y., and Guo, D. Deepseek"
+      },
+      {
+        "title": "Page 18",
+        "level": 2,
+        "content_preview": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data Wang, S., Liu, C., Zheng, Z., Qi, S., Chen, S., Yang, Q., Zhao, A., Wang, C., Song, S., and Huang, G. Boosting LLM agents with recursive contemplation for effective deception handling. In Ku, L.-W., Martins, A., and Srikumar, V. (eds.), Findings of the Association for Computational Linguistics: ACL 2024, pp. 9909\u20139953, Bangkok, Thailand, August 2024. Association for Computational Linguistics. doi: 10.18653/v1/2024.findings-acl.591. URL"
+      },
+      {
+        "title": "Page 19",
+        "level": 2,
+        "content_preview": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data Zeng, H., Jiang, D., Wang, H., Nie, P., Chen, X., and Chen, W. ACECODER: acing coder RL via automated test-case synthesis. CoRR, abs/2502.01718, 2025a. doi: 10.48550/ARXIV.2502.01718. URL https://doi.org/10.48550/arXiv.2502.01718. Zeng, W., Huang, Y., Liu, Q., Liu, W., He, K., Ma, Z., and He, J. Simplerl-zoo: Investigating and taming zero reinforcement learning for open base models in the wild. CoRR, abs/2503.18892, 2025b. doi: 10.4855"
+      },
+      {
+        "title": "Page 20",
+        "level": 2,
+        "content_preview": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data Appendix Appendix Contents A Reinforcement Learning with Verifiable Rewards. 21 B Implementation Details 21 C More Results 22 C.1 Out-of-Distribution Performance Breakdown . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 22 C.2 In-Distribution Results . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 22 C.3 Interplay Between Propose and Solve Roles . . . . . ."
+      },
+      {
+        "title": "Page 21",
+        "level": 2,
+        "content_preview": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data A. Reinforcement Learning with Verifiable Rewards. We use reinforcement learning to update our learner LLM, rewarding it based on a task-specific reward function rf, where the subscript f indicates the task. The goal of the RL agent is to maximize the expected discounted sum of rewards. We adopt an online variant of RL, REINFORCE++, which is optimized using the original PPO objective: LPPO(\u03b8) = Eq\u223cP (Q), o\u223c\u03c0\u03b8old (O|q) \" 1 |o| |o| X t=1"
+      },
+      {
+        "title": "Page 22",
+        "level": 2,
+        "content_preview": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data Model Data Curation Base Model Oat-7B (Liu et al., 2025) 8.5k math pairs (Hendrycks et al., 2021) Qwen2.5-7B-Math SimpleRL-Zoo (Zeng et al., 2025b) 8.5k math pairs (Hendrycks et al., 2021) Qwen2.5-7B-Base OpenReasonerZero (Hu et al., 2025) 57k STEM + math samples Qwen2.5-7B-Base PRIME-Zero (Cui et al., 2025) 457k math + 27k code problems Qwen2.5Math-7B-Base CodeR1-Zero-7B-LC2k-1088 (Liu & Zhang, 2025) 2k Leetcode pairs Qwen2.5-7B-Instr"
+      },
+      {
+        "title": "Page 23",
+        "level": 2,
+        "content_preview": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data 1 EVAL_INPUT_PREDICTION_TEMPLATE = \"\"\"{code} 2 {gold_output} == f({ agent_input })\"\"\" 3 4 exec( EVAL_INPUT_PREDICTION_TEMPLATE ) Figure 10. Python Code to Check Agent Input Abduction Correctness. 1 EVAL_OUTPUT_PREDICTION_TEMPLATE = \"\"\"{code} 2 eval ({ gold_output }) == eval ({ agent_output })\"\"\" 3 4 exec( EVAL_OUTPUT_PREDICTION_TEMPLATE ) Figure 11. Python Code to Check Agent Output Deduction Correctness. 1 EVAL_FUNCTION_PREDICTION_TEM"
+      },
+      {
+        "title": "Page 24",
+        "level": 2,
+        "content_preview": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data 0 40 80 120 160 200 240 280 0.0 0.2 0.4 0.6 0.8 Reward 0 40 80 120 160 200 240 280 1000 2000 3000 4000 Token Length Training Steps Abduction Task Solve Propose Figure 15. Abduction Task Reward and Token Lengths. The task reward and token lengths of the two roles for abduction task type of Absolute Zero Reasoner-base-7b. 0 40 80 120 160 200 240 280 0.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 Reward 0 40 80 120 160 200 240 280 250 500 750 1000 1250 "
+      },
+      {
+        "title": "Page 25",
+        "level": 2,
+        "content_preview": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data 0 40 80 120 160 200 240 280 0.0 0.2 0.4 0.6 0.8 1.0 Reward 0 40 80 120 160 200 240 280 400 600 800 1000 1200 1400 Token Length Training Steps Deduction Task Solve Propose Figure 17. Deduction Task Reward and Token Lengths. The task reward and token lengths of the two roles for deduction task type of Absolute Zero Reasoner-base-7b. Task: Propose Deduction Task Model Input: (k random selected example programs as few-shot input) Model Out"
+      },
+      {
+        "title": "Page 26",
+        "level": 2,
+        "content_preview": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data def f(numbers): # Step 1: Filter out even numbers filtered_numbers = [num for num in numbers if num % 2 != 0] # Step 2: Calculate the sum of the remaining odd numbers sum_of_odd_numbers = sum(filtered_numbers) # Step 3: Reverse the order of the remaining odd numbers reversed_odd_numbers = filtered_numbers[::-1] # Step 4: Calculate the product of the reversed odd numbers product_of_reversed_odd_numbers = 1 for num in reversed_odd_number"
+      },
+      {
+        "title": "Page 27",
+        "level": 2,
+        "content_preview": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data Task: Propose Abduction Task Model Input: (k random selected example programs as few-shot input) Model Output: For this task, we need an intelligent problem that requires deep algorithmic reasoning and demands long multi step reasoning. A typical type of problem that fits these requirements is the Matrix Reconstruction from a given jumbled li st of elements, where we have to figure out the matrix\u2019s dimensions and individual values. How"
+      },
+      {
+        "title": "Page 28",
+        "level": 2,
+        "content_preview": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data Task: Propose Induction Task Model Input: Here is the function f. Analyze its behaviour and relate it to the observed inputs/outputs. def f(numbers: list[int]) -> int: replacement = { 0: 2, 1: 3, 2: 1, 3: 0, 4: 4 } return sum(replacement[num] for num in numbers) Model Output: To solve this task, we need to come up with 10 different inputs for the function f(numbers: list[int]) -> int. The function replaces each number in the list accor"
+      },
+      {
+        "title": "Page 29",
+        "level": 2,
+        "content_preview": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data Task: Solve Abduction Task Model Input: Here is the function f and the output: \u20181\u2018, please predict the input. def f(numbers: list[int], target: int) -> int: accumulated_values = [] current_sum = 0 for number in numbers: current_sum += number accumulated_values.append(current_sum) result = 0 for i in range(len(accumulated_values)): for j in range(i + 1, len(accumulated_values)): if accumulated_values[j] \\ - accumulated_values[i] == targ"
+      },
+      {
+        "title": "Page 30",
+        "level": 2,
+        "content_preview": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data Task: Solve Deduction Task (Example 1) Model Input: Here is the function f, the input provided [1, 2, 1, 2, 3, 2, 1], 2, and we need to predict the output. def f(array: list[int], k: int) -> int: window_start = 0 max_length = 0 char_freq = {} for window_end in range(len(array)): end_char = array[window_end] if end_char not in char_freq: char_freq[end_char] = 0 char_freq[end_char] += 1 while len(char_freq) > k: start_char = array[window"
+      },
+      {
+        "title": "Page 31",
+        "level": 2,
+        "content_preview": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data Task: Solve Induction Task Model Input: Given the inputs and outputs, deduce the code snippet implementing the described function- ality: Input Description: Given a list of integers, sort the list and then for each element at index i, multiply it by (n \u2212i), where n is the total number of elements. Compute the final sum. Inputs: ['[1, 2, 3, 4]', '[4, 3, 2, 1]', '[3, 1, 4, 2]', '[1, 2, 2, 3]', '[5]'] Outputs: ['20', '20', '20', '17', '5'"
+      },
+      {
+        "title": "Page 32",
+        "level": 2,
+        "content_preview": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data Model HEval+ MBPP+ LCBv1-5 AIME\u201924 AIME\u201925 AMC\u201923 MATH500 Minerva OlympiadBench Llama3.1-8B 31.7 53.7 0.0 0.0 0.0 2.5 10.6 5.5 2.1 + Simple-RL-Zoo 38.4 55.3 7.4 0.0 0.0 7.5 22.2 8.8 4.7 + AZR 35.4 50.8 8.5 3.3 0.0 5.0 13.2 14.0 5.0 Qwen2.5-3B-Coder 67.1 65.9 20.0 3.3 3.3 20.0 51.0 18.4 16.6 + AZR 71.3 69.0 24.4 3.3 3.3 37.5 62.0 26.1 27.0 Qwen2.5-14B-Coder 76.8 71.7 31.4 0.0 0.0 37.5 54.8 10.7 18.5 + AZR 80.5 71.2 39.0 23.3 20.0 65.0 7"
+      },
+      {
+        "title": "Page 33",
+        "level": 2,
+        "content_preview": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data Task: Solve Deduction Task (Example 2) Model Input: Here is the function f, the given input, and we need to predict the output. def f(num_list: list[int], target_product: int) -> list[tuple[int]]: result_pairs = [] for i in range(len(num_list)): for j in range(i + 1, len(num_list)): if num_list[i] * num_list[j] == target_product: result_pairs.append((num_list[i], num_list[j])) return result_pairs Input: [2, 3, 5, 7, 10], 10 Output: [(2"
+      },
+      {
+        "title": "Page 34",
+        "level": 2,
+        "content_preview": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data Task: Solve Deduction Task (Llama 8B) Model Input: Here is the function f, the input provided 'cookie', and we need to predict the output. def f(input_string: str): \"\"\"Function to check if a string contains given substrings.\"\"\" substring = \"code\" # Start with `substring` as the first substring. curr_index = substring # Slice out the required substring from the input string sliced_out_string = input_string[0:len(substring)] if (sliced_o"
+      },
+      {
+        "title": "Page 35",
+        "level": 2,
+        "content_preview": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data MATH REASONING CODE REASONING OVERALL PERFORMANCE 50 75 100 125 150 175 200 225 250 0.050 0.100 0.150 0.200 Accuracy AIME 2024 50 75 100 125 150 175 200 225 250 0.000 0.050 0.100 AIME 2025 50 75 100 125 150 175 200 225 250 0.300 0.325 0.350 0.375 0.400 Olympiad Bench 50 75 100 125 150 175 200 225 250 0.280 0.300 0.320 0.340 0.360 0.380 Accuracy Minerva 50 75 100 125 150 175 200 225 250 0.625 0.650 0.675 0.700 0.725 0.750 Math 500 50 75"
+      },
+      {
+        "title": "Page 36",
+        "level": 2,
+        "content_preview": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data MATH REASONING CODE REASONING OVERALL PERFORMANCE 50 100 150 200 250 300 350 0.050 0.100 0.150 0.200 Accuracy AIME 2024 50 100 150 200 250 300 350 0.000 0.020 0.040 0.060 0.080 0.100 AIME 2025 50 100 150 200 250 300 350 0.340 0.360 0.380 Olympiad Bench 50 100 150 200 250 300 350 0.275 0.300 0.325 0.350 0.375 Accuracy Minerva 50 100 150 200 250 300 350 0.680 0.700 0.720 0.740 0.760 Math 500 50 100 150 200 250 300 350 0.400 0.450 0.500 0"
+      },
+      {
+        "title": "Page 37",
+        "level": 2,
+        "content_preview": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data MATH REASONING CODE REASONING OVERALL PERFORMANCE 50 100 150 200 250 300 350 0.100 0.150 0.200 Accuracy AIME 2024 50 100 150 200 250 300 350 0.050 0.100 0.150 0.200 AIME 2025 50 100 150 200 250 300 350 0.250 0.300 0.350 0.400 Olympiad Bench 50 100 150 200 250 300 350 0.300 0.350 0.400 Accuracy Minerva 50 100 150 200 250 300 350 0.500 0.550 0.600 0.650 0.700 0.750 Math 500 50 100 150 200 250 300 350 0.450 0.500 0.550 0.600 AMC 2023 50 1"
+      },
+      {
+        "title": "Page 38",
+        "level": 2,
+        "content_preview": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data MATH REASONING CODE REASONING OVERALL PERFORMANCE 50 100 150 200 250 300 350 400 0.100 0.150 0.200 Accuracy AIME 2024 50 100 150 200 250 300 350 400 0.050 0.100 0.150 0.200 AIME 2025 50 100 150 200 250 300 350 400 0.380 0.400 0.420 0.440 Olympiad Bench 50 100 150 200 250 300 350 400 0.200 0.250 0.300 0.350 0.400 Accuracy Minerva 50 100 150 200 250 300 350 400 0.700 0.720 0.740 0.760 0.780 0.800 Math 500 50 100 150 200 250 300 350 400 0"
+      },
+      {
+        "title": "Page 39",
+        "level": 2,
+        "content_preview": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data A conversation between User and Assistant. The user asks a question, and the Assistant solves it. The assistant first thinks about the reasoning process in the mind and then provides the user with the answer. The reasoning process and answer are enclosed within <think> </think> and <answer> </answer> tags, respectively, i.e., <think> reasoning process here </think> <answer> answer here </answer>. !\u2192 !\u2192 !\u2192 !\u2192 User: {TASK_INSTRUCTION} As"
+      },
+      {
+        "title": "Page 40",
+        "level": 2,
+        "content_preview": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data ## Task: Create a Python Code Snippet (where custom classes are allowed, which should be defined at the top of the code snippet) with one Matching Input !\u2192 Using the reference code snippets provided below as examples, design a new and unique Python code snippet that demands deep algorithmic reasoning to deduce one possible input from a given output. Your submission should include both a code snippet and test input pair, where the input"
+      },
+      {
+        "title": "Page 41",
+        "level": 2,
+        "content_preview": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data ## Task: Create a New Python Code Snippet (where custom classes are allowed, which should be defined at the top of the code snippet) with one Matching Input !\u2192 Using the reference code snippets provided below as examples, design a new and unique Python code snippet that demands deep algorithmic reasoning to deduce the output from the input. Your submission should include a code snippet and a test input pair, where the input will be plu"
+      },
+      {
+        "title": "Page 42",
+        "level": 2,
+        "content_preview": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data ## Task: Output {NUM_INPUTS} Inputs that can be plugged into the following Code Snippet to produce diverse Outputs, and give a message related to the given snippet. !\u2192 Using the code snippet provided below, design {NUM_INPUTS} inputs that can be plugged into the code snippet to produce a diverse set of outputs. A subset of your given input and its deterministically produced outputs will be given to a test subject to deduce the function"
+      },
+      {
+        "title": "Page 43",
+        "level": 2,
+        "content_preview": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data # Task: Provide One Possible Input of a Python Code Snippet Given the Code and Output Given the following Code Snippet and the Output, think step by step then provide one possible input that produced the output. The input needs to be wrapped in ```input``` tags. Remember if an argument is a string, wrap it in quotes. If the function requires multiple arguments, separate them with commas. !\u2192 !\u2192 !\u2192 # Code Snippet: ```python {SNIPPET} ```"
+      },
+      {
+        "title": "Page 44",
+        "level": 2,
+        "content_preview": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data # Task: Deduce the Function that Produced the Outputs from the Inputs Given a set of input/output pairs and a message that describes the function, think through the problem step by step to deduce a general code snippet. This code should produce the hidden outputs from the hidden inputs, matching the original data-generating code that created the input/output pairs. Place your final answer inside python tags! It may be helpful to work t"
+      },
+      {
+        "title": "Page 45",
+        "level": 2,
+        "content_preview": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data Task: Manual Constructed Sudoku Abduction Task Model Input: Here is the function f and the output: [ [\u201d5\u201d,\u201d3\u201d,\u201d.\u201d,\u201d.\u201d,\u201d7\u201d,\u201d.\u201d,\u201d.\u201d,\u201d.\u201d,\u201d.\u201d], [\u201d6\u201d,\u201d.\u201d,\u201d.\u201d,\u201d1\u201d,\u201d9\u201d,\u201d5\u201d,\u201d.\u201d,\u201d.\u201d,\u201d.\u201d], [\u201d.\u201d,\u201d9\u201d,\u201d8\u201d,\u201d.\u201d,\u201d.\u201d,\u201d.\u201d,\u201d.\u201d,\u201d6\u201d,\u201d.\u201d], [\u201d8\u201d,\u201d.\u201d,\u201d.\u201d,\u201d.\u201d,\u201d6\u201d,\u201d.\u201d,\u201d.\u201d,\u201d.\u201d,\u201d3\u201d], [\u201d4\u201d,\u201d.\u201d,\u201d.\u201d,\u201d8\u201d,\u201d.\u201d,\u201d3\u201d,\u201d.\u201d,\u201d.\u201d,\u201d1\u201d], [\u201d7\u201d,\u201d.\u201d,\u201d.\u201d,\u201d.\u201d,\u201d2\u201d,\u201d.\u201d,\u201d.\u201d,\u201d.\u201d,\u201d6\u201d], [\u201d.\u201d,\u201d6\u201d,\u201d.\u201d,\u201d.\u201d,\u201d.\u201d,\u201d.\u201d,\u201d2\u201d,\u201d8\u201d,\u201d.\u201d], [\u201d.\u201d,\u201d.\u201d,\u201d.\u201d,\u201d4\u201d,\u201d1\u201d,\u201d9\u201d,\u201d.\u201d,\u201d.\u201d,\u201d5\u201d], [\u201d.\u201d,\u201d.\u201d,\u201d.\u201d,\u201d.\u201d,\u201d8\u201d,\u201d.\u201d,\u201d"
+      },
+      {
+        "title": "Page 46",
+        "level": 2,
+        "content_preview": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data Model Output: To determine the input that produced the given output, we need to analyze the function \u2018f\u2018 and understand what it does. Let\u2019s break down the function step by step: 1. **Input Validation in \u2018g_0\u2018**: - The function \u2018g_0\u2018 checks if the given board is valid. - A board is valid if each row, each column, and each 3x3 subgrid contains the digits 1 through 9 exactly once. - If the board is not valid, \u2018g_0\u2018 returns \u2018False\u2018. 2. **I"
+      },
+      {
+        "title": "Page 47",
+        "level": 2,
+        "content_preview": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data Task: Manually Constructed Sum Product Game Solve Abduction Task Model Input: Here is the function f and the output: \u2018True\u2018, please predict the input. def g_3(): return [(x, y) for x in range(2, 101) for y in range(x + 1, 101) if x + y <= 100] def g_2(pairs): d = {} for (x, y) in pairs: s = x + y d.setdefault(s, []).append((x, y)) return d def g_1(pairs): d = {} for (x, y) in pairs: p = x * y d.setdefault(p, []).append((x, y)) return d"
+      },
+      {
+        "title": "Page 48",
+        "level": 2,
+        "content_preview": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data Model Output: the function \u2018f(x, y)\u2018 returns \u2018True\u2018 if the following conditions are met: 1. \u2018x\u2018 and \u2018y\u2018 are both integers. 2. \u2018x\u2018 and \u2018y\u2018 satisfy \u20181 < x < y\u2018 and \u2018x + y <= 100\u2018. 3. The final candidates after applying the conditions in \u2018g_0\u2018 are exactly one pair, and that pair is \u2018(x, y)\u2018. Let\u2019s analyze the function \u2018g_0\u2018 step by step to understand what it does: 1. \u2018pairs = g_3()\u2018 generates all pairs \u2018(x, y)\u2018 such that \u20182 <= x < y <= 10"
+      },
+      {
+        "title": "Page 49",
+        "level": 2,
+        "content_preview": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data D. Alternative Approaches Considered In this section, we share many of the approaches we tried that did not prove to be particularly helpful for Absolute Zero Reasoner. However, we believe it is especially valuable to share these findings with the community, as they are crucial for guiding future research. Below, we outline each of the additional methods we explored during the development of our project. D.1. Error Deduction Task Since"
+      },
+      {
+        "title": "Page 50",
+        "level": 2,
+        "content_preview": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data complexity measure (Halstead, 1977) as intrinsic rewards. Concretely, we used the complexipy and Radon packages (Lopez, 2025; Canal, 2023) to implement the respective metrics. These are then served as intrinsic rewards during the AZR self-play phase. Diversity Rewards. We also attempted using diversity rewards to . Inspired by DiveR-CT (Zhao et al., 2025a), we incorporate code edit distance as an intrinsic reward. Specifically, we trea"
+      }
+    ],
+    "total_sections": 51
+  },
+  "scores": {
+    "marker_similarity": 0.0,
+    "extractor_similarity": 0.0
+  }
+}

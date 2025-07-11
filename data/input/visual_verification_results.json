@@ -1,0 +1,124 @@
+{
+  "pdf_path": "/home/graham/workspace/experiments/extractor/data/input/2505.03335v2.pdf",
+  "verification_complete": true,
+  "toc_analysis": {
+    "found": true,
+    "page_numbers": [
+      8
+    ],
+    "sections": [
+      "are equal. For computational budget reasons, we fixed j = 2 for all experiments.",
+      "present part of the triplet to the solver. Specifically, we set x = (p, i) for deduction; x = (p, o) for abduction; and x = ({in, on}N//2",
+      "3.3.4. Answer Verification",
+      "recommend the reader to see how we did abduction, deduction and induction verification in code in Figures 10 to 12, respectively.",
+      "3.3.5. Task-Relative REINFORCE++",
+      "Zhao et al., 2022; Wang et al., 2023; Yue et al., 2023). Instead of computing a single global baseline as in REINFORCE++ (Hu, 2025)",
+      "per-question baselines, as in GRPO (Shao et al., 2024), and a global baseline, allowing for more structured variance reduction tailored to",
+      "4. Experiments",
+      "4.1. Experiment Setup",
+      "For all experiments, we initialize the buffers as described in Section 3.1. AZR models are trained using a batch",
+      "size of 64 \u00d7 6 (2 roles \u00d7 3 task types). We use constant learning rate= 1e\u22126 and the AdamW optimizer (Loshchilov & Hutter, 2019).",
+      "Complete list of hyperparameters is provided in Table 3.",
+      "we train AZR models on Qwen2.5-7B and Qwen2.5-7B-Coder,",
+      "Zero Reasoner-base-7B and Absolute Zero Reasoner-Coder-7B, respectively.",
+      "Qwen2.5-Coder-3B, Qwen2.5-Coder-14B, Qwen2.5-14B, Llama-3.1-8B (Yang et al., 2024a; Hui et al., 2024; Dubey et al.,",
+      "2024).",
+      "benchmarks. For coding tasks, we evaluate using Evalplus (Liu et al., 2023) on the HumanEval+ and MBPP+ benchmarks, as",
+      "well as LiveCodeBench Generation (v1-5, May 23-Feb 25) (Jain et al., 2024). For mathematical reasoning, we utilize six standard",
+      "benchmarks commonly used in recent zero-shot trained reasoners: AIME\u201924, AIME\u201925, OlympiadBench (He et al., 2024), Minerva,",
+      "Math500 (Hendrycks et al., 2021), and AMC\u201923. For ID benchmarks, we use CruxEval-I(nput), CruxEval-O(utput), and LiveCodeBench-",
+      "Execution (Gu et al., 2024; Jain et al., 2024), which assess reasoning capabilities regarding the input and output of programs (Li et al.,",
+      "2025). Greedy decoding is used for all baseline methods and AZR results to ensure reproducibility."
+    ]
+  },
+  "structure_analysis": {
+    "total_pages": 0,
+    "page_samples": {
+      "1": {
+        "page_number": 1,
+        "image_size": [
+          1224,
+          1584
+        ],
+        "image_path": "/tmp/tmp2_s0x56c/page_001.png",
+        "extracted": true,
+        "has_equations": false,
+        "has_table": false,
+        "word_count": 387,
+        "potential_headers": [
+          "May 9, 2025",
+          "Absolute Zero: Reinforced Self-play Reasoning with Zero Data",
+          "Shenzhi Wang 1, Qingyun Wu 3, Zilong Zheng 2,\u0000 and Gao Huang 1,\u00001 Tsinghua University"
+        ]
+      },
+      "12": {
+        "page_number": 12,
+        "image_size": [
+          1224,
+          1584
+        ],
+        "image_path": "/tmp/tmp2_s0x56c/page_012.png",
+        "extracted": true,
+        "has_equations": false,
+        "has_table": false,
+        "word_count": 929,
+        "potential_headers": [
+          "Absolute Zero: Reinforced Self-play Reasoning with Zero Data",
+          "Gen Reference",
+          "Trained Roles"
+        ]
+      },
+      "25": {
+        "page_number": 25,
+        "image_size": [
+          1224,
+          1584
+        ],
+        "image_path": "/tmp/tmp2_s0x56c/page_025.png",
+        "extracted": true,
+        "has_equations": false,
+        "has_table": false,
+        "word_count": 248,
+        "potential_headers": [
+          "Absolute Zero: Reinforced Self-play Reasoning with Zero Data",
+          "Token Length",
+          "Training Steps"
+        ]
+      },
+      "37": {
+        "page_number": 37,
+        "image_size": [
+          1224,
+          1584
+        ],
+        "image_path": "/tmp/tmp2_s0x56c/page_037.png",
+        "extracted": true,
+        "has_equations": false,
+        "has_table": false,
+        "word_count": 181,
+        "potential_headers": [
+          "Absolute Zero: Reinforced Self-play Reasoning with Zero Data",
+          "MATH REASONING",
+          "CODE REASONING"
+        ]
+      },
+      "50": {
+        "page_number": 50,
+        "image_size": [
+          1224,
+          1584
+        ],
+        "image_path": "/tmp/tmp2_s0x56c/page_050.png",
+        "extracted": true,
+        "has_equations": false,
+        "has_table": true,
+        "word_count": 729,
+        "potential_headers": [
+          "Absolute Zero: Reinforced Self-play Reasoning with Zero Data",
+          "D.5. Environment Transition",
+          "Removing Comments and Docstrings"
+        ]
+      }
+    }
+  }
+}

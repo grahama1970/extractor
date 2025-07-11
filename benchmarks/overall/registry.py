@@ -1,3 +1,16 @@
+"""
+Module: registry.py
+
+Sample Input:
+>>> # See function docstrings for specific examples
+
+Expected Output:
+>>> # See function docstrings for expected results
+
+Example Usage:
+>>> # Import and use as needed based on module functionality
+"""
+
 from benchmarks.overall.methods.docling import DoclingMethod
 from benchmarks.overall.methods.gt import GTMethod
 from benchmarks.overall.methods.llamaparse import LlamaParseMethod

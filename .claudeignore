@@ -1,0 +1,60 @@
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Git repositories
+.git/
+repos/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Large binary files
+*.so
+*.dll
+*.dylib
+*.ttf
+*.woff
+*.woff2
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# IDE files
+.idea/
+.vscode/
+
+# Large data files
+*.pdf
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.mp4
+*.avi
+*.mov
+
+# Archive directories
+archive/
+
+# Logs
+*.log
+logs/
+
+# Cache directories
+.cache/
+cache/
+
+# Test outputs
+test_results/
+test_reports/
+debug_output/
+
+# Data directories with many files
+data/output/
+data/images/

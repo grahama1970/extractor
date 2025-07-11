@@ -1,0 +1,48 @@
+{
+  "markdown_length": 239826,
+  "parser_sections": 94,
+  "full_pipeline_sections": 1,
+  "sample_markdown": "![](_page_0_Picture_0.jpeg)\n\n# **Absolute Zero: Reinforced Self-play Reasoning with Zero Data**\n<!-- SECTION_BREADCRUMB: [{\"level\": 1, \"title\": \"**Absolute Zero: Reinforced Self-play Reasoning with Zero Data**\", \"hash\": \"e3b0c44298fc1c14\"}] -->\n\n**Andrew Zhao** <sup>1</sup> **, Yiran Wu**<sup>3</sup> **, Yang Yue** <sup>1</sup> **, Tong Wu**<sup>2</sup> **, Quentin Xu**<sup>1</sup> **, Yang Yue** <sup>1</sup> **, Matthieu Lin**<sup>1</sup> **, Shenzhi Wang** <sup>1</sup> **, Qingyun Wu**<sup>3</sup> **, Zilong Zheng** <sup>2</sup>*,* **and Gao Huang** <sup>1</sup>*,*\n\n1 Tsinghua University 2 Beijing Institute for General Artificial Intelligence 3 Pennsylvania State University\n\nzqc21@mails.tsinghua.edu.cn, yiran.wu@psu.edu, zlzheng@bigai.ai, gaohuang@tsinghua.edu.cn\n\nReinforcement learning with verifiable rewards (RLVR) has shown promise in enhancing the reasoning capabilities of large language models by learning directly from outcome-based rewards. Recent RLVR works that operate under the *zero setting* avoid supervision in labeling the reasoning process, but still depend on manually curated collections of questions and answers for training. The scarcity of highquality, human-produced examples raises concerns about the long-term scalability of relying on human supervision, a challenge already evident in the domain of language model pretraining. Furthermore, in a hypothetical future where AI surpasses human intelligence, tasks provided by humans may offer limited learning potential for a superintelligent system. To address these concerns, we propose a new RLVR paradigm called *Absolute Zero*, in which a single model learns to propose tasks that maximize its own learning progress and improves reasoning by solving them, without relying on any external data. Under this paradigm, we introduce the Absolute Zero Reasoner (AZR), a system that self-evolves its training curriculum and reasoning ability by using a code executor to both validate proposed code reasoning tasks an",
+  "sample_sections": [
+    {
+      "title": "![](_page_0_Picture_0.jpeg)",
+      "level": 1
+    },
+    {
+      "title": "**Absolute Zero: Reinforced Self-play Reasoning with Zero Data**",
+      "level": 1
+    },
+    {
+      "title": "Absolute Zero: Reinforced Self-play Reasoning with Zero Data",
+      "level": 1
+    },
+    {
+      "title": "**1. Introduction**",
+      "level": 1
+    },
+    {
+      "title": "**2. The Absolute Zero Paradigm**",
+      "level": 1
+    },
+    {
+      "title": "**2.1. Preliminaries**",
+      "level": 3
+    },
+    {
+      "title": "**2.2. Absolute Zero**",
+      "level": 3
+    },
+    {
+      "title": "**3. Absolute Zero Reasoner**",
+      "level": 1
+    },
+    {
+      "title": "<span id=\"page-3-1\"></span>**3.1. Two Roles in One: Proposer and Solver**",
+      "level": 3
+    },
+    {
+      "title": "<span id=\"page-5-0\"></span>**3.2. Learning Different Modes of Reasoning: Deduction, Induction, and Abduction Absolute Zero: Reinforced Self-play Reasoning with Zero Data**",
+      "level": 4
+    }
+  ]
+}

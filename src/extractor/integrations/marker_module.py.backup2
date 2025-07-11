@@ -1,0 +1,165 @@
+"""Marker Module for claude-module-communicator integration"""
+from typing import Dict, Any, List, Optional
+from loguru import logger
+import asyncio
+from pathlib import Path
+import os
+import hashlib
+from datetime import datetime
+
+# Import BaseModule from claude_coms
+try:
+    from claude_coms.base_module import BaseModule
+except ImportError:
+    # Fallback for development
+    class BaseModule:
+        def __init__(self, name, system_prompt, capabilities, registry=None):
+            self.name = name
+            self.system_prompt = system_prompt
+            self.capabilities = capabilities
+            self.registry = registry
+
+# Import Marker components
+try:
+    from marker.convert import convert_single_pdf
+    from marker.models import load_all_models
+    from marker.settings import settings
+except ImportError:
+    logger.warning("Marker components not available, running in mock mode")
+    
+    async def convert_single_pdf(file_path, models, **kwargs):
+        # Mock implementation
+        return {
+            "markdown": f"# Mock conversion of {file_path}\n\nThis is a mock conversion.",
+            "metadata": {"pages": 1, "tables": 0, "images": 0}
+        }
+    
+    def load_all_models():
+        return {}
+
+
+class MarkerModule(BaseModule):
+    """Marker module for PDF to Markdown conversion"""
+    
+    def __init__(self, registry=None):
+        super().__init__(
+            name="marker",
+            system_prompt="High-quality PDF to Markdown conversion with table extraction, image handling, and format preservation. Optimized for technical documents, research papers, and complex layouts.",
+            capabilities=[
+                "convert_pdf_to_markdown",
+                "extract_tables",
+                "extract_images",
+                "validate_extraction",
+                "batch_convert",
+                "get_conversion_status",
+                "analyze_document_structure",
+                "get_supported_formats"
+            ],
+            registry=registry
+        )
+        
+        # REQUIRED ATTRIBUTES
+        self.version = "2.0.0"
+        self.description = "Marker PDF processing module for high-fidelity document conversion with support for complex layouts, tables, and mathematical notation"
+        
+        # Initialize components
+        self._initialized = False
+        self.models = None
+        self.max_file_size_mb = 100
+        self.supported_formats = [".pdf"]
+        
+        # Conversion tracking
+        self.active_conversions = {}
+        self.conversion_history = {}
+        
+        # Output directory
+        self.output_dir = Path(os.getenv("MARKER_OUTPUT_DIR", "./output/marker"))
+        
+    async def start(self) -> None:
+        """Initialize the Marker module"""
+        if not self._initialized:
+            try:
+                # Load models
+                logger.info("Loading Marker models...")
+                self.models = await asyncio.to_thread(load_all_models)
+                
+                # Ensure output directory exists
+                self.output_dir.mkdir(parents=True, exist_ok=True)
+                
+                self._initialized = True
+                logger.info(f"{self.name} module started successfully")
+                
+            except Exception as e:
+                logger.error(f"Failed to initialize Marker module: {e}")
+                raise
+    
+    async def stop(self) -> None:
+        """Cleanup Marker resources"""
+        # Clear active conversions
+        self.active_conversions.clear()
+        
+        # Clean up models if needed
+        if self.models:
+            # Model cleanup if required
+            pass
+        
+        logger.info(f"{self.name} module stopped")
+    
+    async def process(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """Process requests from the communicator"""
+        try:
+            action = request.get("action")
+            
+            if action not in self.capabilities:
+                return {
+                    "success": False,
+                    "error": f"Unknown action: {action}",
+                    "available_actions": self.capabilities,
+                    "module": self.name
+                }
+            
+            # Route to appropriate handler
+            result = await self._route_action(action, request)
+            
+            return {
+                "success": True,
+                "module": self.name,
+                **result
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in {self.name}: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "module": self.name
+            }
+
+    def get_input_schema(self) -> Optional[Dict[str, Any]]:
+        """Return the input schema for this module"""
+        return {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": self.capabilities
+                },
+                "data": {
+                    "type": "object"
+                }
+            },
+            "required": ["action"]
+        }
+    
+    def get_output_schema(self) -> Optional[Dict[str, Any]]:
+        """Return the output schema for this module"""
+        return {
+            "type": "object",
+            "properties": {
+                "success": {"type": "boolean"},
+                "module": {"type": "string"},
+                "data": {"type": "object"},
+                "error": {"type": "string"}
+            },
+            "required": ["success", "module"]
+        }
