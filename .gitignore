@@ -2,7 +2,6 @@ private.py
 .DS_Store
 local.env
 experiments
-examples
 test_data
 repos
 training
@@ -77,7 +76,6 @@ cover/
 
 archive
 repos
-examples
 
 # Translations
 *.mo
