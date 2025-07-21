@@ -195,3 +195,11 @@ cython_debug/
 **/vertex_ai_service_account.json
 **/*_service_account.json
 **/*credentials*.json
+
+# Node modules
+node_modules/
+**/node_modules/
+
+# Next.js build output
+.next/
+**/.next/
