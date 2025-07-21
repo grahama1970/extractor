@@ -203,3 +203,12 @@ node_modules/
 # Next.js build output
 .next/
 **/.next/
+
+# Deprecated files (temporary)
+deprecated/
+
+# Large output files
+*.json
+!package.json
+!tsconfig.json
+!pyproject.toml
