@@ -15,6 +15,10 @@ temp
 conversion_results
 uploads
 /cache
+.archive
+
+proof_of_concept
+sessions/
 
 vertex_ai_service_account.json
 
@@ -153,6 +157,9 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+.env.*
+*.env
+.envrc
 
 # Spyder project settings
 .spyderproject
@@ -210,3 +217,8 @@ deprecated/
 !package.json
 !tsconfig.json
 !pyproject.toml
+
+# Ignore additional env variants
+.env.*
+*.env
+.envrc
