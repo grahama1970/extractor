@@ -17,7 +17,8 @@ CLI (main)
 - `run --reflowed <07_reflowed.json> --summaries <09_summaries.json> -o <results_dir> [--skip-export]`
 
 Environment
-- `ARANGO_HOST/PORT/USER/PASSWORD/DATABASE`.
+- Arango: `ARANGO_HOST/PORT/USER/PASSWORD/DATABASE` (use a dedicated test DB during development).
+- Session + cache (LLM prep work): `LITELLM_SESSION_ID`, `LITELLM_ATTACH_SESSION`.
 
 Implementation Notes (tricky parts)
 - source_pdf selection: Chooses the most common `reflowed_sections[*].source_pdf`; falls back to `source_files.sections` if absent.

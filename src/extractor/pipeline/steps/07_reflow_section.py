@@ -18,6 +18,8 @@ from datetime import datetime
 import base64
 import numpy as np
 from textwrap import dedent
+import pandas as pd
+from typing import Optional
 
 # Direct, non-abstracted, top-level imports for core functionality
 try:
@@ -59,17 +61,7 @@ from loguru import logger
 from rich.console import Console
 import litellm
 from tqdm.asyncio import tqdm_asyncio
-try:
-    from tenacity import retry, stop_after_attempt, wait_random_exponential
-except ImportError:  # minimal fallback: no retry
-    def retry(*args, **kwargs):
-        def _wrap(fn):
-            return fn
-        return _wrap
-    def stop_after_attempt(*args, **kwargs):
-        return None
-    def wait_random_exponential(*args, **kwargs):
-        return None
+ 
 from extractor.core.services.utils.json_utils import clean_json_string
 from extractor.pipeline.utils.image_io import (
     get_section_image_b64,
@@ -79,12 +71,13 @@ from extractor.pipeline.utils.image_io import (
 )
 from extractor.pipeline.utils.diagnostics import start_resource_sampler, stop_resource_sampler, get_run_id, iso_now, make_event, snapshot_resources, build_stage_timings, classify_llm_error, gpu_metrics_available
 from extractor.pipeline.utils.litellm_call import litellm_call
+from extractor.pipeline.utils.model_params import build_chat_messages, build_chat_extras, image_file_to_data_url
 from extractor.pipeline.utils.vision import preflight_vision_support
 from extractor.pipeline.utils.ann_index import build_ann_index, query_ann_index, load_ann_index
 
 # --- Initialization & Configuration ---
 
-if not load_dotenv(find_dotenv(), override=True):
+if not load_dotenv(find_dotenv(), override=False):
     logger.warning(".env not found; proceeding with process environment only.")
 
 # Initialize LiteLLM cache to prevent duplicate calls
@@ -109,10 +102,16 @@ from extractor.pipeline.utils.embeddings import ensure_embedder as _ensure_embed
 # Configuration from environment variables
 # Use Ollama for free testing, or set LITELLM_VLM_MODEL env var for other providers
 # Use GPT-5 for reflow by default; can override via env
-LLM_MODEL = os.getenv("LITELLM_VLM_MODEL", "openai/gpt-5")
+# Default to Gemini Flash for multimodal reflow; override via LITELLM_VLM_MODEL
+LLM_MODEL = os.getenv("LITELLM_VLM_MODEL", "gemini/gemini-2.5-flash")
 MAX_CONCURRENT_CALLS = int(os.getenv("MAX_CONCURRENT_LLM_CALLS", 3))
 LLM_SEMAPHORE = asyncio.Semaphore(MAX_CONCURRENT_CALLS)
 SEMANTIC_TOP_K = int(os.getenv("SEMANTIC_ANNOTATION_TOP_K", 5))
+TABLE_CONF_THRESHOLD = float(os.getenv("STAGE07_TABLE_CONFIDENCE_THRESHOLD", "0.6"))
+INCLUDE_FIGURE_IMAGES = os.getenv("STAGE07_INCLUDE_FIGURES", "false").lower() in ("1", "true", "yes", "y")
+MAX_ANNOTATION_IMAGES = int(os.getenv("STAGE07_MAX_ANNOTATION_IMAGES", "2"))
+ATTACH_SECTION_IMAGE = os.getenv("STAGE07_ATTACH_SECTION_IMAGE", "true").lower() in ("1", "true", "yes", "y")
+SCHEMA_MODE = os.getenv("STAGE07_SCHEMA_MODE", "reflow_json").strip().lower()  # "text" | "reflow_json"
 
 
 # --- Core LLM and Prompting Functions ---
@@ -216,10 +215,25 @@ def get_annotation_image_b64(annot: Dict[str, Any], base_dir: Path) -> Optional[
         return None
     return _safe_read_image_b64(path, base_dir)
 
+def _sanitize_text(s: Optional[str]) -> str:
+    if not s:
+        return ""
+    removals = [
+        "\u200e", "\u200f",  # LRM/RLM
+        "\u200b", "\u200c", "\u200d",  # zero-width
+        "\u202a", "\u202b", "\u202c", "\u202d", "\u202e",  # bidi overrides
+        "\u2066", "\u2067", "\u2068", "\u2069",  # isolates
+    ]
+    s2 = str(s)
+    for ch in removals:
+        s2 = s2.replace(ch, "")
+    s2 = s2.replace("\u00a0", " ")
+    return "\n".join(" ".join(line.split()) for line in s2.splitlines()).strip()
+
 def build_section_context_text(section: Dict[str, Any]) -> str:
     """Compose concise textual context including tables, figures, and the most relevant annotations (with text)."""
     lines: List[str] = []
-    title = section.get("title", "Untitled")
+    title = _sanitize_text(section.get("title", "Untitled"))
     level = section.get("level", 0)
     page_start = section.get("page_start")
     page_end = section.get("page_end")
@@ -239,7 +253,7 @@ def build_section_context_text(section: Dict[str, Any]) -> str:
         'blocks_count': len(section.get('blocks', [])),
     }, ensure_ascii=False))
 
-    raw_text = section.get("source_text") or section.get("merged_text") or section.get("raw_text", "")
+    raw_text = _sanitize_text(section.get("source_text") or section.get("merged_text") or section.get("raw_text", ""))
     if raw_text:
         snippet = raw_text if len(raw_text) <= 6000 else raw_text[:6000] + " ..."
         lines.append("Source Text:")
@@ -261,6 +275,18 @@ def build_section_context_text(section: Dict[str, Any]) -> str:
                     lines.append(f"  sample_rows: {json.dumps(rows, ensure_ascii=False)[:500]}")
                 except Exception:
                     pass
+        # Optional: enforce exact column hints via env for deterministic reflow
+        try:
+            import os as _os
+            forced = _os.getenv('STAGE07_FORCE_TABLE_COLUMNS', '').strip()
+            if forced:
+                # comma-separated list
+                cols_hint = [c.strip() for c in forced.split(',') if c.strip()]
+                if cols_hint:
+                    lines.append("Table Hints:")
+                    lines.append(f"columns_exact: {json.dumps(cols_hint, ensure_ascii=False)}")
+        except Exception:
+            pass
 
     # Figures summary
     figures = section.get("figures", [])
@@ -276,7 +302,7 @@ def build_section_context_text(section: Dict[str, Any]) -> str:
         for blk in blocks or []:
             for ln in blk.get("lines", []):
                 for sp in ln.get("spans", []):
-                    t = (sp.get("text") or "").strip()
+                    t = _sanitize_text(sp.get("text") or "")
                     if t:
                         parts.append(t)
         s = " ".join(parts)
@@ -314,7 +340,6 @@ def build_section_context_text(section: Dict[str, Any]) -> str:
 
 
 
-@retry(wait=wait_random_exponential(min=1, max=30), stop=stop_after_attempt(3))
 async def reflow_section_with_llm(section_data: Dict[str, Any], results_base_dir: Path, *, include_images: bool, allow_fallback: bool) -> Dict[str, Any]:
     """Reflow a section using multimodal context (section/table/figure/annotation) and return structured JSON."""
     try:
@@ -322,7 +347,7 @@ async def reflow_section_with_llm(section_data: Dict[str, Any], results_base_dir
         # Decide if the model supports multimodal inputs
         supports_vision = any(
             kw in (LLM_MODEL or "").lower()
-            for kw in ("gpt-4o", "gpt-4.1", "gpt-4-vision", "claude-3", "gemini", "llava", "qwen-vl", "grok-vision")
+            for kw in ("gpt-5", "gpt-4o", "gpt-4.1", "gpt-4-vision", "claude-3", "gemini", "llava", "qwen-vl", "grok-vision")
         )
 
         # Build textual context
@@ -336,7 +361,9 @@ async def reflow_section_with_llm(section_data: Dict[str, Any], results_base_dir
         if include_images:
             try:
                 ok = await preflight_vision_support(LLM_MODEL, timeout_sec=10)
-                if not ok:
+                if ok:
+                    supports_vision = True
+                else:
                     supports_vision = False
             except Exception:
                 pass
@@ -349,28 +376,61 @@ async def reflow_section_with_llm(section_data: Dict[str, Any], results_base_dir
                     sec_diags.append(make_event("07_reflow_section","info","section_image_attached","Included section image", {}))
                 except Exception:
                     pass
-            # Table images (up to 2)
-            for t in section_data.get("tables", [])[:2]:
-                tb64 = get_table_image_b64(t, results_base_dir)
-                if tb64:
-                    try:
-                        sec_diags.append(make_event("07_reflow_section","info","table_image_attached","Included table image", {"table_index": t.get("table_index") }))
-                    except Exception:
-                        pass
-                if tb64:
-                    image_blocks.append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{tb64}"}})
-            # Figure images (up to 2)
-            for f in section_data.get("figures", [])[:2]:
-                fb64 = get_figure_image_b64(f, results_base_dir)
-                if fb64:
-                    try:
-                        sec_diags.append(make_event("07_reflow_section","info","figure_image_attached","Included figure image", {"figure_id": f.get("figure_id") }))
-                    except Exception:
-                        pass
-                if fb64:
-                    image_blocks.append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{fb64}"}})
-            # Annotation images (up to 2)
-            for a in section_data.get("annotations", [])[:2]:
+            # Table images: include only low-confidence tables
+            def _tconf(t):
+                try:
+                    pm = t.get("pandas_metrics") or {}
+                    shape = pm.get("shape") or [0, 0]
+                    rows = int(shape[0] or 0)
+                    density = float(pm.get("data_density") or 0.0)
+                    camel = t.get("camelot_metrics") or {}
+                    acc = float(camel.get("accuracy") or 0.0)
+                    white = float(camel.get("whitespace") or 0.0)
+                    score = 0.0
+                    score += 0.2 if rows >= 3 else 0.0
+                    score += min(max(density, 0.0), 1.0) * 0.4
+                    score += min(max(acc / 100.0, 0.0), 1.0) * 0.4
+                    score -= min(max(white / 100.0, 0.0), 1.0) * 0.1
+                    return max(0.0, min(1.0, score))
+                except Exception:
+                    return 0.0
+            for t in section_data.get("tables", []) or []:
+                conf = _tconf(t)
+                if conf < TABLE_CONF_THRESHOLD:
+                    tb64 = get_table_image_b64(t, results_base_dir)
+                    if tb64:
+                        try:
+                            sec_diags.append(make_event("07_reflow_section","info","table_image_attached","Included table image (low confidence)", {"table_index": t.get("table_index"), "confidence": conf }))
+                        except Exception:
+                            pass
+                        image_blocks.append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{tb64}"}})
+            # Figure images (optional via env)
+            if INCLUDE_FIGURE_IMAGES:
+                for f in section_data.get("figures", [])[:2]:
+                    fb64 = get_figure_image_b64(f, results_base_dir)
+                    if fb64:
+                        try:
+                            sec_diags.append(make_event("07_reflow_section","info","figure_image_attached","Included figure image", {"figure_id": f.get("figure_id") }))
+                        except Exception:
+                            pass
+                        image_blocks.append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{fb64}"}})
+            # Annotation images: include top-K by similarity/text length
+            def _ann_score(a):
+                try:
+                    sim = float(a.get("similarity") or 0.0)
+                except Exception:
+                    sim = 0.0
+                inside_len = 0
+                try:
+                    for blk in a.get("inside_blocks", []) or []:
+                        for ln in blk.get("lines", []) or []:
+                            for sp in ln.get("spans", []) or []:
+                                inside_len += len((sp.get("text") or "").strip())
+                except Exception:
+                    pass
+                return sim + 0.001 * min(inside_len, 2000)
+            anns = sorted(section_data.get("annotations", []) or [], key=_ann_score, reverse=True)[:MAX_ANNOTATION_IMAGES]
+            for a in anns:
                 ab64 = get_annotation_image_b64(a, results_base_dir)
                 if ab64:
                     image_blocks.append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{ab64}"}})
@@ -394,71 +454,154 @@ async def reflow_section_with_llm(section_data: Dict[str, Any], results_base_dir
 
 [Note: Images omitted because the selected model does not support vision]"""
 
-        system_prompt = dedent("""
-        You are a technical editor. Given raw PDF-extracted section text plus structured context (tables with pandas metrics, figure descriptions, and nearby annotations), produce a clean Markdown reflow of the section.
-        - Fix broken words, hyphenation across lines, and common OCR errors.
-        - Keep semantics but remove duplicated headers/footers.
-        - Respect original table intent; do not invent data. If tables are present, incorporate them as Markdown tables only if reliable; otherwise summarize them.
+        if SCHEMA_MODE == "reflow_json":
+            system_prompt = dedent("""
+            You are a technical reflow engine. Given a PDF-extracted section JSON, compact tables, and a few images, output a single reflowed section JSON that merges contiguous content for LLM use and DB storage.
 
-        Output strictly JSON with keys:
-          - "reflowed_text": "string (Markdown)"
-          - "ocr_corrections": {"erroneous": "corrected", ...}
-          - "improvements_made": "short description of the fixes"
-          - "summary": "1–3 sentences summarizing the section content"
-        Do not include explanations outside JSON.
-        """).strip()
+            Core requirements
+            - Merge contiguous text into coherent paragraphs (fix hyphenation, broken words, OCR joins). Remove duplicated headers/footers and page artifacts.
+            - Merge contiguous tables, including those that span pages, into one logical table positioned at the first fragment.
+            - Preserve reading order: top→bottom, left→right, across pages.
+            - Prefer provided tables/pandas content; use images only for context or disambiguation.
 
+            Data Integrity (strict)
+            - Tables: DO NOT change cell content. No spelling “corrections”, translations, unit changes, rounding, normalization, inference, or reformatting. Keep numeric formats as-is.
+            - Allowed in tables only: remove intra-cell newlines/excess spaces (join without changing character order); flatten multi-row headers by concatenation delimiters.
+            - Forbidden in tables: reordering rows/columns, filling blanks, deduping, computing totals.
+            - Text/Headings/Lists: Fix OCR splits/hyphenation and obvious typos only outside tables. Record fixes in ocr_corrections.
+
+            Return exactly this JSON (no prose, no fences):
+            {
+              "reflowed_json": {
+                "section_id": string,
+                "title": string,
+                "blocks": [
+                  { "type": "heading", "level": int, "text": string, "source": { "pages": [int], "block_ids": [string] } },
+                  { "type": "paragraph", "text": string, "source": { "pages": [int], "block_ids": [string] } },
+                  { "type": "list", "style": "bulleted|numbered", "items": [string, ...], "source": { "pages": [int], "block_ids": [string] } },
+                  { "type": "table", "title": string|null, "columns": [string,...], "rows": [[string|number|null,...],...],
+                    "confidence": { "status": "high|medium|low", "density": number|null, "source": "camelot+pandas" },
+                    "markdown": string|null, "markdown_provenance": "image"|null,
+                    "image_refs": [string,...], "source": { "table_indices": [int], "page_indices": [int] } },
+                  { "type": "figure", "title": string|null, "caption": string|null, "alt": string, "image_ref": string, "source": { "pages": [int], "block_ids": [string] } }
+                ]
+              },
+              "ocr_corrections": { "erroneous": "corrected", ... },
+              "improvements_made": string,
+              "summary": string
+            }
+
+            Notes
+            - Tables: build from provided columns+rows; ensure exact cell content; trim whitespace only. Include markdown only if pandas failed or confidence is low, in which case set markdown_provenance="image" and attach image_refs.
+            - Figures: include concise caption and set image_ref to uploaded filename.
+            - Source traceability: populate source.pages/block_ids when available; omit if unknown.
+            """).strip()
+        else:
+            system_prompt = dedent("""
+            You are a technical editor. Given raw PDF-extracted section text plus structured context (tables with pandas metrics, figure descriptions, and nearby annotations), produce a clean Markdown reflow of the section.
+            - Fix broken words, hyphenation across lines, and common OCR errors.
+            - Keep semantics but remove duplicated headers/footers.
+            - Data Integrity (strict for tables): DO NOT change cell content; if tables are present, include Markdown tables only when the table extraction is reliable (high density/consistent columns). Otherwise, summarize and reference the image. Record non-table OCR fixes in ocr_corrections.
+
+            Output strictly JSON with keys:
+              - "reflowed_text": "string (Markdown)"
+              - "ocr_corrections": {"erroneous": "corrected", ...}
+              - "improvements_made": "short description of the fixes"
+              - "summary": "1–3 sentences summarizing the section content"
+            Do not include explanations outside JSON.
+            """).strip()
+
+        # Limit context size for GPT-5 stability
+        if "gpt-5" in (LLM_MODEL or "").lower():
+            context_text = context_text[:3000]
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_content},
         ]
 
-        # Build Responses API user content (text + images)
-        responses_user_content: list[dict[str, Any]] = [{"type": "input_text", "text": context_text}]
+        # Attach images for Chat Completions (data URL parts)
         if include_images:
-            sec_b64 = get_section_image_b64(section_data, results_base_dir)
+            max_images = int(os.getenv("STAGE07_MAX_IMAGES", "6"))
+            attached = 0
+            def _attach_blocks(b64: Optional[str], kind: str, meta: dict):
+                nonlocal attached, image_blocks
+                if b64 and attached < max_images:
+                    image_blocks.append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}})
+                    try:
+                        sec_diags.append(make_event("07_reflow_section","info",f"{kind}_image_attached","Included image", meta))
+                    except Exception:
+                        pass
+                    attached += 1
             if sec_b64:
-                responses_user_content.append({"type": "input_image", "image_url": f"data:image/png;base64,{sec_b64}"})
-            for t in section_data.get("tables", [])[:2]:
-                tb64 = get_table_image_b64(t, results_base_dir)
-                if tb64:
-                    try:
-                        sec_diags.append(make_event("07_reflow_section","info","table_image_attached","Included table image", {"table_index": t.get("table_index") }))
-                    except Exception:
-                        pass
-                if tb64:
-                    responses_user_content.append({"type": "input_image", "image_url": f"data:image/png;base64,{tb64}"})
-            for f in section_data.get("figures", [])[:2]:
-                fb64 = get_figure_image_b64(f, results_base_dir)
-                if fb64:
-                    try:
-                        sec_diags.append(make_event("07_reflow_section","info","figure_image_attached","Included figure image", {"figure_id": f.get("figure_id") }))
-                    except Exception:
-                        pass
-                if fb64:
-                    responses_user_content.append({"type": "input_image", "image_url": f"data:image/png;base64,{fb64}"})
-            for a in section_data.get("annotations", [])[:2]:
-                ab64 = get_annotation_image_b64(a, results_base_dir)
-                if ab64:
-                    responses_user_content.append({"type": "input_image", "image_url": f"data:image/png;base64,{ab64}"})
+                _attach_blocks(sec_b64, "section", {"section_id": section_data.get("id")})
+            for t in section_data.get("tables", []) or []:
+                conf = _tconf(t)
+                if conf < TABLE_CONF_THRESHOLD:
+                    _attach_blocks(get_table_image_b64(t, results_base_dir), "table", {"table_index": t.get("table_index"), "confidence": conf})
+            if INCLUDE_FIGURE_IMAGES:
+                for f in section_data.get("figures", [])[:2]:
+                    _attach_blocks(get_figure_image_b64(f, results_base_dir), "figure", {"figure_id": f.get("figure_id")})
+            for a in anns:
+                _attach_blocks(get_annotation_image_b64(a, results_base_dir), "annotation", {"annotation_id": a.get("id")})
 
         # LLM call: prefer OpenAI Responses API for GPT-5 with reasoning
+        # Single path: Chat Completions via litellm_call
+        sid = os.getenv("LITELLM_SESSION_ID") or get_run_id()
+        # Instrumentation: write request summary
         try:
-            from litellm import aresponses as _aresponses  # type: ignore
+            logs_dir = results_base_dir / "07_reflow_section" / "logs"
+            logs_dir.mkdir(parents=True, exist_ok=True)
+            def _image_bytes(data_url: str) -> int:
+                try:
+                    if not isinstance(data_url, str) or "," not in data_url:
+                        return 0
+                    b64 = data_url.split(",", 1)[1]
+                    # Approximate decoded length
+                    return int(len(b64) * 3 / 4)
+                except Exception:
+                    return 0
+            req_info = {
+                "model": LLM_MODEL,
+                "context_length": len(context_text),
+                "images_count": sum(1 for c in responses_user_content if c.get("type") == "input_image"),
+                "image_bytes": [
+                    _image_bytes(c.get("image_url", "")) for c in responses_user_content if c.get("type") == "input_image"
+                ],
+                "session_id": sid,
+            }
+            (logs_dir / f"request_info_{section_data.get('id','section')}.json").write_text(json.dumps(req_info, indent=2))
         except Exception:
-            _aresponses = None  # type: ignore
-        # Disable Responses API path for simplicity/compatibility
-        _aresponses = None
+            pass
+        # Attempt 1: Chat Completions with standardized messages (system + user text + image_url data URL)
         try:
-            results = await litellm_call([{"model": LLM_MODEL, "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_content}
-                    ], "response_format": {"type": "json_object"}, "max_tokens": 1200, "timeout": 60, "stream": False}], wrap_json=False, concurrency=1, desc="Reflow Section")
+            # Build image data URL for section image if present and attach to messages
+            image_data_url = None
+            try:
+                # prefer section image
+                if sec_b64:
+                    image_data_url = f"data:image/png;base64,{sec_b64}"
+            except Exception:
+                image_data_url = None
+            system_text = (
+                "You are a strict JSON reflow engine. Return ONLY a JSON object with keys: "
+                "reflowed_json, ocr_corrections, improvements_made, summary. No code fences. "
+                "Requirements: reflowed_json.blocks must preserve reading order and include: "
+                "(a) a single merged table block when tables are fragmented/continued. The table title MUST start with 'INFERRED:' (e.g., INFERRED: …). Use the nearby text to form a concise title but always prefix with INFERRED:. The table must include 'columns' and 'rows' consistent with provided context. When column hints are provided in context, use those exact column names verbatim and in order; do NOT rename or substitute synonyms. Do not alter cell values; "
+                "(b) a figure block with a non-empty title (literal or INFERRED), short caption, and image_ref when applicable. "
+                "Always provide ocr_corrections and improvements_made; include summary."
+            )
+            messages = build_chat_messages(system_text, context_text, image_data_url)
+            extras = build_chat_extras(LLM_MODEL)
+            call_params = {"model": LLM_MODEL, "messages": messages, **extras, "timeout": 60}
+            results = await litellm_call([call_params], wrap_json=False, concurrency=1, desc="Reflow Section", session_id=sid)
             resp = results[0] if results else ""
+            try:
+                (logs_dir / f"response_strict_{section_data.get('id','section')}.json").write_text(
+                    json.dumps(resp, default=str, indent=2) if isinstance(resp, dict) else str(resp)
+                )
+            except Exception:
+                pass
         except Exception as e:
-            if not allow_fallback:
-                typer.secho(f"Stage 07 LLM call failed: {e}", fg=typer.colors.RED)
-                raise
             resp = ""
 
         # Normalize response to get content
@@ -505,81 +648,68 @@ async def reflow_section_with_llm(section_data: Dict[str, Any], results_base_dir
                     content = None
 
         if not isinstance(content, str) or not content.strip():
-            if not allow_fallback:
-                typer.secho("Stage 07: LLM returned empty content.", fg=typer.colors.RED)
-                raise RuntimeError("LLM returned empty content")
-            logger.warning("Reflow LLM returned empty content; falling back to pass-through text.")
+            # Attempt 2: Relaxed mode (no response_format). Parse free-form via clean_json_string downstream.
             try:
-                sec_diags.append(make_event("07_reflow_section","warning","llm_empty_content","LLM returned empty content", {}))
+                # Relaxed: same messages, no response_format extras
+                call_params = {"model": LLM_MODEL, "messages": messages, "timeout": 60}
+                results = await litellm_call([call_params], wrap_json=False, concurrency=1, desc="Reflow Section (relaxed)", session_id=sid)
+                resp2 = results[0] if results else ""
+                try:
+                    (logs_dir / f"response_relaxed_{section_data.get('id','section')}.json").write_text(
+                        json.dumps(resp2, default=str, indent=2) if isinstance(resp2, dict) else str(resp2)
+                    )
+                except Exception:
+                    pass
             except Exception:
-                pass
-            base_text = (
-                section_data.get("merged_text")
-                or section_data.get("source_text")
-                or section_data.get("raw_text", "")
-            )
-            out = {
-                **section_data,
-                "reflowed_text": base_text,
-                "ocr_corrections": {},
-                "improvements_made": "Fallback: empty LLM output",
-                "reflow_status": "fallback",
-            }
-            # attach per-section diagnostics
-            try:
-                md = out.setdefault("metadata", {})
-                md.setdefault("diagnostics", []).extend(sec_diags)
-            except Exception:
-                pass
-            if STAGE07_DEBUG:
-                out["quick_summary"] = (section_data.get("merged_text") or section_data.get("raw_text", ""))[:280]
-            return out
+                resp2 = ""
+            content = resp2 if isinstance(resp2, str) else None
+        if not isinstance(content, str) or not content.strip():
+            typer.secho("Stage 07: LLM returned empty content.", fg=typer.colors.RED)
+            raise RuntimeError("Stage 07: LLM returned empty content. Verify API keys and Chat Completions access; inspect logs in 07_reflow_section/logs for request_info and response dumps.")
 
-        cleaned = clean_json_string(content)
+        # Parse/repair JSON robustly
         try:
-            result = json.loads(cleaned) if isinstance(cleaned, str) else cleaned
-            if not isinstance(result, dict):
-                raise ValueError("LLM JSON not an object")
+            parsed = clean_json_string(content, return_dict=True)
+            if isinstance(parsed, dict):
+                result = parsed
+            elif isinstance(parsed, list):
+                # If the model returned a top-level list, try using the first object
+                result = parsed[0] if parsed and isinstance(parsed[0], dict) else {"reflowed_text": content}
+            elif isinstance(parsed, str):
+                tmp = json.loads(parsed)
+                result = tmp if isinstance(tmp, dict) else {"reflowed_text": content}
+            else:
+                result = {"reflowed_text": content}
         except Exception:
-            logger.warning("Invalid JSON from LLM; using raw text fallback")
+            logger.warning("Invalid JSON from LLM; failing per policy (no fallback)")
             try:
                 sec_diags.append(make_event("07_reflow_section","warning","llm_invalid_json","LLM returned invalid JSON", {}))
             except Exception:
                 pass
-            base_text = (
-                section_data.get("merged_text")
-                or section_data.get("source_text")
-                or section_data.get("raw_text", "")
-            )
-            out = {
-                **section_data,
-                "reflowed_text": base_text,
-                "ocr_corrections": {},
-                "improvements_made": "Fallback: invalid LLM JSON",
-                "reflow_status": "fallback",
-            }
-            # attach per-section diagnostics
-            try:
-                md = out.setdefault("metadata", {})
-                md.setdefault("diagnostics", []).extend(sec_diags)
-            except Exception:
-                pass
-            try:
-                md = out.setdefault("metadata", {})
-                md.setdefault("diagnostics", []).extend(sec_diags)
-            except Exception:
-                pass
-            if STAGE07_DEBUG:
-                out["quick_summary"] = (section_data.get("merged_text") or section_data.get("raw_text", ""))[:280]
-            return out
+            raise ValueError("Stage 07: LLM returned invalid JSON. See logs in 07_reflow_section/logs and verify the model returns strict JSON (no code fences) matching schema mode expectations.")
 
-        out = {**section_data}
-        out.update({
-            "reflowed_text": result.get("reflowed_text", section_data.get("raw_text", "")),
-            "ocr_corrections": result.get("ocr_corrections", {}),
-            "improvements_made": result.get("improvements_made", ""),
-            "reflow_status": "success",
-        })
+        # Enforce schema presence; do not accept wrappers or missing keys
+        if SCHEMA_MODE == "reflow_json":
+            if not (isinstance(result, dict) and result.get("reflowed_json")):
+                raise ValueError("Stage 07: Expected 'reflowed_json' in model output for schema mode but it was missing. Ensure the prompt instructs returning the exact schema.")
+            out = {**section_data}
+            out.update({
+                "reflowed_json": result.get("reflowed_json"),
+                "ocr_corrections": result.get("ocr_corrections", {}),
+                "improvements_made": result.get("improvements_made", ""),
+                "summary": result.get("summary", ""),
+                "reflow_status": "success",
+            })
+        else:
+            if not (isinstance(result, dict) and result.get("reflowed_text")):
+                raise ValueError("Stage 07: Expected 'reflowed_text' in model output but it was missing. Ensure the prompt instructs returning the exact keys.")
+            out = {**section_data}
+            out.update({
+                "reflowed_text": result.get("reflowed_text"),
+                "ocr_corrections": result.get("ocr_corrections", {}),
+                "improvements_made": result.get("improvements_made", ""),
+                "reflow_status": "success",
+            })
         if STAGE07_DEBUG:
             out["quick_summary"] = result.get("summary", (section_data.get("merged_text") or section_data.get("raw_text", ""))[:280])
         try:
@@ -589,35 +719,14 @@ async def reflow_section_with_llm(section_data: Dict[str, Any], results_base_dir
             pass
         return out
     except Exception as e:
-        if not allow_fallback:
-            typer.secho(f"Stage 07: LLM call failed: {e}", fg=typer.colors.RED)
-            raise
+        # Always fail (no fallback)
         try:
             info = classify_llm_error(e)
-            sec_diags.append(make_event("07_reflow_section","error", info["code"], info["message"], {}))
+            sec_diags.append(make_event("07_reflow_section","error", info.get("code","llm_error"), info.get("message", str(e)), {}))
         except Exception:
             pass
-        logger.warning(f"Reflow LLM call failed; using fallback: {e}")
-        base_text = (
-            section_data.get("merged_text")
-            or section_data.get("source_text")
-            or section_data.get("raw_text", "")
-        )
-        out = {
-            **section_data,
-            "reflowed_text": base_text,
-            "ocr_corrections": {},
-            "improvements_made": "Fallback: exception during LLM call",
-            "reflow_status": "fallback",
-        }
-        try:
-            md = out.setdefault("metadata", {})
-            md.setdefault("diagnostics", []).extend(sec_diags)
-        except Exception:
-            pass
-        if STAGE07_DEBUG:
-            out["quick_summary"] = (section_data.get("merged_text") or section_data.get("raw_text", ""))[:280]
-        return out
+        typer.secho(f"Stage 07: LLM call failed: {e}", fg=typer.colors.RED)
+        raise RuntimeError("Stage 07 failed: LLM call did not return usable JSON. Check 07_reflow_section/logs, verify API keys, and confirm the configured Chat model is reachable.")
 
 def consolidate_data(
     sections_path: Path,
@@ -692,6 +801,107 @@ def consolidate_data(
         section['tables'] = tables_by_section.get(sid, [])
         section['figures'] = figures_by_section.get(sid, [])
 
+        # Merge tables within the section when they represent header/body or continued parts across pages
+        def _rows_cols(t: Dict[str, Any]) -> tuple[int, int]:
+            m = t.get('pandas_metrics') or {}
+            shape = m.get('shape') or [0, 0]
+            try:
+                return int(shape[0] or 0), int(shape[1] or 0)
+            except Exception:
+                return 0, 0
+        def _h_iou(a: list[float], b: list[float]) -> float:
+            try:
+                ax0, _, ax1, _ = a
+                bx0, _, bx1, _ = b
+                inter = max(0.0, min(float(ax1), float(bx1)) - max(float(ax0), float(bx0)))
+                uni = max(float(ax1), float(bx1)) - min(float(ax0), float(bx0))
+                return float(inter/uni) if uni > 0 else 0.0
+            except Exception:
+                return 0.0
+        def _metrics_for(df: pd.DataFrame) -> Dict[str, Any]:
+            try:
+                if df is None or df.empty:
+                    return {"shape": [0, 0], "data_density": 0.0, "columns": []}
+                total_cells = int(df.size)
+                non_empty = int(df.astype(str).ne('').sum().sum())
+                return {
+                    "shape": [int(df.shape[0]), int(df.shape[1])],
+                    "columns": [str(c) for c in df.columns],
+                    "dtypes": {str(k): str(v) for k, v in df.dtypes.to_dict().items()},
+                    "null_counts": {str(k): int(v) for k, v in df.isnull().sum().to_dict().items()},
+                    "total_cells": total_cells,
+                    "non_empty_cells": non_empty,
+                    "data_density": float(non_empty / total_cells) if total_cells > 0 else 0.0,
+                }
+            except Exception:
+                return {"shape": [0, 0], "data_density": 0.0, "columns": []}
+
+        def _merge_section_tables(sec: Dict[str, Any]) -> None:
+            tabs = list(sec.get('tables') or [])
+            if len(tabs) <= 1:
+                return
+            # Sort by page then by table_index
+            try:
+                tabs.sort(key=lambda t: (int(t.get('page_index', 0) or 0), int(t.get('table_index', 0) or 0)))
+            except Exception:
+                pass
+            merged: list[Dict[str, Any]] = tabs[:]
+            i = 0
+            while i < len(merged) - 1:
+                t1, t2 = merged[i], merged[i+1]
+                r1, c1 = _rows_cols(t1)
+                r2, c2 = _rows_cols(t2)
+                if c1 > 0 and c1 == c2 and (t2.get('page_index', 0) <= (t1.get('page_index', 0) or 0) + 1):
+                    iou = _h_iou(t1.get('bbox', []) or [0,0,0,0], t2.get('bbox', []) or [0,0,0,0])
+                    if iou >= 0.2:
+                        # Case A: header (1 row) + body (>=2 rows)
+                        if r1 == 1 and r2 >= 2:
+                            try:
+                                hdr = pd.DataFrame(t1.get('pandas_df') or [])
+                                body = pd.DataFrame(t2.get('pandas_df') or [])
+                                # Apply header row as column names if shape aligns
+                                if len(body.columns) == len(hdr.columns):
+                                    new_cols = [str(x).strip() or str(j) for j, x in enumerate(hdr.iloc[0].tolist())]
+                                    body.columns = new_cols
+                                t2['pandas_df'] = body.to_dict('records')
+                                # Recompute metrics
+                                t2['pandas_metrics'] = _metrics_for(body)
+                                # Drop t1, keep t2 as merged
+                                merged.pop(i)
+                                continue  # stay at same index; t2 now occupies position i
+                            except Exception:
+                                pass
+                        # Case B: both bodies with same columns -> concatenate
+                        if r1 >= 2 and r2 >= 2:
+                            try:
+                                df1 = pd.DataFrame(t1.get('pandas_df') or [])
+                                df2 = pd.DataFrame(t2.get('pandas_df') or [])
+                                if len(df1.columns) == len(df2.columns):
+                                    out = pd.concat([df1, df2], ignore_index=True)
+                                    t1['pandas_df'] = out.to_dict('records')
+                                    t1['pandas_metrics'] = _metrics_for(out)
+                                    # Drop t2
+                                    merged.pop(i+1)
+                                    # do not advance i; re-evaluate chaining merges
+                                    continue
+                            except Exception:
+                                pass
+                i += 1
+            # If multiple remain, keep the densest
+            if len(merged) > 1:
+                def _density(t: Dict[str, Any]) -> float:
+                    m = t.get('pandas_metrics') or {}
+                    try:
+                        return float(m.get('data_density') or 0.0)
+                    except Exception:
+                        return 0.0
+                keep = max(merged, key=_density)
+                sec['tables'] = [keep]
+            else:
+                sec['tables'] = merged
+
+        _merge_section_tables(section)
+
         # Attach relevant annotations by page range, then rank by semantic similarity (text-only fallback)
         page_start = int(section.get("page_start", 0) or 0)
         page_end = int(section.get("page_end", page_start) or page_start)
@@ -749,6 +959,110 @@ def consolidate_data(
                 pass
 
     return sections_data
+
+def _structured_fallback(section_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Build a deterministic structured reflow (reflow_json) without LLM.
+
+    - Merges consecutive text blocks into paragraphs
+    - Converts pandas tables to table blocks (no markdown)
+    - Adds figure blocks with captions from ai_description when available
+    """
+    def _clean_lines(text: str) -> str:
+        if not text:
+            return ""
+        lines = [ln.strip() for ln in str(text).splitlines() if ln.strip()]
+        return " ".join(lines)
+
+    out: Dict[str, Any] = {
+        "section_id": section_data.get("id") or section_data.get("section_id") or "section",
+        "title": section_data.get("title") or section_data.get("display_title") or "Untitled",
+        "blocks": [],
+    }
+
+    # Merge consecutive Text blocks into paragraphs
+    para_text: List[str] = []
+    para_pages: List[int] = []
+    para_ids: List[str] = []
+    for b in section_data.get("blocks", []) or []:
+        btype = b.get("block_type") or b.get("type")
+        if btype == "Text":
+            t = _clean_lines(b.get("text") or "")
+            if t:
+                para_text.append(t)
+                try:
+                    para_pages.append(int(b.get("page", b.get("page_idx", -1))))
+                except Exception:
+                    pass
+                if b.get("id"):
+                    para_ids.append(str(b.get("id")))
+            continue
+        # flush paragraph when hitting a non-text block
+        if para_text:
+            out["blocks"].append({
+                "type": "paragraph",
+                "text": " ".join(para_text),
+                "source": {"pages": sorted(list({p for p in para_pages if isinstance(p, int) and p >= 0})), "block_ids": para_ids},
+            })
+            para_text, para_pages, para_ids = [], [], []
+        # carry through other block types only as markers (figures handled below)
+    if para_text:
+        out["blocks"].append({
+            "type": "paragraph",
+            "text": " ".join(para_text),
+            "source": {"pages": sorted(list({p for p in para_pages if isinstance(p, int) and p >= 0})), "block_ids": para_ids},
+        })
+
+    # Tables → table blocks using pandas data
+    for t in section_data.get("tables", []) or []:
+        pm = t.get("pandas_metrics") or {}
+        cols = list(pm.get("columns") or [])
+        rows_raw = t.get("pandas_df") or []
+        rows = []
+        if rows_raw and cols:
+            for r in rows_raw:
+                rows.append([r.get(c, None) for c in cols])
+        conf = "high"
+        try:
+            density = float(pm.get("data_density") or 0.0)
+            if density < 0.9:
+                conf = "medium"
+        except Exception:
+            density = None  # type: ignore
+        tbl_block = {
+            "type": "table",
+            "title": None,
+            "columns": cols,
+            "rows": rows,
+            "confidence": {"status": conf, "density": density if isinstance(density, (int, float)) else None, "source": "camelot+pandas"},
+            "markdown": None,
+            "markdown_provenance": None,
+            "image_refs": [],
+            "source": {
+                "table_indices": [t.get("table_index")] if t.get("table_index") is not None else [],
+                "page_indices": [t.get("page_index")] if t.get("page_index") is not None else [],
+            },
+        }
+        out["blocks"].append(tbl_block)
+
+    # Figures → figure blocks
+    for f in section_data.get("figures", []) or []:
+        cap = (f.get("caption") or f.get("ai_description") or "").strip() or None
+        img_ref = f.get("image_path") or None
+        try:
+            page_idx = int(f.get("page", f.get("page_idx", -1)))
+        except Exception:
+            page_idx = -1
+        fig_block = {
+            "type": "figure",
+            "title": None,
+            "caption": cap,
+            "alt": cap or "Figure",
+            "image_ref": img_ref,
+            "source": {"pages": [page_idx] if page_idx >= 0 else [], "block_ids": []},
+        }
+        out["blocks"].append(fig_block)
+
+    return out
 
 # --- Main Orchestration and CLI ---
 @app.command()

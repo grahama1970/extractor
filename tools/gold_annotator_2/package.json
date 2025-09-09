@@ -1,0 +1,28 @@
+{
+  "name": "gold-annotator-2",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "next dev -p 3003 -H 0.0.0.0",
+    "build": "next build",
+    "start": "next start -p 3002",
+    "lint": "next lint || echo 'lint skipped'",
+    "type-check": "tsc -p tsconfig.json",
+    "cdp:capture": "node scripts/cdp_capture.mjs"
+  },
+  "dependencies": {
+    "next": "14.2.5",
+    "pdfjs-dist": "4.6.82",
+    "react": "18.2.0",
+    "react-dom": "18.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "20.10.6",
+    "@types/react": "18.2.45",
+    "@types/react-dom": "18.2.18",
+    "eslint": "8.57.0",
+    "eslint-config-next": "14.2.5",
+    "puppeteer-core": "^22.15.0",
+    "typescript": "5.4.2"
+  }
+}

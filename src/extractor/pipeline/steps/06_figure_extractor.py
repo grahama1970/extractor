@@ -62,10 +62,7 @@ except Exception:
 
 from rich.console import Console
 from extractor.pipeline.utils.diagnostics import start_resource_sampler, stop_resource_sampler, get_run_id, iso_now, make_event, snapshot_resources, build_stage_timings
-
-# Direct, non-abstracted, top-level imports
-import litellm
-from tenacity import retry, stop_after_attempt, wait_random_exponential
+from extractor.pipeline.utils.litellm_call import litellm_call
 from extractor.pipeline.utils.litellm_cache import initialize_litellm_cache
 
 # --- Initialization & Configuration ---
@@ -88,90 +85,43 @@ console = Console()
 # Make key parameters configurable via environment variables
 VERTICAL_PADDING_RATIO = float(os.getenv("FIGURE_VERTICAL_PADDING", "0.2"))
 # Use local model for simple image descriptions (2-3 sentences)
-VLM_MODEL = os.getenv("LITELLM_VLM_MODEL", "openai/gpt-5-mini")
+VLM_MODEL = os.getenv("LITELLM_VLM_MODEL", "gemini/gemini-2.5-flash")
 
 app = typer.Typer(help="Robustly extracts and describes figures from a PDF.")
 
 # --- Core Functions ---
 
-# ADDED: Tenacity decorator for robustness
-@retry(wait=wait_random_exponential(min=1, max=30), stop=stop_after_attempt(3))
 async def describe_image_with_llm(image_data: bytes, context: str = "") -> str:
-    """Describe an image using an LLM via LiteLLM, with automatic retries (vision if supported)."""
-    try:
-        # Minimal, in-function prompt to avoid global constants churn
-        system_prompt = textwrap.dedent("""
-            You are a helpful assistant that writes concise technical figure descriptions (2–3 sentences).
-            Focus on what the figure shows, notable labels, axes, and relationships. Avoid speculation.
-        """).strip()
-
-        # Heuristic: does configured model support vision?
-        model = VLM_MODEL
-        supports_vision = any(
-            kw in (model or "").lower()
-            for kw in ("gpt-5", "gpt-4o", "gpt-4.1", "gpt-4-vision", "claude-3", "gemini", "llava", "qwen-vl", "grok-vision")
-        )
-
-        if supports_vision:
-            b64 = base64.b64encode(image_data).decode("utf-8")
-            user_content: Any = [
-                {"type": "text", "text": f"Context: {context[:2000]}"},
-                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}}
-            ]
-        else:
-            # Fallback to text-only description using nearby text only
-            user_content = f"Context-only description request (no vision available for model '{model}'): {context[:4000]}"
-
-        messages = [
+    """Describe an image via a single LiteLLM Chat call (Router.acompletion under the hood)."""
+    system_prompt = textwrap.dedent(
+        """
+        You are a helpful assistant that writes concise technical figure descriptions (2–3 sentences).
+        Focus on what the figure shows, notable labels, axes, and relationships. Avoid speculation.
+        """
+    ).strip()
+    b64 = base64.b64encode(image_data).decode("utf-8")
+    user_content = [
+        {"type": "text", "text": f"Context: {context[:2000]}"},
+        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
+    ]
+    model = (os.getenv("LITELLM_VLM_MODEL") or VLM_MODEL or "").strip()
+    params: Dict[str, Any] = {
+        "model": model,
+        "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_content},
-        ]
-
-        # Try strict JSON response format? Not needed; we want a short free-form description.
-        _kwargs: Dict[str, Any] = {
-            "model": model,
-            "messages": messages,
-            "max_tokens": 256,
-            "timeout": 30,
-            "stream": False,
-        }
-        if "gpt-5" not in (model or "").lower():
-            _kwargs["temperature"] = 0.2
-        resp = await litellm.acompletion(**_kwargs)
-
-        # Normalize response (object vs dict)
-        content: Optional[str] = None
-        if isinstance(resp, dict):
-            try:
-                choices = resp.get("choices") or []
-                if choices:
-                    message = choices[0].get("message") or {}
-                    content = message.get("content")
-            except Exception:
-                content = None
-        else:
-            choices_obj = getattr(resp, "choices", None)
-            if choices_obj:
-                try:
-                    choice0 = choices_obj[0]
-                    msg = getattr(choice0, "message", None)
-                    if msg is not None and getattr(msg, "content", None) is not None:
-                        content = msg.content  # type: ignore[attr-defined]
-                    else:
-                        text_attr = getattr(choice0, "text", None)
-                        if isinstance(text_attr, str):
-                            content = text_attr
-                except Exception:
-                    content = None
-
-        if isinstance(content, str) and content.strip():
-            return content.strip()
-
-        logger.warning("VLM returned empty or non-text content; using fallback description.")
-        return "Figure present; automated description unavailable due to model response. Please review the nearby text context."
-    except Exception as e:
-        logger.error(f"describe_image_with_llm failed: {e}")
-        raise
+        ],
+        "max_tokens": 256,
+        "timeout": 30,
+    }
+    # light temperature default
+    params["temperature"] = 0.2
+    sid = os.getenv("LITELLM_SESSION_ID") or get_run_id()
+    out = await litellm_call([params], desc="figure_description", session_id=sid)
+    content = (out[0] if out else "")
+    if isinstance(content, str) and content.strip():
+        return content.strip()
+    raise RuntimeError("VLM returned empty content for figure description")
 
 async def extract_and_describe_figure(
     pdf_path: Path,

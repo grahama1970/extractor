@@ -1,0 +1,23 @@
+2025-08-02 09:31:01 | INFO     | __main__:main:564 - Running in WORKING mode...
+2025-08-02 09:31:01 | INFO     | __main__:working_usage:419 - === Running Working Usage Examples ===
+2025-08-02 09:31:01 | INFO     | __main__:extract_annotations_from_pdf_raw:94 - Loading cached annotations from: /home/graham/workspace/experiments/extractor/tmp/pipeline_run/annotations.json
+2025-08-02 09:31:01 | INFO     | __main__:working_usage:442 - ✓ Saved output to /home/graham/workspace/experiments/extractor/outputs/poc_00_annotations.json
+2025-08-02 09:31:01 | INFO     | __main__:working_usage:459 - ✓ Comparison report saved to /home/graham/workspace/experiments/extractor/reports/poc_00_comparison_report.md
+2025-08-02 09:31:01 | INFO     | __main__:working_usage:462 - 
+=== Comparison Summary ===
+2025-08-02 09:31:01 | INFO     | __main__:working_usage:463 - Gold standard annotations: 5
+2025-08-02 09:31:01 | INFO     | __main__:working_usage:464 - Extracted annotations: 5
+2025-08-02 09:31:01 | SUCCESS  | __main__:working_usage:470 - ✅ Annotation counts match!
+2025-08-02 09:31:01 | INFO     | __main__:working_usage:475 - 
+✓ Extracted 5 annotations
+2025-08-02 09:31:01 | INFO     | __main__:working_usage:476 - ✓ Types: {'merge_table': 2, 'section_header_correction': 2, 'important_area': 1}
+2025-08-02 09:31:01 | ERROR    | annotation_storage:_init_connection:129 - Failed to connect to ArangoDB: Invalid URL 'localhost/_db/_system/_api/database': No scheme supplied. Perhaps you meant https://localhost/_db/_system/_api/database?
+2025-08-02 09:31:01 | INFO     | annotation_storage:_create_indexes:159 - Created 11 indexes
+2025-08-02 09:31:01 | INFO     | annotation_storage:_create_bm25_view:188 - Created BM25 search view for annotations
+2025-08-02 09:31:01 | INFO     | __main__:working_usage:483 - ✓ Database initialized: {'success': True, 'collections_created': [], 'indexes_created': ['annotations.pdf_hash', 'annotations.page', 'annotations.instruction', 'annotations.created_at', 'annotations.bbox', 'annotation_patterns.pattern_type', 'annotation_patterns.confidence', 'annotation_patterns.usage_count', 'annotation_effectiveness.annotation_id', 'annotation_effectiveness.success_rate', 'annotation_effectiveness.last_used'], 'bm25_view': {'success': True, 'view': 'annotation_search_view'}}
+2025-08-02 09:31:01 | INFO     | annotation_storage:_detect_annotation_patterns:406 - Detected 2 annotation patterns
+2025-08-02 09:31:01 | WARNING  | annotation_storage:_detect_annotation_patterns:407 - Pattern storage not implemented - patterns not persisted
+2025-08-02 09:31:01 | INFO     | __main__:working_usage:490 - ✓ Stored 5 annotations in ArangoDB
+2025-08-02 09:31:01 | WARNING  | annotation_storage:search_similar_annotations:449 - Database not connected - returning empty results
+2025-08-02 09:31:01 | INFO     | __main__:working_usage:494 - ✓ Search found 0 results for 'table'
+2025-08-02 09:31:01 | INFO     | __main__:working_usage:496 - ✓ All working_usage tests passed!

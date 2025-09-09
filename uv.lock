@@ -1537,7 +1537,7 @@ requires-dist = [
     { name = "json-repair", specifier = ">=0.44.1" },
     { name = "jsonpath-ng", specifier = ">=1.7.0" },
     { name = "jsonpickle", specifier = ">=4.1.1" },
-    { name = "litellm", directory = "../litellm" },
+    { name = "litellm", specifier = ">=1.74.7" },
     { name = "loguru", specifier = ">=0.7.0,<0.8" },
     { name = "lxml", specifier = ">=5.3.0" },
     { name = "mammoth", marker = "extra == 'full'", specifier = ">=1.9.0,<2" },
@@ -1622,7 +1622,6 @@ dependencies = [
     { name = "numpy", version = "2.3.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "packaging" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/5c/f4/7c2136f4660ca504266cc08b38df2aa1db14fea93393b82e099ff34d7290/faiss_cpu-1.11.0.post1.tar.gz", hash = "sha256:06b1ea9ddec9e4d9a41c8ef7478d493b08d770e9a89475056e963081eed757d1", size = 70543, upload-time = "2025-07-15T09:15:02.127Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c5/29/b5c3fb0815449a5c7f1dd507da68ab30ab7a2a497178d5b4e365799f7670/faiss_cpu-1.11.0.post1-cp310-cp310-macosx_13_0_x86_64.whl", hash = "sha256:e079d44ea22919f6477fea553b05854c68838ab553e1c6b1237437a8becdf89d", size = 7886451, upload-time = "2025-07-15T09:13:32.159Z" },
     { url = "https://files.pythonhosted.org/packages/b9/85/e526467ac75ef915b1444d5a1e9ef7af54d73242f923e664fffc2db65d54/faiss_cpu-1.11.0.post1-cp310-cp310-macosx_14_0_arm64.whl", hash = "sha256:4ded0c91cb67f462ae00a4d339718ea2fbb23eedbf260c3a07de77c32c23205a", size = 3308139, upload-time = "2025-07-15T09:13:34.033Z" },
@@ -2962,7 +2961,7 @@ wheels = [
 
 [[package]]
 name = "litellm"
-version = "1.75.8"
+version = "1.76.0"
 source = { directory = "../litellm" }
 dependencies = [
     { name = "aiohttp" },

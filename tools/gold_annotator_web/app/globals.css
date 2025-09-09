@@ -1,0 +1,15 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Label color tokens (customizable by designers) */
+:root {
+  --label-color-section: #8b5cf6;      /* violet-500 */
+  --label-color-table: #10b981;        /* emerald-500 */
+  --label-color-figure: #f59e0b;       /* amber-500 */
+  --label-color-requirements: #0ea5e9; /* sky-500 */
+  --label-color-text: #f43f5e;         /* rose-500 */
+  --label-color-default: #64748b;      /* slate-500 */
+}
+
+html, body, :root { height: 100%; }

@@ -19,7 +19,8 @@ CLI (main)
 - `run --annotations <01_annotations.json> -o <results_dir> [--mode insert|bridge|both]`
 
 Environment
-- `ARANGO_HOST/PORT/USER/PASSWORD/DATABASE`, `ARANGO_ANNOTATIONS_COLLECTION`, `GRAPH_VERTEX_COLLECTION`, `GRAPH_EDGE_COLLECTION`, `GRAPH_NAME`.
+- Arango: `ARANGO_HOST/PORT/USER/PASSWORD/DATABASE` (use a dedicated test DB during development).
+- Collections: `ARANGO_ANNOTATIONS_COLLECTION`, `GRAPH_VERTEX_COLLECTION`, `GRAPH_EDGE_COLLECTION`, `GRAPH_NAME`.
 
 Downstream
 - Enables Stage 07 hybrid search augmentation and future graph traversals.

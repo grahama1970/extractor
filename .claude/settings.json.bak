@@ -1,0 +1,24 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c 'log_dir=\"$HOME/.claude/logs/extract-pdf\"; mkdir -p \"$log_dir\"; ts=$(date +%Y%m%d_%H%M%S); echo \"$CLAUDE_STDOUT\" >> \"$log_dir/${ts}_stdout.log\"; echo \"$CLAUDE_STDERR\" >> \"$log_dir/${ts}_stderr.log\"; echo \"[$(date)] cmd=$CLAUDE_CMD exit=$CLAUDE_EXIT_CODE\" >> \"$log_dir/commands.log\";'"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c 'log_dir=\"$HOME/.claude/logs/extract-pdf\"; mkdir -p \"$log_dir\"; ts=$(date +%Y%m%d_%H%M%S); echo \"$CLAUDE_STDOUT\" >> \"$log_dir/${ts}_stdout.log\"; echo \"$CLAUDE_STDERR\" >> \"$log_dir/${ts}_stderr.log\"; echo \"[$(date)] cmd=$CLAUDE_CMD exit=$CLAUDE_EXIT_CODE\" >> \"$log_dir/commands.log\";'"
+          }
+        ]
+      }
+    ]
+  }
+}

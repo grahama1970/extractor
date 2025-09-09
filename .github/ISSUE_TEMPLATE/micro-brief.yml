@@ -1,0 +1,43 @@
+name: Micro‑Brief
+description: Small, feel‑first UI change for the PDF annotator
+labels: ["micro-brief","status:proposed"]
+body:
+  - type: input
+    id: route
+    attributes:
+      label: Route/Element
+      placeholder: "/main · HUD"
+    validations:
+      required: true
+  - type: textarea
+    id: friction
+    attributes:
+      label: Friction
+      description: What feels wrong now (1 sentence). Attach 1 screenshot/GIF below.
+    validations:
+      required: true
+  - type: textarea
+    id: target
+    attributes:
+      label: Target Feel
+      description: What should it feel like (1–2 sentences, include numbers if helpful).
+    validations:
+      required: true
+  - type: checkboxes
+    id: acceptance
+    attributes:
+      label: Acceptance
+      options:
+        - label: Item 1
+        - label: Item 2
+        - label: Item 3
+  - type: textarea
+    id: verify
+    attributes:
+      label: Verify (60–120s)
+      description: Steps + expected results.
+  - type: textarea
+    id: assets
+    attributes:
+      label: Assets
+      description: Attach 1–2 screenshots/GIFs here.

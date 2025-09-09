@@ -1,0 +1,8 @@
+2025-08-02 09:31:47 | INFO     | __main__:main:887 - Running in WORKING mode...
+2025-08-02 09:31:47 | INFO     | __main__:working_usage:760 - === Running Working Usage Examples ===
+2025-08-02 09:31:47 | INFO     | poc_01_marker_extraction:extract_with_marker:79 - Extracting PDF with marker: /home/graham/workspace/experiments/extractor/proof_of_concept/BHT_CV32A65X_marked.pdf
+2025-08-02 09:31:47 | INFO     | poc_01_marker_extraction:extract_with_marker:90 - Using cached extraction from: /home/graham/workspace/experiments/extractor/tmp/raw_marker_blocks.json
+2025-08-02 09:31:47 | INFO     | __main__:load_annotations_from_poc00:668 - Loading annotations from POC 00 output: /home/graham/workspace/experiments/extractor/tmp/annotations.json
+2025-08-02 09:31:47 | INFO     | __main__:relabel_suspicious_blocks:615 - Found 0 suspicious blocks
+2025-08-02 09:31:47 | WARNING  | __main__:working_usage:794 - No suspicious blocks found - this is expected for clean PDFs
+2025-08-02 09:31:47 | SUCCESS  | __main__:working_usage:801 - ✓ All working_usage tests passed!

@@ -1,0 +1,67 @@
+{
+  "reflowed_json": {
+    "id": "section_0",
+    "title": "BHT (Branch History Table) submodule",
+    "level": 4,
+    "section_number": "4.1.5.4",
+    "page_start": 0,
+    "page_end": 1,
+    "blocks": [
+      {
+        "type": "text",
+        "text": "The Branch History Table (BHT) is implemented as a memory array sized by the BHTDepth configuration parameter. The lower bits of the virtual PC index this memory. When the EX_STAGE resolves a branch, the branch PC and the taken/not-taken outcome update the corresponding BHT entry. Each entry is a two-bit saturating counter that captures recent behavior to predict whether a branch should be taken on the next fetch."
+      },
+      {
+        "type": "figure",
+        "title": "INFERRED: Two-bit saturating counter state machine used by the BHT",
+        "caption": "Four states (strongly not taken, weakly not taken, weakly taken, strongly taken) transition on each outcome to bias future predictions.",
+        "image_ref": "section_0_fig_1"
+      },
+      {
+        "type": "text",
+        "text": "During pre-decode in the instr_scan submodule, the BHT is consulted to determine whether the current PC has a valid entry and to provide the taken/not-taken prediction to the frontend. The BHT is not flushed. In the referenced design configuration, some ports are statically tied: flush_bp_i = 0 for any HW configuration, and because DebugEn = false, debug_mode_i = 0."
+      },
+      {
+        "type": "text",
+        "text": "The interface connects the BHT to the subsystem clock and reset, the cache (for virtual PC indexing), the execute stage (for update information), and the frontend (for prediction outputs)."
+      },
+      {
+        "type": "table",
+        "title": "INFERRED: Interface table header",
+        "columns": [
+          "0",
+          "1",
+          "2",
+          "3",
+          "4"
+        ],
+        "rows": [
+          [
+            "Signal",
+            "IO",
+            "Descripti on",
+            "connexi on",
+            "Type"
+          ]
+        ]
+      }
+    ]
+  },
+  "ocr_corrections": [
+    "Descripti on -> Description",
+    "connexi on -> connection",
+    "Asynchron ous -> Asynchronous",
+    "ou t -> out",
+    "bht_updat e_i -> bht_update_i",
+    "valids -> validates",
+    "SUBSY STEM -> SUBSYSTEM",
+    "FRONT END -> FRONTEND"
+  ],
+  "improvements_made": [
+    "Merged fragmented content into coherent paragraphs with consistent terminology.",
+    "Provided a single, unified table block per instructions and preserved cell values while normalizing in narrative.",
+    "Added an inferred figure caption for the two-bit saturating counter diagram and referenced it via image_ref.",
+    "Normalized hyphenation/line-break artifacts and clarified ambiguous phrases without changing technical meaning."
+  ],
+  "summary": "Describes the BHT as a memory indexed by virtual PC and updated in EX_STAGE using two-bit saturating counters to predict branch direction during pre-decode. Notes that the BHT is not flushed and lists tied-off configuration ports; includes the interface table header and the counter state-machine figure."
+}

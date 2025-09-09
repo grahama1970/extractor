@@ -27,8 +27,11 @@ CLI (main)
 - `run <input_json> --pdf-dir <dir> -o <results_dir> [--annotations --model -c --dpi --debug --limit --timeout --use-knowledge/--no-knowledge --auto-reject/--no-auto-reject --persist-headers/--no-persist-headers --verify-all-headers/--only-suspicious]`
 
 Environment
-- LLM: `LITELLM_VISION_MODEL` (e.g., `openai/gpt-5-mini`).
+- VLM model (single source): `LITELLM_VLM_MODEL` (e.g., `openai/gpt-5-mini`).
+- Session + cache: `LITELLM_SESSION_ID` (logged + cache namespace), `LITELLM_ATTACH_SESSION` (default true).
 - Optional ArangoDB: `ARANGO_HOST/PORT/USER/PASSWORD/DATABASE`, `ARANGO_HEADERS_VERIFIED_COLLECTION`.
+Notes
+- Multimodal calls go through `litellm_call`, which auto-routes GPT‑5 + images via OpenAI Responses API and normalizes output.
 
 Downstream
 - Produces verified headers for section building and reflow; suspicion fields reflect final verdict for consistency.

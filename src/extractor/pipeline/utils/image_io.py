@@ -33,10 +33,28 @@ def _safe_read_image_b64(path_str: str, base_dir: Path) -> Optional[str]:
                     out.append(x)
             return out
 
+        from io import BytesIO
+        try:
+            from PIL import Image  # type: ignore
+        except Exception:
+            Image = None  # type: ignore
+
         for cand in _candidates():
             if cand.exists():
-                with open(cand, "rb") as f:
-                    return base64.b64encode(f.read()).decode("utf-8")
+                raw = cand.read_bytes()
+                # Try to validate and normalize encoding via PIL
+                if Image is not None:
+                    try:
+                        img = Image.open(BytesIO(raw))
+                        buf = BytesIO()
+                        # Prefer PNG to preserve diagrams; provider will accept PNG
+                        img.save(buf, format="PNG")
+                        norm = buf.getvalue()
+                        return base64.b64encode(norm).decode("utf-8")
+                    except Exception:
+                        pass
+                # Fallback: return original bytes (may still work if valid)
+                return base64.b64encode(raw).decode("utf-8")
         return None
     except Exception:
         return None
@@ -68,4 +86,3 @@ def get_annotation_image_b64(annot: Dict[str, object], base_dir: Path) -> Option
     if not path:
         return None
     return _safe_read_image_b64(str(path), base_dir)
-

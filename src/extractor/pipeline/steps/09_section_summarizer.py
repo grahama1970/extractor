@@ -56,6 +56,7 @@ except Exception:
 from rich.console import Console
 from tqdm.asyncio import tqdm
 from extractor.pipeline.utils.litellm_call import litellm_call
+from extractor.pipeline.utils.diagnostics import get_run_id
 
 # Import JSON utilities
 from extractor.core.services.utils.json_utils import clean_json_string
@@ -138,9 +139,13 @@ async def summarize_section(
                 params["temperature"] = 0.3
             if strict_json:
                 params["response_format"] = {"type": "json_object"}
-            out = await litellm_call([params], concurrency=1, desc="summarize_section")
+            sid = os.getenv("LITELLM_SESSION_ID") or get_run_id()
+            out = await litellm_call([params], concurrency=1, desc="summarize_section", session_id=sid)
             content = out[0] if out else ""
             result = clean_json_string(content, return_dict=True)
+            if strict_json and (not isinstance(result, dict) or 'summary' not in result):
+                # Fail fast when strict JSON is requested
+                raise ValueError(f"Invalid JSON from LLM (strict mode). Raw snippet: {str(content)[:200]}")
             if not isinstance(result, dict) or 'summary' not in result:
                 try:
                     logger.debug(f"LLM summary raw content (snippet): {(content or '')[:180]}")
@@ -231,7 +236,8 @@ async def create_checkpoint_summary(
         }
         if not is_gpt5:
             params["temperature"] = 0.3
-        out = await litellm_call([params], concurrency=1, desc="checkpoint_summary")
+        sid = os.getenv("LITELLM_SESSION_ID") or get_run_id()
+        out = await litellm_call([params], concurrency=1, desc="checkpoint_summary", session_id=sid)
         content = out[0] if out else ""
         result = clean_json_string(content, return_dict=True)
         

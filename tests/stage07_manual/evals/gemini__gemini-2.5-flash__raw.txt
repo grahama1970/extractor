@@ -1,0 +1,93 @@
+```json
+{
+  "reflowed_json": {
+    "blocks": [
+      {
+        "type": "text",
+        "text_content": "BHT is implemented as a memory which is composed of BHTDepth configuration parameter entries. The lower address bits of the virtual address point to the memory entry. When a branch instruction is resolved by the EX_STAGE module, the branch PC and the taken (or not taken) status information is stored in the Branch History Table."
+      },
+      {
+        "type": "text",
+        "text_content": "The Branch History Table is a table of two-bit saturating counters that takes the virtual address of the current fetched instruction by the CACHE. It states whether the current branch request should be taken or not. The two-bit counter is updated by the successive execution of the instructions as shown in the following figure."
+      },
+      {
+        "type": "figure",
+        "title": "INFERRED: Two-bit Saturating Counter State Diagram",
+        "caption": "State diagram illustrating the four states of a two-bit saturating counter used in the Branch History Table and transitions based on whether a branch is taken or not taken.",
+        "image_ref": "figure_0.png"
+      },
+      {
+        "type": "text",
+        "text_content": "When a branch instruction is pre-decoded by instr_scan submodule, the BHT validates whether the PC address is in the BHT and provides the taken or not prediction. The BHT is never flushed."
+      },
+      {
+        "type": "table",
+        "title": "INFERRED: BHT Submodule Interface Signals",
+        "header": [
+          "Signal",
+          "IO",
+          "Description",
+          "connection",
+          "Type"
+        ],
+        "rows": [
+          [
+            "clk_i",
+            "in",
+            "Subsystem Clock",
+            "SUBSYSTEM",
+            "logic"
+          ],
+          [
+            "rst_ni",
+            "in",
+            "Asynchronous reset active low",
+            "SUBSYSTEM",
+            "logic"
+          ],
+          [
+            "vpc_i",
+            "in",
+            "Virtual PC",
+            "CACHE",
+            "logic[CVA6Cfg.VLEN-1:0]"
+          ],
+          [
+            "bht_update_i",
+            "in",
+            "Update bht with resolved address",
+            "EXECUTE",
+            "bht_update_t"
+          ],
+          [
+            "bht_prediction_o",
+            "out",
+            "Prediction from bht",
+            "FRONTEND",
+            "ariane_pkg::bht_prediction_t[CVA6Cfg.INSTR_PER_FETCH-1:0]"
+          ]
+        ]
+      },
+      {
+        "type": "text",
+        "text_content": "Due to cv32a65x configuration, some ports are tied to a static value. These ports do not appear in the above table, they are listed below. For any HW configuration, the flush_bp_i input is tied to 0. As DebugEn = False, the debug_mode_i input is tied to 0."
+      }
+    ]
+  },
+  "ocr_corrections": [
+    {
+      "original": "vailds",
+      "corrected": "validates",
+      "context": "When a branch instruction is pre-decoded by instr_scan submodule, the BHT vailds whether the PC address is in the BHT and provides the taken or not prediction."
+    }
+  ],
+  "improvements_made": [
+    "Merged fragmented table parts into a single, comprehensive table as per the hint, ensuring all interface signals are presented cohesively.",
+    "Extracted the state diagram and formatted it as a dedicated figure block with an inferred title and a descriptive caption, enhancing the visual explanation of BHT operation.",
+    "Grouped related textual content into coherent paragraphs to improve overall readability and flow, forming self-contained knowledge chunks.",
+    "Corrected the OCR error 'vailds' to 'validates' for improved accuracy of the text.",
+    "Combined the configuration notes, including the formerly bulleted points, into a single, cohesive paragraph that reads well as a self-contained chunk."
+  ],
+  "summary": "The BHT (Branch History Table) submodule is a memory component storing branch prediction information, indexed using lower virtual address bits. It utilizes two-bit saturating counters, which are updated based on whether a branch is taken or not, as illustrated by a state diagram. During instruction pre-decoding, the BHT validates the PC address and provides branch predictions. The BHT is never flushed. Additionally, certain configuration-dependent ports, such as 'flush_bp_i' and 'debug_mode_i', are tied to static values and are documented outside of the main interface table."
+}
+```

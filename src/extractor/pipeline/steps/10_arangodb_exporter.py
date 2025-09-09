@@ -266,12 +266,17 @@ def run(
         console.print("[yellow]No objects to load. Exiting.[/yellow]")
         return
 
-    if skip_export:
-        console.print("[yellow]--skip-export flag is set. Saving flattened data to JSON instead of exporting.[/yellow]")
-        output_path = json_output_dir / "10_flattened_data.json"
-        with open(output_path, 'w') as f:
+    # Always materialize flattened JSON for downstream stages (Stage 11 and tooling)
+    try:
+        flat_path = json_output_dir / "10_flattened_data.json"
+        with open(flat_path, 'w') as f:
             json.dump(pdf_objects_to_load, f, indent=2)
-        console.print(f"📄 Saved {len(pdf_objects_to_load)} flattened objects to: {output_path}")
+        logger.info(f"Wrote flattened data for Stage 11 to: {flat_path}")
+    except Exception as e:
+        logger.warning(f"Failed to write flattened JSON (continuing): {e}")
+
+    if skip_export:
+        console.print("[yellow]--skip-export flag is set. Skipping ArangoDB export (flattened JSON already saved).[/yellow]")
         return
 
     try:

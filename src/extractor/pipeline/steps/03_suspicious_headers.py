@@ -86,11 +86,11 @@ initialize_litellm_cache()
 load_dotenv()
 app = typer.Typer(help="Verify suspicious headers using a multimodal LLM.", add_completion=False)
 
-def _env_vlm_model(default: str = "openai/gpt-5-mini") -> str:
-    """Return VLM model preferring LITELLM_VLM_MODEL, falling back to LITELLM_VISION_MODEL.
-    Keeps a single point of truth for env lookup across steps.
+def _env_vlm_model(default: str = "gemini/gemini-2.5-flash") -> str:
+    """Return VLM model from a single environment variable for clarity.
+    We use only LITELLM_VLM_MODEL to avoid confusion.
     """
-    return os.getenv("LITELLM_VLM_MODEL") or os.getenv("LITELLM_VISION_MODEL") or default
+    return os.getenv("LITELLM_VLM_MODEL") or default
 
 
 @dataclass
@@ -160,9 +160,6 @@ def _retrieve_prior_decisions(header_text_norm: str, font_sig: str, limit: int =
     return []
 
 # --- Verify the User has selected a Multmodal (Vision) model
-from tenacity import retry, stop_after_attempt, wait_exponential
-
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=2, max=10))
 async def verify_header_with_llm(
     image_b64: str,
     context_text: str,
@@ -180,11 +177,13 @@ async def verify_header_with_llm(
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": user_content},
     ]
+    sid = os.getenv("LITELLM_SESSION_ID") or get_run_id()
     results = await litellm_call(
         prompts=[{"model": model, "messages": messages}],
         wrap_json=True,
         concurrency=1,
-        desc="verify header"
+        desc="verify header",
+        session_id=sid,
     )
     answer = results[0] if results else ""
     try:
@@ -630,7 +629,8 @@ async def process_pdf_pipeline(config: Config):
     if prepared:
         try:
             t_llm0 = time.monotonic()
-            coro = litellm_call(prepared, wrap_json=True, concurrency=config.llm_concurrency, desc="Verifying Headers")
+            sid = os.getenv("LITELLM_SESSION_ID") or run_id
+            coro = litellm_call(prepared, wrap_json=True, concurrency=config.llm_concurrency, desc="Verifying Headers", session_id=sid)
             if config.max_runtime_seconds and config.max_runtime_seconds > 0:
                 results = await asyncio.wait_for(coro, timeout=config.max_runtime_seconds)
             else:
@@ -768,7 +768,7 @@ async def process_pdf_pipeline(config: Config):
 # COMMAND-LINE INTERFACE
 # ------------------------------------------------------------------
 @app.command()
-    def run(
+def run(
     input_json: Annotated[Path, typer.Argument(..., help="Path to the Marker JSON output from Stage 02.")],
     pdf_dir: Annotated[Path, typer.Option("--pdf-dir", help="Directory containing the source and clean PDFs from Stage 01.")] = Path("data/results/pipeline/01_annotation_processor"),
     output_dir: Annotated[Path, typer.Option("-o", help="Parent directory for pipeline results.")] = Path("data/results/pipeline"),
@@ -914,7 +914,7 @@ def debug_test():
     }
 
 @app.command("debug-bundle")
-    def debug_bundle(
+def debug_bundle(
     bundle: Path = typer.Argument(..., exists=True, file_okay=True, dir_okay=False, readable=True, help="Bundle with keys: marker_blocks (Stage 02 output object), clean_pdf (path)"),
     output_dir: Path = typer.Option("data/results/pipeline", "-o", help="Parent directory for pipeline results."),
     model: Optional[str] = typer.Option(None, "--model", help="LLM model to use (defaults to env)"),

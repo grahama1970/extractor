@@ -1,0 +1,11 @@
+Return ONLY a JSON object with keys: reflowed_json, ocr_corrections, improvements_made, summary. No code fences.
+
+Requirements (dataset-driven unless otherwise specified):
+- Produce the exact number of table and figure blocks specified by the dataset entry (defaults for seed set: 1 table and 1 figure).
+- Table: MERGE any fragmented/continued tables into a single logical table; set title to 'INFERRED: ...'.
+  Columns should match the provided hints (count and order) when given; do not alter any cell values; include rows.
+- Figure: include a figure block with title 'INFERRED: ...' and a short caption; set image_ref when applicable.
+- Preserve reading order across blocks.
+- Include at least one contiguous text block that reads as a coherent knowledge chunk (not only bullets).
+- Do not change spelling inside table cells; minor spelling fixes outside tables are acceptable.
+

@@ -1,0 +1,9 @@
+models:
+  - openrouter/qwen/qwen3-235b-a22b-2507
+  - gemini/gemini-2.5-flash
+  - moonshot/kimi-k2-turbo-preview
+  - openai/gpt-5-mini
+  - openai/gpt-5
+  # Qwen via OpenRouter (enable one of these after confirming the exact slug on OpenRouter)
+  # - openrouter/qwen/qwen2.5-72b-instruct
+  # - openrouter/qwen/qwen2-vl-72b-instruct

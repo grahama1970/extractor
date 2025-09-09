@@ -119,7 +119,7 @@ def test_litellm_cache():
 
         # First call should miss cache
         response1 = litellm.completion(
-            model="gpt-4o-mini",
+            model="vertex_ai/gemini-2.5-flash",
             messages=test_messages,
             cache={"no-cache": False},
         )
@@ -129,7 +129,7 @@ def test_litellm_cache():
 
         # Second call should hit cache
         response2 = litellm.completion(
-            model="gpt-4o-mini",
+            model="vertex_ai/gemini-2.5-flash",
             messages=test_messages,
             cache={"no-cache": False},
         )

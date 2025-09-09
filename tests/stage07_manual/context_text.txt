@@ -1,0 +1,21 @@
+Section: BHT (Branch History Table) submodule
+
+Table summary:
+Shape: (1, 5) columns: 0, 1, 2, 3, 4
+
+Relevant annotations:
+- 4.1.5.4. BHT (Branch History Table) submodule
+- Figure
+
+
+Section JSON Summary:
+{
+  "id": "section_0",
+  "title": "BHT (Branch History Table) submodule",
+  "level": 4,
+  "page_start": 0,
+  "page_end": 1,
+  "section_number": "4.1.5.4",
+  "section_hash": "1402d30f1a7ebbc4e5645fc6234aedff",
+  "blocks_count": 16
+}

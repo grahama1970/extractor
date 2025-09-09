@@ -13,6 +13,13 @@ set +u; set -a; [[ -f .env ]] && source .env || true; set +a; set -u
 
 PDF="data/input/pipeline/BHT_CV32A65X_marked.pdf"
 OUT="data/results/pipeline"
+SID=${LITELLM_SESSION_ID:-"$(date +%s)-verify"}
+export LITELLM_SESSION_ID="$SID"
+export LITELLM_ATTACH_SESSION=true
+# Dedicated test DB per session
+export ARANGO_DATABASE="pdf_knowledge_base_test_${SID}"
+# Wire Lean4 CLI for full proving (file I/O style)
+export LEAN4_CLI_CMD="python /home/graham/workspace/experiments/lean4/src/lean4_prover/cli_mini.py batch --input-file {input_json} --output-file {output_json}"
 ANN_JSON="$OUT/01_annotation_processor/json_output/01_annotations.json"
 BLOCKS_JSON="$OUT/02_marker_extractor/json_output/02_marker_blocks.json"
 VERIFIED_JSON="$OUT/03_suspicious_headers/json_output/03_verified_blocks.json"
@@ -43,12 +50,12 @@ echo "== Stage 06: Figure extractor =="
 python src/extractor/pipeline/steps/06_figure_extractor.py run "$BLOCKS_JSON" --sections "$SECTIONS_JSON" --pdf-dir "$OUT/01_annotation_processor" -o "$OUT" >/dev/null
 need "$FIGURES_JSON"; pass "Stage 06 figures JSON exists"
 
-echo "== Stage 07: Reflow sections =="
-python src/extractor/pipeline/steps/07_reflow_section.py run --sections "$SECTIONS_JSON" --tables "$TABLES_JSON" --figures "$FIGURES_JSON" -o "$OUT" --summary-only >/dev/null
+echo "== Stage 07: Reflow sections (full VLM) =="
+python src/extractor/pipeline/steps/07_reflow_section.py run --sections "$SECTIONS_JSON" --tables "$TABLES_JSON" --figures "$FIGURES_JSON" -o "$OUT" >/dev/null
 need "$REFLOW_JSON"; pass "Stage 07 reflow JSON exists"
 
-echo "== Stage 08: Lean4 requirements extraction (skip proving) =="
-python src/extractor/pipeline/steps/08_lean4_theorem_prover.py run "$REFLOW_JSON" -o "$OUT" --skip-proving >/dev/null
+echo "== Stage 08: Lean4 requirements extraction (full proving) =="
+python src/extractor/pipeline/steps/08_lean4_theorem_prover.py run "$REFLOW_JSON" -o "$OUT" >/dev/null
 need "$THEOREMS_JSON"; pass "Stage 08 theorems JSON exists"
 
 echo "== Stage 09: Section summarizer (real LLM calls) =="
@@ -72,4 +79,3 @@ python src/extractor/pipeline/steps/14_report_generator.py run "$OUT" >/dev/null
 need "$OUT/final_report.json"; need "$OUT/final_report.md"; pass "Stage 14 final reports exist"
 
 echo "\nAll CLI steps completed successfully."
-

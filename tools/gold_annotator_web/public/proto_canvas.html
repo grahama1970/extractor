@@ -1,0 +1,377 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Proto Canvas (Static)</title>
+    <style>
+      html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+      .bar { padding: 8px; border-bottom: 1px solid #e5e7eb; display: flex; align-items: center; gap: 8px; font-size: 14px; }
+      .btn { padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 4px; background: #fff; cursor: pointer; }
+      .btn:hover { background: #f8fafc; }
+      .spacer { flex: 1; }
+      #stage-wrap { position: absolute; inset: 42px 0 0 0; }
+      #stage { width: 100%; height: 100%; }
+      .chip { color: #6b7280; }
+    </style>
+    <script src="/konva.min.js"></script>
+    <script>if (typeof Konva === "undefined") { document.write("<script src=\"https://unpkg.com/konva@9.3.15/konva.min.js\"><\/script>"); }</script>
+  </head>
+  <body>
+    <div class="bar">
+      <button class="btn" id="add-box">Add Box</button>
+      <button class="btn" id="add-text">Add Text</button>
+      <span>|</span>
+      <button class="btn" id="load">Load (server)</button>
+      <button class="btn" id="save">Save (server)</button>
+      <button class="btn" id="import-json">Import JSON</button>
+      <button class="btn" id="export-json">Export JSON</button>
+      <button class="btn" id="self-test">Self-Test</button>
+      <label style="display:flex;align-items:center;gap:6px;margin-left:12px;">
+        <input type="checkbox" id="publish" checked /> Publish
+      </label>
+      <button class="btn" id="add-arrow">Add Arrow</button>
+      <button class="btn" id="add-svg-upload">Add SVG (upload)</button>
+      <button class="btn" id="add-svg-paste">Add SVG (paste)</button>
+      <div class="spacer"></div>
+      <span class="chip" id="status">v0</span>
+    </div>
+    <div class="bar" style="gap:6px;">
+      <span>Icons:</span>
+      <span id="icons"></span>
+      <span class="chip" style="margin-left:8px;">[icon:name] markers (mapped later)</span>
+    </div>
+    <input type="file" id="file-input" accept="application/json" style="display:none;" />
+    <div id="stage-wrap"><div id="stage"></div></div>
+
+    <script>
+      (() => {
+        // Resolve API base: same-origin under http/https; prompt/param under file://
+        const params = new URLSearchParams(location.search);
+        let API_BASE = '';
+        if (location.protocol !== 'http:' && location.protocol !== 'https:') {
+          API_BASE = params.get('server') || localStorage.getItem('api_base') || '';
+          if (!API_BASE) { API_BASE = prompt('Enter server URL (e.g., http://192.168.86.49:3002)') || ''; }
+          if (API_BASE) localStorage.setItem('api_base', API_BASE);
+        }
+        const wrap = document.getElementById('stage');
+        const stage = new Konva.Stage({ container: wrap, width: wrap.clientWidth, height: wrap.clientHeight });
+        const layer = new Konva.Layer();
+        stage.add(layer);
+        const tr = new Konva.Transformer({ rotateEnabled: false });
+        layer.add(tr);
+        logEvent('konva_loaded', {});
+
+        let version = 0;
+        let publish = true;
+        let pushTimer = null;
+        const statusEl = document.getElementById('status');
+        statusEl.title = API_BASE ? ('Server: '+API_BASE) : 'Server: same-origin';
+
+        function logEvent(type, data) {
+          try {
+            fetch((API_BASE||'') + '/api/proto/log', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ type, href: location.href, ua: navigator.userAgent, ts: new Date().toISOString(), ...data })
+            });
+          } catch {}
+        }
+        logEvent('page_load', {});
+
+        // Console proxy to server log
+        ;(function(){
+          const levels=['log','warn','error'];
+          levels.forEach((lvl)=>{
+            const orig=console[lvl].bind(console);
+            console[lvl]=function(){
+              try{ fetch((API_BASE||'')+'/api/proto/log',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({type:'console',level:lvl,message:Array.from(arguments).map(a=>{try{return (typeof a==='string')?a:JSON.stringify(a)}catch(e){return String(a)}}).join(' ')})}); }catch(e){}
+              return orig.apply(console, arguments);
+            };
+          });
+        })();
+    ;
+
+
+        if (typeof window.Konva === 'undefined') {
+          logEvent('konva_missing', {});
+          statusEl.textContent = 'Konva failed to load';
+          statusEl.style.color = '#b91c1c';
+          return;
+        }
+
+
+        function fitStage() {
+          const el = document.getElementById('stage');
+          stage.width(el.clientWidth);
+          stage.height(el.clientHeight);
+          layer.draw();
+        }
+        window.addEventListener('resize', fitStage);
+
+        function selectShape(node) {
+          tr.nodes(node ? [node] : []);
+          layer.draw();
+        }
+
+        function makeDraggable(node) {
+          node.setAttrs({ draggable: true });
+          node.on('click', () => selectShape(node));
+          node.on('dragend', schedulePush);
+          node.on('transformend', schedulePush);
+        }
+
+        function addBox() {
+          logEvent('add_box', {});
+          const rect = new Konva.Rect({ x: 80 + Math.random()*80, y: 80 + Math.random()*60, width: 220, height: 100, stroke: '#1f2937', strokeWidth: 2, fillEnabled: false });
+          makeDraggable(rect);
+          layer.add(rect); selectShape(rect); layer.draw(); schedulePush();
+        }
+
+        function addText() {
+          logEvent('add_text', {});
+          const txt = new Konva.Text({ x: 100 + Math.random()*80, y: 100 + Math.random()*60, text: 'Text', fontSize: 20, fill: '#111827' });
+          makeDraggable(txt);
+          txt.on('dblclick', () => {
+            const next = prompt('Edit text:', txt.text());
+            if (next !== null) { txt.text(next); layer.draw(); schedulePush(); }
+          });
+          layer.add(txt); selectShape(txt); layer.draw(); schedulePush();
+        }
+
+        function addArrow() {
+          logEvent('add_arrow', {});
+          const x = 120 + Math.random()*80, y = 120 + Math.random()*60;
+          const arr = new Konva.Arrow({ points: [x, y, x+120, y], stroke: '#1f2937', strokeWidth: 2, pointerLength: 10, pointerWidth: 10, fill: '#1f2937' });
+          makeDraggable(arr);
+          layer.add(arr); selectShape(arr); layer.draw(); schedulePush();
+        }
+
+        function addSVGFromDataURL(dataUrl) {
+          const img = new Image();
+          img.onload = () => {
+            const kimg = new Konva.Image({ x: 100 + Math.random()*60, y: 100 + Math.random()*40, image: img, width: img.width, height: img.height });
+            kimg.setAttr('dataSrc', dataUrl);
+            makeDraggable(kimg);
+            layer.add(kimg); selectShape(kimg); layer.draw(); schedulePush();
+          };
+          img.src = dataUrl;
+        }
+
+        function addSVGUpload(file) {
+          logEvent('add_svg_upload', { name: (file && file.name) || null, size: (file && file.size) || null });
+          const r = new FileReader();
+          r.onload = () => addSVGFromDataURL(r.result);
+          r.readAsDataURL(file);
+        }
+
+        function addSVGPaste() {
+          logEvent('add_svg_paste', {});
+          const svg = prompt('Paste SVG markup (<svg ...>...</svg>):');
+          if (!svg) return;
+          const blob = new Blob([svg], { type: 'image/svg+xml' });
+          const url = URL.createObjectURL(blob);
+          addSVGFromDataURL(url);
+          setTimeout(() => URL.revokeObjectURL(url), 10000);
+        }
+
+        function exportShapes() {
+          return layer.getChildren().filter(n => n !== tr).map(n => {
+            if (n instanceof Konva.Rect) return { t: 'rect', x: n.x(), y: n.y(), w: n.width() * n.scaleX(), h: n.height() * n.scaleY(), stroke: n.stroke() };
+            if (n instanceof Konva.Text) return { t: 'text', x: n.x(), y: n.y(), text: n.text(), fontSize: n.fontSize(), fill: n.fill() };
+            if (n.className === 'Image') return { t: 'svg', x: n.x(), y: n.y(), w: n.width() * n.scaleX(), h: n.height() * n.scaleY(), src: n.getAttr('dataSrc') || null };
+            if (n.className === 'Arrow') return { t: 'arrow', points: n.points(), stroke: n.stroke(), strokeWidth: n.strokeWidth() };
+            return null;
+          }).filter(Boolean);
+        }
+
+        function clearShapes() {
+          layer.getChildren().forEach(n => { if (n !== tr) n.destroy(); });
+          tr.nodes([]);
+        }
+
+        function importShapes(shapes) {
+          clearShapes();
+          (shapes || []).forEach(s => {
+            if (s.t === 'rect') {
+              const r = new Konva.Rect({ x: s.x||0, y: s.y||0, width: s.w||200, height: s.h||100, stroke: s.stroke||'#1f2937', strokeWidth: 2, fillEnabled: false });
+              makeDraggable(r); layer.add(r);
+            } else if (s.t === 'text') {
+              const t = new Konva.Text({ x: s.x||0, y: s.y||0, text: s.text||'', fontSize: s.fontSize||20, fill: s.fill||'#111827' });
+              makeDraggable(t); t.on('dblclick', () => { const next = prompt('Edit text:', t.text()); if (next!==null){ t.text(next); layer.draw(); schedulePush(); } });
+              layer.add(t);
+            } else if (s.t === 'svg' && s.src) {
+              const img = new Image();
+              img.onload = () => { const kimg = new Konva.Image({ x: s.x||0, y: s.y||0, image: img, width: s.w||img.width, height: s.h||img.height }); kimg.setAttr('dataSrc', s.src); makeDraggable(kimg); layer.add(kimg); layer.draw(); };
+              img.src = s.src;
+            } else if (s.t === 'arrow') {
+              const arr = new Konva.Arrow({ points: (s.points||[0,0,100,0]), stroke: s.stroke||'#1f2937', strokeWidth: s.strokeWidth||2, pointerLength: 10, pointerWidth: 10, fill: s.stroke||'#1f2937' });
+              makeDraggable(arr); layer.add(arr);
+            }
+          });
+          layer.draw();
+        }
+
+        async function loadServer() {
+          logEvent('load_server', {});
+          try {
+            const res = await fetch(API_BASE + '/api/proto/state');
+            if (!res.ok) throw new Error(await res.text());
+            const j = await res.json();
+            version = typeof j.version === 'number' ? j.version : version;
+            const shapes = j.state && j.state.shapes ? j.state.shapes : [];
+            importShapes(shapes);
+            statusEl.textContent = 'v' + version; statusEl.title = API_BASE ? ('Server: '+API_BASE) : 'Server: same-origin';
+
+        function logEvent(type, data) {
+          try {
+            fetch((API_BASE||'') + '/api/proto/log', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ type, href: location.href, ua: navigator.userAgent, ts: new Date().toISOString(), ...data })
+            });
+          } catch {}
+        }
+        logEvent('page_load', {});
+
+          } catch (e) { console.error('load failed', e); }
+        }
+
+        async function saveServer() {
+          logEvent('save_server', { pendingVersion: version });
+          try {
+            const state = { shapes: exportShapes() };
+            const res = await fetch(API_BASE + '/api/proto/state', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ifVersion: version, state }) });
+            if (!res.ok) throw new Error(await res.text());
+            const j = await res.json();
+            if (typeof j.version === 'number') version = j.version;
+            statusEl.textContent = 'v' + version; statusEl.title = API_BASE ? ('Server: '+API_BASE) : 'Server: same-origin';
+            logEvent('save_server_ok', { version });
+
+        function logEvent(type, data) {
+          try {
+            fetch((API_BASE||'') + '/api/proto/log', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ type, href: location.href, ua: navigator.userAgent, ts: new Date().toISOString(), ...data })
+            });
+          } catch {}
+        }
+        logEvent('page_load', {});
+
+          } catch (e) { console.error('save failed', e); }
+        }
+
+        function schedulePush() {
+          if (!publish) return;
+          if (pushTimer) clearTimeout(pushTimer);
+          pushTimer = setTimeout(saveServer, 600);
+        }
+
+        async function poll() {
+          try {
+            const res = await fetch(API_BASE + '/api/proto/state');
+            if (res.ok) {
+              const j = await res.json();
+              if (typeof j.version === 'number' && j.version > version) {
+                version = j.version; statusEl.textContent = 'v' + version; statusEl.title = API_BASE ? ('Server: '+API_BASE) : 'Server: same-origin'; logEvent('poll_update', { version });
+
+        function logEvent(type, data) {
+          try {
+            fetch((API_BASE||'') + '/api/proto/log', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ type, href: location.href, ua: navigator.userAgent, ts: new Date().toISOString(), ...data })
+            });
+          } catch {}
+        }
+        logEvent('page_load', {});
+
+                const shapes = j.state && j.state.shapes ? j.state.shapes : [];
+                importShapes(shapes);
+              }
+            }
+          } catch {}
+          setTimeout(poll, 1000);
+        }
+
+        // UI wiring
+        document.getElementById('add-box').onclick = addBox;
+        document.getElementById('add-text').onclick = addText;
+        document.getElementById('load').onclick = loadServer;
+        document.getElementById('save').onclick = saveServer;
+        document.getElementById('self-test').onclick = async () => {
+          try {
+            addBox(); addText(); addArrow();
+            await saveServer();
+            logEvent('self_test_ok', { version });
+            alert('Self-Test complete. Version: '+version);
+          } catch (e) { logEvent('self_test_fail', { message: String(e) }); alert('Self-Test failed: '+e); }
+        };
+        document.getElementById('add-arrow').onclick = addArrow;
+        document.getElementById('add-svg-upload').onclick = () => document.getElementById('file-svg').click();
+        document.getElementById('add-svg-paste').onclick = addSVGPaste;
+        document.getElementById('file-svg').onchange = (e) => { const f = e.target.files && e.target.files[0]; if (f) addSVGUpload(f); e.target.value=''; };
+        document.getElementById('publish').onchange = (e) => { publish = e.target.checked; };
+
+
+        // Import / Export JSON
+        const fileInput = document.getElementById('file-input');
+        document.getElementById('import-json').onclick = () => fileInput.click();
+        fileInput.onchange = async (e) => {
+          const f = e.target.files && e.target.files[0]; if (!f) return;
+          try {
+            const txt = await f.text();
+            const j = JSON.parse(txt);
+            const shapes = j.shapes || j.state?.shapes || j.elements || [];
+            importShapes(shapes);
+            schedulePush();
+          } catch (err) { console.error('import failed', err); }
+          finally { fileInput.value = ''; }
+        };
+        document.getElementById('export-json').onclick = () => {
+          const blob = new Blob([JSON.stringify({ shapes: exportShapes() }, null, 2)], { type: 'application/json' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url; a.download = 'proto_canvas.json';
+          document.body.appendChild(a); a.click(); a.remove();
+          URL.revokeObjectURL(url);
+        };
+
+        // Icon tag palette
+        const iconNames = ['upload','search','file-text','download','folder-plus','settings'];
+        const iconWrap = document.getElementById('icons');
+        iconNames.forEach((name) => {
+          const b = document.createElement('button');
+          b.className = 'btn'; b.textContent = name; b.title = `Insert [icon:${name}]`;
+          b.onclick = () => {
+            const txt = new Konva.Text({ x: 80 + Math.random()*80, y: 80 + Math.random()*60, text: `[icon:${name}]`, fontSize: 20, fill: '#111827' });
+            makeDraggable(txt);
+            layer.add(txt); selectShape(txt); layer.draw(); schedulePush();
+          };
+          iconWrap.appendChild(b);
+        });
+
+        // Delete selected with keyboard
+        window.addEventListener('keydown', (ev) => {
+          if (ev.key === 'Delete' || ev.key === 'Backspace') {
+            const nodes = tr.nodes();
+            if (nodes && nodes.length) {
+              nodes.forEach(n => n.destroy());
+              tr.nodes([]); layer.draw(); schedulePush();
+            }
+          }
+        });
+
+
+        // Stage interactions
+        stage.on('click', (e) => { if (e.target === stage) selectShape(null); });
+
+        // Initial
+        fitStage();
+        loadServer();
+        poll();
+
+        // Global error logging
+        window.addEventListener('error', (e) => { logEvent('client_error', { message: String(e.message||e), stack: String(e.error && e.error.stack || ''), filename: e.filename, lineno: e.lineno, colno: e.colno }); });
+        window.addEventListener('unhandledrejection', (e) => { logEvent('unhandled_rejection', { reason: String(e.reason||'') }); });
+      })();
+    </script>
+  </body>
+  </html>

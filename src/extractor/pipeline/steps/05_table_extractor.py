@@ -71,7 +71,7 @@ from loguru import logger
 from rich.console import Console
 from rich.table import Table as RichTable
 from io import BytesIO  # kept if needed elsewhere; will avoid PIL roundtrip when saving
-from extractor.pipeline.utils.diagnostics import start_resource_sampler, stop_resource_sampler, get_run_id, iso_now, make_event, snapshot_resources, build_stage_timings
+from extractor.pipeline.utils.diagnostics import start_resource_sampler, stop_resource_sampler, get_run_id, iso_now, make_event, snapshot_resources, build_stage_timings, gpu_metrics_available
 
 # --- Initialization ---
 if not load_dotenv(find_dotenv()):
@@ -85,11 +85,11 @@ console = Console()
 # Camelot extraction strategies
 CAMELOT_STRATEGIES = {
     "lattice_strong": {
-        "flavor": "lattice", 
+        "flavor": "lattice",
         "params": {"process_background": True, "line_scale": 40}
     },
     "lattice_default": {
-        "flavor": "lattice", 
+        "flavor": "lattice",
         "params": {"process_background": True, "line_scale": 15}
     },
     "lattice_sensitive": {
@@ -115,7 +115,9 @@ TABLE_MULTI_PAGE_MERGE_ENABLED = os.getenv("TABLE_MULTI_PAGE_MERGE_ENABLED", "tr
 TABLE_MULTI_PAGE_MERGE_MIN_IOU = float(os.getenv("TABLE_MULTI_PAGE_MERGE_MIN_IOU", 0.3))
 
 # Feature toggles (env-configurable)
-TABLE_HEADER_STITCHING_ENABLED = os.getenv("TABLE_HEADER_STITCHING_ENABLED", "true").lower() in ("1", "true", "yes", "y")
+# Important: Stage 05 shall NOT merge/stitch tables by default. Merging happens in Stage 07.
+# Default this feature OFF to avoid header/body stitching at this stage.
+TABLE_HEADER_STITCHING_ENABLED = os.getenv("TABLE_HEADER_STITCHING_ENABLED", "false").lower() in ("1", "true", "yes", "y")
 TABLE_HEADER_DEDUP_ENABLED = os.getenv("TABLE_HEADER_DEDUP_ENABLED", "true").lower() in ("1", "true", "yes", "y")
 TABLE_HEADER_COALESCE_ENABLED = os.getenv("TABLE_HEADER_COALESCE_ENABLED", "true").lower() in ("1", "true", "yes", "y")
 TABLE_HEADER_REPEAT_MIN_MATCH = float(os.getenv("TABLE_HEADER_REPEAT_MIN_MATCH", 0.6))
@@ -232,22 +234,24 @@ def extract_tables_from_page(
     page_tables = {}
     best_strategy = None
     
-    # Order strategies with last successful one first
+    # Strategy policy:
+    # - Try baseline lattice(line_scale=15) first
+    # - Only if no tables detected on this page, fall back to other strategies
     strategies_to_try = []
-    if last_good_strategy and last_good_strategy in CAMELOT_STRATEGIES:
-        strategies_to_try.append({
-            "name": last_good_strategy, 
-            **CAMELOT_STRATEGIES[last_good_strategy]
-        })
-    
+    baseline_name = "lattice_default"
+    strategies_to_try.append({"name": baseline_name, **CAMELOT_STRATEGIES[baseline_name]})
+    fallback_strategies = []
+    if last_good_strategy and last_good_strategy in CAMELOT_STRATEGIES and last_good_strategy != baseline_name:
+        fallback_strategies.append({"name": last_good_strategy, **CAMELOT_STRATEGIES[last_good_strategy]})
     for name, config in CAMELOT_STRATEGIES.items():
-        if name != last_good_strategy:
-            strategies_to_try.append({"name": name, **config})
+        if name not in {baseline_name, last_good_strategy}:
+            fallback_strategies.append({"name": name, **config})
 
     # Track per-strategy durations
     strategy_durations = {}
     found_by_strategy = {}
     # Try each strategy
+    # First pass: baseline only
     for strategy in strategies_to_try:
         import time as _t
         _t0=_t.monotonic()
@@ -259,26 +263,61 @@ def extract_tables_from_page(
         strategy_durations[nm]["total_ms"] += _dt
 
         found_count = 0
-        for table in tables:
-            bbox_tuple = getattr(table, "_bbox", None)
-            if not bbox_tuple and hasattr(table, "cells") and getattr(table, "cells"):
+        def _bbox_tuple_for(table_obj: Any) -> Optional[tuple]:
+            bt = getattr(table_obj, "_bbox", None)
+            if not bt and hasattr(table_obj, "cells") and getattr(table_obj, "cells"):
                 try:
-                    xs = [c.x1 for c in table.cells] + [c.x2 for c in table.cells]
-                    ys = [c.y1 for c in table.cells] + [c.y2 for c in table.cells]
-                    bbox_tuple = (min(xs), min(ys), max(xs), max(ys))
+                    xs = [c.x1 for c in table_obj.cells] + [c.x2 for c in table_obj.cells]
+                    ys = [c.y1 for c in table_obj.cells] + [c.y2 for c in table_obj.cells]
+                    bt = (min(xs), min(ys), max(xs), max(ys))
                 except Exception:
-                    bbox_tuple = None
+                    bt = None
+            return bt
+
+        def _iou(a: tuple, b: tuple) -> float:
+            try:
+                ax0, ay0, ax1, ay1 = a
+                bx0, by0, bx1, by1 = b
+                inter_w = max(0.0, min(ax1, bx1) - max(ax0, bx0))
+                inter_h = max(0.0, min(ay1, by1) - max(ay0, by0))
+                inter = inter_w * inter_h
+                area_a = max(0.0, (ax1 - ax0)) * max(0.0, (ay1 - ay0))
+                area_b = max(0.0, (bx1 - bx0)) * max(0.0, (by1 - by0))
+                union = area_a + area_b - inter
+                return float(inter / union) if union > 0 else 0.0
+            except Exception:
+                return 0.0
+
+        def _quantize_bbox(bt: tuple) -> tuple:
+            return tuple(round(float(x), 2) for x in bt)
+
+        for table in tables:
+            bbox_tuple = _bbox_tuple_for(table)
             score = score_table(table.df)
             if score == 0:
                 continue
             if not bbox_tuple:
                 # if we cannot determine bbox, skip this table instance
                 continue
-            bbox_key = tuple(map(int, bbox_tuple))
+            bbox_q = _quantize_bbox(bbox_tuple)
             
-            # Keep the best scoring version of each table
-            if bbox_key not in page_tables or score > page_tables[bbox_key]['score']:
-                page_tables[bbox_key] = {
+            # De-dup by IoU; allow multiple distinct tables
+            replaced_existing = False
+            for existing_key in list(page_tables.keys()):
+                iou = _iou(bbox_q, existing_key)
+                if iou >= 0.90:
+                    if score > page_tables[existing_key]['score']:
+                        page_tables[existing_key] = {
+                            'table': table,
+                            'score': score,
+                            'strategy': strategy['name']
+                        }
+                        if not best_strategy:
+                            best_strategy = strategy['name']
+                    replaced_existing = True
+                    break
+            if not replaced_existing:
+                page_tables[bbox_q] = {
                     'table': table,
                     'score': score,
                     'strategy': strategy['name']
@@ -289,14 +328,87 @@ def extract_tables_from_page(
 
         # record per-page count for this strategy after processing
         strategy_durations[nm].setdefault("found", {})[page_num] = int(found_count)
+        # If baseline found any, stop before trying others
+        if strategy.get("name") == baseline_name and found_count > 0:
+            break
 
-    # Convert to output format
+    # If baseline yielded nothing, run fallbacks
+    if not page_tables:
+        for strategy in fallback_strategies:
+            import time as _t
+            _t0=_t.monotonic()
+            tables = try_camelot_strategy(pdf_path, page_num, strategy, diagnostics)
+            _dt = int((_t.monotonic()-_t0)*1000)
+            nm=strategy.get("name")
+            strategy_durations.setdefault(nm, {"count":0,"total_ms":0})
+            strategy_durations[nm]["count"] += 1
+            strategy_durations[nm]["total_ms"] += _dt
+
+            found_count = 0
+            def _bbox_tuple_for(table_obj: Any) -> Optional[tuple]:
+                bt = getattr(table_obj, "_bbox", None)
+                if not bt and hasattr(table_obj, "cells") and getattr(table_obj, "cells"):
+                    try:
+                        xs = [c.x1 for c in table_obj.cells] + [c.x2 for c in table_obj.cells]
+                        ys = [c.y1 for c in table_obj.cells] + [c.y2 for c in table_obj.cells]
+                        bt = (min(xs), min(ys), max(xs), max(ys))
+                    except Exception:
+                        bt = None
+                return bt
+            def _iou(a: tuple, b: tuple) -> float:
+                try:
+                    ax0, ay0, ax1, ay1 = a
+                    bx0, by0, bx1, by1 = b
+                    inter_w = max(0.0, min(ax1, bx1) - max(ax0, bx0))
+                    inter_h = max(0.0, min(ay1, by1) - max(ay0, by0))
+                    inter = inter_w * inter_h
+                    area_a = max(0.0, (ax1 - ax0)) * max(0.0, (ay1 - ay0))
+                    area_b = max(0.0, (bx1 - bx0)) * max(0.0, (by1 - by0))
+                    union = area_a + area_b - inter
+                    return float(inter / union) if union > 0 else 0.0
+                except Exception:
+                    return 0.0
+            def _quantize_bbox(bt: tuple) -> tuple:
+                return tuple(round(float(x), 2) for x in bt)
+
+            for table in tables:
+                bbox_tuple = _bbox_tuple_for(table)
+                score = score_table(table.df)
+                if score == 0 or not bbox_tuple:
+                    continue
+                bbox_q = _quantize_bbox(bbox_tuple)
+                replaced_existing = False
+                for existing_key in list(page_tables.keys()):
+                    iou = _iou(bbox_q, existing_key)
+                    if iou >= 0.90:
+                        if score > page_tables[existing_key]['score']:
+                            page_tables[existing_key] = {
+                                'table': table,
+                                'score': score,
+                                'strategy': strategy['name']
+                            }
+                        replaced_existing = True
+                        break
+                if not replaced_existing:
+                    page_tables[bbox_q] = {
+                        'table': table,
+                        'score': score,
+                        'strategy': strategy['name']
+                    }
+                    found_count += 1
+
+            strategy_durations[nm].setdefault("found", {})[page_num] = int(found_count)
+            if found_count > 0:
+                break
+
+    # Convert to output format: select exactly one best table per page
     extracted_tables = []
     table_idx = 0
-    
-    for bbox_key, table_info in page_tables.items():
+    if page_tables:
+        best_key = max(page_tables.keys(), key=lambda k: float(page_tables[k]['score'] or 0.0))
+        table_info = page_tables[best_key]
         table = table_info['table']
-        
+
         # Extract table image
         bbox_tuple = getattr(table, "_bbox", None)
         if not bbox_tuple and hasattr(table, "cells") and getattr(table, "cells"):
@@ -309,7 +421,7 @@ def extract_tables_from_page(
         img_path = extract_table_image(
             pdf_doc, page_num, bbox_tuple, output_dir, table_idx, diagnostics
         ) if bbox_tuple else None
-        
+
         # Optionally coalesce repeated header rows mid-body before metrics
         df = table.df
         if TABLE_HEADER_COALESCE_ENABLED:
@@ -339,16 +451,15 @@ def extract_tables_from_page(
             },
             "score": table_info['score']
         }
-        
+
         if img_path:
             # store path relative to results root (../.. from image_output)
             try:
                 table_data["table_image_path"] = str(Path(img_path).resolve().relative_to(output_dir.parent.parent.resolve()))
             except Exception:
                 table_data["table_image_path"] = img_path
-            
+
         extracted_tables.append(table_data)
-        table_idx += 1
 
     return extracted_tables, best_strategy, strategy_durations
 
@@ -645,7 +756,7 @@ def run(
                     table["section_id"] = section.get("id", "unknown")
                     break
 
-    # Heuristic filtering: density- and header-aware, with robust fallback
+    # Heuristic filtering: accept solid multi-row tables; drop header-only/sparse artifacts
     filtered_tables = []
     for t in all_tables:
         metrics = t.get("pandas_metrics", {}) or {}
@@ -653,7 +764,7 @@ def run(
         rows = int(shape[0]) if isinstance(shape, (list, tuple)) and shape else 0
         cols = int(shape[1]) if isinstance(shape, (list, tuple)) and shape else 0
         density = float(metrics.get("data_density", 0.0) or 0.0)
-        # Accept dense multi-row tables; drop header-only or sparse artifacts
+        # Accept dense multi-row tables only (Stage 07 handles merging logic, not Stage 05)
         if (rows >= TABLE_FILTER_MIN_ROWS) or (rows >= 2 and density >= TABLE_FILTER_MIN_DENSITY):
             filtered_tables.append(t)
         else:
@@ -662,13 +773,30 @@ def run(
             except Exception:
                 pass
 
-    # Fallback: if nothing passed filters, keep the highest-scoring table
-    if not filtered_tables and all_tables:
-        try:
-            best = max(all_tables, key=lambda t: float(t.get("score", 0.0)))
-            filtered_tables = [best]
-        except Exception:
-            filtered_tables = all_tables[:1]
+    # Select the best table per page to ensure exactly one primary table per page
+    if all_tables:
+        by_page: Dict[int, List[Dict[str, Any]]] = {}
+        for t in all_tables:
+            by_page.setdefault(int(t.get("page_index", 0)), []).append(t)
+        selected: List[Dict[str, Any]] = []
+        for page, candidates in sorted(by_page.items()):
+            # Prefer strong tables (multi-row, dense)
+            strong: List[Dict[str, Any]] = []
+            for t in candidates:
+                m = t.get("pandas_metrics", {}) or {}
+                shape = m.get("shape", [0, 0])
+                rows = int(shape[0]) if isinstance(shape, (list, tuple)) and shape else 0
+                density = float(m.get("data_density", 0.0) or 0.0)
+                if (rows >= TABLE_FILTER_MIN_ROWS) or (rows >= 2 and density >= TABLE_FILTER_MIN_DENSITY):
+                    strong.append(t)
+            try:
+                best_list = strong if strong else candidates
+                best = max(best_list, key=lambda t: float(t.get("score", 0.0)))
+                selected.append(best)
+            except Exception:
+                continue
+        # Replace filtered_tables by page-best selection
+        filtered_tables = selected
 
     # --- De-duplicate header rows accidentally included in body ---
     try:

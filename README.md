@@ -457,3 +457,4 @@ Built on top of excellent open-source projects:
 - [Worker Development](docs/WORKERS.md)
 - [Security Guide](docs/SECURITY.md)
 - [Performance Tuning](docs/PERFORMANCE.md)
+- [Debuggable Typer CLI (VS Code friendly)](docs/03_guides/DEBUGGABLE_TYPER_CLI.md)

@@ -181,12 +181,86 @@ def run(
         if stages[4].gold_file and stages[4].gold_file.exists():
             _run([sys.executable, "-m", "extractor.pipeline.tools.compare_to_gold", "--output", str(out_json), "--gold", str(stages[4].gold_file)])
 
-    # Early exit or skip heavy
+    # Continue with heavy stages if requested
     if skip_heavy or until <= 4:
         print("Stopped before heavy stages. Use --no-skip-heavy and --until N to continue.")
         raise typer.Exit(0)
 
-    # Subsequent stages could be added similarly...
+    # Stage 5
+    if until >= 5:
+        in_json = DATA_RESULTS / stages[4].output_json
+        _run([sys.executable, str(stages[5].script), "run", str(in_json), "--pdf-dir", str(anno_dir), "-o", str(DATA_RESULTS)])
+        out_json = DATA_RESULTS / stages[5].output_json
+        if stages[5].gold_file and stages[5].gold_file.exists():
+            _run([sys.executable, "-m", "extractor.pipeline.tools.compare_to_gold", "--output", str(out_json), "--gold", str(stages[5].gold_file)])
+
+    # Stage 6
+    if until >= 6:
+        blocks_json = DATA_RESULTS / stages[2].output_json
+        sections_json = DATA_RESULTS / stages[4].output_json
+        _run([sys.executable, str(stages[6].script), "run", str(blocks_json), "--sections", str(sections_json), "--pdf-dir", str(anno_dir), "-o", str(DATA_RESULTS)])
+        out_json = DATA_RESULTS / stages[6].output_json
+        if stages[6].gold_file and stages[6].gold_file.exists():
+            _run([sys.executable, "-m", "extractor.pipeline.tools.compare_to_gold", "--output", str(out_json), "--gold", str(stages[6].gold_file)])
+
+    # Stage 7
+    if until >= 7:
+        sections_json = DATA_RESULTS / stages[4].output_json
+        tables_json = DATA_RESULTS / stages[5].output_json
+        figures_json = DATA_RESULTS / stages[6].output_json
+        _run([sys.executable, str(stages[7].script), "run", "--sections", str(sections_json), "--tables", str(tables_json), "--figures", str(figures_json), "-o", str(DATA_RESULTS)])
+        out_json = DATA_RESULTS / stages[7].output_json
+        if stages[7].gold_file and stages[7].gold_file.exists():
+            _run([sys.executable, "-m", "extractor.pipeline.tools.compare_to_gold", "--output", str(out_json), "--gold", str(stages[7].gold_file)])
+
+    # Stage 8
+    if until >= 8:
+        reflow_json = DATA_RESULTS / stages[7].output_json
+        _run([sys.executable, str(stages[8].script), "run", str(reflow_json), "-o", str(DATA_RESULTS)])
+        out_json = DATA_RESULTS / stages[8].output_json
+        if stages[8].gold_file and stages[8].gold_file.exists():
+            _run([sys.executable, "-m", "extractor.pipeline.tools.compare_to_gold", "--output", str(out_json), "--gold", str(stages[8].gold_file)])
+
+    # Stage 9
+    if until >= 9:
+        reflow_json = DATA_RESULTS / stages[7].output_json
+        _run([sys.executable, str(stages[9].script), "run", str(reflow_json), "-o", str(DATA_RESULTS), "--max-concurrent", "2", "--window-size", "2", "--strict-json"])
+        out_json = DATA_RESULTS / stages[9].output_json
+        if stages[9].gold_file and stages[9].gold_file.exists():
+            _run([sys.executable, "-m", "extractor.pipeline.tools.compare_to_gold", "--output", str(out_json), "--gold", str(stages[9].gold_file)])
+
+    # Stage 10
+    if until >= 10:
+        reflow_json = DATA_RESULTS / stages[7].output_json
+        summaries_json = DATA_RESULTS / stages[9].output_json
+        _run([sys.executable, str(stages[10].script), "run", "--reflowed", str(reflow_json), "--summaries", str(summaries_json), "-o", str(DATA_RESULTS)])
+        out_json = DATA_RESULTS / stages[10].output_json
+        if stages[10].gold_file and stages[10].gold_file.exists():
+            _run([sys.executable, "-m", "extractor.pipeline.tools.compare_to_gold", "--output", str(out_json), "--gold", str(stages[10].gold_file)])
+
+    # Stage 11
+    if until >= 11:
+        flat_json = DATA_RESULTS / stages[10].output_json
+        _run([sys.executable, str(stages[11].script), "run", str(flat_json), "-o", str(DATA_RESULTS)])
+        out_json = DATA_RESULTS / stages[11].output_json
+        if stages[11].gold_file and stages[11].gold_file.exists():
+            _run([sys.executable, "-m", "extractor.pipeline.tools.compare_to_gold", "--output", str(out_json), "--gold", str(stages[11].gold_file)])
+
+    # Stage 12 (optional gold)
+    if until >= 12 and stages[12].gold_file:
+        annotations_json = DATA_RESULTS / stages[1].output_json
+        _run([sys.executable, str(stages[12].script), "run", "--annotations", str(annotations_json), "-o", str(DATA_RESULTS)])
+        out_json = DATA_RESULTS / stages[12].output_json
+        if stages[12].gold_file and stages[12].gold_file.exists():
+            _run([sys.executable, "-m", "extractor.pipeline.tools.compare_to_gold", "--output", str(out_json), "--gold", str(stages[12].gold_file)])
+
+    # Stage 14
+    if until >= 14:
+        _run([sys.executable, str(stages[14].script), "run", str(DATA_RESULTS)])
+        out_json = DATA_RESULTS / stages[14].output_json
+        if stages[14].gold_file and stages[14].gold_file.exists():
+            _run([sys.executable, "-m", "extractor.pipeline.tools.compare_to_gold", "--output", str(out_json), "--gold", str(stages[14].gold_file)])
+
     raise typer.Exit(0)
 
 

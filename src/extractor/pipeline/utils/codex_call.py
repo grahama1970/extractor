@@ -1,4 +1,3 @@
-# codex_exec.py
 """
 Async wrapper for running `codex exec ...` with robust timeout, streaming, and termination.
 
@@ -6,15 +5,17 @@ Key features:
 - Overall and idle timeouts (wall and silence).
 - Graceful shutdown (SIGTERM) → hard kill (SIGKILL) with process-group awareness.
 - Stream readers that cannot deadlock; cancellation-safe finalization.
-- Rolling capture limits to avoid unbounded memory growth.
+- Rolling capture limits applied during read to avoid unbounded memory growth.
 - Optional binary or decoded text outputs.
 - Pluggable stdout/stderr chunk callbacks for live streaming.
 - Safe logging (optional redaction) and controlled environment inheritance.
 
-Requires: Python 3.10+, loguru
+Requires: Python 3.10+, loguru, typer, tqdm
 """
 
 from __future__ import annotations
+
+#--- Imports ---#
 
 import asyncio
 import os
@@ -26,47 +27,16 @@ import json
 from enum import Enum, auto
 from typing import Callable, Iterable, Mapping, Optional, Sequence, List, Any, Dict
 
-try:
-    from loguru import logger
-except Exception:  # pragma: no cover - fallback if loguru missing
-    import logging as _logging
-    _logging.basicConfig(level=_logging.INFO)
-    logger = _logging.getLogger("codex_call")
-try:
-    from tqdm.asyncio import tqdm as _tqdm_async  # type: ignore
-except Exception:  # pragma: no cover - fallback if tqdm not installed
-    import asyncio as _asyncio
-    class _tqdm_async:  # type: ignore
-        @staticmethod
-        def as_completed(tasks, total=None, desc=None):  # minimal shim
-            return _asyncio.as_completed(tasks)
-try:
-    import typer
-    _HAS_TYPER = True
-except Exception:
-    _HAS_TYPER = False
-    # Minimal shim so function signatures and decorators do not fail
-    class _TyperShim:
-        def __init__(self,*a,**k):
-            pass
-        def command(self,*a,**k):
-            return lambda f: f
-        def echo(self,msg,**kw):
-            print(msg)
-    def _arg_default(default=None,*a,**k):
-        return default
-    typer = _TyperShim()  # type: ignore
-    typer.Typer = _TyperShim  # type: ignore
-    typer.Argument = _arg_default  # type: ignore
-    typer.Option = _arg_default  # type: ignore
+from loguru import logger
+from tqdm.asyncio import as_completed as _tqdm_as_completed  # progress-enabled as_completed
+import typer
 
 
-# --------------------------
-# Data structures
-# --------------------------
+#--- Data Structures ---#
 
 @dataclass(frozen=True)
 class ExecResult:
+    """Captured results of a Codex exec invocation, with outputs and timing."""
     args: list[str]
     returncode: Optional[int]
     duration_s: float
@@ -83,9 +53,7 @@ class ExecResult:
     stderr: str
 
 
-# --------------------------
-# Helpers
-# --------------------------
+#--- Helpers ---#
 
 def _chunked(seq: List[Any], n: int) -> List[List[Any]]:
     """Return a list of slices of size n (last may be smaller)."""
@@ -95,14 +63,13 @@ def _chunked(seq: List[Any], n: int) -> List[List[Any]]:
 
 
 class _DeadlineResult(Enum):
+    """Outcome of deadline checks: OK, overall timeout, or idle timeout."""
     OK = auto()
     OVERALL_TIMEOUT = auto()
     IDLE_TIMEOUT = auto()
 
 
-# --------------------------
-# Utilities
-# --------------------------
+#--- Utilities ---#
 
 def _redact(seq: Sequence[str], redaction_markers: Sequence[str] | None) -> list[str]:
     """
@@ -132,14 +99,22 @@ def _build_env(
     allowlist: Iterable[str] | None,
     denylist: Iterable[str] | None,
 ) -> dict[str, str]:
+    """Construct the child env from optional base, with allow/deny filters.
+
+    - inherit_env: start from current process env when True.
+    - base_env: overlay of explicit key/values.
+    - allowlist: if provided, keep only these keys.
+    - denylist: remove these keys if present.
+    """
     env = os.environ.copy() if inherit_env else {}
     if base_env:
         env.update(base_env)
     if allowlist:
-        env = {k: v for k, v in env.items() if k in set(allowlist)}
+        allowed = set(allowlist)
+        env = {k: v for k, v in env.items() if k in allowed}
         if base_env:
             for k, v in base_env.items():
-                if k in allowlist:
+                if k in allowed:
                     env[k] = v
     if denylist:
         for k in denylist:
@@ -154,6 +129,7 @@ def _check_deadlines(
     overall_timeout_s: Optional[float],
     idle_timeout_s: Optional[float],
 ) -> _DeadlineResult:
+    """Evaluate overall and idle deadlines and return the outcome."""
     if overall_timeout_s is not None and (now - t0) > overall_timeout_s:
         return _DeadlineResult.OVERALL_TIMEOUT
     if idle_timeout_s is not None and (now - last_activity) > idle_timeout_s:
@@ -166,40 +142,41 @@ async def _read_stream(
     sink: bytearray | None,
     on_chunk: Optional[Callable[[bytes], None]],
     last_activity_ref: list[float],
+    capture_limit: Optional[int] = None,
 ) -> None:
     """
     Read from `stream` until EOF. Extends `sink` if provided (bytearray).
     Calls on_chunk(bytes) for live streaming.
     Updates last_activity_ref[0] on every read.
+    Applies capture limit per chunk to bound memory.
     """
-    try:
-        while True:
-            chunk = await stream.read(65536)
-            if not chunk:
-                break
-            last_activity_ref[0] = time.monotonic()
+    while True:
+        chunk = await stream.read(65536)
+        if not chunk:
+            break
+        last_activity_ref[0] = time.monotonic()
 
-            if on_chunk:
-                try:
-                    on_chunk(chunk)
-                except Exception:
-                    logger.exception("on_chunk callback raised")
+        # If callback raises, let it propagate (fail fast).
+        if on_chunk:
+            on_chunk(chunk)
 
-            if sink is not None:
-                sink.extend(chunk)
-    except asyncio.CancelledError:
-        raise
-    except Exception:
-        logger.exception("Error while reading process stream")
+        if sink is not None:
+            sink.extend(chunk)
+            if capture_limit is not None:
+                if capture_limit <= 0:
+                    sink.clear()
+                elif len(sink) > capture_limit:
+                    del sink[0 : len(sink) - capture_limit]
 
 
 async def _write_stdin_bytes(proc: asyncio.subprocess.Process, data: bytes) -> None:
     """
     Write stdin in safe chunks respecting backpressure; close when done.
+    Errors propagate (fail fast).
     """
+    if not proc.stdin:
+        return
     try:
-        if not proc.stdin:
-            return
         view = memoryview(data)
         CHUNK = 65536
         offset = 0
@@ -208,16 +185,9 @@ async def _write_stdin_bytes(proc: asyncio.subprocess.Process, data: bytes) -> N
             proc.stdin.write(view[offset:end])
             await proc.stdin.drain()
             offset = end
-    except asyncio.CancelledError:
-        raise
-    except Exception:
-        logger.exception("Failed writing to stdin")
     finally:
-        try:
-            if proc.stdin and not proc.stdin.is_closing():
-                proc.stdin.close()
-        except Exception:
-            pass
+        if proc.stdin and not proc.stdin.is_closing():
+            proc.stdin.close()
 
 
 def _apply_capture_limit(buf: bytearray, limit: Optional[int]) -> None:
@@ -234,9 +204,7 @@ def _apply_capture_limit(buf: bytearray, limit: Optional[int]) -> None:
         del buf[0 : len(buf) - limit]
 
 
-# --------------------------
-# Main runner
-# --------------------------
+#--- Main Runner ---#
 
 async def run_codex_exec(
     script_or_path: str,
@@ -268,8 +236,10 @@ async def run_codex_exec(
     ask_for_approval: Optional[str] = None,
     sandbox_mode: Optional[str] = None,
 ) -> ExecResult:
-    """
-    Run `codex exec <script_or_path> [extra_args...]` with robust supervision.
+    """Run `codex exec <script_or_path> ...` with timeouts and streaming.
+
+    Provides supervised execution, IO streaming, capture limits, and graceful
+    termination. Returns ExecResult with timing/timeout flags and outputs.
     """
     args = [codex_bin, "exec", script_or_path]
 
@@ -307,14 +277,25 @@ async def run_codex_exec(
 
     stdout_buf = bytearray()
     stderr_buf = bytearray()
-
     last_activity_ref = [time.monotonic()]
 
     reader_stdout = asyncio.create_task(
-        _read_stream(proc.stdout, stdout_buf if stdout_capture_limit != 0 else None, on_stdout_chunk, last_activity_ref)
+        _read_stream(
+            proc.stdout,  # type: ignore[arg-type]
+            stdout_buf if stdout_capture_limit != 0 else None,
+            on_stdout_chunk,
+            last_activity_ref,
+            stdout_capture_limit if stdout_capture_limit not in (None, 0) else None,
+        )
     )
     reader_stderr = asyncio.create_task(
-        _read_stream(proc.stderr, stderr_buf if stderr_capture_limit != 0 else None, on_stderr_chunk, last_activity_ref)
+        _read_stream(
+            proc.stderr,  # type: ignore[arg-type]
+            stderr_buf if stderr_capture_limit != 0 else None,
+            on_stderr_chunk,
+            last_activity_ref,
+            stderr_capture_limit if stderr_capture_limit not in (None, 0) else None,
+        )
     )
 
     stdin_task = None
@@ -324,6 +305,7 @@ async def run_codex_exec(
     timed_out = False
     idle_timed_out = False
     was_killed = False
+    supervisor_exc: BaseException | None = None
 
     async def _poll_wait(interval: float) -> bool:
         try:
@@ -353,15 +335,17 @@ async def run_codex_exec(
                 break
     except asyncio.CancelledError:
         logger.warning("run_codex_exec cancelled; terminating child process")
-        timed_out = True
-    except Exception:
+        supervisor_exc = asyncio.CancelledError()
+    except Exception as e:
         logger.exception("Supervisor loop error; terminating child process")
-        timed_out = True
+        supervisor_exc = e
     finally:
+        # Apply capture tail one more time
         _apply_capture_limit(stdout_buf, stdout_capture_limit)
         _apply_capture_limit(stderr_buf, stderr_capture_limit)
 
-        if timed_out or idle_timed_out:
+        # Handle termination on timeouts or supervisor errors
+        if timed_out or idle_timed_out or supervisor_exc is not None:
             try:
                 if sys.platform.startswith("win"):
                     proc.terminate()
@@ -399,22 +383,26 @@ async def run_codex_exec(
                     except Exception:
                         pass
 
+        # Ensure stdin closed
         if proc.stdin and not proc.stdin.is_closing():
             try:
                 proc.stdin.close()
             except Exception:
                 pass
 
+        # Await stream tasks; let exceptions propagate (fail fast)
         tasks = [reader_stdout, reader_stderr]
         if stdin_task:
             tasks.append(stdin_task)
         try:
-            await asyncio.gather(*tasks, return_exceptions=True)
-        except Exception:
-            logger.exception("Error awaiting stream tasks")
+            await asyncio.gather(*tasks)  # return_exceptions=False by default
+        except Exception as e:
+            if supervisor_exc is None:
+                supervisor_exc = e
 
     duration = time.monotonic() - t0
 
+    # Final capture tail
     _apply_capture_limit(stdout_buf, stdout_capture_limit)
     _apply_capture_limit(stderr_buf, stderr_capture_limit)
 
@@ -429,13 +417,13 @@ async def run_codex_exec(
         stderr_text = stderr_bytes.decode(encoding, errors=errors)
 
     logger.info(
-        "Finished codex exec: rc={} in {:.2f}s | timed_out={} idle_timed_out={} killed={}",
-        proc.returncode,
-        duration,
-        timed_out,
-        idle_timed_out,
-        was_killed,
+        f"Finished codex exec: rc={proc.returncode} in {duration:.2f}s | "
+        f"timed_out={timed_out} idle_timed_out={idle_timed_out} killed={was_killed}"
     )
+
+    # If there was an internal failure (not just a child timeout), raise it.
+    if supervisor_exc is not None and not (timed_out or idle_timed_out):
+        raise supervisor_exc
 
     return ExecResult(
         args=list(args),
@@ -451,17 +439,54 @@ async def run_codex_exec(
     )
 
 
-# --------------------------
-# Example (manual test)
-# --------------------------
-app = typer.Typer(name="codex_call", help="Run batch prompts through Codex exec (mirrors litellm_call UX).") if _HAS_TYPER else None
+#--- JSONL Helpers ---#
+
+async def run_codex_exec_jsonl(script_or_path: str, payload, **kwargs) -> ExecResult:
+    """Serialize payload as JSONL, pipe to stdin, and run under Codex."""
+    lines: list[str] = []
+    if isinstance(payload, dict):
+        lines.append(json.dumps(payload))
+    else:
+        for obj in payload:
+            lines.append(json.dumps(obj))
+    stdin_bytes = ("\n".join(lines) + "\n").encode("utf-8")
+    return await run_codex_exec(
+        script_or_path,
+        forward_stdin=True,
+        stdin_bytes=stdin_bytes,
+        **kwargs,
+    )
 
 
+async def run_codex_batch_jsonl(
+    script_or_path: str,
+    payloads,
+    *,
+    concurrency: int = 4,
+    desc: str = "Codex Batch",
+    **kwargs
+) -> list[str]:
+    """Run many JSONL payloads concurrently with progress; return last lines."""
+    sem = asyncio.Semaphore(concurrency)
+    results: list[Optional[str]] = [None] * len(payloads)
+
+    async def _one(i, p):
+        async with sem:
+            res = await run_codex_exec_jsonl(script_or_path, p, **kwargs)
+            out_lines = (res.stdout or "").strip().splitlines()
+            results[i] = out_lines[-1] if out_lines else ""
+            return results[i]
+
+    tasks = [asyncio.create_task(_one(i, p)) for i, p in enumerate(payloads)]
+    for t in _tqdm_as_completed(tasks, total=len(tasks), desc=desc):
+        await t
+    return [r or "" for r in results]
+
+
+#--- Payload Construction ---#
 
 def _demo_payloads(model: Optional[str]) -> List[Dict[str, Any]]:
-    """Load demo payloads from a static JSONL file for clarity.
-    Reads from CODEX_DEMO_JSONL or defaults to data/demos/codex_call_demo_simple.jsonl.
-    """
+    """Load demo items from JSONL (env CODEX_DEMO_JSONL or default path)."""
     path = os.environ.get("CODEX_DEMO_JSONL", "data/demos/codex_call_demo_simple.jsonl")
     payloads: List[Dict[str, Any]] = []
     with open(path, 'r', encoding='utf-8') as f:
@@ -480,8 +505,75 @@ def _demo_payloads(model: Optional[str]) -> List[Dict[str, Any]]:
     return payloads
 
 
+def build_payloads(
+    *,
+    demo: bool,
+    stdin_flag: bool,
+    jsonl_flag: bool,
+    prompts: Optional[List[str]],
+    model: Optional[str],
+) -> List[Dict[str, Any]]:
+    """Build request payloads from demo, stdin (text/JSONL), or positional args."""
+    payloads: List[Dict[str, Any]] = []
 
-@app.command() if _HAS_TYPER else (lambda f: f)
+    if demo:
+        return _demo_payloads(model)
+
+    if stdin_flag:
+        for line in sys.stdin:
+            line = line.rstrip("\n")
+            if not line:
+                continue
+            if jsonl_flag:
+                try:
+                    obj = json.loads(line)
+                    if isinstance(obj, dict):
+                        d = obj
+                        if model and "model" not in d:
+                            d = {**d, "model": model}
+                        payloads.append(d)
+                    elif isinstance(obj, str):
+                        d = {"text": obj}
+                        if model:
+                            d["model"] = model
+                        payloads.append(d)
+                    else:
+                        d = {"text": str(obj)}
+                        if model:
+                            d["model"] = model
+                        payloads.append(d)
+                except json.JSONDecodeError:
+                    # Treat invalid JSON line as raw text
+                    d = {"text": line}
+                    if model:
+                        d["model"] = model
+                    payloads.append(d)
+            else:
+                d = {"text": line}
+                if model:
+                    d["model"] = model
+                payloads.append(d)
+        return payloads
+
+    # Positional prompts path
+    prompts = prompts or []
+    for p in prompts:
+        d = {"text": p}
+        if model:
+            d["model"] = model
+        payloads.append(d)
+    return payloads
+
+
+#--- Typer CLI ---#
+
+app = typer.Typer(
+    name="codex_call",
+    help="Run batch prompts through Codex exec (mirrors litellm_call UX)."
+)
+
+
+@app.command()
 def run(
     prompts: List[str] = typer.Argument(None, help="Prompts to run (like litellm_call)."),
     demo: bool = typer.Option(False, "--demo", help="Run a built-in 5-item batch."),
@@ -514,73 +606,36 @@ def run(
     Runs a batch of prompts via Codex by invoking the LiteLLM helper as the child process.
 
     Examples:
-    - python codex_call.py --demo
-    - python codex_call.py "What is 2+2?" "Describe this image: data/images/table.png"
-    - echo '"What is 2+2?"' | python codex_call.py --stdin --jsonl
+    - python codex_exec.py --demo
+    - python codex_exec.py "What is 2+2?" "Describe this image: data/images/table.png"
+    - echo '"What is 2+2?"' | python codex_exec.py --stdin --jsonl
     """
-    # Resolve payloads as list of dicts (to match litellm_call JSONL usage)
-    payloads: List[Dict[str, Any]] = []
-    if demo:
-        payloads = _demo_payloads(model)
-    elif stdin:
-        for line in sys.stdin:
-            line = line.rstrip("\n")
-            if not line:
-                continue
-            if jsonl:
-                try:
-                    obj = json.loads(line)
-                    if isinstance(obj, dict):
-                        if model and "model" not in obj:
-                            obj = {**obj, "model": model}
-                        payloads.append(obj)
-                    elif isinstance(obj, str):
-                        d: Dict[str, Any] = {"text": obj}
-                        if model:
-                            d["model"] = model
-                        payloads.append(d)
-                    else:
-                        d = {"text": str(obj)}
-                        if model:
-                            d["model"] = model
-                        payloads.append(d)
-                except Exception:
-                    # Fallback to raw line -> wrap as {text, model?}
-                    d = {"text": line}
-                    if model:
-                        d["model"] = model
-                    payloads.append(d)
-            else:
-                d = {"text": line}
-                if model:
-                    d["model"] = model
-                payloads.append(d)
-    else:
-        # Positional prompts -> wrap as dicts
-        for p in prompts:
-            d = {"text": p}
-            if model:
-                d["model"] = model
-            payloads.append(d)
+    # Build payloads (single source of truth)
+    payloads = build_payloads(
+        demo=demo,
+        stdin_flag=stdin,
+        jsonl_flag=jsonl,
+        prompts=prompts,
+        model=model,
+    )
 
     if not payloads:
         typer.echo("No prompts provided. Use --demo, pass prompts, or --stdin.", err=True)
         raise typer.Exit(1)
+
     # Inject flat model_reasoning_effort only (no nested keys) if requested
     if reasoning_effort:
         for i, obj in enumerate(payloads):
-            if not isinstance(obj, dict):
-                continue
-            if "model_reasoning_effort" in obj:
-                continue
-            updated = dict(obj)
-            updated["model_reasoning_effort"] = reasoning_effort
-            payloads[i] = updated
+            if isinstance(obj, dict) and "model_reasoning_effort" not in obj:
+                updated = dict(obj)
+                updated["model_reasoning_effort"] = reasoning_effort
+                payloads[i] = updated
 
     if dry_run:
         for obj in payloads:
-            print(__import__("json").dumps(obj))
+            print(json.dumps(obj))
         return
+
     # Decide mode: direct Codex vs worker script
     if not target:
         # Direct Codex mode: build prompt strings and call `codex exec` directly
@@ -595,6 +650,7 @@ def run(
                 sem = asyncio.Semaphore(concurrency)
                 results = [None] * len(group)
                 meta = [None] * len(group)
+
                 async def _one(i, item):
                     async with sem:
                         # Build prompt text from item
@@ -611,7 +667,13 @@ def run(
 
                         if not text:
                             results[i] = "[rc=?] Empty prompt"
-                            meta[i] = {"index": i + 1, "request": item if isinstance(item, dict) else {"text": str(item)}, "answer": "", "rc": None, "duration_s": 0.0}
+                            meta[i] = {
+                                "index": i + 1,
+                                "request": item if isinstance(item, dict) else {"text": str(item)},
+                                "answer": "",
+                                "rc": None,
+                                "duration_s": 0.0,
+                            }
                             return
 
                         flags = []
@@ -660,12 +722,13 @@ def run(
                         }
 
                 tasks = [asyncio.create_task(_one(i, it)) for i, it in enumerate(group)]
-                for t in _tqdm_async.as_completed(tasks, total=len(tasks), desc="Codex Direct Batch"):
+                for t in _tqdm_as_completed(tasks, total=len(tasks), desc="Codex Direct Batch"):
                     await t
                 # extend preserving order
                 outs_all.extend([r or "" for r in results])
                 meta_all.extend([m for m in meta])
             return outs_all, meta_all
+
         outs, meta = asyncio.run(_run_direct())
     else:
         # Worker script mode (e.g., litellm_call.py) via JSONL over stdin
@@ -673,6 +736,7 @@ def run(
             sem = asyncio.Semaphore(concurrency)
             results = [None] * len(payloads)
             meta = [None] * len(payloads)
+
             async def _one(i, item):
                 async with sem:
                     res = await run_codex_exec_jsonl(
@@ -704,81 +768,23 @@ def run(
                         "rc": res.returncode,
                         "duration_s": res.duration_s,
                     }
+
             tasks = [asyncio.create_task(_one(i, it)) for i, it in enumerate(payloads)]
-            for t in _tqdm_async.as_completed(tasks, total=len(tasks), desc="Codex JSONL Batch"):
+            for t in _tqdm_as_completed(tasks, total=len(tasks), desc="Codex JSONL Batch"):
                 await t
             return [r or "" for r in results], [m for m in meta]
+
         outs, meta = asyncio.run(_run_worker())
 
     if emit_json:
-        import json as _json
         # Emit compact JSON array mapping input to answer
-        output = _json.dumps(meta, ensure_ascii=False)
-        if _HAS_TYPER:
-            typer.echo(output)
-        else:
-            print(output)
+        output = json.dumps(meta, ensure_ascii=False, default=str)
+        typer.echo(output)
     else:
         for i, (p, o) in enumerate(zip(payloads, outs), start=1):
             preview = p.get("text") if isinstance(p, dict) else str(p)
-            print(f"[{i}] {preview} -> {o}") if not _HAS_TYPER else typer.echo(f"[{i}] {preview} -> {o}")
+            typer.echo(f"[{i}] {preview} -> {o}")
 
 
-
-# --------------------------
-# JSONL helpers (fixed)
-# --------------------------
-
-async def run_codex_exec_jsonl(script_or_path: str, payload, **kwargs) -> ExecResult:
-    """
-    One-shot JSONL round-trip: serializes payload (dict or list of dicts) to JSON Lines,
-    sends via stdin, closes it, and returns ExecResult.
-    """
-    lines: list[str] = []
-    if isinstance(payload, dict):
-        lines.append(json.dumps(payload))
-    else:
-        for obj in payload:
-            lines.append(json.dumps(obj))
-    stdin_bytes = ("\n".join(lines) + "\n").encode("utf-8")
-    return await run_codex_exec(
-        script_or_path,
-        forward_stdin=True,
-        stdin_bytes=stdin_bytes,
-        **kwargs,
-    )
-
-
-async def run_codex_batch_jsonl(
-    script_or_path: str,
-    payloads,
-    *,
-    concurrency: int = 4,
-    desc: str = "Codex Batch",
-    **kwargs
-) -> list[str]:
-    """
-    Run a batch of JSONL payloads with limited concurrency and progress display.
-    Returns a list of strings (last stdout line per task).
-    """
-    sem = asyncio.Semaphore(concurrency)
-    results: list[Optional[str]] = [None] * len(payloads)
-
-    async def _one(i, p):
-        async with sem:
-            res = await run_codex_exec_jsonl(script_or_path, p, **kwargs)
-            out_lines = (res.stdout or "").strip().splitlines()
-            results[i] = out_lines[-1] if out_lines else ""
-            return results[i]
-
-    tasks = [asyncio.create_task(_one(i, p)) for i, p in enumerate(payloads)]
-    for t in _tqdm_async.as_completed(tasks, total=len(tasks), desc=desc):
-        await t
-    return [r or "" for r in results]
 if __name__ == "__main__":
-    # Typer-only entrypoint for consistency across the pipeline
-    if app is not None:
-        app()
-    else:
-        print("Typer is required to run codex_call CLI.", file=sys.stderr)
-        sys.exit(2)
+    app()

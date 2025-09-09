@@ -205,7 +205,8 @@ async def identify_requirements_in_section(
             }
             if "gpt-5" not in (LEAN4_MODEL or "").lower():
                 params["temperature"] = 0.1
-            results = await litellm_call([params], wrap_json=False, concurrency=1, desc="Extract Requirements")
+            sid = os.getenv("LITELLM_SESSION_ID") or get_run_id()
+            results = await litellm_call([params], wrap_json=False, concurrency=1, desc="Extract Requirements", session_id=sid)
             response = results[0] if results else ""
             # Normalize response object/dict
             content: Optional[str] = None

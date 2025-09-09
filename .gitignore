@@ -198,6 +198,26 @@ cython_debug/
 # Sensitive files
 .env.bak
 **/vertex_ai_service_account.json
+
+# Ignore all PDFs
+*.pdf
+**/*.pdf
+
+# Ignore any directory with 'archive' in its name (case variants)
+**/*archive*/
+**/*Archive*/
+**/*ARCHIVE*/
+
+# Common private key material
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+*.der
+id_rsa
+id_dsa
 **/*_service_account.json
 **/*credentials*.json
 
@@ -222,3 +242,14 @@ deprecated/
 .env.*
 *.env
 .envrc
+# Local dev artifacts (added by Codex CLI)
+/.serena/
+/data/
+/archive/
+/_archive/
+/proof_of_concept/
+/benchmarks/
+/examples/
+/repos/
+/logs/
+/tmp/

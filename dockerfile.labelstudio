@@ -1,0 +1,10 @@
+FROM heartexlabs/label-studio:latest
+
+# Optional defaults; override via docker-compose or .env
+ENV LABEL_STUDIO_LOCAL_FILES_SERVING_ENABLED=true \
+    LABEL_STUDIO_LOCAL_FILES_DOCUMENT_ROOT=/label-studio/localdata \
+    LABEL_STUDIO_USERNAME=admin@example.com \
+    LABEL_STUDIO_PASSWORD=ChangeMe123!
+
+# The base image defines the entrypoint/cmd to run Label Studio on port 8080
+

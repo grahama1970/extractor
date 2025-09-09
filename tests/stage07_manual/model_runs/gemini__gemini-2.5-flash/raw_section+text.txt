@@ -1,0 +1,37 @@
+[
+  {
+    "Signal": "clk_i",
+    "IO": "in",
+    "Description": "Subsystem Clock",
+    "connection": "SUBSYSTEM",
+    "Type": "logic"
+  },
+  {
+    "Signal": "rst_ni",
+    "IO": "in",
+    "Description": "Asynchronous reset active low",
+    "connection": "SUBSYSTEM",
+    "Type": "logic"
+  },
+  {
+    "Signal": "vpc_i",
+    "IO": "in",
+    "Description": "Virtual PC",
+    "connection": "CACHE",
+    "Type": "logic[CVA6Cfg.VLEN-1:0]"
+  },
+  {
+    "Signal": "bht_update_i",
+    "IO": "in",
+    "Description": "Update bht with resolved address",
+    "connection": "EXECUTE",
+    "Type": "bht_update_t"
+  },
+  {
+    "Signal": "bht_prediction_o",
+    "IO": "out",
+    "Description": "Prediction from bht",
+    "connection": "FRONTEND",
+    "Type": "ariane_pkg::bht_prediction_t[CVA6Cfg.INSTR_PER_FETCH-1:0]"
+  }
+]

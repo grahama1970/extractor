@@ -1,0 +1,11 @@
+
+{
+  "descriptions": [
+    {
+      "description": "A black-and-white giant panda walking toward the camera on grass and a log, surrounded by leafy green plants."
+    },
+    {
+      "description": "A brightly colored scarlet macaw in mid-flight, showing red, blue and yellow plumage against a blurred green background."
+    }
+  ]
+}

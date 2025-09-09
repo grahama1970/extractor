@@ -1,0 +1,12 @@
+version: "3.9"
+services:
+  browserless:
+    image: ghcr.io/browserless/chromium:latest
+    ports: ["3000:3000"]
+    shm_size: "2g"
+    environment:
+      - BROWSERLESS_TOKEN=devtoken123
+      - PREBOOT_CHROME=true
+      - MAX_CONCURRENT_SESSIONS=1
+    volumes:
+      - ./artifacts:/work/artifacts

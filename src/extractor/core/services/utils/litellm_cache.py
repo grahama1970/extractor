@@ -96,6 +96,8 @@ def initialize_litellm_cache() -> None:
 
         # Set up LiteLLM cache with debug logging
         logger.debug("Configuring LiteLLM Redis cache...")
+        # Respect optional namespace for per-session isolation
+        cache_namespace = os.getenv("LITELLM_CACHE_NAMESPACE") or os.getenv("LITELLM_SESSION_ID")
         litellm.cache = LiteLLMCache(  # Use imported Cache
             type=LiteLLMCacheType.REDIS,  # Use Enum/Type
             host=redis_host,
@@ -103,6 +105,7 @@ def initialize_litellm_cache() -> None:
             password=redis_password,
             supported_call_types=["acompletion", "completion"],
             ttl=60 * 60 * 24 * 2,  # 2 days
+            namespace=cache_namespace,
         )
 
         # Enable caching and verify

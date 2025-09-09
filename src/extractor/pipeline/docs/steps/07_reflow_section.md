@@ -26,7 +26,11 @@ CLI (main)
 - `run --sections <s04.json> --tables <s05.json> --figures <s06.json> [--annotations <s01.json>] -o <results_dir> [--summary-only --include-images/--no-include-images --allow-fallback --bundle]`
 
 Environment
+- VLM model (single source): `LITELLM_VLM_MODEL` (e.g., `openai/gpt-5-mini`).
+- Session + cache: `LITELLM_SESSION_ID` (logged + cache namespace), `LITELLM_ATTACH_SESSION` (default true).
 - Optional ArangoDB for hybrid search.
+Notes
+- Full mode includes images; `litellm_call` auto-routes GPT‑5 + images via OpenAI Responses API and normalizes output.
 
 Downstream
 - Stage 10 flattens and exports reflowed content to `pdf_objects` in ArangoDB.

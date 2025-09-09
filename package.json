@@ -1,0 +1,28 @@
+{
+  "name": "extractor",
+  "version": "1.0.0",
+  "description": "Advanced multi-format document extraction system with self-correcting AI agents, annotation-guided learning, and continuous improvement through metadata accumulation. Handles PDFs, DOCX, PPTX, XML, HTML, and more with enterprise-grade accuracy.",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs",
+    "example": "examples",
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/grahama1970/extractor.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/grahama1970/extractor/issues"
+  },
+  "homepage": "https://github.com/grahama1970/extractor#readme",
+  "devDependencies": {
+    "puppeteer": "^24.19.0"
+  }
+}

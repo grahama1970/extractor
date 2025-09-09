@@ -560,6 +560,17 @@ def extract_annotations_data(pdf_path: Path, config: Config) -> List[Dict[str, A
                             nearest_note = ft.get("note")
                 except Exception:
                     nearest_note = None
+                # Parse machine-readable keys from nearest_note if present
+                def _parse_note_keys(note: Any) -> Dict[str, str]:
+                    out: Dict[str, str] = {}
+                    if not isinstance(note, str):
+                        return out
+                    for ln in [x.strip() for x in note.splitlines() if x.strip()]:
+                        if "=" in ln and not ln.startswith("#"):
+                            k, v = ln.split("=", 1)
+                            out[k.strip()] = v.strip()
+                    return out
+                machine_note = _parse_note_keys(nearest_note)
                 matrix = fitz.Matrix(config.render_dpi / 72, config.render_dpi / 72)
                 # Render without drawing annotations to avoid annotation frames leaking into features
                 try:
@@ -587,6 +598,7 @@ def extract_annotations_data(pdf_path: Path, config: Config) -> List[Dict[str, A
                     "below_blocks": below_blocks,
                     "image_path": str(img_path),
                     "human_note": nearest_note,
+                    "machine_note": machine_note if machine_note else None,
                     "computed_features": {
                         "avg_font_size_inside": avg_size_inside,
                         "avg_font_size_above": avg_size_above,
@@ -782,14 +794,16 @@ async def process_pdf_pipeline(config: Config):
     try:
         if config.max_runtime_seconds and config.max_runtime_seconds > 0:
             t0 = time.monotonic()
+            sid = os.getenv("LITELLM_SESSION_ID") or get_run_id()
             results: List[str] = await asyncio.wait_for(
-                litellm_call(items, concurrency=config.llm_concurrency, desc="Interpreting Annotations"),
+                litellm_call(items, concurrency=config.llm_concurrency, desc="Interpreting Annotations", session_id=sid),
                 timeout=config.max_runtime_seconds,
             )
             t_llm_ms = int((time.monotonic() - t0) * 1000)
         else:
             t0 = time.monotonic()
-            results = await litellm_call(items, concurrency=config.llm_concurrency, desc="Interpreting Annotations")
+            sid = os.getenv("LITELLM_SESSION_ID") or get_run_id()
+            results = await litellm_call(items, concurrency=config.llm_concurrency, desc="Interpreting Annotations", session_id=sid)
             t_llm_ms = int((time.monotonic() - t0) * 1000)
     except asyncio.TimeoutError as e:
         msg_info = classify_llm_error(e)

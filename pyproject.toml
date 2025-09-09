@@ -31,8 +31,8 @@ dependencies = [
  "anthropic>=0.56.0",
  "pre-commit>=4.2.0,<5",
  "openai>=1.65.2,<2",
- # "litellm>=1.74.7",
- "litellm @ file:///home/graham/workspace/experiments/litellm",
+ "litellm>=1.74.7",
+ # "litellm @ file:///home/graham/workspace/experiments/litellm",
  "tree-sitter>=0.23.2",
  "asyncio>=3.4.3,<4",
  "json-repair>=0.44.1",
@@ -129,6 +129,7 @@ pdf-tools = "extractor.cli.pdf_tools:app"
 # Core pipeline entrypoints (flattened API)
 extract-pipeline = "extractor.pipeline.api:cli_main"
 extract-sections = "extractor.pipeline.api:cli_main"
+pipeline-run-all = "extractor.pipeline.run_all:app"
 pipeline-validate-gold = "extractor.pipeline.tools.validate_gold_standard:app"
 # Use Typer apps as entrypoints so CLI flags are parsed correctly
 pipeline-compare-gold = "extractor.pipeline.tools.compare_to_gold:app"

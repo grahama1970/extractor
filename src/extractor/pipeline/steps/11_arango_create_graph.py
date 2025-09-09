@@ -77,7 +77,8 @@ except Exception:
     faiss = None  # type: ignore
 
 from tqdm.asyncio import tqdm
-import litellm
+from extractor.pipeline.utils.litellm_call import litellm_call
+from extractor.pipeline.utils.diagnostics import get_run_id
 
 # FAIL FAST - simple env loading
 from dotenv import load_dotenv, find_dotenv
@@ -246,29 +247,21 @@ async def _rationale_for_pair(text_a: str, text_b: str, model: str, max_tokens: 
             b_snip = b_snip[:800] + " ..."
         system = "You explain concisely why two document snippets are related. Use one or two sentences. Avoid quoting long text."
         user = f"Snippet A:\n{a_snip}\n\nSnippet B:\n{b_snip}\n\nExplain the relationship succinctly."
-        _kwargs: Dict[str, Any] = {
+
+        params: Dict[str, Any] = {
             "model": model,
-            "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
             "max_tokens": max_tokens,
             "stream": False,
             "timeout": 60,
         }
-        if "gpt-5" not in (model or "").lower():
-            _kwargs["temperature"] = 0.1
-        resp = await litellm.acompletion(**_kwargs)
-        content = ""
-        if isinstance(resp, dict):
-            choices = resp.get("choices") or []
-            if choices:
-                content = (choices[0].get("message") or {}).get("content") or ""
-        else:
-            ch = getattr(resp, "choices", None)
-            if ch:
-                msg = getattr(ch[0], "message", None)
-                content = getattr(msg, "content", "") if msg else ""
-                if not content:
-                    content = getattr(ch[0], "text", "") or ""
-        return (content or "").strip()[:600]
+        params["temperature"] = 1.0 if "gpt-5" in (model or "").lower() else 0.1
+        sid = os.getenv("LITELLM_SESSION_ID") or get_run_id()
+        out = await litellm_call([params], concurrency=1, desc="graph_rationale", session_id=sid)
+        return ((out[0] if out else "").strip())[:600]
     except Exception:
         return ""
 

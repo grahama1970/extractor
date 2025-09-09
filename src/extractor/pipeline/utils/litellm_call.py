@@ -1,64 +1,79 @@
 #!/usr/bin/env python3
 
 """
-LiteLLM Call - Easy async LLM batch runner with automatic image support
+LiteLLM Call - Thin async batch runner that adds multimodal prep on top of LiteLLM Router
 
 WHAT IT DOES:
-- Run multiple LLM prompts in parallel for speed
-- Automatically detects and includes images from URLs or local files
+- Parse prompts, auto-detect images (URLs/local), compress/fetch, and build proper vision message parts
+- Batch multiple prompts per model using LiteLLM Router async APIs
+- Leverage LiteLLM’s built-in retries and per-deployment concurrency/semaphores
 - Works with any LiteLLM-supported model (OpenAI, Anthropic, Ollama, etc.)
-- Handles all image processing automatically (compression, base64 encoding)
+- Optionally wraps non-JSON outputs into JSON and augments JSON with usage/cost metadata
+- Mixed models in one run: supported (items can specify different models)
 
-WHAT THIS SCRIPT DOES **NOT** DO:
-- It does NOT inject JSON mode, system prompts, schemas, or tool-call definitions.  
-  If you need strict JSON, include `"response_format": {"type": "json_object"}`  
-  (or a system prompt) yourself.  
-- It does NOT support or transform tool calls; pass a full LiteLLM dict with `tools` if required.
+WHAT THIS SCRIPT DOES NOT DO:
+- It does NOT inject JSON mode, system prompts, schemas, or tool-call definitions.
+  If you need strict JSON, include `"response_format": {"type": "json_object"}` (or a system prompt).
+- It does NOT transform tool calls. If you pass tools, they will be sent as-is on individual calls (not batched).
+- It does NOT implement custom retry/tenacity or custom concurrency. Those are delegated to LiteLLM Router.
 
-QUICK START:
-1. Basic text prompt:
-   $ python litellm_call.py "What is 2+2?"
+WHAT’S DIFFERENT VS ORIGINAL VERSION:
+- Uses LiteLLM Router for:
+  - Retries (num_retries) via Router instead of a custom tenacity decorator
+  - Concurrency/rate-limiting via per-deployment semaphores (max_parallel_requests/rpm/tpm)
+  - Per-model batch calls: Router.abatch_completion_one_model_multiple_requests
+- Still supports different models per item:
+  - Requests are grouped by model and sent as separate batches per model
+  - Items with extra per-request params (e.g., temperature/tools) are sent in parallel individually
+- Removed hand-rolled “concurrency” control; rely on Router’s concurrency
+- Keeps the image auto-detect/compress logic and CLI UX
 
-2. Multiple prompts (run in parallel):
-   $ python litellm_call.py "What is 2+2?" "What is the capital of France?"
+INPUT FORMS SUPPORTED:
+1) Simple string:
+   "What's in this image? /path/to/image.jpg"
 
-3. Prompt with images (auto-detected):
-   $ python litellm_call.py "What's in this image? /path/to/image.jpg"
-   $ python litellm_call.py "Compare: https://example.com/cat.jpg and dog.png"
+2) Shorthand dict:
+   {"text": "Explain this", "image": "path/to/image.jpg", "model": "gpt-4o-mini"}
 
-4. From files:
-   $ python litellm_call.py @prompts.txt        # One prompt per line
-   $ python litellm_call.py prompts.json        # JSON array of prompts
-   $ python litellm_call.py @prompts.jsonl      # JSON Lines format
-   
-5. From stdin:
-   $ echo "What is 2+2?" | python litellm_call.py --stdin
-   $ cat prompts.jsonl | python litellm_call.py --stdin --jsonl
+3) Full control (sent individually if you include per-request params):
+   {
+     "model": "gpt-4o-mini",
+     "messages": [...],
+     "temperature": 0.7,
+     "tools": [...]
+   }
 
-ENVIRONMENT SETUP:
-- OLLAMA_DEFAULT_MODEL: Model to use (default: "ollama/gemma3:12b")
-- OLLAMA_BASE_URL: API endpoint (default: "http://localhost:11434")
-- OLLAMA_API_KEY: API key if required
+BATCHING RULES:
+- Requests with only model + messages (no extra per-request params) are grouped by model and sent via Router.abatch_completion_one_model_multiple_requests.
+- Requests that include extra per-request params (e.g., temperature/tools/response_format/etc.) are sent as individual Router.acompletion calls to preserve request-specific behavior.
+- Mixed models in one run are supported; each model gets its own batch.
 
-ADVANCED USAGE:
-- Override model: --model "gpt-4"
-- Custom API: --api-base "https://api.openai.com/v1"
-- With API key: --api-key "sk-..."
+ENVIRONMENT / DEFAULTS:
+- LITELLM_MODEL: Fallback model (default: "ollama/gemma3:12b")
+- LITELLM_NUM_RETRIES: Default num_retries for Router calls (default: 3)
+- LITELLM_MAX_PARALLEL: Router default_max_parallel_requests (per-deployment semaphore default). Optional.
+- LITELLM_ATTACH_SESSION: If "true", pass session_id as `user` to providers (default: true)
 
-INPUT FORMATS:
-1. Simple string: "What is 2+2?"
-2. With image: {"text": "Explain this", "image": "path/to/image.jpg"}
-3. Full control: {"model": "gpt-4", "messages": [...], "temperature": 0.7}
+Provider-specific envs are still honored by LiteLLM (e.g., OPENAI_API_KEY, OLLAMA_BASE_URL, etc.).
 
-FEATURES:
-- Automatic image detection in prompts (URLs and file paths)
-- Smart image compression to stay under API limits
-- Parallel processing with progress bar
-- Automatic retries on failures
-- Silent handling of missing/broken images
-- Supports all common image formats (jpg, png, gif, etc.)
+CLI EXAMPLES:
+- Single:
+  $ python litellm_call.py "What is 2+2?"
 
+- Batch (multiple prompts):
+  $ python litellm_call.py "What is 2+2?" "What is the capital of France?"
+
+- Multimodal (auto image detection from local path and URL):
+  $ python litellm_call.py "What's in this image? /path/to/image.jpg"
+  $ python litellm_call.py "Describe https://example.com/cat.jpg and dog.png"
+
+- From files / stdin:
+  $ python litellm_call.py @prompts.txt
+  $ python litellm_call.py prompts.json
+  $ python litellm_call.py @prompts.jsonl
+  $ echo "What is 2+2?" | python litellm_call.py --stdin
 """
+
 import asyncio
 import sys
 import json
@@ -67,189 +82,83 @@ import io
 import os
 import re
 from pathlib import Path
-from typing import List, Tuple, Any, Dict
+from typing import List, Tuple, Any, Dict, Optional
 from copy import deepcopy
 
 import httpx
 from PIL import Image
-from litellm import acompletion
 import litellm as _litellm
-from tenacity import retry, stop_after_attempt, wait_exponential
 from tqdm.asyncio import tqdm
 from loguru import logger
 from dotenv import load_dotenv, find_dotenv
 from urlextract import URLExtract
-try:
-    import typer
-    _HAS_TYPER = True
-except Exception:
-    _HAS_TYPER = False
-    class _TyperShim:
-        def __init__(self,*a,**k): pass
-        def command(self,*a,**k): return lambda f: f
-        def __call__(self,*a,**k): print("Typer not installed; CLI disabled")
-    def _opt(*a,**k): return None
-    def _arg(*a,**k): return None
-    typer = _TyperShim()  # type: ignore
-    typer.Typer = _TyperShim  # type: ignore
-    typer.Option = _opt  # type: ignore
-    typer.Argument = _arg  # type: ignore
-    typer.secho = print  # type: ignore
 
 from strip_tags import strip_tags
+from litellm import Router
+from extractor.pipeline.utils.image_helpers import (
+    IMAGE_EXT as _IMAGE_EXT,
+    extract_images as _shared_extract_images,
+    safe_image as _shared_safe_image,
+    compress_image_cached,
+    fetch_remote_image_cached,
+)
 
 logger.remove()
 logger.add(sys.stderr, level="WARNING")
-from extractor.pipeline.utils.litellm_cache import initialize_litellm_cache
 
+# Optional: your project’s litellm cache initializer
+try:
+    from extractor.pipeline.utils.litellm_cache import initialize_litellm_cache
+except Exception:
+    def initialize_litellm_cache():
+        pass
 
 load_dotenv(find_dotenv())
-_litellm.drop_params = True  # tolerate provider-specific unsupported params
+# Do not drop provider-specific params; we pass image_url parts intentionally
+_litellm.drop_params = False
 initialize_litellm_cache()
 
 # -----------------------------------------------------------------------------
-#  Typer app  (NEW)
+# Defaults / env
 # -----------------------------------------------------------------------------
-# Typer app is defined only when executed as a script
-
-# Default model configuration - works with any LiteLLM provider
 MODEL = os.getenv("LITELLM_MODEL", os.getenv("OLLAMA_DEFAULT_MODEL", "ollama/gemma3:12b"))
-
-# Provider-specific configurations (LiteLLM will use the appropriate ones)
-# For Ollama
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-OLLAMA_API_KEY = os.getenv("OLLAMA_API_KEY", "")
-
-# For Moonshot/Kimi
-MOONSHOT_API_KEY = os.getenv("MOONSHOT_API_KEY", "")
-MOONSHOT_API_BASE = os.getenv("MOONSHOT_API_BASE", "https://api.moonshot.ai/v1")
-
-# For OpenAI
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-
-# For Anthropic
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
-
-IMAGE_EXT = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tiff", ".webp"}
+IMAGE_EXT = _IMAGE_EXT
 extractor = URLExtract()
-
 SHOW_PROGRESS = os.getenv("LITELLM_NO_PROGRESS", "").lower() not in {"1", "true", "yes"}
 
+DEFAULT_NUM_RETRIES = int(os.getenv("LITELLM_NUM_RETRIES", "3"))
+DEFAULT_MAX_PARALLEL = os.getenv("LITELLM_MAX_PARALLEL")
+DEFAULT_MAX_PARALLEL = int(DEFAULT_MAX_PARALLEL) if DEFAULT_MAX_PARALLEL and DEFAULT_MAX_PARALLEL.isdigit() else None
+DEFAULT_ATTACH_SESSION = os.getenv("LITELLM_ATTACH_SESSION", "true").lower() in {"1", "true", "yes", "y"}
+
+# Optional image cache directory (persistent across runs)
+_IMAGE_CACHE_DIR = os.getenv("LITELLM_IMAGE_CACHE_DIR") or None
+
 # -----------------------------------------------------------------------------
-# Helpers
+# Helpers - Images
 # -----------------------------------------------------------------------------
 
 def safe_image(path: Path) -> bool:
-    """True if file exists, has an image extension, and PIL can open it."""
-    try:
-        return path.exists() and path.suffix.lower() in IMAGE_EXT and Image.open(path).verify() is None
-    except Exception:
-        return False
+    return _shared_safe_image(path)
 
 
 def extract_images(text: str) -> tuple[List[str], str]:
-    """
-    Return:
-        - list[str] of all valid image URLs/paths (remote & local)
-        - cleaned prompt text with placeholders {Image 1}, {Image 2}, …
-    """
-    found, seen = [], set()
-
-    # 1) Strip XML/HTML tags ----------------------------------------------------
-    plain = strip_tags(text)
-
-    # 2) Remote URLs -----------------------------------------------------------
-    for url in extractor.find_urls(plain):
-        url = url.strip()
-        if url.lower().endswith(tuple(IMAGE_EXT)) and url not in seen:
-            found.append(url)
-            seen.add(url)
-
-    # 3) Local files -----------------------------------------------------------
-    tokens = re.findall(r'(?:"[^"]*"|\'[^\']*\'|\S+)', plain)
-    for tok in tokens:
-        tok = tok.strip('"\'')
-        if not tok:
-            continue
-        candidate = Path(tok).expanduser().resolve()
-        if safe_image(candidate) and str(candidate) not in seen:
-            found.append(str(candidate))
-            seen.add(str(candidate))
-
-    # 4) Build cleaned prompt with placeholders --------------------------------
-    cleaned = text
-    for idx, img in enumerate(found, 1):
-        placeholder = f"{{Image {idx}}}"
-        cleaned = cleaned.replace(img, placeholder)
-    cleaned = re.sub(r"\s{2,}", " ", cleaned).strip()
-
-    return found, cleaned
+    return _shared_extract_images(text)
 
 
 def compress_image(path_str: str, max_kb: int = 1000) -> str:
-    """Return base-64 data-URI for a *local* image, compressed if required."""
-    path = Path(path_str)
-    img_bytes = path.read_bytes()
-    max_bytes = max_kb * 1024
-
-    if len(img_bytes) <= max_bytes:
-        mime = f"image/{path.suffix[1:]}"
-        return f"data:{mime};base64,{base64.b64encode(img_bytes).decode()}"
-
-    img = Image.open(io.BytesIO(img_bytes))
-    quality = 85
-    while quality > 20:
-        buf = io.BytesIO()
-        img.save(buf, format="JPEG", quality=quality, optimize=True)
-        if len(buf.getvalue()) <= max_bytes:
-            return f"data:image/jpeg;base64,{base64.b64encode(buf.getvalue()).decode()}"
-        quality -= 10
-
-    img.thumbnail((img.width // 2, img.height // 2))
-    buf = io.BytesIO()
-    img.save(buf, format="JPEG", quality=30)
-    return f"data:image/jpeg;base64,{base64.b64encode(buf.getvalue()).decode()}"
+    return compress_image_cached(path_str, max_kb=max_kb, cache_dir=_IMAGE_CACHE_DIR)
 
 
-def fetch_remote_image(url: str) -> str | None:
-    """Download remote image and return base-64 data-URI or None on failure."""
-    try:
-        r = httpx.get(url, timeout=10)
-        r.raise_for_status()
-        mime = r.headers.get("content-type", "image/jpeg").split(";")[0]
-        return f"data:{mime};base64,{base64.b64encode(r.content).decode()}"
-    except Exception as e:
-        logger.warning(f"Skipping remote image {url}: {e}")
-        return None
+def fetch_remote_image(url: str) -> Optional[str]:
+    return fetch_remote_image_cached(url, timeout=10, cache_dir=_IMAGE_CACHE_DIR)
+
+
+## No MIME coercion: pass image data URLs through unchanged
 
 
 # -----------------------------------------------------------------------------
-# LITELLM UTILITIES
-# -----------------------------------------------------------------------------
-
-# Note: we don't need this
-def _build_params(model: str,
-                  messages: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Return the final dict for acompletion, injecting only needed keys."""
-    params = {"model": model, "messages": messages}
-
-    # LiteLLM auto-detects most providers, but Ollama needs an explicit base URL
-    if model.startswith("ollama/"):
-        # Special case for large models hosted on ollama.com
-        if "120b" in model or "gpt-oss" in model:
-            params["api_base"] = "https://ollama.com"
-            if OLLAMA_API_KEY:
-                params["api_key"] = OLLAMA_API_KEY
-        else:
-            # Regular local ollama models
-            params["api_base"] = OLLAMA_BASE_URL
-            if OLLAMA_API_KEY:
-                params["api_key"] = OLLAMA_API_KEY
-
-    return params
-
-# -----------------------------------------------------------------------------
-# Cost and token-usage helpers
+# Cost / usage helpers
 # -----------------------------------------------------------------------------
 
 def _clean_json_code_fences(text: str) -> str:
@@ -258,6 +167,7 @@ def _clean_json_code_fences(text: str) -> str:
         s = re.sub(r"^```(?:json)?\s*", "", s, flags=re.IGNORECASE)
         s = re.sub(r"\s*```$", "", s)
     return s.strip()
+
 
 def _extract_usage_and_cost(resp: Any) -> Dict[str, Any]:
     metadata: Dict[str, Any] = {}
@@ -287,6 +197,7 @@ def _extract_usage_and_cost(resp: Any) -> Dict[str, Any]:
         metadata["cache_hit"] = hidden.get("cache_hit")
     return metadata
 
+
 def _maybe_augment_json_with_cost(text: str, resp: Any, wrap_non_json: bool = False) -> str:
     cleaned = _clean_json_code_fences(text)
     try:
@@ -309,296 +220,476 @@ def _maybe_augment_json_with_cost(text: str, resp: Any, wrap_non_json: bool = Fa
     if wrap_non_json:
         return json.dumps({"content": parsed, "metadata": metadata}, ensure_ascii=False)
 
-    # Return compact JSON string for arrays/scalars
     return json.dumps(parsed, ensure_ascii=False)
 
-# -----------------------------------------------------------------------------
-# LLM call with retry
-# -----------------------------------------------------------------------------
 
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=4))
-async def _call(params: Dict[str, Any], idx: int) -> Tuple[int, Any]:
-    """Call LiteLLM and always return (idx, result_or_exception).
-
-    This prevents task-level exceptions from bubbling out of as_completed,
-    so callers can record a structured error per prompt without crashing.
-    """
-    try:
-        resp = await acompletion(**params)
-        return idx, resp
-    except Exception as e:
-        # Map provider errors to clearer ValueError when images are present but model lacks vision
+def _extract_text(resp: Any) -> str:
+    # OpenAI-style dict
+    if isinstance(resp, dict) and "choices" in resp:
         try:
-            msgs = params.get("messages") or []
-            # Detect any image_url content parts in messages
-            def _has_image(ms):
-                for m in ms:
-                    content = m.get("content")
-                    if isinstance(content, list):
-                        for part in content:
-                            if isinstance(part, dict) and part.get("type") == "image_url":
-                                return True
-                return False
-            if _has_image(msgs):
-                m = str(e).lower()
-                if any(kw in m for kw in ["does not support", "unsupported", "image input", "image_url", "no vision", "vision not", "invalid type for", "doesn't support"]):
-                    model = params.get("model", "unknown")
-                    return idx, ValueError(f"Model '{model}' does not support image inputs: {e}")
+            ch = resp.get("choices") or []
+            if ch:
+                msg = ch[0].get("message") or {}
+                return str(msg.get("content") or "")
         except Exception:
             pass
-        return idx, e
+    # ModelResponse-like object
+    ch_obj = getattr(resp, "choices", None)
+    if ch_obj:
+        try:
+            ch0 = ch_obj[0]
+            msg = getattr(ch0, "message", None)
+            if msg is not None and getattr(msg, "content", None) is not None:
+                content = getattr(msg, "content")
+                if isinstance(content, list):
+                    parts = []
+                    for p in content:
+                        if isinstance(p, dict):
+                            t = p.get("text") or p.get("content")
+                            if isinstance(t, str) and t.strip():
+                                parts.append(t.strip())
+                    if parts:
+                        return "\n".join(parts)
+                return str(content)
+            txt = getattr(ch0, "text", None)
+            if isinstance(txt, str):
+                return txt
+            # Fallback: some adapters expose text on response.output_text
+            ot = getattr(resp, "output_text", None)
+            if isinstance(ot, str) and ot.strip():
+                return ot
+        except Exception:
+            pass
+    if isinstance(resp, str):
+        return resp
+    return ""
 
 
 # -----------------------------------------------------------------------------
-# Batch runner
+# Prompt preprocessing => messages
+# -----------------------------------------------------------------------------
+
+def _to_messages_and_model(
+    item: Any,
+    default_model: str,
+    *,
+    response_format: Optional[str] = None,
+    request_timeout: Optional[float] = None,
+) -> Tuple[str, List[Dict[str, Any]], Dict[str, Any]]:
+    """
+    Returns:
+      model: str
+      messages: List[message]
+      extra_kwargs: Dict[str,Any]  # any per-request params beyond (model, messages)
+    Behavior:
+      - str -> parse for images, build a single user message with text + image parts
+      - shorthand dict -> same as str + optional 'image' + model override
+      - full dict with 'messages' -> preserve messages; anything else goes into extra_kwargs
+    """
+    extra_kwargs: Dict[str, Any] = {}
+
+    # Full dict with manual messages
+    if isinstance(item, dict) and "messages" in item:
+        model = item.get("model", default_model)
+        messages = item["messages"]
+        # Everything else is per-request params (temperature, tools, etc.)
+        for k, v in item.items():
+            if k not in {"model", "messages"}:
+                extra_kwargs[k] = v
+        if response_format:
+            extra_kwargs.setdefault("response_format", {"type": response_format})
+        if request_timeout is not None:
+            extra_kwargs.setdefault("timeout", request_timeout)
+        return model, messages, extra_kwargs
+
+    # Shorthand dict
+    if isinstance(item, dict):
+        text = str(item.get("text", ""))
+        images = [str(item["image"])] if "image" in item else []
+        model = item.get("model", default_model)
+    else:
+        images, text = extract_images(str(item))
+        model = default_model
+
+    content_parts: List[Dict[str, Any]] = []
+    if text:
+        content_parts.append({"type": "text", "text": text})
+    for img in images:
+        url = fetch_remote_image(img) if img.startswith("http") else compress_image(img)
+        if url:
+            content_parts.append({"type": "image_url", "image_url": {"url": url}})
+
+    messages = [{"role": "user", "content": content_parts or [{"type": "text", "text": ""}]}]
+    if response_format:
+        extra_kwargs.setdefault("response_format", {"type": response_format})
+    if request_timeout is not None:
+        extra_kwargs.setdefault("timeout", request_timeout)
+    return model, messages, extra_kwargs
+
+
+# -----------------------------------------------------------------------------
+# Core API - uses LiteLLM Router for batching/retries/semaphores
 # -----------------------------------------------------------------------------
 
 async def litellm_call(
     prompts: List[Any],
     *,
     wrap_json: bool = False,
-    concurrency: int | None = None,
     desc: str | None = None,
+    session_id: str | None = None,
+    attach_session_to_provider: bool | None = None,
+    num_retries: Optional[int] = None,
+    default_max_parallel_requests: Optional[int] = None,
+    concurrency: Optional[int] = None,
+    response_format: Optional[str] = None,
+    request_timeout: Optional[float] = None,
+    stream: bool = False,
+    models: Optional[List[str]] = None,
 ) -> List[str]:
     """
-    Run any combination of prompts in parallel.
+    Run prompts in parallel with automatic image support.
+    - Batch per-model requests via Router.abatch_completion_one_model_multiple_requests
+    - Send per-request customized calls individually via Router.acompletion
+    - Mixed models per run supported (each model gets its own batch)
 
-    Accepts:
-        - plain strings
-        - shorthand dicts: {"text": "...", "image": "...", "model": "..."}
-        - full LiteLLM dicts: {"model": "...", "messages": [...], "api_base": "..."}
-
-    Returns:
-        List of text answers in the same order as the input list.
+    Returns list[str] answers, aligned with input order. Errors become "" unless wrap_json=True,
+    in which case a structured {"error":{...}} JSON is returned.
     """
-    # Normalize single prompt → list
     if isinstance(prompts, (str, dict)):
         prompts = [prompts]
 
-    tasks: List[asyncio.Task[Tuple[int, Any]]] = []
+    if attach_session_to_provider is None:
+        attach_session_to_provider = DEFAULT_ATTACH_SESSION
 
+    num_retries = DEFAULT_NUM_RETRIES if num_retries is None else num_retries
+    if concurrency is not None and default_max_parallel_requests is None:
+        default_max_parallel_requests = concurrency
+    default_max_parallel_requests = (
+        DEFAULT_MAX_PARALLEL if default_max_parallel_requests is None else default_max_parallel_requests
+    )
+
+    # One prompt → many models (simple, low-brittleness approach):
+    if models:
+        expanded: List[Any] = []
+        for item in prompts:
+            for m in models:
+                if isinstance(item, dict):
+                    it = dict(item)
+                    it["model"] = m
+                else:
+                    it = item
+                expanded.append(it)
+        prompts = expanded
+
+    # Preprocess all prompts
+    processed: List[Tuple[int, str, List[Dict[str, Any]], Dict[str, Any]]] = []
     for idx, item in enumerate(prompts):
-        # -----------------------------------------------------------
-        # 1) Already a complete LiteLLM dict
-        # -----------------------------------------------------------
-        if isinstance(item, dict) and "messages" in item:
-            item.setdefault("model", MODEL)  # add only if missing
-            tasks.append(asyncio.create_task(_call(item, idx)))
-            continue
+        model, messages, extra_kwargs = _to_messages_and_model(
+            item, MODEL, response_format=response_format, request_timeout=request_timeout
+        )
+        processed.append((idx, model, messages, extra_kwargs))
 
-        # -----------------------------------------------------------
-        # 2) Shorthand dict or plain string with auto-image support
-        # -----------------------------------------------------------
-        if isinstance(item, dict):
-            text   = str(item.get("text", ""))
-            images = [str(item["image"])] if "image" in item else []
-            model  = item.get("model", MODEL)
+    # Group by model for batchable items (no per-request extra kwargs)
+    batches: Dict[str, List[Tuple[int, List[Dict[str, Any]]]]] = {}
+    individuals: List[Tuple[int, str, List[Dict[str, Any]], Dict[str, Any]]] = []
+
+    for idx, model, messages, extra_kwargs in processed:
+        if extra_kwargs:
+            individuals.append((idx, model, messages, extra_kwargs))
         else:
-            images, text = extract_images(str(item))
-            model = MODEL
-            extra = {}
+            batches.setdefault(model, []).append((idx, messages))
 
-        content_parts = [{"type": "text", "text": text}]
-        for img in images:
-            url = fetch_remote_image(img) if img.startswith("http") else compress_image(img)
-            if url:
-                content_parts.append({"type": "image_url", "image_url": {"url": url}})
+    # Initialize Router with all required model entries
+    unique_models = sorted({m for _, m, _, _ in processed})
+    model_list: List[Dict[str, Any]] = [
+        {"model_name": m, "litellm_params": {"model": m}} for m in unique_models
+    ]
 
-        params = {
-            "model": model,
-            "messages": [{"role": "user", "content": content_parts}]
-        }
-        if extra:
-            params.update(extra)
-        tasks.append(asyncio.create_task(_call(params, idx)))
+    router = Router(
+        model_list=model_list,
+        num_retries=num_retries,
+        default_max_parallel_requests=default_max_parallel_requests,
+    )
 
-    # -----------------------------------------------------------
-    # Collect results in original order
-    # -----------------------------------------------------------
-    # Optional concurrency limiting: process tasks in batches
-    total = len(tasks)
-    results: List[str] = [""] * total
+    results: List[str] = [""] * len(processed)
 
-    if concurrency and concurrency > 0 and concurrency < total:
-        # chunk indices
-        for start in range(0, total, concurrency):
-            chunk = tasks[start:start + concurrency]
-            for coro in tqdm(
-                asyncio.as_completed(chunk),
-                total=len(chunk),
-                desc=desc or "Processing",
-                disable=not SHOW_PROGRESS
-            ):
-                idx, resp = await coro
-                if isinstance(resp, Exception):
-                    # Structured error output
-                    if wrap_json:
-                        final_answer = json.dumps({
-                            "error": {
-                                "type": type(resp).__name__,
-                                "message": str(resp)[:400]
-                            }
-                        }, ensure_ascii=False)
-                    else:
-                        final_answer = ""
-                    logger.warning(f"LiteLLM call failed for Q{idx}: {type(resp).__name__}: {resp}")
-                else:
-                    answer = resp.choices[0].message.content or ""
-                    final_answer = _maybe_augment_json_with_cost(answer, resp, wrap_non_json=wrap_json)
+    # Optional streaming fast-path: only for a single item without extra kwargs
+    if stream and len(processed) == 1 and not individuals and len(batches) == 1:
+        model = unique_models[0]
+        idx0, msgs0 = next(iter(batches[model]))
+        kwargs: Dict[str, Any] = {}
+        if attach_session_to_provider and session_id:
+            kwargs["user"] = session_id
+        if request_timeout is not None:
+            kwargs.setdefault("timeout", request_timeout)
+        try:
+            resp_stream = await router.acompletion(model=model, messages=msgs0, stream=True, **kwargs)
+        except TypeError:
+            resp = await router.acompletion(model=model, messages=msgs0, **kwargs)
+            results[idx0] = _format_answer(idx0, resp, wrap_json, prompts)
+            return results
 
-                results[idx] = final_answer
+        assembled = []
+        try:
+            async for chunk in resp_stream:  # type: ignore
+                try:
+                    delta = chunk["choices"][0]["delta"].get("content")
+                    if delta:
+                        print(delta, end="", flush=True)
+                        assembled.append(delta)
+                        continue
+                except Exception:
+                    pass
+                text = (
+                    getattr(getattr(chunk, "choices", [None])[0], "text", None)
+                    if hasattr(chunk, "choices") else None
+                )
+                if isinstance(text, str):
+                    print(text, end="", flush=True)
+                    assembled.append(text)
+        except Exception:
+            pass
+        print()
+        results[idx0] = "".join(assembled)
+        return results
 
-                safe_prompt = deepcopy(prompts[idx])
-                if isinstance(safe_prompt, dict) and "api_key" in safe_prompt:
-                    safe_prompt["api_key"] = "***"
-                logger.info(f"\nQ{idx}: {str(safe_prompt)[:50]}...\nA{idx}: {final_answer[:100]}...")
-    else:
-        for coro in tqdm(
-            asyncio.as_completed(tasks),
-            total=total,
-            desc=desc or "Processing",
-            disable=not SHOW_PROGRESS
-        ):
-            idx, resp = await coro
-            if isinstance(resp, Exception):
-                if wrap_json:
-                    final_answer = json.dumps({
-                        "error": {
-                            "type": type(resp).__name__,
-                            "message": str(resp)[:400]
-                        }
-                    }, ensure_ascii=False)
-                else:
-                    final_answer = ""
-                logger.warning(f"LiteLLM call failed for Q{idx}: {type(resp).__name__}: {resp}")
-            else:
-                answer = resp.choices[0].message.content or ""
-                final_answer = _maybe_augment_json_with_cost(answer, resp, wrap_non_json=wrap_json)
+    # Submit all calls via Router.acompletion (unified path)
+    async def _call_one(idx: int, model: str, messages: List[Dict[str, Any]], extra: Dict[str, Any]) -> Tuple[int, Any]:
+        kwargs = dict(extra)
+        if attach_session_to_provider and session_id and "user" not in kwargs:
+            kwargs["user"] = session_id
+        if request_timeout is not None and "timeout" not in kwargs:
+            kwargs["timeout"] = request_timeout
+        try:
+            resp = await router.acompletion(model=model, messages=messages, **kwargs)
+            return idx, resp
+        except Exception as e:
+            return idx, e
 
-            results[idx] = final_answer
+    tasks: List[asyncio.Task[Tuple[int, Any]]] = []
+    # From batchable items
+    for model, payload in batches.items():
+        for idx0, msgs0 in payload:
+            tasks.append(asyncio.create_task(_call_one(idx0, model, msgs0, {})))
+    # From individual items
+    for idx, model, messages, extra in individuals:
+        tasks.append(asyncio.create_task(_call_one(idx, model, messages, extra)))
 
-            safe_prompt = deepcopy(prompts[idx])
-            if isinstance(safe_prompt, dict) and "api_key" in safe_prompt:
-                safe_prompt["api_key"] = "***"
-            logger.info(f"\nQ{idx}: {str(safe_prompt)[:50]}...\nA{idx}: {final_answer[:100]}...")
+    if not tasks:
+        return results
+
+    for _ in tqdm(asyncio.as_completed(tasks), total=len(tasks), desc=desc or "Processing", disable=not SHOW_PROGRESS):
+        await _
+
+    for t in tasks:
+        idx, resp = t.result()
+        results[idx] = _format_answer(idx, resp, wrap_json, prompts)
 
     return results
 
 
-# NOTE: CLI bindings for this module are created only under
-# `if __name__ == "__main__":` to avoid import-time side effects.
-# ---------------------------------------------------------------------------
-# Quick test
-# ---------------------------------------------------------------------------
+async def _progress_wait(
+    batch_tasks: List[asyncio.Task],
+    indiv_tasks: List[asyncio.Task],
+):
+    # Iterate as tasks complete for tqdm
+    pending = set(batch_tasks + indiv_tasks)
+    while pending:
+        done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+        for _ in done:
+            yield True
+
+
+def _format_answer(idx: int, resp: Any, wrap_json: bool, prompts: List[Any]) -> str:
+    if isinstance(resp, Exception):
+        # If model lacks vision, surface a clearer message if possible
+        m = str(resp).lower()
+        if any(kw in m for kw in ["does not support", "unsupported", "image input", "image_url", "no vision", "vision not", "invalid type for", "doesn't support"]):
+            logger.warning(f"LiteLLM call failed for Q{idx}: {type(resp).__name__}: {resp}")
+        if wrap_json:
+            return json.dumps({
+                "error": {
+                    "type": type(resp).__name__,
+                    "message": str(resp)[:400]
+                }
+            }, ensure_ascii=False)
+        return ""
+    try:
+        answer = _extract_text(resp)
+        final_answer = _maybe_augment_json_with_cost(answer, resp, wrap_non_json=wrap_json)
+    except Exception as e:
+        logger.warning(f"Failed to parse response for Q{idx}: {e}")
+        final_answer = "" if not wrap_json else json.dumps({"error": {"type": type(e).__name__, "message": str(e)[:400]}}, ensure_ascii=False)
+
+    safe_prompt = deepcopy(prompts[idx])
+    if isinstance(safe_prompt, dict) and "api_key" in safe_prompt:
+        safe_prompt["api_key"] = "***"
+    logger.info(f"Q{idx}: {str(safe_prompt)[:50]}... -> {final_answer[:100]}...")
+    return final_answer
+
+
+# -----------------------------------------------------------------------------
+# Demo / CLI
+# -----------------------------------------------------------------------------
 
 async def demo() -> List[str]:
-    """
-    Run a canned set of prompts and return the results.
-    Safe to call from other async code.
-    """
     prompts = [
         "What is the capital of France?",
         "Calculate 15+27+38",
         "What is 3 + 5? Return JSON: {question:string,answer:number}",
         "What is this animal eating? proof_of_concept/ollama_turbo/images/image2.png",
-        "Describe https://upload.wikimedia.org/wikipedia/commons/thumb/9/90/Labrador_Retriever_portrait.jpg/960px-Labrador_Retriever_portrait.jpg  and https://upload.wikimedia.org/wikipedia/commons/thumb/4/4d/Cat_November_2010-1a.jpg/960px-Cat_November_2010-1a.jpg",
+        "Describe https://upload.wikimedia.org/wikipedia/commons/thumb/9/90/Labrador_Retriever_portrait.jpg/960px-Labrador_Retriever_portrait.jpg and https://upload.wikimedia.org/wikipedia/commons/thumb/4/4d/Cat_November_2010-1a.jpg/960px-Cat_November_2010-1a.jpg",
         {"text": "Explain this meme", "image": "proof_of_concept/ollama_turbo/images/image.png"},
+        # Individual (per-request params => not batched)
         {
-            "model": "ollama/gpt-oss:120b",
-            "api_base": "https://ollama.com",
+            "model": "gpt-4o-mini",
             "messages": [
                 {"role": "system", "content": "You are a helpful assistant."},
                 {"role": "user", "content": "Tell me a short joke."}
             ],
-            "temperature": 1.0
+            "temperature": 0.7
         }
     ]
-
-
-    return await litellm_call(prompts[2:3])
+    return await litellm_call(prompts[0:5], wrap_json=False)
 
 
 def demo_sync() -> List[str]:
-    """
-    Synchronous wrapper around `demo()` for callers that are not async.
-    """
     return asyncio.run(demo())
 
 
 if __name__ == "__main__":
-    try:
-        import typer as _ty
-        cli = _ty.Typer(
-            name="litellm_call",
-            help="Fast async LLM batch runner with inline image support via LiteLLM / Ollama.",
-        )
+    import typer  # Typer is a declared dependency; import directly
 
-        @cli.command()
-        def main(
-            sources: list[str] = _ty.Argument(None, help="Prompts or files containing prompts"),
-            model: str = _ty.Option(MODEL, "--model", "-m", help="LiteLLM model name"),
-            api_base: str = _ty.Option(None, "--api-base", help="Override API base URL"),
-            api_key: str = _ty.Option(None, "--api-key", help="Override API key"),
-            stdin: bool = _ty.Option(False, "--stdin", help="Read prompts from stdin"),
-            jsonl: bool = _ty.Option(False, "--jsonl", help="Input is in JSON Lines format"),
-            wrap_json: bool = _ty.Option(False, "--wrap-json", help="Wrap non-JSON outputs in JSON"),
-        ):
-            # Reuse the same logic by calling the function below
-            # Build prompts as in the original CLI
-            prompts: list[object] = []
-            from pathlib import Path as _Path
-            import json as _json
-            import sys as _sys
+    cli = typer.Typer(
+        name="litellm_call",
+        help=(
+            "Thin async batch runner with image support via LiteLLM Router.\n\n"
+            "Examples:\n"
+            "  - Single: python litellm_call.py \"What is 2+2?\"\n"
+            "  - Batch:  python litellm_call.py \"What is 2+2?\" \"Capital of France?\"\n"
+            "  - Images: python litellm_call.py \"Describe /path/to/image.jpg and https://example.com/cat.jpg\"\n"
+            "  - Files:  python litellm_call.py @prompts.txt   | @prompts.jsonl | prompts.json\n"
+            "  - Stdin:  echo \"What is 2+2?\" | python litellm_call.py --stdin\n"
+        ),
+    )
 
-            global MODEL
-            if model:
-                MODEL = model
-            if api_base:
-                os.environ["OLLAMA_API_BASE"] = api_base
-                os.environ["MOONSHOT_API_BASE"] = api_base
-                os.environ["OPENAI_API_BASE"] = api_base
-            if api_key:
-                if model.startswith("ollama/"):
-                    os.environ["OLLAMA_API_KEY"] = api_key
-                elif model.startswith("moonshot/"):
-                    os.environ["MOONSHOT_API_KEY"] = api_key
-                elif model.startswith("gpt") or model.startswith("text-"):
-                    os.environ["OPENAI_API_KEY"] = api_key
-                elif model.startswith("claude"):
-                    os.environ["ANTHROPIC_API_KEY"] = api_key
+    @cli.command()
+    def main(
+        sources: List[str] = typer.Argument(None, help="Prompts or files containing prompts. Use @file to read a file, or '-' for stdin."),
+        model: str = typer.Option(MODEL, "--model", "-m", help="Default LiteLLM model name"),
+        models: Optional[str] = typer.Option(None, "--models", help="Comma-separated list of models for 'one prompt → many models'"),
+        stdin: bool = typer.Option(False, "--stdin", help="Read prompts from stdin"),
+        jsonl: bool = typer.Option(False, "--jsonl", help="Input is in JSON Lines format"),
+        wrap_json: bool = typer.Option(False, "--wrap-json", help="Wrap non-JSON outputs in JSON and add usage/cost in metadata"),
+        max_parallel: int = typer.Option(DEFAULT_MAX_PARALLEL or 0, "--max-parallel", help="Router default_max_parallel_requests (0 = unset)"),
+        num_retries: int = typer.Option(DEFAULT_NUM_RETRIES, "--num-retries", help="Router num_retries"),
+        response_format: Optional[str] = typer.Option(None, "--response-format", help="Inject response_format type (e.g., 'json_object')"),
+        request_timeout: Optional[float] = typer.Option(None, "--timeout", help="Request timeout in seconds"),
+        stream: bool = typer.Option(False, "--stream", help="Stream output for a single prompt"),
+        image_cache_dir: Optional[str] = typer.Option(None, "--image-cache-dir", help="Directory for persistent image cache (overrides LITELLM_IMAGE_CACHE_DIR)"),
+    ):
+        # Apply defaults
+        global MODEL
+        if model:
+            MODEL = model
 
-            if stdin or (sources == ["-"]):
-                for line in _sys.stdin:
-                    line = line.rstrip("\n")
-                    if jsonl:
-                        prompts.append(_json.loads(line))
-                    else:
-                        prompts.append(line)
+        # NOTE: Auth is handled via environment and load_dotenv(find_dotenv()).
+        # No API key/base mutation here; keep this thin and defer to LiteLLM env parsing.
 
-            for src in sources or []:
-                if src == "-":
-                    continue
-                if src.startswith("@"):
-                    src = src[1:]
-                path = _Path(src)
-                if not path.exists():
-                    prompts.append(src)
-                    continue
-                if path.suffix.lower() == ".json":
-                    prompts.extend(_json.loads(path.read_text()))
-                elif path.suffix.lower() == ".jsonl" or jsonl:
-                    prompts.extend(_json.loads(l) for l in path.read_text().splitlines() if l.strip())
+        # Optional image cache dir override
+        global _IMAGE_CACHE_DIR
+        if image_cache_dir:
+            _IMAGE_CACHE_DIR = image_cache_dir
+
+        # Build the prompt list from args/stdin/files
+        prompts: List[object] = []
+        from pathlib import Path as _Path
+
+        if stdin or (sources == ["-"]):
+            for line in sys.stdin:
+                line = line.rstrip("\n")
+                if jsonl:
+                    prompts.append(json.loads(line))
                 else:
-                    prompts.extend(path.read_text().splitlines())
+                    prompts.append(line)
 
-            if not prompts:
-                _ty.echo("No prompts provided.", err=True)
-                raise _ty.Exit(1)
+        for src in sources or []:
+            if src == "-":
+                continue
+            if src.startswith("@"):
+                src = src[1:]
+            path = _Path(src)
+            if not path.exists():
+                prompts.append(src)
+                continue
+            if path.suffix.lower() == ".json":
+                prompts.extend(json.loads(path.read_text()))
+            elif path.suffix.lower() == ".jsonl" or jsonl:
+                prompts.extend(json.loads(l) for l in path.read_text().splitlines() if l.strip())
+            else:
+                prompts.extend(path.read_text().splitlines())
 
-            results = asyncio.run(litellm_call(prompts, wrap_json=wrap_json))
-            for r in results:
-                _ty.echo(r)
+        if not prompts:
+            typer.echo("No prompts provided.", err=True)
+            raise typer.Exit(1)
 
-        cli()
-    except Exception as _e:
-        print("Typer CLI unavailable:", _e)
+        dmpr = max_parallel if max_parallel and max_parallel > 0 else None
+        model_list_opt = [m.strip() for m in models.split(",")] if models else None
+        results = asyncio.run(
+            litellm_call(
+                prompts,
+                wrap_json=wrap_json,
+                default_max_parallel_requests=dmpr,
+                num_retries=num_retries,
+                response_format=response_format,
+                request_timeout=request_timeout,
+                stream=stream,
+                models=model_list_opt,
+            )
+        )
+        for r in results:
+            typer.echo(r)
+
+    @cli.command("sanity")
+    def sanity(
+        model: str = typer.Option(MODEL, "--model", "-m", help="Model to use for the sanity check"),
+        wrap_json: bool = typer.Option(False, "--wrap-json", help="Wrap non-JSON and include error/usage metadata"),
+        request_timeout: Optional[float] = typer.Option(None, "--timeout", help="Request timeout in seconds"),
+    ):
+        """Quick sanity check via LiteLLM Router.
+
+        Prints the model's JSON response and exits 0 only if the parsed JSON contains {"ok": true}.
+        This tolerates additional fields like metadata injected by the adapter.
+        """
+        global MODEL
+        if model:
+            MODEL = model
+
+        prompt = 'Return only {"ok":true} as JSON.'
+        results = asyncio.run(
+            litellm_call(
+                [prompt],
+                wrap_json=wrap_json,
+                response_format="json_object",
+                request_timeout=request_timeout,
+            )
+        )
+        out = results[0] if results else ""
+        typer.echo(out)
+
+        ok = False
+        try:
+            data = json.loads(out.strip())
+            if isinstance(data, dict):
+                if data.get("ok") is True:
+                    ok = True
+                else:
+                    content = data.get("content")
+                    if isinstance(content, dict) and content.get("ok") is True:
+                        ok = True
+        except Exception:
+            ok = False
+
+        raise typer.Exit(code=0 if ok else 2)
+
+    cli()

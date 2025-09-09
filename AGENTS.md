@@ -1,135 +1,161 @@
-# Repository Guidelines
+# AGENTS.md
 
-## Agent Quickstart (Codex CLI)
+## Repository Guidelines
 
-- Activation: Start by telling the agent: `Activate the current dir as project using serena`. This binds the workspace and enables Serena tools.
-- Planning: For multi-step work, use the plan tool (`update_plan`) to track progress.
-- Editing: Make changes via `apply_patch` with minimal, targeted diffs.
-- Search: Prefer `rg` (ripgrep) for fast code/text search.
-- Verify: Run `pytest -q`, `ruff check .`, `black .`, and `mypy src` as needed.
+Based on [OpenAI Prompting Guide](https://cookbook.openai.com/examples/gpt-5/gpt-5_prompting_guide).
 
-### Always Do This First
+### Agent Quickstart (Codex CLI)
 
-- Activate Serena project: tell the agent `Activate the current dir as project using serena`.
-- Activate venv and load env for each command: `source .venv/bin/activate && set -a && [ -f .env ] && source .env && set +a`.
+* **Activation**: Start with the prompt:  
+  `Activate the current dir as project using serena`
+* **Planning**: Use `update_plan` for multi-step work.
+* **Editing**: Apply changes via `apply_patch` (minimal, targeted diffs).
+* **Search**: Use `rg` for fast project search.
+* **Verify**: Run `pytest -q`, `ruff check .`, `black .`, `mypy src`.
 
-### One-shot Examples
+#### Always Do This First
 
-- Bootstrap + tests: `test -d .venv || uv venv; source .venv/bin/activate && uv pip install -e .[dev] && set -a && [ -f .env ] && source .env && set +a && pytest -q`.
-- Bootstrap + CLI: `test -d .venv || uv venv; source .venv/bin/activate && uv pip install -e .[dev] && set -a && [ -f .env ] && source .env && set +a && lean4-agent --no-db --no-cache requirement "The sum of two even numbers is even"`.
+* Activate Serena project.
+* Activate venv & load env:
 
-### Bootstrap Environment
+  ```bash
+  source .venv/bin/activate && set -a && [ -f .env ] && source .env && set +a
+  ```
 
-- cd: `cd /path/to/lean4` (Codex may already be there; include if unsure).
-- Create venv: `uv venv` (or `python -m venv .venv`).
-- Activate venv: `source .venv/bin/activate`.
-- Install deps: `uv pip install -e .[dev]` (or `pip install -e .[dev]`).
-- Load env: `set -a; [ -f .env ] && source .env; set +a`.
-- Inspect project: skim `pyproject.toml` (project metadata, deps, tools).
+---
 
-Note: Shell state is not guaranteed to persist across Codex calls. When running a command that relies on venv or env vars, chain activation and the command in one line, e.g.: `source .venv/bin/activate && set -a && source .env && set +a && pytest -q`.
+## UX-Specific Directives (Universal, Not Project-Specific)
 
-## Project Structure & Module Organization
+* **Frameworks**: React + Tailwind + ShadCN. Responsive design, modern SVG icons, tasteful animations.
+* **Verification**:
+  * Use MCP Puppeteer to validate interactions.
+  * Take screenshots; confirm no blank pages, React errors, or server issues.
+  * Iterate until UX works as expected.
+* **Research**:
+  * If blocked, perform external web research for visuals or code.
+  * Use Context7 MCP for modern documentation.
+* **Hot Reloading**: All UX must hot-reload for near real-time feedback.
+* **User Collaboration**: Implement user requests unless they add brittleness or reduce usability. Recommend against with justification if so.
 
-- src/lean4_prover/: Core Python package (core, config, utils, concurrency, db,
-websocket).
-- tests/: Pytest suite (tests/unit, tests/test_cli.py).
-- frontend/: Vite + React + TypeScript UI.
-- docs/: Architecture, usage, and reports.
-- scripts/: Dev utilities and CLI demos.
-- workspace/: Mounted into the Lean container for compiled assets.
-- Dockerfile, docker-compose.yml: Lean 4 + Mathlib environment (pinned to v4.8.0).
-- lakefile.toml, lean-toolchain: Lean project metadata.
+---
 
-## Build, Test, and Development Commands
+## Agent Behavior
 
-- Python install:
-    - uv pip install -e .[dev] (preferred) or pip install -e .[dev]
-- Run CLI:
-    - lean4-agent --no-db --no-cache requirement "The sum of two even numbers
-is even"
-- WebSocket server:
-    - certainly-server
-- Frontend:
-    - cd frontend && npm run dev | build | preview
-- Lean environment:
-    - docker-compose up -d --build
-- Lint/format/type-check:
-    - ruff check . • black . • mypy src
+* **Be Autonomous**:
+  * Rephrase user goal.
+  * Outline step plan.
+  * Narrate execution so user knows *what* and *why*.
 
-## Coding Style & Naming Conventions
+* **Be Persistent**:
+  * Keep going until solved.
+  * Never hand back incomplete work; research and act if unsure.
+  * Make assumptions instead of asking mid-flow; document afterward.
 
-- Python: 4 spaces; Black (line length 100); Ruff for linting; imports sorted by
-Ruff/isort; type hints encouraged (mypy permissive).
-- Naming: snake_case (functions/vars), PascalCase (classes), UPPER_SNAKE_CASE
-(constants).
-- Frontend: Prettier + ESLint; camelCase for vars/functions, PascalCase for React
-components.
+* **Amend Prompt & Tasks**:
+  * After finishing, reflect: what was missing in the prompt or task?
+  * Suggest prompt/task improvements + communication tips.
+  * Note what worked well and should be reused in future.
 
-## Testing Guidelines
+---
 
-- Framework: pytest (+ pytest-asyncio).
-- Run: pytest -q or pytest --cov=src/lean4_prover.
-- Layout: tests live in tests/unit and follow test_*.py.
-- Practices: mock external services; prefer --no-db --no-cache in CLI paths; keep
-tests deterministic and fast.
+## Prompting & Verification Best Practices
 
-## Commit & Pull Request Guidelines
+* **System Role**: Always begin with a clear system role/persona (e.g., “You are a meticulous, production-grade Python/React developer. Follow repo conventions exactly.”).
+* **Structured Outputs**:
+  * Prefer `response_format` or explicit JSON schemas for predictable results.
+  * Fail closed: if schema isn’t followed, retry with explicit correction.
+  * Document schema expectations in prompts.
+* **Verification Loop**:
+  * After each patch, rerun lint + tests until passing or a hard blocker is identified.
+  * Auto-apply minimal fixes for common errors; rerun without stopping.
+* **Reflection**:
+  * Capture what worked and what failed.
+  * Suggest refinements for future agent runs.
+* **Prompt Reuse**:
+  * Maintain a library of canonical prompts for recurring tasks.
+  * Prefer referencing these over improvising new phrasing.
+* **Error Handling**:
+  * Retry gracefully on external tool failures (exponential backoff once).
+  * Always return actionable next steps; never fail silently.
 
-- Commits: imperative mood, concise subject; prefer Conventional Commits (feat:,
-fix:, refactor:, docs:, test:, chore:). Example: feat(core): add input router
-fallback.
-- PRs: clear description, link issues, include test updates; ensure pytest,
-ruff, and black pass; add screenshots for UI changes; update docs/ when behavior
-changes.
+---
 
-## Security & Configuration Tips
+## Development Basics
 
-- Environment: cp env.example .env and set API keys (LLM providers) and optional
-ArangoDB/Redis; never commit secrets.
-- Docker: resources configured in docker-compose.yml (lean_runner mounts ./
-workspace).
-- Secrets and logs: avoid adding sensitive files; verify .gitignore entries before
-committing.
+* **Bootstrap**:
+  ```bash
+  test -d .venv || uv venv
+  source .venv/bin/activate && uv pip install -e .[dev]
+  set -a && [ -f .env ] && source .env && set +a
+  ```
+* **Structure**:
+  * `src/lean4_prover/` → core Python
+  * `frontend/` → React + TypeScript + Vite
+  * `tests/`, `docs/`, `scripts/`, `workspace/`
+* **Frontend**:
+  ```bash
+  cd frontend && npm run dev | build | preview
+  ```
+* **Lean/Docker**:
+  ```bash
+  docker compose up -d --build
+  ```
 
-## LLM Provider Sanity Check (curl‑first)
+---
 
-Use this quick runbook when LLM calls fail (401, non‑JSON, empty content) before digging into code:
+## Style & Testing
 
-1) Activate venv and export env
-- `source .venv/bin/activate && set -a && [ -f .env ] && source .env && set +a`
+* **Python**: Black (100 cols), Ruff, type hints via mypy, 4 spaces.
+* **Frontend**: Prettier + ESLint, camelCase vars, PascalCase components.
+* **Testing**: `pytest -q`; use mocks; keep tests deterministic and fast.
+* **Commits**: Conventional Commits (`feat:`, `fix:`, `docs:`…).
 
-2) Verify key is in current shell (env overrides .env)
-- Never paste secrets into logs or commits.
+---
 
-3) curl JSON‑mode sanity test (OpenAI)
-- `export OPENAI_API_KEY=sk-...` (temporary in shell)
-- Run:
+## Security
+
+* Never commit secrets.
+* Copy `env.example` → `.env` and fill API keys.
+* Verify `.gitignore` before committing.
+
+---
+
+## LLM Provider Sanity Check
+
+Prefer validating through the same path the codebase uses: `src/extractor/pipeline/utils/litellm_call.py` (LiteLLM Router). This exercises auth, routing, and our multimodal prep.
+
+Basic check (prints JSON and succeeds if it contains `{"ok":true}`):
+
+```bash
+source .venv/bin/activate && set -a && [ -f .env ] && source .env && set +a
+python src/extractor/pipeline/utils/litellm_call.py sanity --model "${LITELLM_MODEL:-gpt-4o-mini}"
 ```
+
+Expect: output JSON includes `{"ok":true}` (the adapter may add a `metadata` object). Exit code 0 on success, non‑zero otherwise.
+
+Debug variant (always JSON, includes error/usage metadata on failure):
+
+```bash
+python src/extractor/pipeline/utils/litellm_call.py sanity --wrap-json --model "${LITELLM_MODEL:-gpt-4o-mini}"
+```
+
+Notes:
+- Set provider creds in `.env` (e.g., `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OLLAMA_BASE_URL`, etc.).
+- Optionally set `LITELLM_MODEL` in `.env` to your default model.
+- For batch/JSONL tests, see `--stdin` and `--jsonl` in the script help.
+
+Alternative (raw OpenAI curl) if you specifically need to bypass LiteLLM:
+
+```bash
+source .venv/bin/activate && set -a && [ -f .env ] && source .env && set +a
 curl -sS \
   -H 'Content-Type: application/json' \
   -H "Authorization: Bearer $OPENAI_API_KEY" \
   https://api.openai.com/v1/chat/completions \
   -d '{
         "model": "gpt-4o-mini",
-        "messages": [{"role":"user","content":"Return only {\\"ok\\":true} as JSON."}],
+        "messages": [{"role":"user","content":"Return only {\"ok\":true} as JSON."}],
         "response_format": {"type":"json_object"},
         "max_tokens": 20
       }'
 ```
-- Expect HTTP 200 and `{"ok":true}`.
-
-4) Model quirks
-- GPT‑5 requires `temperature=1.0`. If using gpt‑5/gpt‑5‑mini with LiteLLM, set temp accordingly.
-- Prefer models with reliable JSON mode (e.g., `openai/gpt-4o`) for strict JSON stages.
-
-5) LiteLLM tips
-- Add a system message instructing JSON‑only output.
-- Consider the OpenAI Responses API for stricter JSON compliance.
-
-6) Fallback playbook
-- If curl fails → fix key/org/project.
-- If curl passes but code fails → check model ID, temperature, response_format, and network/proxy.
-- Use `scripts/test_summarizer_json_mode.py` for quick JSON‑mode testing outside the pipeline.
-
-See also: `scripts/curl_json_mode_check.sh` for a one‑command curl sanity check.

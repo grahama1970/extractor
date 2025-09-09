@@ -12,10 +12,13 @@ dependencies = [
     "pymupdf>=1.23.0",
     "pydantic>=2.0.0",
     "pillow>=10.0.0",
+    "marker-pdf",
+    "aiofiles",
 ]
 
 [project.scripts]
 mcp-extractor-tools = "mcp_extractor_tools:mcp.run"
+mcp-marker-pdf = "mcp_marker_pdf:mcp.run"
 
 [build-system]
 requires = ["hatchling"]
