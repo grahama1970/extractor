@@ -42,9 +42,9 @@ const MIN_SIZE = 0.02; // 2% minimum
 
 const ClassicLayout = () => {
   // Prototype state
-  const [currentPage, setCurrentPage] = useState(5);
+  const [currentPage, setCurrentPage] = useState(1);
   const [doc, setDoc] = useState<PdfDoc | null>(null);
-  const [totalPages, setTotalPages] = useState<number>(50);
+  const [totalPages, setTotalPages] = useState<number>(2);
   const [zoom, setZoom] = useState(1);
 
   // Boxes per page
@@ -146,6 +146,25 @@ const ClassicLayout = () => {
     const y = Math.max(m, b.y * r.height - 40);
     return { ...base, left: Math.min(Math.max(m, x), r.width - 160), top: Math.min(Math.max(m, y), r.height - 44) };
   }, [hudMode, hudPos, selectedBox]);
+
+  // Dev-only helpers for tests (window.__ux)
+  useEffect(() => {
+    // @ts-ignore
+    (window as any).__ux = {
+      setPage: (n: number) => setCurrentPage(Math.max(1, Math.min(totalPages, Math.floor(n)))),
+      drawBox: (page: number, x0: number, y0: number, x1: number, y1: number, type?: string) => {
+        const x = Math.min(x0, x1);
+        const y = Math.min(y0, y1);
+        const w = Math.abs(x1 - x0);
+        const h = Math.abs(y1 - y0);
+        setCurrentPage(Math.max(1, Math.min(totalPages, Math.floor(page))));
+        const t = (type || defaultNewType) as string;
+        const id = `box-${Math.random().toString(36).slice(2,7)}`;
+        setPageBoxes(prev => [...prev, { id, type: t, instanceId: `${t.toLowerCase()}-${Math.random().toString(36).slice(2,5)}`, x, y, w, h }]);
+      }
+    };
+    return () => { try { /* @ts-ignore */ delete (window as any).__ux; } catch { /* noop */ } };
+  }, [totalPages, defaultNewType, setPageBoxes]);
 
   // Add Label dialog state
   const [addOpen, setAddOpen] = useState(false);
@@ -472,7 +491,7 @@ const ClassicLayout = () => {
                 >
                   <PdfCanvas doc={doc} page={currentPage} zoom={zoom} />
                   {/* Annotation overlay */}
-                  <div className="absolute inset-0" onClick={() => setSelectedId(null)}>
+                  <div className="absolute inset-0" data-testid="overlay" onClick={() => setSelectedId(null)}>
                     {/* Draft box rendered while drawing */}
                     {draftBox && (
                       <div
@@ -482,16 +501,24 @@ const ClassicLayout = () => {
                     )}
                     {pageBoxes.map((b) => {
                       const isSelected = b.id === selectedId;
+                      const borderClass = b.type === 'Section' ? 'border-annotation-section'
+                        : b.type === 'Table' ? 'border-annotation-table'
+                        : b.type === 'Figure' ? 'border-annotation-figure'
+                        : 'border-annotation-section';
+                      const chipBg = b.type === 'Section' ? 'bg-annotation-section'
+                        : b.type === 'Table' ? 'bg-annotation-table'
+                        : b.type === 'Figure' ? 'bg-annotation-figure'
+                        : 'bg-annotation-section';
                       return (
                         <div data-testid="box"
                           key={b.id}
-                          className={`absolute border-2 border-dashed cursor-move transition-all ${isSelected ? "ring-2 ring-primary ring-offset-2" : ""} ${b.type === "Section" ? "border-annotation-section" : "border-annotation-table"}`}
+                          className={`absolute border-2 border-dashed cursor-move transition-all ${isSelected ? "ring-2 ring-primary ring-offset-2" : ""} ${borderClass}`}
                           style={{ left: `${b.x * 100}%`, top: `${b.y * 100}%`, width: `${b.w * 100}%`, height: `${b.h * 100}%` }}
                           onPointerDown={(e) => { e.stopPropagation(); beginDrag(b.id, e, "move"); }}
                           onClick={(e) => { e.stopPropagation(); setSelectedId(b.id); }}
                         >
                           {/* Label chip */}
-                          <div className={`absolute -top-6 left-0 px-2 py-1 text-xs font-medium text-white rounded ${b.type === "Section" ? "bg-annotation-section" : "bg-annotation-table"}`}>
+                          <div className={`absolute -top-6 left-0 px-2 py-1 text-xs font-medium text-white rounded ${chipBg}`}>
                             {b.type} · {b.instanceId}
                           </div>
                           {/* Resize handles */}
@@ -714,8 +741,8 @@ const ClassicLayout = () => {
                 <ChevronLeft className="h-4 w-4" />
               </Button>
               <div className="flex-1 text-center">
-                <input type="range" min={1} max={totalPages} value={currentPage} onChange={(e) => setCurrentPage(Number(e.target.value))} className="w-full" />
-                <div className="text-sm text-muted-foreground mt-1">Page {currentPage} of {totalPages}</div>
+                <input data-testid="pager-slider" type="range" min={1} max={totalPages} value={currentPage} onChange={(e) => setCurrentPage(Number(e.target.value))} className="w-full" />
+                <div className="text-sm text-muted-foreground mt-1" data-testid="page-label">Page {currentPage} of {totalPages}</div>
               </div>
               <Button size="sm" variant="outline" onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))} title="Next">
                 <ChevronRight className="h-4 w-4" />

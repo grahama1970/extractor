@@ -1,0 +1,35 @@
+name: UX Suite
+
+on:
+  pull_request:
+    branches: [ "*" ]
+
+jobs:
+  ux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install dependencies (prototype)
+        run: |
+          cd prototypes/tabbed/html
+          npm ci
+      - name: Install Puppeteer
+        run: |
+          npm init -y
+          npm i -D puppeteer
+      - name: Start dev server
+        run: |
+          cd prototypes/tabbed/html
+          nohup npm run dev >/dev/null 2>&1 & echo $! > ../../..//vite.pid
+      - name: Wait for dev server
+        run: |
+          for i in $(seq 1 120); do curl -sSf http://127.0.0.1:8080/main >/dev/null 2>&1 && break; sleep 0.5; done
+      - name: Run UX suite
+        run: node scripts/ux_suite.mjs
+      - name: Cleanup
+        if: always()
+        run: |
+          kill $(cat vite.pid) 2>/dev/null || true

@@ -1,13 +1,17 @@
+"""Utilities for debugging and inspecting the document model.
+
+This module provides helpers for:
+- Structured logging with both console and file handlers
+- Inspecting section hierarchy and overall document structure
+- Setting programmatic breakpoints after specific sections
 """
+
 import json
 import logging
 import os
 import sys
 from pprint import pformat
-from typing import Any, Callable, Dict, List, Optional, Union
-Module: document_debugger.py
-Description: Implementation of document debugger functionality
-Description: Implementation of document debugger functionality
+from typing import Callable, Optional
 
 from extractor.core.schema import BlockTypes
 from extractor.core.schema.blocks import Block, BlockId
@@ -15,9 +19,6 @@ from extractor.core.schema.blocks import Block, BlockId
 
 class SectionBreakpoint(Exception):
     """Exception raised when a section breakpoint is triggered."""
-"""
-Utilities for debugging the document model.
-    pass
 
 
 class DocumentDebugger:
@@ -158,8 +159,13 @@ class DocumentDebugger:
         return structure
     
     @staticmethod
-    def breakpoint_after_section(document, section_title: Optional[str] = None, level: Optional[int] = None, 
-                                 callback: Optional[Callable[[Block], None]] = None, raise_exception: bool = False):
+    def breakpoint_after_section(
+        document,
+        section_title: Optional[str] = None,
+        level: Optional[int] = None,
+        callback: Optional[Callable[[Block], None]] = None,
+        raise_exception: bool = False,
+    ):
         """
         Set conditional breakpoint after processing a specific section.
         

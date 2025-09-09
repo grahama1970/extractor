@@ -1,0 +1,16 @@
+{
+  "folders": [
+    { "path": "src/extractor", "name": "Backend" },
+    { "path": "tools/gold_annotator_web", "name": "Gold Annotator (Next.js)" },
+    { "path": "prototypes/tabbed/html", "name": "Proto: Vite React" }
+  ],
+  "settings": {
+    // Python
+    "python.defaultInterpreterPath": "${workspaceFolder:Backend}/.venv/bin/python",
+    // Formatting
+    "editor.formatOnSave": true,
+    // Recommended for TS/React workspaces
+    "typescript.tsserver.experimental.enableProjectDiagnostics": true
+  }
+}
+

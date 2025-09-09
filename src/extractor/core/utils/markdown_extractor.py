@@ -1,17 +1,12 @@
-"""
+"""Utilities for extracting section breadcrumbs and metadata from markdown files."""
+
 import re
 import json
 from typing import Dict, List, Any
-Module: markdown_extractor.py
-Description: Functions for markdown extractor operations
-Description: Functions for markdown extractor operations
 
 
 def extract_sections_from_markdown(markdown_content: str) -> List[Dict[str, Any]]:
-    """
-"""
-Utilities for extracting section breadcrumbs and metadata from markdown files.
-    Extract all sections with their breadcrumbs from a markdown document.
+    """Extract all sections with their breadcrumbs from a markdown document.
     
     Args:
         markdown_content: The markdown content to extract sections from

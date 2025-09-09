@@ -4,6 +4,16 @@ const nextConfig = {
   experimental: {
     typedRoutes: true,
   },
+  async rewrites() {
+    // Proxy API calls during dev/prod to FastAPI backend
+    const apiBase = process.env.NEXT_PUBLIC_API_PROXY || "http://localhost:8000";
+    return [
+      {
+        source: "/api/:path*",
+        destination: `${apiBase}/:path*`,
+      },
+    ];
+  },
   async headers() {
     // Prevent caching of HTML responses so clients always get fresh chunk hashes
     return [

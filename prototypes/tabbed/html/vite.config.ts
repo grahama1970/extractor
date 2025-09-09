@@ -8,6 +8,14 @@ export default defineConfig(({ mode }) => ({
   server: {
     host: "::",
     port: 8080,
+    proxy: {
+      // Proxy API calls during dev to FastAPI backend (uvicorn on :8000)
+      "/api": {
+        target: process.env.VITE_API_PROXY || "http://localhost:8000",
+        changeOrigin: true,
+        rewrite: (pathStr) => pathStr.replace(/^\/api/, ""),
+      },
+    },
   },
   plugins: [react(), mode === "development" && componentTagger()].filter(Boolean),
   resolve: {

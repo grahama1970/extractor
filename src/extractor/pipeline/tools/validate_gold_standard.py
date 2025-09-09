@@ -17,6 +17,39 @@ from typing import Any, Dict, List, Tuple
 
 import typer
 
+
+
+# ---- Helper utilities for item-level assertions ----
+from typing import Optional as _Optional
+
+
+def _dict_subset_equal(expected: dict, actual: dict) -> bool:
+    """Return True if expected is a (recursive) subset of actual."""
+    if not isinstance(expected, dict) or not isinstance(actual, dict):
+        return expected == actual
+    for k, v in expected.items():
+        if k not in actual:
+            return False
+        if isinstance(v, dict):
+            if not _dict_subset_equal(v, actual.get(k)):
+                return False
+        elif isinstance(v, list):
+            av = actual.get(k)
+            if not isinstance(av, list) or len(v) != len(av):
+                return False
+            for vv, aa in zip(v, av):
+                if isinstance(vv, dict):
+                    if not _dict_subset_equal(vv, aa):
+                        return False
+                else:
+                    if vv != aa:
+                        return False
+        else:
+            if v != actual.get(k):
+                return False
+    return True
+
+
 app = typer.Typer(help="Validate pipeline outputs against gold standards")
 
 
@@ -311,7 +344,7 @@ STAGE_TO_GS: Dict[str, str] = {
 
 
 def _gs_dir() -> Path:
-    return Path("src/extractor/pipeline/gold_standards")
+    return Path("data/gold_standards/pipeline")
 
 
 def _has_keys(d: Dict[str, Any], keys: List[str]) -> bool:
@@ -342,6 +375,101 @@ def compare_against_gs_invariants(stage_id: str, run_data: Dict[str, Any], gs_da
     status_value = invariants.get("status_value")
     if status_value is not None and isinstance(run_data, dict):
         add("status_value_matches", run_data.get("status") == status_value, {"expected": status_value, "actual": run_data.get("status")})
+
+
+    # -------- Generalized numeric field checks (non-determinism-friendly) --------
+    # numeric_fields_exact/min/max: { field_name: number }
+    for field, val in (invariants.get("numeric_fields_exact", {}) or {}).items():
+        actual = run_data.get(field)
+        add(f"numeric_exact:{field}", actual == val, {"expected": val, "actual": actual})
+    for field, val in (invariants.get("numeric_fields_min", {}) or {}).items():
+        actual = run_data.get(field)
+        ok_field = (isinstance(actual, (int, float)) and actual >= val)
+        add(f"numeric_min:{field}", ok_field, {"min": val, "actual": actual})
+    for field, val in (invariants.get("numeric_fields_max", {}) or {}).items():
+        actual = run_data.get(field)
+        ok_field = (isinstance(actual, (int, float)) and actual <= val)
+        add(f"numeric_max:{field}", ok_field, {"max": val, "actual": actual})
+
+    # -------- Array length checks (exact/min/max) --------
+    # array_len_exact/min/max: { array_key: number }
+    def _arr_len(d: Dict[str, Any], key: str) -> Optional[int]:
+        v = d.get(key)
+        return len(v) if isinstance(v, list) else None
+
+    for k, n in (invariants.get("array_len_exact", {}) or {}).items():
+        ln = _arr_len(run_data, k)
+        add(f"array_len_exact:{k}", ln == n, {"expected": n, "actual": ln})
+    for k, n in (invariants.get("array_len_min", {}) or {}).items():
+        ln = _arr_len(run_data, k)
+        add(f"array_len_min:{k}", (ln is not None and ln >= n), {"min": n, "actual": ln})
+    for k, n in (invariants.get("array_len_max", {}) or {}).items():
+        ln = _arr_len(run_data, k)
+        add(f"array_len_max:{k}", (ln is not None and ln <= n), {"max": n, "actual": ln})
+
+    # -------- Item-level expectations --------
+    # Schema:
+    # expected_invariants.item_expectations = {
+    #   "tables": [
+    #       {
+    #         "select": {"page_index": 0},
+    #         "require": "one",  # one | at_least_one | exactly_n
+    #         "exactly_n": 1,     # used when require == exactly_n
+    #         "assert": {
+    #            "equals": { ... expected partial or full dict ... },
+    #            "exact": false   # false => subset match; true => full equality
+    #         }
+    #       },
+    #       ...
+    #   ]
+    # }
+    try:
+        item_specs = invariants.get('item_expectations') or {}
+        for arr_key, specs in (item_specs.items() if isinstance(item_specs, dict) else []):
+            items = run_data.get(arr_key)
+            if not isinstance(items, list):
+                add(f"item_expectations:{arr_key}_is_array", False, {"actual_type": type(items).__name__})
+                continue
+            for spec in (specs or []):
+                sel = spec.get('select') or {}
+                req = (spec.get('require') or 'one').strip()
+                n_exact = int(spec.get('exactly_n') or 1)
+                assertion = spec.get('assert') or {}
+                expected = assertion.get('equals') or {}
+                exact = bool(assertion.get('exact', False))
+
+                # filter by simple equality on top-level fields
+                def _match(it: dict) -> bool:
+                    for k, v in sel.items():
+                        if it.get(k) != v:
+                            return False
+                    return True
+                matches = [it for it in items if isinstance(it, dict) and _match(it)]
+
+                # requirement check
+                ok_req = True
+                if req == 'one':
+                    ok_req = (len(matches) == 1)
+                elif req == 'at_least_one':
+                    ok_req = (len(matches) >= 1)
+                elif req == 'exactly_n':
+                    ok_req = (len(matches) == n_exact)
+                else:
+                    ok_req = (len(matches) >= 1)
+                add(f"item_expectations:{arr_key}:select:{sel}", ok_req, {"found": len(matches), "require": req, "exactly_n": n_exact})
+
+                # assertion check against first match if present
+                if matches and isinstance(expected, dict) and expected:
+                    actual = matches[0]
+                    if exact:
+                        ok_assert = (actual == expected)
+                    else:
+                        ok_assert = _dict_subset_equal(expected, actual)
+                    add(f"item_assert:{arr_key}:select:{sel}", ok_assert, {"exact": exact})
+    except Exception as _e:
+        add("item_expectations_error", False, {"error": str(_e)})
+
+
 
     # Stage-specific invariant families
     if stage_id == "01":
