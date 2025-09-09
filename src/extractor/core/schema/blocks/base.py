@@ -19,9 +19,9 @@ Example Usage:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Dict, List, Literal, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, Dict, List, Literal, Optional, Sequence, Tuple, Any
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator, Field
 from PIL import Image
 
 from extractor.core.schema import BlockTypes
@@ -105,6 +105,15 @@ class Block(BaseModel):
     lowres_image: Image.Image | None = None
     highres_image: Image.Image | None = None
     removed: bool = False # Has block been replaced by new block?
+    
+    # Validation and quality fields
+    is_suspicious: bool = False  # Whether this block has quality issues
+    suspicious_reasons: List[str] = Field(default_factory=list)  # Multiple reasons why the block is suspicious
+    suspicion_confidence: Optional[float] = None  # Confidence that block is suspicious (0.0-1.0)
+    confidence: Optional[float] = None  # Surya/extraction confidence score (0.0-1.0)
+    quality_score: Optional[float] = None  # Overall quality assessment score
+    requires_review: bool = False  # Whether human/LLM review is needed
+    validation_metadata: Dict[str, Any] = Field(default_factory=dict)  # Additional validation data (e.g., pattern matches)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -236,6 +245,9 @@ class Block(BaseModel):
         blocks = []
         for block_id in self.structure:
             block = document.get_block(block_id)
+            if block is None:
+                # Skip missing blocks
+                continue
             if block.removed:
                 continue
             if (block_types is None or block.block_type in block_types) and not block.removed:
@@ -259,6 +271,9 @@ class Block(BaseModel):
         if self.structure is not None and len(self.structure) > 0:
             for block_id in self.structure:
                 block = document.get_block(block_id)
+                if block is None:
+                    # Skip missing blocks - this is a workaround for block ID issues
+                    continue
                 rendered = block.render(document, self.structure, section_hierarchy)
                 section_hierarchy = rendered.section_hierarchy.copy()  # Update the section hierarchy from the peer blocks
                 child_content.append(rendered)
@@ -292,3 +307,60 @@ class Block(BaseModel):
         child_ref_blocks = [block for block in child_blocks if block.id.block_type == BlockTypes.Reference]
         html = Block.assemble_html(self, document, child_ref_blocks, parent_structure)
         return html + self.html
+    
+    # Suspicious block detection methods
+    def mark_suspicious(self, reason: str, confidence: float = 0.8, metadata: Optional[Dict[str, Any]] = None):
+        """Mark this block as suspicious with a reason and confidence score."""
+        self.is_suspicious = True
+        if reason not in self.suspicious_reasons:
+            self.suspicious_reasons.append(reason)
+        
+        # Update suspicion confidence (take highest)
+        if self.suspicion_confidence is None:
+            self.suspicion_confidence = confidence
+        else:
+            self.suspicion_confidence = max(self.suspicion_confidence, confidence)
+        
+        # Add any metadata
+        if metadata:
+            self.validation_metadata.update(metadata)
+        
+        # Automatically mark for review if high suspicion
+        if self.suspicion_confidence >= 0.7:
+            self.requires_review = True
+    
+    def clear_suspicion(self):
+        """Clear all suspicion flags and reasons."""
+        self.is_suspicious = False
+        self.suspicious_reasons = []
+        self.suspicion_confidence = None
+        self.requires_review = False
+        self.validation_metadata = {}
+    
+    def calculate_quality_score(self) -> float:
+        """Calculate overall quality score based on confidence and suspicion."""
+        base_score = self.confidence or 0.5
+        
+        # Reduce score based on suspicion
+        if self.is_suspicious and self.suspicion_confidence:
+            penalty = self.suspicion_confidence * 0.5  # Max 50% reduction
+            base_score = base_score * (1 - penalty)
+        
+        # Further reduce if multiple reasons
+        if len(self.suspicious_reasons) > 1:
+            base_score *= (1 - 0.1 * min(len(self.suspicious_reasons) - 1, 3))
+        
+        self.quality_score = max(0.0, min(1.0, base_score))
+        return self.quality_score
+    
+    def get_suspicion_summary(self) -> Dict[str, Any]:
+        """Get a summary of suspicion data for reporting."""
+        return {
+            "is_suspicious": self.is_suspicious,
+            "reasons": self.suspicious_reasons,
+            "suspicion_confidence": self.suspicion_confidence,
+            "extraction_confidence": self.confidence,
+            "quality_score": self.quality_score or self.calculate_quality_score(),
+            "requires_review": self.requires_review,
+            "metadata": self.validation_metadata
+        }

@@ -78,6 +78,9 @@ class ConfigParser:
                          help="Directory for Claude workspace (default: /tmp/marker_claude).")(fn)
         fn = click.option("--converter_cls", type=str, default=None, help="Converter class to use.  Defaults to PDF converter.")(fn)
         fn = click.option("--llm_service", type=str, default=None, help="LLM service to use - should be full import path, like marker.services.litellm.LiteLLMService")(fn)
+        # MARKER FORK ADDITION START - LiteLLM model selection
+        fn = click.option("--litellm_model", type=str, default=None, help="LiteLLM model to use in provider/model format (e.g. 'ollama/gemma3:27b')")(fn)
+        # MARKER FORK ADDITION END
 
         # enum options
         fn = click.option("--force_layout_block", type=click.Choice(choices=[t.name for t in BlockTypes]), default=None,)(fn)
@@ -138,6 +141,11 @@ class ConfigParser:
                 claude_config.claude_workspace_dir = claude_workspace
                 
             config["claude"] = claude_config
+            
+        # MARKER FORK ADDITION START - Add litellm_model to config
+        if self.cli_options.get("litellm_model"):
+            config["litellm_model"] = self.cli_options["litellm_model"]
+        # MARKER FORK ADDITION END
 
         return config
 
@@ -189,12 +197,15 @@ class ConfigParser:
         if claude_config_name != "disabled":
             # Add Claude post-processor to defaults
             return "default+marker.processors.claude_post_processor.ClaudePostProcessor"
-        elif self.cli_options.get("add_summaries", False):
+        
+        # Check if summaries are requested
+        if self.cli_options.get("add_summaries", False):
             # We'll need to append the summarizer to the default processors
             # by using a special marker that the PdfConverter can check
             return "default+marker.processors.simple_summarizer.SimpleSectionSummarizer"
         
-        return None
+        # Return default processors if nothing else specified
+        return "default"
 
     def get_converter_cls(self):
         converter_cls = self.cli_options.get("converter_cls", None)

@@ -1,22 +1,3 @@
-"""
-Module: sectionheader.py
-
-External Dependencies:
-- warnings: [Documentation URL]
-- numpy: https://numpy.org/doc/
-- sklearn: [Documentation URL]
-- marker: [Documentation URL]
-
-Sample Input:
->>> # Add specific examples based on module functionality
-
-Expected Output:
->>> # Add expected output examples
-
-Example Usage:
->>> # Add usage examples
-"""
-
 import warnings
 from typing import Annotated, Dict, List
 
@@ -65,7 +46,7 @@ class SectionHeaderProcessor(BaseProcessor):
                     line_heights[block.id] = block.line_height(document)
                 else:
                     line_heights[block.id] = 0
-                    block.ignore_for_output = True  # Don't output an empty section header'
+                    block.ignore_for_output = True  # Don't output an empty section header
 
         flat_line_heights = list(line_heights.values())
         heading_ranges = self.bucket_headings(flat_line_heights)

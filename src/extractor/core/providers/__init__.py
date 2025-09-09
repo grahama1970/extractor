@@ -19,8 +19,8 @@ Example Usage:
 >>> # Add usage examples
 """
 
-from copy import deepcopy
-from typing import List, Optional, Dict
+from functools import lru_cache
+from typing import List, Optional, Dict, Any
 
 from PIL import Image
 from pydantic import BaseModel
@@ -51,11 +51,14 @@ class ProviderOutput(BaseModel):
         return "".join(span.text for span in self.spans)
 
     def __hash__(self):
-        return hash(tuple(self.line.polygon.bbox))
+        # Include spans text in hash to avoid collision on identical bboxes
+        spans_text = "".join(span.text for span in self.spans)
+        return hash((tuple(self.line.polygon.bbox), spans_text))
 
     def merge(self, other: "ProviderOutput"):
-        new_output = deepcopy(self)
-        other_copy = deepcopy(other)
+        # Use Pydantic's built-in copy method instead of deepcopy
+        new_output = self.model_copy(deep=True)
+        other_copy = other.model_copy(deep=True)
 
         new_output.spans.extend(other_copy.spans)
         if new_output.chars is not None and other_copy.chars is not None:
@@ -70,32 +73,100 @@ class ProviderOutput(BaseModel):
 ProviderPageLines = Dict[int, List[ProviderOutput]]
 
 class BaseProvider:
-    def __init__(self, filepath: str, config: Optional[BaseModel | dict] = None):
+    def __init__(self, filepath: str, config: Optional[BaseModel | Dict[str, Any]] = None):
         assign_config(self, config)
         self.filepath = filepath
 
     def __len__(self):
-        pass
+        """Return the number of pages/items in this provider.
+        
+        Returns:
+            int: Number of pages or items
+            
+        Raises:
+            NotImplementedError: Must be implemented by subclasses
+        """
+        raise NotImplementedError("Subclasses must implement __len__")
 
     def get_images(self, idxs: List[int], dpi: int) -> List[Image.Image]:
-        pass
+        """Get images for the specified page indices at given DPI.
+        
+        Args:
+            idxs: List of page indices to render
+            dpi: DPI for image rendering
+            
+        Returns:
+            List of PIL Image objects
+            
+        Raises:
+            NotImplementedError: Must be implemented by subclasses
+        """
+        raise NotImplementedError("Subclasses must implement get_images")
 
     def get_page_bbox(self, idx: int) -> PolygonBox | None:
-        pass
+        """Get the bounding box for a specific page.
+        
+        Args:
+            idx: Page index
+            
+        Returns:
+            PolygonBox or None if page doesn't exist
+            
+        Raises:
+            NotImplementedError: Must be implemented by subclasses
+        """
+        raise NotImplementedError("Subclasses must implement get_page_bbox")
 
-    def get_page_lines(self, idx: int) -> List[Line]:
-        pass
+    def get_page_lines(self, idx: int) -> List["ProviderOutput"]:
+        """Get text lines for a specific page.
+        
+        Args:
+            idx: Page index
+            
+        Returns:
+            List of ProviderOutput objects
+            
+        Raises:
+            NotImplementedError: Must be implemented by subclasses
+        """
+        raise NotImplementedError("Subclasses must implement get_page_lines")
 
     def get_page_refs(self, idx: int) -> List[Reference]:
-        pass
+        """Get references for a specific page.
+        
+        Args:
+            idx: Page index
+            
+        Returns:
+            List of Reference objects
+            
+        Raises:
+            NotImplementedError: Must be implemented by subclasses
+        """
+        raise NotImplementedError("Subclasses must implement get_page_refs")
 
     def __enter__(self):
         return self
 
     @staticmethod
+    @lru_cache(maxsize=1)
     def get_font_css():
+        """Get cached CSS configuration for fonts.
+        
+        Returns:
+            CSS object for weasyprint
+            
+        Raises:
+            ValueError: If font settings are not properly configured
+        """
         from weasyprint import CSS
         from weasyprint.text.fonts import FontConfiguration
+
+        # Validate font settings
+        if not hasattr(settings, 'FONT_PATH') or not settings.FONT_PATH:
+            raise ValueError("FONT_PATH setting is required but not configured")
+        if not hasattr(settings, 'FONT_NAME') or not settings.FONT_NAME:
+            raise ValueError("FONT_NAME setting is required but not configured")
 
         font_config = FontConfiguration()
         css = CSS(string=f'''

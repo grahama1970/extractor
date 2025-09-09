@@ -1,0 +1,973 @@
+#!/usr/bin/env python3
+"""
+Suspicious Header Verifier
+--------------------------
+This pipeline step takes the output JSON from a Marker process (which has been
+run through the SuspiciousHeaderFixer) and a corresponding PDF. It finds all
+blocks flagged with `suspicious_header: true`, captures an image of the block
+and its immediate context, and uses a multimodal LLM to verify if the block is
+truly a section header.
+
+The script updates the JSON with the LLM's findings and saves a new version.
+"""
+
+import os
+import json
+import base64
+import asyncio
+import textwrap
+from pathlib import Path
+from dataclasses import dataclass, field
+from typing import List, Dict, Any, Optional, cast, Tuple
+from datetime import datetime
+import uuid
+
+import fitz  # PyMuPDF
+try:
+    try:
+        import typer
+        _HAS_TYPER = True
+    except Exception:
+        _HAS_TYPER = False
+        class _TyperShim:
+            def __init__(self,*a,**k): pass
+            def command(self,*a,**k): return lambda f: f
+            def __call__(self,*a,**k): print("Typer not installed; CLI disabled")
+        def _opt(*a,**k): return None
+        def _arg(*a,**k): return None
+        typer = _TyperShim()  # type: ignore
+        typer.Typer = _TyperShim  # type: ignore
+        typer.Option = _opt  # type: ignore
+        typer.Argument = _arg  # type: ignore
+        typer.secho = print  # type: ignore
+
+    _HAS_TYPER = True
+except Exception:
+    _HAS_TYPER = False
+    class _TyperShim:
+        def __init__(self,*a,**k): pass
+        def command(self,*a,**k): return lambda f: f
+        def __call__(self,*a,**k): print("Typer not installed; CLI disabled")
+    def _opt(*a,**k): return None
+    def _arg(*a,**k): return None
+    typer = _TyperShim()  # type: ignore
+    typer.Typer = _TyperShim  # type: ignore
+    typer.Option = _opt  # type: ignore
+    typer.Argument = _arg  # type: ignore
+    typer.secho = print  # type: ignore
+
+from typing_extensions import Annotated
+from dotenv import load_dotenv
+from loguru import logger
+
+from extractor.core.services.utils.litellm_cache import initialize_litellm_cache
+from extractor.pipeline.utils.prompt_builder import build_llm_context
+from extractor.pipeline.utils.ann_index import build_ann_index, query_ann_index
+from extractor.pipeline.utils.annotations import (
+    rect_overlap_ratio as _rect_overlap_ratio,
+    cue_from_annotation as _cue_from_annotation,
+    summarize_cues as _summarize_cues,
+    annotation_text_snippet as _annotation_text_snippet,
+    load_relevant_rules as _load_relevant_rules,
+)
+from extractor.pipeline.utils.litellm_call import litellm_call
+from extractor.pipeline.utils.diagnostics import start_resource_sampler, stop_resource_sampler, make_event, snapshot_resources, build_stage_timings, get_run_id, classify_llm_error, gpu_metrics_available
+try:
+    import psutil  # type: ignore
+except Exception:
+    psutil = None  # type: ignore
+import time
+
+initialize_litellm_cache()
+
+# ------------------------------------------------------------------
+# CONFIGURATION
+# ------------------------------------------------------------------
+load_dotenv()
+app = typer.Typer(help="Verify suspicious headers using a multimodal LLM.", add_completion=False)
+
+def _env_vlm_model(default: str = "openai/gpt-5-mini") -> str:
+    """Return VLM model preferring LITELLM_VLM_MODEL, falling back to LITELLM_VISION_MODEL.
+    Keeps a single point of truth for env lookup across steps.
+    """
+    return os.getenv("LITELLM_VLM_MODEL") or os.getenv("LITELLM_VISION_MODEL") or default
+
+
+@dataclass
+class Config:
+    input_pdf: Path
+    input_json: Path
+    output_dir: Path
+    render_dpi: int = 200
+    llm_model: str = field(default_factory=_env_vlm_model)
+    llm_concurrency: int = 5
+    debug: bool = False
+    task_limit: int = 0  # 0 = no limit
+    max_runtime_seconds: int = 0  # 0 = no limit
+    # Knowledge/annotations support
+    annotations_json: Optional[Path] = None
+    use_knowledge: bool = True
+    use_prior: bool = True
+    auto_reject_negatives: bool = True
+    persist_headers: bool = False
+    source_pdf: Optional[str] = None
+    # Treat all SectionHeader blocks as candidates (ignore Stage 02 suspicious flags)
+    verify_all_headers: bool = False
+    # Whether to write suspicion fields back into blocks
+    write_suspicion_fields: bool = True
+
+# ------------------------------------------------------------------
+# PROMPT
+# ------------------------------------------------------------------
+SYSTEM_PROMPT = textwrap.dedent("""
+    You are an expert document analyst. Your task is to determine if a text block, which has been
+    flagged as a "suspicious" section header, is actually a legitimate section header or if it has
+    been misclassified.
+
+    You will be given:
+    1.  An image showing the text block in question, along with the text immediately above and below it for visual context.
+    2.  The structured text content for these three blocks, including font style information.
+
+    Analyze both the visual layout (font size, boldness, spacing) and the text content. A real header typically has a larger font,
+    is often bold, has space around it, and contains topical, non-sentence-like text. A misclassified block might be a figure caption,
+    part of a table, a list item, or just a sentence fragment.
+
+    Provide a strict JSON response with:
+    - "is_header": true|false
+    - "reasoning": short explanation
+""")
+
+# ------------------------------------------------------------------
+# HELPER FUNCTIONS
+# ------------------------------------------------------------------
+# build_llm_context now imported from utils.prompt_builder
+
+# --------------------
+# Annotations loading and cue extraction
+# --------------------
+
+# annotations helpers now imported from utils.annotations
+
+# --------------------
+# Crucial rules (optional) – used for weighting
+# --------------------
+RELEVANT_RULES = _load_relevant_rules()
+# --- Prior decisions retrieval (stub) ---
+def _retrieve_prior_decisions(header_text_norm: str, font_sig: str, limit: int = 5) -> list[dict]:
+    """Stubbed prior retrieval to prevent NameError when --use-prior is enabled.
+    Replace with DB-backed retrieval in future without affecting current offline mode.
+    """
+    return []
+
+# --- Verify the User has selected a Multmodal (Vision) model
+from tenacity import retry, stop_after_attempt, wait_exponential
+
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=2, max=10))
+async def verify_header_with_llm(
+    image_b64: str,
+    context_text: str,
+    model: str
+) -> Dict[str, Any]:
+    """Verify header using litellm_call (vision required) with strict JSON intent.
+
+    Always sends an image; provider error will be raised to the caller.
+    """
+    user_content: Any = [
+        {"type": "text", "text": context_text},
+        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_b64}"}},
+    ]
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": user_content},
+    ]
+    results = await litellm_call(
+        prompts=[{"model": model, "messages": messages}],
+        wrap_json=True,
+        concurrency=1,
+        desc="verify header"
+    )
+    answer = results[0] if results else ""
+    try:
+        payload = json.loads(answer) if answer else {}
+    except Exception:
+        payload = {"error": {"type": "ParseError", "message": answer[:200]}}
+    if isinstance(payload, dict) and payload.get("error"):
+        err = payload["error"]
+        raise RuntimeError(f"LLM error: {err.get('type')}: {err.get('message')}")
+    if not isinstance(payload, dict):
+        payload = {"content": payload}
+    payload = cast(Dict[str, Any], payload)
+    payload["is_header"] = bool(payload.get("is_header", True))
+    payload["reasoning"] = str(payload.get("reasoning", ""))
+    return payload
+
+# ------------------------------------------------------------------
+# MAIN PIPELINE
+# ------------------------------------------------------------------
+@dataclass
+class VerificationTask:
+    """Holds all necessary info for a single verification task."""
+    page_idx: int
+    block_idx: int
+    page_blocks: List[Dict[str, Any]]
+    page_obj: fitz.Page
+    config: Config
+    image_output_dir: Path
+
+    def get_context_blocks(self) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
+        """Return (target, above, below) where above/below skip empty blocks.
+
+        Empty means:
+        - No text content (after strip) AND
+        - No usable bbox (missing or zero area)
+
+        Preference: textual neighbors; fallback to any block with a non-zero bbox
+        within a small window.
+        """
+        def _has_text(b: Optional[Dict[str, Any]]) -> bool:
+            if not b:
+                return False
+            t = (b.get("text") or b.get("content") or "").strip()
+            if t:
+                return True
+            # legacy shape
+            for ln in (b.get("lines") or []):
+                for sp in (ln.get("spans") or []):
+                    if (sp.get("text") or "").strip():
+                        return True
+            return False
+
+        def _has_bbox(b: Optional[Dict[str, Any]]) -> bool:
+            if not b:
+                return False
+            bb = b.get("bbox")
+            if not isinstance(bb, (list, tuple)) or len(bb) != 4:
+                return False
+            x0, y0, x1, y1 = bb
+            try:
+                return (float(x1) - float(x0)) > 0 and (float(y1) - float(y0)) > 0
+            except Exception:
+                return False
+
+        def _non_empty(b: Optional[Dict[str, Any]]) -> bool:
+            return _has_text(b) or _has_bbox(b)
+
+        target = self.page_blocks[self.block_idx]
+
+        # immediate neighbors
+        above = self.page_blocks[self.block_idx - 1] if self.block_idx > 0 else None
+        below = self.page_blocks[self.block_idx + 1] if self.block_idx < len(self.page_blocks) - 1 else None
+
+        # If neighbor is empty, scan up to ±5 blocks to find a non-empty one
+        MAX_SCAN = 5
+        if not _non_empty(above):
+            for i in range(self.block_idx - 2, max(-1, self.block_idx - 2 - MAX_SCAN), -1):
+                if i < 0:
+                    break
+                cand = self.page_blocks[i]
+                if _non_empty(cand):
+                    above = cand
+                    break
+
+        if not _non_empty(below):
+            for i in range(self.block_idx + 2, min(len(self.page_blocks), self.block_idx + 2 + MAX_SCAN)):
+                cand = self.page_blocks[i]
+                if _non_empty(cand):
+                    below = cand
+                    break
+
+        return target, above, below
+
+    def render_context_image_b64(self) -> str:
+        """Renders an image of the block and its neighbors, saves it, and returns base64."""
+        target, above, below = self.get_context_blocks()
+        
+        expanded_rect = fitz.Rect(target['bbox'])
+        
+        if above and 'bbox' in above:
+            expanded_rect.include_rect(fitz.Rect(above['bbox']))
+        if below and 'bbox' in below:
+            expanded_rect.include_rect(fitz.Rect(below['bbox']))
+            
+        expanded_rect.x0 -= 10
+        expanded_rect.y0 -= 10
+        expanded_rect.x1 += 10
+        expanded_rect.y1 += 10
+        
+        # ensure expanded rect stays within page bounds across PyMuPDF versions
+        expanded_rect = expanded_rect & self.page_obj.rect
+
+        matrix = fitz.Matrix(self.config.render_dpi / 72, self.config.render_dpi / 72)
+        pix = self.page_obj.get_pixmap(matrix=matrix, clip=expanded_rect)  # type: ignore[attr-defined]
+        
+        # Save the image for inspection
+        image_path = self.image_output_dir / f"suspicious_p{self.page_idx}_b{self.block_idx}.png"
+        pix.save(str(image_path))
+        
+        # Also update the block with the path to its context image
+        self.page_blocks[self.block_idx]["context_image_path"] = str(image_path)
+
+        # IMPORTANT: Encode as PNG to match data URL type
+        return base64.b64encode(pix.tobytes("png")).decode('utf-8')
+
+
+async def process_pdf_pipeline(config: Config):
+    """
+    Stage 03 orchestrator: verify suspicious headers with a vision-capable LLM.
+
+    Phases:
+    1) Init: set up output dirs; load Stage 02 JSON + PDF; normalize to pages.
+    2) Annotations: index by page; compute concise human-cue summaries (and global negatives); set source_pdf.
+    3) Candidate discovery: collect suspicious headers; optionally include all SectionHeaders.
+    4) Preflight: render one real candidate context image; probe selected model for vision support.
+       Note: this sends a placeholder text ("Preflight vision capability check.") with the image only to test provider support; the
+       response is ignored and NOT used for any header decision.
+    5) Preparation: for each candidate, choose context neighbors (±5 scan), compute human cues (with optional auto-reject),
+       render a context image, and build the textual prompt.
+    6) LLM batch: call litellm in one batch with concurrency and optional timeout; parse JSON responses; map errors to safe defaults.
+    7) Apply: update the block type (Text on reject), clear the suspicious_header flag, write llm_verification, update suspicion fields,
+       and optionally persist results to ArangoDB if configured.
+    8) Save: flatten pages back to a top-level blocks list and write 03_verified_blocks.json.
+
+    Side effects:
+    - Writes context images to image_output/ for each candidate.
+    - Writes final JSON to json_output/.
+
+    Flags of note:
+    - verify_all_headers: include every SectionHeader as a candidate.
+    - use_knowledge / auto_reject_negatives: use on-page annotation cues; can skip LLM on strong negatives.
+    - llm_concurrency / max_runtime_seconds: batch performance controls.
+    - write_suspicion_fields: reflect outcomes in suspicion_* fields.
+    """
+    # 1) Init — inputs and output layout
+    run_id = get_run_id()
+    diagnostics = []
+    errors_count = 0
+    warnings_count = 0
+
+    print(f"Verifying suspicious headers in '{config.input_json.name}'...")
+    stage_start_ts = datetime.now().isoformat()
+    t_stage0 = time.monotonic()
+    resources = snapshot_resources("start")
+    import os
+    sampler = start_resource_sampler(float(os.getenv("SAMPLE_INTERVAL_SEC", "2"))) if os.getenv("ENABLE_RESOURCE_SAMPLING", "0").lower() in ("1","true","yes","y") else None
+    try:
+        if sampler and not gpu_metrics_available():
+            diagnostics.append(make_event("03_suspicious_headers","info","gpu_metrics_unavailable","NVML not available; GPU metrics disabled",{}))
+    except Exception:
+        pass
+    try:
+        if psutil is not None:
+            proc = psutil.Process()
+            resources["proc_rss_mb_start"] = int((proc.memory_info().rss or 0)/(1024*1024))
+            vm = psutil.virtual_memory()
+            resources["vmem_used_mb_start"] = int(getattr(vm, "used", 0)/(1024*1024))
+    except Exception:
+        pass
+    
+    # Define clear output paths
+    json_output_dir = config.output_dir / "json_output"
+    image_output_dir = config.output_dir / "image_output"
+    json_output_dir.mkdir(parents=True, exist_ok=True)
+    image_output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Load Stage 02 JSON
+    with open(config.input_json, 'r') as f:
+        marker_data = json.load(f)
+    
+    try:
+        pdf_doc = fitz.open(config.input_pdf)
+    except Exception as e:
+        print(f"Failed to open PDF {config.input_pdf}: {e}")
+        return {"success": False, "error": str(e)}
+    
+    # Normalize: Stage 02 may be flat blocks — convert to pages for local processing
+    if "pages" not in marker_data:
+        all_blocks = marker_data.get("blocks", [])
+        pages_dict = {}
+        for block in all_blocks:
+            p_idx = block.get("page_idx", 0)
+            if p_idx not in pages_dict:
+                pages_dict[p_idx] = []
+            pages_dict[p_idx].append(block)
+        
+        marker_data["pages"] = [{"blocks": pages_dict.get(i, [])} for i in sorted(pages_dict.keys())]
+
+    # 2) Annotations — index by page, build global cue summary
+    annotations_by_page: Dict[int, List[Dict[str, Any]]] = {}
+    global_negative_examples_summary: Optional[str] = None
+    ann_index = None
+    if config.annotations_json and config.annotations_json.exists():
+        try:
+            with open(config.annotations_json, "r") as af:
+                a_payload = json.load(af)
+            for a in a_payload.get("annotations", []):
+                p = int(a.get("page", -1))
+                if p >= 0:
+                    annotations_by_page.setdefault(p, []).append(a)
+        except Exception as e:
+            logger.warning(f"Failed to load annotations from {config.annotations_json}: {e}")
+
+# Load saved FAISS index from Stage 01 if present; else build ephemeral
+# NOTE: Removed misplaced FAISS/negatives block that executed at import time.
+# Annotation FAISS indexing and global negatives are handled inside process_pdf_pipeline.
+
+    # 3) Candidate discovery — suspicious headers and fallbacks (or verify-all)
+    # Preflight happens once we know we have candidates.
+
+    # Identify candidate tasks (suspicious headers, suspicious SectionHeaders, or all SectionHeaders with --verify-all-headers)
+    tasks: List[VerificationTask] = []
+    for p_idx, page_data in enumerate(marker_data.get("pages", [])):
+        page_blocks = page_data.get("blocks", [])
+        for b_idx, block in enumerate(page_blocks):
+            sh_flag = bool(block.get("suspicious_header") is True)
+            # Fallback: treat SectionHeader with is_suspicious True (or header-related reasons) as candidates
+            fallback_header_susp = (
+                (block.get("block_type") == "SectionHeader") and (
+                    bool(block.get("is_suspicious")) or any(
+                        "header" in str(r).lower() for r in (block.get("suspicious_reasons") or [])
+                    )
+                )
+            )
+            verify_all = bool(getattr(config, "verify_all_headers", False)) and (block.get("block_type") == "SectionHeader")
+            if sh_flag or fallback_header_susp or verify_all:
+                tasks.append(VerificationTask(
+                    page_idx=p_idx,
+                    block_idx=b_idx,
+                    page_blocks=page_blocks,
+                    page_obj=pdf_doc[p_idx],
+                    config=config,
+                    image_output_dir=image_output_dir, # Pass image dir to task
+                ))
+
+    # Optional limit for human debugging
+    total_before = len(tasks)
+    if config.task_limit and config.task_limit > 0:
+        tasks = tasks[: config.task_limit]
+        logger.info(f"Limiting suspicious header verifications to first {len(tasks)} of {total_before}")
+
+    if not tasks:
+        print("No suspicious headers found to verify.")
+        # Still save a result file for consistency
+        output_json_path = json_output_dir / "03_verified_blocks.json"
+        marker_data["run_id"] = run_id
+        # Derive counts from diagnostics severities
+        try:
+            _err = sum(1 for _d in (diagnostics or []) if str(_d.get("severity")) == "error")
+            _wrn = sum(1 for _d in (diagnostics or []) if str(_d.get("severity")) == "warning")
+        except Exception:
+            _err, _wrn = errors_count, warnings_count
+        marker_data["errors_count"] = _err
+        marker_data["warnings_count"] = _wrn
+        marker_data["diagnostics"] = diagnostics
+        with open(output_json_path, "w") as f:
+            json.dump(marker_data, f, indent=2)
+        print(f"Saved unmodified data to: {output_json_path}")
+        pdf_doc.close()
+        return
+
+    print(f"Found {len(tasks)} suspicious headers. Starting verification...")
+    try:
+        diagnostics.append(make_event("03_suspicious_headers","info","vision_preflight_ok", f"Model supports vision: {config.llm_model}", {"tasks": len(tasks)}))
+    except Exception:
+        pass
+
+    # 4) Preflight — verify model supports vision using a real candidate clip
+    # (Tiny images can be rejected by providers; we use an actual context image.)
+    try:
+        sample_image_b64 = tasks[0].render_context_image_b64()
+        t_pf0 = time.monotonic()
+        _ = await verify_header_with_llm(sample_image_b64, "Preflight vision capability check.", config.llm_model)
+        preflight_duration_ms = int((time.monotonic()-t_pf0)*1000)
+        try:
+            import os as _os
+            _os.environ["VISION_PREFLIGHT_ASSUME_OK"] = "1"
+        except Exception:
+            pass
+    except Exception as e:
+        pdf_doc.close()
+        raise RuntimeError(f"Selected model does not support vision or call failed: {e}")
+    # Prior decisions disabled: ArangoDB deferred to Step 10+
+    def _normalize_header_text(t: str) -> str:
+        import re
+        s = (t or "").strip().lower()
+        # drop excessive whitespace
+        s = " ".join(s.split())
+        # strip leading numbering like "4.1.2" or "(iv)" or "a)": keep words
+        s = re.sub(r"^(\(?[ivx]+\)|\d+(?:[\.-]\d+)*|[a-z]\)|[a-z]\.)\s+", "", s)
+        return s
+
+    def _font_signature(b: Dict[str, Any]) -> str:
+        fs = b.get("first_span_font") or {}
+        name = str(fs.get("name") or "?")
+        size = fs.get("size"); size = f"{float(size):.1f}" if isinstance(size, (int, float)) else str(size or "?")
+        bold = "b" if fs.get("bold") else "n"
+        italic = "i" if fs.get("italic") else "n"
+        color = str(fs.get("color_bucket") or "?")
+        return f"{name}|{size}|{bold}{italic}|{color}"
+
+        # NOTE: Removed stray ArangoDB persistence block. DB export is deferred to later stages.
+
+    # 5) Prepare prompts — compute cues, optional auto-reject, render image, build context
+    prepared: List[Dict[str, Any]] = []
+    task_refs: List[VerificationTask] = []
+    auto_results: Dict[int, Dict[str, Any]] = {}
+
+    for idx, task in enumerate(tasks):
+        try:
+            target_block, above_block, below_block = task.get_context_blocks()
+            # Optional FAISS advisory cue: similar annotations
+            try:
+                if ann_index is not None:
+                    qtext = (target_block.get('text') or '')[:500]
+                    sims = query_ann_index(ann_index, qtext, top_k=3)
+                    if sims:
+                        diagnostics.append(make_event('03_suspicious_headers','info','ann_similar_support', 'Similar annotations found', {'top_k': len(sims)}))
+            except Exception:
+                pass
+
+            # --- Build human annotations cues (if available) ---
+            human_summary = None
+            auto_reject = False
+            auto_reason = ""
+            if config.use_knowledge and annotations_by_page:
+                anns = annotations_by_page.get(task.page_idx, [])
+                cues: List[Tuple[int, float, str]] = []
+                bb = cast(List[float], target_block.get("bbox") or [0, 0, 0, 0])
+                def _is_relevant_03(a: Dict[str, Any]) -> bool:
+                    try:
+                        return "03" in (a.get("relevant_to") or [])
+                    except Exception:
+                        return False
+                anns_sorted = sorted(anns, key=lambda x: (not _is_relevant_03(x)))
+                any_relevant_negative = False
+                for a in anns_sorted:
+                    rect = cast(List[float], a.get("expanded_rect") or a.get("original_rect") or [])
+                    if not rect:
+                        continue
+                    overlap = _rect_overlap_ratio(bb, rect)
+                    if overlap < 0.05:
+                        continue
+                    pol, st, lbl = _cue_from_annotation(a)
+                    if pol != 0:
+                        weight = st * min(1.0, 0.5 + overlap)
+                        try:
+                            if _is_relevant_03(a):
+                                boost = float((RELEVANT_RULES.get("boost_relevant_weight_for_stage") or {}).get("03", 1.25))
+                                weight = min(1.0, weight * boost)
+                                if pol < 0:
+                                    any_relevant_negative = True
+                        except Exception:
+                            pass
+                        cues.append((pol, weight, lbl))
+                human_summary, _ = _summarize_cues(cues)
+                if config.auto_reject_negatives and cues:
+                    default_th = float((RELEVANT_RULES.get("auto_reject_thresholds") or {}).get("default", 0.85))
+                    crucial_th = float((RELEVANT_RULES.get("auto_reject_thresholds") or {}).get("relevant_03", 0.75))
+                    threshold = crucial_th if any_relevant_negative else default_th
+                    for pol, st, lbl in cues:
+                        if pol < 0 and st >= threshold:
+                            auto_reject = True
+                            auto_reason = f"Auto-reject due to {'RELEVANT ' if any_relevant_negative else ''}negative human cue: {lbl} ({st:.2f})"
+                            break
+
+            # --- Prior decisions retrieval (optional, read-only) ---
+            prior_summary = None
+            if getattr(config, 'use_prior', True):
+                try:
+                    tnorm = _normalize_header_text((target_block.get('text') or ''))
+                    fsig = _font_signature(target_block)
+                    priors = _retrieve_prior_decisions(tnorm, fsig, limit=5)
+                    if priors:
+                        rej = [p for p in priors if p.get('is_header') is False and (p.get('confidence') or 0) >= 0.85]
+                        acc = [p for p in priors if p.get('is_header') is True and (p.get('confidence') or 0) >= 0.85]
+                        lines = []
+                        if rej:
+                            lines.append(f"Prior rejects: {len(rej)} (>=0.85 conf)")
+                        if acc:
+                            lines.append(f"Prior accepts: {len(acc)} (>=0.85 conf)")
+                        prior_summary = "; ".join(lines) or f"Prior matches: {len(priors)}"
+                        # Auto-reject based on strong prior evidence
+                        if config.auto_reject_negatives and len(rej) >= 2:
+                            auto_reject = True
+                            auto_reason = f"Auto-reject due to prior decisions: {len(rej)} strong rejections"
+                except Exception as e:
+                    logger.debug(f"Prior processing failed: {e}")
+
+            combined_human_summary = human_summary
+            if global_negative_examples_summary:
+                combined_human_summary = (human_summary + "\n\n" if human_summary else "") + global_negative_examples_summary
+            if prior_summary:
+                combined_human_summary = (combined_human_summary + "\n\n" if combined_human_summary else "") + f"Prior Decisions: {prior_summary}"
+
+            if auto_reject:
+                auto_results[idx] = {"is_header": False, "reasoning": auto_reason}
+                continue
+
+            # Render context image and build prompt
+            image_b64 = task.render_context_image_b64()
+            context_text = build_llm_context(target_block, above_block, below_block, human_annotations_summary=combined_human_summary)
+            messages = [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": [
+                    {"type": "text", "text": context_text},
+                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_b64}"}},
+                ]},
+            ]
+            prepared.append({
+                "model": config.llm_model,
+                "messages": messages,
+                "response_format": {"type": "json_object"},
+            })
+            task_refs.append(task)
+
+        except Exception as e:
+            logger.exception(f"Preparation failed for page {task.page_idx} block {task.block_idx}: {e}")
+            auto_results[idx] = {"is_header": True, "reasoning": f"Preparation error: {e}"}
+
+    # 6) LLM batch — verify and collect JSON payloads
+    llm_payloads: List[Dict[str, Any]] = []
+    if prepared:
+        try:
+            t_llm0 = time.monotonic()
+            coro = litellm_call(prepared, wrap_json=True, concurrency=config.llm_concurrency, desc="Verifying Headers")
+            if config.max_runtime_seconds and config.max_runtime_seconds > 0:
+                results = await asyncio.wait_for(coro, timeout=config.max_runtime_seconds)
+            else:
+                results = await coro
+            llm_batch_duration_ms = int((time.monotonic()-t_llm0)*1000)
+        except asyncio.TimeoutError as e:
+            logger.error(f"Stage 03 model calls timed out after {config.max_runtime_seconds}s")
+            info = classify_llm_error(e)
+            try:
+                diagnostics.append(make_event("03_suspicious_headers","error", info["code"], info["message"], {"prepared": len(prepared)}))
+                errors_count += 1
+            except Exception:
+                pass
+            results = [json.dumps({"error": {"type": "Timeout", "message": info.get("message")}})] * len(prepared)
+        except Exception as e:
+            logger.error(f"Stage 03 model calls failed: {e}")
+            info = classify_llm_error(e)
+            try:
+                diagnostics.append(make_event("03_suspicious_headers","error", info["code"], info["message"], {"prepared": len(prepared)}))
+                errors_count += 1
+            except Exception:
+                pass
+            results = [json.dumps({"error": {"type": type(e).__name__, "message": info.get("message")}})] * len(prepared)
+
+        for ans in results:
+            try:
+                llm_payloads.append(json.loads(ans) if ans else {})
+            except Exception:
+                llm_payloads.append({"error": {"type": "ParseError", "message": ans[:200]}})
+
+    # 7) Apply results back to blocks — update types, suspicion fields, persist
+    prep_idx = 0
+    for idx, task in enumerate(tasks):
+        # Determine result (auto or from batch)
+        if idx in auto_results:
+            llm_result = auto_results[idx]
+        else:
+            payload = llm_payloads[prep_idx] if prep_idx < len(llm_payloads) else {}
+            prep_idx += 1
+            if payload.get("error"):
+                # Keep header on model error but record reasoning
+                err = payload["error"]
+                llm_result = {"is_header": True, "reasoning": f"LLM error: {err.get('type')}: {err.get('message')}"}
+            else:
+                payload = cast(Dict[str, Any], payload)
+                if payload.get("is_header") is None:
+                    payload["is_header"] = True
+                if payload.get("reasoning") is None:
+                    payload["reasoning"] = ""
+                llm_result = payload
+
+        # Update JSON in place
+        block_to_update = marker_data["pages"][task.page_idx]["blocks"][task.block_idx]
+        is_header = bool(llm_result.get("is_header", True))
+        if not is_header:
+            block_to_update["block_type"] = "Text"
+
+        block_to_update["suspicious_header"] = False
+        block_to_update["llm_verification"] = {
+            "verified_at": datetime.now().isoformat(),
+            "model": config.llm_model,
+            "result": llm_result,
+            "original_block_type": "SectionHeader",
+            "final_block_type": block_to_update["block_type"],
+        }
+
+        # Use a dedicated flag to control writing suspicion fields
+        if config.write_suspicion_fields:
+            if is_header:
+                block_to_update["is_suspicious"] = False
+                block_to_update["suspicious_reasons"] = []
+                block_to_update["suspicion_confidence"] = 0.0
+                block_to_update["requires_review"] = False
+            else:
+                block_to_update["is_suspicious"] = True
+                reasons = block_to_update.get("suspicious_reasons") or []
+                if "llm_verification_reject" not in [str(r) for r in reasons]:
+                    reasons.append("llm_verification_reject")
+                block_to_update["suspicious_reasons"] = reasons
+                # If model returned a confidence field, prefer it; else set a default high suspicion
+                try:
+                    conf = llm_result.get("confidence")
+                    block_to_update["suspicion_confidence"] = float(conf) if isinstance(conf, (int, float)) else 0.9
+                except Exception:
+                    block_to_update["suspicion_confidence"] = 0.9
+                block_to_update["requires_review"] = True
+
+        # Persistence disabled in Stage 03 to keep this step offline and simple.
+        # Export/persistence is handled in later stages.
+    pdf_doc.close()
+
+    # 8) Save the updated JSON — flatten pages to top-level blocks
+    output_json_path = json_output_dir / "03_verified_blocks.json"
+    
+    # Flatten the pages structure back to a simple list of blocks
+    final_blocks = [block for page in marker_data["pages"] for block in page["blocks"]]
+    marker_data["blocks"] = final_blocks
+    del marker_data["pages"]
+
+    marker_data["run_id"] = run_id
+    marker_data["errors_count"] = errors_count
+    marker_data["warnings_count"] = warnings_count
+    marker_data["diagnostics"] = diagnostics
+    stage_end_ts = datetime.now().isoformat()
+    try:
+        if psutil is not None:
+            proc = psutil.Process()
+            resources["proc_rss_mb_end"] = int((proc.memory_info().rss or 0)/(1024*1024))
+            vm = psutil.virtual_memory()
+            resources["vmem_used_mb_end"] = int(getattr(vm, "used", 0)/(1024*1024))
+    except Exception:
+        pass
+    timings = {
+        "stage_start_ts": stage_start_ts,
+        "stage_end_ts": stage_end_ts,
+        "stage_duration_ms": int((time.monotonic()-t_stage0)*1000),
+        "preflight_duration_ms": int(locals().get("preflight_duration_ms", 0)),
+        "llm_batch_duration_ms": int(locals().get("llm_batch_duration_ms", 0)),
+    }
+    try:
+        samples = stop_resource_sampler(sampler) if sampler else []
+        if samples:
+            resources.setdefault("resource_samples", samples)
+    except Exception:
+        pass
+    marker_data["timings"] = timings
+    marker_data["resources"] = resources
+    with open(output_json_path, "w") as f:
+        json.dump(marker_data, f, indent=2)
+    
+    print(f"\nVerification complete. Updated JSON saved to: {output_json_path}")
+
+
+# ------------------------------------------------------------------
+# COMMAND-LINE INTERFACE
+# ------------------------------------------------------------------
+@app.command()
+    def run(
+    input_json: Annotated[Path, typer.Argument(..., help="Path to the Marker JSON output from Stage 02.")],
+    pdf_dir: Annotated[Path, typer.Option("--pdf-dir", help="Directory containing the source and clean PDFs from Stage 01.")] = Path("data/results/pipeline/01_annotation_processor"),
+    output_dir: Annotated[Path, typer.Option("-o", help="Parent directory for pipeline results.")] = Path("data/results/pipeline"),
+    model: Annotated[Optional[str], typer.Option("--model", help="Name of the vision-capable LLM to use.")] = None,
+    concurrency: Annotated[int, typer.Option("-c", help="Number of concurrent API calls.")] = 5,
+    dpi: Annotated[int, typer.Option("--dpi", help="Rendering resolution for context images.")] = 200,
+    debug: Annotated[bool, typer.Option("--debug", help="Enable verbose logging to a stage log file.")] = False,
+    limit: Annotated[int, typer.Option("--limit", help="Limit number of suspicious headers to verify (0 = all).")] = 0,
+    timeout: Annotated[int, typer.Option("--timeout", help="Overall stage timeout in seconds (0 = no limit).")] = 0,
+    annotations_json: Annotated[Optional[Path], typer.Option("--annotations", help="Optional: Path to Stage 01 annotations JSON")]=None,
+    use_knowledge: Annotated[bool, typer.Option("--use-knowledge/--no-knowledge", help="Use on-page annotations for cues")] = True,
+    use_prior: Annotated[bool, typer.Option("--use-prior/--no-prior", help="Use prior decisions from ArangoDB for cues (retrieval-only)")] = True,
+    auto_reject: Annotated[bool, typer.Option("--auto-reject/--no-auto-reject", help="Auto-reject when cues strongly disagree with header")] = True,
+    persist_headers: Annotated[bool, typer.Option("--persist-headers/--no-persist-headers", help="Persist decisions to ArangoDB (off by default)")] = False,
+    verify_all_headers: Annotated[bool, typer.Option("--verify-all-headers/--only-suspicious", help="Verify all SectionHeader blocks, not only suspicious ones")] = False,
+):
+    """
+    Finds and verifies suspicious section headers in a Marker JSON file using a multimodal LLM.
+    """
+    # Derive the clean PDF path from the pdf_dir
+    # Assumes a naming convention like '..._clean.pdf'
+    try:
+        candidates = sorted(pdf_dir.glob("*_clean.pdf"))
+        clean_pdf_path = candidates[0]
+    except (StopIteration, IndexError):
+        raise typer.BadParameter(f"No '*_clean.pdf' found in --pdf-dir: {pdf_dir}")
+
+    if not input_json.exists():
+        raise typer.BadParameter(f"Input JSON not found: {input_json}")
+
+    # Define clear output paths for this stage
+    stage_output_dir = output_dir / "03_suspicious_headers"
+    json_output_dir = stage_output_dir / "json_output"
+    image_output_dir = stage_output_dir / "image_output"
+    stage_output_dir.mkdir(parents=True, exist_ok=True)
+    json_output_dir.mkdir(exist_ok=True)
+    image_output_dir.mkdir(exist_ok=True)
+
+    # Configure logging sink per stage run
+    try:
+        from loguru import logger as _lg
+        _lg.remove()
+        _lg.add(
+            str(stage_output_dir / "stage_03_suspicious_headers.log"),
+            level="DEBUG" if debug else "INFO",
+            enqueue=True,
+            backtrace=True,
+            diagnose=False,
+            rotation="1 week",
+            retention="14 days",
+        )
+    except Exception:
+        pass
+
+    # Enforce design: defer ArangoDB until after Step 09
+    if persist_headers:
+        try:
+            logger.warning("Ignoring --persist-headers: ArangoDB persistence is deferred until after Step 09 (export stages handle DB).")
+        except Exception:
+            pass
+        persist_headers = False
+
+    cfg = Config(
+        input_pdf=clean_pdf_path,
+        input_json=input_json,
+        output_dir=stage_output_dir, # Pass the specific stage directory
+        llm_model=model or _env_vlm_model(),
+        llm_concurrency=concurrency,
+        render_dpi=dpi,
+        debug=debug,
+        task_limit=limit,
+        max_runtime_seconds=timeout,
+        annotations_json=annotations_json,
+        use_knowledge=use_knowledge,
+        use_prior=use_prior,
+        auto_reject_negatives=auto_reject,
+        persist_headers=persist_headers,
+        verify_all_headers=verify_all_headers,
+    )
+    asyncio.run(process_pdf_pipeline(cfg))
+
+
+def debug_test():
+    """Debug function to test with simulated suspicious headers."""
+    import shutil
+    
+    # Load the stage 2 output
+    input_json = Path("stage_02_results.json")
+    if not input_json.exists():
+        print("Error: stage_02_results.json not found. Run 02_marker_extractor.py first.")
+        return
+    
+    with open(input_json, 'r') as f:
+        data = json.load(f)
+    
+    # Create a test version with suspicious headers
+    # Mark the bullet point items as suspicious headers (they shouldn't be headers)
+    test_blocks = []
+    for block in data['blocks']:
+        block_copy = block.copy()
+        
+        # Mark ListItems as suspicious SectionHeaders for testing
+        if block['block_type'] == 'ListItem':
+            block_copy['block_type'] = 'SectionHeader'  # Misclassify as header
+            block_copy['is_suspicious'] = True
+            block_copy['suspicious_reasons'] = ['bullet_point_misclassified']
+            block_copy['suspicion_confidence'] = 0.9
+            print(f"Marked as suspicious: {block['text'][:50]}...")
+        
+        test_blocks.append(block_copy)
+    
+    # Convert to the format expected by this script (pages structure)
+    pages_data = {}
+    for block in test_blocks:
+        page_idx = block.get('page_idx', 0)
+        if page_idx not in pages_data:
+            pages_data[page_idx] = []
+        
+        # Convert to expected format with suspicious_header field
+        formatted_block = {
+            'block_type': block['block_type'],
+            'bbox': block['bbox'],
+            'text': block['text'],
+            'suspicious_header': block.get('is_suspicious', False),
+            # Add minimal lines/spans structure for the script
+            'lines': [{
+                'spans': [{
+                    'text': block['text'],
+                    'font_style': {
+                        'font_name': 'Unknown',
+                        'font_size': 'N/A'
+                    }
+                }]
+            }]
+        }
+        pages_data[page_idx].append(formatted_block)
+    
+    # Create the expected structure
+    marker_format = {
+        'pages': [
+            {'blocks': blocks} for _, blocks in sorted(pages_data.items())
+        ]
+    }
+
+@app.command("debug-bundle")
+    def debug_bundle(
+    bundle: Path = typer.Argument(..., exists=True, file_okay=True, dir_okay=False, readable=True, help="Bundle with keys: marker_blocks (Stage 02 output object), clean_pdf (path)"),
+    output_dir: Path = typer.Option("data/results/pipeline", "-o", help="Parent directory for pipeline results."),
+    model: Optional[str] = typer.Option(None, "--model", help="LLM model to use (defaults to env)"),
+    concurrency: int = typer.Option(5, "-c", help="Concurrent LLM calls"),
+    dpi: int = typer.Option(200, "--dpi", help="Rendering DPI for context images"),
+    debug: bool = typer.Option(False, "--debug", help="Verbose logging"),
+    limit: int = typer.Option(0, "--limit", help="Limit suspicious headers to verify (0=all)"),
+    timeout: int = typer.Option(0, "--timeout", help="Overall timeout (0=no limit)"),
+):
+    """Run Stage 03 with a consolidated bundle.
+
+    Bundle keys:
+    - marker_blocks: object shaped like Stage 02 JSON (accepted by this step)
+    - clean_pdf: absolute path to the *_clean.pdf from Stage 01
+    """
+    stage_output_dir = output_dir / "03_suspicious_headers"
+    json_output_dir = stage_output_dir / "json_output"
+    image_output_dir = stage_output_dir / "image_output"
+    stage_output_dir.mkdir(parents=True, exist_ok=True)
+    json_output_dir.mkdir(exist_ok=True)
+    image_output_dir.mkdir(exist_ok=True)
+
+    try:
+        data = json.loads(bundle.read_text())
+    except Exception as e:
+        typer.secho(f"Failed to read bundle: {e}", fg=typer.colors.RED); raise typer.Exit(1)
+
+    marker_blocks = data.get('marker_blocks')
+    clean_pdf = data.get('clean_pdf')
+    if not marker_blocks or not clean_pdf:
+        typer.secho("Bundle must include 'marker_blocks' and 'clean_pdf'", fg=typer.colors.RED); raise typer.Exit(1)
+
+    tmp_json = stage_output_dir / "_bundle_marker_blocks.json"
+    tmp_json.write_text(json.dumps(marker_blocks))
+
+    cfg = Config(
+        input_pdf=Path(clean_pdf),
+        input_json=tmp_json,
+        output_dir=stage_output_dir,
+        render_dpi=dpi,
+        llm_model=model or _env_vlm_model(),
+        llm_concurrency=concurrency,
+        debug=debug,
+        task_limit=limit,
+        max_runtime_seconds=timeout,
+    )
+    asyncio.run(process_pdf_pipeline(cfg))
+    print("Debug bundle: verification complete for suspicious headers")
+
+
+if __name__ == "__main__":
+    import sys
+    if len(sys.argv) > 1 and sys.argv[1] == "debug":
+        debug_test()
+    else:
+        app()

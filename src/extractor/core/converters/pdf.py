@@ -40,7 +40,7 @@ from extractor.core.builders.ocr import OcrBuilder
 from extractor.core.builders.structure import StructureBuilder
 from extractor.core.converters import BaseConverter
 from extractor.core.processors.blockquote import BlockquoteProcessor
-from extractor.core.processors.code import CodeProcessor
+from extractor.core.processors.code_processor import CodeProcessor
 from extractor.core.processors.debug import DebugProcessor
 from extractor.core.processors.document_toc import DocumentTOCProcessor
 from extractor.core.processors.equation import EquationProcessor
@@ -52,10 +52,12 @@ from extractor.core.processors.llm.llm_complex import LLMComplexRegionProcessor
 from extractor.core.processors.llm.llm_form import LLMFormProcessor
 from extractor.core.processors.llm.llm_image_description import LLMImageDescriptionProcessor
 from extractor.core.processors.llm.llm_table import LLMTableProcessor
+from extractor.core.processors.llm.llm_table_merge import LLMTableMergeProcessor
 from extractor.core.processors.llm.llm_inlinemath import LLMInlineMathLinesProcessor
 from extractor.core.processors.page_header import PageHeaderProcessor
 from extractor.core.processors.reference import ReferenceProcessor
 from extractor.core.processors.sectionheader import SectionHeaderProcessor
+from extractor.core.processors.font_header import FontHeaderProcessor
 from extractor.core.processors.table import TableProcessor
 from extractor.core.processors.text import TextProcessor
 from extractor.core.processors.llm.llm_equation import LLMEquationProcessor
@@ -66,14 +68,17 @@ from extractor.core.schema.registry import register_block_class
 from extractor.core.util import strings_to_classes
 from extractor.core.processors.llm.llm_handwriting import LLMHandwritingProcessor
 from extractor.core.processors.order import OrderProcessor
+# MARKER FORK ADDITION START - LiteLLM service
 from extractor.core.services.litellm import LiteLLMService
+# MARKER FORK ADDITION END
 from extractor.core.processors.line_merge import LineMergeProcessor
 from extractor.core.processors.llm.llm_mathblock import LLMMathBlockProcessor
-try:
-    from extractor.core.processors.enhanced_camelot import EnhancedTableProcessor
-    ENHANCED_CAMELOT_AVAILABLE = True
-except ImportError:
-    ENHANCED_CAMELOT_AVAILABLE = False
+
+
+# Extractor-Specific Imports (Fork)
+from extractor.core.processors.suspicious_header_fixer import SuspiciousHeaderFixer
+from extractor.core.processors.block_relabel import BlockRelabelProcessor
+
 
 
 class PdfConverter(BaseConverter):
@@ -93,6 +98,7 @@ class PdfConverter(BaseConverter):
     ] = False
     default_processors: Tuple[BaseProcessor, ...] = (
         OrderProcessor,
+        BlockRelabelProcessor,
         LineMergeProcessor,
         BlockquoteProcessor,
         CodeProcessor,
@@ -104,24 +110,28 @@ class PdfConverter(BaseConverter):
         ListProcessor,
         PageHeaderProcessor,
         SectionHeaderProcessor,
-        # Use EnhancedTableProcessor if available, otherwise fallback to TableProcessor
-        *(
-            [EnhancedTableProcessor] 
-            if ENHANCED_CAMELOT_AVAILABLE 
-            else [TableProcessor]
-        ),
+        FontHeaderProcessor,  # Font-based header detection after initial SectionHeaderProcessor
+        # Table extraction happens in later pipeline stages (05_table_extractor.py)
+        TableProcessor,
+        TextProcessor,
+        # FontCaptureProcessor deprecated: font metadata is gathered directly
+        # via provider spans or PyMuPDF in downstream processors.
+        ReferenceProcessor,
+        SuspiciousHeaderFixer,    # ← fix mis-classifications
+        DebugProcessor,
+    )
+    
+    # LLM processors to be added conditionally when use_llm=True
+    llm_processors: Tuple[BaseProcessor, ...] = (
         LLMTableProcessor,
         LLMTableMergeProcessor,
         LLMFormProcessor,
-        TextProcessor,
         LLMInlineMathLinesProcessor,
         LLMComplexRegionProcessor,
         LLMImageDescriptionProcessor,
         LLMEquationProcessor,
         LLMHandwritingProcessor,
         LLMMathBlockProcessor,
-        ReferenceProcessor,
-        DebugProcessor,
     )
 
     def __init__(
@@ -141,10 +151,19 @@ class PdfConverter(BaseConverter):
             register_block_class(block_type, override_block_type)
 
         if processor_list:
-            if isinstance(processor_list, str) and processor_list.startswith("default+"):
-                # Use default processors and append the additional ones
-                additional_processor = processor_list.replace("default+", "")
-                processor_list = list(self.default_processors) + strings_to_classes([additional_processor])
+            if isinstance(processor_list, str):
+                if processor_list == "default":
+                    # Just use default processors
+                    processor_list = self.default_processors
+                elif processor_list.startswith("default+"):
+                    # Use default processors and append the additional ones
+                    additional_processors_str = processor_list.replace("default+", "")
+                    # Support comma-separated list of additional processors
+                    additional_processors = [p.strip() for p in additional_processors_str.split(",") if p.strip()]
+                    processor_list = list(self.default_processors) + strings_to_classes(additional_processors)
+                else:
+                    # Assume it's a comma-separated list of processor classes
+                    processor_list = strings_to_classes(processor_list if isinstance(processor_list, list) else [processor_list])
             else:
                 processor_list = strings_to_classes(processor_list)
         else:
@@ -159,7 +178,9 @@ class PdfConverter(BaseConverter):
             llm_service_cls = strings_to_classes([llm_service])[0]
             llm_service = self.resolve_dependencies(llm_service_cls)
         elif config.get("use_llm", False):
+            # MARKER FORK ADDITION START - Use LiteLLM as default LLM service
             llm_service = self.resolve_dependencies(LiteLLMService)
+            # MARKER FORK ADDITION END
 
         # Inject llm service into artifact_dict so it can be picked up by processors, etc.
         artifact_dict["llm_service"] = llm_service
@@ -167,6 +188,15 @@ class PdfConverter(BaseConverter):
 
         self.artifact_dict = artifact_dict
         self.renderer = renderer
+
+        # Ensure processor_list is a list of classes, not strings
+        if isinstance(processor_list, tuple):
+            processor_list = list(processor_list)
+            
+        # Add LLM processors if use_llm is enabled
+        if self.use_llm and processor_list == list(self.default_processors):
+            # Only add LLM processors if we're using default processors
+            processor_list = list(processor_list) + list(self.llm_processors)
 
         processor_list = self.initialize_processors(processor_list)
         self.processor_list = processor_list
@@ -215,7 +245,13 @@ def convert_single_pdf(pdf_path: str, **kwargs) -> str:
         from extractor.core.models import create_model_dict
         
         # Create model dictionary
-        models = create_model_dict()
+        # Check environment variable to force CPU usage
+        device = None
+        if os.getenv("FORCE_CPU", "").lower() == "true":
+            device = "cpu"
+            print("📱 Forcing CPU usage for Marker models (FORCE_CPU=true)")
+        
+        models = create_model_dict(device=device)
         
         # Try to use ConfigParser if available
         try:
@@ -270,91 +306,10 @@ def convert_single_pdf(pdf_path: str, **kwargs) -> str:
         return markdown_output
         
     except Exception as e:
-        # Fall back to PyMuPDF extraction for now
-        print(f"⚠️  Surya conversion failed: {e}")
-        print("   Falling back to PyMuPDF extraction...")
-        
-        try:
-            import fitz  # PyMuPDF
-            from pathlib import Path
-            
-            doc = fitz.open(pdf_path)
-            pdf_name = Path(pdf_path).stem
-            markdown_parts = [f"# {pdf_name}\n"]
-            
-            max_pages = kwargs.get("max_pages")
-            pages_to_process = min(len(doc), max_pages) if max_pages else len(doc)
-            
-            for page_num in range(pages_to_process):
-                page = doc[page_num]
-                text = page.get_text()
-                
-                if text.strip():
-                    # Add page header
-                    markdown_parts.append(f"\n## Page {page_num + 1}\n")
-                    
-                    # Process text into paragraphs
-                    lines = text.split('\n')
-                    current_para = []
-                    
-                    for line in lines:
-                        line = line.strip()
-                        if line:
-                            current_para.append(line)
-                        elif current_para:
-                            # End of paragraph
-                            paragraph = ' '.join(current_para)
-                            markdown_parts.append(paragraph + '\n')
-                            current_para = []
-                    
-                    # Add last paragraph
-                    if current_para:
-                        paragraph = ' '.join(current_para)
-                        markdown_parts.append(paragraph + '\n')
-            
-            doc.close()
-            
-            result = '\n'.join(markdown_parts)
-            
-            # Ensure we have substantial content
-            if len(result) < 500:
-                return f"""# {pdf_name}
-
-⚠️  Warning: Very little text extracted ({len(result)} chars)
-
-This PDF might be:
-- A scanned document requiring OCR
-- An image-based PDF
-- A corrupted file
-
-Full Surya-based extraction is needed for better results.
-"""
-            
-            return result
-            
-        except ImportError:
-            return f"""# Error: PyMuPDF Not Installed
-
-To extract PDF content, please install PyMuPDF:
-```bash
-uv add pymupdf
-```
-
-Then re-run the extraction.
-"""
-        except Exception as fallback_error:
-            from pathlib import Path
-            pdf_name = Path(pdf_path).stem
-            return f"""# Error Converting {pdf_name}
-
-Primary error (Surya): {str(e)}
-Fallback error (PyMuPDF): {str(fallback_error)}
-
-Please ensure:
-1. The PDF file exists and is readable
-2. Required dependencies are installed
-3. Sufficient system resources are available
-"""
+        # FAIL FAST - NO FALLBACK TO PYMUPDF EVER!
+        print(f"❌ FATAL: Surya conversion failed: {e}")
+        print("❌ FAILING FAST AS REQUIRED - NO FALLBACK")
+        raise Exception(f"PDF conversion failed: {str(e)}. NO FALLBACK TO PYMUPDF.")
 
 
 if __name__ == "__main__":

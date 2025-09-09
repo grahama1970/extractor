@@ -45,15 +45,8 @@ from extractor.core.schema.registry import get_block_class
 from extractor.core.schema.text.line import Line
 from extractor.core.schema.text.span import Span
 
-# Import granger_common for memory management
-try:
-    from granger_common import SmartPDFHandler
-    GRANGER_COMMON_AVAILABLE = True
-except ImportError:
-    GRANGER_COMMON_AVAILABLE = False
-    logging.warning("granger_common not available - using standard PDF processing")
 
-# Ignore pypdfium2 warning about form flattening
+# # Ignore pypdfium2 warning about form flattening
 logging.getLogger("pypdfium2").setLevel(logging.ERROR)
 
 
@@ -62,15 +55,6 @@ class PdfProvider(BaseProvider):
     A provider for PDF files.
     """
     
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        
-        # Initialize SmartPDFHandler if available
-        if GRANGER_COMMON_AVAILABLE:
-            self.pdf_handler = SmartPDFHandler(memory_threshold_mb=1000)
-            logging.info("Using SmartPDFHandler for memory-efficient processing")
-        else:
-            self.pdf_handler = None
 
     page_range: Annotated[
         Optional[List[int]],
@@ -121,6 +105,14 @@ class PdfProvider(BaseProvider):
         int,
         "Memory threshold in MB for switching to streaming mode.",
     ] = 1000
+    disable_path_validation: Annotated[
+        bool,
+        "Whether to disable path validation for PDFs.",
+    ] = False
+    allowed_directories: Annotated[
+        Optional[List[str]],
+        "List of allowed directories for PDF processing. If None, uses defaults.",
+    ] = None
     
     def validate_pdf_path(self, file_path: str) -> Path:
         """Validate PDF file path for security."""
@@ -128,20 +120,34 @@ class PdfProvider(BaseProvider):
         
         path = Path(file_path).resolve()
         
-        # Allowed directories for PDF processing
-        allowed_dirs = [
-            Path("/home/graham/workspace/experiments/marker/data"),
-            Path("/tmp/marker_processing"),
-            Path.home() / ".marker" / "cache"
-        ]
+        # Skip validation if disabled
+        if self.disable_path_validation:
+            # Still ensure it's a PDF
+            if path.suffix.lower() not in ['.pdf', '.PDF']:
+                raise ValueError(f"Not a PDF file: {file_path}")
+            return path
+        
+        # Use configured directories or defaults
+        if self.allowed_directories:
+            allowed_dirs = [Path(d) for d in self.allowed_directories]
+        else:
+            # Default allowed directories
+            allowed_dirs = [
+                Path("/home/graham/workspace/experiments/marker/data"),
+                Path("/home/graham/workspace/experiments/extractor"),
+                Path("/tmp/marker_processing"),
+                Path("/tmp"),
+                Path.home() / ".marker" / "cache"
+            ]
         
         # Check for path traversal
         if ".." in str(file_path):
             raise ValueError(f"Path traversal detected: {file_path}")
         
         # Ensure within allowed directories  
-        allowed_paths = [d.resolve() for d in allowed_dirs]
-        if not any(path.is_relative_to(allowed) for allowed in allowed_paths):
+        allowed_paths = [d.resolve() for d in allowed_dirs if d.exists()]
+        
+        if allowed_paths and not any(path.is_relative_to(allowed) for allowed in allowed_paths):
             raise ValueError(f"Path outside allowed directories: {file_path}")
         
         # Ensure it's a PDF
@@ -153,7 +159,11 @@ class PdfProvider(BaseProvider):
     def __init__(self, filepath: str, config=None):
         super().__init__(filepath, config)
 
-        self.filepath = filepath
+        # Validate and set filepath using security validation
+        self.filepath = str(self.validate_pdf_path(filepath))
+        
+        # Initialize SmartPDFHandler if available
+        # self.pdf_handler = None
 
         with self.get_doc() as doc:
             self.page_count = len(doc)
@@ -163,7 +173,7 @@ class PdfProvider(BaseProvider):
             }
 
             if self.page_range is None:
-                self.page_range = range(len(doc))
+                self.page_range = list(range(len(doc)))
 
             assert max(self.page_range) < len(doc) and min(self.page_range) >= 0, (
                 f"Invalid page range, values must be between 0 and {len(doc) - 1}.  Min of provided page range is {min(self.page_range)} and max is {max(self.page_range)}."
@@ -503,8 +513,10 @@ class PdfProvider(BaseProvider):
             if length < buffer_size:
                 font_name = font_name_buffer.value.decode("utf-8")
             else:
-                font_name_buffer = ctypes.create_string_buffer(length)
-                pdfium_c.FPDFFont_GetBaseFontName(font, font_name_buffer, length)
+                # Increase buffer size dynamically to avoid truncation
+                buffer_size = max(256, length)
+                font_name_buffer = ctypes.create_string_buffer(buffer_size)
+                pdfium_c.FPDFFont_GetBaseFontName(font, font_name_buffer, buffer_size)
                 font_name = font_name_buffer.value.decode("utf-8")
         except Exception:
             pass

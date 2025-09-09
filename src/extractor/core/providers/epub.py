@@ -1,131 +1,388 @@
 """
 Module: epub.py
+Purpose: Native EPUB extraction without PDF conversion
 
 External Dependencies:
-- base64: [Documentation URL]
-- tempfile: [Documentation URL]
-- bs4: [Documentation URL]
-- marker: [Documentation URL]
-- weasyprint: [Documentation URL]
-- ebooklib: [Documentation URL]
+- ebooklib: https://pypi.org/project/ebooklib/
 
-Sample Input:
->>> # Add specific examples based on module functionality
-
-Expected Output:
->>> # Add expected output examples
-
-Example Usage:
->>> # Add usage examples
+Example usage
+-------------
+>>> from extractor.core.providers.epub import EPUBProvider
+>>> doc = NativeEPUBProvider().extract_document("book.epub")
+>>> print(doc.source_type)   # SourceType.EPUB
+>>> print(len(doc.blocks))   # number of extracted blocks
 """
 
+import hashlib
 import base64
-import os
-import tempfile
+import re
+from pathlib import Path
+from typing import List, Dict, Any, Optional, Union
 
-from bs4 import BeautifulSoup
+from ebooklib import epub
+from bs4 import BeautifulSoup, Tag, NavigableString, Comment
+from loguru import logger
 
-from extractor.core.providers.pdf import PdfProvider
-
-css = '''
-@page {
-    size: A4;
-    margin: 2cm;
-}
-
-img {
-    max-width: 100%;
-    max-height: 25cm;
-    object-fit: contain;
-    margin: 12pt auto;
-}
-
-div, p {
-    max-width: 100%;
-    word-break: break-word;
-    font-size: 10pt;
-}
-
-table {
-    width: 100%;
-    border-collapse: collapse;
-    break-inside: auto;
-    font-size: 10pt;
-}
-
-tr {
-    break-inside: avoid;
-    page-break-inside: avoid;
-}
-
-td {
-    border: 0.75pt solid #000;
-    padding: 6pt;
-}
-'''
+from extractor.core.schema.unified_document import (
+    UnifiedDocument, BlockType, SourceType, BaseBlock, TableBlock,
+    ImageBlock, BlockMetadata, DocumentMetadata, HierarchyNode, TableCell
+)
 
 
-class EpubProvider(PdfProvider):
-    def __init__(self, filepath: str, config=None):
-        temp_pdf = tempfile.NamedTemporaryFile(delete=False, suffix=f".pdf")
-        self.temp_pdf_path = temp_pdf.name
-        temp_pdf.close()
+class EPUBProvider:
+    """Direct EPUB extraction without PDF conversion."""
 
-        # Convert Epub to PDF
-        try:
-            self.convert_epub_to_pdf(filepath)
-        except Exception as e:
-            raise RuntimeError(f"Failed to convert {filepath} to PDF: {e}")
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
+        self.config = config or {}
+        self.block_counter = 0
 
-        # Initialize the PDF provider with the temp pdf path
-        super().__init__(self.temp_pdf_path, config)
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+    def extract_document(self, filepath: Union[str, Path]) -> UnifiedDocument:
+        filepath = Path(filepath)
+        logger.info(f"Extracting EPUB document: {filepath}")
 
-    def __del__(self):
-        if os.path.exists(self.temp_pdf_path):
-            os.remove(self.temp_pdf_path)
+        book = epub.read_epub(str(filepath))
 
-    def convert_epub_to_pdf(self, filepath):
-        from weasyprint import CSS, HTML
-        from ebooklib import epub
-        import ebooklib
+        # Gather all textual spine items (in reading order)
+        items = [book.get_item_with_id(i[0]) for i in book.spine]
+        items = [i for i in items if i and i.media_type == "application/xhtml+xml"]
 
-        ebook = epub.read_epub(filepath)
+        # 1. Metadata
+        metadata = self._extract_metadata(book, filepath)
 
-        styles = []
-        html_content = ""
-        img_tags = {}
+        # 2. Blocks
+        blocks: List[BaseBlock] = []
+        for item in items:
+            self._parse_xhtml(item, blocks)
 
-        for item in ebook.get_items():
-            if item.get_type() == ebooklib.ITEM_IMAGE:
-                img_data = base64.b64encode(item.get_content()).decode("utf-8")
-                img_tags[item.file_name] = f'data:{item.media_type};base64,{img_data}'
-            elif item.get_type() == ebooklib.ITEM_STYLE:
-                styles.append(item.get_content().decode('utf-8'))
+        # 3. Images referenced in manifest (embedded)
+        image_blocks = self._extract_images(book)
+        blocks.extend(image_blocks)
 
-        for item in ebook.get_items():
-            if item.get_type() == ebooklib.ITEM_DOCUMENT:
-                html_content += item.get_content().decode("utf-8")
+        # 4. TOC-based hierarchy with null check
+        hierarchy = self._build_toc_hierarchy(book.toc, blocks) if book.toc else None
 
-        soup = BeautifulSoup(html_content, 'html.parser')
-        for img in soup.find_all('img'):
-            src = img.get('src')
-            if src:
-                normalized_src = src.replace('../', '')
-                if normalized_src in img_tags:
-                    img['src'] = img_tags[normalized_src]
-
-        for image in soup.find_all('image'):
-            src = image.get('xlink:href')
-            if src:
-                normalized_src = src.replace('../', '')
-                if normalized_src in img_tags:
-                    image['xlink:href'] = img_tags[normalized_src]
-
-        html_content = str(soup)
-        full_style = ''.join([css])  # + styles)
-
-        # we convert the epub to HTML
-        HTML(string=html_content, base_url=filepath).write_pdf(
-            self.temp_pdf_path,
-            stylesheets=[CSS(string=full_style), self.get_font_css()]
+        doc = UnifiedDocument(
+            id=self._generate_doc_id(filepath),
+            source_type=SourceType.EPUB,
+            source_path=str(filepath),
+            blocks=blocks,
+            hierarchy=hierarchy,
+            metadata=metadata,
+            full_text=self._extract_full_text(blocks),
+            keywords=self._extract_keywords(book),
         )
+
+        logger.info(f"Extracted {len(blocks)} blocks from EPUB")
+        return doc
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+    def _generate_doc_id(self, filepath: Path) -> str:
+        return hashlib.md5(str(filepath).encode()).hexdigest()
+
+    def _generate_block_id(self) -> str:
+        self.block_counter += 1
+        return f"epub-block-{self.block_counter}"
+
+    def _extract_metadata(self, book: epub.EpubBook, filepath: Path) -> DocumentMetadata:
+        meta = DocumentMetadata()
+
+        meta.title = book.get_metadata("DC", "title")[0][0] if book.get_metadata("DC", "title") else ""
+        meta.author = "; ".join([a[0] for a in book.get_metadata("DC", "creator")])
+        meta.language = book.get_metadata("DC", "language")[0][0] if book.get_metadata("DC", "language") else ""
+
+        # Store raw metadata dict for downstream use
+        meta.format_metadata = {
+            "file_type": "epub",
+            "identifier": book.get_metadata("DC", "identifier"),
+            "publisher": book.get_metadata("DC", "publisher"),
+            "description": book.get_metadata("DC", "description"),
+            "file_size": filepath.stat().st_size,
+        }
+        return meta
+
+    # ------------------------------------------------------------------
+    # XHTML parsing
+    # ------------------------------------------------------------------
+    def _parse_xhtml(self, item: epub.EpubItem, blocks: List[BaseBlock]) -> None:
+        soup = BeautifulSoup(item.get_content(), "lxml")
+
+        # Remove script/style
+        for tag in soup(["script", "style", "noscript"]):
+            tag.decompose()
+
+        # Walk the DOM
+        self._walk_soup(soup.body or soup, blocks, parent_id=None)
+
+    def _walk_soup(
+        self,
+        node: Union[Tag, NavigableString],
+        blocks: List[BaseBlock],
+        parent_id: Optional[str],
+    ) -> None:
+        if isinstance(node, Comment):
+            return
+        if isinstance(node, NavigableString):
+            text = str(node).strip()
+            if text:
+                blocks.append(
+                    BaseBlock(
+                        id=self._generate_block_id(),
+                        type=BlockType.PARAGRAPH,
+                        content=text,
+                        parent_id=parent_id,
+                        metadata=BlockMetadata(attributes={"context": "nav-string"}, confidence=0.9),
+                    )
+                )
+            return
+
+        tag = node.name.lower()
+
+        # Headings
+        if tag in {"h1", "h2", "h3", "h4", "h5", "h6"}:
+            level = int(tag[1])
+            text = node.get_text(" ", strip=True)
+            if text:
+                block = BaseBlock(
+                    id=self._generate_block_id(),
+                    type=BlockType.HEADING,
+                    content=text,
+                    parent_id=parent_id,
+                    metadata=BlockMetadata(
+                        attributes={"level": level, "tag": tag}, confidence=1.0
+                    ),
+                )
+                blocks.append(block)
+                parent_id = block.id  # children nest under heading
+
+        # Paragraphs
+        elif tag == "p":
+            text = node.get_text(" ", strip=True)
+            if text:
+                blocks.append(
+                    BaseBlock(
+                        id=self._generate_block_id(),
+                        type=BlockType.PARAGRAPH,
+                        content=text,
+                        parent_id=parent_id,
+                        metadata=BlockMetadata(attributes={"tag": "p"}, confidence=1.0),
+                    )
+                )
+
+        # Lists
+        elif tag in {"ul", "ol"}:
+            list_block = BaseBlock(
+                id=self._generate_block_id(),
+                type=BlockType.LIST,
+                content={"ordered": tag == "ol"},
+                parent_id=parent_id,
+                metadata=BlockMetadata(attributes={"tag": tag}, confidence=1.0),
+            )
+            blocks.append(list_block)
+            for idx, li in enumerate(node.find_all("li", recursive=False)):
+                li_text = li.get_text(" ", strip=True)
+                if li_text:
+                    blocks.append(
+                        BaseBlock(
+                            id=self._generate_block_id(),
+                            type=BlockType.LISTITEM,
+                            content=li_text,
+                            parent_id=list_block.id,
+                            metadata=BlockMetadata(
+                                {"index": idx, "ordered": tag == "ol"}, confidence=1.0
+                            ),
+                        )
+                    )
+
+        # Tables
+        elif tag == "table":
+            table_block = self._parse_table(node, parent_id)
+            if table_block:
+                blocks.append(table_block)
+
+        # Images
+        elif tag == "img":
+            src = node.get("src", "")
+            if src:
+                blocks.append(
+                    ImageBlock(
+                        id=self._generate_block_id(),
+                        type=BlockType.IMAGE,
+                        content="",
+                        src=src,
+                        alt=node.get("alt", ""),
+                        metadata=BlockMetadata(attributes={"tag": "img"}, confidence=1.0),
+                    )
+                )
+
+        # Code (pre or code)
+        elif tag in {"pre", "code"}:
+            lang = node.get("class", [""])[0] if isinstance(node.get("class"), list) else ""
+            lang = lang.replace("language-", "") if lang.startswith("language-") else None
+            text = node.get_text()
+            blocks.append(
+                BaseBlock(
+                    id=self._generate_block_id(),
+                    type=BlockType.CODE,
+                    content=text,
+                    parent_id=parent_id,
+                    metadata=BlockMetadata(language=lang, attributes={"tag": tag}, confidence=1.0),
+                )
+            )
+
+        # Recurse into children
+        for child in node.children:
+            self._walk_soup(child, blocks, parent_id)
+
+    def _parse_table(self, table: Tag, parent_id: Optional[str]) -> Optional[TableBlock]:
+        rows = table.find_all("tr")
+        if not rows:
+            return None
+
+        cells = []
+        headers = []
+        for r_idx, tr in enumerate(rows):
+            cols = tr.find_all(["td", "th"])
+            for c_idx, cell in enumerate(cols):
+                rowspan = int(cell.get("rowspan", 1))
+                colspan = int(cell.get("colspan", 1))
+                text = cell.get_text(" ", strip=True)
+                cells.append(
+                    TableCell(
+                        row=r_idx,
+                        col=c_idx,
+                        content=text,
+                        rowspan=rowspan,
+                        colspan=colspan,
+                        style={"is_header": cell.name == "th"},
+                    )
+                )
+            if r_idx == 0 and all(c.name == "th" for c in cols):
+                headers.append(r_idx)
+
+        if not cells:
+            return None
+
+        max_row = max(c.row for c in cells)
+        max_col = max(c.col for c in cells)
+
+        return TableBlock(
+            id=self._generate_block_id(),
+            type=BlockType.TABLE,
+            content={},
+            rows=max_row + 1,
+            cols=max_col + 1,
+            cells=cells,
+            headers=headers,
+            metadata=BlockMetadata(attributes={"tag": "table"}, confidence=1.0),
+            parent_id=parent_id,
+        )
+
+    # ------------------------------------------------------------------
+    # Images & misc
+    # ------------------------------------------------------------------
+    def _extract_images(self, book: epub.EpubBook) -> List[ImageBlock]:
+        blocks = []
+        for item in book.get_items():
+            if item.media_type and item.media_type.startswith("image/"):
+                data = item.get_content()
+                b64 = base64.b64encode(data).decode("utf-8")
+                data_uri = f"data:{item.media_type};base64,{b64}"
+                blocks.append(
+                    ImageBlock(
+                        id=self._generate_block_id(),
+                        type=BlockType.IMAGE,
+                        content="",
+                        src=data_uri,
+                        alt=item.file_name,
+                        format=item.media_type.split("/")[-1],
+                        metadata=BlockMetadata(
+                            attributes={"original_filename": item.file_name, "embedded": True},
+                            confidence=1.0,
+                        ),
+                    )
+                )
+        return blocks
+
+    def _build_toc_hierarchy(self, toc, blocks: List[BaseBlock]) -> Optional[HierarchyNode]:
+        """
+        Build hierarchy from EPUB TOC (NCX or nav.xhtml).
+        Links each TOC entry with the closest heading block.
+        """
+        if not toc:
+            return None
+
+        root = HierarchyNode(id="root", title="Book", level=0, block_id="root", children=[])
+
+        def recurse(entries, parent_node, level):
+            for entry in entries:
+                title = entry.title if entry.title else "Untitled"
+                href = entry.href
+                # simple heuristic: use the first heading on that page with null checks
+                block_id = next(
+                    (b.id for b in blocks if b.metadata and b.metadata.attributes and href in str(b.metadata.attributes.get("src", ""))),
+                    None,
+                )
+                node = HierarchyNode(
+                    id=f"toc-{hashlib.md5(title.encode()).hexdigest()}",
+                    title=title,
+                    level=level,
+                    block_id=block_id,
+                    parent_id=parent_node.id,
+                    breadcrumb=[n.title for n in root.children] + [title],
+                )
+                parent_node.children.append(node)
+                if entry.children:
+                    recurse(entry.children, node, level + 1)
+
+        recurse(toc, root, 1)
+        return root if root.children else None
+
+    def _extract_full_text(self, blocks: List[BaseBlock]) -> str:
+        return "\n".join(
+            b.content
+            for b in blocks
+            if hasattr(b, "content") and isinstance(b.content, str)
+        )
+
+    def _extract_keywords(self, book: epub.EpubBook) -> List[str]:
+        kw = book.get_metadata("DC", "subject") or []
+        return [k[0] for k in kw if k]
+
+
+# ----------------------------------------------------------------------
+# Quick self-test
+# ----------------------------------------------------------------------
+if __name__ == "__main__":
+    import tempfile
+    import os
+
+    # Create minimal EPUB in memory
+    book = epub.EpubBook()
+    book.set_title("Test EPUB")
+    book.set_language("en")
+
+    c1 = epub.EpubHtml(title="Chapter 1", file_name="chap_01.xhtml", lang="en")
+    c1.content = """<html><body>
+        <h1>Chapter 1</h1>
+        <p>Hello EPUB world!</p>
+        <table border="1"><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table>
+    </body></html>"""
+
+    book.add_item(c1)
+    book.toc = [epub.Link("chap_01.xhtml", "Chapter 1", "ch1")]
+    book.spine = ["nav", c1]
+
+    with tempfile.NamedTemporaryFile(suffix=".epub", delete=False) as f:
+        epub.write_epub(f.name, book)
+        tmp = f.name
+
+    doc = EPUBProvider().extract_document(tmp)
+    assert doc.source_type == SourceType.EPUB
+    assert len(doc.blocks) >= 3  # heading, paragraph, table
+    os.unlink(tmp)
+    print("✅ EPUB native provider self-test passed")

@@ -17,3 +17,4 @@ Example Usage:
 
 from extractor.core.schema.text.line import Line
 from extractor.core.schema.text.span import Span
+from extractor.core.schema.text.char import Char

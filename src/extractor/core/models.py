@@ -37,6 +37,8 @@ from surya.table_rec import TableRecPredictor
 
 
 def create_model_dict(device=None, dtype=None) -> dict:
+    if device is None:
+        device = "cpu"
     return {
         "layout_model": LayoutPredictor(device=device, dtype=dtype),
         "texify_model": RecognitionPredictor(device=device, dtype=dtype),  # Use RecognitionPredictor for texify

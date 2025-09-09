@@ -1,101 +1,120 @@
 """
 Module: registry.py
-Description: Functions for registry operations
+Description: Provider factory for native (loss-free) extraction only.
 
 External Dependencies:
-- filetype: [Documentation URL]
-- bs4: [Documentation URL]
-- marker: [Documentation URL]
+- filetype: https://pypi.org/project/filetype/
+- bs4:      https://pypi.org/project/beautifulsoup4/
 
-Sample Input:
->>> # Add specific examples based on module functionality
-
-Expected Output:
->>> # Add expected output examples
-
-Example Usage:
->>> # Add usage examples
+Example usage
+-------------
+>>> from extractor.core.providers.registry import provider_from_filepath
+>>> provider_class = provider_from_filepath("report.docx")
+>>> doc = provider_class("report.docx").extract_document()
 """
 
 import filetype
 import filetype.match as file_match
-from bs4 import BeautifulSoup
-from filetype.types import archive, document, IMAGE
+from pathlib import Path
+from typing import Type
 
-from extractor.core.providers.document import DocumentProvider
-from extractor.core.providers.epub import EpubProvider
-from extractor.core.providers.html import HTMLProvider
+# --- Native providers -------------------------------------------------
 from extractor.core.providers.image import ImageProvider
 from extractor.core.providers.pdf import PdfProvider
-from extractor.core.providers.powerpoint import PowerPointProvider
-from extractor.core.providers.spreadsheet import SpreadSheetProvider
+from extractor.core.providers.docx import DOCXProvider
+from extractor.core.providers.epub import EPUBProvider
+from extractor.core.providers.html import HTMLProvider
+from extractor.core.providers.pptx import PPTXProvider
+from extractor.core.providers.rst import RSTProvider
+from extractor.core.providers.spreadsheet import SpreadsheetProvider
 
-DOCTYPE_MATCHERS = {
-    "image": IMAGE,
-    "pdf": [
-        archive.Pdf,
-    ],
-    "epub": [
-        archive.Epub,
-    ],
-    "doc": [document.Doc, document.Docx, document.Odt],
-    "xls": [document.Xls, document.Xlsx, document.Ods],
-    "ppt": [document.Ppt, document.Pptx, document.Odp],
+# ------------------------------------------------------------------
+# Provider factory
+# ------------------------------------------------------------------
+_PROVIDER_MAP: dict[str, Type] = {
+    # images
+    "png":  ImageProvider,
+    "jpg":  ImageProvider,
+    "jpeg": ImageProvider,
+    "gif":  ImageProvider,
+    "bmp":  ImageProvider,
+    "tiff": ImageProvider,
+    "svg":  ImageProvider,
+    "webp": ImageProvider,
+
+    # documents (native extraction)
+    "docx": DOCXProvider,
+    "doc":  DOCXProvider,
+    "odt":  DOCXProvider,
+
+    "xlsx": SpreadsheetProvider,
+    "xls":  SpreadsheetProvider,
+    "xlsm": SpreadsheetProvider,
+    "ods":  SpreadsheetProvider,
+
+    "pptx": PPTXProvider,
+    "ppt":  PPTXProvider,
+    "odp":  PPTXProvider,
+
+    "epub": EPUBProvider,
+    "html": HTMLProvider,
+    "htm":  HTMLProvider,
+    "rst":  RSTProvider,
+
+    # PDF remains the fallback
+    "pdf":  PdfProvider,
 }
 
 
-def load_matchers(doctype: str):
-    return [cls() for cls in DOCTYPE_MATCHERS[doctype]]
+def provider_from_filepath(filepath: str) -> Type:
+    """
+    Return the *native* provider class for the given file path.
 
+    Priority:
+    1. Exact extension match in `_PROVIDER_MAP`.
+    2. MIME type detection via `filetype`.
+    3. HTML heuristics (if file looks like HTML).
+    4. Fallback to `PdfProvider`.
+    """
+    path = Path(filepath)
 
-def load_extensions(doctype: str):
-    return [cls.EXTENSION for cls in DOCTYPE_MATCHERS[doctype]]
+    # 1. Exact extension
+    ext = path.suffix.lower().lstrip(".")
+    if ext in _PROVIDER_MAP:
+        return _PROVIDER_MAP[ext]
 
+    # 2. MIME detection
+    mime = filetype.guess(str(path))
+    if mime and hasattr(mime, 'mime'):
+        mime_map = {
+            "image":  ImageProvider,
+            "application/pdf": PdfProvider,
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document": DOCXProvider,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":     SpreadsheetProvider,
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation": PPTXProvider,
+            "application/epub+zip": EPUBProvider,
+            "application/vnd.oasis.opendocument.text":        DOCXProvider,
+            "application/vnd.oasis.opendocument.spreadsheet": SpreadsheetProvider,
+            "application/vnd.oasis.opendocument.presentation": PPTXProvider,
+        }
+        # Handle image MIME types that start with "image/"
+        if mime.mime.startswith("image/"):
+            return ImageProvider
+        
+        provider = mime_map.get(mime.mime)
+        if provider:
+            return provider
 
-def provider_from_ext(filepath: str):
-    ext = filepath.rsplit(".", 1)[-1].strip()
-    if not ext:
-        return PdfProvider
+    # 3. HTML sniffing
+    if ext in {"html", "htm"}:
+        try:
+            with path.open("r", encoding="utf-8", errors="ignore") as f:
+                head = f.read(2048)
+            from bs4 import BeautifulSoup
+            if BeautifulSoup(head, "html.parser").find():
+                return HTMLProvider
+        except Exception:
+            pass
 
-    if ext in load_extensions("image"):
-        return ImageProvider
-    if ext in load_extensions("pdf"):
-        return PdfProvider
-    if ext in load_extensions("doc"):
-        return DocumentProvider
-    if ext in load_extensions("xls"):
-        return SpreadSheetProvider
-    if ext in load_extensions("ppt"):
-        return PowerPointProvider
-    if ext in load_extensions("epub"):
-        return EpubProvider
-    if ext in ["html"]:
-        return HTMLProvider
-
+    # 4. Fallback
     return PdfProvider
-
-
-def provider_from_filepath(filepath: str):
-    if filetype.image_match(filepath) is not None:
-        return ImageProvider
-    if file_match(filepath, load_matchers("pdf")) is not None:
-        return PdfProvider
-    if file_match(filepath, load_matchers("epub")) is not None:
-        return EpubProvider
-    if file_match(filepath, load_matchers("doc")) is not None:
-        return DocumentProvider
-    if file_match(filepath, load_matchers("xls")) is not None:
-        return SpreadSheetProvider
-    if file_match(filepath, load_matchers("ppt")) is not None:
-        return PowerPointProvider
-
-    try:
-        soup = BeautifulSoup(open(filepath, "r").read(), "html.parser")
-        # Check if there are any HTML tags
-        if bool(soup.find()):
-            return HTMLProvider
-    except Exception:
-        pass
-
-    # Fallback if we incorrectly detect the file type
-    return provider_from_ext(filepath)

@@ -18,10 +18,13 @@ Example Usage:
 """
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import List, Tuple, Annotated
+from typing import List, Tuple, Annotated, Optional
+import asyncio
+import os
 
 from pydantic import BaseModel
 from tqdm import tqdm
+from loguru import logger
 
 from extractor.core.output import json_to_html, unwrap_outer_tag
 from extractor.core.processors.llm import BaseLLMComplexBlockProcessor
@@ -31,6 +34,83 @@ from extractor.core.schema.blocks import Block, InlineMath
 from extractor.core.schema.document import Document
 from extractor.core.schema.groups import PageGroup
 
+
+
+async def call_claude_subprocess(prompt: str, image_path: Optional[str] = None, 
+                                      timeout: int = 30, use_ultrathink: bool = False) -> str:
+    """
+    Call Claude CLI using proper subprocess with correct syntax.
+    
+    Args:
+        prompt: The prompt to send to Claude
+        image_path: Optional path to image file (will be included in prompt)
+        timeout: Timeout in seconds
+        use_ultrathink: Whether to prefix prompt with 'ultrathink:'
+        
+    Returns:
+        Claude's response as string
+    """
+    # Build the full prompt
+    full_prompt = prompt
+    if image_path and os.path.exists(image_path):
+        # Include image path in the prompt for Claude to analyze
+        full_prompt = f"Please analyze the image at {image_path}\n\n{prompt}"
+    
+    if use_ultrathink:
+        full_prompt = f"ultrathink: {full_prompt}"
+    
+    # Set up environment with proper PATH
+    env = os.environ.copy()
+    env["PATH"] = "/usr/bin:/bin:/usr/local/bin:/home/graham/.bun/bin:" + env.get("PATH", "")
+    env["BUN_INSTALL"] = "/home/graham/.bun"
+    
+    # Use correct claude -p syntax (NOT --print)
+    cmd = [
+        "/home/graham/.bun/bin/claude",
+        "-p",
+        "--dangerously-skip-permissions"
+    ]
+    
+    try:
+        # Create subprocess with proper stream handling
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=env
+        )
+        
+        # Send prompt and get response
+        stdout, stderr = await asyncio.wait_for(
+            proc.communicate(input=full_prompt.encode()),
+            timeout=timeout
+        )
+        
+        if proc.returncode == 0 and stdout:
+            return stdout.decode().strip()
+        else:
+            error_msg = stderr.decode() if stderr else "No error message"
+            logger.error(f"Claude subprocess failed: {error_msg}")
+            return ""
+            
+    except asyncio.TimeoutError:
+        logger.error(f"Claude subprocess timed out after {timeout}s")
+        if proc:
+            proc.terminate()
+            await proc.wait()
+        return ""
+    except Exception as e:
+        logger.error(f"Claude subprocess error: {e}")
+        return ""
+
+def call_claude_subprocess_sync(prompt: str, image_path: Optional[str] = None,
+                                    timeout: int = 30, use_ultrathink: bool = False) -> str:
+    """
+    Synchronous version of call_claude_subprocess.
+    """
+    import asyncio
+    return asyncio.run(call_claude_subprocess(prompt, image_path, timeout, use_ultrathink))
 
 class LLMMathBlockProcessor(BaseLLMComplexBlockProcessor):
     redo_inline_math: Annotated[
@@ -190,22 +270,50 @@ Adversarial training <i>(AT)</i> <a href='#page-9-1'>[23]</a>, which aims to min
         prompt = self.text_math_rewriting_prompt.replace("{extracted_html}", block_text)
 
         image = self.extract_image(document, block)
-        response = self.llm_service(prompt, image, block, LLMTextSchema)
+        response = call_claude_subprocess_sync(prompt)
 
         if not response or "corrected_html" not in response:
             block.update_metadata(llm_error_count=1)
+            self.add_validation_to_block(block, True, 'LLM response missing or malformed')
             return
 
         corrected_html = response["corrected_html"]
         if not corrected_html:
             block.update_metadata(llm_error_count=1)
+            self.add_validation_to_block(block, True, 'Empty LLM response')
             return
 
+        # Enhanced suspicious detection for math block processing
+        suspicious_reasons = []
+        
         # Block is fine
         if "no corrections needed" in corrected_html.lower():
             return
 
+        # Check for short response
         if len(corrected_html) < len(block_text) * 0.6:
+            suspicious_reasons.append("LLM returned significantly shorter response")
+        
+        # Check for error messages
+        error_indicators = ["error", "failed", "cannot", "unable", "sorry", "invalid"]
+        html_lower = corrected_html.lower()
+        for indicator in error_indicators:
+            if indicator in html_lower and len(corrected_html) < 200:
+                suspicious_reasons.append(f"LLM may have returned error: '{indicator}'")
+        
+        # Check for math tag issues
+        math_open = corrected_html.count("<math")
+        math_close = corrected_html.count("</math>")
+        if math_open != math_close:
+            suspicious_reasons.append("Unbalanced math tags")
+        
+        # Check for basic HTML structure
+        if "<" not in corrected_html or ">" not in corrected_html:
+            suspicious_reasons.append("Response lacks HTML structure")
+        
+        # Set suspicious flag if any issues found
+        if suspicious_reasons:
+            self.add_validation_to_block(block, True, '"; ".join(suspicious_reasons)')
             block.update_metadata(llm_error_count=1)
             return
 

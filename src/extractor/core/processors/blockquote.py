@@ -1,19 +1,3 @@
-"""
-Module: blockquote.py
-
-External Dependencies:
-- marker: [Documentation URL]
-
-Sample Input:
->>> # Add specific examples based on module functionality
-
-Expected Output:
->>> # Add expected output examples
-
-Example Usage:
->>> # Add usage examples
-"""
-
 from typing import Annotated, Tuple
 
 from extractor.core.processors import BaseProcessor

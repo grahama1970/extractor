@@ -28,7 +28,7 @@ from extractor.core.schema.blocks import Block, Caption, Code, Equation, Figure,
 from extractor.core.schema.document import Document
 from extractor.core.schema.groups import FigureGroup, ListGroup, PageGroup, \
     PictureGroup, TableGroup
-from extractor.core.schema.text import Line, Span
+from extractor.core.schema.text import Line, Span, Char
 
 BLOCK_REGISTRY: Dict[BlockTypes, str] = {}
 
@@ -46,6 +46,7 @@ def get_block_class(block_type: BlockTypes) -> Type[Block]:
 
 register_block_class(BlockTypes.Line, Line)
 register_block_class(BlockTypes.Span, Span)
+register_block_class(BlockTypes.Char, Char)
 register_block_class(BlockTypes.FigureGroup, FigureGroup)
 register_block_class(BlockTypes.TableGroup, TableGroup)
 register_block_class(BlockTypes.ListGroup, ListGroup)

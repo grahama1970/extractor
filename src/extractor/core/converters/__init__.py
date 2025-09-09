@@ -55,10 +55,18 @@ class BaseConverter:
                 continue
             elif param_name == 'config':
                 resolved_kwargs[param_name] = self.config
+            elif param_name == 'llm_service':
+                resolved_kwargs[param_name] = self.llm_service
             elif param.name in self.artifact_dict:
                 resolved_kwargs[param_name] = self.artifact_dict[param_name]
             elif param.default != inspect.Parameter.empty:
                 resolved_kwargs[param_name] = param.default
+            elif param.kind == inspect.Parameter.VAR_KEYWORD:  # **kwargs
+                # Skip **kwargs parameters, they'll be handled by empty dict
+                continue
+            elif param.kind == inspect.Parameter.VAR_POSITIONAL:  # *args
+                # Skip *args parameters, they'll be handled by empty tuple
+                continue
             else:
                 raise ValueError(f"Cannot resolve dependency for parameter: {param_name}")
 

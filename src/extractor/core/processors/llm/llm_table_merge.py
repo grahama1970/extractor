@@ -30,6 +30,15 @@ from extractor.core.processors.llm import BaseLLMComplexBlockProcessor
 from extractor.core.schema import BlockTypes
 from extractor.core.schema.blocks import Block, TableCell
 from extractor.core.schema.document import Document
+from loguru import logger
+import asyncio
+import sys
+from pathlib import Path
+import subprocess
+import json
+
+# Direct ArangoDB connection - NO MORE DUMMY FUNCTIONS!
+ARANGO_WORKER_PATH = "/home/graham/workspace/experiments/cc_executor/.claude/agents/workers/arango_tools_worker.py"
 
 
 class LLMTableMergeProcessor(BaseLLMComplexBlockProcessor):
@@ -37,6 +46,28 @@ class LLMTableMergeProcessor(BaseLLMComplexBlockProcessor):
         Tuple[BlockTypes],
         "The block types to process.",
     ] = (BlockTypes.Table, BlockTypes.TableOfContents)
+    
+    def __init__(self, llm_service=None, config=None):
+        # Handle the complex initialization with multiple inheritance
+        # We need to manually call the right initializers
+        
+        # First, initialize BaseProcessor attributes via assign_config
+        from extractor.core.util import assign_config
+        assign_config(self, config)
+        
+        # Set LLM-specific attributes from BaseLLMProcessor
+        self.llm_service = None
+        if hasattr(self, 'use_llm') and not self.use_llm:
+            self.llm_service = None
+        else:
+            self.llm_service = llm_service
+        
+        # Initialize KnowledgeAwareProcessor attributes
+        self._pattern_cache = {}
+        self._batch_queries = []
+        
+        # Test ArangoDB connection (from KnowledgeAwareProcessor)
+        self._test_arango_connection()
     table_height_threshold: Annotated[
         float,
         "The minimum height ratio relative to the page for the first table in a pair to be considered for merging.",
@@ -73,64 +104,115 @@ class LLMTableMergeProcessor(BaseLLMComplexBlockProcessor):
         str,
         "The prompt to use for rewriting text.",
         "Default is a string containing the Gemini rewriting prompt."
-    ] = """You're a text correction expert specializing in accurately reproducing tables from PDFs.'
-You'll receive two images of tables from successive pages of a PDF.  Table 1 is from the first page, and Table 2 is from the second page.  Both tables may actually be part of the same larger table. Your job is to decide if Table 2 should be merged with Table 1, and how they should be joined.  The should only be merged if they're part of the same larger table, and Table 2 cannot be interpreted without merging.
+    ] = """You're a table analysis expert specializing in identifying split tables in PDFs.
 
-You'll specify your judgement in json format - first whether Table 2 should be merged with Table 1, then the direction of the merge, either `bottom` or `right`.  A bottom merge means that the rows of Table 2 are joined to the rows of Table 1. A right merge means that the columns of Table 2 are joined to the columns of Table 1.  (bottom merge is equal to np.vstack, right merge is equal to np.hstack)'
+You'll receive two images and HTML representations of tables from a PDF. Table 1 comes first, and Table 2 appears after it (possibly on the next page). Your job is to determine if these tables should be merged because they're actually parts of the same larger table that was split.
 
-Table 2 should be merged at the bottom of Table 1 if Table 2 has no headers, and the rows have similar values, meaning that Table 2 continues Table 1. Table 2 should be merged to the right of Table 1 if each row in Table 2 matches a row in Table 1, meaning that Table 2 contains additional columns that augment Table 1.
+**Important Analysis Steps:**
+1. I will use pandas.read_html() to parse both tables and analyze their structure
+2. Compare column counts and column names/headers
+3. Check if Table 2 has headers or continues without headers
+4. Analyze data patterns and content relationships
+5. Determine if tables are semantically related
 
-Only merge Table 1 and Table 2 if Table 2 cannot be interpreted without merging.  Only merge Table 1 and Table 2 if you can read both images properly.
+**Merge Decision Criteria:**
+- BOTTOM merge: Table 2 continues rows from Table 1 (same columns, no repeated headers)
+- RIGHT merge: Table 2 adds columns to Table 1 (same rows, additional attributes)
+- NO merge: Tables are independent and complete on their own
+
+**Technical Analysis Process:**
+```python
+import pandas as pd
+from io import StringIO
+
+# Parse tables using pandas
+try:
+    df1 = pd.read_html(StringIO(table1_html))[0]
+    df2 = pd.read_html(StringIO(table2_html))[0]
+    
+    # Analyze structure
+    t1_shape = df1.shape
+    t2_shape = df2.shape
+    t1_columns = list(df1.columns)
+    t2_columns = list(df2.columns)
+    
+    # Check for header patterns
+    has_headers_t2 = not all(isinstance(col, int) for col in df2.columns)
+    columns_match = t1_columns == t2_columns
+    
+except Exception as e:
+    # Fallback to manual analysis
+    pass
+```
 
 **Instructions:**
-1. Carefully examine the provided table images.  Table 1 is the first image, and Table 2 is the second image.
-2. Examine the provided html representations of Table 1 and Table 2.
-3. Write a description of Table 1.
-4. Write a description of Table 2.
-5. Analyze whether Table 2 should be merged into Table 1, and write an explanation.
-6. Output your decision on whether they should be merged, and merge direction.
-**Example:**
+1. Examine the provided table images
+2. Parse the HTML representations using the pandas approach shown above
+3. Analyze table structure, headers, and data patterns
+4. Determine if tables are split parts of a larger table
+5. Make a conservative decision - only merge if clearly necessary
+
+**Example Analysis:**
 Input:
 Table 1
 ```html
 <table>
     <tr>
-        <th>Name</th>
-        <th>Age</th>
-        <th>City</th>
-        <th>State</th>
+        <th>Signal</th>
+        <th>IO</th>
+        <th>Description</th>
+        <th>Type</th>
     </tr>
     <tr>
-        <td>John</td>
-        <td>25</td>
-        <td>Chicago</td>
-        <td>IL</td>
+        <td>clk_i</td>
+        <td>in</td>
+        <td>Clock input</td>
+        <td>logic</td>
     </tr>
+</table>
 ```
 Table 2
 ```html
 <table>
     <tr>
-        <td>Jane</td>
-        <td>30</td>
-        <td>Los Angeles</td>
-        <td>CA</td>
+        <td>rst_ni</td>
+        <td>in</td>
+        <td>Reset active low</td>
+        <td>logic</td>
     </tr>
+    <tr>
+        <td>valid_i</td>
+        <td>in</td>
+        <td>Valid signal</td>
+        <td>logic</td>
+    </tr>
+</table>
 ```
+
 Output:
 ```json
 {
-    "table1_description": "Table 1 has 4 headers, and 1 row.  The headers are Name, Age, City, and State.",
-    "table2_description": "Table 2 has no headers, but the values appear to represent a person's name, age, city, and state.",'
-    "explanation": "The values in Table 2 match the headers in Table 1, and Table 2 has no headers. Table 2 should be merged to the bottom of Table 1.",
+    "table1_description": "Signal interface table with 4 columns (Signal, IO, Description, Type) and 1 data row after headers",
+    "table2_description": "Continuation of signal table with same 4 columns but no headers, containing 2 additional signal rows",
+    "pandas_analysis": {
+        "t1_shape": [1, 4],
+        "t2_shape": [2, 4],
+        "t1_has_headers": true,
+        "t2_has_headers": false,
+        "column_count_match": true,
+        "data_pattern_match": true
+    },
+    "explanation": "Table 2 is a direct continuation of Table 1. Both have 4 columns with identical structure. Table 2 lacks headers and contains additional signal definitions that follow the same pattern as Table 1.",
     "merge": "true",
     "direction": "bottom"
 }
 ```
+
 **Input:**
 Table 1
 ```html
 {{table1}}
+```
 Table 2
 ```html
 {{table2}}
@@ -230,15 +312,17 @@ Table 2
         if table_run:
             table_runs.append(table_run)
 
-        with ThreadPoolExecutor(max_workers=self.max_concurrency) as executor:
-            for future in as_completed([
-                executor.submit(self.process_rewriting, document, blocks)
-                for blocks in table_runs
-            ]):
-                future.result()  # Raise exceptions if any occurred
-                pbar.update(1)
-
-        pbar.close()
+        try:
+            with ThreadPoolExecutor(max_workers=self.max_concurrency) as executor:
+                futures = [
+                    executor.submit(self.process_rewriting, document, blocks)
+                    for blocks in table_runs
+                ]
+                for future in as_completed(futures):
+                    future.result()  # Raise exceptions if any occurred
+                    pbar.update(1)
+        finally:
+            pbar.close()
 
     def process_rewriting(self, document: Document, blocks: List[Block]):
         if len(blocks) < 2:
@@ -248,6 +332,25 @@ Table 2
         start_block = blocks[0]
         for i in range(1, len(blocks)):
             curr_block = blocks[i]
+            
+            # KNOWLEDGE-FIRST: Check historical merge patterns
+            merge_knowledge = asyncio.run(self._check_table_merge_knowledge(
+                start_block, curr_block, document
+            ))
+            
+            # If we have high confidence knowledge, use it
+            if merge_knowledge and merge_knowledge.get('confidence_score', 0) > 0.85:
+                logger.info(f"🧠 Using knowledge-based merge decision: {merge_knowledge['recommended_action']}")
+                
+                if merge_knowledge['recommended_action'] == 'merge':
+                    direction = merge_knowledge.get('merge_direction', 'bottom')
+                    self._apply_knowledge_merge(start_block, curr_block, direction, document)
+                    continue
+                elif merge_knowledge['recommended_action'] == 'skip':
+                    start_block = curr_block
+                    continue
+            
+            # Fall back to LLM analysis if no strong knowledge match
             children = start_block.contained_blocks(document, (BlockTypes.TableCell,))
             children_curr = curr_block.contained_blocks(document, (BlockTypes.TableCell,))
             if not children or not children_curr:
@@ -290,6 +393,11 @@ Table 2
             curr_block.structure = []
             start_block.structure = [b.id for b in merged_cells]
             start_block.lowres_image = merged_image
+            
+            # Record the merge decision for learning
+            asyncio.run(self._record_merge_decision(
+                start_block, curr_block, direction, document
+            ))
 
     def validate_merge(self, cells1: List[TableCell], cells2: List[TableCell], direction: Literal['right', 'bottom'] = 'right'):
         if direction == "right":
@@ -338,6 +446,131 @@ Table 2
             new_img.paste(image1, (0, 0))
             new_img.paste(image2, (0, h1))
         return new_img
+    
+    # Knowledge-first methods required by KnowledgeAwareProcessor
+    def process_with_knowledge(self, block, analysis, document):
+        """Process block using knowledge analysis - not used in merge processor."""
+        pass
+    
+    async def _check_table_merge_knowledge(self, table1: Block, table2: Block, document: Document):
+        """Check knowledge base for similar table merge patterns - REAL ArangoDB queries!"""
+        # Extract features from both tables
+        features1 = self._extract_features(table1, document)
+        features2 = self._extract_features(table2, document)
+        
+        # Search for similar table merge patterns
+        merge_query = f"""
+        FOR doc IN pdf_objects
+          FILTER doc.object_type == 'table_merge_pattern'
+          LET table1_similarity = BM25(doc.table1_text, @table1_text)
+          LET table2_similarity = BM25(doc.table2_text, @table2_text)
+          LET combined_score = (table1_similarity + table2_similarity) / 2
+          FILTER combined_score > 0.3
+          SORT combined_score DESC
+          LIMIT 5
+          RETURN {{
+            case_id: doc._key,
+            confidence: combined_score,
+            merge_data: doc.merge_data,
+            table1_text: doc.table1_text,
+            table2_text: doc.table2_text,
+            match_type: 'bm25'
+          }}
+        """
+        
+        result = self._call_arango(
+            "query",
+            aql=merge_query,
+            bind_vars=json.dumps({
+                "table1_text": features1.get('text', '')[:200],
+                "table2_text": features2.get('text', '')[:200]
+            })
+        )
+        
+        if result.get("success") and result.get("results"):
+            # Find best match
+            matches = result["results"]
+            best_match = max(matches, key=lambda m: m.get('confidence', 0))
+            
+            if best_match['confidence'] > 0.85:
+                # Use the historical merge decision
+                merge_data = best_match.get('merge_data', {})
+                return {
+                    'confidence_score': best_match['confidence'],
+                    'recommended_action': merge_data.get('action', 'llm_analysis'),
+                    'merge_direction': merge_data.get('direction', 'bottom'),
+                    'similarity_matches': matches,
+                    'source': best_match['match_type']
+                }
+        
+        # No high-confidence match, fall back to LLM
+        return {
+            'confidence_score': 0.0,
+            'recommended_action': 'llm_analysis',
+            'similarity_matches': [],
+            'source': 'none'
+        }
+    
+    async def _record_merge_decision(self, table1: Block, table2: Block, direction: str, document: Document):
+        """Record merge decision for future learning - REAL ArangoDB insert!"""
+        import numpy as np
+        
+        # Extract full context
+        features1 = self._extract_features(table1, document)
+        features2 = self._extract_features(table2, document)
+        
+        # Create the merge pattern document
+        doc = {
+            'object_type': 'table_merge_pattern',
+            'table1_text': features1.get('text', '')[:500],
+            'table2_text': features2.get('text', '')[:500],
+            'table1_bbox': features1.get('bbox', []),
+            'table2_bbox': features2.get('bbox', []),
+            'merge_data': {
+                'action': 'merge',
+                'direction': direction
+            },
+            'timestamp': str(np.datetime64('now')),
+            'source': 'llm_decision',
+            'confidence': 0.9,  # LLM decisions have high confidence
+            'processor': 'LLMTableMergeProcessor',
+            'document_path': str(document.filepath) if hasattr(document, 'filepath') else 'unknown'
+        }
+        
+        # Insert into ArangoDB
+        insert_result = self._call_arango(
+            "insert",
+            message=f"Table merge pattern: {direction}",
+            level="INFO",
+            **doc
+        )
+        
+        if insert_result.get("success"):
+            case_id = insert_result.get("_key")
+            logger.info(f"📝 Recorded table merge decision to ArangoDB: {case_id}")
+        else:
+            logger.warning(f"Failed to record merge decision: {insert_result.get('error')}")
+        
+    def _apply_knowledge_merge(self, start_block: Block, curr_block: Block, direction: str, document: Document):
+        """Apply merge based on knowledge recommendation."""
+        children = start_block.contained_blocks(document, (BlockTypes.TableCell,))
+        children_curr = curr_block.contained_blocks(document, (BlockTypes.TableCell,))
+        
+        if not children or not children_curr:
+            return
+            
+        # Get images for merging
+        start_image = start_block.get_image(document, highres=False)
+        curr_image = curr_block.get_image(document, highres=False)
+        
+        # Perform the merge
+        merged_image = self.join_images(start_image, curr_image, direction)
+        merged_cells = self.join_cells(children, children_curr, direction)
+        curr_block.structure = []
+        start_block.structure = [b.id for b in merged_cells]
+        start_block.lowres_image = merged_image
+        
+        logger.success(f"✅ Applied knowledge-based table merge (direction: {direction})")
 
 
 class MergeSchema(BaseModel):

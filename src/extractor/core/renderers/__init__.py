@@ -102,7 +102,7 @@ class BaseRenderer:
                 "page_id": page.page_id,
                 "text_extraction_method": page.text_extraction_method,
                 "block_counts": block_counts,
-                "block_metadata": block_metadata.model_dump()
+                "block_metadata": block_metadata.model_dump(mode='python')
             })
         return page_stats
 

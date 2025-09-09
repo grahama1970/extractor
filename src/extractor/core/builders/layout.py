@@ -19,6 +19,7 @@ from typing import Annotated, List, Optional
 
 from surya.layout import LayoutPredictor
 from surya.layout.schema import LayoutResult, LayoutBox
+from loguru import logger
 
 from extractor.core.builders import BaseBuilder
 from extractor.core.providers.pdf import PdfProvider
@@ -101,11 +102,37 @@ class LayoutBuilder(BaseBuilder):
             layout_page_size = PolygonBox.from_bbox(layout_result.image_bbox).size
             provider_page_size = page.polygon.size
             page.layout_sliced = layout_result.sliced  # This indicates if the page was sliced by the layout model
+            # Debug: print all unique labels from Surya
+            unique_labels = set(bbox.label for bbox in layout_result.bboxes)
+            logger.debug(f"Surya detected labels on page {page.page_id}: {unique_labels}")
+            
             for bbox in sorted(layout_result.bboxes, key=lambda x: x.position):
-                block_cls = get_block_class(BlockTypes[bbox.label])
+                # Log SectionHeader detection
+                if bbox.label == "SectionHeader":
+                    logger.debug(f"Processing SectionHeader at position {bbox.position}")
+                    
+                # Map label to BlockTypes enum (handle case differences)
+                try:
+                    block_type = BlockTypes[bbox.label]
+                except KeyError:
+                    # Handle label mapping issues
+                    label_map = {
+                        "Section-header": "SectionHeader",
+                        "Section header": "SectionHeader",
+                        # Add other mappings as needed
+                    }
+                    mapped_label = label_map.get(bbox.label, bbox.label)
+                    try:
+                        block_type = BlockTypes[mapped_label]
+                    except KeyError:
+                        print(f"WARNING: Unknown block type '{bbox.label}', skipping")
+                        continue
+                        
+                block_cls = get_block_class(block_type)
                 layout_block = page.add_block(block_cls, PolygonBox(polygon=bbox.polygon))
                 layout_block.polygon = layout_block.polygon.rescale(layout_page_size, provider_page_size)
                 layout_block.top_k = {BlockTypes[label]: prob for (label, prob) in bbox.top_k.items()}
+                layout_block.confidence = bbox.confidence  # Add the confidence score from Surya
                 page.add_structure(layout_block)
 
             # Ensure page has non-empty structure

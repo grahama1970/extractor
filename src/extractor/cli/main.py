@@ -14,6 +14,7 @@ from typing import Optional
 from extractor.cli.agent_commands import app as agent_app
 from extractor.cli.slash_commands import registry as slash_registry
 from extractor.cli.granger_slash_mcp_mixin import add_slash_mcp_commands
+from extractor.pipeline.api import extract_sections
 
 
 app = typer.Typer(
@@ -162,6 +163,26 @@ def commands(
         
     except Exception as e:
         logger.error(f"Failed to list commands: {e}")
+        raise typer.Exit(1)
+
+
+@app.command()
+def sections(
+    pdf_path: Path = typer.Argument(..., help="Path to PDF file"),
+    output_dir: Path = typer.Option(Path("data/results/pipeline"), "-o", "--output-dir", help="Results directory"),
+    json_out: bool = typer.Option(False, "--json", help="Print sections as JSON"),
+):
+    """Run the core pipeline (01→04) and return sections."""
+    try:
+        sections, out_path = extract_sections(pdf_path, output_dir)
+        if json_out:
+            import json as _json
+            print(_json.dumps({"sections": sections}, indent=2))
+        else:
+            print(f"Sections JSON: {out_path}")
+            print(f"Sections count: {len(sections)}")
+    except Exception as e:
+        logger.error(f"sections command failed: {e}")
         raise typer.Exit(1)
 
 

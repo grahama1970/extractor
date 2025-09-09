@@ -117,3 +117,34 @@ These may need future cleanup but are kept for now:
 3. Update README.md to reflect new structure
 4. Document the proof_of_concept examples
 5. Consider creating an index of what's in archive/
+
+## Additional Cleanup Completed (Phase 2)
+
+### Directories Assessed in `src/extractor/`:
+1. **handlers/** - KEPT (active marker integration)
+2. **cli/** - KEPT (terminal interface per user request)
+3. **processors/** - KEPT (AI enhancement processors)
+4. **integrations/** - DEPRECATED (moved to deprecated/)
+5. **logs/** - DEPRECATED (empty, wrong location)
+6. **mcp/** - DEPRECATED (old implementation)
+7. **utils/** - DEPRECATED (empty directory)
+8. **rl_integration/** - ARCHIVED (experimental RL features)
+9. **scratch.md** - DELETED (incomplete fragment)
+
+### Final Clean Structure:
+```
+src/extractor/
+├── core/          # Core extraction library
+├── handlers/      # Integration adapters
+├── processors/    # AI enhancement processors  
+├── cli/           # Terminal interface
+├── servers/       # MCP server implementation
+├── prompts/       # Prompt templates
+└── static/        # Required fonts
+```
+
+### Cleanup Results:
+- Moved 4 directories to `deprecated/src_extractor_20250721/`
+- Archived RL integration to `archive/rl_integration_20250721/`
+- Deleted scratch.md file
+- Project now has clear, focused directory structure

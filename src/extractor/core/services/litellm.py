@@ -1,153 +1,140 @@
 """
+MARKER FORK ADDITION - LiteLLM Integration
+
 Module: litellm.py
+Description: LiteLLM service for unified LLM access across multiple providers
 
 External Dependencies:
-- base64: [Documentation URL]
-- litellm: [Documentation URL]
-- PIL: [Documentation URL]
+- litellm: https://docs.litellm.ai/
+- PIL: Python Imaging Library
 - pydantic: https://docs.pydantic.dev/
-- marker: [Documentation URL]
-
-Sample Input:
->>> # Add specific examples based on module functionality
-
-Expected Output:
->>> # Add expected output examples
+- tenacity: https://tenacity.readthedocs.io/
 
 Example Usage:
->>> # Add usage examples
+>>> from extractor.core.services.litellm import LiteLLMService
+>>> service = LiteLLMService({"litellm_model": "moonshot/kimi-k2-turbo-preview"})
+>>> result = service(prompt, image, block, ResponseSchema)
 """
+
+from __future__ import annotations
 
 import base64
 import json
 import os
 import time
 from io import BytesIO
-from typing import Annotated, List, Union, Optional
+from pathlib import Path
+from typing import List, Optional, Annotated
 
 import litellm
 import PIL
 from PIL import Image
 from pydantic import BaseModel
+from loguru import logger
+from dotenv import find_dotenv, load_dotenv
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential_jitter,
+    retry_if_exception_type,
+)
 
 from extractor.core.schema.blocks import Block
 from extractor.core.services import BaseService
-from extractor.core.services.utils.log_utils import log_api_request, log_api_response, log_api_error
+from extractor.core.services.utils.log_utils import (
+    log_api_request,
+    log_api_response,
+    log_api_error,
+)
 from extractor.core.services.utils.json_utils import clean_json_string
+from extractor.core.services.utils.litellm_cache import initialize_litellm_cache
+from litellm import completion_cost
 
-# Import cache initialization from the utils directory
-try:
-    from extractor.core.services.utils.litellm_cache import initialize_litellm_cache
-    CACHE_AVAILABLE = True
-except ImportError:
-    CACHE_AVAILABLE = False
+# --------------------------------------------------------------------------- #
+# Environment
+# --------------------------------------------------------------------------- #
+dotenv_path = find_dotenv()
+load_dotenv(dotenv_path)
+project_root = Path(dotenv_path).parent
 
+# --------------------------------------------------------------------------- #
+# Tenacity retry decorator
+# --------------------------------------------------------------------------- #
+@retry(
+    reraise=True,
+    stop=stop_after_attempt(3),
+    wait=wait_exponential_jitter(initial=1, max=10),
+    retry=retry_if_exception_type((
+        litellm.exceptions.Timeout,
+        litellm.exceptions.RateLimitError,
+    )),
+)
+def _call_litellm(**kwargs):
+    """Internal wrapper around litellm.completion with Tenacity retries."""
+    return litellm.completion(**kwargs)
 
+# --------------------------------------------------------------------------- #
+# Service
+# --------------------------------------------------------------------------- #
 class LiteLLMService(BaseService):
-    # Note: This is not a required field as it will be loaded from env vars if not provided
-    litellm_api_key: Annotated[
-        str,
-        "The API key to use for the LiteLLM service. If not provided, will attempt to use the appropriate environment variable based on the model provider."
-    ] = ""
     litellm_model: Annotated[
         str,
-        "The model name to use for LiteLLM in provider/model format (e.g. 'openai/gpt-4o-mini', 'vertex/gemini-pro-vision')."
-    ] = "vertex_ai/gemini-2.0-flash"
-    litellm_base_url: Annotated[
-        Optional[str],
-        "Optional base URL for the API (for custom endpoints)."
-    ] = ""
-    enable_cache: Annotated[
-        bool,
-        "Whether to enable caching for LLM responses. This can reduce API costs and improve performance."
-    ] = True
+        "The model name to use for LiteLLM in provider/model format "
+        "(e.g. 'openai/gpt-4o-mini', 'moonshot/kimi-k2-0711-preview').",
+    ] = "moonshot/kimi-k2-0711-preview"
 
-    def __init__(self, config: Optional[BaseModel | dict] = None):
+    litellm_api_key: Annotated[
+        Optional[str],
+        "The API key to use. If not provided, will use environment variables "
+        "based on the provider.",
+    ] = None
+
+    litellm_base_url: Annotated[
+        Optional[str], "Optional base URL for the API (for custom endpoints)."
+    ] = None
+
+    enable_cache: Annotated[bool, "Whether to enable caching for LLM responses."] = True
+
+    # --------------------------------------------------------------------- #
+    # Initialisation
+    # --------------------------------------------------------------------- #
+    def __init__(self, config: Optional[BaseModel | dict] = None) -> None:
         super().__init__(config)
 
-        # Initialize cache if available and enabled
-        if self.enable_cache and CACHE_AVAILABLE:
+        # LiteLLM global tweaks
+        litellm.enable_json_schema_validation = True
+
+        # Cache init
+        if self.enable_cache:
             try:
                 initialize_litellm_cache()
-                print("LiteLLM cache initialized")
-            except Exception as e:
-                print(f"Failed to initialize LiteLLM cache: {e}")
-                print("Continuing without cache")
-        elif self.enable_cache:
-            print("LiteLLM cache not available (marker/services/utils/litellm_cache.py not found)")
-            print("Continuing without cache")
+                logger.info("LiteLLM cache initialised")
+            except Exception as exc:
+                logger.warning(f"Failed to initialise LiteLLM cache: {exc}")
 
-    def get_api_key(self, model: str):
-        """
-        Get the appropriate API key based on the model provider.
-        If no API key is provided directly, it will look for the appropriate
-        environment variable based on the provider prefix in the model name.
+    # --------------------------------------------------------------------- #
+    # Helpers
+    # --------------------------------------------------------------------- #
+    @staticmethod
+    def _image_to_base64(image: PIL.Image.Image) -> str:
+        """Convert PIL image to base64 string."""
+        buffer = BytesIO()
+        image.save(buffer, format="WEBP")
+        return base64.b64encode(buffer.getvalue()).decode("utf-8")
 
-        Args:
-            model: The model name in provider/model format
-
-        Returns:
-            str: The API key to use
-        """
-        # If API key is directly provided (not empty), use it
-        if self.litellm_api_key and self.litellm_api_key.strip():
-            return self.litellm_api_key
-
-        # Otherwise, try to get the API key from environment variables
-        # based on the provider prefix
-        if "/" not in model:
-            # Default to OpenAI if no provider is specified
-            return os.environ.get("OPENAI_API_KEY")
-
-        provider = model.split("/")[0].lower()
-
-        # Map provider to environment variable
-        provider_to_env = {
-            "openai": "OPENAI_API_KEY",
-            "azure": "AZURE_API_KEY",
-            "anthropic": "ANTHROPIC_API_KEY",
-            "claude": "ANTHROPIC_API_KEY",
-            "vertex": "VERTEX_PROJECT",
-            "vertex_ai": "VERTEX_PROJECT",
-            "google": "GOOGLE_API_KEY",
-            "gemini": "GOOGLE_API_KEY",
-            "ollama": "OLLAMA_API_KEY",
-            "mistral": "MISTRAL_API_KEY",
-            "cohere": "COHERE_API_KEY",
-            "groq": "GROQ_API_KEY",
-        }
-
-        env_var = provider_to_env.get(provider, "OPENAI_API_KEY")
-        api_key = os.environ.get(env_var)
-
-        # Log which environment variable we're using (without showing the actual key)
-        print(f"Using API key from environment variable: {env_var}")
-
-        return api_key
-
-    def image_to_base64(self, image: PIL.Image.Image):
-        image_bytes = BytesIO()
-        image.save(image_bytes, format="WEBP")
-        return base64.b64encode(image_bytes.getvalue()).decode("utf-8")
-
-    def prepare_images(
-        self, images: Union[Image.Image, List[Image.Image]]
-    ) -> List[dict]:
-        if isinstance(images, Image.Image):
-            images = [images]
-
+    def _prepare_images(self, images: List[PIL.Image.Image]) -> List[dict]:
+        """Prepare images for LiteLLM format."""
         return [
             {
                 "type": "image_url",
-                "image_url": {
-                    "url": "data:image/webp;base64,{}".format(
-                        self.image_to_base64(img)
-                    ),
-                }
+                "image_url": {"url": f"data:image/webp;base64,{self._image_to_base64(img)}"},
             }
             for img in images
         ]
 
+    # --------------------------------------------------------------------- #
+    # Core API
+    # --------------------------------------------------------------------- #
     def __call__(
         self,
         prompt: str,
@@ -156,119 +143,74 @@ class LiteLLMService(BaseService):
         response_schema: type[BaseModel],
         max_retries: int | None = None,
         timeout: int | None = None,
-    ):
-        if max_retries is None:
-            max_retries = self.max_retries
+    ) -> dict:
+        max_retries = max_retries if max_retries is not None else self.max_retries
+        timeout = timeout if timeout is not None else self.timeout
 
-        if timeout is None:
-            timeout = self.timeout
+        # Normalise images
+        images = image if isinstance(image, list) else [image]
 
-        if not isinstance(image, list):
-            image = [image]
-
-        image_data = self.prepare_images(image)
-
-        # Add system message to ensure JSON output
+        # Build messages
         messages = [
             {
                 "role": "system",
-                "content": "You are a helpful assistant that always responds with valid JSON. Your response must be compatible with the provided schema and contain the word 'json' to ensure proper formatting."
+                "content": "You are a helpful assistant that always responds "
+                "with valid JSON matching the provided schema.",
             },
             {
                 "role": "user",
-                "content": [
-                    *image_data,
-                    {"type": "text", "text": prompt},
-                ],
-            }
+                "content": [*self._prepare_images(images), {"type": "text", "text": prompt}],
+            },
         ]
 
-        # Parse model provider and name from litellm_model
-        model = self.litellm_model
-
-        # Get the appropriate API key based on the model provider
-        api_key = self.get_api_key(model)
-        if not api_key:
-            raise ValueError(f"No API key found for model {model}. Please provide an API key directly or set the appropriate environment variable.")
-
-        # Configure litellm
-        litellm_config = {
-            "api_key": api_key,
+        # Build kwargs for litellm.completion
+        litellm_kwargs = {
+            "model": self.litellm_model,
+            "messages": messages,
+            "temperature": 0,
             "timeout": timeout,
         }
 
-        # Add base_url if provided and not empty
-        if self.litellm_base_url and self.litellm_base_url.strip():
-            litellm_config["api_base"] = self.litellm_base_url
+        # Optional overrides
+        if self.litellm_base_url:
+            litellm_kwargs["api_base"] = self.litellm_base_url
+        if self.litellm_api_key:
+            litellm_kwargs["api_key"] = self.litellm_api_key
+        if self.litellm_model.startswith(("openai/", "azure/")):
+            litellm_kwargs["response_format"] = {"type": "json_object"}
 
-        tries = 0
-        while tries < max_retries:
-            try:
-                # Set custom headers
-                headers = {
-                    "X-Title": "Marker",
-                    "HTTP-Referer": "https://github.com/VikParuchuri/marker",
-                }
+        # ------------------------------------------------------------------ #
+        # Perform call with Tenacity retries
+        # ------------------------------------------------------------------ #
+        try:
+            log_api_request("LiteLLM", litellm_kwargs)
+            response = _call_litellm(**litellm_kwargs)
+            log_api_response("LiteLLM", response)
 
-                # Make the API call through litellm
-                # Handle response format based on model provider
-                litellm_kwargs = {
-                    "model": model,
-                    "messages": messages,
-                    **litellm_config,
-                    "extra_headers": headers
-                }
+            # Extract textual answer
+            text = response.choices[0].message.content
+            tokens = response.usage.total_tokens if response.usage else 0
 
-                # Add response_format if it's an OpenAI model (only format they support)
-                if model.startswith("openai/") or model.startswith("azure/"):
-                    litellm_kwargs["response_format"] = {"type": "json_object"}
-                
-                # For Vertex AI/Gemini models, add JSON instruction to the prompt
-                if model.startswith("vertex") or model.startswith("gemini"):
-                    if messages[0]["role"] == "system":
-                        messages[0]["content"] += " Always respond with valid JSON format."
-                    else:
-                        messages.insert(0, {
-                            "role": "system", 
-                            "content": "Always respond with valid JSON format."
-                        })
+            # Monetary cost (USD)
+            cost_usd = float(completion_cost(completion_response=response))
 
-                # Log the API request
-                log_api_request("LiteLLM", litellm_kwargs)
+            # Update block metadata
+            metadata_update = {
+                'llm_tokens_used': tokens,
+                'llm_request_count': 1
+            }
+            
+            # Store cost in result instead of metadata
+            # since BlockMetadata doesn't have llm_cost_usd field
+            block.update_metadata(**metadata_update)
 
-                # Make the API call through litellm
-                response = litellm.completion(**litellm_kwargs)
+            # Return parsed JSON with cost
+            result = clean_json_string(text, return_dict=True)
+            result['completion_cost'] = cost_usd
+            logger.info(f"LiteLLM completion cost: ${cost_usd:.6f}")
+            return result
 
-                # Log the API response
-                log_api_response("LiteLLM", response)
-
-                response_text = response.choices[0].message.content
-                total_tokens = response.usage.total_tokens
-                block.update_metadata(llm_tokens_used=total_tokens, llm_request_count=1)
-
-                # Use clean_json_string instead of json.loads
-                return clean_json_string(response_text, return_dict=True)
-            except litellm.exceptions.Timeout as e:
-                # Timeout error
-                tries += 1
-                wait_time = tries * 3
-                log_api_error("LiteLLM", e, litellm_kwargs)
-                print(
-                    f"Timeout error: {e}. Retrying in {wait_time} seconds... (Attempt {tries}/{max_retries})"
-                )
-                time.sleep(wait_time)
-            except litellm.exceptions.RateLimitError as e:
-                # Rate limit exceeded
-                tries += 1
-                wait_time = tries * 3
-                log_api_error("LiteLLM", e, litellm_kwargs)
-                print(
-                    f"Rate limit error: {e}. Retrying in {wait_time} seconds... (Attempt {tries}/{max_retries})"
-                )
-                time.sleep(wait_time)
-            except Exception as e:
-                log_api_error("LiteLLM", e, litellm_kwargs)
-                print(f"Error in LiteLLM service: {e}")
-                break
-
-        return {}
+        except Exception as exc:
+            log_api_error("LiteLLM", exc, litellm_kwargs)
+            logger.error(f"LiteLLM call failed after retries: {exc}")
+            return {}

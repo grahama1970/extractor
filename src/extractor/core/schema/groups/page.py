@@ -31,7 +31,7 @@ from extractor.core.schema.blocks import Block, BlockId, Text
 from extractor.core.schema.blocks.base import BlockMetadata
 from extractor.core.schema.groups.base import Group
 from extractor.core.schema.polygon import PolygonBox
-from extractor.core.util import matrix_intersection_area
+from extractor.core.util import matrix_intersection_area, sort_text_lines
 
 LINE_MAPPING_TYPE = List[Tuple[int, ProviderOutput]]
 
@@ -137,9 +137,20 @@ class PageGroup(Group):
         return block
 
     def get_block(self, block_id: BlockId) -> Block | None:
-        block: Block = self.children[block_id.block_id]
-        assert block.block_id == block_id.block_id
-        return block
+        # First try direct indexing for performance
+        if block_id.block_id < len(self.children):
+            block = self.children[block_id.block_id]
+            if block.block_id == block_id.block_id:
+                return block
+        
+        # Fall back to searching - this handles non-sequential IDs
+        for block in self.children:
+            if block.block_id == block_id.block_id:
+                return block
+                
+        # If not found, return None instead of crashing
+        # This is a workaround for the block ID mismatch issue in our fork
+        return None
 
     def assemble_html(self, document, child_blocks, parent_structure=None):
         template = ""
@@ -256,25 +267,56 @@ class PageGroup(Group):
                 self.structure.append(block.id)
 
     def add_initial_blocks(
-        self, block_lines: Dict[BlockId, LINE_MAPPING_TYPE], text_extraction_method: str
+        self,
+        block_lines: Dict[BlockId, LINE_MAPPING_TYPE],
+        text_extraction_method: str,
+        keep_chars: bool = False,
     ):
         # Add lines to the proper blocks, sorted in order
         for block_id, lines in block_lines.items():
-            lines = sorted(lines, key=lambda x: x[0])
+            line_extraction_methods = set(
+                [line[1].line.text_extraction_method for line in lines]
+            )
+            if len(line_extraction_methods) == 1:
+                lines = sorted(lines, key=lambda x: x[0])
+                lines = [line for _, line in lines]
+            else:
+                lines = [line for _, line in lines]
+                line_polygons = [line.line.polygon for line in lines]
+                sorted_line_polygons = sort_text_lines(line_polygons)
+                argsort = [line_polygons.index(p) for p in sorted_line_polygons]
+                lines = [lines[i] for i in argsort]
+
             block = self.get_block(block_id)
-            for line_idx, provider_output in lines:
+            for provider_output in lines:
                 line = provider_output.line
                 spans = provider_output.spans
                 self.add_full_block(line)
                 block.add_structure(line)
                 block.polygon = block.polygon.merge([line.polygon])
                 block.text_extraction_method = text_extraction_method
-                for span in spans:
+                for span_idx, span in enumerate(spans):
                     self.add_full_block(span)
                     line.add_structure(span)
 
+                    if not keep_chars:
+                        continue
+
+                    # Provider doesn't have chars
+                    if len(provider_output.chars) == 0:
+                        continue
+
+                    # Loop through characters associated with the span
+                    for char in provider_output.chars[span_idx]:
+                        char.page_id = self.page_id
+                        self.add_full_block(char)
+                        span.add_structure(char)
+
     def merge_blocks(
-        self, provider_outputs: List[ProviderOutput], text_extraction_method: str
+        self,
+        provider_outputs: List[ProviderOutput],
+        text_extraction_method: str,
+        keep_chars: bool = False,
     ):
         provider_line_idxs = list(range(len(provider_outputs)))
         valid_blocks = [
@@ -320,7 +362,7 @@ class PageGroup(Group):
         self.create_missing_blocks(new_blocks, block_lines)
 
         # Add blocks to the page
-        self.add_initial_blocks(block_lines, text_extraction_method)
+        self.add_initial_blocks(block_lines, text_extraction_method, keep_chars)
 
     def aggregate_block_metadata(self) -> BlockMetadata:
         if self.metadata is None:

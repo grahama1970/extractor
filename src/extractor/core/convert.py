@@ -15,6 +15,8 @@ from typing import Any, Dict
 
 from extractor.core.converters.pdf import PdfConverter
 from extractor.core.renderers.json import JSONRenderer
+from extractor.core.processors.font_style import FontStyleProcessor
+from extractor.core.processors.suspicious_header import SuspiciousHeaderProcessor
 
 try:
     # Model weights / artifact registry helper
@@ -53,16 +55,30 @@ def convert_pdf_to_json(pdf_path: str, **config_overrides: Any) -> Dict[str, Any
     }
     config.update({k: v for k, v in config_overrides.items() if v is not None})
 
-    # Prepare converter with forced JSON renderer
+    # Prepare converter with forced JSON renderer and FontStyleProcessor
     models = create_model_dict()
+    
+    # Store PDF path globally so FontStyleProcessor can access it
+    import extractor.core.processors.font_style
+    extractor.core.processors.font_style._global_pdf_path = pdf_path
+    
+    # Build processor list with font and suspicious header processors
+    # Use comma-separated list for multiple additional processors
+    additional_processors = [
+        f"{FontStyleProcessor.__module__}.{FontStyleProcessor.__name__}",
+        f"{SuspiciousHeaderProcessor.__module__}.{SuspiciousHeaderProcessor.__name__}"
+    ]
+    processor_list = f"default+{','.join(additional_processors)}"
+    
     converter = PdfConverter(
         artifact_dict=models,
         renderer="extractor.core.renderers.json.JSONRenderer",
+        processor_list=processor_list,
         config=config,
     )
 
-    json_output = converter(pdf_path)  # This is a JSONOutput (pydantic BaseModel)
-    return json_output.model_dump()
+    json_output = converter(pdf_path)  # Now returns dict directly from renderer
+    return json_output
 
 
 # ---------------------------------------------------------------------------

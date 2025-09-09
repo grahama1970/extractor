@@ -17,10 +17,13 @@ Example Usage:
 """
 
 import json
-from typing import List, Tuple, Annotated
+import os
+import asyncio
+from typing import List, Tuple, Annotated, Optional
 
 from pydantic import BaseModel
 from PIL import Image
+from loguru import logger
 
 from extractor.core.processors.llm import BaseLLMSimpleBlockProcessor, PromptData, BlockData
 
@@ -30,6 +33,83 @@ from extractor.core.schema.blocks import Block
 from extractor.core.schema.document import Document
 from extractor.core.schema.text import Line
 
+
+
+async def call_claude_subprocess(prompt: str, image_path: Optional[str] = None, 
+                                      timeout: int = 30, use_ultrathink: bool = False) -> str:
+    """
+    Call Claude CLI using proper subprocess with correct syntax.
+    
+    Args:
+        prompt: The prompt to send to Claude
+        image_path: Optional path to image file (will be included in prompt)
+        timeout: Timeout in seconds
+        use_ultrathink: Whether to prefix prompt with 'ultrathink:'
+        
+    Returns:
+        Claude's response as string
+    """
+    # Build the full prompt
+    full_prompt = prompt
+    if image_path and os.path.exists(image_path):
+        # Include image path in the prompt for Claude to analyze
+        full_prompt = f"Please analyze the image at {image_path}\n\n{prompt}"
+    
+    if use_ultrathink:
+        full_prompt = f"ultrathink: {full_prompt}"
+    
+    # Set up environment with proper PATH
+    env = os.environ.copy()
+    env["PATH"] = "/usr/bin:/bin:/usr/local/bin:/home/graham/.bun/bin:" + env.get("PATH", "")
+    env["BUN_INSTALL"] = "/home/graham/.bun"
+    
+    # Use correct claude -p syntax (NOT --print)
+    cmd = [
+        "/home/graham/.bun/bin/claude",
+        "-p",
+        "--dangerously-skip-permissions"
+    ]
+    
+    try:
+        # Create subprocess with proper stream handling
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=env
+        )
+        
+        # Send prompt and get response
+        stdout, stderr = await asyncio.wait_for(
+            proc.communicate(input=full_prompt.encode()),
+            timeout=timeout
+        )
+        
+        if proc.returncode == 0 and stdout:
+            return stdout.decode().strip()
+        else:
+            error_msg = stderr.decode() if stderr else "No error message"
+            logger.error(f"Claude subprocess failed: {error_msg}")
+            return ""
+            
+    except asyncio.TimeoutError:
+        logger.error(f"Claude subprocess timed out after {timeout}s")
+        if proc:
+            proc.terminate()
+            await proc.wait()
+        return ""
+    except Exception as e:
+        logger.error(f"Claude subprocess error: {e}")
+        return ""
+
+def call_claude_subprocess_sync(prompt: str, image_path: Optional[str] = None,
+                                    timeout: int = 30, use_ultrathink: bool = False) -> str:
+    """
+    Synchronous version of call_claude_subprocess.
+    """
+    import asyncio
+    return asyncio.run(call_claude_subprocess(prompt, image_path, timeout, use_ultrathink))
 
 class LLMInlineMathLinesProcessor(BaseLLMSimpleBlockProcessor):
     math_line_batch_size: Annotated[
@@ -175,15 +255,43 @@ analysis: The inline math in the lines is not in LaTeX format and is not surroun
 
         if not response or "corrected_lines" not in response:
             blocks[0].update_metadata(llm_error_count=1)
+            blocks[0].is_suspicious = True
+            blocks[0].suspicious_reason = "LLM response missing or malformed"
             return
 
         corrected_lines = response["corrected_lines"]
         balanced_math = all([line.count("<math") == line.count("</math>") for line in corrected_lines])
-        if any([
-            not corrected_lines,
-            len(corrected_lines) != len(blocks),
-            not balanced_math
-        ]):
+        
+        # Enhanced suspicious detection for inline math processing
+        suspicious_reasons = []
+        
+        if not corrected_lines:
+            suspicious_reasons.append("Empty response")
+        elif len(corrected_lines) != len(blocks):
+            suspicious_reasons.append(f"Line count mismatch: expected {len(blocks)}, got {len(corrected_lines)}")
+        elif not balanced_math:
+            suspicious_reasons.append("Unbalanced math tags")
+        
+        # Check for error messages
+        error_indicators = ["error", "failed", "cannot", "unable", "sorry"]
+        for line in corrected_lines:
+            line_lower = line.lower()
+            for indicator in error_indicators:
+                if indicator in line_lower and len(line) < 100:
+                    suspicious_reasons.append(f"LLM may have returned error: '{indicator}'")
+                    break
+        
+        # Check for gibberish
+        for i, line in enumerate(corrected_lines):
+            if len(line) > 0:
+                alpha_ratio = sum(1 for c in line if c.isalpha()) / len(line)
+                if alpha_ratio < 0.2:
+                    suspicious_reasons.append(f"Line {i+1} appears to be gibberish")
+        
+        # Set suspicious flag if any issues found
+        if suspicious_reasons:
+            blocks[0].is_suspicious = True
+            blocks[0].suspicious_reason = "; ".join(suspicious_reasons)
             blocks[0].update_metadata(llm_error_count=1)
             return
 

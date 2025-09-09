@@ -8,6 +8,8 @@ license = "GPL-3.0-or-later"
 keywords = [ "extraction", "document", "pdf", "docx", "pptx", "xml", "ocr", "ai", "table-detection", "multi-format",]
 dependencies = [
  "pillow>=10.1.0,<11.0.0",
+ #"pillow>=11.3.0",
+ "pdf2image>=1.16.0,<2",
  "pydantic>=2.4.2,<3",
  "pydantic-settings>=2.0.3,<3",
  "transformers>=4.45.2,<5",
@@ -19,8 +21,9 @@ dependencies = [
  "surya-ocr>=0.14.5,<0.15.0",
  "regex>=2024.4.28,<2025",
  "pdftext~=0.6.2",
- "markdownify>=0.13.1,<0.14",
+ "markdownify<0.13",
  "click>=8.1.7,<9",
+ "typer>=0.16.0",
  "markdown2>=2.5.2,<3",
  "filetype>=1.2.0,<2",
  "scikit-learn>=1.6.1,<2",
@@ -28,9 +31,8 @@ dependencies = [
  "anthropic>=0.56.0",
  "pre-commit>=4.2.0,<5",
  "openai>=1.65.2,<2",
- "litellm>=1.67.0,<2",
- "camelot-py>=0.11.0,<0.12",
- "cv2-tools",
+ # "litellm>=1.74.7",
+ "litellm @ file:///home/graham/workspace/experiments/litellm",
  "tree-sitter>=0.23.2",
  "asyncio>=3.4.3,<4",
  "json-repair>=0.44.1",
@@ -48,12 +50,38 @@ dependencies = [
  "xlsxwriter>=3.2.0,!=3.2.3",
  "defusedxml>=0.7.1",
  "aiohttp>=3.11.18",
- "typer>=0.16.0",
  "python-arango>=8.2.0",
  "redis>=6.2.0",
+ "structlog>=24.0.0",
+ "rich>=13.0.0",
+ "pytest-asyncio>=0.24.0",
  "opencv-python>=4.11.0.86",
  "pymupdf>=1.26.1",
- "weasyprint>=63.1",
+ "pandas>=2.0.0",
+ "tenacity>=9.1.2",
+ "pyperclip>=1.9.0",
+ "nest-asyncio>=1.6.0",
+ "docutils>=0.21.2",
+ "trafilatura>=2.0.0",
+ "ebooklib>=0.18",
+ "odfpy>=1.4.1",
+ "ijson>=3.4.0",
+ "jsonpath-ng>=1.7.0",
+ "aiofiles>=24.1.0",
+ "faiss-cpu>=1.11.0.post1",
+ "sentence-transformers>=5.0.0",
+ "python-louvain>=0.16",
+ "unidecode>=1.4.0",
+ "backoff>=2.2.1",
+ "matplotlib>=3.10.3",
+ "spacy>=3.8.7",
+ "flask>=3.1.1",
+ "flask-cors>=6.0.1",
+ "jsonpickle>=4.1.1",
+ "certainly @ file://localhost/home/graham/workspace/experiments/lean4",
+ "pdfplumber>=0.11.7",
+ "nomic>=3.5.3",
+ "camelot-py>=1.0.9",
 ]
 [[project.authors]]
 name = "Graham Anderson"
@@ -92,11 +120,20 @@ Repository = "https://github.com/grahama1970/extractor"
 Forked-From = "https://github.com/VikParuchuri/marker"
 
 [project.scripts]
-extractor-cli = "extractor.cli.main:app"
-extractor_single = "extractor.scripts.convert_single:convert_single_cli"
-extractor_chunk_convert = "extractor.scripts.chunk_convert:chunk_convert_cli"
-extractor_gui = "extractor.scripts.run_streamlit_app:streamlit_app_cli"
-extractor_server = "extractor.scripts.server:server_cli"
+extractor-cli = "extractor.cli.main:app"                     # legacy umbrella CLI (kept for compat)
+extractor_single = "extractor.core.scripts.convert_single:convert_single_cli"
+extractor_chunk_convert = "extractor.core.scripts.chunk_convert:chunk_convert_cli"
+extractor_gui = "extractor.core.scripts.run_streamlit_app:streamlit_app_cli"
+extractor_server = "extractor.core.scripts.server:server_cli"
+pdf-tools = "extractor.cli.pdf_tools:app"
+# Core pipeline entrypoints (flattened API)
+extract-pipeline = "extractor.pipeline.api:cli_main"
+extract-sections = "extractor.pipeline.api:cli_main"
+pipeline-validate-gold = "extractor.pipeline.tools.validate_gold_standard:app"
+# Use Typer apps as entrypoints so CLI flags are parsed correctly
+pipeline-compare-gold = "extractor.pipeline.tools.compare_to_gold:app"
+pipeline-run-and-validate = "extractor.pipeline.tools.run_and_validate:app"
+pipeline-quick-smoke = "extractor.pipeline.tools.quick_smoke:app"
 
 [tool.hatch.build]
 sources = [ "src",]
@@ -110,6 +147,11 @@ markers = [ "filename(name): specify the filename for the pdf_document fixture",
 filterwarnings = [ "ignore::Warning",]
 asyncio_mode = "auto"
 addopts = "    -v\n    --tb=short\n    --strict-markers\n    --json-report\n    --json-report-file=test-results.json\n    --json-report-summary\n"
+
+[tool.uv.workspace]
+members = [
+    "tmp/marker-test",
+]
 
 [tool.hatch.build.targets.sdist]
 include = [ "src/extractor", "src/extractor/core/scripts/*.sh", "src/extractor/core/scripts/*.html",]

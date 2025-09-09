@@ -1,61 +1,101 @@
+#!/usr/bin/env python3
 """
-Module: convert_single.py
-Description: Functions for convert single operations
-
-External Dependencies:
-- click: [Documentation URL]
-- marker: [Documentation URL]
-
-Sample Input:
->>> # Add specific examples based on module functionality
-
-Expected Output:
->>> # Add expected output examples
-
-Example Usage:
->>> # Add usage examples
+Marker conversion script for PDF extraction
+This is the script called by extract-pdf.md pipeline
 """
 
 import os
-
-os.environ["GRPC_VERBOSITY"] = "ERROR"
-os.environ["GLOG_minloglevel"] = "2"
-os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"  # Transformers uses .isin for a simple op, which is not supported on MPS
-
-import time
+import sys
+import json
 import click
+from pathlib import Path
 
+# Add the parent directory to the path so we can import from src
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
+
+from extractor.core.converters.pdf import PdfConverter
 from extractor.core.config.parser import ConfigParser
-from extractor.core.config.printer import CustomClickPrinter
-from extractor.core.logger import configure_logging
 from extractor.core.models import create_model_dict
-from extractor.core.output import save_output
-
-configure_logging()
 
 
-@click.command(cls=CustomClickPrinter, help="Convert a single PDF to markdown.")
-@click.argument("fpath", type=str)
 @ConfigParser.common_options
-def convert_single_cli(fpath: str, **kwargs):
-    models = create_model_dict()
-    start = time.time()
-    config_parser = ConfigParser(kwargs)
+@click.command()
+@click.argument("pdf_path", type=click.Path(exists=True))
+@click.option("--extract_fonts", is_flag=True, default=False, help="Extract font metrics for first span in each block")
+def main(pdf_path, **kwargs):
+    """Convert a single PDF file using marker."""
+    try:
+        # Create config parser
+        config_parser = ConfigParser(kwargs)
+        config = config_parser.generate_config_dict()
+        
+        # Set default output directory if not specified
+        if 'output_dir' not in kwargs or not kwargs['output_dir']:
+            kwargs['output_dir'] = '.'
+            
+        output_dir = kwargs['output_dir']
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Create models
+        print(f"Loading ML models...")
+        # Let models auto-detect device/dtype for better compatibility
+        models = create_model_dict()
+        
+        # Get processors
+        processors = config_parser.get_processors()
+        
+        # Create converter
+        print(f"Creating PDF converter...")
+        converter = PdfConverter(
+            config=config,
+            artifact_dict=models,
+            processor_list=processors,
+            renderer=config_parser.get_renderer(),
+            llm_service=config_parser.get_llm_service()
+        )
+        
+        # Convert PDF
+        print(f"Processing {pdf_path}...")
+        result = converter(pdf_path)
+        
+        # Extract font metrics if requested (currently limited by marker's JSON output)
+        if kwargs.get('extract_fonts', False):
+            print(f"Note: Font extraction requested but marker JSON output doesn't include font/span data")
+            print(f"Font data is only available in marker's internal Document object, not in JSON export")
+            
+            # Add metadata note about font extraction limitation
+            if hasattr(result, 'metadata'):
+                if not hasattr(result.metadata, 'update'):
+                    # Convert to dict if needed
+                    meta_dict = result.metadata if isinstance(result.metadata, dict) else {}
+                    meta_dict['font_extraction_note'] = "Font data not available in marker JSON output - only in internal Document object"
+                    result.metadata = meta_dict
+        
+        # Save result
+        pdf_name = Path(pdf_path).stem
+        output_format = kwargs.get('output_format', 'json')
+        
+        if output_format == 'json':
+            output_file = os.path.join(output_dir, f"{pdf_name}.json")
+            with open(output_file, 'w') as f:
+                # Convert Pydantic model to JSON
+                if hasattr(result, 'model_dump_json'):
+                    f.write(result.model_dump_json(indent=2))
+                else:
+                    f.write(json.dumps(result, indent=2))
+        else:
+            output_file = os.path.join(output_dir, f"{pdf_name}.{output_format}")
+            with open(output_file, 'w') as f:
+                f.write(str(result))
+                
+        print(f"✓ Saved to {output_file}")
+        
+    except Exception as e:
+        print(f"Error: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
 
-    converter_cls = config_parser.get_converter_cls()
-    converter = converter_cls(
-        config=config_parser.generate_config_dict(),
-        artifact_dict=models,
-        processor_list=config_parser.get_processors(),
-        renderer=config_parser.get_renderer(),
-        llm_service=config_parser.get_llm_service()
-    )
-    rendered = converter(fpath)
-    import pdb; pdb.set_trace()
-    out_folder = config_parser.get_output_folder(fpath)
-    with open("/home/graham/workspace/experiments/extractor/output_path.txt", "w") as f:
-        f.write(out_folder)
-    save_output(rendered, out_folder, config_parser.get_base_filename(fpath))
 
-    print(f"Saved markdown to {out_folder}")
-    print(f"Total time: {time.time() - start}")
+if __name__ == "__main__":
+    main()
