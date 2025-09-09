@@ -44,10 +44,11 @@ async function main() {
   const after = await page.$eval('[data-testid="hud"]', el => { const b=el.getBoundingClientRect(); return {x:b.left,y:b.top}; });
   if (Math.hypot(after.x - before.x, after.y - before.y) < 60) throw new Error('HUD position did not persist');
 
-  // 3) Draw on page 1 and page 2, then verify persistence after reload
+  // 3) Draw on page 1 and page 2 (arm Draw mode), then verify persistence after reload
   const overlaySel = 'div.relative.inline-block > div.absolute.inset-0';
   await page.waitForSelector(overlaySel, { timeout: 5000 });
   const rect = await page.$eval(overlaySel, el => { const r=el.getBoundingClientRect(); return {x:r.left,y:r.top,w:r.width,h:r.height};});
+  await page.click('[data-testid="hud-new"]');
   await page.mouse.move(rect.x + rect.w*0.25, rect.y + rect.h*0.25);
   await page.mouse.down();
   await page.mouse.move(rect.x + rect.w*0.55, rect.y + rect.h*0.38, { steps: 8 });
@@ -58,6 +59,7 @@ async function main() {
   await page.keyboard.press(']');
   await wait(600);
   const rect2 = await page.$eval(overlaySel, el => { const r=el.getBoundingClientRect(); return {x:r.left,y:r.top,w:r.width,h:r.height};});
+  await page.click('[data-testid="hud-new"]');
   await page.mouse.move(rect2.x + rect2.w*0.30, rect2.y + rect2.h*0.30);
   await page.mouse.down();
   await page.mouse.move(rect2.x + rect2.w*0.62, rect2.y + rect2.h*0.62, { steps: 8 });

@@ -623,7 +623,7 @@ const ClassicLayout = () => {
                   </DialogFooter>
                 </DialogContent>
               </Dialog>
-              <Button size="sm" variant="outline" title="New (N)" onClick={() => setDrawArmed(true)}>
+              <Button data-testid="hud-new" size="sm" variant="outline" title="New (N)" onClick={() => setDrawArmed(true)}>
                 <Crosshair className="h-4 w-4" />
               </Button>
               <Button
@@ -635,6 +635,7 @@ const ClassicLayout = () => {
               >
                 {hudMode === 'attach' ? 'Attached' : 'Free'}
               </Button>
+              <Button size="sm" variant="outline" title="Help (?)" onClick={()=>setHelpOpen(true)}>?</Button>
               <div className="text-xs text-muted-foreground">Type:</div>
               <Button size="sm" variant={defaultNewType === "Section" ? "default" : "outline"} onClick={() => {
                 setDefaultNewType("Section");
@@ -825,6 +826,24 @@ const ClassicLayout = () => {
             <Button variant="outline" onClick={formatJson}>Format</Button>
             <Button variant="outline" onClick={() => navigator.clipboard.writeText(jsonText)}>Copy</Button>
             <Button onClick={() => setJsonOpen(false)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      {/* Help Overlay */}
+      <Dialog open={helpOpen} onOpenChange={setHelpOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Shortcuts & Modes</DialogTitle>
+            <DialogDescription>Quick reference for annotating.</DialogDescription>
+          </DialogHeader>
+          <div className="text-sm space-y-2">
+            <p><b>N</b>: New (arm Draw mode) · <b>ESC</b>: cancel draw · <b>Shift</b>: constrain 4:3</p>
+            <p><b>[</b> / <b>]</b>: page prev/next · <b>D</b>/<b>Ctrl+D</b>: duplicate · <b>Delete</b>: remove</p>
+            <p><b>H</b>: toggle HUD attach/free · <b>R</b>: reset HUD position</p>
+            <p>Thumbs: Left rail / Bottom filmstrip / Off via selector</p>
+          </div>
+          <DialogFooter>
+            <Button onClick={()=>setHelpOpen(false)}>Close</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
