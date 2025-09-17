@@ -33,18 +33,18 @@ from extractor.core.services.utils.log_utils import log_api_request, log_api_res
 from typing import Annotated, List, Dict, Any, Optional
 
 
-
-async def call_claude_subprocess(prompt: str, image_path: Optional[str] = None, 
-                                      timeout: int = 30, use_ultrathink: bool = False) -> str:
+async def call_claude_subprocess(
+    prompt: str, image_path: Optional[str] = None, timeout: int = 30, use_ultrathink: bool = False
+) -> str:
     """
     Call Claude CLI using proper subprocess with correct syntax.
-    
+
     Args:
         prompt: The prompt to send to Claude
         image_path: Optional path to image file (will be included in prompt)
         timeout: Timeout in seconds
         use_ultrathink: Whether to prefix prompt with 'ultrathink:'
-        
+
     Returns:
         Claude's response as string
     """
@@ -53,22 +53,18 @@ async def call_claude_subprocess(prompt: str, image_path: Optional[str] = None,
     if image_path and os.path.exists(image_path):
         # Include image path in the prompt for Claude to analyze
         full_prompt = f"Please analyze the image at {image_path}\n\n{prompt}"
-    
+
     if use_ultrathink:
         full_prompt = f"ultrathink: {full_prompt}"
-    
+
     # Set up environment with proper PATH
     env = os.environ.copy()
     env["PATH"] = "/usr/bin:/bin:/usr/local/bin:/home/graham/.bun/bin:" + env.get("PATH", "")
     env["BUN_INSTALL"] = "/home/graham/.bun"
-    
+
     # Use correct claude -p syntax (NOT --print)
-    cmd = [
-        "/home/graham/.bun/bin/claude",
-        "-p",
-        "--dangerously-skip-permissions"
-    ]
-    
+    cmd = ["/home/graham/.bun/bin/claude", "-p", "--dangerously-skip-permissions"]
+
     try:
         # Create subprocess with proper stream handling
         proc = await asyncio.create_subprocess_exec(
@@ -76,22 +72,21 @@ async def call_claude_subprocess(prompt: str, image_path: Optional[str] = None,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            env=env
+            env=env,
         )
-        
+
         # Send prompt and get response
         stdout, stderr = await asyncio.wait_for(
-            proc.communicate(input=full_prompt.encode()),
-            timeout=timeout
+            proc.communicate(input=full_prompt.encode()), timeout=timeout
         )
-        
+
         if proc.returncode == 0 and stdout:
             return stdout.decode().strip()
         else:
             error_msg = stderr.decode() if stderr else "No error message"
             logger.error(f"Claude subprocess failed: {error_msg}")
             return ""
-            
+
     except asyncio.TimeoutError:
         logger.error(f"Claude subprocess timed out after {timeout}s")
         if proc:
@@ -102,24 +97,28 @@ async def call_claude_subprocess(prompt: str, image_path: Optional[str] = None,
         logger.error(f"Claude subprocess error: {e}")
         return ""
 
-def call_claude_subprocess_sync(prompt: str, image_path: Optional[str] = None,
-                                    timeout: int = 30, use_ultrathink: bool = False) -> str:
+
+def call_claude_subprocess_sync(
+    prompt: str, image_path: Optional[str] = None, timeout: int = 30, use_ultrathink: bool = False
+) -> str:
     """
     Synchronous version of call_claude_subprocess.
     """
     import asyncio
+
     return asyncio.run(call_claude_subprocess(prompt, image_path, timeout, use_ultrathink))
 
+
 class LLMImageDescriptionProcessor(BaseLLMSimpleBlockProcessor):
-    block_types = (BlockTypes.Picture, BlockTypes.Figure,)
-    extract_images: Annotated[
-        bool,
-        "Extract images from the document."
-    ] = True
+    block_types = (
+        BlockTypes.Picture,
+        BlockTypes.Figure,
+    )
+    extract_images: Annotated[bool, "Extract images from the document."] = True
     image_description_prompt: Annotated[
         str,
         "The prompt to use for generating image descriptions.",
-        "Default is a string containing the prompt."
+        "Default is a string containing the prompt.",
     ] = """You are a document analysis expert who specializes in creating text descriptions for images.
 You will receive an image of a picture or figure.  Your job will be to create a short description of the image.
 **Instructions:**
@@ -141,20 +140,15 @@ In this figure, a bar chart titled "Fruit Preference Survey" is showing the numb
 ```
 """
     use_async_batch: Annotated[
-        bool,
-        "Whether to use async batch processing for image descriptions."
+        bool, "Whether to use async batch processing for image descriptions."
     ] = True
-    max_batch_size: Annotated[
-        int,
-        "Maximum number of images to process in a single batch."
-    ] = 5
+    max_batch_size: Annotated[int, "Maximum number of images to process in a single batch."] = 5
     detail_level: Annotated[
-        str,
-        "Level of detail in the image descriptions: 'brief', 'standard', or 'detailed'."
+        str, "Level of detail in the image descriptions: 'brief', 'standard', or 'detailed'."
     ] = "standard"
     litellm_model: Annotated[
         Optional[str],
-        "The LiteLLM model to use in provider/model format. If None, will use the LiteLLM service model."
+        "The LiteLLM model to use in provider/model format. If None, will use the LiteLLM service model.",
     ] = None
 
     def inference_blocks(self, document: Document) -> List[BlockData]:
@@ -174,19 +168,26 @@ In this figure, a bar chart titled "Fruit Preference Survey" is showing the numb
             elif self.detail_level == "detailed":
                 detail_instruction = "Provide a detailed description including all visible elements and their relationships."
 
-            modified_prompt = self.image_description_prompt.replace("{raw_text}", block.raw_text(document))
+            modified_prompt = self.image_description_prompt.replace(
+                "{raw_text}", block.raw_text(document)
+            )
             if detail_instruction:
-                modified_prompt = modified_prompt.replace("3. Output a faithful description", f"3. {detail_instruction} Output a faithful description")
+                modified_prompt = modified_prompt.replace(
+                    "3. Output a faithful description",
+                    f"3. {detail_instruction} Output a faithful description",
+                )
 
             image = self.extract_image(document, block)
 
-            prompt_data.append({
-                "prompt": modified_prompt,
-                "image": image,
-                "block": block,
-                "schema": ImageSchema,
-                "page": block_data["page"]
-            })
+            prompt_data.append(
+                {
+                    "prompt": modified_prompt,
+                    "image": image,
+                    "block": block,
+                    "schema": ImageSchema,
+                    "page": block_data["page"],
+                }
+            )
 
         return prompt_data
 
@@ -198,10 +199,7 @@ In this figure, a bar chart titled "Fruit Preference Survey" is showing the numb
         inference_blocks = []
         for page in document.pages:
             for block in page.contained_blocks(document, self.block_types):
-                inference_blocks.append({
-                    "page": page,
-                    "block": block
-                })
+                inference_blocks.append({"page": page, "block": block})
 
         if not inference_blocks:
             return
@@ -211,7 +209,9 @@ In this figure, a bar chart titled "Fruit Preference Survey" is showing the numb
             # Ensure we have a LiteLLM service
             llm_service = document.llm_service
             if not isinstance(llm_service, LiteLLMService):
-                print("Warning: Async batch processing requires LiteLLMService. Falling back to sequential processing.")
+                print(
+                    "Warning: Async batch processing requires LiteLLMService. Falling back to sequential processing."
+                )
                 self._process_sequentially(document, inference_blocks)
                 return
 
@@ -220,11 +220,15 @@ In this figure, a bar chart titled "Fruit Preference Survey" is showing the numb
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
                 try:
-                    loop.run_until_complete(self._process_async_batch(document, inference_blocks, llm_service))
+                    loop.run_until_complete(
+                        self._process_async_batch(document, inference_blocks, llm_service)
+                    )
                 finally:
                     loop.close()
             except Exception as e:
-                print(f"Error in async batch processing: {e}. Falling back to sequential processing.")
+                print(
+                    f"Error in async batch processing: {e}. Falling back to sequential processing."
+                )
                 self._process_sequentially(document, inference_blocks)
         else:
             # Process sequentially
@@ -236,21 +240,22 @@ In this figure, a bar chart titled "Fruit Preference Survey" is showing the numb
         if total_blocks == 0:
             return
 
-        with tqdm(total=total_blocks, desc="Processing images", disable=getattr(self, "disable_tqdm", False)) as pbar:
+        with tqdm(
+            total=total_blocks,
+            desc="Processing images",
+            disable=getattr(self, "disable_tqdm", False),
+        ) as pbar:
             for block_data in blocks:
                 block = block_data["block"]
                 page = block_data["page"]
 
-                prompt = self.image_description_prompt.replace("{raw_text}", block.raw_text(document))
+                prompt = self.image_description_prompt.replace(
+                    "{raw_text}", block.raw_text(document)
+                )
                 image = self.extract_image(document, block)
 
                 try:
-                    response = document.llm_service(
-                        prompt,
-                        image,
-                        block,
-                        ImageSchema
-                    )
+                    response = document.llm_service(prompt, image, block, ImageSchema)
                     self.rewrite_block(response, {"block": block}, document)
                 except Exception as e:
                     print(f"Error processing image: {e}")
@@ -258,7 +263,9 @@ In this figure, a bar chart titled "Fruit Preference Survey" is showing the numb
 
                 pbar.update(1)
 
-    async def _process_async_batch(self, document: Document, blocks: List[dict], llm_service: LiteLLMService):
+    async def _process_async_batch(
+        self, document: Document, blocks: List[dict], llm_service: LiteLLMService
+    ):
         """Process images in async batches using LiteLLM's acompletion feature."""
         total_blocks = len(blocks)
 
@@ -277,7 +284,7 @@ In this figure, a bar chart titled "Fruit Preference Survey" is showing the numb
             messages = [
                 {
                     "role": "system",
-                    "content": "You are a helpful assistant that always responds with valid JSON. Your response must be compatible with the provided schema and contain the word 'json' to ensure proper formatting."
+                    "content": "You are a helpful assistant that always responds with valid JSON. Your response must be compatible with the provided schema and contain the word 'json' to ensure proper formatting.",
                 },
                 {
                     "role": "user",
@@ -285,21 +292,27 @@ In this figure, a bar chart titled "Fruit Preference Survey" is showing the numb
                         *image_data,
                         {"type": "text", "text": prompt},
                     ],
-                }
+                },
             ]
 
-            all_prompts.append({
-                "messages": messages,
-                "block": block,
-            })
+            all_prompts.append(
+                {
+                    "messages": messages,
+                    "block": block,
+                }
+            )
 
         # Process in batches
         batch_size = min(self.max_batch_size, total_blocks)
         results = {}
 
-        with tqdm(total=total_blocks, desc="Processing images", disable=getattr(self, "disable_tqdm", False)) as pbar:
+        with tqdm(
+            total=total_blocks,
+            desc="Processing images",
+            disable=getattr(self, "disable_tqdm", False),
+        ) as pbar:
             for i in range(0, total_blocks, batch_size):
-                batch = all_prompts[i:i+batch_size]
+                batch = all_prompts[i : i + batch_size]
                 batch_tasks = []
 
                 for item in batch:
@@ -337,7 +350,10 @@ In this figure, a bar chart titled "Fruit Preference Survey" is showing the numb
                             try:
                                 # Extract and process response
                                 response_text = response.choices[0].message.content
-                                from extractor.core.services.utils.json_utils import clean_json_string
+                                from extractor.core.services.utils.json_utils import (
+                                    clean_json_string,
+                                )
+
                                 json_data = clean_json_string(response_text, return_dict=True)
 
                                 # Update the block with the description
@@ -347,7 +363,7 @@ In this figure, a bar chart titled "Fruit Preference Survey" is showing the numb
                                     if hasattr(response, "usage") and response.usage:
                                         block.update_metadata(
                                             llm_tokens_used=response.usage.total_tokens,
-                                            llm_request_count=1
+                                            llm_request_count=1,
                                         )
                             except Exception as e:
                                 print(f"Error processing response: {e}")
@@ -380,6 +396,7 @@ In this figure, a bar chart titled "Fruit Preference Survey" is showing the numb
             return
 
         block.description = image_description
+
 
 class ImageSchema(BaseModel):
     image_description: str

@@ -1,0 +1,47 @@
+name: CI - Contracts and Smokes
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  contracts-and-smokes:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up uv and Python
+        uses: astral-sh/setup-uv@v4
+        with:
+          python-version: '3.12'
+
+      - name: Sync dependencies (default + dev, locked)
+        run: uv sync --group dev --frozen
+
+      - name: Prompt lint
+        run: uv run make prompt-lint
+
+      - name: Run contract tests
+        run: uv run pytest -q tests/contracts/test_contracts_models.py
+
+      - name: Run Stage-01 smoke (artifacts)
+        run: uv run make smoke-01
+
+      - name: Gamified contracts & smokes
+        run: uv run make smoke-gamified-all
+
+      - name: Stage 04–06 smokes
+        run: |
+          uv run make smoke-04
+          uv run make smoke-05
+          uv run make smoke-06
+
+      - name: Stage 10/11/12/14 smokes
+        run: |
+          uv run make smoke-10
+          uv run make smoke-11
+          uv run make smoke-12
+          uv run make smoke-14

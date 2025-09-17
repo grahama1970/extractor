@@ -23,4 +23,3 @@ class PageHeader(Block):
     block_description: str = "Text that appears at the top of a page, like a page title."
     replace_output_newlines: bool = True
     ignore_for_output: bool = True
-

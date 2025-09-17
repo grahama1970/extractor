@@ -24,8 +24,16 @@ from docutils import io as docutils_io
 from loguru import logger
 
 from extractor.core.schema.unified_document import (
-    UnifiedDocument, BlockType, SourceType, BaseBlock, TableBlock,
-    ImageBlock, BlockMetadata, DocumentMetadata, HierarchyNode, TableCell
+    UnifiedDocument,
+    BlockType,
+    SourceType,
+    BaseBlock,
+    TableBlock,
+    ImageBlock,
+    BlockMetadata,
+    DocumentMetadata,
+    HierarchyNode,
+    TableCell,
 )
 
 
@@ -35,9 +43,15 @@ class RSTProvider:
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         self.config = config or {}
         self.block_counter = 0
-        # Ensure docutils directives/roles are loaded
-        directives.setup()
-        roles.setup()
+        # Ensure docutils directives/roles are loaded when available
+        try:
+            directives.setup()
+        except AttributeError:
+            pass
+        try:
+            roles.setup()
+        except AttributeError:
+            pass
 
     # ------------------------------------------------------------------
     # Public API
@@ -63,9 +77,9 @@ class RSTProvider:
                 from docutils.utils import new_document
                 from docutils.frontend import OptionParser
                 from docutils.parsers.rst import Parser
-                
+
                 settings = OptionParser(components=(Parser,)).get_default_values()
-                doctree = new_document('<rst-doc>', settings=settings)
+                doctree = new_document("<rst-doc>", settings=settings)
                 # Add the content as a simple paragraph
                 para = nodes.paragraph()
                 para += nodes.Text(f.read())
@@ -164,9 +178,8 @@ class RSTProvider:
                     id=self._generate_block_id(),
                     content=node.astext(),
                     metadata=BlockMetadata(
-                        attributes={"language": node.get("language") or None},
-                        confidence=1.0
-                    )
+                        attributes={"language": node.get("language") or None}, confidence=1.0
+                    ),
                 )
             )
             return
@@ -265,9 +278,7 @@ class RSTProvider:
 
     def _extract_full_text(self, blocks: List[BaseBlock]) -> str:
         return "\n".join(
-            b.content if isinstance(b.content, str) else ""
-            for b in blocks
-            if hasattr(b, "content")
+            b.content if isinstance(b.content, str) else "" for b in blocks if hasattr(b, "content")
         )
 
 

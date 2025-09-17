@@ -67,9 +67,7 @@ def truncate_large_value(
             half_len = max_str_len // 2
             if half_len == 0 and max_str_len > 0:
                 half_len = 1
-            return (
-                f"{value[:half_len]}...{value[-half_len:]}" if half_len > 0 else "..."
-            )
+            return f"{value[:half_len]}...{value[-half_len:]}" if half_len > 0 else "..."
         else:
             return value
 
@@ -83,10 +81,20 @@ def truncate_large_value(
                 return "[<0 elements>]"
         else:
             # If list elements are dicts, truncate them recursively
-            return [truncate_large_value(item, max_str_len, max_list_elements_shown) if isinstance(item, dict) else item for item in value]
-    elif isinstance(value, dict): # Add explicit check for dict
-            # Recursively truncate values within dictionaries
-            return {k: truncate_large_value(v, max_str_len, max_list_elements_shown) for k, v in value.items()}
+            return [
+                (
+                    truncate_large_value(item, max_str_len, max_list_elements_shown)
+                    if isinstance(item, dict)
+                    else item
+                )
+                for item in value
+            ]
+    elif isinstance(value, dict):  # Add explicit check for dict
+        # Recursively truncate values within dictionaries
+        return {
+            k: truncate_large_value(v, max_str_len, max_list_elements_shown)
+            for k, v in value.items()
+        }
     else:
         # Handle other types (int, float, bool, None, etc.) - return as is
         return value
@@ -146,6 +154,7 @@ def log_api_request(service_name: str, request_data: Dict[str, Any], truncate: b
 
     logger.debug(f"{service_name} API Request: {request_data_to_log}")
 
+
 def log_api_response(service_name: str, response_data: Any, truncate: bool = True) -> None:
     """Log API response details.
 
@@ -162,7 +171,10 @@ def log_api_response(service_name: str, response_data: Any, truncate: bool = Tru
 
     logger.debug(f"{service_name} API Response: {response_data_to_log}")
 
-def log_api_error(service_name: str, error: Exception, request_data: Optional[Dict[str, Any]] = None) -> None:
+
+def log_api_error(
+    service_name: str, error: Exception, request_data: Optional[Dict[str, Any]] = None
+) -> None:
     """Log API error details.
 
     Args:
@@ -177,6 +189,74 @@ def log_api_error(service_name: str, error: Exception, request_data: Optional[Di
         error_message += f" (Request: {truncated_data})"
 
     logger.error(error_message)
+
+
+# -----------------------------------------------------------------------------
+# Data-URL sanitization helpers (shared by utils that need to return safe payloads)
+# -----------------------------------------------------------------------------
+def sanitize_data_url(value: Any, mode: str = "redact", max_str_len: int = 48) -> Any:
+    """Sanitize a data:image;base64 URL according to the given mode.
+
+    Modes:
+    - 'none':     return unchanged
+    - 'redact':   keep header; replace payload with '<redacted>'
+    - 'hash':     replace entire data URL with '<data-url sha256=... bytes≈N>'
+    - 'truncate': keep header and use truncate_large_value() on the full string
+    """
+    if not isinstance(value, str):
+        return value
+    m = BASE64_IMAGE_PATTERN.match(value)
+    if not m:
+        return value
+    header = m.group(1)
+    data = value[len(header) :]
+    mode_l = (mode or "redact").lower()
+    if mode_l == "none":
+        return value
+    if mode_l == "hash":
+        try:
+            import hashlib
+
+            sha = hashlib.sha256(data.encode("utf-8", "ignore")).hexdigest()
+            approx = int(len(data) * 3 / 4)
+            return f"<data-url sha256={sha} bytes≈{approx}>"
+        except Exception:
+            return "<data-url sha256=error>"
+    if mode_l == "truncate":
+        return truncate_large_value(value, max_str_len=max_str_len)
+    # default = redact
+    return header + "<redacted>"
+
+
+def sanitize_messages_for_return(messages: List[Dict[str, Any]], mode: str = "redact", max_str_len: int = 48) -> List[Dict[str, Any]]:
+    """Return a sanitized shallow copy of OpenAI-style messages.
+
+    Only image_url parts are sanitized; other parts are kept as-is.
+    """
+    mode_l = (mode or "redact").lower()
+    if mode_l == "none":
+        return messages
+    out: List[Dict[str, Any]] = []
+    for msg in messages:
+        if not isinstance(msg, dict):
+            out.append(msg)
+            continue
+        role = msg.get("role")
+        content = msg.get("content")
+        if isinstance(content, list):
+            parts = []
+            for part in content:
+                if isinstance(part, dict) and part.get("type") == "image_url":
+                    img = dict(part.get("image_url") or {})
+                    if "url" in img:
+                        img["url"] = sanitize_data_url(img.get("url"), mode_l, max_str_len)
+                    parts.append({"type": "image_url", "image_url": img})
+                else:
+                    parts.append(part)
+            out.append({"role": role, "content": parts})
+        else:
+            out.append(msg)
+    return out
 
 
 if __name__ == "__main__":

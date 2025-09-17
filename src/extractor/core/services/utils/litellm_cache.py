@@ -37,6 +37,7 @@ import litellm
 import os
 import redis
 from dotenv import load_dotenv  # Import dotenv for environment variable loading
+
 # from litellm.caching import Cache, Type  # Import Cache and Type
 import sys  # Import sys for exit codes
 from loguru import logger
@@ -56,6 +57,7 @@ except ImportError:
     def truncate_large_value(value: Any, *args: Any, **kwargs: Any) -> Any:
         return value
 
+
 # load_env_file() # Removed - Docker Compose handles .env loading via env_file
 load_dotenv()
 
@@ -63,9 +65,7 @@ load_dotenv()
 def initialize_litellm_cache() -> None:
     redis_host = os.getenv("REDIS_HOST", "localhost")
     redis_port = int(os.getenv("REDIS_PORT", 6379))
-    redis_password = os.getenv(
-        "REDIS_PASSWORD", None
-    )  # Assuming password might be needed
+    redis_password = os.getenv("REDIS_PASSWORD", None)  # Assuming password might be needed
 
     try:
         logger.debug(
@@ -82,9 +82,7 @@ def initialize_litellm_cache() -> None:
             decode_responses=True,  # Added decode_responses for easier debugging if needed
         )
         if not test_redis.ping():
-            raise ConnectionError(
-                f"Redis is not responding at {redis_host}:{redis_port}."
-            )
+            raise ConnectionError(f"Redis is not responding at {redis_host}:{redis_port}.")
 
         # Verify Redis is empty or log existing keys
         keys = test_redis.keys("*")
@@ -132,9 +130,7 @@ def initialize_litellm_cache() -> None:
             logger.warning(f"Redis test write/read failed: {e}")
 
     except (redis.ConnectionError, redis.TimeoutError) as e:
-        logger.warning(
-            f"⚠️ Redis connection failed: {e}. Falling back to in-memory caching."
-        )
+        logger.warning(f"⚠️ Redis connection failed: {e}. Falling back to in-memory caching.")
         # Fall back to in-memory caching if Redis is unavailable
         logger.debug("Configuring in-memory cache fallback...")
         litellm.cache = LiteLLMCache(type=LiteLLMCacheType.LOCAL)  # Use Enum/Type
@@ -173,9 +169,7 @@ def test_litellm_cache() -> Tuple[bool, Dict[str, Optional[bool]]]:
         )
         usage1 = getattr(response1, "usage", "N/A")
         hidden_params1 = getattr(response1, "_hidden_params", {})
-        cache_hit1 = hidden_params1.get(
-            "cache_hit"
-        )  # Could be None if not hit or feature disabled
+        cache_hit1 = hidden_params1.get("cache_hit")  # Could be None if not hit or feature disabled
         cache_details["cache_hit1"] = cache_hit1
         logger.info(f"First call usage: {usage1}")
         logger.info(f"Response 1: Cache hit: {cache_hit1}")
@@ -232,9 +226,7 @@ if __name__ == "__main__":
 
     except Exception as e:
         tests_failed_count += 1  # Count exception as failure
-        logger.error(
-            f" Test 'cache_hit_miss': FAILED due to exception during test execution."
-        )
+        logger.error(f" Test 'cache_hit_miss': FAILED due to exception during test execution.")
         logger.error(f"   Exception: {e}", exc_info=True)
 
     # --- Report validation status ---

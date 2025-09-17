@@ -28,10 +28,10 @@ from pdftext.schema import Reference
 class ImageProvider(BaseProvider):
     def __init__(self, filepath: str, config: Optional[Dict[str, Any]] = None):
         super().__init__(filepath, config)
-        
+
         # Open image and detect if it's multi-page (TIFF, GIF, etc.)
         self.image = Image.open(filepath)
-        self.image_count = getattr(self.image, 'n_frames', 1)
+        self.image_count = getattr(self.image, "n_frames", 1)
         self.page_lines: ProviderPageLines = {i: [] for i in range(self.image_count)}
 
         # Convert to list for proper type checking
@@ -51,7 +51,7 @@ class ImageProvider(BaseProvider):
         return self
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
-        if hasattr(self, 'image') and self.image:
+        if hasattr(self, "image") and self.image:
             self.image.close()
 
     def get_images(self, idxs: List[int], dpi: int) -> List[Image.Image]:

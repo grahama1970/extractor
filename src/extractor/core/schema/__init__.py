@@ -38,6 +38,7 @@ class BlockTypes(str, Enum):
 # Define ProcessorType here alongside BlockTypes
 class ProcessorType(Enum):
     """Defines the types of processors available in the pipeline."""
+
     ANNOTATION_LEARNING = "annotation_learning"
     MARKER_EXTRACTION = "marker_extraction"
     TEXT_CLEANING = "text_cleaning"

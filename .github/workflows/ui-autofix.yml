@@ -1,0 +1,82 @@
+name: UI Autofix (CDP/Puppeteer)
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  ui-autofix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+
+      - name: Install root deps
+        run: npm ci
+
+      - name: Install prototype deps
+        run: npm ci
+        working-directory: prototypes/tabbed/html
+
+      - name: Start Vite dev server (8080)
+        run: |
+          nohup npm run dev >/tmp/vite_dev.log 2>&1 &
+        working-directory: prototypes/tabbed/html
+
+      - name: Wait for dev server
+        run: |
+          timeout 90s bash -lc 'until curl -sf http://127.0.0.1:8080/main >/dev/null; do sleep 1; done'
+
+      - name: UI smoke
+        id: smoke1
+        run: |
+          BASE_URL=http://127.0.0.1:8080 \
+          node scripts/smokes/ui_extract_load.mjs
+        continue-on-error: true
+
+      - name: Attempt autofix (if smoke failed)
+        if: steps.smoke1.outcome == 'failure'
+        run: |
+          BASE_URL=http://127.0.0.1:8080 \
+          node scripts/tools/ux_autofix_overlay.mjs || true
+
+      - name: Rebuild (after autofix)
+        if: steps.smoke1.outcome == 'failure'
+        run: |
+          npm run build
+        working-directory: prototypes/tabbed/html
+
+      - name: Restart Vite dev server
+        if: steps.smoke1.outcome == 'failure'
+        run: |
+          pkill -f "vite" || true
+          nohup npm run dev >/tmp/vite_dev_2.log 2>&1 &
+        working-directory: prototypes/tabbed/html
+
+      - name: Wait for dev server again
+        if: steps.smoke1.outcome == 'failure'
+        run: |
+          timeout 90s bash -lc 'until curl -sf http://127.0.0.1:8080/main >/dev/null; do sleep 1; done'
+
+      - name: UI smoke (retry)
+        if: steps.smoke1.outcome == 'failure'
+        run: |
+          BASE_URL=http://127.0.0.1:8080 \
+          node scripts/smokes/ui_extract_load.mjs
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-autofix-artifacts
+          path: |
+            scripts/artifacts/**
+            /tmp/vite_dev*.log
+          if-no-files-found: ignore
+

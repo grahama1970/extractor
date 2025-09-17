@@ -96,7 +96,8 @@ def run_mm(image: Optional[str], model: Optional[str], *, prompt: str = "Describ
     ]
 
     resp = completion(model=model_id, messages=messages, temperature=temperature, max_tokens=max_tokens)
-    return resp.choices[0].message.content
+    from extractor.pipeline.utils.litellm_response_utils import extract_content
+    return extract_content(resp)
 
 # ---------- Typer CLI ----------
 

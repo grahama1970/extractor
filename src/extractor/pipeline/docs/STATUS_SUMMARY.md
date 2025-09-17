@@ -49,7 +49,7 @@ The agent requires network access and env pass-through. The user updated `~/.cod
   - `approval = "on-request"` (or `"never"`)
   - `sandbox = "workspace-write"`
   - `inherit_env = true`
-  - `env_allowlist` includes: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OLLAMA_BASE_URL`, `OLLAMA_API_KEY`, `LITELLM_MODEL`, `LITELLM_DEFAULT_MODEL`, `LITELLM_SMALL_MODEL`, `ARANGO_HOST`, `ARANGO_PORT`, `ARANGO_USER`, `ARANGO_PASSWORD`, `ARANGO_DATABASE`, `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`, `VIRTUAL_ENV`, `PATH`, `PYTHONPATH`.
+  - `env_allowlist` includes: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OLLAMA_BASE_URL`, `OLLAMA_API_KEY`, `LITELLM_MODEL`, `LITELLM_DEFAULT_MODEL`, `DEFAULT_LITELLM_MODEL`, `LITELLM_SMALL_MODEL`, `ARANGO_HOST`, `ARANGO_PORT`, `ARANGO_USER`, `ARANGO_PASSWORD`, `ARANGO_DATABASE`, `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`, `VIRTUAL_ENV`, `PATH`, `PYTHONPATH`.
 - `[timeouts]`: `timeout_sec = 900`, `idle_timeout_sec = 0`
 - `[policies]`: `allow_network = true`
 

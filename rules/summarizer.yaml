@@ -1,0 +1,8 @@
+lengths:
+  short: 3
+  medium: 5
+  long: 8
+style:
+  bullets: true
+  hedges_banned: true
+

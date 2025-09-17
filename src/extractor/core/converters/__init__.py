@@ -51,11 +51,11 @@ class BaseConverter:
 
         resolved_kwargs = {}
         for param_name, param in parameters.items():
-            if param_name == 'self':
+            if param_name == "self":
                 continue
-            elif param_name == 'config':
+            elif param_name == "config":
                 resolved_kwargs[param_name] = self.config
-            elif param_name == 'llm_service':
+            elif param_name == "llm_service":
                 resolved_kwargs[param_name] = self.llm_service
             elif param.name in self.artifact_dict:
                 resolved_kwargs[param_name] = self.artifact_dict[param_name]
@@ -72,18 +72,26 @@ class BaseConverter:
 
         return cls(**resolved_kwargs)
 
-    def initialize_processors(self, processor_cls_lst: List[Type[BaseProcessor]]) -> List[BaseProcessor]:
+    def initialize_processors(
+        self, processor_cls_lst: List[Type[BaseProcessor]]
+    ) -> List[BaseProcessor]:
         processors = []
         for processor_cls in processor_cls_lst:
             processors.append(self.resolve_dependencies(processor_cls))
 
-        simple_llm_processors = [p for p in processors if issubclass(type(p), BaseLLMSimpleBlockProcessor)]
-        other_processors = [p for p in processors if not issubclass(type(p), BaseLLMSimpleBlockProcessor)]
+        simple_llm_processors = [
+            p for p in processors if issubclass(type(p), BaseLLMSimpleBlockProcessor)
+        ]
+        other_processors = [
+            p for p in processors if not issubclass(type(p), BaseLLMSimpleBlockProcessor)
+        ]
 
         if not simple_llm_processors:
             return processors
 
-        llm_positions = [i for i, p in enumerate(processors) if issubclass(type(p), BaseLLMSimpleBlockProcessor)]
+        llm_positions = [
+            i for i, p in enumerate(processors) if issubclass(type(p), BaseLLMSimpleBlockProcessor)
+        ]
         insert_position = max(0, llm_positions[-1] - len(simple_llm_processors) + 1)
 
         meta_processor = LLMSimpleBlockMetaProcessor(
@@ -99,7 +107,7 @@ if __name__ == "__main__":
     # Test base converter functionality
     print("🧪 Testing Base Converter")
     print("=" * 50)
-    
+
     # Test 1: Create base converter
     print("\n📝 Test 1: Initialize Base Converter")
     try:
@@ -110,7 +118,7 @@ if __name__ == "__main__":
         print(f"   - LLM service: {converter.llm_service}")
     except Exception as e:
         print(f"❌ Initialization failed: {e}")
-    
+
     # Test 2: Test dependency resolution
     print("\n📝 Test 2: Dependency Resolution")
     try:
@@ -119,10 +127,10 @@ if __name__ == "__main__":
             def __init__(self, config=None, llm_service=None):
                 self.config = config
                 self.llm_service = llm_service
-        
+
         converter = BaseConverter({"test": True})
         converter.artifact_dict = {"llm_service": None}
-        
+
         # Resolve dependencies
         processor = converter.resolve_dependencies(TestProcessor)
         print("✅ Dependency resolution works")
@@ -130,15 +138,15 @@ if __name__ == "__main__":
         print(f"   - Processor llm_service: {processor.llm_service}")
     except Exception as e:
         print(f"❌ Dependency resolution failed: {e}")
-    
+
     # Test 3: Test processor initialization
     print("\n📝 Test 3: Processor Initialization")
     try:
         from extractor.core.processors.text import TextProcessor
-        
+
         converter = BaseConverter({})
         converter.artifact_dict = {}
-        
+
         # Initialize processors
         processors = converter.initialize_processors([TextProcessor])
         print("✅ Processor initialization works")
@@ -148,7 +156,7 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"⚠️  Processor initialization: {e}")
         print("   - This may require full processor setup")
-    
+
     # Test 4: Test not implemented call
     print("\n📝 Test 4: Call Method Check")
     try:
@@ -160,6 +168,6 @@ if __name__ == "__main__":
         print("   - Subclasses must implement __call__")
     except Exception as e:
         print(f"❌ Unexpected error: {e}")
-    
+
     print("\n" + "=" * 50)
     print("✅ Base converter validation complete")

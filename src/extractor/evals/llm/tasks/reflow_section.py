@@ -115,10 +115,13 @@ async def run_reflow_eval(
                 metrics["fail_reason"] = ",".join(reasons) if reasons else "unknown"
             write_json(model_dir / f"{cid}__metrics.json", metrics)
             cost = calc_cost(model, call.usage, call.provider_cost_reported, pricing)
-            write_json(model_dir / f"{cid}__cost.json", {
-                "provider_cost_reported": call.provider_cost_reported,
-                "estimated_cost_usd": cost,
-            })
+            write_json(
+                model_dir / f"{cid}__cost.json",
+                {
+                    "provider_cost_reported": call.provider_cost_reported,
+                    "estimated_cost_usd": cost,
+                },
+            )
             per_items.append({"id": cid, "metrics": metrics, "cost": cost})
             model_ok = model_ok and bool(metrics.get("ok"))
             total_cost += float(cost or 0.0)
@@ -126,12 +129,14 @@ async def run_reflow_eval(
             if max_cost is not None and cumulative_cost >= float(max_cost):
                 # Stop adding more model work; return partial summary
                 break
-        results.append({
-            "model": model,
-            "ok": model_ok,
-            "total_cost_usd": total_cost if total_cost > 0 else None,
-            "items": per_items,
-        })
+        results.append(
+            {
+                "model": model,
+                "ok": model_ok,
+                "total_cost_usd": total_cost if total_cost > 0 else None,
+                "items": per_items,
+            }
+        )
         if max_cost is not None and cumulative_cost >= float(max_cost):
             break
     # choose recommendation: first all-ok sorted by cost, else cheapest overall

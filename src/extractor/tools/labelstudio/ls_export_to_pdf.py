@@ -133,11 +133,15 @@ def _embed_regions(doc: fitz.Document, page_index: int, regions: Dict[str, Dict]
             page.addRectAnnot(rect)
 
         # FreeText machine_note as JSON
-        meta = {k: v for k, v in {
-            "id": r.get("id"),
-            "type": r.get("type"),
-            "expected_json": r.get("expected_json"),
-        }.items() if v is not None}
+        meta = {
+            k: v
+            for k, v in {
+                "id": r.get("id"),
+                "type": r.get("type"),
+                "expected_json": r.get("expected_json"),
+            }.items()
+            if v is not None
+        }
         content = json.dumps(meta, ensure_ascii=False)
         try:
             page.add_freetext_annot(rect, content)
@@ -146,10 +150,20 @@ def _embed_regions(doc: fitz.Document, page_index: int, regions: Dict[str, Dict]
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Convert Label Studio JSON export back into annotated PDFs.")
-    ap.add_argument("--export", required=True, help="Path to Label Studio export JSON (list of tasks)")
-    ap.add_argument("--out-dir", default="data/labelstudio/annotated_pdfs", help="Output directory for annotated PDFs")
-    ap.add_argument("--suffix", default="_ls_marked", help="Suffix for output filenames before .pdf")
+    ap = argparse.ArgumentParser(
+        description="Convert Label Studio JSON export back into annotated PDFs."
+    )
+    ap.add_argument(
+        "--export", required=True, help="Path to Label Studio export JSON (list of tasks)"
+    )
+    ap.add_argument(
+        "--out-dir",
+        default="data/labelstudio/annotated_pdfs",
+        help="Output directory for annotated PDFs",
+    )
+    ap.add_argument(
+        "--suffix", default="_ls_marked", help="Suffix for output filenames before .pdf"
+    )
     args = ap.parse_args()
 
     export_path = Path(args.export)
@@ -208,4 +222,3 @@ def main():
 
 if __name__ == "__main__":  # pragma: no cover
     main()
-

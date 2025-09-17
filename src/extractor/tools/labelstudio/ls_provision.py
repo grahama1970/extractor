@@ -85,12 +85,21 @@ def get_project_by_title(host: str, access: str, title: str) -> Optional[dict]:
     return None
 
 
-def create_or_update_project(host: str, access: str, *, project_id: Optional[int], title: Optional[str], label_config: Optional[str]) -> int:
+def create_or_update_project(
+    host: str,
+    access: str,
+    *,
+    project_id: Optional[int],
+    title: Optional[str],
+    label_config: Optional[str],
+) -> int:
     if project_id:
         # Optionally patch label_config
         if label_config:
             url = f"{host}/api/projects/{project_id}"
-            r = requests.patch(url, headers=auth_headers(access), json={"label_config": label_config}, timeout=30)
+            r = requests.patch(
+                url, headers=auth_headers(access), json={"label_config": label_config}, timeout=30
+            )
             if r.status_code not in (200, 202):
                 die(f"Failed to patch label_config: HTTP {r.status_code} {r.text}")
         return int(project_id)
@@ -103,7 +112,9 @@ def create_or_update_project(host: str, access: str, *, project_id: Optional[int
         pid = int(prj.get("id"))
         if label_config:
             url = f"{host}/api/projects/{pid}"
-            r = requests.patch(url, headers=auth_headers(access), json={"label_config": label_config}, timeout=30)
+            r = requests.patch(
+                url, headers=auth_headers(access), json={"label_config": label_config}, timeout=30
+            )
             if r.status_code not in (200, 202):
                 die(f"Failed to patch label_config: HTTP {r.status_code} {r.text}")
         return pid
@@ -139,7 +150,9 @@ def create_local_export_storage(host: str, access: str, project_id: int, path: s
     return int(r.json().get("id"))
 
 
-def export_project_sync(host: str, access: str, project_id: int, out_path: Path, download_all_tasks: bool = True):
+def export_project_sync(
+    host: str, access: str, project_id: int, out_path: Path, download_all_tasks: bool = True
+):
     """Download export synchronously via /api/projects/:id/export?exportType=JSON.
 
     This avoids snapshot polling and writes the JSON directly to disk.
@@ -156,7 +169,9 @@ def export_project_sync(host: str, access: str, project_id: int, out_path: Path,
     print(f"Export written: {out_path}")
 
 
-def create_export_snapshot(host: str, access: str, project_id: int, serialization_options: Optional[dict] = None) -> int:
+def create_export_snapshot(
+    host: str, access: str, project_id: int, serialization_options: Optional[dict] = None
+) -> int:
     """Create an export snapshot with optional serialization options (e.g., include predictions full)."""
     url = f"{host}/api/projects/{project_id}/exports"
     payload = {}
@@ -172,7 +187,9 @@ def create_export_snapshot(host: str, access: str, project_id: int, serializatio
     return int(export_id)
 
 
-def wait_export_completed(host: str, access: str, project_id: int, export_id: int, timeout_s: int = 120) -> None:
+def wait_export_completed(
+    host: str, access: str, project_id: int, export_id: int, timeout_s: int = 120
+) -> None:
     url = f"{host}/api/projects/{project_id}/exports/{export_id}"
     deadline = time.time() + timeout_s
     while time.time() < deadline:
@@ -188,7 +205,14 @@ def wait_export_completed(host: str, access: str, project_id: int, export_id: in
     die("Export polling timeout")
 
 
-def download_export_snapshot(host: str, access: str, project_id: int, export_id: int, out_path: Path, export_type: str = "JSON") -> None:
+def download_export_snapshot(
+    host: str,
+    access: str,
+    project_id: int,
+    export_id: int,
+    out_path: Path,
+    export_type: str = "JSON",
+) -> None:
     url = f"{host}/api/projects/{project_id}/exports/{export_id}/download"
     params = {"exportType": export_type}
     r = requests.get(url, headers=auth_headers(access), params=params, timeout=120)
@@ -202,19 +226,19 @@ def download_export_snapshot(host: str, access: str, project_id: int, export_id:
 def get_preset_label_config() -> str:
     return (
         "<View>\n"
-        "  <Image name=\"image\" value=\"$image\"/>\n"
-        "  <RectangleLabels name=\"label\" toName=\"image\">\n"
-        "    <Label value=\"Table\" hotkey=\"1\"/>\n"
-        "    <Label value=\"Requirements\" hotkey=\"2\"/>\n"
-        "    <Label value=\"Figure\" hotkey=\"3\"/>\n"
+        '  <Image name="image" value="$image"/>\n'
+        '  <RectangleLabels name="label" toName="image">\n'
+        '    <Label value="Table" hotkey="1"/>\n'
+        '    <Label value="Requirements" hotkey="2"/>\n'
+        '    <Label value="Figure" hotkey="3"/>\n'
         "  </RectangleLabels>\n"
-        "  <Choices name=\"type\" toName=\"image\" perRegion=\"true\" required=\"true\">\n"
-        "    <Choice value=\"table\"/>\n"
-        "    <Choice value=\"requirements\"/>\n"
-        "    <Choice value=\"figure\"/>\n"
+        '  <Choices name="type" toName="image" perRegion="true" required="true">\n'
+        '    <Choice value="table"/>\n'
+        '    <Choice value="requirements"/>\n'
+        '    <Choice value="figure"/>\n'
         "  </Choices>\n"
-        "  <TextArea name=\"id\" toName=\"image\" perRegion=\"true\" required=\"true\" displayMode=\"region-list\"/>\n"
-        "  <TextArea name=\"expected_json\" toName=\"image\" perRegion=\"true\" displayMode=\"region-list\"/>\n"
+        '  <TextArea name="id" toName="image" perRegion="true" required="true" displayMode="region-list"/>\n'
+        '  <TextArea name="expected_json" toName="image" perRegion="true" displayMode="region-list"/>\n'
         "</View>"
     )
 
@@ -222,8 +246,16 @@ def get_preset_label_config() -> str:
 def main():
     ap = argparse.ArgumentParser(description="Provision LS project + import tasks (API only)")
     ap.add_argument("--host", default=os.environ.get("LS_HOST", "http://localhost:8080"))
-    ap.add_argument("--refresh", default=os.environ.get("LS_REFRESH"), help="(optional) Personal access token (refresh)")
-    ap.add_argument("--access", default=None, help="(optional) Use an access token directly (skips refresh) — otherwise auto-load from cache/.env")
+    ap.add_argument(
+        "--refresh",
+        default=os.environ.get("LS_REFRESH"),
+        help="(optional) Personal access token (refresh)",
+    )
+    ap.add_argument(
+        "--access",
+        default=None,
+        help="(optional) Use an access token directly (skips refresh) — otherwise auto-load from cache/.env",
+    )
     ap.add_argument("--project-id", type=int, default=None)
     ap.add_argument("--project-title", default=None)
     ap.add_argument("--tasks", required=True, help="Path to tasks JSON array file")
@@ -231,8 +263,16 @@ def main():
     ap.add_argument("--use-label-config-preset", action="store_true")
     ap.add_argument("--create-local-export", action="store_true")
     ap.add_argument("--export-path", default="/label-studio/localdata/labelstudio/exports")
-    ap.add_argument("--download-export-sync", default=None, help="If set, downloads JSON export to this file after import.")
-    ap.add_argument("--snapshot-export", default=None, help="If set, create export snapshot (predictions full) and download to this file.")
+    ap.add_argument(
+        "--download-export-sync",
+        default=None,
+        help="If set, downloads JSON export to this file after import.",
+    )
+    ap.add_argument(
+        "--snapshot-export",
+        default=None,
+        help="If set, create export snapshot (predictions full) and download to this file.",
+    )
     args = ap.parse_args()
 
     load_ls_env()
@@ -246,7 +286,13 @@ def main():
     elif args.label_config:
         label_config_xml = Path(args.label_config).read_text(encoding="utf-8")
 
-    pid = create_or_update_project(host, access, project_id=args.project_id, title=args.project_title, label_config=label_config_xml)
+    pid = create_or_update_project(
+        host,
+        access,
+        project_id=args.project_id,
+        title=args.project_title,
+        label_config=label_config_xml,
+    )
     print(f"Project ID: {pid}")
 
     tasks_file = Path(args.tasks)

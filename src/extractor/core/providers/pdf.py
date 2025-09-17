@@ -21,6 +21,7 @@ Example Usage:
 """
 
 import contextlib
+import os
 import ctypes
 import logging
 import re
@@ -54,7 +55,6 @@ class PdfProvider(BaseProvider):
     """
     A provider for PDF files.
     """
-    
 
     page_range: Annotated[
         Optional[List[int]],
@@ -113,47 +113,48 @@ class PdfProvider(BaseProvider):
         Optional[List[str]],
         "List of allowed directories for PDF processing. If None, uses defaults.",
     ] = None
-    
+
     def validate_pdf_path(self, file_path: str) -> Path:
         """Validate PDF file path for security."""
         from pathlib import Path
-        
+
         path = Path(file_path).resolve()
-        
+
         # Skip validation if disabled
         if self.disable_path_validation:
             # Still ensure it's a PDF
-            if path.suffix.lower() not in ['.pdf', '.PDF']:
+            if path.suffix.lower() not in [".pdf", ".PDF"]:
                 raise ValueError(f"Not a PDF file: {file_path}")
             return path
-        
+
         # Use configured directories or defaults
+        allowed_dirs: list[Path] = []
+        env_dirs = os.getenv("PDF_ALLOWED_DIRS", "")
+        if env_dirs.strip():
+            for p in env_dirs.split(":"):
+                p = p.strip()
+                if p:
+                    allowed_dirs.append(Path(p))
         if self.allowed_directories:
-            allowed_dirs = [Path(d) for d in self.allowed_directories]
-        else:
-            # Default allowed directories
-            allowed_dirs = [
-                Path("/home/graham/workspace/experiments/marker/data"),
-                Path("/home/graham/workspace/experiments/extractor"),
-                Path("/tmp/marker_processing"),
-                Path("/tmp"),
-                Path.home() / ".marker" / "cache"
-            ]
-        
+            allowed_dirs.extend([Path(d) for d in self.allowed_directories])
+        if not allowed_dirs:
+            # Default allowed directories (workspace + /tmp)
+            allowed_dirs = [ Path.cwd(), Path("/tmp"), Path.home() / ".marker" / "cache" ]
+
         # Check for path traversal
         if ".." in str(file_path):
             raise ValueError(f"Path traversal detected: {file_path}")
-        
-        # Ensure within allowed directories  
+
+        # Ensure within allowed directories
         allowed_paths = [d.resolve() for d in allowed_dirs if d.exists()]
-        
+
         if allowed_paths and not any(path.is_relative_to(allowed) for allowed in allowed_paths):
             raise ValueError(f"Path outside allowed directories: {file_path}")
-        
+
         # Ensure it's a PDF
-        if path.suffix.lower() not in ['.pdf', '.PDF']:
+        if path.suffix.lower() not in [".pdf", ".PDF"]:
             raise ValueError(f"Not a PDF file: {file_path}")
-        
+
         return path
 
     def __init__(self, filepath: str, config=None):
@@ -161,23 +162,21 @@ class PdfProvider(BaseProvider):
 
         # Validate and set filepath using security validation
         self.filepath = str(self.validate_pdf_path(filepath))
-        
+
         # Initialize SmartPDFHandler if available
         # self.pdf_handler = None
 
         with self.get_doc() as doc:
             self.page_count = len(doc)
             self.page_lines: ProviderPageLines = {i: [] for i in range(len(doc))}
-            self.page_refs: Dict[int, List[Reference]] = {
-                i: [] for i in range(len(doc))
-            }
+            self.page_refs: Dict[int, List[Reference]] = {i: [] for i in range(len(doc))}
 
             if self.page_range is None:
                 self.page_range = list(range(len(doc)))
 
-            assert max(self.page_range) < len(doc) and min(self.page_range) >= 0, (
-                f"Invalid page range, values must be between 0 and {len(doc) - 1}.  Min of provided page range is {min(self.page_range)} and max is {max(self.page_range)}."
-            )
+            assert (
+                max(self.page_range) < len(doc) and min(self.page_range) >= 0
+            ), f"Invalid page range, values must be between 0 and {len(doc) - 1}.  Min of provided page range is {min(self.page_range)} and max is {max(self.page_range)}."
 
             if self.force_ocr:
                 # Manually assign page bboxes, since we can't get them from pdftext
@@ -310,21 +309,17 @@ class PdfProvider(BaseProvider):
                     for span in line["spans"]:
                         if not span["text"]:
                             continue
-                        font_formats = self.font_flags_to_format(
-                            span["font"]["flags"]
-                        ).union(self.font_names_to_format(span["font"]["name"]))
+                        font_formats = self.font_flags_to_format(span["font"]["flags"]).union(
+                            self.font_names_to_format(span["font"]["name"])
+                        )
                         font_name = span["font"]["name"] or "Unknown"
                         font_weight = span["font"]["weight"] or 0
                         font_size = span["font"]["size"] or 0
-                        polygon = PolygonBox.from_bbox(
-                            span["bbox"], ensure_nonzero_area=True
-                        )
+                        polygon = PolygonBox.from_bbox(span["bbox"], ensure_nonzero_area=True)
                         span_chars = [
                             Char(
                                 char=c["char"],
-                                polygon=PolygonBox.from_bbox(
-                                    c["bbox"], ensure_nonzero_area=True
-                                ),
+                                polygon=PolygonBox.from_bbox(c["bbox"], ensure_nonzero_area=True),
                                 char_idx=c["char_idx"],
                             )
                             for c in span["chars"]
@@ -353,9 +348,7 @@ class PdfProvider(BaseProvider):
                             )
                         )
                         chars.append(span_chars)
-                    polygon = PolygonBox.from_bbox(
-                        line["bbox"], ensure_nonzero_area=True
-                    )
+                    polygon = PolygonBox.from_bbox(line["bbox"], ensure_nonzero_area=True)
                     assert len(spans) == len(chars)
                     lines.append(
                         ProviderOutput(
@@ -393,9 +386,7 @@ class PdfProvider(BaseProvider):
         page_bbox = PolygonBox.from_bbox(page.get_bbox())
         try:
             page_objs = list(
-                page.get_objects(
-                    filter=[pdfium_c.FPDF_PAGEOBJ_TEXT, pdfium_c.FPDF_PAGEOBJ_IMAGE]
-                )
+                page.get_objects(filter=[pdfium_c.FPDF_PAGEOBJ_TEXT, pdfium_c.FPDF_PAGEOBJ_IMAGE])
             )
         except PdfiumError:
             # Happens when pdfium fails to get the number of page objects
@@ -407,9 +398,7 @@ class PdfProvider(BaseProvider):
 
         if self.strip_existing_ocr:
             # If any text objects on the page are in invisible render mode, skip this page
-            for text_obj in filter(
-                lambda obj: obj.type == pdfium_c.FPDF_PAGEOBJ_TEXT, page_objs
-            ):
+            for text_obj in filter(lambda obj: obj.type == pdfium_c.FPDF_PAGEOBJ_TEXT, page_objs):
                 if pdfium_c.FPDFTextObj_GetTextRenderMode(text_obj) in [
                     pdfium_c.FPDF_TEXTRENDERMODE_INVISIBLE,
                     pdfium_c.FPDF_TEXTRENDERMODE_UNKNOWN,
@@ -419,9 +408,7 @@ class PdfProvider(BaseProvider):
             non_embedded_fonts = []
             empty_fonts = []
             font_map = {}
-            for text_obj in filter(
-                lambda obj: obj.type == pdfium_c.FPDF_PAGEOBJ_TEXT, page_objs
-            ):
+            for text_obj in filter(lambda obj: obj.type == pdfium_c.FPDF_PAGEOBJ_TEXT, page_objs):
                 font = pdfium_c.FPDFTextObj_GetFont(text_obj)
                 font_name = self._get_fontname(font)
 
@@ -437,9 +424,7 @@ class PdfProvider(BaseProvider):
                 return False
 
             # if we see very large images covering most of the page, we can skip this page
-            for img_obj in filter(
-                lambda obj: obj.type == pdfium_c.FPDF_PAGEOBJ_IMAGE, page_objs
-            ):
+            for img_obj in filter(lambda obj: obj.type == pdfium_c.FPDF_PAGEOBJ_IMAGE, page_objs):
                 img_bbox = PolygonBox.from_bbox(img_obj.get_pos())
                 if page_bbox.intersection_pct(img_bbox) >= self.image_threshold:
                     return False
@@ -484,9 +469,7 @@ class PdfProvider(BaseProvider):
 
     def get_images(self, idxs: List[int], dpi: int) -> List[Image.Image]:
         with self.get_doc() as doc:
-            images = [
-                self._render_image(doc, idx, dpi, self.flatten_pdf) for idx in idxs
-            ]
+            images = [self._render_image(doc, idx, dpi, self.flatten_pdf) for idx in idxs]
         return images
 
     def get_page_bbox(self, idx: int) -> PolygonBox | None:
@@ -507,9 +490,7 @@ class PdfProvider(BaseProvider):
 
         try:
             font_name_buffer = ctypes.create_string_buffer(buffer_size)
-            length = pdfium_c.FPDFFont_GetBaseFontName(
-                font, font_name_buffer, buffer_size
-            )
+            length = pdfium_c.FPDFFont_GetBaseFontName(font, font_name_buffer, buffer_size)
             if length < buffer_size:
                 font_name = font_name_buffer.value.decode("utf-8")
             else:

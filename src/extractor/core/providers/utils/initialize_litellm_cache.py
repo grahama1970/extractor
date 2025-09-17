@@ -35,21 +35,28 @@ import litellm
 import os
 import redis
 from loguru import logger
+
 # load_env_file() # Removed - Docker Compose handles .env loading via env_file
 
 
 def initialize_litellm_cache() -> None:
     redis_host = os.getenv("REDIS_HOST", "localhost")
     redis_port = int(os.getenv("REDIS_PORT", 6379))
-    redis_password = os.getenv("REDIS_PASSWORD", None) # Assuming password might be needed
+    redis_password = os.getenv("REDIS_PASSWORD", None)  # Assuming password might be needed
 
     try:
-        logger.debug(f"Starting LiteLLM cache initialization (Redis target: {redis_host}:{redis_port})...")
+        logger.debug(
+            f"Starting LiteLLM cache initialization (Redis target: {redis_host}:{redis_port})..."
+        )
 
         # Test Redis connection before enabling caching
         logger.debug("Testing Redis connection...")
         test_redis = redis.Redis(
-            host=redis_host, port=redis_port, password=redis_password, socket_timeout=2, decode_responses=True # Added decode_responses for easier debugging if needed
+            host=redis_host,
+            port=redis_port,
+            password=redis_password,
+            socket_timeout=2,
+            decode_responses=True,  # Added decode_responses for easier debugging if needed
         )
         if not test_redis.ping():
             raise ConnectionError(f"Redis is not responding at {redis_host}:{redis_port}.")
@@ -96,9 +103,7 @@ def initialize_litellm_cache() -> None:
             logger.warning(f"Redis test write/read failed: {e}")
 
     except (redis.ConnectionError, redis.TimeoutError) as e:
-        logger.warning(
-            f"⚠️ Redis connection failed: {e}. Falling back to in-memory caching."
-        )
+        logger.warning(f"⚠️ Redis connection failed: {e}. Falling back to in-memory caching.")
         # Fall back to in-memory caching if Redis is unavailable
         logger.debug("Configuring in-memory cache fallback...")
         litellm.cache = litellm.Cache(type="local")

@@ -45,7 +45,9 @@ class SectionHeader(Block):
                 content += block.raw_text(document)
 
         # Generate a hash of the content
-        hash_value = hashlib.sha256(content.encode('utf-8')).hexdigest()[:16]  # Use first 16 chars of the hash
+        hash_value = hashlib.sha256(content.encode("utf-8")).hexdigest()[
+            :16
+        ]  # Use first 16 chars of the hash
         logging.debug(f"Generated section hash for '{content[:50]}...': {hash_value}")
         return hash_value
 
@@ -74,14 +76,18 @@ class SectionHeader(Block):
             block = document.get_block(block_id)
 
             # Stop if we find another section header at the same or higher level
-            if (block.block_type == BlockTypes.SectionHeader and 
-                    self.heading_level is not None and
-                    getattr(block, "heading_level", 999) <= self.heading_level):
+            if (
+                block.block_type == BlockTypes.SectionHeader
+                and self.heading_level is not None
+                and getattr(block, "heading_level", 999) <= self.heading_level
+            ):
                 break
 
             section_blocks.append(block)
 
-        logging.debug(f"Found {len(section_blocks)} content blocks for section '{self.raw_text(document)[:50]}...'")
+        logging.debug(
+            f"Found {len(section_blocks)} content blocks for section '{self.raw_text(document)[:50]}...'"
+        )
         return section_blocks
 
     def _build_breadcrumb_array(self, section_hierarchy):
@@ -108,19 +114,11 @@ class SectionHeader(Block):
                         parent_title = str(parent)
                         parent_hash = ""
 
-                    breadcrumb.append({
-                        "title": parent_title,
-                        "hash": parent_hash,
-                        "level": level
-                    })
+                    breadcrumb.append({"title": parent_title, "hash": parent_hash, "level": level})
 
         # Add this section
         title = self.raw_text(None).strip()
-        breadcrumb.append({
-            "title": title,
-            "hash": self.section_hash,
-            "level": self.heading_level
-        })
+        breadcrumb.append({"title": title, "hash": self.section_hash, "level": self.heading_level})
 
         return breadcrumb
 
@@ -128,7 +126,7 @@ class SectionHeader(Block):
         """Get JSON representation of breadcrumb for HTML output."""
         # Get current section hierarchy from Document (if available)
         section_hierarchy = {}
-        if hasattr(document, 'get_current_section_hierarchy'):
+        if hasattr(document, "get_current_section_hierarchy"):
             section_hierarchy = document.get_current_section_hierarchy()
 
         # Build breadcrumb from hierarchy
@@ -152,7 +150,7 @@ class SectionHeader(Block):
 
         # Include section hash and breadcrumb as data attributes
         breadcrumb_json = self._get_breadcrumb_json(document) if document else "{}"
-        return f'<{tag} data-section-hash="{self.section_hash}" data-breadcrumb=\'{breadcrumb_json}\'>{template}</{tag}>'
+        return f"<{tag} data-section-hash=\"{self.section_hash}\" data-breadcrumb='{breadcrumb_json}'>{template}</{tag}>"
 
     def assign_section_hierarchy(self, section_hierarchy: Dict[int, Dict]):
         """
@@ -161,8 +159,8 @@ class SectionHeader(Block):
         if self.heading_level:
             # Compute hash if not already set
             if not self.section_hash:
-                text = self.raw_text(None) if hasattr(self, 'text') else ""
-                self.section_hash = hashlib.sha256(text.encode('utf-8')).hexdigest()[:16]
+                text = self.raw_text(None) if hasattr(self, "text") else ""
+                self.section_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
 
             # Remove any higher or equal level sections from the hierarchy
             levels = list(section_hierarchy.keys())
@@ -178,10 +176,12 @@ class SectionHeader(Block):
                 "id": self.id,
                 "title": self.raw_text(None).strip(),
                 "hash": self.section_hash,
-                "breadcrumb": breadcrumb  # Include full breadcrumb array
+                "breadcrumb": breadcrumb,  # Include full breadcrumb array
             }
 
-            logging.debug(f"Updated section hierarchy: Level {self.heading_level}, Title: '{section_hierarchy[self.heading_level]['title'][:30]}...'")
+            logging.debug(
+                f"Updated section hierarchy: Level {self.heading_level}, Title: '{section_hierarchy[self.heading_level]['title'][:30]}...'"
+            )
 
         return section_hierarchy
 
@@ -195,7 +195,7 @@ class SectionHeader(Block):
 
         # Get current section hierarchy from Document (if available)
         section_hierarchy = {}
-        if hasattr(document, 'get_current_section_hierarchy'):
+        if hasattr(document, "get_current_section_hierarchy"):
             section_hierarchy = document.get_current_section_hierarchy()
 
         # Build breadcrumb from hierarchy
@@ -206,5 +206,5 @@ class SectionHeader(Block):
             "level": self.heading_level,
             "hash": self.section_hash,
             "block_id": str(self.id),
-            "breadcrumb": breadcrumb
+            "breadcrumb": breadcrumb,
         }

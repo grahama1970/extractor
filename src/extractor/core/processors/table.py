@@ -100,8 +100,8 @@ class TableProcessor(BaseProcessor):
                         "img_size": page.get_image(highres=True).size,
                         "ocr_block": any(
                             [
-                                getattr(page, 'text_extraction_method', '') in ["surya"],
-                                getattr(page, 'ocr_errors_detected', False),
+                                getattr(page, "text_extraction_method", "") in ["surya"],
+                                getattr(page, "ocr_errors_detected", False),
                             ]
                         ),
                     }
@@ -116,9 +116,7 @@ class TableProcessor(BaseProcessor):
         self.assign_ocr_lines(ocr_blocks)  # Handle tables where OCR is needed
         for table_item in table_data:
             if "table_text_lines" not in table_item:
-                logger.warning(
-                    f"No text lines found for table {table_item['block_id']}"
-                )
+                logger.warning(f"No text lines found for table {table_item['block_id']}")
                 table_item["table_text_lines"] = []
 
         self.table_rec_model.disable_tqdm = self.disable_tqdm
@@ -164,9 +162,7 @@ class TableProcessor(BaseProcessor):
         # Clean out other blocks inside the table
         # This can happen with stray text blocks inside the table post-merging
         for page in document.pages:
-            child_contained_blocks = page.contained_blocks(
-                document, self.contained_block_types
-            )
+            child_contained_blocks = page.contained_blocks(document, self.contained_block_types)
             for block in page.contained_blocks(document, self.block_types):
                 intersections = matrix_intersection_area(
                     [c.polygon.bbox for c in child_contained_blocks],
@@ -215,9 +211,7 @@ class TableProcessor(BaseProcessor):
             for col in unique_cols:
                 # Cells in this col
                 col_cells = [c for c in table.cells if c.col_id == col]
-                col_text = [
-                    "\n".join(self.finalize_cell_text(c)).strip() for c in col_cells
-                ]
+                col_text = ["\n".join(self.finalize_cell_text(c)).strip() for c in col_cells]
                 all_dollars = all([ct in ["", "$"] for ct in col_text])
                 colspans = [c.colspan for c in col_cells]
                 span_into_col = [
@@ -239,10 +233,7 @@ class TableProcessor(BaseProcessor):
                     next_col_cells = [c for c in table.cells if c.col_id == col + 1]
                     next_col_rows = [c.row_id for c in next_col_cells]
                     col_rows = [c.row_id for c in col_cells]
-                    if (
-                        len(next_col_cells) == len(col_cells)
-                        and next_col_rows == col_rows
-                    ):
+                    if len(next_col_cells) == len(col_cells) and next_col_rows == col_rows:
                         dollar_cols.append(col)
 
             if len(dollar_cols) == 0:
@@ -267,9 +258,7 @@ class TableProcessor(BaseProcessor):
 
                         # Add dollar to start of the next column
                         next_text_lines = (
-                            next_row_col[0].text_lines
-                            if next_row_col[0].text_lines
-                            else []
+                            next_row_col[0].text_lines if next_row_col[0].text_lines else []
                         )
                         next_row_col[0].text_lines = deepcopy(text_lines) + deepcopy(
                             next_text_lines
@@ -296,8 +285,7 @@ class TableProcessor(BaseProcessor):
                 row_cells = deepcopy([c for c in table.cells if c.row_id == row])
                 rowspans = [c.rowspan for c in row_cells]
                 line_lens = [
-                    len(c.text_lines) if isinstance(c.text_lines, list) else 1
-                    for c in row_cells
+                    len(c.text_lines) if isinstance(c.text_lines, list) else 1 for c in row_cells
                 ]
 
                 # Other cells that span into this row
@@ -404,9 +392,7 @@ class TableProcessor(BaseProcessor):
             text_line_bboxes = [t["bbox"] for t in table_text_lines]
             table_cell_bboxes = [c.bbox for c in table_cells]
 
-            intersection_matrix = matrix_intersection_area(
-                text_line_bboxes, table_cell_bboxes
-            )
+            intersection_matrix = matrix_intersection_area(text_line_bboxes, table_cell_bboxes)
 
             cell_text = defaultdict(list)
             for text_line_idx, table_text_line in enumerate(table_text_lines):
@@ -445,9 +431,7 @@ class TableProcessor(BaseProcessor):
             page_range=unique_pages,
             workers=self.pdftext_workers,
         )
-        assert len(cell_text) == len(unique_pages), (
-            "Number of pages and table inputs must match"
-        )
+        assert len(cell_text) == len(unique_pages), "Number of pages and table inputs must match"
 
         for pidx, (page_tables, pnum) in enumerate(zip(cell_text, unique_pages)):
             table_idx = 0
@@ -461,9 +445,7 @@ class TableProcessor(BaseProcessor):
                     else:
                         block["table_text_lines"] = page_tables[table_idx]
                     table_idx += 1
-            assert table_idx == len(page_tables), (
-                "Number of tables and table inputs must match"
-            )
+            assert table_idx == len(page_tables), "Number of tables and table inputs must match"
 
     def assign_ocr_lines(self, ocr_blocks: list):
         det_images = [t["table_image"] for t in ocr_blocks]

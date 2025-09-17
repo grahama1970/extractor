@@ -1,0 +1,36 @@
+name: Gamified Prompts
+
+on:
+  push:
+    paths:
+      - 'prototypes/gamified/docs/**'
+      - 'prototypes/gamified/tools/prompt_opt.py'
+      - 'prototypes/gamified/rules/prompt_optimization.yaml'
+      - '.github/workflows/gamified-prompts.yml'
+  pull_request:
+    paths:
+      - 'prototypes/gamified/docs/**'
+      - 'prototypes/gamified/tools/prompt_opt.py'
+      - 'prototypes/gamified/rules/prompt_optimization.yaml'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Ensure uv
+        run: |
+          python -m pip install -U uv
+
+      - name: Validate POP (tokamak prompt)
+        run: |
+          uv run --with typer>=0.12 pyyaml +            python -m prototypes.gamified.tools.prompt_opt +              validate prototypes/gamified/docs/02_tokamak_prompt.md --strict
+

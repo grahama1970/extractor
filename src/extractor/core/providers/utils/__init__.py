@@ -2,6 +2,7 @@
 Shared utilities for document providers.
 """
 
+
 def alphanum_ratio(text):
     """Calculate the ratio of alphanumeric characters in text."""
     text = text.replace(" ", "")

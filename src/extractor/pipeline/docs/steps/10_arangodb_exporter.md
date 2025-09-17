@@ -14,15 +14,19 @@ Key Behavior
 - Adds indexes for common queries and order reconstruction.
 
 CLI (main)
-- `run --reflowed <07_reflowed.json> --summaries <09_summaries.json> -o <results_dir> [--skip-export]`
+- `run --reflowed <07_reflowed.json> --summaries <09_summaries.json> -o <results_dir> [--skip-export] [--skip-embeddings] [--fast-embeddings]`
 
 Environment
 - Arango: `ARANGO_HOST/PORT/USER/PASSWORD/DATABASE` (use a dedicated test DB during development).
 - Session + cache (LLM prep work): `LITELLM_SESSION_ID`, `LITELLM_ATTACH_SESSION`.
 
+Deterministic/CI Mode
+- Use `--fast-embeddings` to generate deterministic 8‑D hash embeddings (no model download).
+- Use `--skip-embeddings` to omit embeddings entirely (field is null). Downstream graph will write zero edges unless embeddings are present.
+
 Implementation Notes (tricky parts)
 - source_pdf selection: Chooses the most common `reflowed_sections[*].source_pdf`; falls back to `source_files.sections` if absent.
 - Ordering: Adds `object_index_in_doc` and index for fast reconstruction of document order.
 - Text content shaping: Generates text for Tables/Figures from metadata (titles/headers/ai_description) when available; plain text for Text blocks.
-- Embeddings: Generated lazily if sentence-transformers are available; failure tolerated (logs warning, continues without embeddings).
+- Embeddings: Generated lazily if sentence-transformers are available; failure tolerated (logs warning, continues without embeddings). `--fast-embeddings` bypasses models.
 - Indexes: Creates persistent/fulltext indexes on first run; safe to re-run.

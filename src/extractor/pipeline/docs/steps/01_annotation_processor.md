@@ -42,3 +42,38 @@ Downstream
 - Stage 12 (insert) loads this JSON into ArangoDB.
 - Stage 03 consumes this JSON via `--annotations` to bias verification.
 - Stage 07 optionally uses this JSON; `source_pdf` is propagated for DB hybrid filtering.
+
+
+No Annotations
+- If the input PDF has no annotations, this stage still emits a valid JSON with:
+  - `annotation_count: 0`
+  - `annotations: []`
+  - `clean_pdf_path` to the cleaned PDF
+- Downstream stages must treat annotations as optional:
+- Stage 03/05/06/07 will not attempt to attach or reference annotations when the array is empty or the `--annotations` path is omitted.
+
+External Annotations (Skip Stage 01)
+------------------------------------
+When using the Tabbed PDF annotator (or any external tool) you can skip Stage 01 entirely and provide the Stage‑01 JSON and a clean PDF directly.
+
+Two paths are supported:
+
+1) CLI flags on the main pipeline:
+```
+python -m extractor.pipeline.run_all \
+  --pdf /abs/path/to.pdf \
+  --results data/results/pipeline_from_ui \
+  --annotations-json /abs/path/to/01_annotations.json \
+  --clean-pdf /abs/path/to/clean.pdf \
+  --validate
+```
+- The pipeline stages your files under `01_annotation_processor/` and runs 02→14.
+
+2) HTTP bridge (Tabbed → Pipeline):
+- POST `/api/pipeline/run-external` with JSON:
+  - `pdf_rel` or `pdf_path`
+  - `boxes_by_page: { 1: [{ x,y,w,h,type }], ... }` using normalized coordinates in [0..1]
+- The server converts these boxes to PDF‑point rectangles, writes `01_annotations.json`, copies the original PDF as the clean PDF (phase‑1), then executes `run_all` with validation. The response includes links to the final report and the run summary.
+
+Note
+- The staged files live at `01_annotation_processor/json_output/01_annotations.json` and `01_annotation_processor/*_clean.pdf` to keep downstream paths consistent.

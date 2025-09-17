@@ -35,18 +35,18 @@ from extractor.core.schema.document import Document
 from extractor.core.schema.groups import PageGroup
 
 
-
-async def call_claude_subprocess(prompt: str, image_path: Optional[str] = None, 
-                                      timeout: int = 30, use_ultrathink: bool = False) -> str:
+async def call_claude_subprocess(
+    prompt: str, image_path: Optional[str] = None, timeout: int = 30, use_ultrathink: bool = False
+) -> str:
     """
     Call Claude CLI using proper subprocess with correct syntax.
-    
+
     Args:
         prompt: The prompt to send to Claude
         image_path: Optional path to image file (will be included in prompt)
         timeout: Timeout in seconds
         use_ultrathink: Whether to prefix prompt with 'ultrathink:'
-        
+
     Returns:
         Claude's response as string
     """
@@ -55,22 +55,18 @@ async def call_claude_subprocess(prompt: str, image_path: Optional[str] = None,
     if image_path and os.path.exists(image_path):
         # Include image path in the prompt for Claude to analyze
         full_prompt = f"Please analyze the image at {image_path}\n\n{prompt}"
-    
+
     if use_ultrathink:
         full_prompt = f"ultrathink: {full_prompt}"
-    
+
     # Set up environment with proper PATH
     env = os.environ.copy()
     env["PATH"] = "/usr/bin:/bin:/usr/local/bin:/home/graham/.bun/bin:" + env.get("PATH", "")
     env["BUN_INSTALL"] = "/home/graham/.bun"
-    
+
     # Use correct claude -p syntax (NOT --print)
-    cmd = [
-        "/home/graham/.bun/bin/claude",
-        "-p",
-        "--dangerously-skip-permissions"
-    ]
-    
+    cmd = ["/home/graham/.bun/bin/claude", "-p", "--dangerously-skip-permissions"]
+
     try:
         # Create subprocess with proper stream handling
         proc = await asyncio.create_subprocess_exec(
@@ -78,22 +74,21 @@ async def call_claude_subprocess(prompt: str, image_path: Optional[str] = None,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            env=env
+            env=env,
         )
-        
+
         # Send prompt and get response
         stdout, stderr = await asyncio.wait_for(
-            proc.communicate(input=full_prompt.encode()),
-            timeout=timeout
+            proc.communicate(input=full_prompt.encode()), timeout=timeout
         )
-        
+
         if proc.returncode == 0 and stdout:
             return stdout.decode().strip()
         else:
             error_msg = stderr.decode() if stderr else "No error message"
             logger.error(f"Claude subprocess failed: {error_msg}")
             return ""
-            
+
     except asyncio.TimeoutError:
         logger.error(f"Claude subprocess timed out after {timeout}s")
         if proc:
@@ -104,13 +99,17 @@ async def call_claude_subprocess(prompt: str, image_path: Optional[str] = None,
         logger.error(f"Claude subprocess error: {e}")
         return ""
 
-def call_claude_subprocess_sync(prompt: str, image_path: Optional[str] = None,
-                                    timeout: int = 30, use_ultrathink: bool = False) -> str:
+
+def call_claude_subprocess_sync(
+    prompt: str, image_path: Optional[str] = None, timeout: int = 30, use_ultrathink: bool = False
+) -> str:
     """
     Synchronous version of call_claude_subprocess.
     """
     import asyncio
+
     return asyncio.run(call_claude_subprocess(prompt, image_path, timeout, use_ultrathink))
+
 
 class LLMMathBlockProcessor(BaseLLMComplexBlockProcessor):
     redo_inline_math: Annotated[
@@ -209,12 +208,8 @@ Adversarial training <i>(AT)</i> <a href='#page-9-1'>[23]</a>, which aims to min
         additional_text_blocks = []
         for page in document.pages:
             # Check for inline math blocks
-            page_inlinemath_blocks = [
-                im for im in inline_blocks if im[0].page_id == page.page_id
-            ]
-            page_detected_blocks = [
-                db for db in detected_blocks if db[0].page_id == page.page_id
-            ]
+            page_inlinemath_blocks = [im for im in inline_blocks if im[0].page_id == page.page_id]
+            page_detected_blocks = [db for db in detected_blocks if db[0].page_id == page.page_id]
             math_block_count = len(page_inlinemath_blocks) + len(page_detected_blocks)
 
             # Find all potential blocks
@@ -223,10 +218,7 @@ Adversarial training <i>(AT)</i> <a href='#page-9-1'>[23]</a>, which aims to min
             )
 
             # Check if the ratio of math blocks to additional blocks is high enough
-            if (
-                math_block_count / max(1, len(additional_blocks))
-                < self.inlinemath_min_ratio
-            ):
+            if math_block_count / max(1, len(additional_blocks)) < self.inlinemath_min_ratio:
                 continue
 
             for b in additional_blocks:
@@ -240,9 +232,7 @@ Adversarial training <i>(AT)</i> <a href='#page-9-1'>[23]</a>, which aims to min
         if total_blocks == 0:
             return
 
-        pbar = tqdm(
-            desc=f"{self.__class__.__name__} running", disable=self.disable_tqdm
-        )
+        pbar = tqdm(desc=f"{self.__class__.__name__} running", disable=self.disable_tqdm)
         with ThreadPoolExecutor(max_workers=self.max_concurrency) as executor:
             for future in as_completed(
                 [
@@ -274,18 +264,18 @@ Adversarial training <i>(AT)</i> <a href='#page-9-1'>[23]</a>, which aims to min
 
         if not response or "corrected_html" not in response:
             block.update_metadata(llm_error_count=1)
-            self.add_validation_to_block(block, True, 'LLM response missing or malformed')
+            self.add_validation_to_block(block, True, "LLM response missing or malformed")
             return
 
         corrected_html = response["corrected_html"]
         if not corrected_html:
             block.update_metadata(llm_error_count=1)
-            self.add_validation_to_block(block, True, 'Empty LLM response')
+            self.add_validation_to_block(block, True, "Empty LLM response")
             return
 
         # Enhanced suspicious detection for math block processing
         suspicious_reasons = []
-        
+
         # Block is fine
         if "no corrections needed" in corrected_html.lower():
             return
@@ -293,24 +283,24 @@ Adversarial training <i>(AT)</i> <a href='#page-9-1'>[23]</a>, which aims to min
         # Check for short response
         if len(corrected_html) < len(block_text) * 0.6:
             suspicious_reasons.append("LLM returned significantly shorter response")
-        
+
         # Check for error messages
         error_indicators = ["error", "failed", "cannot", "unable", "sorry", "invalid"]
         html_lower = corrected_html.lower()
         for indicator in error_indicators:
             if indicator in html_lower and len(corrected_html) < 200:
                 suspicious_reasons.append(f"LLM may have returned error: '{indicator}'")
-        
+
         # Check for math tag issues
         math_open = corrected_html.count("<math")
         math_close = corrected_html.count("</math>")
         if math_open != math_close:
             suspicious_reasons.append("Unbalanced math tags")
-        
+
         # Check for basic HTML structure
         if "<" not in corrected_html or ">" not in corrected_html:
             suspicious_reasons.append("Response lacks HTML structure")
-        
+
         # Set suspicious flag if any issues found
         if suspicious_reasons:
             self.add_validation_to_block(block, True, '"; ".join(suspicious_reasons)')

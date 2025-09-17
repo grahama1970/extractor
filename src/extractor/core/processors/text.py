@@ -55,9 +55,7 @@ class TextProcessor(BaseProcessor):
                     # we check for a column break
                     column_break = math.floor(next_block.polygon.y_start) <= math.ceil(
                         block.polygon.y_start
-                    ) and next_block.polygon.x_start > (
-                        block.polygon.x_end + column_gap
-                    )
+                    ) and next_block.polygon.x_start > (block.polygon.x_end + column_gap)
                 else:
                     page_break = True
                     next_page = document.get_page(next_block.page_id)
@@ -72,17 +70,11 @@ class TextProcessor(BaseProcessor):
 
                 # we check for next_block indentation
                 if len(new_block_lines):
-                    min_x = math.ceil(
-                        min([line.polygon.x_start for line in new_block_lines])
-                    )
-                    next_block_starts_indented = (
-                        new_block_lines[0].polygon.x_start > min_x
-                    )
+                    min_x = math.ceil(min([line.polygon.x_start for line in new_block_lines]))
+                    next_block_starts_indented = new_block_lines[0].polygon.x_start > min_x
 
                 lines: List[Line] = [
-                    line
-                    for line in block.structure_blocks(document)
-                    if line.polygon.width > 1
+                    line for line in block.structure_blocks(document) if line.polygon.width > 1
                 ]
                 if len(lines):
                     max_x = math.floor(max([line.polygon.x_end for line in lines]))

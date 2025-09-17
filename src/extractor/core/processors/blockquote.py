@@ -9,6 +9,7 @@ class BlockquoteProcessor(BaseProcessor):
     """
     A processor for tagging blockquotes.
     """
+
     block_types: Annotated[
         Tuple[BlockTypes],
         "The block types to process.",
@@ -51,15 +52,25 @@ class BlockquoteProcessor(BaseProcessor):
                 if next_block.ignore_for_output:
                     continue
 
-                matching_x_end = abs(next_block.polygon.x_end - block.polygon.x_end) < self.x_end_tolerance * block.polygon.width
-                matching_x_start = abs(next_block.polygon.x_start - block.polygon.x_start) < self.x_start_tolerance * block.polygon.width
-                x_indent = next_block.polygon.x_start > block.polygon.x_start + (self.min_x_indent * block.polygon.width)
+                matching_x_end = (
+                    abs(next_block.polygon.x_end - block.polygon.x_end)
+                    < self.x_end_tolerance * block.polygon.width
+                )
+                matching_x_start = (
+                    abs(next_block.polygon.x_start - block.polygon.x_start)
+                    < self.x_start_tolerance * block.polygon.width
+                )
+                x_indent = next_block.polygon.x_start > block.polygon.x_start + (
+                    self.min_x_indent * block.polygon.width
+                )
                 y_indent = next_block.polygon.y_start > block.polygon.y_end
 
                 if block.blockquote:
-                    next_block.blockquote = (matching_x_end and matching_x_start) or (x_indent and y_indent)
+                    next_block.blockquote = (matching_x_end and matching_x_start) or (
+                        x_indent and y_indent
+                    )
                     next_block.blockquote_level = block.blockquote_level
-                    if (x_indent and y_indent):
+                    if x_indent and y_indent:
                         next_block.blockquote_level += 1
                 elif len(next_block.structure) >= 2 and (x_indent and y_indent):
                     next_block.blockquote = True

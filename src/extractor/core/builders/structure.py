@@ -29,6 +29,7 @@ class StructureBuilder(BaseBuilder):
     """
     A builder for grouping blocks together based on their structure.
     """
+
     gap_threshold: Annotated[
         float,
         "The minimum gap between blocks to consider them part of the same group.",
@@ -67,16 +68,20 @@ class StructureBuilder(BaseBuilder):
             prev_block = page.get_prev_block(block)
             next_block = page.get_next_block(block)
 
-            if prev_block and \
-                prev_block.block_type in caption_types and \
-                prev_block.polygon.minimum_gap(block.polygon) < gap_threshold_px and \
-                    prev_block.id not in remove_ids:
+            if (
+                prev_block
+                and prev_block.block_type in caption_types
+                and prev_block.polygon.minimum_gap(block.polygon) < gap_threshold_px
+                and prev_block.id not in remove_ids
+            ):
                 block_structure.insert(0, prev_block.id)
                 selected_polygons.append(prev_block.polygon)
 
-            if next_block and \
-                    next_block.block_type in caption_types and \
-                    next_block.polygon.minimum_gap(block.polygon) < gap_threshold_px:
+            if (
+                next_block
+                and next_block.block_type in caption_types
+                and next_block.polygon.minimum_gap(block.polygon) < gap_threshold_px
+            ):
                 block_structure.append(next_block.id)
                 selected_polygons.append(next_block.polygon)
 
@@ -107,12 +112,14 @@ class StructureBuilder(BaseBuilder):
             block_structure = [block_id]
             selected_polygons = [block.polygon]
 
-            for j, next_block_id in enumerate(page.structure[i + 1:]):
+            for j, next_block_id in enumerate(page.structure[i + 1 :]):
                 next_block = page.get_block(next_block_id)
-                if all([
-                    next_block.block_type == BlockTypes.ListItem,
-                    next_block.polygon.minimum_gap(selected_polygons[-1]) < gap_threshold_px
-                ]):
+                if all(
+                    [
+                        next_block.block_type == BlockTypes.ListItem,
+                        next_block.polygon.minimum_gap(selected_polygons[-1]) < gap_threshold_px,
+                    ]
+                ):
                     block_structure.append(next_block_id)
                     selected_polygons.append(next_block.polygon)
                 else:

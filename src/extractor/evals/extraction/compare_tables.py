@@ -35,7 +35,9 @@ def iou_rect(a: List[float], b: List[float]) -> float:
     return float(inter / union) if union > 0 else 0.0
 
 
-def best_table_match_for_annotation(tables: List[Dict[str, Any]], page_index: int, ann_rect: List[float], *, min_iou: float = 0.05) -> Optional[Dict[str, Any]]:
+def best_table_match_for_annotation(
+    tables: List[Dict[str, Any]], page_index: int, ann_rect: List[float], *, min_iou: float = 0.05
+) -> Optional[Dict[str, Any]]:
     candidates = [t for t in tables if int(t.get("page_index", -1)) == int(page_index)]
     best, best_iou = None, 0.0
     for t in candidates:
@@ -69,7 +71,9 @@ def extract_table_columns_rows(table: Dict[str, Any]) -> Tuple[List[str], int]:
     return [str(c) for c in cols], rows_count
 
 
-def compare_extracted_to_gold(ex_cols: List[str], ex_rows: int, gold: Dict[str, Any], *, row_tol: float = 0.2) -> Dict[str, Any]:
+def compare_extracted_to_gold(
+    ex_cols: List[str], ex_rows: int, gold: Dict[str, Any], *, row_tol: float = 0.2
+) -> Dict[str, Any]:
     gcols = gold.get("columns") or []
     grows = gold.get("rows") or []
     gshape = gold.get("shape")
@@ -80,7 +84,9 @@ def compare_extracted_to_gold(ex_cols: List[str], ex_rows: int, gold: Dict[str, 
     # Order-insensitive header set equality if names provided
     columns_set_ok = set(ex_cols_norm) == set(gcols_norm) if gcols_norm else True
 
-    expected_rows = len(grows) if grows else (int(gshape[0]) if isinstance(gshape, list) and gshape else None)
+    expected_rows = (
+        len(grows) if grows else (int(gshape[0]) if isinstance(gshape, list) and gshape else None)
+    )
     rows_within_tol = True
     if expected_rows is not None and expected_rows >= 1:
         tol = max(1, int(round(row_tol * expected_rows)))
@@ -99,4 +105,3 @@ def compare_extracted_to_gold(ex_cols: List[str], ex_rows: int, gold: Dict[str, 
 
 def load_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
-

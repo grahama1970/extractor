@@ -17,7 +17,9 @@ Example Usage:
 
 from typing import Annotated, List, Optional, Tuple
 
-from surya.recognition import RecognitionPredictor as TexifyPredictor  # Use RecognitionPredictor instead
+from surya.recognition import (
+    RecognitionPredictor as TexifyPredictor,
+)  # Use RecognitionPredictor instead
 from extractor.core.processors import BaseProcessor
 from extractor.core.processors.util import add_math_spans_to_line
 from extractor.core.schema import BlockTypes
@@ -30,6 +32,7 @@ class EquationProcessor(BaseProcessor):
     """
     A processor for recognizing equations in the document.
     """
+
     block_types: Annotated[
         Tuple[BlockTypes],
         "The block types to process.",
@@ -41,7 +44,7 @@ class EquationProcessor(BaseProcessor):
     texify_batch_size: Annotated[
         Optional[int],
         "The batch size to use for the Texify model.",
-        "Default is None, which will use the default batch size for the model."
+        "Default is None, which will use the default batch size for the model.",
     ] = None
     token_buffer: Annotated[
         int,
@@ -51,10 +54,7 @@ class EquationProcessor(BaseProcessor):
         bool,
         "Whether to disable the tqdm progress bar.",
     ] = False
-    texify_inline_spans: Annotated[
-        bool,
-        "Whether to run texify on inline math spans."
-    ] = False
+    texify_inline_spans: Annotated[bool, "Whether to run texify on inline math spans."] = False
 
     def __init__(self, texify_model: TexifyPredictor, config=None):
         super().__init__(config)
@@ -77,12 +77,9 @@ class EquationProcessor(BaseProcessor):
                 # Simple token estimation - avg 4 chars per token
                 token_count = len(raw_text) // 4
 
-                equation_data.append({
-                    "image": image,
-                    "block_id": block.id,
-                    "token_count": token_count,
-                    "page": page
-                })
+                equation_data.append(
+                    {"image": image, "block_id": block.id, "token_count": token_count, "page": page}
+                )
 
         if len(equation_data) == 0:
             return
@@ -90,8 +87,8 @@ class EquationProcessor(BaseProcessor):
         predictions = self.get_latex_batched(equation_data)
         for prediction, equation_d in zip(predictions, equation_data):
             conditions = [
-                len(prediction) > equation_d["token_count"] * .4,
-                len(prediction.strip()) > 0
+                len(prediction) > equation_d["token_count"] * 0.4,
+                len(prediction.strip()) > 0,
             ]
             if not all(conditions):
                 continue
@@ -109,16 +106,11 @@ class EquationProcessor(BaseProcessor):
         math_count = latex.count("<math")
         math_start = latex.startswith("<math>")
         math_end = latex.endswith("</math>")
-        if any([
-            math_count != 1,
-            not math_start,
-            not math_end
-        ]):
+        if any([math_count != 1, not math_start, not math_end]):
             return latex
 
         latex = latex.replace("<math>", '<math display="block">')
         return latex
-
 
     def get_batch_size(self):
         if self.texify_batch_size is not None:
@@ -134,25 +126,27 @@ class EquationProcessor(BaseProcessor):
         # Extract images and bboxes from equation data
         inference_images = []
         bboxes_list = []
-        
+
         for eq in equation_data:
             inference_images.append(eq["image"])
             # Create a bbox that covers the entire image
             h, w = eq["image"].height, eq["image"].width
             bbox = [[0, 0, w, h]]  # Single bbox covering whole image
             bboxes_list.append(bbox)
-        
+
         self.texify_model.disable_tqdm = self.disable_tqdm
-        
+
         # Now pass bboxes to avoid det_predictor requirement
         model_output = self.texify_model(
             images=inference_images,
             bboxes=bboxes_list,  # ADD THIS to match marker-pdf!
             task_names=["block_without_boxes"] * len(inference_images),
             recognition_batch_size=self.get_batch_size(),
-            sort_lines=False
+            sort_lines=False,
         )
-        predictions = [output.text_lines[0].text if output.text_lines else "" for output in model_output]
+        predictions = [
+            output.text_lines[0].text if output.text_lines else "" for output in model_output
+        ]
 
         for i, pred in enumerate(predictions):
             # Simple token estimation for validation
@@ -164,7 +158,7 @@ class EquationProcessor(BaseProcessor):
 
     def get_total_texify_tokens(self, text):
         # Surya's RecognitionPredictor uses ocr_tokenizer instead of tokenizer
-        if hasattr(self.texify_model.processor, 'ocr_tokenizer'):
+        if hasattr(self.texify_model.processor, "ocr_tokenizer"):
             tokenizer = self.texify_model.processor.ocr_tokenizer
         else:
             tokenizer = self.texify_model.processor.tokenizer

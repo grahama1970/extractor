@@ -37,9 +37,17 @@ def cue_from_annotation(a: Dict[str, Any]) -> Tuple[int, float, str]:
 
     positive_keywords = ["section header", "sectionheader", "header"]
     negative_keywords = [
-        "not a section header", "not header", "not a header", "non header",
-        "paragraph", "list item", "caption", "footnote", "code block",
-        "table region", "table header only"
+        "not a section header",
+        "not header",
+        "not a header",
+        "non header",
+        "paragraph",
+        "list item",
+        "caption",
+        "footnote",
+        "code block",
+        "table region",
+        "table header only",
     ]
 
     label = None
@@ -47,11 +55,15 @@ def cue_from_annotation(a: Dict[str, Any]) -> Tuple[int, float, str]:
     strength = 0.0
 
     ln = note.lower()
-    if any(k in ln for k in negative_keywords) or any(any(neg in lab for neg in negative_keywords) for lab in labels):
+    if any(k in ln for k in negative_keywords) or any(
+        any(neg in lab for neg in negative_keywords) for lab in labels
+    ):
         polarity = -1
         strength = 0.95
         label = note or "NOT a section header"
-    elif any(k in ln for k in positive_keywords) or any(any(pos in lab for pos in positive_keywords) for lab in labels):
+    elif any(k in ln for k in positive_keywords) or any(
+        any(pos in lab for pos in positive_keywords) for lab in labels
+    ):
         polarity = 1
         strength = 0.85
         label = note or "Section Header"
@@ -61,7 +73,15 @@ def cue_from_annotation(a: Dict[str, Any]) -> Tuple[int, float, str]:
             polarity = 1
             strength = max(0.5, min(1.0, inferred_conf or 0.7))
             label = f"inferred:{inferred_type} ({strength:.2f})"
-        elif inferred_type in ("paragraph", "list_item", "caption", "footnote", "code_block", "table_header", "table_region"):
+        elif inferred_type in (
+            "paragraph",
+            "list_item",
+            "caption",
+            "footnote",
+            "code_block",
+            "table_header",
+            "table_region",
+        ):
             polarity = -1
             strength = max(0.5, min(1.0, 0.6 + 0.4 * (1 - inferred_conf)))
             label = f"inferred:{inferred_type}"
@@ -96,9 +116,12 @@ def annotation_text_snippet(a: Dict[str, Any], max_chars: int = 140) -> str:
         s = " ".join(parts)
         s = " ".join(s.split())
         return s
+
     inside = _blocks_to_text(a.get("inside_blocks", []))
     if not inside:
-        inside = _blocks_to_text(a.get("above_blocks", [])) or _blocks_to_text(a.get("below_blocks", []))
+        inside = _blocks_to_text(a.get("above_blocks", [])) or _blocks_to_text(
+            a.get("below_blocks", [])
+        )
     return inside[:max_chars] + ("…" if len(inside) > max_chars else "")
 
 
@@ -110,5 +133,7 @@ def load_relevant_rules() -> Dict[str, Any]:
                 return cast(Dict[str, Any], json.load(f))
     except Exception:
         pass
-    return {"boost_relevant_weight_for_stage": {"03": 1.25}, "auto_reject_thresholds": {"default": 0.85, "relevant_03": 0.75}}
-
+    return {
+        "boost_relevant_weight_for_stage": {"03": 1.25},
+        "auto_reject_thresholds": {"default": 0.85, "relevant_03": 0.75},
+    }

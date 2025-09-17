@@ -35,11 +35,13 @@ Input/Output:
 
 import litellm
 import os
+
 try:
     import redis
 except ImportError:
     redis = None  # type: ignore
 from dotenv import load_dotenv  # Import dotenv for environment variable loading
+
 # from litellm.caching import Cache, Type  # Import Cache and Type
 import sys  # Import sys for exit codes
 from loguru import logger
@@ -55,7 +57,7 @@ try:
 except ImportError:
     # Fail fast - don't hide missing dependencies
     logger.error("Required utility function truncate_large_value not found")
-    logger.error("Expected location: extractor.core.services.utils.log_utils") 
+    logger.error("Expected location: extractor.core.services.utils.log_utils")
     sys.exit(1)
 
 # load_env_file() # Removed - Docker Compose handles .env loading via env_file
@@ -63,11 +65,21 @@ load_dotenv()
 
 
 def initialize_litellm_cache() -> None:
+    # Allow disabling LiteLLM cache entirely via env flag
+    if os.getenv("LITELLM_DISABLE_CACHE", "").lower() in {"1", "true", "yes", "y"}:
+        try:
+            # Best-effort disable if enabled elsewhere
+            if hasattr(litellm, "disable_cache"):
+                litellm.disable_cache()  # type: ignore[attr-defined]
+            # Remove any cache object
+            setattr(litellm, "cache", None)
+        except Exception:
+            pass
+        logger.info("LiteLLM caching disabled via LITELLM_DISABLE_CACHE")
+        return
     redis_host = os.getenv("REDIS_HOST", "localhost")
     redis_port = int(os.getenv("REDIS_PORT", 6379))
-    redis_password = os.getenv(
-        "REDIS_PASSWORD", None
-    )  # Assuming password might be needed
+    redis_password = os.getenv("REDIS_PASSWORD", None)  # Assuming password might be needed
 
     try:
         logger.debug(
@@ -130,9 +142,7 @@ def initialize_litellm_cache() -> None:
             logger.warning(f"Redis test write/read failed: {e}")
 
     except Exception as e:
-        logger.warning(
-            f"⚠️ Redis cache disabled ({e}); using in-memory caching."
-        )
+        logger.warning(f"⚠️ Redis cache disabled ({e}); using in-memory caching.")
         # Fall back to in-memory caching if Redis is unavailable
         logger.debug("Configuring in-memory cache fallback...")
         litellm.cache = LiteLLMCache(type=LiteLLMCacheType.LOCAL)  # Use Enum/Type
@@ -171,9 +181,7 @@ def test_litellm_cache() -> Tuple[bool, Dict[str, Optional[bool]]]:
         )
         usage1 = getattr(response1, "usage", "N/A")
         hidden_params1 = getattr(response1, "_hidden_params", {})
-        cache_hit1 = hidden_params1.get(
-            "cache_hit"
-        )  # Could be None if not hit or feature disabled
+        cache_hit1 = hidden_params1.get("cache_hit")  # Could be None if not hit or feature disabled
         cache_details["cache_hit1"] = cache_hit1
         logger.info(f"First call usage: {usage1}")
         logger.info(f"Response 1: Cache hit: {cache_hit1}")
@@ -230,9 +238,7 @@ if __name__ == "__main__":
 
     except Exception as e:
         tests_failed_count += 1  # Count exception as failure
-        logger.error(
-            f" Test 'cache_hit_miss': FAILED due to exception during test execution."
-        )
+        logger.error(f" Test 'cache_hit_miss': FAILED due to exception during test execution.")
         logger.error(f"   Exception: {e}", exc_info=True)
 
     # --- Report validation status ---

@@ -36,7 +36,7 @@ from extractor.core.settings import settings
 def strings_to_classes(items: List[str]) -> List[type]:
     classes = []
     for item in items:
-        module_name, class_name = item.rsplit('.', 1)
+        module_name, class_name = item.rsplit(".", 1)
         module = import_module(module_name)
         classes.append(getattr(module, class_name))
     return classes
@@ -67,7 +67,9 @@ def verify_config_keys(obj):
             if value is None and not is_optional:
                 none_vals += f"{attr_name}, "
 
-    assert len(none_vals) == 0, f"In order to use {obj.__class__.__name__}, you must set the configuration values `{none_vals}`."
+    assert (
+        len(none_vals) == 0
+    ), f"In order to use {obj.__class__.__name__}, you must set the configuration values `{none_vals}`."
 
 
 def assign_config(cls, config: BaseModel | dict | None):
@@ -137,7 +139,7 @@ def matrix_distance(boxes1: List[List[float]], boxes2: List[List[float]]) -> np.
     boxes1 = np.array(boxes1)  # Shape: (N, 4)
     boxes2 = np.array(boxes2)  # Shape: (M, 4)
 
-    boxes1_centers = (boxes1[:, :2] + boxes1[:, 2:]) / 2 # Shape: (M, 2)
+    boxes1_centers = (boxes1[:, :2] + boxes1[:, 2:]) / 2  # Shape: (M, 2)
     boxes2_centers = (boxes2[:, :2] + boxes2[:, 2:]) / 2  # Shape: (M, 2)
 
     boxes1_centers = boxes1_centers[:, np.newaxis, :]  # Shape: (N, 1, 2)
@@ -165,11 +167,12 @@ def sort_text_lines(lines: List[PolygonBox], tolerance=1.25):
 
     return sorted_lines
 
+
 def download_font():
     if not os.path.exists(settings.FONT_PATH):
         os.makedirs(os.path.dirname(settings.FONT_PATH), exist_ok=True)
         font_dl_path = f"{settings.ARTIFACT_URL}/{settings.FONT_NAME}"
-        with requests.get(font_dl_path, stream=True) as r, open(settings.FONT_PATH, 'wb') as f:
+        with requests.get(font_dl_path, stream=True) as r, open(settings.FONT_PATH, "wb") as f:
             r.raise_for_status()
             for chunk in r.iter_content(chunk_size=8192):
                 f.write(chunk)

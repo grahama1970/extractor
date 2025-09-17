@@ -24,58 +24,85 @@ from datetime import datetime
 
 from docx2python import docx2python
 from docx2python.iterators import iter_at_depth, iter_tables
+from docx import Document as PythonDocxDocument
 from loguru import logger
 
 from extractor.core.schema.unified_document import (
-    UnifiedDocument, BlockType, SourceType, BaseBlock, TableBlock,
-    ImageBlock, BlockMetadata, DocumentMetadata,
-    HierarchyNode, TableCell
+    UnifiedDocument,
+    BlockType,
+    SourceType,
+    BaseBlock,
+    TableBlock,
+    ImageBlock,
+    BlockMetadata,
+    DocumentMetadata,
+    HierarchyNode,
+    TableCell,
 )
 
 
 class DOCXProvider:
     """Direct DOCX extraction without PDF conversion"""
-    
+
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         self.config = dict(config or {})
         self.block_counter = 0
         self.style_hierarchy = {
-            'Title': 0,
-            'Heading 1': 1,
-            'Heading 2': 2,
-            'Heading 3': 3,
-            'Heading 4': 4,
-            'Heading 5': 5,
-            'Heading 6': 6,
-            'Subtitle': 1,
+            "Title": 0,
+            "Heading 1": 1,
+            "Heading 2": 2,
+            "Heading 3": 3,
+            "Heading 4": 4,
+            "Heading 5": 5,
+            "Heading 6": 6,
+            "Subtitle": 1,
         }
-        
+
     def extract_document(self, filepath: Union[str, Path]) -> UnifiedDocument:
         """Extract DOCX content to unified document format"""
         filepath = Path(filepath)
         logger.info(f"Extracting DOCX document: {filepath}")
-        
+
         # Extract with docx2python
         with docx2python(str(filepath)) as docx_content:
             # Extract all components
             metadata = self._extract_metadata(docx_content)
-            blocks = self._extract_blocks(docx_content)
-            
+            blocks = self._extract_blocks(docx_content, filepath)
+
+            # Post-process: promote numbered headings in mangled docs
+            try:
+                promoted = 0
+                for b in blocks:
+                    if b.type == BlockType.PARAGRAPH and isinstance(b.content, str):
+                        t = b.content.strip()
+                        if re.match(r"^\d+(?:\.\d+)*\.[\s\u00A0]+", t):
+                            b.type = BlockType.HEADING
+                            try:
+                                dots = t.count('.')
+                                b.metadata.attributes["level"] = max(1, min(dots + 1, 6))
+                            except Exception:
+                                b.metadata.attributes["level"] = 2
+                            promoted += 1
+                if promoted:
+                    logger.debug(f"Promoted {promoted} DOCX paragraphs to headings by numbering heuristic")
+            except Exception:
+                pass
+
             # Add comments as blocks
             comment_blocks = self._extract_comments(docx_content)
             blocks.extend(comment_blocks)
-            
+
             # Build hierarchy from styles
             hierarchy = self._build_hierarchy(blocks)
-            
+
             # Extract images
             image_blocks = self._extract_images(docx_content)
             blocks.extend(image_blocks)
-            
+
             # Apply Claude table merge analysis if enabled
-            if self.config.get('enable_table_merge_analysis', True):
+            if self.config.get("enable_table_merge_analysis", True):
                 blocks = self._analyze_and_merge_tables(blocks)
-            
+
             # Create unified document
             doc = UnifiedDocument(
                 id=self._generate_doc_id(filepath),
@@ -85,197 +112,200 @@ class DOCXProvider:
                 hierarchy=hierarchy,
                 metadata=metadata,
                 full_text=self._extract_full_text(blocks),
-                keywords=self._extract_keywords(docx_content)
+                keywords=self._extract_keywords(docx_content),
             )
-            
+
             logger.info(f"Extracted {len(blocks)} blocks from DOCX")
             return doc
-    
+
     def _generate_doc_id(self, filepath: Path) -> str:
         """Generate unique document ID"""
         return hashlib.md5(str(filepath).encode()).hexdigest()
-    
+
     def _extract_metadata(self, docx_content) -> DocumentMetadata:
         """Extract document metadata"""
         props = docx_content.core_properties
-        
+
         metadata = DocumentMetadata()
-        
+
         # Map core properties with null checks
-        if props and hasattr(props, 'get'):
-            metadata.title = props.get('title', '') if props.get('title') else ''
-            metadata.author = props.get('creator', '') or props.get('lastModifiedBy', '') if props else ''
-            
+        if props and hasattr(props, "get"):
+            metadata.title = props.get("title", "") if props.get("title") else ""
+            metadata.author = (
+                props.get("creator", "") or props.get("lastModifiedBy", "") if props else ""
+            )
+
             # Parse dates
-            created = props.get('created')
+            created = props.get("created")
             if created:
                 try:
-                    metadata.created_date = datetime.fromisoformat(created.replace('Z', '+00:00'))
+                    metadata.created_date = datetime.fromisoformat(created.replace("Z", "+00:00"))
                 except (ValueError, AttributeError) as e:
                     logger.debug(f"Failed to parse created date '{created}': {e}")
-                    
-            modified = props.get('modified')
+
+            modified = props.get("modified")
             if modified:
                 try:
-                    metadata.modified_date = datetime.fromisoformat(modified.replace('Z', '+00:00'))
+                    metadata.modified_date = datetime.fromisoformat(modified.replace("Z", "+00:00"))
                 except (ValueError, AttributeError) as e:
                     logger.debug(f"Failed to parse modified date '{modified}': {e}")
-            
+
             # Language from properties
-            metadata.language = props.get('language', '')
-            
+            metadata.language = props.get("language", "")
+
             # Store all properties as format metadata
             metadata.format_metadata = {
-                'file_type': 'docx',  # Add file type for consistency
-                'core_properties': props,
-                'has_comments': bool(docx_content.comments),
-                'has_footnotes': bool(docx_content.footnotes),
-                'has_endnotes': bool(docx_content.endnotes)
+                "file_type": "docx",  # Add file type for consistency
+                "core_properties": props,
+                "has_comments": bool(docx_content.comments),
+                "has_footnotes": bool(docx_content.footnotes),
+                "has_endnotes": bool(docx_content.endnotes),
             }
-        
+
         return metadata
-    
-    def _extract_blocks(self, docx_content) -> List[BaseBlock]:
+
+    def _extract_blocks(self, docx_content, filepath: Path) -> List[BaseBlock]:
         """Extract all content blocks from DOCX"""
         blocks = []
-        
+
         # Check if we have paragraph-level data with styles
-        if hasattr(docx_content, 'document_pars'):
+        if hasattr(docx_content, "document_pars"):
             # Use paragraph-level extraction for better style detection
             blocks.extend(self._extract_blocks_with_styles(docx_content))
         else:
             # Fallback to basic extraction
             blocks.extend(self._extract_blocks_basic(docx_content))
-        
+
         # Extract tables separately using iter_tables
         table_blocks = self._extract_tables_properly(docx_content)
         blocks.extend(table_blocks)
-        
+        blocks.extend(self._extract_tables_python_docx(filepath))
+
         # Process headers and footers
         if docx_content.header:
             for section_idx, header in enumerate(docx_content.header):
                 header_blocks = self._process_header_footer(
-                    header, 
-                    BlockType.PAGEHEADER,
-                    f"section-{section_idx}"
+                    header, BlockType.PAGEHEADER, f"section-{section_idx}"
                 )
                 blocks.extend(header_blocks)
-        
+
         if docx_content.footer:
             for section_idx, footer in enumerate(docx_content.footer):
                 footer_blocks = self._process_header_footer(
-                    footer,
-                    BlockType.PAGEFOOTER,
-                    f"section-{section_idx}"
+                    footer, BlockType.PAGEFOOTER, f"section-{section_idx}"
                 )
                 blocks.extend(footer_blocks)
-        
+
         # Process footnotes
         if docx_content.footnotes:
             footnote_blocks = self._process_footnotes(docx_content.footnotes)
             blocks.extend(footnote_blocks)
-            
+
         # Process endnotes
         if docx_content.endnotes:
             endnote_blocks = self._process_endnotes(docx_content.endnotes)
             blocks.extend(endnote_blocks)
-        
+
         return blocks
-    
+
     def _extract_blocks_with_styles(self, docx_content) -> List[BaseBlock]:
         """Extract blocks using paragraph-level style information"""
         blocks = []
-        
+
         # Debug: Let's see what docx2python returns for body
         logger.debug(f"Body content type: {type(docx_content.body)}")
-        logger.debug(f"Body content length: {len(docx_content.body) if hasattr(docx_content.body, '__len__') else 'N/A'}")
+        logger.debug(
+            f"Body content length: {len(docx_content.body) if hasattr(docx_content.body, '__len__') else 'N/A'}"
+        )
         if docx_content.body and len(docx_content.body) > 0:
             logger.debug(f"First body element type: {type(docx_content.body[0])}")
-        
+
         # Iterate through document paragraphs at depth 4
         for par_idx, par in enumerate(iter_at_depth(docx_content.document_pars, 4)):
             # Check if this is a Par object (from docx2python v3)
-            if hasattr(par, 'style') and hasattr(par, 'runs'):
+            if hasattr(par, "style") and hasattr(par, "runs"):
                 # Extract text from runs
                 text_parts = []
                 for run in par.runs:
-                    if hasattr(run, 'text') and run.text:
+                    if hasattr(run, "text") and run.text:
                         text_parts.append(run.text)
-                
-                text = ''.join(text_parts).strip()
+
+                text = "".join(text_parts).strip()
                 if not text:
                     continue
-                
+
                 # Get style
-                style = par.style if hasattr(par, 'style') else ''
-                
-                # Determine block type based on style
+                style = par.style if hasattr(par, "style") else ""
+
+                # Determine block type based on style first
                 block_type = BlockType.PARAGRAPH
                 level = None
-                
-                if style:
-                    # Handle various heading styles (case insensitive)
-                    # docx2python returns styles without spaces (e.g., "Heading1" not "Heading 1")
-                    if style == 'Title':
-                        block_type = BlockType.HEADING
-                        level = 0
-                    elif style == 'Subtitle':
+
+                style_name = style or ""
+                if style_name:
+                    if style_name == "Title":
                         block_type = BlockType.HEADING
                         level = 1
-                    elif style.startswith('Heading'):
+                    elif style_name == "Subtitle":
                         block_type = BlockType.HEADING
-                        # Extract level from style name (e.g., "Heading1" -> 1)
+                        level = 2
+                    elif style_name.startswith("Heading"):
+                        block_type = BlockType.HEADING
                         try:
-                            # Style names from docx2python are like "Heading1", "Heading2", etc.
-                            level_str = style.replace('Heading', '').strip()
-                            if level_str.isdigit():
-                                level = int(level_str)
-                            else:
-                                level = 1
-                        except (ValueError, AttributeError):
+                            lvl = style_name.replace("Heading", "").strip()
+                            level = int(lvl) if lvl.isdigit() else 1
+                        except Exception:
                             level = 1
-                
+
+                # Fallback content heuristics for mangled DOCX (no heading styles)
+                if block_type == BlockType.PARAGRAPH:
+                    # e.g., "4.1.5.4. Heading text" (allow NBSP)
+                    if re.match(r"^\d+(?:\.\d+)*\.[\s\u00A0]+", text):
+                        block_type = BlockType.HEADING
+                        level = text.count(".") + 1
+                    elif len(text) < 80 and text.isupper():
+                        block_type = BlockType.HEADING
+                        level = 2
+
                 metadata = BlockMetadata(
-                    attributes={
-                        'style': style,
-                        'paragraph_index': par_idx
-                    },
-                    confidence=1.0
+                    attributes={"style": style_name, "paragraph_index": par_idx}, confidence=1.0
                 )
-                
+
                 if level is not None:
-                    metadata.attributes['level'] = level
-                
-                blocks.append(BaseBlock(
-                    id=self._generate_block_id(),
-                    type=block_type,
-                    content=text,
-                    metadata=metadata
-                ))
+                    metadata.attributes["level"] = level
+
+                blocks.append(
+                    BaseBlock(
+                        id=self._generate_block_id(),
+                        type=block_type,
+                        content=text,
+                        metadata=metadata,
+                    )
+                )
             elif isinstance(par, str) and par.strip():
                 # Plain text paragraph (shouldn't happen with document_pars)
                 blocks.append(self._process_paragraph(par, 0, par_idx))
-        
+
         # Don't extract tables here - they're already extracted as paragraphs
         # Tables in docx2python are part of the document structure, not separate
-        
+
         return blocks
-    
+
     def _extract_blocks_basic(self, docx_content) -> List[BaseBlock]:
         """Basic extraction when style information is not available"""
         blocks = []
         body_content = docx_content.body
-        
+
         for section_idx, section in enumerate(body_content):
             section_blocks = self._process_section(section, section_idx)
             blocks.extend(section_blocks)
-        
+
         return blocks
-    
+
     def _extract_tables_from_body(self, body_content) -> List[BaseBlock]:
         """Extract tables from document body"""
         blocks = []
-        
+
         for section_idx, section in enumerate(body_content):
             if isinstance(section, list):
                 for element_idx, element in enumerate(section):
@@ -289,13 +319,13 @@ class DOCXProvider:
                                 table_block = self._process_table(element, section_idx, element_idx)
                                 if table_block:
                                     blocks.append(table_block)
-        
+
         return blocks
-    
+
     def _process_section(self, section: List, section_idx: int) -> List[BaseBlock]:
         """Process a document section"""
         blocks = []
-        
+
         for element_idx, element in enumerate(section):
             if isinstance(element, list):
                 # This is a table
@@ -308,65 +338,56 @@ class DOCXProvider:
                     para_block = self._process_paragraph(element, section_idx, element_idx)
                     if para_block:
                         blocks.append(para_block)
-            elif hasattr(element, '__iter__'):
+            elif hasattr(element, "__iter__"):
                 # Handle nested structures
                 for item in element:
                     if isinstance(item, str) and item.strip():
                         para_block = self._process_paragraph(item, section_idx, element_idx)
                         if para_block:
                             blocks.append(para_block)
-        
+
         return blocks
-    
+
     def _process_paragraph(self, text: str, section_idx: int, para_idx: int) -> Optional[BaseBlock]:
         """Process a paragraph"""
         text = text.strip()
         if not text:
             return None
-        
+
         # Try to detect heading style from content patterns
         block_type = BlockType.PARAGRAPH
         level = None
-        
+
         # Common heading patterns
-        if re.match(r'^(Chapter|Section|Part)\s+\d+', text, re.IGNORECASE):
+        if re.match(r"^(Chapter|Section|Part)\s+\d+", text, re.IGNORECASE):
             block_type = BlockType.HEADING
             level = 1
-        elif re.match(r'^\d+\.\s+[A-Z]', text):  # Numbered heading
+        elif re.match(r"^\d+\.\s+[A-Z]", text):  # Numbered heading
             block_type = BlockType.HEADING
-            level = text.count('.') + 1
+            level = text.count(".") + 1
         elif len(text) < 100 and text.isupper():  # Short all-caps likely heading
             block_type = BlockType.HEADING
             level = 2
-        
+
         block_id = self._generate_block_id()
-        
+
         metadata = BlockMetadata(
-            attributes={
-                'section_index': section_idx,
-                'paragraph_index': para_idx
-            },
-            confidence=0.95
+            attributes={"section_index": section_idx, "paragraph_index": para_idx}, confidence=0.95
         )
-        
+
         if level:
-            metadata.attributes['level'] = level
-        
-        return BaseBlock(
-            id=block_id,
-            type=block_type,
-            content=text,
-            metadata=metadata
-        )
-    
+            metadata.attributes["level"] = level
+
+        return BaseBlock(id=block_id, type=block_type, content=text, metadata=metadata)
+
     def _extract_tables_properly(self, docx_content) -> List[BaseBlock]:
         """Extract tables using docx2python's table iterator"""
         blocks = []
-        
+
         # docx2python puts all content in a table-like structure
         # Real tables can be found by checking the lineage
         table_idx = 0
-        
+
         # Get all tables from the body
         for table in iter_tables(docx_content.body):
             # Check if this is actually a table (not just the document structure)
@@ -377,48 +398,80 @@ class DOCXProvider:
                 if table_block:
                     blocks.append(table_block)
                     table_idx += 1
-        
+
         return blocks
-    
-    def _process_table(self, table_data: List, section_idx: int, table_idx: int) -> Optional[TableBlock]:
+
+    def _extract_tables_python_docx(self, filepath: Path) -> List[BaseBlock]:
+        """Fallback table extraction using python-docx when docx2python misses tables."""
+        try:
+            document = PythonDocxDocument(str(filepath))
+        except Exception:
+            return []
+
+        blocks: List[BaseBlock] = []
+        for table_index, table in enumerate(document.tables):
+            rows = len(table.rows)
+            cols = len(table.columns) if table.columns else 0
+            cells: List[TableCell] = []
+            for r_idx, row in enumerate(table.rows):
+                for c_idx, cell in enumerate(row.cells):
+                    text = cell.text.strip()
+                    cells.append(TableCell(row=r_idx, col=c_idx, content=text))
+            block_id = self._generate_block_id()
+            blocks.append(
+                TableBlock(
+                    id=block_id,
+                    type=BlockType.TABLE,
+                    content={"title": None},
+                    rows=rows,
+                    cols=cols,
+                    cells=cells,
+                    headers=[0] if rows else None,
+                    metadata=BlockMetadata(
+                        attributes={"table_index": table_index, "source": "python-docx"},
+                        confidence=0.9,
+                    ),
+                )
+            )
+        return blocks
+
+    def _process_table(
+        self, table_data: List, section_idx: int, table_idx: int
+    ) -> Optional[TableBlock]:
         """Process a table"""
         if not table_data or not any(table_data):
             return None
-        
+
         cells = []
         headers = []
-        
+
         for row_idx, row in enumerate(table_data):
             if not isinstance(row, list):
                 continue
-                
+
             # Check if this is a header row (first row often is)
             if row_idx == 0 and all(isinstance(cell, str) for cell in row):
                 # Simple heuristic: if all cells are short text, likely headers
                 if all(len(str(cell).strip()) < 50 for cell in row if cell):
                     headers.append(row_idx)
-            
+
             for col_idx, cell in enumerate(row):
                 # Cell might be a list of paragraphs
                 if isinstance(cell, list):
                     # Join all paragraphs in the cell
-                    cell_text = ' '.join(str(p).strip() for p in cell if p)
+                    cell_text = " ".join(str(p).strip() for p in cell if p)
                 else:
                     cell_text = str(cell).strip() if cell else ""
-                    
-                cells.append(TableCell(
-                    row=row_idx,
-                    col=col_idx,
-                    content=cell_text
-                ))
-        
+
+                cells.append(TableCell(row=row_idx, col=col_idx, content=cell_text))
+
         if not cells:
             return None
-        
+
         # Calculate dimensions
         max_row = max(cell.row for cell in cells) if cells else 0
         max_col = max(cell.col for cell in cells) if cells else 0
-        
+
         return TableBlock(
             id=self._generate_block_id(),
             type=BlockType.TABLE,
@@ -428,24 +481,22 @@ class DOCXProvider:
             cells=cells,
             headers=headers,
             metadata=BlockMetadata(
-                attributes={
-                    'section_index': section_idx,
-                    'table_index': table_idx
-                },
-                confidence=0.95
-            )
+                attributes={"section_index": section_idx, "table_index": table_idx}, confidence=0.95
+            ),
         )
-    
-    def _process_header_footer(self, content: List, block_type: BlockType, section_id: str) -> List[BaseBlock]:
+
+    def _process_header_footer(
+        self, content: List, block_type: BlockType, section_id: str
+    ) -> List[BaseBlock]:
         """Process headers or footers"""
         blocks = []
-        
+
         if not content:
             return blocks
-        
+
         # Flatten nested structure and extract text
         text_parts = []
-        
+
         def extract_text(item):
             if isinstance(item, str):
                 if item.strip():
@@ -453,189 +504,188 @@ class DOCXProvider:
             elif isinstance(item, list):
                 for subitem in item:
                     extract_text(subitem)
-        
+
         extract_text(content)
-        
+
         if text_parts:
-            combined_text = ' '.join(text_parts)
-            blocks.append(BaseBlock(
-                id=self._generate_block_id(),
-                type=block_type,
-                content=combined_text,
-                metadata=BlockMetadata(
-                    attributes={'section': section_id},
-                    confidence=0.95
+            combined_text = " ".join(text_parts)
+            blocks.append(
+                BaseBlock(
+                    id=self._generate_block_id(),
+                    type=block_type,
+                    content=combined_text,
+                    metadata=BlockMetadata(attributes={"section": section_id}, confidence=0.95),
                 )
-            ))
-        
+            )
+
         return blocks
-    
+
     def _process_footnotes(self, footnotes: List) -> List[BaseBlock]:
         """Process footnotes"""
         blocks = []
-        
+
         for idx, footnote in enumerate(footnotes):
             if isinstance(footnote, str) and footnote.strip():
-                blocks.append(BaseBlock(
-                    id=self._generate_block_id(),
-                    type=BlockType.FOOTNOTE,
-                    content=footnote.strip(),
-                    metadata=BlockMetadata(
-                        attributes={'footnote_index': idx + 1},
-                        confidence=0.95
-                    )
-                ))
-            elif isinstance(footnote, list):
-                # Handle nested footnote structure
-                text = ' '.join(str(item) for item in footnote if item)
-                if text.strip():
-                    blocks.append(BaseBlock(
+                blocks.append(
+                    BaseBlock(
                         id=self._generate_block_id(),
                         type=BlockType.FOOTNOTE,
-                        content=text.strip(),
+                        content=footnote.strip(),
                         metadata=BlockMetadata(
-                            attributes={'footnote_index': idx + 1},
-                            confidence=0.95
+                            attributes={"footnote_index": idx + 1}, confidence=0.95
+                        ),
+                    )
+                )
+            elif isinstance(footnote, list):
+                # Handle nested footnote structure
+                text = " ".join(str(item) for item in footnote if item)
+                if text.strip():
+                    blocks.append(
+                        BaseBlock(
+                            id=self._generate_block_id(),
+                            type=BlockType.FOOTNOTE,
+                            content=text.strip(),
+                            metadata=BlockMetadata(
+                                attributes={"footnote_index": idx + 1}, confidence=0.95
+                            ),
                         )
-                    ))
-        
+                    )
+
         return blocks
-    
+
     def _process_endnotes(self, endnotes: List) -> List[BaseBlock]:
         """Process endnotes - similar to footnotes"""
         blocks = []
-        
+
         for idx, endnote in enumerate(endnotes):
             if isinstance(endnote, str) and endnote.strip():
-                blocks.append(BaseBlock(
-                    id=self._generate_block_id(),
-                    type=BlockType.REFERENCE,
-                    content=endnote.strip(),
-                    metadata=BlockMetadata(
-                        attributes={'endnote_index': idx + 1},
-                        confidence=0.95
+                blocks.append(
+                    BaseBlock(
+                        id=self._generate_block_id(),
+                        type=BlockType.REFERENCE,
+                        content=endnote.strip(),
+                        metadata=BlockMetadata(
+                            attributes={"endnote_index": idx + 1}, confidence=0.95
+                        ),
                     )
-                ))
-        
+                )
+
         return blocks
-    
+
     def _extract_comments(self, docx_content) -> List[BaseBlock]:
         """Extract comments as blocks"""
         blocks = []
-        
+
         if not docx_content.comments:
             return blocks
-        
+
         for idx, comment in enumerate(docx_content.comments):
             if isinstance(comment, str) and comment.strip():
-                blocks.append(BaseBlock(
-                    id=self._generate_block_id(),
-                    type=BlockType.COMMENT,
-                    content=comment.strip(),
-                    metadata=BlockMetadata(
-                        attributes={
-                            'comment_index': idx + 1,
-                            'comment_type': 'document_comment'
-                        },
-                        confidence=0.95
-                    )
-                ))
-            elif isinstance(comment, dict):
-                # Handle structured comment data
-                text = comment.get('text', '')
-                author = comment.get('author', '')
-                if text:
-                    blocks.append(BaseBlock(
+                blocks.append(
+                    BaseBlock(
                         id=self._generate_block_id(),
                         type=BlockType.COMMENT,
-                        content=text,
+                        content=comment.strip(),
                         metadata=BlockMetadata(
                             attributes={
-                                'comment_index': idx + 1,
-                                'author': author,
-                                'comment_type': 'document_comment'
+                                "comment_index": idx + 1,
+                                "comment_type": "document_comment",
                             },
-                            confidence=0.95
+                            confidence=0.95,
+                        ),
+                    )
+                )
+            elif isinstance(comment, dict):
+                # Handle structured comment data
+                text = comment.get("text", "")
+                author = comment.get("author", "")
+                if text:
+                    blocks.append(
+                        BaseBlock(
+                            id=self._generate_block_id(),
+                            type=BlockType.COMMENT,
+                            content=text,
+                            metadata=BlockMetadata(
+                                attributes={
+                                    "comment_index": idx + 1,
+                                    "author": author,
+                                    "comment_type": "document_comment",
+                                },
+                                confidence=0.95,
+                            ),
                         )
-                    ))
-        
+                    )
+
         return blocks
-    
+
     def _extract_images(self, docx_content) -> List[ImageBlock]:
         """Extract images as blocks"""
         blocks = []
-        
-        if not hasattr(docx_content, 'images') or not docx_content.images:
+
+        if not hasattr(docx_content, "images") or not docx_content.images:
             return blocks
-        
+
         for filename, image_data in docx_content.images.items():
             # Create base64 data URI
             import base64
-            image_base64 = base64.b64encode(image_data).decode('utf-8')
-            
+
+            image_base64 = base64.b64encode(image_data).decode("utf-8")
+
             # Detect image format from filename
             ext = Path(filename).suffix.lower()
             mime_type = {
-                '.png': 'image/png',
-                '.jpg': 'image/jpeg',
-                '.jpeg': 'image/jpeg',
-                '.gif': 'image/gif',
-                '.bmp': 'image/bmp',
-                '.tiff': 'image/tiff',
-                '.svg': 'image/svg+xml'
-            }.get(ext, 'image/png')
-            
+                ".png": "image/png",
+                ".jpg": "image/jpeg",
+                ".jpeg": "image/jpeg",
+                ".gif": "image/gif",
+                ".bmp": "image/bmp",
+                ".tiff": "image/tiff",
+                ".svg": "image/svg+xml",
+            }.get(ext, "image/png")
+
             data_uri = f"data:{mime_type};base64,{image_base64}"
-            
-            blocks.append(ImageBlock(
-                id=self._generate_block_id(),
-                type=BlockType.IMAGE,
-                content="",
-                src=data_uri,
-                alt=filename,
-                format=ext[1:] if ext else 'unknown',
-                metadata=BlockMetadata(
-                    attributes={
-                        'original_filename': filename,
-                        'embedded': True
-                    },
-                    confidence=1.0
+
+            blocks.append(
+                ImageBlock(
+                    id=self._generate_block_id(),
+                    type=BlockType.IMAGE,
+                    content="",
+                    src=data_uri,
+                    alt=filename,
+                    format=ext[1:] if ext else "unknown",
+                    metadata=BlockMetadata(
+                        attributes={"original_filename": filename, "embedded": True}, confidence=1.0
+                    ),
                 )
-            ))
-        
+            )
+
         return blocks
-    
+
     def _build_hierarchy(self, blocks: List[BaseBlock]) -> Optional[HierarchyNode]:
         """Build document hierarchy from heading blocks"""
         heading_blocks = [b for b in blocks if b.type == BlockType.HEADING]
-        
+
         if not heading_blocks:
             # Try to build from other structural elements
             return self._build_default_hierarchy(blocks)
-        
+
         # Create root node
-        root = HierarchyNode(
-            id="root",
-            title="Document",
-            level=0,
-            block_id="root",
-            children=[]
-        )
-        
+        root = HierarchyNode(id="root", title="Document", level=0, block_id="root", children=[])
+
         # Build hierarchy
         stack = [root]
-        
+
         for block in heading_blocks:
             # Add null check for metadata.attributes
             if block.metadata and block.metadata.attributes:
-                level = block.metadata.attributes.get('level', 1)
+                level = block.metadata.attributes.get("level", 1)
             else:
                 level = 1
-            
+
             # Pop stack until we find parent level
             while len(stack) > level:
                 stack.pop()
-            
+
             # Create node
             node = HierarchyNode(
                 id=f"h-{block.id}",
@@ -643,43 +693,37 @@ class DOCXProvider:
                 level=level,
                 block_id=block.id,
                 parent_id=stack[-1].id if stack else None,
-                breadcrumb=[n.title for n in stack] + [block.content]
+                breadcrumb=[n.title for n in stack] + [block.content],
             )
-            
+
             # Add to parent
             if stack:
                 stack[-1].children.append(node)
-            
+
             # Update stack
             if len(stack) <= level:
                 stack.append(node)
             else:
                 stack[level] = node
-        
+
         return root
-    
+
     def _build_default_hierarchy(self, blocks: List[BaseBlock]) -> Optional[HierarchyNode]:
         """Build a default hierarchy when no headings are found"""
-        root = HierarchyNode(
-            id="root",
-            title="Document",
-            level=0,
-            block_id="root",
-            children=[]
-        )
-        
+        root = HierarchyNode(id="root", title="Document", level=0, block_id="root", children=[])
+
         # Group by section if we have that info
         sections = {}
         for block in blocks:
             # Add null check for metadata.attributes
             if block.metadata and block.metadata.attributes:
-                section_idx = block.metadata.attributes.get('section_index', 0)
+                section_idx = block.metadata.attributes.get("section_index", 0)
             else:
                 section_idx = 0
             if section_idx not in sections:
                 sections[section_idx] = []
             sections[section_idx].append(block)
-        
+
         # Create section nodes
         for section_idx in sorted(sections.keys()):
             if len(sections) > 1:  # Only create section nodes if multiple sections
@@ -689,53 +733,56 @@ class DOCXProvider:
                     level=1,
                     block_id=f"section-{section_idx}",
                     parent_id="root",
-                    breadcrumb=["Document", f"Section {section_idx + 1}"]
+                    breadcrumb=["Document", f"Section {section_idx + 1}"],
                 )
                 root.children.append(section_node)
-        
+
         return root if root.children else None
-    
+
     def _extract_full_text(self, blocks: List[BaseBlock]) -> str:
         """Extract all text content from blocks"""
         text_parts = []
         for block in blocks:
-            if hasattr(block, 'content') and isinstance(block.content, str):
+            if hasattr(block, "content") and isinstance(block.content, str):
                 text_parts.append(block.content)
-            elif block.type == BlockType.TABLE and hasattr(block, 'cells'):
+            elif block.type == BlockType.TABLE and hasattr(block, "cells"):
                 # Extract table text
                 for cell in block.cells:
                     if cell.content:
                         text_parts.append(cell.content)
-        return '\n'.join(text_parts)
-    
+        return "\n".join(text_parts)
+
     def _extract_keywords(self, docx_content) -> List[str]:
         """Extract keywords from document properties"""
         keywords = []
-        
+
         if docx_content.core_properties:
             # Check for keywords in properties
             props = docx_content.core_properties
-            if 'keywords' in props and props['keywords']:
+            if "keywords" in props and props["keywords"]:
                 # Keywords might be comma-separated
-                kw_string = props['keywords']
-                keywords = [k.strip() for k in kw_string.split(',') if k.strip()]
-            
+                kw_string = props["keywords"]
+                keywords = [k.strip() for k in kw_string.split(",") if k.strip()]
+
             # Also check subject
-            if 'subject' in props and props['subject']:
-                keywords.append(props['subject'])
-        
+            if "subject" in props and props["subject"]:
+                keywords.append(props["subject"])
+
         return keywords
-    
+
     def _generate_block_id(self) -> str:
         """Generate unique block ID"""
         self.block_counter += 1
         return f"docx-block-{self.block_counter}"
-    
+
     def _analyze_and_merge_tables(self, blocks: List[BaseBlock]) -> List[BaseBlock]:
         """Analyze tables for potential merging using Claude's logic"""
         # Import the Claude table merge analyzer if available
         try:
-            from extractor.core.processors.claude_table_merge_analyzer import ClaudeTableMergeAnalyzer
+            from extractor.core.processors.claude_table_merge_analyzer import (
+                ClaudeTableMergeAnalyzer,
+            )
+
             analyzer = ClaudeTableMergeAnalyzer()
             return analyzer.analyze_and_merge_tables(blocks)
         except ImportError:
@@ -746,15 +793,15 @@ class DOCXProvider:
 if __name__ == "__main__":
     # Test the DOCX extractor
     import tempfile
-    
+
     # For testing, we'll create a simple test
     # In real usage, we'd have an actual DOCX file
     provider = DOCXProvider()
-    
+
     # Since we can't easily create a DOCX file in memory for testing,
     # we'll just verify the class initializes correctly
     assert provider is not None
     assert provider.block_counter == 0
-    
+
     print("✅ DOCX provider initialized successfully")
     print("Note: Full testing requires actual DOCX files")

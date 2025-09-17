@@ -76,20 +76,23 @@ const TabbedLayout = () => {
                   Load PDF
                 </Button>
                 
-                <div className="space-y-3">
+                <div className="space-y-2">
                   {pdfFiles.map((file, index) => (
-                    <Card key={index} className="p-3 hover:bg-muted/50 transition-colors cursor-pointer">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <div className="font-medium text-sm">{file.name}</div>
-                          <div className="text-xs text-muted-foreground">
-                            {file.pages} pages | <span className={`text-status-${file.status}`}>{file.status}</span>
-                          </div>
+                    <Card
+                      key={index}
+                      className="group h-12 px-3 rounded-xl flex items-center justify-between text-left transition-colors hover:bg-muted cursor-pointer"
+                      role="button"
+                      aria-label={`Open ${file.name}`}
+                    >
+                      <div className="min-w-0">
+                        <div className="font-medium text-sm truncate">{file.name}</div>
+                        <div className="text-xs text-muted-foreground truncate">
+                          {file.pages} pages | <span className={`text-status-${file.status}`}>{file.status}</span>
                         </div>
-                        <Button variant="ghost" size="sm">
-                          <Archive className="h-4 w-4" />
-                        </Button>
                       </div>
+                      <Button variant="ghost" size="icon" className="opacity-0 group-hover:opacity-100 transition-opacity" aria-label="Archive">
+                        <Archive className="h-4 w-4" />
+                      </Button>
                     </Card>
                   ))}
                 </div>

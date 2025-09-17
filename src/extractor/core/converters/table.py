@@ -47,7 +47,11 @@ class TableConverter(PdfConverter):
         LLMFormProcessor,
         LLMComplexRegionProcessor,
     )
-    converter_block_types: List[BlockTypes] = (BlockTypes.Table, BlockTypes.Form, BlockTypes.TableOfContents)
+    converter_block_types: List[BlockTypes] = (
+        BlockTypes.Table,
+        BlockTypes.Form,
+        BlockTypes.TableOfContents,
+    )
 
     def build_document(self, filepath: str):
         provider_cls = provider_from_filepath(filepath)
@@ -61,7 +65,9 @@ class TableConverter(PdfConverter):
         document = document_builder(provider, layout_builder, line_builder, ocr_builder)
 
         for page in document.pages:
-            page.structure = [p for p in page.structure if p.block_type in self.converter_block_types]
+            page.structure = [
+                p for p in page.structure if p.block_type in self.converter_block_types
+            ]
 
         for processor in self.processor_list:
             processor(document)
@@ -78,14 +84,12 @@ if __name__ == "__main__":
     # Test table extraction functionality
     print("🧪 Testing Table Converter")
     print("=" * 50)
-    
+
     # Test 1: Initialize table converter
     print("\n📝 Test 1: Initialize Table Converter")
     try:
         converter = TableConverter(
-            artifact_dict={},
-            processor_list=None,
-            renderer=None  # Use default
+            artifact_dict={}, processor_list=None, renderer=None  # Use default
         )
         print("✅ Table converter initialized")
         print(f"   - Processors: {len(converter.processor_list)}")
@@ -93,8 +97,9 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"❌ Initialization failed: {e}")
         import sys
+
         sys.exit(1)
-    
+
     # Test 2: Check processor types
     print("\n📝 Test 2: Check Processor Configuration")
     try:
@@ -102,35 +107,41 @@ if __name__ == "__main__":
         print("✅ Processors configured:")
         for name in processor_names:
             print(f"   - {name}")
-        
+
         # Verify table-specific processors
         assert "TableProcessor" in processor_names, "Missing TableProcessor"
         assert "LLMTableProcessor" in processor_names, "Missing LLM table processor"
         print("   ✓ All table processors present")
     except Exception as e:
         print(f"❌ Processor check failed: {e}")
-    
+
     # Test 3: Test with minimal PDF
     print("\n📝 Test 3: Process Test Document")
     import tempfile
     import os
-    
-    with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp:
+
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
         test_pdf = tmp.name
         # Write minimal PDF header
-        tmp.write(b'%PDF-1.4\n%test\n')
-    
+        tmp.write(b"%PDF-1.4\n%test\n")
+
     try:
         # Build document (without full processing)
         document = converter.build_document(test_pdf)
         print("✅ Document built successfully")
         print(f"   - Pages: {len(document.pages)}")
-        print(f"   - OCR disabled: {hasattr(converter, 'config') and converter.config.get('disable_ocr', True)}")
-        
+        print(
+            f"   - OCR disabled: {hasattr(converter, 'config') and converter.config.get('disable_ocr', True)}"
+        )
+
         # Check filtering works
         if document.pages:
             page = document.pages[0]
-            filtered_blocks = [b.block_type for b in page.structure if b.block_type in converter.converter_block_types]
+            filtered_blocks = [
+                b.block_type
+                for b in page.structure
+                if b.block_type in converter.converter_block_types
+            ]
             print(f"   - Filtered to {len(filtered_blocks)} table/form blocks")
     except Exception as e:
         print(f"⚠️  Document processing: {e}")
@@ -138,6 +149,6 @@ if __name__ == "__main__":
     finally:
         if os.path.exists(test_pdf):
             os.unlink(test_pdf)
-    
+
     print("\n" + "=" * 50)
     print("✅ Table converter validation complete")

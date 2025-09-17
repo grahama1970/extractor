@@ -36,10 +36,12 @@ from extractor.core.util import assign_config
 
 configure_logging()
 
+
 class Char(BaseModel):
     char: str
     polygon: PolygonBox
     char_idx: int
+
 
 class ProviderOutput(BaseModel):
     line: Line
@@ -72,6 +74,7 @@ class ProviderOutput(BaseModel):
 
 ProviderPageLines = Dict[int, List[ProviderOutput]]
 
+
 class BaseProvider:
     def __init__(self, filepath: str, config: Optional[BaseModel | Dict[str, Any]] = None):
         assign_config(self, config)
@@ -79,10 +82,10 @@ class BaseProvider:
 
     def __len__(self):
         """Return the number of pages/items in this provider.
-        
+
         Returns:
             int: Number of pages or items
-            
+
         Raises:
             NotImplementedError: Must be implemented by subclasses
         """
@@ -90,14 +93,14 @@ class BaseProvider:
 
     def get_images(self, idxs: List[int], dpi: int) -> List[Image.Image]:
         """Get images for the specified page indices at given DPI.
-        
+
         Args:
             idxs: List of page indices to render
             dpi: DPI for image rendering
-            
+
         Returns:
             List of PIL Image objects
-            
+
         Raises:
             NotImplementedError: Must be implemented by subclasses
         """
@@ -105,13 +108,13 @@ class BaseProvider:
 
     def get_page_bbox(self, idx: int) -> PolygonBox | None:
         """Get the bounding box for a specific page.
-        
+
         Args:
             idx: Page index
-            
+
         Returns:
             PolygonBox or None if page doesn't exist
-            
+
         Raises:
             NotImplementedError: Must be implemented by subclasses
         """
@@ -119,13 +122,13 @@ class BaseProvider:
 
     def get_page_lines(self, idx: int) -> List["ProviderOutput"]:
         """Get text lines for a specific page.
-        
+
         Args:
             idx: Page index
-            
+
         Returns:
             List of ProviderOutput objects
-            
+
         Raises:
             NotImplementedError: Must be implemented by subclasses
         """
@@ -133,13 +136,13 @@ class BaseProvider:
 
     def get_page_refs(self, idx: int) -> List[Reference]:
         """Get references for a specific page.
-        
+
         Args:
             idx: Page index
-            
+
         Returns:
             List of Reference objects
-            
+
         Raises:
             NotImplementedError: Must be implemented by subclasses
         """
@@ -152,10 +155,10 @@ class BaseProvider:
     @lru_cache(maxsize=1)
     def get_font_css():
         """Get cached CSS configuration for fonts.
-        
+
         Returns:
             CSS object for weasyprint
-            
+
         Raises:
             ValueError: If font settings are not properly configured
         """
@@ -163,13 +166,14 @@ class BaseProvider:
         from weasyprint.text.fonts import FontConfiguration
 
         # Validate font settings
-        if not hasattr(settings, 'FONT_PATH') or not settings.FONT_PATH:
+        if not hasattr(settings, "FONT_PATH") or not settings.FONT_PATH:
             raise ValueError("FONT_PATH setting is required but not configured")
-        if not hasattr(settings, 'FONT_NAME') or not settings.FONT_NAME:
+        if not hasattr(settings, "FONT_NAME") or not settings.FONT_NAME:
             raise ValueError("FONT_NAME setting is required but not configured")
 
         font_config = FontConfiguration()
-        css = CSS(string=f'''
+        css = CSS(
+            string=f"""
             @font-face {{
                 font-family: GoNotoCurrent-Regular;
                 src: url({settings.FONT_PATH});
@@ -181,5 +185,7 @@ class BaseProvider:
                 font-feature-settings: "liga" 0;
                 text-rendering: optimizeLegibility;
             }}
-            ''', font_config=font_config)
+            """,
+            font_config=font_config,
+        )
         return css

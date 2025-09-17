@@ -19,16 +19,12 @@ Example Usage:
 from __future__ import annotations
 
 import base64
-import json
-import os
-import time
 from io import BytesIO
 from pathlib import Path
 from typing import List, Optional, Annotated
 
 import litellm
 import PIL
-from PIL import Image
 from pydantic import BaseModel
 from loguru import logger
 from dotenv import find_dotenv, load_dotenv
@@ -49,6 +45,7 @@ from extractor.core.services.utils.log_utils import (
 from extractor.core.services.utils.json_utils import clean_json_string
 from extractor.core.services.utils.litellm_cache import initialize_litellm_cache
 from litellm import completion_cost
+from extractor.pipeline.utils.litellm_response_utils import extract_content
 
 # --------------------------------------------------------------------------- #
 # Environment
@@ -57,6 +54,7 @@ dotenv_path = find_dotenv()
 load_dotenv(dotenv_path)
 project_root = Path(dotenv_path).parent
 
+
 # --------------------------------------------------------------------------- #
 # Tenacity retry decorator
 # --------------------------------------------------------------------------- #
@@ -64,14 +62,17 @@ project_root = Path(dotenv_path).parent
     reraise=True,
     stop=stop_after_attempt(3),
     wait=wait_exponential_jitter(initial=1, max=10),
-    retry=retry_if_exception_type((
-        litellm.exceptions.Timeout,
-        litellm.exceptions.RateLimitError,
-    )),
+    retry=retry_if_exception_type(
+        (
+            litellm.exceptions.Timeout,
+            litellm.exceptions.RateLimitError,
+        )
+    ),
 )
 def _call_litellm(**kwargs):
     """Internal wrapper around litellm.completion with Tenacity retries."""
     return litellm.completion(**kwargs)
+
 
 # --------------------------------------------------------------------------- #
 # Service
@@ -188,25 +189,22 @@ class LiteLLMService(BaseService):
             log_api_response("LiteLLM", response)
 
             # Extract textual answer
-            text = response.choices[0].message.content
+            text = extract_content(response)
             tokens = response.usage.total_tokens if response.usage else 0
 
             # Monetary cost (USD)
             cost_usd = float(completion_cost(completion_response=response))
 
             # Update block metadata
-            metadata_update = {
-                'llm_tokens_used': tokens,
-                'llm_request_count': 1
-            }
-            
+            metadata_update = {"llm_tokens_used": tokens, "llm_request_count": 1}
+
             # Store cost in result instead of metadata
             # since BlockMetadata doesn't have llm_cost_usd field
             block.update_metadata(**metadata_update)
 
             # Return parsed JSON with cost
             result = clean_json_string(text, return_dict=True)
-            result['completion_cost'] = cost_usd
+            result["completion_cost"] = cost_usd
             logger.info(f"LiteLLM completion cost: ${cost_usd:.6f}")
             return result
 

@@ -25,71 +25,48 @@ from textwrap import dedent
 
 # Third-party
 from loguru import logger
-try:
-    try:
-        import typer
-        _HAS_TYPER = True
-    except Exception:
-        _HAS_TYPER = False
-        class _TyperShim:
-            def __init__(self,*a,**k): pass
-            def command(self,*a,**k): return lambda f: f
-            def __call__(self,*a,**k): print("Typer not installed; CLI disabled")
-        def _opt(*a,**k): return None
-        def _arg(*a,**k): return None
-        typer = _TyperShim()  # type: ignore
-        typer.Typer = _TyperShim  # type: ignore
-        typer.Option = _opt  # type: ignore
-        typer.Argument = _arg  # type: ignore
-        typer.secho = print  # type: ignore
-
-    _HAS_TYPER = True
-except Exception:
-    _HAS_TYPER = False
-    class _TyperShim:
-        def __init__(self,*a,**k): pass
-        def command(self,*a,**k): return lambda f: f
-        def __call__(self,*a,**k): print("Typer not installed; CLI disabled")
-    def _opt(*a,**k): return None
-    def _arg(*a,**k): return None
-    typer = _TyperShim()  # type: ignore
-    typer.Typer = _TyperShim  # type: ignore
-    typer.Option = _opt  # type: ignore
-    typer.Argument = _arg  # type: ignore
-    typer.secho = print  # type: ignore
-
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
+import typer
+from dotenv import load_dotenv, find_dotenv
+from extractor.pipeline.utils.litellm_cache import initialize_litellm_cache
+from extractor.pipeline.utils.diagnostics import get_run_id
+from extractor.pipeline.utils.litellm_call import litellm_call
+
 try:
-    from arango.client import ArangoClient
+    from arango import ArangoClient
     from arango.exceptions import ArangoError
     from arango.database import StandardDatabase
-except Exception:
+except Exception:  # allow import without python-arango for non-DB debug paths
     ArangoClient = None  # type: ignore
+
     class ArangoError(Exception): ...  # type: ignore
+
     class StandardDatabase: ...  # type: ignore
 
-try:
-    import faiss  # type: ignore
-    _HAS_FAISS = True
-except Exception:
-    _HAS_FAISS = False
-    faiss = None  # type: ignore
 
-from tqdm.asyncio import tqdm
-from extractor.pipeline.utils.litellm_call import litellm_call
-from extractor.pipeline.utils.diagnostics import get_run_id
-
-# FAIL FAST - simple env loading
-from dotenv import load_dotenv, find_dotenv
 if not load_dotenv(find_dotenv(), override=True):
-    raise ValueError("No .env file found - check .env exists")
+    print("Warning: .env not found; proceeding with process env only.", file=sys.stderr)
+# Initialize LiteLLM cache for rationale generation
+try:
+    initialize_litellm_cache()
+except Exception as _e:
+    logger.warning(f"LiteLLM cache init failed (continuing): {_e}")
+
 
 logger.remove()
 logger.add(sys.stderr, level="INFO")
 
-app = typer.Typer(help="Create graph relationships between PDF objects in ArangoDB")
 console = Console()
+
+# Optional FAISS dependency with NumPy fallback
+try:
+    import faiss  # type: ignore
+
+    _HAVE_FAISS = True
+except Exception:
+    faiss = None  # type: ignore
+    _HAVE_FAISS = False
 
 # (duplicate config block removed)
 # Stage 11 configuration via environment (toggleable)
@@ -100,21 +77,38 @@ GRAPH_HIERARCHY_WEIGHT = float(os.getenv("GRAPH_HIERARCHY_WEIGHT", 0.3))
 GRAPH_EDGE_COLLECTION = os.getenv("GRAPH_EDGE_COLLECTION", "pdf_relationships")
 GRAPH_GRAPH_NAME = os.getenv("GRAPH_NAME", "pdf_knowledge_graph")
 GRAPH_VERTEX_COLLECTION = os.getenv("GRAPH_VERTEX_COLLECTION", "pdf_objects")
-GRAPH_ENABLE_RATIONALES = os.getenv("GRAPH_ENABLE_RATIONALES", "true").lower() in ("1", "true", "yes", "y")
-GRAPH_RATIONALE_MODEL = os.getenv("GRAPH_RATIONALE_MODEL", "openai/gpt-5-mini")
+GRAPH_ENABLE_RATIONALES = os.getenv("GRAPH_ENABLE_RATIONALES", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+    "y",
+)
+# Prefer the project's default LLM for rationales unless explicitly overridden
+GRAPH_RATIONALE_MODEL = (
+    os.getenv("GRAPH_RATIONALE_MODEL")
+    or os.getenv("LITELLM_DEFAULT_MODEL")
+    or os.getenv("DEFAULT_LITELLM_MODEL")
+    or os.getenv("LITELLM_MODEL")
+    or "gemini/gemini-2.5-flash"
+)
 GRAPH_RATIONALE_CONCURRENCY = int(os.getenv("GRAPH_RATIONALE_CONCURRENCY", 8))
 GRAPH_RATIONALE_MAX_TOKENS = int(os.getenv("GRAPH_RATIONALE_MAX_TOKENS", 256))
-GRAPH_RELATIONSHIPS_ENABLED = os.getenv("GRAPH_RELATIONSHIPS_ENABLED", "true").lower() in ("1", "true", "yes", "y")
+GRAPH_RELATIONSHIPS_ENABLED = os.getenv("GRAPH_RELATIONSHIPS_ENABLED", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+    "y",
+)
 
 
 def ensure_graph_and_edge_collection(
     db: StandardDatabase,
     graph_name: str = "pdf_knowledge_graph",
     edge_collection: str = "pdf_relationships",
-    vertex_collection: str = "pdf_objects"
+    vertex_collection: str = "pdf_objects",
 ) -> str:
     """Ensure graph and edge collection exist in ArangoDB.
-    
+
     Returns:
         Name of the edge collection
     """
@@ -123,27 +117,29 @@ def ensure_graph_and_edge_collection(
         if not db.has_collection(edge_collection):
             db.create_collection(edge_collection, edge=True)
             logger.info(f"Created edge collection: {edge_collection}")
-        
+
         # Create graph if it doesn't exist
         if not db.has_graph(graph_name):
             db.create_graph(
                 name=graph_name,
-                edge_definitions=[{
-                    'edge_collection': edge_collection,
-                    'from_vertex_collections': [vertex_collection],
-                    'to_vertex_collections': [vertex_collection]
-                }]
+                edge_definitions=[
+                    {
+                        "edge_collection": edge_collection,
+                        "from_vertex_collections": [vertex_collection],
+                        "to_vertex_collections": [vertex_collection],
+                    }
+                ],
             )
             logger.info(f"Created graph: {graph_name}")
-        
+
         # Add indexes for efficient queries
         edge_col = db.collection(edge_collection)
         edge_col.add_persistent_index(fields=["relationship_type"], unique=False)
         edge_col.add_persistent_index(fields=["weight"], unique=False)
         edge_col.add_persistent_index(fields=["source_pdf"], unique=False)
-        
+
         return edge_collection
-        
+
     except ArangoError as e:
         logger.error(f"Failed to set up graph structures: {e}")
         sys.exit(1)
@@ -151,45 +147,44 @@ def ensure_graph_and_edge_collection(
 
 def build_faiss_index(embeddings: NDArray[np.float32]) -> faiss.IndexFlatIP:
     """Build FAISS index with normalized embeddings for cosine similarity.
-    
+
     Args:
         embeddings: Array of embeddings
-        
+
     Returns:
         FAISS index ready for search
     """
     # Normalize for cosine similarity
     faiss.normalize_L2(embeddings)
-    
+
     # Use inner product (equivalent to cosine similarity after normalization)
     dimension = embeddings.shape[1]
     index = faiss.IndexFlatIP(dimension)
     index.add(cast(Any, embeddings))  # type: ignore[arg-type]
-    
+
     logger.info(f"Built FAISS index with {index.ntotal} vectors")
-    
-    return index
+    return ("faiss", index)
 
 
 def calculate_hierarchy_distance(doc1: Dict[str, Any], doc2: Dict[str, Any]) -> float:
     """Calculate normalized hierarchical distance between two documents.
-    
+
     Returns:
         Normalized distance between 0 and 1
     """
     # If not from same PDF, max distance
-    if doc1.get('source_pdf') != doc2.get('source_pdf'):
+    if doc1.get("source_pdf") != doc2.get("source_pdf"):
         return 1.0
-    
+
     # Calculate section level difference
-    level1 = doc1.get('section_level', 0)
-    level2 = doc2.get('section_level', 0)
+    level1 = doc1.get("section_level", 0)
+    level2 = doc2.get("section_level", 0)
     level_diff = abs(level1 - level2)
-    
+
     # Check if in same section hierarchy
-    breadcrumbs1 = doc1.get('section_breadcrumbs', [])
-    breadcrumbs2 = doc2.get('section_breadcrumbs', [])
-    
+    breadcrumbs1 = doc1.get("section_breadcrumbs", [])
+    breadcrumbs2 = doc2.get("section_breadcrumbs", [])
+
     # Find common ancestor depth
     common_depth = 0
     for i, (b1, b2) in enumerate(zip(breadcrumbs1, breadcrumbs2)):
@@ -197,14 +192,14 @@ def calculate_hierarchy_distance(doc1: Dict[str, Any], doc2: Dict[str, Any]) -> 
             common_depth = i + 1
         else:
             break
-    
+
     # Calculate tree distance
     tree_distance = (len(breadcrumbs1) - common_depth) + (len(breadcrumbs2) - common_depth)
-    
+
     # Normalize (assuming max depth of 10)
     max_possible_distance = 10
     normalized_distance = min(tree_distance / max_possible_distance, 1.0)
-    
+
     return normalized_distance
 
 
@@ -212,29 +207,30 @@ def calculate_combined_weight(
     semantic_similarity: float,
     hierarchy_distance: float,
     semantic_weight: float = 0.7,
-    hierarchy_weight: float = 0.3
+    hierarchy_weight: float = 0.3,
 ) -> float:
     """Calculate combined weight using semantic similarity and hierarchy.
-    
+
     Args:
         semantic_similarity: FAISS similarity score (0-1)
         hierarchy_distance: Normalized hierarchy distance (0-1)
         semantic_weight: Weight for semantic similarity
         hierarchy_weight: Weight for hierarchy
-        
+
     Returns:
         Combined weight between 0 and 1
     """
     # Convert hierarchy distance to similarity using exponential decay
     hierarchy_similarity = math.exp(-3 * hierarchy_distance)
-    
+
     # Combine weights
-    combined = (semantic_weight * semantic_similarity + 
-                hierarchy_weight * hierarchy_similarity)
-    
+    combined = semantic_weight * semantic_similarity + hierarchy_weight * hierarchy_similarity
+
     return combined
 
+
 # -------- Rationale generation helpers (concurrent) --------
+
 
 async def _rationale_for_pair(text_a: str, text_b: str, model: str, max_tokens: int) -> str:
     """Generate a short rationale explaining why two pdf_objects are related."""
@@ -246,10 +242,26 @@ async def _rationale_for_pair(text_a: str, text_b: str, model: str, max_tokens: 
         if len(b_snip) > 800:
             b_snip = b_snip[:800] + " ..."
         system = "You explain concisely why two document snippets are related. Use one or two sentences. Avoid quoting long text."
-        user = f"Snippet A:\n{a_snip}\n\nSnippet B:\n{b_snip}\n\nExplain the relationship succinctly."
+        user = (
+            f"Snippet A:\n{a_snip}\n\nSnippet B:\n{b_snip}\n\nExplain the relationship succinctly."
+        )
+
+        # If the selected model is an OpenAI model but no OPENAI_API_KEY is present,
+        # fall back to the default LLM configured for the project.
+        _mdl = model
+        try:
+            if (model or "").startswith("openai/") and not os.getenv("OPENAI_API_KEY"):
+                _mdl = (
+                    os.getenv("LITELLM_DEFAULT_MODEL")
+                    or os.getenv("DEFAULT_LITELLM_MODEL")
+                    or os.getenv("LITELLM_MODEL")
+                    or "gemini/gemini-2.5-flash"
+                )
+        except Exception:
+            pass
 
         params: Dict[str, Any] = {
-            "model": model,
+            "model": _mdl,
             "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
@@ -258,14 +270,24 @@ async def _rationale_for_pair(text_a: str, text_b: str, model: str, max_tokens: 
             "stream": False,
             "timeout": 60,
         }
-        params["temperature"] = 1.0 if "gpt-5" in (model or "").lower() else 0.1
+        params["temperature"] = 1.0 if "gpt-5" in (_mdl or "").lower() else 0.1
         sid = os.getenv("LITELLM_SESSION_ID") or get_run_id()
-        out = await litellm_call([params], concurrency=1, desc="graph_rationale", session_id=sid)
-        return ((out[0] if out else "").strip())[:600]
+        out = await litellm_call([params], concurrency=1, desc="graph_rationale", session_id=sid, export="results")
+        r = out[0] if out else None
+        try:
+            from loguru import logger as _logger
+            if r:
+                _logger.info(f"graph_rationale: model={r.request.model} ok={r.exception is None}")
+        except Exception:
+            pass
+        return (((r.content if r else "").strip()))[:600]
     except Exception:
         return ""
 
-async def enrich_edges_with_rationales(edges: List[Dict[str, Any]], doc_text_map: Dict[str, str]) -> None:
+
+async def enrich_edges_with_rationales(
+    edges: List[Dict[str, Any]], doc_text_map: Dict[str, str]
+) -> None:
     """Attach rationale text to each edge using concurrent LLM calls."""
     if not edges:
         return
@@ -282,7 +304,9 @@ async def enrich_edges_with_rationales(edges: List[Dict[str, Any]], doc_text_map
                 edge["rationale_model"] = GRAPH_RATIONALE_MODEL
                 return
             async with sem:
-                rationale = await _rationale_for_pair(ta, tb, GRAPH_RATIONALE_MODEL, GRAPH_RATIONALE_MAX_TOKENS)
+                rationale = await _rationale_for_pair(
+                    ta, tb, GRAPH_RATIONALE_MODEL, GRAPH_RATIONALE_MAX_TOKENS
+                )
                 edge["rationale"] = rationale
                 edge["rationale_model"] = GRAPH_RATIONALE_MODEL
         except Exception:
@@ -301,108 +325,113 @@ async def find_and_create_relationships(
     batch_size: int = 100,
     skip_db_insert: bool = False,
     db: Optional[StandardDatabase] = None,
-    edge_collection: Optional[str] = None
+    edge_collection: Optional[str] = None,
 ):
     """Find similar documents and create edge relationships."""
     edge_buffer = []
     total_edges = 0
-    
+
     # Pre-compute text lookup map for rationales
     doc_text_map: Dict[str, str] = {
-        f"pdf_objects/{d.get('_key')}": (d.get('text_content') or "")
-        for d in documents
+        f"pdf_objects/{d.get('_key')}": (d.get("text_content") or "") for d in documents
     }
 
     with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        console=console
+        SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console
     ) as progress:
         task = progress.add_task("Finding relationships...", total=len(documents))
-        
+
         for idx, doc in enumerate(documents):
-            query_embedding = embeddings[idx:idx+1]
-            similarities, indices = index.search(query_embedding, k_neighbors + 1)  # type: ignore[misc]
-            
-            for rank, (sim_idx, similarity) in enumerate(zip(indices[0][1:], similarities[0][1:]), start=1):
+            query_embedding = embeddings[idx : idx + 1]
+            similarities, indices = index_search(index, query_embedding, k_neighbors + 1)  # type: ignore[misc]
+
+            for rank, (sim_idx, similarity) in enumerate(
+                zip(indices[0][1:], similarities[0][1:]), start=1
+            ):
                 if similarity < similarity_threshold:
                     continue
-                
+
                 neighbor_doc = documents[int(sim_idx)]
                 hierarchy_dist = calculate_hierarchy_distance(doc, neighbor_doc)
                 combined_weight = calculate_combined_weight(
-                    similarity, hierarchy_dist,
+                    similarity,
+                    hierarchy_dist,
                     semantic_weight=GRAPH_SEMANTIC_WEIGHT,
                     hierarchy_weight=GRAPH_HIERARCHY_WEIGHT,
                 )
-                
+
                 edge_doc = {
-                    '_from': f"pdf_objects/{doc['_key']}",
-                    '_to': f"pdf_objects/{neighbor_doc['_key']}",
-                    'relationship_type': 'semantic_similarity',
-                    'semantic_score': float(similarity),
-                    'hierarchy_distance': hierarchy_dist,
-                    'weight': float(combined_weight),
-                    'source_pdf': doc['source_pdf'],
-                    'discovery_method': 'faiss_hierarchical',
-                    'knn_rank': int(rank),
-                    'neighbor_index': int(sim_idx),
-                    'created_at': datetime.now(timezone.utc).isoformat()
+                    "_from": f"pdf_objects/{doc['_key']}",
+                    "_to": f"pdf_objects/{neighbor_doc['_key']}",
+                    "relationship_type": "semantic_similarity",
+                    "semantic_score": float(similarity),
+                    "hierarchy_distance": hierarchy_dist,
+                    "weight": float(combined_weight),
+                    "source_pdf": doc["source_pdf"],
+                    "discovery_method": "faiss_hierarchical",
+                    "knn_rank": int(rank),
+                    "neighbor_index": int(sim_idx),
+                    "created_at": datetime.now(timezone.utc).isoformat(),
                 }
-                
+
                 edge_buffer.append(edge_doc)
-                
+
                 if not skip_db_insert and len(edge_buffer) >= batch_size:
                     try:
                         if GRAPH_ENABLE_RATIONALES:
                             await enrich_edges_with_rationales(edge_buffer, doc_text_map)
                         assert db is not None and edge_collection is not None
                         edge_col = db.collection(edge_collection)
-                        result = edge_col.import_bulk(edge_buffer, on_duplicate='ignore')
+                        result = edge_col.import_bulk(edge_buffer, on_duplicate="ignore")
                         created = 0
                         try:
-                            created = int(result.get('created', 0))  # type: ignore[attr-defined]
+                            created = int(result.get("created", 0))  # type: ignore[attr-defined]
                         except Exception:
                             created = 0
                         total_edges += created
                         edge_buffer.clear()
                     except ArangoError as e:
                         logger.error(f"Failed to insert edges: {e}")
-            
+
             progress.update(task, advance=1)
-    
+
     if not skip_db_insert and edge_buffer:
         try:
             if GRAPH_ENABLE_RATIONALES:
                 await enrich_edges_with_rationales(edge_buffer, doc_text_map)
             assert db is not None and edge_collection is not None
             edge_col = db.collection(edge_collection)
-            result = edge_col.import_bulk(edge_buffer, on_duplicate='ignore')
+            result = edge_col.import_bulk(edge_buffer, on_duplicate="ignore")
             created = 0
             try:
-                created = int(result.get('created', 0))  # type: ignore[attr-defined]
+                created = int(result.get("created", 0))  # type: ignore[attr-defined]
             except Exception:
                 created = 0
             total_edges += created
         except ArangoError as e:
             logger.error(f"Failed to insert final edges: {e}")
-    
+
     if skip_db_insert and GRAPH_ENABLE_RATIONALES and edge_buffer:
         await enrich_edges_with_rationales(edge_buffer, doc_text_map)
 
     if not skip_db_insert:
         logger.success(f"Created {total_edges} edge relationships")
-    
+
     return edge_buffer if skip_db_insert else total_edges
 
 
-@app.command()
 def run(
-    input_json: Path = typer.Argument(..., help="Path to Stage 10 flattened data JSON.", exists=True),
-    output_dir: Path = typer.Option("data/results/pipeline", "-o", help="Parent directory for pipeline results."),
+    input_json: Path = typer.Argument(
+        ..., help="Path to Stage 10 flattened data JSON.", exists=True
+    ),
+    output_dir: Path = typer.Option(
+        "data/results/pipeline", "-o", help="Parent directory for pipeline results."
+    ),
     k_neighbors: int = typer.Option(10, help="Number of neighbors to find for similarity."),
     similarity_threshold: float = typer.Option(0.55, help="Minimum similarity to create an edge."),
-    skip_graph_creation: bool = typer.Option(False, "--skip-graph-creation", help="Prepare graph edges but do not export to ArangoDB."),
+    skip_graph_creation: bool = typer.Option(
+        False, "--skip-graph-creation", help="Prepare graph edges but do not export to ArangoDB."
+    ),
 ):
     """Builds graph relationships between PDF objects using FAISS and hierarchy."""
     console.print("[bold green]Building PDF Knowledge Graph (Stage 11)[/bold green]")
@@ -413,7 +442,7 @@ def run(
     stage_output_dir.mkdir(parents=True, exist_ok=True)
     json_output_dir.mkdir(exist_ok=True)
 
-    with open(input_json, 'r') as f:
+    with open(input_json, "r") as f:
         documents = json.load(f)
 
     if not documents:
@@ -424,27 +453,31 @@ def run(
     if not GRAPH_RELATIONSHIPS_ENABLED:
         if skip_graph_creation:
             output_path = json_output_dir / "11_graph_edges.json"
-            with open(output_path, 'w') as f:
+            with open(output_path, "w") as f:
                 json.dump([], f, indent=2)
-            console.print(f"[yellow]Relationships disabled (GRAPH_RELATIONSHIPS_ENABLED=false). Wrote 0 edges to: {output_path}[/yellow]")
+            console.print(
+                f"[yellow]Relationships disabled (GRAPH_RELATIONSHIPS_ENABLED=false). Wrote 0 edges to: {output_path}[/yellow]"
+            )
         else:
             confirmation = {
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "status": "Skipped",
                 "edges_created": 0,
-                "reason": "GRAPH_RELATIONSHIPS_ENABLED=false"
+                "reason": "GRAPH_RELATIONSHIPS_ENABLED=false",
             }
             output_path = json_output_dir / "11_graph_confirmation.json"
-            with open(output_path, 'w') as f:
+            with open(output_path, "w") as f:
                 json.dump(confirmation, f, indent=2)
-            console.print(f"[yellow]Relationships disabled (GRAPH_RELATIONSHIPS_ENABLED=false). Confirmation saved to: {output_path}[/yellow]")
+            console.print(
+                f"[yellow]Relationships disabled (GRAPH_RELATIONSHIPS_ENABLED=false). Confirmation saved to: {output_path}[/yellow]"
+            )
         return
 
-    docs_with_embed = [doc for doc in documents if doc.get('embedding')]
+    docs_with_embed = [doc for doc in documents if doc.get("embedding")]
     if not docs_with_embed:
         if skip_graph_creation:
             output_path = json_output_dir / "11_graph_edges.json"
-            with open(output_path, 'w') as f:
+            with open(output_path, "w") as f:
                 json.dump([], f, indent=2)
             console.print(f"[yellow]No embeddings found; wrote 0 edges to: {output_path}[/yellow]")
             return
@@ -455,11 +488,13 @@ def run(
                 "edges_created": 0,
             }
             output_path = json_output_dir / "11_graph_confirmation.json"
-            with open(output_path, 'w') as f:
+            with open(output_path, "w") as f:
                 json.dump(confirmation, f, indent=2)
-            console.print(f"[yellow]No embeddings found; confirmation saved to: {output_path}[/yellow]")
+            console.print(
+                f"[yellow]No embeddings found; confirmation saved to: {output_path}[/yellow]"
+            )
             return
-    embeddings = np.array([doc['embedding'] for doc in docs_with_embed], dtype='float32')
+    embeddings = np.array([doc["embedding"] for doc in docs_with_embed], dtype="float32")
 
     # --- FAISS Indexing ---
     console.print("Building FAISS index...")
@@ -467,7 +502,7 @@ def run(
 
     # --- Relationship Calculation ---
     console.print("Finding and creating relationships...")
-    
+
     db = None
     edge_collection = GRAPH_EDGE_COLLECTION
     if not skip_graph_creation:
@@ -477,10 +512,10 @@ def run(
             user = os.getenv("ARANGO_USER", "root")
             password = os.getenv("ARANGO_PASSWORD")
             db_name = os.getenv("ARANGO_DATABASE", "pdf_knowledge_base")
-            
+
             if not password:
                 raise ValueError("ARANGO_PASSWORD environment variable is not set.")
-            
+
             client = ArangoClient(hosts=f"http://{host}:{port}")
             db = client.db(db_name, username=user, password=password)
             db.version()
@@ -489,28 +524,34 @@ def run(
                 db,
                 graph_name=GRAPH_GRAPH_NAME,
                 edge_collection=GRAPH_EDGE_COLLECTION,
-                vertex_collection=GRAPH_VERTEX_COLLECTION
+                vertex_collection=GRAPH_VERTEX_COLLECTION,
             )
         except (ArangoError, ValueError) as e:
             logger.error(f"Failed to connect to ArangoDB: {e}")
             raise typer.Exit(1)
 
-    edges = asyncio.run(find_and_create_relationships(
-        documents=docs_with_embed,
-        embeddings=embeddings,
-        index=index,
-        k_neighbors=k_neighbors if k_neighbors else GRAPH_K,
-        similarity_threshold=similarity_threshold if similarity_threshold else GRAPH_SIM_THRESHOLD,
-        skip_db_insert=skip_graph_creation,
-        db=db,
-        edge_collection=edge_collection
-    ))
+    edges = asyncio.run(
+        find_and_create_relationships(
+            documents=docs_with_embed,
+            embeddings=embeddings,
+            index=index,
+            k_neighbors=k_neighbors if k_neighbors else GRAPH_K,
+            similarity_threshold=(
+                similarity_threshold if similarity_threshold else GRAPH_SIM_THRESHOLD
+            ),
+            skip_db_insert=skip_graph_creation,
+            db=db,
+            edge_collection=edge_collection,
+        )
+    )
 
     # --- Final Output ---
     if skip_graph_creation:
-        console.print("[yellow]--skip-graph-creation flag is set. Saving graph edges to JSON.[/yellow]")
+        console.print(
+            "[yellow]--skip-graph-creation flag is set. Saving graph edges to JSON.[/yellow]"
+        )
         output_path = json_output_dir / "11_graph_edges.json"
-        with open(output_path, 'w') as f:
+        with open(output_path, "w") as f:
             json.dump(edges, f, indent=2)
         edges_list = cast(List[Dict[str, Any]], edges)
         console.print(f"📄 Saved {len(edges_list)} graph edges to: {output_path}")
@@ -521,14 +562,23 @@ def run(
             "edges_created": edges,
         }
         output_path = json_output_dir / "11_graph_confirmation.json"
-        with open(output_path, 'w') as f:
+        with open(output_path, "w") as f:
             json.dump(confirmation, f, indent=2)
         console.print(f"✅ Graph creation complete. Confirmation saved to: {output_path}")
 
-@app.command("debug-bundle")
+
 def debug_bundle(
-    bundle: Path = typer.Argument(..., exists=True, file_okay=True, dir_okay=False, readable=True, help="Bundle JSON with key 'documents' (flattened pdf_objects)"),
-    output_dir: Path = typer.Option("data/results/pipeline", "-o", help="Parent directory for pipeline results."),
+    bundle: Path = typer.Argument(
+        ...,
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        readable=True,
+        help="Bundle JSON with key 'documents' (flattened pdf_objects)",
+    ),
+    output_dir: Path = typer.Option(
+        "data/results/pipeline", "-o", help="Parent directory for pipeline results."
+    ),
     k_neighbors: int = typer.Option(10, help="Number of neighbors to find for similarity."),
     similarity_threshold: float = typer.Option(0.55, help="Minimum similarity to create an edge."),
 ):
@@ -544,9 +594,10 @@ def debug_bundle(
         if not isinstance(documents, list) or not documents:
             raise ValueError("Bundle must include non-empty 'documents' list")
     except Exception as e:
-        typer.secho(f"Failed to load bundle: {e}", fg=typer.colors.RED); raise typer.Exit(1)
+        typer.secho(f"Failed to load bundle: {e}", fg=typer.colors.RED)
+        raise typer.Exit(1)
 
-    docs_with_embed = [doc for doc in documents if doc.get('embedding')]
+    docs_with_embed = [doc for doc in documents if doc.get("embedding")]
     if not docs_with_embed:
         typer.secho("No documents with embeddings provided.", fg=typer.colors.YELLOW)
         output_path = json_output_dir / "11_graph_edges.json"
@@ -554,23 +605,62 @@ def debug_bundle(
         console.print(f"[yellow]Saved 0 edges to {output_path}")
         return
 
-    embeddings = np.array([doc['embedding'] for doc in docs_with_embed], dtype='float32')
+    embeddings = np.array([doc["embedding"] for doc in docs_with_embed], dtype="float32")
     index = build_faiss_index(embeddings)
 
-    edges = asyncio.run(find_and_create_relationships(
-        documents=docs_with_embed,
-        embeddings=embeddings,
-        index=index,
-        k_neighbors=k_neighbors,
-        similarity_threshold=similarity_threshold,
-        skip_db_insert=True,
-        db=None,
-        edge_collection=GRAPH_EDGE_COLLECTION,
-    ))
+    edges = asyncio.run(
+        find_and_create_relationships(
+            documents=docs_with_embed,
+            embeddings=embeddings,
+            index=index,
+            k_neighbors=k_neighbors,
+            similarity_threshold=similarity_threshold,
+            skip_db_insert=True,
+            db=None,
+            edge_collection=GRAPH_EDGE_COLLECTION,
+        )
+    )
 
     output_path = json_output_dir / "11_graph_edges.json"
     output_path.write_text(json.dumps(edges, indent=2))
     console.print(f"[green]Debug bundle: saved {len(edges)} graph edges to {output_path}")
- 
+
+
+def build_cli():
+    import typer as _typer
+
+    app = _typer.Typer(help="Create graph relationships between PDF objects in ArangoDB")
+    app.command(name="run")(run)
+    app.command(name="debug-bundle")(debug_bundle)
+    return app
+
+
+# Fallback NumPy search helpers when FAISS unavailable
+if not _HAVE_FAISS:
+
+    def build_faiss_index(embeddings: NDArray[np.float32]):
+        emb = embeddings.copy()
+        norms = np.linalg.norm(emb, axis=1, keepdims=True) + 1e-12
+        emb = emb / norms
+        logger.warning("FAISS not available; using NumPy similarity search fallback.")
+        return ("numpy", emb)
+
+    def index_search(index_obj, query_embedding: NDArray[np.float32], k: int):
+        kind, idx = index_obj
+        q = query_embedding.copy()
+        q /= np.linalg.norm(q, axis=1, keepdims=True) + 1e-12
+        sims = (idx @ q.T).T
+        order = np.argsort(-sims, axis=1)
+        topk_idx = order[:, :k]
+        topk_sim = np.take_along_axis(sims, topk_idx, axis=1)
+        return topk_sim, topk_idx
+
+else:
+
+    def index_search(index_obj, query_embedding: NDArray[np.float32], k: int):
+        _, fa = index_obj
+        return fa.search(query_embedding, k)
+
+
 if __name__ == "__main__":
-    app()
+    build_cli()()

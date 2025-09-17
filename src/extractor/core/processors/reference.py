@@ -56,16 +56,18 @@ class ReferenceProcessor(BaseProcessor):
             if not (len(refs) and len(block_starts)):
                 continue
 
-            distances = np.linalg.norm(block_starts[:, np.newaxis, :] - ref_starts[np.newaxis, :, :], axis=2)
+            distances = np.linalg.norm(
+                block_starts[:, np.newaxis, :] - ref_starts[np.newaxis, :, :], axis=2
+            )
             for ref_idx in range(len(ref_starts)):
                 block_idx = np.argmin(distances[:, ref_idx])
                 block = blocks[block_idx]
 
-                ref_block = page.add_full_block(ReferenceClass(
-                    ref=refs[ref_idx].ref,
-                    polygon=block.polygon,
-                    page_id=page.page_id
-                ))
+                ref_block = page.add_full_block(
+                    ReferenceClass(
+                        ref=refs[ref_idx].ref, polygon=block.polygon, page_id=page.page_id
+                    )
+                )
                 if block.structure is None:
                     block.structure = []
                 block.structure.insert(0, ref_block.id)

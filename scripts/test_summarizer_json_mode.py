@@ -22,6 +22,7 @@ import argparse
 from textwrap import dedent
 
 import litellm
+from extractor.pipeline.utils.litellm_response_utils import extract_content
 
 try:
     from extractor.pipeline.utils.json_utils import clean_json_string
@@ -77,14 +78,7 @@ async def test_summarize(section: dict, *, model: str, strict_json: bool) -> dic
 
     resp = await litellm.acompletion(**kwargs)
     # Normalize content across providers
-    content = None
-    try:
-        content = resp.choices[0].message.content
-    except Exception:
-        try:
-            content = resp.choices[0].text
-        except Exception:
-            content = ""
+    content = extract_content(resp)
 
     result = clean_json_string(content, return_dict=True)
     ok = isinstance(result, dict) and "summary" in result

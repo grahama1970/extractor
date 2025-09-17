@@ -1,0 +1,32 @@
+FROM python:3.10-slim
+
+# Optional: set a non-root user for extra safety
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+# Install system deps (add as needed)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential curl ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
+# Copy project (minimal for server usage)
+COPY pyproject.toml README.md ./
+COPY src ./src
+
+# Install server requirements (project uses pyproject; dev brings FastAPI/uvicorn)
+RUN pip install --upgrade pip && \
+    pip install -e .[dev]
+
+EXPOSE 8000
+
+# Default Arango config (override via compose/env)
+ENV ARANGO_HOST=arango \
+    ARANGO_PORT=8529 \
+    ARANGO_USERNAME=root \
+    ARANGO_PASSWORD=openSesame \
+    ARANGO_DB=marker
+
+CMD ["uvicorn", "extractor.core.scripts.server:app", "--host", "0.0.0.0", "--port", "8000"]
+

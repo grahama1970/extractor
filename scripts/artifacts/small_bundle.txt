@@ -1,0 +1,32 @@
+# Project Bundle
+
+- Generated: 2025-09-15T14:35:57Z
+- Root: /home/graham/workspace/experiments/extractor/scripts/artifacts/test_bundle_small
+- Git: 3820a08d+dirty
+- Files: 3
+
+---
+
+
+====== BEGIN FILE: README.md ======
+```markdown
+# Title\nA note
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: demo.yaml ======
+```yaml
+name: demo\nitems:\n  - one\n  - two
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: hello.py ======
+```python
+def hello():\n    return 'world'
+```
+
+====== END FILE ======

@@ -10,13 +10,15 @@ class ListProcessor(BaseProcessor):
     """
     A processor for merging lists across pages and columns
     """
+
     block_types = (BlockTypes.ListGroup,)
     ignored_block_types: Annotated[
         Tuple[BlockTypes],
         "The list of block types to ignore when merging lists.",
     ] = (BlockTypes.PageHeader, BlockTypes.PageFooter)
     min_x_indent: Annotated[
-        float, "The minimum horizontal indentation required to consider a block as a nested list item.",
+        float,
+        "The minimum horizontal indentation required to consider a block as a nested list item.",
         "This is expressed as a percentage of the page width and is used to determine hierarchical relationships within a list.",
     ] = 0.01
 
@@ -49,10 +51,13 @@ class ListProcessor(BaseProcessor):
                 else:
                     page_break = True
                     next_page = document.get_page(next_block.page_id)
-                    next_block_in_first_quadrant = (next_block.polygon.x_start < next_page.polygon.width // 2) and \
-                        (next_block.polygon.y_start < next_page.polygon.height // 2)
+                    next_block_in_first_quadrant = (
+                        next_block.polygon.x_start < next_page.polygon.width // 2
+                    ) and (next_block.polygon.y_start < next_page.polygon.height // 2)
 
-                block.has_continuation = column_break or (page_break and next_block_in_first_quadrant)
+                block.has_continuation = column_break or (
+                    page_break and next_block_in_first_quadrant
+                )
 
     def list_group_indentation(self, document: Document):
         for page in document.pages:
@@ -70,16 +75,23 @@ class ListProcessor(BaseProcessor):
                     if list_item_block.block_type != BlockTypes.ListItem:
                         continue
 
-                    while stack and list_item_block.polygon.x_start <= stack[-1].polygon.x_start + (self.min_x_indent * page.polygon.width):
+                    while stack and list_item_block.polygon.x_start <= stack[-1].polygon.x_start + (
+                        self.min_x_indent * page.polygon.width
+                    ):
                         stack.pop()
 
                     if stack and list_item_block.polygon.y_start > stack[-1].polygon.y_start:
                         list_item_block.list_indent_level = stack[-1].list_indent_level
-                        if list_item_block.polygon.x_start > stack[-1].polygon.x_start + (self.min_x_indent * page.polygon.width):
+                        if list_item_block.polygon.x_start > stack[-1].polygon.x_start + (
+                            self.min_x_indent * page.polygon.width
+                        ):
                             list_item_block.list_indent_level += 1
 
                     next_list_item_block = block.get_next_block(page, list_item_block)
-                    if next_list_item_block is not None and next_list_item_block.polygon.x_start > list_item_block.polygon.x_end:
+                    if (
+                        next_list_item_block is not None
+                        and next_list_item_block.polygon.x_start > list_item_block.polygon.x_end
+                    ):
                         stack = [next_list_item_block]  # reset stack on column breaks
                     else:
                         stack.append(list_item_block)
@@ -88,13 +100,17 @@ class ListProcessor(BaseProcessor):
                 for list_item_id in block.structure.copy():
                     list_item_block: ListItem = page.get_block(list_item_id)
 
-                    while stack and list_item_block.list_indent_level <= stack[-1].list_indent_level:
+                    while (
+                        stack and list_item_block.list_indent_level <= stack[-1].list_indent_level
+                    ):
                         stack.pop()
 
                     if stack:
                         current_parent = stack[-1]
                         current_parent.add_structure(list_item_block)
-                        current_parent.polygon = current_parent.polygon.merge([list_item_block.polygon])
+                        current_parent.polygon = current_parent.polygon.merge(
+                            [list_item_block.polygon]
+                        )
 
                         block.remove_structure_items([list_item_id])
                     stack.append(list_item_block)

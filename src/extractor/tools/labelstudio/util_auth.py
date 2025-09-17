@@ -22,7 +22,7 @@ def _decode_jwt_exp(token: str) -> Optional[int]:
             return None
         payload = parts[1]
         # add padding
-        pad = '=' * (-len(payload) % 4)
+        pad = "=" * (-len(payload) % 4)
         data = json.loads(base64.urlsafe_b64decode(payload + pad).decode("utf-8"))
         return int(data.get("exp")) if "exp" in data else None
     except Exception:
@@ -79,4 +79,3 @@ def get_access_token(host: str) -> str:
         raise SystemExit("No 'access' in refresh response")
     _save_cache(access)
     return access
-

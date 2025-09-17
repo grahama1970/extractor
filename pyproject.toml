@@ -8,17 +8,13 @@ license = "GPL-3.0-or-later"
 keywords = [ "extraction", "document", "pdf", "docx", "pptx", "xml", "ocr", "ai", "table-detection", "multi-format",]
 dependencies = [
  "pillow>=10.1.0,<11.0.0",
- #"pillow>=11.3.0",
  "pdf2image>=1.16.0,<2",
  "pydantic>=2.4.2,<3",
  "pydantic-settings>=2.0.3,<3",
- "transformers>=4.45.2,<5",
  "python-dotenv>=1.0.0,<2",
- "torch>=2.5.1,<3",
  "tqdm>=4.66.1,<5",
  "ftfy>=6.1.1,<7",
  "rapidfuzz>=3.8.1,<4",
- "surya-ocr>=0.14.5,<0.15.0",
  "regex>=2024.4.28,<2025",
  "pdftext~=0.6.2",
  "markdownify<0.13",
@@ -26,13 +22,7 @@ dependencies = [
  "typer>=0.16.0",
  "markdown2>=2.5.2,<3",
  "filetype>=1.2.0,<2",
- "scikit-learn>=1.6.1,<2",
- "google-genai>=1.0.0,<2",
- "anthropic>=0.56.0",
  "pre-commit>=4.2.0,<5",
- "openai>=1.65.2,<2",
- "litellm>=1.74.7",
- # "litellm @ file:///home/graham/workspace/experiments/litellm",
  "tree-sitter>=0.23.2",
  "asyncio>=3.4.3,<4",
  "json-repair>=0.44.1",
@@ -40,7 +30,6 @@ dependencies = [
  "tree-sitter-language-pack>=0.7.3",
  "numpy>=2.2.6",
  "loguru>=0.7.0,<0.8",
- "ghostscript>=0.7",
  "claude-test-reporter @ git+https://github.com/grahama1970/claude-test-reporter.git@main",
  "beautifulsoup4>=4.13.4",
  "lxml>=5.3.0",
@@ -55,9 +44,7 @@ dependencies = [
  "structlog>=24.0.0",
  "rich>=13.0.0",
  "pytest-asyncio>=0.24.0",
- "opencv-python>=4.11.0.86",
  "pymupdf>=1.26.1",
- "pandas>=2.0.0",
  "tenacity>=9.1.2",
  "pyperclip>=1.9.0",
  "nest-asyncio>=1.6.0",
@@ -68,20 +55,13 @@ dependencies = [
  "ijson>=3.4.0",
  "jsonpath-ng>=1.7.0",
  "aiofiles>=24.1.0",
- "faiss-cpu>=1.11.0.post1",
- "sentence-transformers>=5.0.0",
- "python-louvain>=0.16",
  "unidecode>=1.4.0",
  "backoff>=2.2.1",
- "matplotlib>=3.10.3",
- "spacy>=3.8.7",
- "flask>=3.1.1",
- "flask-cors>=6.0.1",
  "jsonpickle>=4.1.1",
- "certainly @ file://localhost/home/graham/workspace/experiments/lean4",
+ # Gate the local 'certainly' package (which pulls faiss-gpu) to Python < 3.11
+ # On Python >= 3.11 use faiss-cpu instead (see markers above)
  "pdfplumber>=0.11.7",
- "nomic>=3.5.3",
- "camelot-py>=1.0.9",
+ "ruff>=0.13.0",
 ]
 [[project.authors]]
 name = "Graham Anderson"
@@ -106,6 +86,9 @@ dev = [
  "playwright>=1.49.1,<2",
  "pytest-html>=4.1.1",
  "psutil>=7.0.0",
+ "types-requests>=2.32.0.20241016",
+ "types-PyYAML>=6.0.12.20241221",
+ "types-docutils>=0.21.0.20241020",
 ]
 
 [build-system]
@@ -114,6 +97,59 @@ build-backend = "hatchling.build"
 
 [project.optional-dependencies]
 full = [ "mammoth>=1.9.0,<2", "openpyxl>=3.1.5,<4", "python-pptx>=1.0.2,<2", "ebooklib>=0.18,<0.19", "weasyprint~=63.1",]
+# Minimal runtime deps to run Python smokes without heavy dev extras / GPU wheels
+smokes = [
+  "litellm>=1.74.7",
+  "python-dotenv>=1.0.0,<2",
+  "typer>=0.16.0",
+  "httpx>=0.28.0",
+  "loguru>=0.7.0,<0.8",
+  "pillow>=10.1.0,<11.0.0",
+ "urlextract>=1.9.0",
+ "strip_tags>=0.6",
+  "tqdm>=4.66.1,<5",
+  "json-repair>=0.44.1",
+  "pymupdf>=1.26.1",
+  "camelot-py>=1.0.9",
+  "opencv-python-headless>=4.7.0",
+  "pandas>=2.0.0",
+  "tenacity>=9.1.2",
+]
+lessons = [
+  "graph-memory @ file:///home/graham/workspace/experiments/memory",
+]
+prover = [
+  # Optional Lean/FAISS powered extras (depends on local path); install on environments where available
+  "certainly @ file:///home/graham/workspace/experiments/lean4",
+]
+accurate = [
+  "torch>=2.5.1,<3",
+  "transformers>=4.45.2,<5",
+  "sentence-transformers>=5.0.0",
+  "spacy>=3.8.7",
+  "opencv-python>=4.11.0.86",
+  "camelot-py>=1.0.9",
+  "pandas>=2.0.0",
+  "surya-ocr>=0.14.5,<0.15.0",
+  "ghostscript>=0.7",
+  "matplotlib>=3.10.3",
+  "python-louvain>=0.16",
+  "nomic>=3.5.3",
+  "faiss-cpu>=1.11.0.post1; python_version >= \"3.11\"",
+  "faiss-gpu>=1.7.2; python_version < \"3.11\"",
+]
+server = [
+  "fastapi>=0.115.12",
+  "uvicorn>=0.32.1",
+  "flask>=3.1.1",
+  "flask-cors>=6.0.1",
+]
+llm = [
+  "openai>=1.65.2,<2",
+  "anthropic>=0.56.0",
+  "google-genai>=1.0.0,<2",
+  "litellm>=1.74.7",
+]
 
 [project.urls]
 Repository = "https://github.com/grahama1970/extractor"
@@ -126,15 +162,19 @@ extractor_chunk_convert = "extractor.core.scripts.chunk_convert:chunk_convert_cl
 extractor_gui = "extractor.core.scripts.run_streamlit_app:streamlit_app_cli"
 extractor_server = "extractor.core.scripts.server:server_cli"
 pdf-tools = "extractor.cli.pdf_tools:app"
+arxiv-extract = "memory.arxiv_extract_cli:main"
+pipeline-happy = "extractor.pipeline.cli_happy:main"
 # Core pipeline entrypoints (flattened API)
 extract-pipeline = "extractor.pipeline.api:cli_main"
 extract-sections = "extractor.pipeline.api:cli_main"
 pipeline-run-all = "extractor.pipeline.run_all:app"
+pipeline-run = "extractor.pipeline.cli_mode:app"
 pipeline-validate-gold = "extractor.pipeline.tools.validate_gold_standard:app"
 # Use Typer apps as entrypoints so CLI flags are parsed correctly
 pipeline-compare-gold = "extractor.pipeline.tools.compare_to_gold:app"
 pipeline-run-and-validate = "extractor.pipeline.tools.run_and_validate:app"
 pipeline-quick-smoke = "extractor.pipeline.tools.quick_smoke:app"
+litellm-call = "extractor.pipeline.utils.litellm_call:cli_app"
 
 [tool.hatch.build]
 sources = [ "src",]
@@ -155,42 +195,53 @@ members = [
 ]
 
 [tool.hatch.build.targets.sdist]
-include = [ "src/extractor", "src/extractor/core/scripts/*.sh", "src/extractor/core/scripts/*.html",]
+include = [
+  "src/extractor",
+  "src/extractor/core/scripts/*.sh",
+  "src/extractor/core/scripts/*.html",
+  "memory",
+]
 
 [tool.hatch.build.targets.wheel]
-packages = [ "src/extractor",]
-include = [ "src/extractor/core/scripts/*.sh", "src/extractor/core/scripts/*.html",]
+packages = [ "src/extractor", "memory",]
+include = [
+  "src/extractor/core/scripts/*.sh",
+  "src/extractor/core/scripts/*.html",
+]
 
 [tool.black]
 line-length = 100
 target-version = ["py310"]
-extend-exclude = [
-  '^\.archive/',
-  '^\.claude/',
-  '^prototypes/',
-  '^tools/gold_annotator_web/',
-  '^node_modules/',
-  '^\.next/',
-  '^sessions/',
-  '^repos/',
-  '^artifacts/',
-  '^tmp/',
-]
+# Black expects a single regex string for extend-exclude
+extend-exclude = '''
+(
+  ^\.archive/|
+  ^\.claude/|
+  ^prototypes/|
+  ^tools/gold_annotator_web/|
+  ^node_modules/|
+  ^\.next/|
+  ^sessions/|
+  ^repos/|
+  ^artifacts/|
+  ^tmp/
+)
+'''
 
 [tool.ruff]
 line-length = 100
 target-version = "py310"
 extend-exclude = [
-  '.archive',
-  '.claude',
-  'prototypes',
-  'tools/gold_annotator_web',
-  'node_modules',
-  '.next',
-  'sessions',
-  'repos',
-  'artifacts',
-  'tmp',
+  ".archive",
+  ".claude",
+  "prototypes",
+  "tools/gold_annotator_web",
+  "node_modules",
+  ".next",
+  "sessions",
+  "repos",
+  "artifacts",
+  "tmp",
 ]
 
 [tool.mypy]

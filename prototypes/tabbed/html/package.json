@@ -5,10 +5,14 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:force": "vite --force",
+    "prebuild": "node ../../../scripts/write_build_info.mjs",
     "build": "vite build",
     "build:dev": "vite build --mode development",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "prepreview:8080": "fuser -k 8080/tcp || true",
+    "preview": "vite preview",
+    "preview:8080": "vite preview --host 0.0.0.0 --port 8080 --strictPort"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

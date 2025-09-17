@@ -1,343 +1,265 @@
 #!/usr/bin/env python3
-
 """
-LiteLLM Call - Thin async batch runner that adds multimodal prep on top of LiteLLM Router
+LiteLLM Call — thin async batch runner with minimal multimodal prep, returning structured results.
 
-WHAT IT DOES:
-- Parse prompts, auto-detect images (URLs/local), compress/fetch, and build proper vision message parts
-- Batch multiple prompts per model using LiteLLM Router async APIs
-- Leverage LiteLLM’s built-in retries and per-deployment concurrency/semaphores
-- Works with any LiteLLM-supported model (OpenAI, Anthropic, Ollama, etc.)
-- Optionally wraps non-JSON outputs into JSON and augments JSON with usage/cost metadata
-- Mixed models in one run: supported (items can specify different models)
+WHAT IT DOES
+- Parses prompts, auto-detects images (URLs/local), compresses/fetches, and builds vision message parts.
+- Groups prompts per model and runs them concurrently via LiteLLM Router (retries/semaphores).
+- RETURNS: one structured object per input with BOTH the original request and the response (or exception),
+  plus a human-ready `content` string (already formatted).
 
-WHAT THIS SCRIPT DOES NOT DO:
-- It does NOT inject JSON mode, system prompts, schemas, or tool-call definitions.
-  If you need strict JSON, include `"response_format": {"type": "json_object"}` (or a system prompt).
-- It does NOT transform tool calls. If you pass tools, they will be sent as-is on individual calls (not batched).
-- It does NOT implement custom retry/tenacity or custom concurrency. Those are delegated to LiteLLM Router.
+WHAT IT DOESN’T DO
+- Doesn’t force JSON mode/system prompts/schemas/tools—pass them yourself if needed.
+- Doesn’t transform tool calls; forwards as-is per request.
+- Doesn’t implement custom retry logic; relies on Router.
 
-WHAT’S DIFFERENT VS ORIGINAL VERSION:
-- Uses LiteLLM Router for:
-  - Retries (num_retries) via Router instead of a custom tenacity decorator
-  - Concurrency/rate-limiting via per-deployment semaphores (max_parallel_requests/rpm/tpm)
-  - Per-model batch calls: Router.abatch_completion_one_model_multiple_requests
-- Still supports different models per item:
-  - Requests are grouped by model and sent as separate batches per model
-  - Items with extra per-request params (e.g., temperature/tools) are sent in parallel individually
-- Removed hand-rolled “concurrency” control; rely on Router’s concurrency
-- Keeps the image auto-detect/compress logic and CLI UX
-
-INPUT FORMS SUPPORTED:
-1) Simple string:
-   "What's in this image? /path/to/image.jpg"
-
-2) Shorthand dict:
-   {"text": "Explain this", "image": "path/to/image.jpg", "model": "gpt-4o-mini"}
-
-3) Full control (sent individually if you include per-request params):
-   {
-     "model": "gpt-4o-mini",
-     "messages": [...],
-     "temperature": 0.7,
-     "tools": [...]
-   }
-
-BATCHING RULES:
-- Requests with only model + messages (no extra per-request params) are grouped by model and sent via Router.abatch_completion_one_model_multiple_requests.
-- Requests that include extra per-request params (e.g., temperature/tools/response_format/etc.) are sent as individual Router.acompletion calls to preserve request-specific behavior.
-- Mixed models in one run are supported; each model gets its own batch.
-
-ENVIRONMENT / DEFAULTS:
-- LITELLM_MODEL: Fallback model (default: "ollama/gemma3:12b")
-- LITELLM_NUM_RETRIES: Default num_retries for Router calls (default: 3)
-- LITELLM_MAX_PARALLEL: Router default_max_parallel_requests (per-deployment semaphore default). Optional.
-- LITELLM_ATTACH_SESSION: If "true", pass session_id as `user` to providers (default: true)
-
-Provider-specific envs are still honored by LiteLLM (e.g., OPENAI_API_KEY, OLLAMA_BASE_URL, etc.).
-
-CLI EXAMPLES:
-- Single:
-  $ python litellm_call.py "What is 2+2?"
-
-- Batch (multiple prompts):
-  $ python litellm_call.py "What is 2+2?" "What is the capital of France?"
-
-- Multimodal (auto image detection from local path and URL):
-  $ python litellm_call.py "What's in this image? /path/to/image.jpg"
-  $ python litellm_call.py "Describe https://example.com/cat.jpg and dog.png"
-
-- From files / stdin:
-  $ python litellm_call.py @prompts.txt
-  $ python litellm_call.py prompts.json
-  $ python litellm_call.py @prompts.jsonl
-  $ echo "What is 2+2?" | python litellm_call.py --stdin
+KEY CHOICES
+- Single, predictable execution path (no experimental helper branches).
+- Bounded client-side concurrency to avoid request stampedes (aligned with Router cap).
+- One environment source of truth for the default model: `LITELLM_DEFAULT_MODEL` in .env (fail fast if absent).
 """
+
+from __future__ import annotations
 
 import asyncio
-import sys
 import json
-import base64
-import io
 import os
-import re
-from pathlib import Path
-from typing import List, Tuple, Any, Dict, Optional
-from copy import deepcopy
+import sys
+from dataclasses import dataclass
+from typing import Any as _Any, Dict, List, Optional, Tuple
 
-import httpx
-from PIL import Image
 import litellm as _litellm
-from tqdm.asyncio import tqdm
+from dotenv import find_dotenv, load_dotenv
 from loguru import logger
-from dotenv import load_dotenv, find_dotenv
-from urlextract import URLExtract
-
-from strip_tags import strip_tags
+from tqdm.asyncio import tqdm
 from litellm import Router
-from extractor.pipeline.utils.image_helpers import (
+_HAVE_PARALLEL_HELPERS = True  # for tests that monkeypatch this flag
+
+# Required project utilities — fail fast if missing
+from extractor.pipeline.utils.litellm_image_utils import (
     IMAGE_EXT as _IMAGE_EXT,
-    extract_images as _shared_extract_images,
-    safe_image as _shared_safe_image,
-    compress_image_cached,
-    fetch_remote_image_cached,
+    compress_image,
+    fetch_remote_image,
 )
+from extractor.pipeline.utils.litellm_response_utils import (
+    assemble_stream_text,
+    format_answer_with_logging,
+)
+from extractor.pipeline.utils.response_utils import to_messages_and_model
+from extractor.pipeline.utils.log_utils import sanitize_messages_for_return
 
-logger.remove()
-logger.add(sys.stderr, level="WARNING")
-
-# Optional: your project’s litellm cache initializer
+# Optional cache initializer — no-op if unavailable
 try:
-    from extractor.pipeline.utils.litellm_cache import initialize_litellm_cache
-except Exception:
-    def initialize_litellm_cache():
-        pass
+    from extractor.pipeline.utils.litellm_cache import initialize_litellm_cache  # type: ignore
+except ImportError:  # pragma: no cover
+    initialize_litellm_cache = lambda: None  # noqa: E731
 
-load_dotenv(find_dotenv())
-# Do not drop provider-specific params; we pass image_url parts intentionally
-_litellm.drop_params = False
+
+# -----------------------------------------------------------------------------
+# Logging & environment
+# -----------------------------------------------------------------------------
+logger.remove()
+_log_level = "DEBUG" if os.getenv("LITELLM_DEBUG", "").lower() in {"1","true","yes","y"} else "WARNING"
+logger.add(sys.stderr, level=_log_level)
+
+# Best-effort .env loading; no exceptions
+_ = load_dotenv(find_dotenv(usecwd=True) or None)
+
+DEFAULT_MODEL = (
+    os.getenv("LITELLM_DEFAULT_MODEL")
+    or os.getenv("DEFAULT_LITELLM_MODEL")
+    or os.getenv("LITELLM_MODEL")
+    or os.getenv("OLLAMA_DEFAULT_MODEL", "ollama/gemma3:12b")
+)
+MODEL = DEFAULT_MODEL  # compatibility alias expected by tests
+
+# Drop unsupported provider params unless explicitly disabled
+_litellm.drop_params = os.getenv("LITELLM_DROP_PARAMS", "true").lower() in {"1", "true", "yes", "y"}
+# Optional: enable verbose LiteLLM debug
+if os.getenv("LITELLM_DEBUG", "").lower() in {"1","true","yes","y"}:
+    try:
+        setattr(_litellm, "logging", True)
+        setattr(_litellm, "debug", True)
+    except Exception:
+        pass
 initialize_litellm_cache()
 
-# -----------------------------------------------------------------------------
-# Defaults / env
-# -----------------------------------------------------------------------------
-MODEL = os.getenv("LITELLM_MODEL", os.getenv("OLLAMA_DEFAULT_MODEL", "ollama/gemma3:12b"))
+# Other env/defaults
 IMAGE_EXT = _IMAGE_EXT
-extractor = URLExtract()
 SHOW_PROGRESS = os.getenv("LITELLM_NO_PROGRESS", "").lower() not in {"1", "true", "yes"}
-
 DEFAULT_NUM_RETRIES = int(os.getenv("LITELLM_NUM_RETRIES", "3"))
-DEFAULT_MAX_PARALLEL = os.getenv("LITELLM_MAX_PARALLEL")
-DEFAULT_MAX_PARALLEL = int(DEFAULT_MAX_PARALLEL) if DEFAULT_MAX_PARALLEL and DEFAULT_MAX_PARALLEL.isdigit() else None
+_DEFAULT_MAX_PARALLEL_STR = os.getenv("LITELLM_MAX_PARALLEL")
+DEFAULT_MAX_PARALLEL: Optional[int] = (
+    int(_DEFAULT_MAX_PARALLEL_STR)
+    if _DEFAULT_MAX_PARALLEL_STR and _DEFAULT_MAX_PARALLEL_STR.isdigit()
+    else None
+)
 DEFAULT_ATTACH_SESSION = os.getenv("LITELLM_ATTACH_SESSION", "true").lower() in {"1", "true", "yes", "y"}
-
-# Optional image cache directory (persistent across runs)
-_IMAGE_CACHE_DIR = os.getenv("LITELLM_IMAGE_CACHE_DIR") or None
-
-# -----------------------------------------------------------------------------
-# Helpers - Images
-# -----------------------------------------------------------------------------
-
-def safe_image(path: Path) -> bool:
-    return _shared_safe_image(path)
-
-
-def extract_images(text: str) -> tuple[List[str], str]:
-    return _shared_extract_images(text)
-
-
-def compress_image(path_str: str, max_kb: int = 1000) -> str:
-    return compress_image_cached(path_str, max_kb=max_kb, cache_dir=_IMAGE_CACHE_DIR)
-
-
-def fetch_remote_image(url: str) -> Optional[str]:
-    return fetch_remote_image_cached(url, timeout=10, cache_dir=_IMAGE_CACHE_DIR)
-
-
-## No MIME coercion: pass image data URLs through unchanged
+IMAGE_CACHE_DIR = os.getenv("LITELLM_IMAGE_CACHE_DIR") or None
 
 
 # -----------------------------------------------------------------------------
-# Cost / usage helpers
+# Structured request/response types
 # -----------------------------------------------------------------------------
-
-def _clean_json_code_fences(text: str) -> str:
-    s = text.strip()
-    if s.startswith("```"):
-        s = re.sub(r"^```(?:json)?\s*", "", s, flags=re.IGNORECASE)
-        s = re.sub(r"\s*```$", "", s)
-    return s.strip()
+@dataclass
+class CallRequest:
+    model: str
+    messages: List[Dict[str, _Any]]
+    kwargs: Optional[Dict[str, _Any]] = None  # extra params for Router.acompletion
 
 
-def _extract_usage_and_cost(resp: Any) -> Dict[str, Any]:
-    metadata: Dict[str, Any] = {}
-    usage = getattr(resp, "usage", None)
-
-    token_usage = None
-    if usage is not None:
-        if isinstance(usage, dict):
-            token_usage = {
-                "prompt_tokens": usage.get("prompt_tokens"),
-                "completion_tokens": usage.get("completion_tokens"),
-                "total_tokens": usage.get("total_tokens"),
-            }
-        else:
-            token_usage = {
-                "prompt_tokens": getattr(usage, "prompt_tokens", None),
-                "completion_tokens": getattr(usage, "completion_tokens", None),
-                "total_tokens": getattr(usage, "total_tokens", None),
-            }
-    if token_usage is not None:
-        metadata["token_usage"] = token_usage
-
-    hidden = getattr(resp, "_hidden_params", {}) or {}
-    if isinstance(hidden, dict) and "response_cost" in hidden:
-        metadata["response_cost"] = hidden.get("response_cost")
-    if isinstance(hidden, dict) and "cache_hit" in hidden:
-        metadata["cache_hit"] = hidden.get("cache_hit")
-    return metadata
+@dataclass
+class CallResult:
+    index: int
+    request: CallRequest
+    response: Optional[_Any] = None
+    exception: Optional[BaseException] = None
+    # Convenience: human-ready string, already formatted by format_answer_with_logging or stream assembly
+    content: Optional[str] = None
 
 
-def _maybe_augment_json_with_cost(text: str, resp: Any, wrap_non_json: bool = False) -> str:
-    cleaned = _clean_json_code_fences(text)
-    try:
-        parsed = json.loads(cleaned)
-    except Exception:
-        if wrap_non_json:
-            return json.dumps({"content": text, "metadata": _extract_usage_and_cost(resp)}, ensure_ascii=False)
-        return text
-
-    metadata = _extract_usage_and_cost(resp)
-    if isinstance(parsed, dict):
-        if "metadata" in parsed and isinstance(parsed["metadata"], dict):
-            parsed["metadata"].update(metadata)
-        elif "_metadata" in parsed and isinstance(parsed["_metadata"], dict):
-            parsed["_metadata"].update(metadata)
-        else:
-            parsed["metadata"] = metadata
-        return json.dumps(parsed, ensure_ascii=False)
-
-    if wrap_non_json:
-        return json.dumps({"content": parsed, "metadata": metadata}, ensure_ascii=False)
-
-    return json.dumps(parsed, ensure_ascii=False)
-
-
-def _extract_text(resp: Any) -> str:
-    # OpenAI-style dict
-    if isinstance(resp, dict) and "choices" in resp:
-        try:
-            ch = resp.get("choices") or []
-            if ch:
-                msg = ch[0].get("message") or {}
-                return str(msg.get("content") or "")
-        except Exception:
-            pass
-    # ModelResponse-like object
-    ch_obj = getattr(resp, "choices", None)
-    if ch_obj:
-        try:
-            ch0 = ch_obj[0]
-            msg = getattr(ch0, "message", None)
-            if msg is not None and getattr(msg, "content", None) is not None:
-                content = getattr(msg, "content")
-                if isinstance(content, list):
-                    parts = []
-                    for p in content:
-                        if isinstance(p, dict):
-                            t = p.get("text") or p.get("content")
-                            if isinstance(t, str) and t.strip():
-                                parts.append(t.strip())
-                    if parts:
-                        return "\n".join(parts)
-                return str(content)
-            txt = getattr(ch0, "text", None)
-            if isinstance(txt, str):
-                return txt
-            # Fallback: some adapters expose text on response.output_text
-            ot = getattr(resp, "output_text", None)
-            if isinstance(ot, str) and ot.strip():
-                return ot
-        except Exception:
-            pass
-    if isinstance(resp, str):
-        return resp
-    return ""
+# -----------------------------------------------------------------------------
+# Provider-specific sanitization
+# -----------------------------------------------------------------------------
+def _sanitize_kwargs_for_provider(model: str, kwargs: Dict[str, _Any]) -> Dict[str, _Any]:
+    """Return kwargs unchanged — rely on litellm.drop_params for provider-specific cleanup."""
+    return kwargs
 
 
 # -----------------------------------------------------------------------------
 # Prompt preprocessing => messages
 # -----------------------------------------------------------------------------
-
 def _to_messages_and_model(
-    item: Any,
+    item: _Any,
     default_model: str,
     *,
     response_format: Optional[str] = None,
     request_timeout: Optional[float] = None,
-) -> Tuple[str, List[Dict[str, Any]], Dict[str, Any]]:
-    """
-    Returns:
-      model: str
-      messages: List[message]
-      extra_kwargs: Dict[str,Any]  # any per-request params beyond (model, messages)
-    Behavior:
-      - str -> parse for images, build a single user message with text + image parts
-      - shorthand dict -> same as str + optional 'image' + model override
-      - full dict with 'messages' -> preserve messages; anything else goes into extra_kwargs
-    """
-    extra_kwargs: Dict[str, Any] = {}
+    image_cache_dir: Optional[str] = None,
+) -> Tuple[str, List[Dict[str, _Any]], Dict[str, _Any]]:
+    """Delegate to response_utils.to_messages_and_model (URL conversion happens later)."""
+    return to_messages_and_model(
+        item,
+        default_model,
+        response_format=response_format,
+        request_timeout=request_timeout,
+        image_cache_dir=image_cache_dir,
+    )
 
-    # Full dict with manual messages
-    if isinstance(item, dict) and "messages" in item:
-        model = item.get("model", default_model)
-        messages = item["messages"]
-        # Everything else is per-request params (temperature, tools, etc.)
-        for k, v in item.items():
-            if k not in {"model", "messages"}:
-                extra_kwargs[k] = v
-        if response_format:
-            extra_kwargs.setdefault("response_format", {"type": response_format})
-        if request_timeout is not None:
-            extra_kwargs.setdefault("timeout", request_timeout)
-        return model, messages, extra_kwargs
-
-    # Shorthand dict
-    if isinstance(item, dict):
-        text = str(item.get("text", ""))
-        images = [str(item["image"])] if "image" in item else []
-        model = item.get("model", default_model)
-    else:
-        images, text = extract_images(str(item))
-        model = default_model
-
-    content_parts: List[Dict[str, Any]] = []
-    if text:
-        content_parts.append({"type": "text", "text": text})
-    for img in images:
-        url = fetch_remote_image(img) if img.startswith("http") else compress_image(img)
-        if url:
-            content_parts.append({"type": "image_url", "image_url": {"url": url}})
-
-    messages = [{"role": "user", "content": content_parts or [{"type": "text", "text": ""}]}]
-    if response_format:
-        extra_kwargs.setdefault("response_format", {"type": response_format})
-    if request_timeout is not None:
-        extra_kwargs.setdefault("timeout", request_timeout)
-    return model, messages, extra_kwargs
+async def _prepare_messages_image_urls(
+    messages: list[dict[str, object]], *, image_cache_dir: str | None
+) -> list[dict[str, object]]:
+    out: list[dict[str, object]] = []
+    import asyncio as _asyncio
+    from copy import deepcopy
+    for msg in messages:
+        if not isinstance(msg, dict):
+            out.append(msg); continue
+        role = msg.get("role")
+        content = msg.get("content")
+        if not isinstance(content, list):
+            out.append(msg); continue
+        new_parts: list[dict[str, object]] = []
+        for part in content:
+            if isinstance(part, dict) and part.get("type") == "image_url":
+                img = dict(part.get("image_url") or {})
+                url = img.get("url")
+                try:
+                    if isinstance(url, str):
+                        if url.startswith("data:"):
+                            new_url = url
+                        elif url.startswith("http"):
+                            new_url = await _asyncio.to_thread(fetch_remote_image, url, cache_dir=image_cache_dir)
+                        else:
+                            new_url = await _asyncio.to_thread(compress_image, url, cache_dir=image_cache_dir)
+                        if new_url:
+                            img["url"] = new_url
+                            new_parts.append({"type": "image_url", "image_url": img})
+                    else:
+                        new_parts.append(part)
+                except Exception:
+                    continue
+            else:
+                new_parts.append(part)
+        out.append({"role": role, "content": new_parts})
+    return out
 
 
 # -----------------------------------------------------------------------------
-# Core API - uses LiteLLM Router for batching/retries/semaphores
+# Router shutdown helper (prevents lingering background tasks keeping the loop alive)
 # -----------------------------------------------------------------------------
+async def _shutdown_router(router: Router) -> None:
+    """
+    Best-effort shutdown for Router and its internal components.
+    Keeps compatibility across LiteLLM versions and avoids orphaned background work.
+    """
+    try:
+        # Prefer async aclose() if present
+        aclose = getattr(router, "aclose", None)
+        if callable(aclose):
+            await aclose()  # type: ignore[func-returns-value]
+            return
+        # Fallback: sync close()
+        close = getattr(router, "close", None)
+        if callable(close):
+            close()  # type: ignore[func-returns-value]
+    except Exception:
+        pass
 
+    async def _stop_component(obj: object) -> None:
+        if not obj:
+            return
+        for name in ("shutdown", "stop", "close", "join", "flush", "aclose"):
+            fn = getattr(obj, name, None)
+            if not callable(fn):
+                continue
+            try:
+                result = fn()
+                if asyncio.iscoroutine(result):
+                    try:
+                        await result
+                    except Exception:
+                        pass
+            except TypeError:
+                # Some close() accept timeouts; try a benign 0
+                try:
+                    result = fn(0)
+                    if asyncio.iscoroutine(result):
+                        await result
+                except Exception:
+                    pass
+            except Exception:
+                pass
+
+    # Try to stop known components if exposed
+    for attr in ("service_logger_obj", "scheduler"):
+        try:
+            await _stop_component(getattr(router, attr, None))
+        except Exception:
+            pass
+
+    # Clear global callbacks that could spawn new threads
+    try:
+        _litellm.callbacks = []
+        _litellm.success_callback = []
+        _litellm.failure_callback = []
+        _litellm.input_callback = []
+        _litellm.service_callback = []
+    except Exception:
+        pass
+
+
+# -----------------------------------------------------------------------------
+# Core API — returns structured CallResult[] (request + response/exception + content)
+# -----------------------------------------------------------------------------
 async def litellm_call(
-    prompts: List[Any],
+    prompts: List[_Any],
     *,
+    default_model: Optional[str] = None,
     wrap_json: bool = False,
-    desc: str | None = None,
-    session_id: str | None = None,
-    attach_session_to_provider: bool | None = None,
+    desc: Optional[str] = None,
+    session_id: Optional[str] = None,
+    attach_session_to_provider: Optional[bool] = None,
     num_retries: Optional[int] = None,
     default_max_parallel_requests: Optional[int] = None,
     concurrency: Optional[int] = None,
@@ -345,273 +267,309 @@ async def litellm_call(
     request_timeout: Optional[float] = None,
     stream: bool = False,
     models: Optional[List[str]] = None,
-) -> List[str]:
+    image_cache_dir: Optional[str] = None,
+    show_progress: Optional[bool] = None,
+    # NEW: how to sanitize base64 data-URIs in the returned request.messages of CallResult
+    sanitize_data_urls: str = "redact",   # one of: "redact" (default), "hash", "truncate", "none"
+    sanitize_truncate_chars: int = 48,    # used when sanitize_data_urls == "truncate"
+    export: str = "content",  # 'content' (default) or 'results'
+) -> List[str] | List[CallResult]:
     """
-    Run prompts in parallel with automatic image support.
-    - Batch per-model requests via Router.abatch_completion_one_model_multiple_requests
-    - Send per-request customized calls individually via Router.acompletion
-    - Mixed models per run supported (each model gets its own batch)
+    Run prompts concurrently with automatic image support.
 
-    Returns list[str] answers, aligned with input order. Errors become "" unless wrap_json=True,
-    in which case a structured {"error":{...}} JSON is returned.
+    RETURNS:
+      A list of CallResult with:
+        - .index (original input index)
+        - .request (CallRequest: model/messages/kwargs)  [messages may be sanitized per `sanitize_data_urls`]
+        - .response OR .exception
+        - .content: a human-ready string produced by response formatting/stream assembly
+
+    Sanitization modes (for image data-URIs in returned CallResult.request.messages):
+      - "redact"  (default): replace with 'data:<mime>;base64,<redacted bytes≈N sha256=...>'
+      - "hash":             replace with '<data-url sha256=... bytes≈N>'
+      - "truncate":         keep head/tail of base64 with '... (bytes≈N, sha256=...)'
+      - "none":             keep the original base64 (not recommended for logs)
     """
+    # --- local helpers --------------------------------------------------------
+    import hashlib
+
+    def _sanitize_data_url(url: str) -> str:
+        """Sanitize a data:*;base64,<blob> URL per sanitize_data_urls mode."""
+        try:
+            if not (isinstance(url, str) and url.startswith("data:")):
+                return url
+            if ";base64," not in url:
+                return url  # only sanitize base64 payloads
+            header, b64 = url.split(";base64,", 1)
+            mime = header[5:] if header.startswith("data:") else header
+            total_bytes = int(len(b64) * 3 / 4)  # rough decoded length
+            sha = hashlib.sha256(b64.encode("utf-8", "ignore")).hexdigest()
+
+            mode = (sanitize_data_urls or "redact").lower()
+            if mode == "none":
+                return url
+            if mode == "hash":
+                return f"<data-url sha256={sha} bytes≈{total_bytes}>"
+            if mode == "truncate":
+                n = max(0, int(sanitize_truncate_chars))
+                head = b64[:n]
+                tail = b64[-n:] if n > 0 else ""
+                return f"data:{mime};base64,{head}...{tail}  (bytes≈{total_bytes}, sha256={sha})"
+            # default = redact
+            return f"data:{mime};base64,<redacted bytes≈{total_bytes} sha256={sha}>"
+        except Exception:
+            # On any parsing issue, fail closed by redacting entirely
+            return "<data-url redacted>"
+
+    def _sanitize_messages_for_return(messages: List[Dict[str, _Any]]) -> List[Dict[str, _Any]]:
+        return sanitize_messages_for_return(messages, sanitize_data_urls, sanitize_truncate_chars)
+
+    # Normalize input
     if isinstance(prompts, (str, dict)):
         prompts = [prompts]
 
+    base_model = default_model or DEFAULT_MODEL
     if attach_session_to_provider is None:
         attach_session_to_provider = DEFAULT_ATTACH_SESSION
 
+    # Router settings
     num_retries = DEFAULT_NUM_RETRIES if num_retries is None else num_retries
     if concurrency is not None and default_max_parallel_requests is None:
         default_max_parallel_requests = concurrency
     default_max_parallel_requests = (
         DEFAULT_MAX_PARALLEL if default_max_parallel_requests is None else default_max_parallel_requests
     )
+    image_cache_dir = image_cache_dir if image_cache_dir is not None else IMAGE_CACHE_DIR
 
-    # One prompt → many models (simple, low-brittleness approach):
+    # Fan-out one prompt → many models
     if models:
-        expanded: List[Any] = []
+        expanded: List[_Any] = []
         for item in prompts:
             for m in models:
                 if isinstance(item, dict):
                     it = dict(item)
                     it["model"] = m
                 else:
-                    it = item
+                    it = {"text": str(item), "model": m}
                 expanded.append(it)
         prompts = expanded
 
-    # Preprocess all prompts
-    processed: List[Tuple[int, str, List[Dict[str, Any]], Dict[str, Any]]] = []
+    # Preprocess
+    processed: List[Tuple[int, str, List[Dict[str, _Any]], Dict[str, _Any]]] = []
     for idx, item in enumerate(prompts):
         model, messages, extra_kwargs = _to_messages_and_model(
-            item, MODEL, response_format=response_format, request_timeout=request_timeout
+            item,
+            base_model,
+            response_format=response_format,
+            request_timeout=request_timeout,
+            image_cache_dir=image_cache_dir,
         )
         processed.append((idx, model, messages, extra_kwargs))
 
-    # Group by model for batchable items (no per-request extra kwargs)
-    batches: Dict[str, List[Tuple[int, List[Dict[str, Any]]]]] = {}
-    individuals: List[Tuple[int, str, List[Dict[str, Any]], Dict[str, Any]]] = []
-
+    # Group batchables vs individuals
+    batches: Dict[str, List[Tuple[int, List[Dict[str, _Any]]]]] = {}
+    individuals: List[Tuple[int, str, List[Dict[str, _Any]], Dict[str, _Any]]] = []
     for idx, model, messages, extra_kwargs in processed:
         if extra_kwargs:
             individuals.append((idx, model, messages, extra_kwargs))
         else:
             batches.setdefault(model, []).append((idx, messages))
 
-    # Initialize Router with all required model entries
     unique_models = sorted({m for _, m, _, _ in processed})
-    model_list: List[Dict[str, Any]] = [
-        {"model_name": m, "litellm_params": {"model": m}} for m in unique_models
-    ]
+
+    def _router_entry(m: str) -> dict:
+        params: dict = {"model": m}
+        # Route Gemini to Google provider explicitly when possible (to honor JSON structured outputs)
+        if m.startswith("gemini/"):
+            key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+            if key:
+                params.update({"api_key": key, "provider": "gemini"})
+        return {"model_name": m, "litellm_params": params}
 
     router = Router(
-        model_list=model_list,
+        model_list=[_router_entry(m) for m in unique_models],
         num_retries=num_retries,
         default_max_parallel_requests=default_max_parallel_requests,
     )
 
-    results: List[str] = [""] * len(processed)
-
-    # Optional streaming fast-path: only for a single item without extra kwargs
-    if stream and len(processed) == 1 and not individuals and len(batches) == 1:
-        model = unique_models[0]
-        idx0, msgs0 = next(iter(batches[model]))
-        kwargs: Dict[str, Any] = {}
-        if attach_session_to_provider and session_id:
-            kwargs["user"] = session_id
-        if request_timeout is not None:
-            kwargs.setdefault("timeout", request_timeout)
-        try:
-            resp_stream = await router.acompletion(model=model, messages=msgs0, stream=True, **kwargs)
-        except TypeError:
-            resp = await router.acompletion(model=model, messages=msgs0, **kwargs)
-            results[idx0] = _format_answer(idx0, resp, wrap_json, prompts)
-            return results
-
-        assembled = []
-        try:
-            async for chunk in resp_stream:  # type: ignore
-                try:
-                    delta = chunk["choices"][0]["delta"].get("content")
-                    if delta:
-                        print(delta, end="", flush=True)
-                        assembled.append(delta)
-                        continue
-                except Exception:
-                    pass
-                text = (
-                    getattr(getattr(chunk, "choices", [None])[0], "text", None)
-                    if hasattr(chunk, "choices") else None
-                )
-                if isinstance(text, str):
-                    print(text, end="", flush=True)
-                    assembled.append(text)
-        except Exception:
-            pass
-        print()
-        results[idx0] = "".join(assembled)
-        return results
-
-    # Submit all calls via Router.acompletion (unified path)
-    async def _call_one(idx: int, model: str, messages: List[Dict[str, Any]], extra: Dict[str, Any]) -> Tuple[int, Any]:
-        kwargs = dict(extra)
-        if attach_session_to_provider and session_id and "user" not in kwargs:
-            kwargs["user"] = session_id
-        if request_timeout is not None and "timeout" not in kwargs:
-            kwargs["timeout"] = request_timeout
-        try:
-            resp = await router.acompletion(model=model, messages=messages, **kwargs)
-            return idx, resp
-        except Exception as e:
-            return idx, e
-
-    tasks: List[asyncio.Task[Tuple[int, Any]]] = []
-    # From batchable items
-    for model, payload in batches.items():
-        for idx0, msgs0 in payload:
-            tasks.append(asyncio.create_task(_call_one(idx0, model, msgs0, {})))
-    # From individual items
-    for idx, model, messages, extra in individuals:
-        tasks.append(asyncio.create_task(_call_one(idx, model, messages, extra)))
-
-    if not tasks:
-        return results
-
-    for _ in tqdm(asyncio.as_completed(tasks), total=len(tasks), desc=desc or "Processing", disable=not SHOW_PROGRESS):
-        await _
-
-    for t in tasks:
-        idx, resp = t.result()
-        results[idx] = _format_answer(idx, resp, wrap_json, prompts)
-
-    return results
-
-
-async def _progress_wait(
-    batch_tasks: List[asyncio.Task],
-    indiv_tasks: List[asyncio.Task],
-):
-    # Iterate as tasks complete for tqdm
-    pending = set(batch_tasks + indiv_tasks)
-    while pending:
-        done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
-        for _ in done:
-            yield True
-
-
-def _format_answer(idx: int, resp: Any, wrap_json: bool, prompts: List[Any]) -> str:
-    if isinstance(resp, Exception):
-        # If model lacks vision, surface a clearer message if possible
-        m = str(resp).lower()
-        if any(kw in m for kw in ["does not support", "unsupported", "image input", "image_url", "no vision", "vision not", "invalid type for", "doesn't support"]):
-            logger.warning(f"LiteLLM call failed for Q{idx}: {type(resp).__name__}: {resp}")
-        if wrap_json:
-            return json.dumps({
-                "error": {
-                    "type": type(resp).__name__,
-                    "message": str(resp)[:400]
-                }
-            }, ensure_ascii=False)
-        return ""
     try:
-        answer = _extract_text(resp)
-        final_answer = _maybe_augment_json_with_cost(answer, resp, wrap_non_json=wrap_json)
-    except Exception as e:
-        logger.warning(f"Failed to parse response for Q{idx}: {e}")
-        final_answer = "" if not wrap_json else json.dumps({"error": {"type": type(e).__name__, "message": str(e)[:400]}}, ensure_ascii=False)
+        # Streaming fast-path
+        if stream and len(processed) == 1 and not individuals and len(batches) == 1:
+            model = unique_models[0]
+            idx0, msgs0 = next(iter(batches[model]))
+            kwargs: Dict[str, _Any] = {}
+            if attach_session_to_provider and session_id:
+                kwargs["user"] = session_id
+            if request_timeout is not None:
+                kwargs["timeout"] = request_timeout
+            try:
+                prepared = await _prepare_messages_image_urls(msgs0, image_cache_dir=image_cache_dir)
+                resp_stream = await router.acompletion(model=model, messages=prepared, stream=True, **kwargs)
+                content = await assemble_stream_text(resp_stream)
+            except TypeError:
+                prepared = await _prepare_messages_image_urls(msgs0, image_cache_dir=image_cache_dir)
+                resp = await router.acompletion(model=model, messages=prepared, **kwargs)
+                content = format_answer_with_logging(idx0, resp, wrap_json, prompts[idx0], logger)
+            if export == "results":
+                req = CallRequest(model=model, messages=_sanitize_messages_for_return(msgs0), kwargs=kwargs or None)
+                return [CallResult(index=idx0, request=req, response=None, exception=None, content=content)]
+            return [content]
 
-    safe_prompt = deepcopy(prompts[idx])
-    if isinstance(safe_prompt, dict) and "api_key" in safe_prompt:
-        safe_prompt["api_key"] = "***"
-    logger.info(f"Q{idx}: {str(safe_prompt)[:50]}... -> {final_answer[:100]}...")
-    return final_answer
+        # Bounded concurrency over acompletion
+        limit_client = concurrency or (DEFAULT_MAX_PARALLEL or 8)
+        sem = asyncio.Semaphore(limit_client)
 
+        async def _call_one(
+            idx: int, model: str, messages: List[Dict[str, _Any]], extra: Dict[str, _Any]
+        ) -> CallResult:
+            kwargs = dict(extra)
+            if attach_session_to_provider and session_id and "user" not in kwargs:
+                kwargs["user"] = session_id
+            if request_timeout is not None and "timeout" not in kwargs:
+                kwargs["timeout"] = request_timeout
+            kwargs = _sanitize_kwargs_for_provider(model, kwargs)
+            prepared = await _prepare_messages_image_urls(messages, image_cache_dir=image_cache_dir)
+            req = CallRequest(model=model, messages=_sanitize_messages_for_return(prepared), kwargs=kwargs or None)
+            async with sem:
+                try:
+                    resp = await router.acompletion(model=model, messages=prepared, **kwargs)
+                    content = format_answer_with_logging(idx, resp, wrap_json, prompts[idx], logger)
+                    return CallResult(idx, req, resp, None, content)
+                except BaseException as e:
+                    logger.exception("litellm_call task failed (idx=%s, model=%s)", idx, model)
+                    content = format_answer_with_logging(idx, e, wrap_json, prompts[idx], logger)
+                    return CallResult(idx, req, None, e, content)
+
+        tasks: List[asyncio.Task[CallResult]] = []
+        for model, payload in batches.items():
+            for idx0, msgs0 in payload:
+                tasks.append(asyncio.create_task(_call_one(idx0, model, msgs0, {})))
+        for idx, model, messages, extra in individuals:
+            tasks.append(asyncio.create_task(_call_one(idx, model, messages, extra)))
+
+        if not tasks:
+            return []
+
+        effective_show = SHOW_PROGRESS if show_progress is None else show_progress
+        disable_bar = (not effective_show) or (not stream and len(tasks) == 1)
+        results: List[CallResult] = []
+        for _ in tqdm(
+            asyncio.as_completed(tasks),
+            total=len(tasks),
+            desc=desc or f"Processing {len(tasks)}",
+            disable=disable_bar,
+        ):
+            results.append(await _)
+        results.sort(key=lambda r: r.index)
+        if export == "results":
+            return results
+        return [r.content or "" for r in results]
+
+    finally:
+        # Ensure Router is shut down. Do NOT shutdown the default executor here;
+        # this function may run inside a long-lived loop (e.g., FastAPI) and shutting
+        # it down causes subsequent run_in_executor calls to fail with "Executor shutdown".
+        await _shutdown_router(router)
 
 # -----------------------------------------------------------------------------
 # Demo / CLI
 # -----------------------------------------------------------------------------
-
-async def demo() -> List[str]:
+async def demo() -> List[CallResult]:
+    """Demo keeps only network-accessible images to avoid local file deps."""
     prompts = [
         "What is the capital of France?",
         "Calculate 15+27+38",
         "What is 3 + 5? Return JSON: {question:string,answer:number}",
-        "What is this animal eating? proof_of_concept/ollama_turbo/images/image2.png",
+        "What is this animal eating? https://upload.wikimedia.org/wikipedia/commons/thumb/0/0f/Grosser_Panda.JPG/960px-Grosser_Panda.JPG",
         "Describe https://upload.wikimedia.org/wikipedia/commons/thumb/9/90/Labrador_Retriever_portrait.jpg/960px-Labrador_Retriever_portrait.jpg and https://upload.wikimedia.org/wikipedia/commons/thumb/4/4d/Cat_November_2010-1a.jpg/960px-Cat_November_2010-1a.jpg",
-        {"text": "Explain this meme", "image": "proof_of_concept/ollama_turbo/images/image.png"},
-        # Individual (per-request params => not batched)
-        {
-            "model": "gpt-4o-mini",
-            "messages": [
-                {"role": "system", "content": "You are a helpful assistant."},
-                {"role": "user", "content": "Tell me a short joke."}
-            ],
-            "temperature": 0.7
-        }
+        "Describe this image: tests/stage07_manual/images/smoke/panda.png"
     ]
-    return await litellm_call(prompts[0:5], wrap_json=False)
+    return await litellm_call(
+        prompts,
+        default_model=DEFAULT_MODEL,
+        wrap_json=False,
+        request_timeout=20,
+        num_retries=0,
+        show_progress=False,
+        concurrency=4,
+        image_cache_dir=IMAGE_CACHE_DIR,
+        sanitize_data_urls="redact",
+    )
 
 
-def demo_sync() -> List[str]:
+def demo_sync() -> List[CallResult]:
     return asyncio.run(demo())
 
 
-if __name__ == "__main__":
-    import typer  # Typer is a declared dependency; import directly
+def build_cli():
+    import typer
 
-    cli = typer.Typer(
+    app = typer.Typer(
         name="litellm_call",
         help=(
-            "Thin async batch runner with image support via LiteLLM Router.\n\n"
+            f"Thin async batch runner with image support via LiteLLM Router.\n"
+            f"Default model: {DEFAULT_MODEL}\n\n"
             "Examples:\n"
-            "  - Single: python litellm_call.py \"What is 2+2?\"\n"
-            "  - Batch:  python litellm_call.py \"What is 2+2?\" \"Capital of France?\"\n"
-            "  - Images: python litellm_call.py \"Describe /path/to/image.jpg and https://example.com/cat.jpg\"\n"
-            "  - Files:  python litellm_call.py @prompts.txt   | @prompts.jsonl | prompts.json\n"
-            "  - Stdin:  echo \"What is 2+2?\" | python litellm_call.py --stdin\n"
+            '  - Single: python litellm_call.py main "What is 2+2?"\n'
+            '  - JSON:   python litellm_call.py main --json "Return only {\\"ok\\":true}"\n'
+            '  - Batch:  python litellm_call.py main "What is 2+2?" "Capital of France?"\n'
+            '  - Images: python litellm_call.py main "Describe /path/to/image.jpg and https://example.com/cat.jpg"\n'
+            "  - Files:  python litellm_call.py main @prompts.txt   | @prompts.jsonl | prompts.json\n"
+            '  - Stdin:  echo "What is 2+2?" | python litellm_call.py main --stdin\n\n'
+            "Note: stream mode prints plain text only (no JSON augmentation).\n"
         ),
     )
 
-    @cli.command()
+    @app.command()
     def main(
-        sources: List[str] = typer.Argument(None, help="Prompts or files containing prompts. Use @file to read a file, or '-' for stdin."),
-        model: str = typer.Option(MODEL, "--model", "-m", help="Default LiteLLM model name"),
-        models: Optional[str] = typer.Option(None, "--models", help="Comma-separated list of models for 'one prompt → many models'"),
+        sources: List[str] = typer.Argument(
+            None,
+            help="Prompts or files containing prompts. Use @file to read a file, or '-' for stdin.",
+        ),
+        model: str = typer.Option(DEFAULT_MODEL, "--model", "-m", help="Default LiteLLM model name"),
+        models: Optional[str] = typer.Option(
+            None, "--models", help="Comma-separated list of models for 'one prompt → many models'"
+        ),
         stdin: bool = typer.Option(False, "--stdin", help="Read prompts from stdin"),
-        jsonl: bool = typer.Option(False, "--jsonl", help="Input is in JSON Lines format"),
-        wrap_json: bool = typer.Option(False, "--wrap-json", help="Wrap non-JSON outputs in JSON and add usage/cost in metadata"),
-        max_parallel: int = typer.Option(DEFAULT_MAX_PARALLEL or 0, "--max-parallel", help="Router default_max_parallel_requests (0 = unset)"),
-        num_retries: int = typer.Option(DEFAULT_NUM_RETRIES, "--num-retries", help="Router num_retries"),
-        response_format: Optional[str] = typer.Option(None, "--response-format", help="Inject response_format type (e.g., 'json_object')"),
-        request_timeout: Optional[float] = typer.Option(None, "--timeout", help="Request timeout in seconds"),
+        jsonl: bool = typer.Option(False, "--jsonl", help="Input is JSON Lines"),
+        wrap_json: bool = typer.Option(False, "--wrap-json", help="Wrap non-JSON and include usage/cost"),
+        json_flag: bool = typer.Option(False, "--json", help="Shorthand for json_object + wrap"),
+        max_parallel: int = typer.Option(DEFAULT_MAX_PARALLEL or 0, "--max-parallel", help="Router semaphore (0=unset)"),
+        num_retries: int = typer.Option(DEFAULT_NUM_RETRIES, "--num-retries", help="Router retries"),
+        response_format: Optional[str] = typer.Option(None, "--response-format", help="e.g. 'json_object'"),
+        request_timeout: Optional[float] = typer.Option(None, "--timeout", help="seconds"),
         stream: bool = typer.Option(False, "--stream", help="Stream output for a single prompt"),
-        image_cache_dir: Optional[str] = typer.Option(None, "--image-cache-dir", help="Directory for persistent image cache (overrides LITELLM_IMAGE_CACHE_DIR)"),
+        image_cache_dir: Optional[str] = typer.Option(None, "--image-cache-dir", help="Persistent image cache dir"),
+        session_id: Optional[str] = typer.Option(None, "--session-id", help="Attach a session/user id"),
+        no_progress: bool = typer.Option(False, "--no-progress", help="Disable progress bar"),
+        quiet: bool = typer.Option(False, "--quiet", help="Suppress stdout results (use with --output)"),
+        prefix_model: Optional[bool] = typer.Option(
+            None, "--prefix-model/--no-prefix-model", help="Prefix outputs with model when using --models"
+        ),
+        output: Optional[str] = typer.Option(None, "--output", "-o", help="Append results to file"),
+        export: str = typer.Option(
+            "content", "--export", help="content (default) or results (JSONL)"
+        ),
+        # Sanitization flags
+        sanitize: str = typer.Option(
+            "redact",
+            "--sanitize",
+            help="Sanitize data: URLs in returned request messages: 'redact'|'hash'|'truncate'|'none'",
+        ),
+        sanitize_chars: int = typer.Option(
+            48,
+            "--sanitize-chars",
+            help="When --sanitize=truncate, keep this many base64 chars at head & tail",
+        ),
     ):
-        # Apply defaults
-        global MODEL
-        if model:
-            MODEL = model
-
-        # NOTE: Auth is handled via environment and load_dotenv(find_dotenv()).
-        # No API key/base mutation here; keep this thin and defer to LiteLLM env parsing.
-
-        # Optional image cache dir override
-        global _IMAGE_CACHE_DIR
-        if image_cache_dir:
-            _IMAGE_CACHE_DIR = image_cache_dir
-
-        # Build the prompt list from args/stdin/files
-        prompts: List[object] = []
+        # Build prompt list from args/stdin/files (explicit; no global mutation)
+        prompts: List[_Any] = []
         from pathlib import Path as _Path
 
         if stdin or (sources == ["-"]):
-            for line in sys.stdin:
-                line = line.rstrip("\n")
-                if jsonl:
-                    prompts.append(json.loads(line))
-                else:
-                    prompts.append(line)
+            data = sys.stdin.read()
+            for line in data.splitlines():
+                prompts.append(json.loads(line) if jsonl else line)
 
         for src in sources or []:
             if src == "-":
@@ -625,71 +583,149 @@ if __name__ == "__main__":
             if path.suffix.lower() == ".json":
                 prompts.extend(json.loads(path.read_text()))
             elif path.suffix.lower() == ".jsonl" or jsonl:
-                prompts.extend(json.loads(l) for l in path.read_text().splitlines() if l.strip())
+                prompts.extend(json.loads(line) for line in path.read_text().splitlines() if line.strip())
             else:
-                prompts.extend(path.read_text().splitlines())
+                prompts.extend(line for line in path.read_text().splitlines() if line.strip())
 
         if not prompts:
-            typer.echo("No prompts provided.", err=True)
-            raise typer.Exit(1)
+            import typer as _typer
+            _typer.echo("No prompts provided.", err=True)
+            raise _typer.Exit(1)
+
+        # `--json` implies JSON mode and wrapping
+        rf = response_format or ("json_object" if json_flag else None)
+        do_wrap = wrap_json or json_flag
 
         dmpr = max_parallel if max_parallel and max_parallel > 0 else None
         model_list_opt = [m.strip() for m in models.split(",")] if models else None
+
         results = asyncio.run(
             litellm_call(
                 prompts,
-                wrap_json=wrap_json,
+                default_model=model,
+                wrap_json=do_wrap,
                 default_max_parallel_requests=dmpr,
                 num_retries=num_retries,
-                response_format=response_format,
+                response_format=rf,
                 request_timeout=request_timeout,
                 stream=stream,
                 models=model_list_opt,
+                image_cache_dir=image_cache_dir if image_cache_dir is not None else IMAGE_CACHE_DIR,
+                session_id=session_id,
+                show_progress=not no_progress,
+                sanitize_data_urls=sanitize,
+                sanitize_truncate_chars=sanitize_chars,
+                export=export,
             )
         )
-        for r in results:
-            typer.echo(r)
 
-    @cli.command("sanity")
+        # Output formatting
+        import typer as _typer
+
+        if export == "results":
+            # Print JSONL records: index, model, sanitized messages, kwargs, content, error
+            def _rec(r):
+                return {
+                    "index": getattr(r, "index", None),
+                    "model": getattr(getattr(r, "request", object()), "model", None),
+                    "messages": getattr(getattr(r, "request", object()), "messages", None),
+                    "kwargs": getattr(getattr(r, "request", object()), "kwargs", None),
+                    "content": getattr(r, "content", None),
+                    "error": None if getattr(r, "exception", None) is None else str(getattr(r, "exception", None)),
+                }
+
+            lines_jsonl = [json.dumps(_rec(r), ensure_ascii=False) for r in results]  # type: ignore[arg-type]
+            if output:
+                try:
+                    with open(output, "a", encoding="utf-8") as f:
+                        for line in lines_jsonl:
+                            f.write(line + "\n")
+                except Exception as e:
+                    _typer.echo(f"Failed to write output: {e}", err=True)
+            if not quiet:
+                for line in lines_jsonl:
+                    _typer.echo(line)
+            return
+
+        # Default: human-readable content strings
+        def _to_line(x):
+            return x if isinstance(x, str) else (x.content or "")
+        lines = [_to_line(r) for r in results]
+
+        # Optional prefix per model when using --models
+        if model_list_opt and (prefix_model if prefix_model is not None else True):
+            labels: List[str] = []
+            for _ in prompts:
+                labels.extend(model_list_opt)
+            if len(labels) == len(lines):
+                lines = [f"[{lab}] {line}" for lab, line in zip(labels, lines)]
+
+        if output:
+            try:
+                with open(output, "a", encoding="utf-8") as f:
+                    for line in lines:
+                        f.write(line + "\n")
+            except Exception as e:
+                _typer.echo(f"Failed to write output: {e}", err=True)
+
+        if not quiet:
+            for line in lines:
+                _typer.echo(line)
+
+    @app.command("sanity")
     def sanity(
-        model: str = typer.Option(MODEL, "--model", "-m", help="Model to use for the sanity check"),
-        wrap_json: bool = typer.Option(False, "--wrap-json", help="Wrap non-JSON and include error/usage metadata"),
-        request_timeout: Optional[float] = typer.Option(None, "--timeout", help="Request timeout in seconds"),
+        model: str = typer.Option(DEFAULT_MODEL, "--model", "-m", help="Model to use for the sanity check"),
+        wrap_json: bool = typer.Option(False, "--wrap-json", help="Wrap non-JSON + include metadata"),
+        request_timeout: Optional[float] = typer.Option(None, "--timeout", help="seconds"),
     ):
-        """Quick sanity check via LiteLLM Router.
-
-        Prints the model's JSON response and exits 0 only if the parsed JSON contains {"ok": true}.
-        This tolerates additional fields like metadata injected by the adapter.
-        """
-        global MODEL
-        if model:
-            MODEL = model
-
+        """Return only {"ok":true} as JSON; exit 0 iff ok=true."""
         prompt = 'Return only {"ok":true} as JSON.'
         results = asyncio.run(
             litellm_call(
                 [prompt],
+                default_model=model,
                 wrap_json=wrap_json,
                 response_format="json_object",
                 request_timeout=request_timeout,
+                num_retries=0,
+                show_progress=False,
+                concurrency=1,
             )
         )
-        out = results[0] if results else ""
-        typer.echo(out)
+        out = (results[0] if results and isinstance(results[0], str) else (results[0].content if results else ""))
+        import typer as _typer
+        _typer.echo(out)
 
         ok = False
         try:
-            data = json.loads(out.strip())
+            data = json.loads((out or "").strip())
             if isinstance(data, dict):
-                if data.get("ok") is True:
-                    ok = True
-                else:
-                    content = data.get("content")
-                    if isinstance(content, dict) and content.get("ok") is True:
-                        ok = True
+                ok = data.get("ok") is True or (
+                    isinstance(data.get("content"), dict) and data["content"].get("ok") is True
+                )
         except Exception:
             ok = False
 
-        raise typer.Exit(code=0 if ok else 2)
+        raise _typer.Exit(code=0 if ok else 2)
 
-    cli()
+    return app
+
+
+cli_app = build_cli()
+
+if __name__ == "__main__":
+    # With no args: run the async demo (debug-friendly). With args: use the CLI.
+    if len(sys.argv) == 1:
+        os.environ.setdefault("LITELLM_NO_PROGRESS", "1")  # cleaner stepping in debuggers
+        results = asyncio.run(demo())
+        for r in results:
+            print(r.content or "")
+        raise SystemExit(0)
+    else:
+        # Ergonomics: if called without an explicit subcommand, default to `main`
+        argv = sys.argv
+        args = argv[1:]
+        if args and (not args[0].startswith("-")) and args[0] not in {"main", "sanity"}:
+            sys.argv = [argv[0], "main", *args]
+        cli_app()
+        raise SystemExit(0)

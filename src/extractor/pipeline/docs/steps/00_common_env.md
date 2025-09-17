@@ -12,5 +12,8 @@ Recommended per-run exports
 export LITELLM_VLM_MODEL=openai/gpt-5-mini
 export LITELLM_SESSION_ID=$(date +%s)-dev
 export LITELLM_ATTACH_SESSION=true
-export ARANGO_DATABASE=pdf_knowledge_base_test_${LITELLM_SESSION_ID}
+export ARANGO_DATABASE=pdf_knowledge_base_test
 ```
+
+Notes
+- Use a dedicated test database (e.g., `pdf_knowledge_base_test`) during development and smokes. The happy path and CI flows assume ArangoDB is present and reachable at `ARANGO_HOST/PORT` with credentials in `.env`.

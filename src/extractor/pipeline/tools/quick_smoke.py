@@ -30,61 +30,202 @@ def _run(cmd: list[str]) -> None:
 
 @app.command()
 def run(
-    pdf: Path = typer.Option(..., "--pdf", exists=True, file_okay=True, dir_okay=False, readable=True),
+    pdf: Path = typer.Option(
+        ..., "--pdf", exists=True, file_okay=True, dir_okay=False, readable=True
+    ),
 ) -> None:
     DATA_RESULTS.mkdir(parents=True, exist_ok=True)
 
     # 1→4
-    _run([sys.executable, "-m", "extractor.pipeline.tools.run_and_validate", "--pdf", str(pdf), "--until", "4"])
+    _run(
+        [
+            sys.executable,
+            "-m",
+            "extractor.pipeline.tools.run_and_validate",
+            "--pdf",
+            str(pdf),
+            "--until",
+            "4",
+        ]
+    )
 
     # 5
-    _run([sys.executable, str(SRC/"extractor/pipeline/steps/05_table_extractor.py"), "run",
-          str(DATA_RESULTS/"04_section_builder/json_output/04_sections.json"),
-          "--pdf-dir", str(DATA_RESULTS/"01_annotation_processor"), "-o", str(DATA_RESULTS)])
-    _run([sys.executable, "-m", "extractor.pipeline.tools.validate_gold_standard", "gold", "05", str(DATA_RESULTS/"05_table_extractor/json_output/05_tables.json")])
+    _run(
+        [
+            sys.executable,
+            str(SRC / "extractor/pipeline/steps/05_table_extractor.py"),
+            "run",
+            str(DATA_RESULTS / "04_section_builder/json_output/04_sections.json"),
+            "--pdf-dir",
+            str(DATA_RESULTS / "01_annotation_processor"),
+            "-o",
+            str(DATA_RESULTS),
+        ]
+    )
+    _run(
+        [
+            sys.executable,
+            "-m",
+            "extractor.pipeline.tools.validate_gold_standard",
+            "gold",
+            "05",
+            str(DATA_RESULTS / "05_table_extractor/json_output/05_tables.json"),
+        ]
+    )
 
     # 6
-    _run([sys.executable, str(SRC/"extractor/pipeline/steps/06_figure_extractor.py"), "run",
-          str(DATA_RESULTS/"02_marker_extractor/json_output/02_marker_blocks.json"),
-          "--sections", str(DATA_RESULTS/"04_section_builder/json_output/04_sections.json"),
-          "--pdf-dir", str(DATA_RESULTS/"01_annotation_processor"), "-o", str(DATA_RESULTS)])
-    _run([sys.executable, "-m", "extractor.pipeline.tools.validate_gold_standard", "gold", "06", str(DATA_RESULTS/"06_figure_extractor/json_output/06_figures.json")])
+    _run(
+        [
+            sys.executable,
+            str(SRC / "extractor/pipeline/steps/06_figure_extractor.py"),
+            "run",
+            str(DATA_RESULTS / "02_marker_extractor/json_output/02_marker_blocks.json"),
+            "--sections",
+            str(DATA_RESULTS / "04_section_builder/json_output/04_sections.json"),
+            "--pdf-dir",
+            str(DATA_RESULTS / "01_annotation_processor"),
+            "-o",
+            str(DATA_RESULTS),
+        ]
+    )
+    _run(
+        [
+            sys.executable,
+            "-m",
+            "extractor.pipeline.tools.validate_gold_standard",
+            "gold",
+            "06",
+            str(DATA_RESULTS / "06_figure_extractor/json_output/06_figures.json"),
+        ]
+    )
 
     # 7 (summary-only)
-    _run([sys.executable, str(SRC/"extractor/pipeline/steps/07_reflow_section.py"), "run",
-          "--sections", str(DATA_RESULTS/"04_section_builder/json_output/04_sections.json"),
-          "--tables", str(DATA_RESULTS/"05_table_extractor/json_output/05_tables.json"),
-          "--figures", str(DATA_RESULTS/"06_figure_extractor/json_output/06_figures.json"),
-          "--annotations", str(DATA_RESULTS/"01_annotation_processor/json_output/01_annotations.json"),
-          "-o", str(DATA_RESULTS), "--summary-only"])
-    _run([sys.executable, "-m", "extractor.pipeline.tools.validate_gold_standard", "gold", "07", str(DATA_RESULTS/"07_reflow_section/json_output/07_reflowed.json")])
+    _run(
+        [
+            sys.executable,
+            str(SRC / "extractor/pipeline/steps/07_reflow_section.py"),
+            "run",
+            "--sections",
+            str(DATA_RESULTS / "04_section_builder/json_output/04_sections.json"),
+            "--tables",
+            str(DATA_RESULTS / "05_table_extractor/json_output/05_tables.json"),
+            "--figures",
+            str(DATA_RESULTS / "06_figure_extractor/json_output/06_figures.json"),
+            "--annotations",
+            str(DATA_RESULTS / "01_annotation_processor/json_output/01_annotations.json"),
+            "-o",
+            str(DATA_RESULTS),
+            "--summary-only",
+        ]
+    )
+    _run(
+        [
+            sys.executable,
+            "-m",
+            "extractor.pipeline.tools.validate_gold_standard",
+            "gold",
+            "07",
+            str(DATA_RESULTS / "07_reflow_section/json_output/07_reflowed.json"),
+        ]
+    )
 
     # 8 (skip proving)
-    _run([sys.executable, str(SRC/"extractor/pipeline/steps/08_lean4_theorem_prover.py"), "run",
-          str(DATA_RESULTS/"07_reflow_section/json_output/07_reflowed.json"), "-o", str(DATA_RESULTS), "--skip-proving"])
-    _run([sys.executable, "-m", "extractor.pipeline.tools.validate_gold_standard", "gold", "08", str(DATA_RESULTS/"08_lean4_theorem_prover/json_output/08_theorems.json")])
+    _run(
+        [
+            sys.executable,
+            str(SRC / "extractor/pipeline/steps/08_lean4_theorem_prover.py"),
+            "run",
+            str(DATA_RESULTS / "07_reflow_section/json_output/07_reflowed.json"),
+            "-o",
+            str(DATA_RESULTS),
+            "--skip-proving",
+        ]
+    )
+    _run(
+        [
+            sys.executable,
+            "-m",
+            "extractor.pipeline.tools.validate_gold_standard",
+            "gold",
+            "08",
+            str(DATA_RESULTS / "08_lean4_theorem_prover/json_output/08_theorems.json"),
+        ]
+    )
 
     # 9
-    _run([sys.executable, str(SRC/"extractor/pipeline/steps/09_section_summarizer.py"), "run",
-          str(DATA_RESULTS/"07_reflow_section/json_output/07_reflowed.json"), "-o", str(DATA_RESULTS), "--strict-json", "--max-concurrent", "3"])
-    _run([sys.executable, "-m", "extractor.pipeline.tools.validate_gold_standard", "gold", "09", str(DATA_RESULTS/"09_section_summarizer/json_output/09_summaries.json")])
+    _run(
+        [
+            sys.executable,
+            str(SRC / "extractor/pipeline/steps/09_section_summarizer.py"),
+            "run",
+            str(DATA_RESULTS / "07_reflow_section/json_output/07_reflowed.json"),
+            "-o",
+            str(DATA_RESULTS),
+            "--strict-json",
+            "--max-concurrent",
+            "3",
+        ]
+    )
+    _run(
+        [
+            sys.executable,
+            "-m",
+            "extractor.pipeline.tools.validate_gold_standard",
+            "gold",
+            "09",
+            str(DATA_RESULTS / "09_section_summarizer/json_output/09_summaries.json"),
+        ]
+    )
 
     # 14
-    _run([sys.executable, str(SRC/"extractor/pipeline/steps/14_report_generator.py"), "run", str(DATA_RESULTS)])
-    _run([sys.executable, "-m", "extractor.pipeline.tools.validate_gold_standard", "gold", "14", str(DATA_RESULTS/"final_report.json")])
+    _run(
+        [
+            sys.executable,
+            str(SRC / "extractor/pipeline/steps/14_report_generator.py"),
+            "run",
+            str(DATA_RESULTS),
+        ]
+    )
+    _run(
+        [
+            sys.executable,
+            "-m",
+            "extractor.pipeline.tools.validate_gold_standard",
+            "gold",
+            "14",
+            str(DATA_RESULTS / "final_report.json"),
+        ]
+    )
 
     # 10 (skip export) + 11 (skip graph creation)
-    _run([sys.executable, str(SRC/"extractor/pipeline/steps/10_arangodb_exporter.py"), "run",
-          "--reflowed", str(DATA_RESULTS/"07_reflow_section/json_output/07_reflowed.json"),
-          "--summaries", str(DATA_RESULTS/"09_section_summarizer/json_output/09_summaries.json"),
-          "-o", str(DATA_RESULTS), "--skip-export"])
-    _run([sys.executable, str(SRC/"extractor/pipeline/steps/11_arango_create_graph.py"), "run",
-          str(DATA_RESULTS/"10_arangodb_exporter/json_output/10_flattened_data.json"),
-          "-o", str(DATA_RESULTS), "--skip-graph-creation"])
+    _run(
+        [
+            sys.executable,
+            str(SRC / "extractor/pipeline/steps/10_arangodb_exporter.py"),
+            "run",
+            "--reflowed",
+            str(DATA_RESULTS / "07_reflow_section/json_output/07_reflowed.json"),
+            "--summaries",
+            str(DATA_RESULTS / "09_section_summarizer/json_output/09_summaries.json"),
+            "-o",
+            str(DATA_RESULTS),
+            "--skip-export",
+        ]
+    )
+    _run(
+        [
+            sys.executable,
+            str(SRC / "extractor/pipeline/steps/11_arango_create_graph.py"),
+            "run",
+            str(DATA_RESULTS / "10_arangodb_exporter/json_output/10_flattened_data.json"),
+            "-o",
+            str(DATA_RESULTS),
+            "--skip-graph-creation",
+        ]
+    )
 
     print("\n✅ Quick smoke completed.")
 
 
 if __name__ == "__main__":
     app()
-

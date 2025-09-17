@@ -1,0 +1,7 @@
+thresholds:
+  numbering_weight: 0.3
+  font_size_weight: 0.3
+  bold_weight: 0.2
+  spacing_weight: 0.1
+  align_center_weight: 0.1
+

@@ -10,3 +10,9 @@ Index
 - 07_reflow_section.md
 - 10_arangodb_exporter.md
 - 12_insert_annotations.md
+
+Happy Path & External Annotations
+---------------------------------
+- One command (CLI): `pipeline-happy` runs the full pipeline on the canonical BHT sample, validates tolerant golds, and writes a run summary (score) + final report.
+- One button (UI): In the Tabbed app, click “Extract” to POST normalized annotations (per‑page boxes) to the pipeline bridge. The bridge stages Stage‑01 JSON and a clean PDF, then runs the pipeline with validation. After the run, click “Load pipeline annotations” to merge auto suggestions into the UI for review.
+- To run from external annotations on the CLI, pass `--annotations-json` and (optionally) `--clean-pdf` to `run_all`.

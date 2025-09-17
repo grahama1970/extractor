@@ -1,0 +1,9943 @@
+You are an expert-level LLM agent architect and senior developer, specializing in production-readiness, system reliability, and maintainability. Your task is to perform a comprehensive code review of the provided Python files.
+
+Your review must be structured, thorough, and actionable. Analyze the code from three perspectives simultaneously: immediate runtime risks, long-term architectural flaws, and immediate code quality/maintainability. CRUCIAL: Find all hallucinated, aspirational, stubbed, or non-working code, and provide working solutions.
+
+Scope
+- Review ONLY Python files contained in the bundle below (ignore non-Python files).
+- The files are from the subtree: prototypes/tabbed
+
+Output Format
+
+---
+### File: `[Full Path to File]`
+
+**Overall Assessment:** [A brief, 1-2 sentence summary of the file's quality, purpose, and primary risks.]
+
+| 🔴 **CRITICAL / WILL BREAK IN PRODUCTION** |
+| :--- |
+| **1. [Issue Name]:** [A concise description of a bug or design flaw that will cause immediate runtime errors (e.g., `NameError`, `TypeError`, `ZeroDivisionError`), race conditions, deadlocks, or guaranteed silent data corruption. Explain the exact failure mode.] |
+| **2. [Another Critical Issue]:** [...] |
+
+| 🟡 **MEDIUM / WILL BITE LATER** |
+| :--- |
+| **1. [Issue Name]:** [A description of an architectural weakness, performance bottleneck, brittle logic, or anti-pattern. Explain why this is a long-term risk.] |
+| **2. [Another Medium Issue]:** [...] |
+
+| 🔵 **REFINEMENT / CODE HYGIENE** |
+| :--- |
+| **1. [Issue Name]:** [Code that, while functionally correct, is stylistically poor or violates best practices. Provide a `git diff` or direct snippet whenever possible.] |
+| **2. [Another Refinement Issue]:** [...] |
+
+| ✅ **STRENGTHS / GOOD PRACTICES** |
+| :--- |
+| **1. [Strength Name]:** [Well-implemented feature, robust pattern, or good practice and why it’s good.] |
+| **2. [Another Strength]:** [...] |
+
+---
+
+Guidelines
+1) Prioritize ruthlessly across 🔴/🟡/🔵.
+2) Be specific and actionable with exact failure modes.
+3) Assume production (containerized, concurrent).
+4) Explain the “why” for every issue and strength.
+5) Be unabridged: include a complete review for every Python file provided.
+6) Crucial: only propose iterative updates that DO NOT add unnecessary complexity or brittleness (this is an MVP).
+
+# Project Bundle
+
+- Generated: 2025-09-15T17:29:51Z
+- Root: /home/graham/workspace/experiments/extractor/prototypes/tabbed
+- Git: 3820a08d+dirty
+- Files: 103
+
+---
+
+
+====== BEGIN FILE: .gitignore ======
+```
+node_modules/
+html/node_modules/
+
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: STATUS.md ======
+```markdown
+# Tabbed Prototypes — Restore Status
+
+Scope: `prototypes/tabbed/html`
+
+Status: restored and runnable (dev), matching the “Classic Three‑Panel Layout” screenshot closely. Key features:
+
+- Classic layout with left Explorer, center canvas + HUD, right Inspector
+- Thumbnail rail (left) or filmstrip (bottom) with smooth paging
+- Sticky header and working pager with zoom
+- Box draw/resize/move with snap, keyboard nudge, duplicate/delete
+- Label management dialog and persisted custom labels
+- Build chip in UI showing git/time; dev/preview send `no-store` headers
+
+Notable implementation notes:
+
+- Added `src/lib/utils.ts` (shadcn `cn` helper)
+- Added `src/lib/pdf.ts` (PDF.js glue: load, canvas render, thumbnail render)
+- Public worker: `public/pdf.worker.min.js` (served at `/pdf.worker.min.js`)
+- Graceful fallback: if `/bht.pdf` is missing, canvases render a placeholder so the UI remains functional
+
+How to run (local):
+
+1. Backend (optional, for API proxy): `python -m uvicorn extractor.core.scripts.server:app --host 0.0.0.0 --port 8001` (or 8000 if 8001 is in use)
+2. Frontend (workspace install at parent):
+   - One-time install at parent: `cd prototypes/tabbed && npm install`
+   - Dev server: `VITE_API_PROXY=http://127.0.0.1:8001 npm run -w html dev -- --force`
+3. Open `http://127.0.0.1:8080/classic` or `/main`
+
+VS Code tasks (single-step):
+
+- Default: `Dev: Clean + Backend(8001) + Vite(8080)` — installs (if needed), then starts FastAPI on :8001 (auto‑fallback to :8000 if :8001 is busy) and Vite on :8080 (workspace-aware)
+- Also available: `Run Backend + Dev (Auto)` — equivalent single-step runner
+
+Verification quick check:
+
+- Header shows “Classic Three‑Panel Layout”
+- Explorer panel has “Open PDF”, “Search files”, file list, “Export All”
+- Center canvas scrolls; boxes draw and drag with snap
+- Bottom pager updates page label; thumbs selectable (left/bottom)
+- Inspector updates `Label Type`, `Instance ID`, and `Generate JSON` opens a dialog
+
+Next steps (optional):
+
+- Add a small two‑page sample PDF as `public/bht.pdf` if you prefer a real render instead of the placeholder
+- Wire the left “Open PDF” to pick local/server PDFs
+- Expand Puppeteer checks to assert sticky toolbars + non‑blocking overlay wheel
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: api/server.py ======
+```python
+"""
+Self-contained FastAPI backend for the Tabbed prototype.
+
+Endpoints:
+- GET / → basic index
+- GET /api/build → { git, started_at }
+- GET /api/list → list PDFs from SERVER_PDFS_ROOT (defaults to prototypes/tabbed/pdfs)
+- GET /api/pdf?rel=... → stream a PDF from the root
+- POST /api/ux/generate → optional LLM call via LiteLLM; falls back to mock when not configured
+- POST /api/ux/mock/generate → canned table JSON (for demos)
+
+Notes:
+- Adds no-store headers to all responses (dev convenience)
+- CORS permissive for local dev
+- Optional caching: attempts Redis; otherwise uses in-memory caching
+"""
+
+from __future__ import annotations
+
+import os
+import subprocess
+import datetime
+import base64
+from typing import List, Dict, Any
+
+from fastapi import FastAPI, BackgroundTasks
+from fastapi.responses import JSONResponse, FileResponse, HTMLResponse, Response
+from fastapi.middleware.cors import CORSMiddleware
+import json
+import time
+import tempfile
+import zipfile
+from pathlib import Path
+from typing import Optional
+
+# Optional ArangoDB (lessons/incidents + search)
+try:
+    from arango import ArangoClient  # type: ignore
+except Exception:  # pragma: no cover - optional runtime dep
+    ArangoClient = None  # type: ignore
+
+try:
+    import fitz  # PyMuPDF
+except Exception:
+    fitz = None
+
+
+def _default_pdfs_root() -> str:
+    here = os.path.abspath(os.path.dirname(__file__))
+    # repo_root/prototypes/tabbed/pdfs
+    root = os.path.abspath(os.path.join(here, "..", "pdfs"))
+    if os.path.isdir(root):
+        return root
+    # fallback to repo_root/data/pdfs
+    alt = os.path.abspath(os.path.join(here, "..", "..", "..", "data", "pdfs"))
+    return alt
+
+
+SERVER_PDFS_ROOT = os.getenv("SERVER_PDFS_ROOT", _default_pdfs_root())
+
+app = FastAPI()
+
+# CORS: wildcard requires allow_credentials=False. If credentials are needed, set explicit origins via env.
+_cors_origins = os.getenv("CORS_ALLOW_ORIGINS", "*")
+if _cors_origins.strip() == "*":
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+else:
+    origins = [o.strip() for o in _cors_origins.split(",") if o.strip()]
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+
+@app.middleware("http")
+async def no_store_headers(request, call_next):
+    resp = await call_next(request)
+    try:
+        resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, proxy-revalidate"
+        resp.headers["Pragma"] = "no-cache"
+        resp.headers["Expires"] = "0"
+        resp.headers["Surrogate-Control"] = "no-store"
+    except Exception:
+        pass
+    return resp
+
+
+@app.get("/")
+async def root():
+    return HTMLResponse("<h3>Tabbed Prototype API</h3><ul><li>/api/list</li><li>/api/pdf?rel=...</li><li>/api/ux/generate</li></ul>")
+
+
+def _git_sha() -> str:
+    try:
+        return subprocess.check_output(["git", "rev-parse", "--short", "HEAD"]).decode().strip()
+    except Exception:
+        return "unknown"
+
+_BUILD_INFO = {
+    "git": _git_sha(),
+    "started_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+}
+
+
+@app.get("/api/build")
+async def api_build():
+    # Return precomputed build metadata to avoid blocking the event loop per request.
+    return _BUILD_INFO
+
+
+# -----------------------------
+# Arango (Lessons & Incidents)
+# -----------------------------
+_ARANGO_DB = None  # cached handle
+_ARANGO_READY = False
+
+
+def _get_env(name: str, default: Optional[str] = None) -> Optional[str]:
+    v = os.getenv(name, default if default is not None else None)
+    return v
+
+
+def _arango_connect():
+    """Best-effort connect to ArangoDB using either ARANGO_URL or ARANGO_HOST/PORT envs.
+
+    Env (supported):
+      - ARANGO_URL (preferred), e.g. http://127.0.0.1:8529
+      - ARANGO_HOST, ARANGO_PORT (fallback)
+      - ARANGO_DB or ARANGO_DATABASE (db name)
+      - ARANGO_USER, ARANGO_PASS or ARANGO_PASSWORD
+    """
+    global _ARANGO_DB
+    if _ARANGO_DB is not None:
+        return _ARANGO_DB
+    if ArangoClient is None:
+        return None
+    # Gather env
+    url = _get_env("ARANGO_URL")
+    host = _get_env("ARANGO_HOST", "127.0.0.1")
+    port = _get_env("ARANGO_PORT", "8529")
+    db_name = _get_env("ARANGO_DB") or _get_env("ARANGO_DATABASE") or "lessons"
+    user = _get_env("ARANGO_USER", "root") or "root"
+    password = _get_env("ARANGO_PASS") or _get_env("ARANGO_PASSWORD") or ""
+
+    try:
+        client = ArangoClient(hosts=(url or f"http://{host}:{port}"))  # type: ignore
+        # Try connect to db, create if missing (requires root perms)
+        sys_db = client.db("_system", username=user, password=password)
+        if not sys_db.has_database(db_name):
+            try:
+                sys_db.create_database(db_name)
+            except Exception:
+                # may lack perms; proceed anyway (will 404 later)
+                pass
+        _ARANGO_DB = client.db(db_name, username=user, password=password)
+        # sanity: try version() to confirm connect
+        _ = _ARANGO_DB.version()  # noqa: F841
+        return _ARANGO_DB
+    except Exception:
+        return None
+
+
+def _ensure_lessons_schema(db):
+    """Ensure lessons + incidents collections and lessons_search view exist.
+    Mirrors scripts/lessons/setup.py and tolerates partial availability.
+    """
+    global _ARANGO_READY
+    if _ARANGO_READY:
+        return True
+    try:
+        if not db:
+            return False
+        # Collections
+        if not db.has_collection("lessons"):
+            db.create_collection("lessons")
+        if not db.has_collection("incidents"):
+            db.create_collection("incidents")
+        # View
+        view_name = "lessons_search"
+        # Detect view by name; arango-py may not expose has_view directly across versions
+        try:
+            existing = [v.get("name") for v in db.views()]
+        except Exception:
+            existing = []
+        if view_name not in existing:
+            db.create_arangosearch_view(
+                view_name,
+                properties={
+                    "links": {
+                        "lessons": {
+                            "includeAllFields": False,
+                            "analyzers": ["text_en"],
+                            "fields": {
+                                "title": {"analyzers": ["text_en"]},
+                                "problem": {"analyzers": ["text_en"]},
+                                "playbook": {"analyzers": ["text_en"]},
+                                "tags": {"analyzers": ["text_en", "identity"]},
+                                "keywords": {"analyzers": ["text_en", "identity"]},
+                                "scope": {"analyzers": ["identity"]},
+                            },
+                        }
+                    }
+                },
+            )
+        _ARANGO_READY = True
+        return True
+    except Exception:
+        return False
+
+
+@app.get("/api/lessons/search")
+async def api_lessons_search(q: str, tags: str | None = None, k: int = 10):
+    """
+    Search lessons using ArangoSearch BM25/TF-IDF.
+
+    Query params:
+      - q: search text
+      - tags: optional comma-separated tag list
+      - k: top K (default 10)
+
+    Returns: { ok, items: [ {title, problem, playbook, tags, scope, status, updated_at, _key} ] }
+    """
+    db = _arango_connect()
+    if not db:
+        return JSONResponse({"ok": False, "error": "arango_unavailable"}, status_code=503)
+    _ensure_lessons_schema(db)
+    try:
+        tag_list = [t.strip() for t in (tags or "").split(",") if t.strip()]
+        bind = {"q": q, "k": int(max(1, min(50, k))), "tags": tag_list}
+        aql = (
+            "FOR d IN lessons_search "
+            "SEARCH ANALYZER("
+            " d.title IN TOKENS(@q, 'text_en') OR"
+            " d.problem IN TOKENS(@q, 'text_en') OR"
+            " d.playbook IN TOKENS(@q, 'text_en') OR"
+            " d.tags IN TOKENS(@q, 'text_en') OR"
+            " d.keywords IN TOKENS(@q, 'text_en')"
+            ", 'text_en') "
+            "FILTER LENGTH(@tags)==0 OR d.tags ANY IN @tags "
+            "SORT BM25(d) DESC, TFIDF(d) DESC "
+            "LIMIT @k "
+            "RETURN KEEP(d, '_key','title','problem','playbook','tags','scope','status','updated_at')"
+        )
+        cursor = db.aql.execute(aql, bind_vars=bind)
+        items = list(cursor)
+        return {"ok": True, "items": items}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/lessons/add")
+async def api_lessons_add(payload: Dict[str, Any]):
+    """
+    Upsert a lesson by (title, scope).
+    Body: { title, problem, playbook, tags: [..], scope: 'tabbed', status: 'active' }
+    """
+    db = _arango_connect()
+    if not db:
+        return JSONResponse({"ok": False, "error": "arango_unavailable"}, status_code=503)
+    _ensure_lessons_schema(db)
+    try:
+        title = (payload.get("title") or "").strip()
+        problem = (payload.get("problem") or "").strip()
+        playbook = (payload.get("playbook") or "").strip()
+        scope = (payload.get("scope") or "tabbed").strip() or "tabbed"
+        status = (payload.get("status") or "active").strip() or "active"
+        tags = payload.get("tags") or []
+        if not isinstance(tags, list):
+            tags = []
+        if not title:
+            return JSONResponse({"ok": False, "error": "missing_title"}, status_code=400)
+        ts = int(time.time())
+        user = os.getenv("USER", "unknown")
+        # Add keywords field for improved BM25 recall: tags + synonyms + scope
+        def build_keywords(tags_list: list[str], scope_val: str) -> str:
+            syn = {
+                "cdp": ["chrome", "chromium", "devtools", "browserless", "puppeteer", "playwright"],
+                "proxy": ["vite", "backend", "target", "api", "port", "8000", "8001"],
+                "json": ["response_format", "schema", "structured", "wrap_json"],
+                "smokes": ["smoke", "ci", "tests", "playwright", "puppeteer"],
+                "timeout": ["hang", "stall", "latency"],
+            }
+            bag: list[str] = []
+            for t in tags_list or []:
+                bag.append(t)
+                bag.extend(syn.get(str(t).lower(), []))
+            if scope_val:
+                bag.append(scope_val)
+            out: list[str] = []
+            seen: set[str] = set()
+            for w in bag:
+                if w and w not in seen:
+                    seen.add(w)
+                    out.append(w)
+            return " ".join(out)
+
+        keywords = build_keywords(tags, scope)
+        aql = (
+            "UPSERT { title: @title, scope: @scope } "
+            "INSERT { title: @title, problem: @problem, playbook: @playbook, tags: @tags, keywords: @keywords, scope: @scope, status: @status, added_by: @user, updated_at: @ts } "
+            "UPDATE { problem: @problem, playbook: @playbook, tags: @tags, keywords: @keywords, status: @status, added_by: @user, updated_at: @ts } "
+            "IN lessons RETURN NEW"
+        )
+        bind = {
+            "title": title,
+            "problem": problem,
+            "playbook": playbook,
+            "tags": tags,
+            "keywords": keywords,
+            "scope": scope,
+            "status": status,
+            "user": user,
+            "ts": ts,
+        }
+        cursor = db.aql.execute(aql, bind_vars=bind)
+        doc = list(cursor)[0]
+        return {"ok": True, "item": doc}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/incident/log")
+async def api_incident_log(payload: Dict[str, Any]):
+    """
+    Record an incident in the 'incidents' collection.
+    Body: { message: str, level?: str, meta?: dict }
+    """
+    db = _arango_connect()
+    if not db:
+        return JSONResponse({"ok": False, "error": "arango_unavailable"}, status_code=503)
+    _ensure_lessons_schema(db)
+    try:
+        msg = (payload.get("message") or "").strip()
+        if not msg:
+            return JSONResponse({"ok": False, "error": "missing_message"}, status_code=400)
+        level = (payload.get("level") or "ERROR").strip() or "ERROR"
+        meta = payload.get("meta") or {}
+        if not isinstance(meta, dict):
+            meta = {"meta": str(meta)}
+        doc = {
+            "message": msg,
+            "level": level,
+            "meta": meta,
+            "ts": int(time.time()),
+            "user": os.getenv("USER", "unknown"),
+        }
+        col = db.collection("incidents")
+        ins = col.insert(doc)
+        return {"ok": True, "_key": ins.get("_key")}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+def _is_within_root(path: str, root: str) -> bool:
+    try:
+        rp = os.path.realpath(path)
+        rr = os.path.realpath(root)
+        return os.path.commonpath([rp, rr]) == rr
+    except Exception:
+        return False
+
+
+def _list_pdfs(root: str) -> List[Dict[str, Any]]:
+    items: List[Dict[str, Any]] = []
+    if not os.path.isdir(root):
+        return items
+    for name in sorted(os.listdir(root)):
+        if not name.lower().endswith(".pdf"):
+            continue
+        fp = os.path.join(root, name)
+        try:
+            st = os.stat(fp)
+        except Exception:
+            continue
+        items.append({"name": name, "rel": name, "size": st.st_size, "mtime": st.st_mtime})
+    return items
+
+
+@app.get("/api/list")
+async def api_list(dir: str | None = None):
+    base = SERVER_PDFS_ROOT if not dir else os.path.join(SERVER_PDFS_ROOT, dir)
+    if not _is_within_root(base, SERVER_PDFS_ROOT):
+        return JSONResponse({"ok": False, "error": "invalid_dir"}, status_code=400)
+    return {"ok": True, "root": SERVER_PDFS_ROOT, "items": _list_pdfs(base)}
+
+
+@app.get("/api/pdf")
+async def api_pdf(rel: str):
+    fp = os.path.join(SERVER_PDFS_ROOT, rel)
+    if not _is_within_root(fp, SERVER_PDFS_ROOT) or not os.path.isfile(fp):
+        return JSONResponse({"ok": False, "error": "not_found"}, status_code=404)
+    return FileResponse(fp, media_type="application/pdf", filename=os.path.basename(fp))
+
+
+def _abs_pdf_path(rel: str) -> str:
+    fp = os.path.join(SERVER_PDFS_ROOT, rel)
+    if not _is_within_root(fp, SERVER_PDFS_ROOT) or not os.path.isfile(fp):
+        raise FileNotFoundError("not_found")
+    return fp
+
+
+@app.post("/api/export/json")
+async def api_export_json(payload: Dict[str, Any]):
+    """
+    Accepts annotations and returns a downloadable JSON file.
+    Payload example: { rel: "file.pdf", boxes_by_page: { "1": [ { type, instance_id, bounding_box:[x,y,w,h] } ] } }
+    """
+    rel = payload.get("rel") or "document"
+    boxes = payload.get("boxes_by_page") or {}
+    out = {"rel": rel, "boxes_by_page": boxes}
+    data = json.dumps(out, indent=2).encode("utf-8")
+    headers = {
+        "Content-Type": "application/json",
+        "Content-Disposition": f"attachment; filename=\"{Path(rel).stem or 'annotations'}.json\"",
+    }
+    return Response(content=data, headers=headers, media_type="application/json")
+
+
+@app.post("/api/export/pdf")
+async def api_export_pdf(payload: Dict[str, Any], tasks: BackgroundTasks):
+    """
+    Render simple annotation overlays into a PDF using PyMuPDF and return it.
+    Payload: { rel: str, boxes_by_page: { page_num(str|int): [ { type, instance_id, bounding_box:[x,y,w,h] } ] } }
+    """
+    if fitz is None:
+        return JSONResponse({"ok": False, "error": "pymupdf_not_available"}, status_code=500)
+    try:
+        rel = payload.get("rel")
+        boxes = payload.get("boxes_by_page") or {}
+        src = _abs_pdf_path(rel)
+        with fitz.open(src) as doc:
+            # Draw annotations as semi-transparent boxes with label text
+            for k, arr in boxes.items():
+                try:
+                    pnum = int(k)
+                except Exception:
+                    continue
+                if pnum < 1 or pnum > doc.page_count:
+                    continue
+            page = doc.load_page(pnum - 1)
+            pw, ph = page.rect.width, page.rect.height
+            for b in arr or []:
+                bb = b.get("bounding_box") or b.get("bbox") or []
+                if not (isinstance(bb, (list, tuple)) and len(bb) == 4):
+                    continue
+                x, y, w, h = bb
+                rect = fitz.Rect(x * pw, y * ph, (x + w) * pw, (y + h) * ph)
+                # Choose color by type
+                t = (b.get("type") or "Section").lower()
+                if t == "table":
+                    color = (0.2, 0.4, 0.9)
+                elif t == "figure":
+                    color = (0.5, 0.3, 0.9)
+                else:
+                    color = (0.1, 0.7, 0.5)
+                page.draw_rect(rect, color=color, fill=(color[0], color[1], color[2], 0.08), width=1.2)
+                label = f"{b.get('type') or ''} · {b.get('instance_id') or ''}"
+                page.insert_text((rect.x0 + 4, rect.y0 - 8), label, fontsize=8, color=color)
+            # Write to temp file
+            fd, tmp_path = tempfile.mkstemp(suffix=".pdf")
+            os.close(fd)
+            doc.save(tmp_path)
+        filename = f"annotated_{Path(rel).stem}.pdf"
+        # Clean up temp file after response is sent
+        tasks.add_task(lambda p: (os.path.exists(p) and os.remove(p)), tmp_path)
+        return FileResponse(tmp_path, media_type="application/pdf", filename=filename)
+    except FileNotFoundError:
+        return JSONResponse({"ok": False, "error": "not_found"}, status_code=404)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/export/zip")
+async def api_export_zip(payload: Dict[str, Any], tasks: BackgroundTasks):
+    """
+    Build a ZIP containing annotations.json and annotated_<name>.pdf (if PyMuPDF available).
+    Payload: { rel: str, boxes_by_page: {...} }
+    """
+    try:
+        rel = payload.get("rel")
+        boxes = payload.get("boxes_by_page") or {}
+        stem = Path(rel or "document").stem or "document"
+        fd, zip_path = tempfile.mkstemp(suffix=".zip")
+        os.close(fd)
+        with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            # annotations.json
+            zf.writestr("annotations.json", json.dumps({"rel": rel, "boxes_by_page": boxes}, indent=2))
+            # annotated pdf (optional)
+            if fitz is not None and rel:
+                try:
+                    src = _abs_pdf_path(rel)
+                    with fitz.open(src) as doc:
+                        for k, arr in boxes.items():
+                            try:
+                                pnum = int(k)
+                            except Exception:
+                                continue
+                            if pnum < 1 or pnum > doc.page_count:
+                                continue
+                            page = doc.load_page(pnum - 1)
+                            pw, ph = page.rect.width, page.rect.height
+                            for b in arr or []:
+                                bb = b.get("bounding_box") or b.get("bbox") or []
+                                if not (isinstance(bb, (list, tuple)) and len(bb) == 4):
+                                    continue
+                                x, y, w, h = bb
+                                rect = fitz.Rect(x * pw, y * ph, (x + w) * pw, (y + h) * ph)
+                                t = (b.get("type") or "Section").lower()
+                                if t == "table":
+                                    color = (0.2, 0.4, 0.9)
+                                elif t == "figure":
+                                    color = (0.5, 0.3, 0.9)
+                                else:
+                                    color = (0.1, 0.7, 0.5)
+                                page.draw_rect(rect, color=color, fill=(color[0], color[1], color[2], 0.08), width=1.2)
+                                label = f"{b.get('type') or ''} · {b.get('instance_id') or ''}"
+                                page.insert_text((rect.x0 + 4, rect.y0 - 8), label, fontsize=8, color=color)
+                        # write annotated to temp and add to zip
+                        fd2, tmp_pdf = tempfile.mkstemp(suffix=".pdf")
+                        os.close(fd2)
+                        doc.save(tmp_pdf)
+                    zf.write(tmp_pdf, arcname=f"annotated_{stem}.pdf")
+                    try:
+                        os.remove(tmp_pdf)
+                    except Exception:
+                        pass
+                except Exception:
+                    # If annotated generation fails, still return annotations.json in the ZIP
+                    pass
+        filename = f"export_{stem}.zip"
+        tasks.add_task(lambda p: (os.path.exists(p) and os.remove(p)), zip_path)
+        return FileResponse(zip_path, media_type="application/zip", filename=filename)
+    except FileNotFoundError:
+        return JSONResponse({"ok": False, "error": "not_found"}, status_code=404)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+# Shared LiteLLM integration (project-standard)
+from extractor.pipeline.utils.litellm_call import litellm_call  # type: ignore
+from extractor.pipeline.utils.litellm_cache import initialize_litellm_cache  # type: ignore
+
+# Initialize cache best-effort
+try:
+    initialize_litellm_cache()
+except Exception:
+    pass
+
+
+@app.post("/api/ux/generate")
+async def http_generate(payload: Dict[str, Any]):
+    # Mock path enabled?
+    if os.getenv("UX_MOCK_GENERATE", "0") in ("1", "true", "TRUE", "yes"):
+        sample = {
+            "title": "INFERRED_Table_Example",
+            "columns": ["Col A", "Col B", "Col C"],
+            "data": [["A1", "B1", "C1"], ["A2", "B2", "C2"]],
+        }
+        return JSONResponse({"ok": True, "data": sample})
+
+    model = (
+        payload.get("model")
+        or os.getenv("LITELLM_DEFAULT_MODEL")
+        or os.getenv("DEFAULT_LITELLM_MODEL")
+        or os.getenv("LITELLM_VLM_MODEL", "gemini/gemini-2.5-flash")
+    )
+    prompt = payload.get("prompt") or ""
+    image = payload.get("image")
+
+    try:
+        params: Dict[str, Any] = {"model": model, "text": prompt}
+        temp_path: str | None = None
+        if image:
+            # Support data URLs by writing to a temporary file
+            if isinstance(image, str) and image.startswith("data:image/") and "," in image:
+                import base64, tempfile
+                header, b64 = image.split(",", 1)
+                ext = "png"
+                try:
+                    kind = header.split(";")[0].split("/")[-1]
+                    if kind in ("png", "jpeg", "jpg", "webp"):
+                        ext = "jpg" if kind == "jpeg" else kind
+                except Exception:
+                    pass
+                fd, temp_path = tempfile.mkstemp(suffix=f".{ext}")
+                with os.fdopen(fd, "wb") as f:
+                    f.write(base64.b64decode(b64))
+                params["image"] = temp_path
+            else:
+                params["image"] = image
+        # Enforce JSON object outputs for downstream parsing
+        results = await litellm_call(
+            [params],
+            wrap_json=True,
+            concurrency=1,
+            desc="Tabbed UX Generate",
+            response_format="json_object",
+        )
+        raw = results[0] if isinstance(results, list) and results else results
+        # Coerce into a JSON object and include the model used
+        content_obj: Dict[str, Any] | None = None
+        try:
+            if isinstance(raw, str):
+                content_obj = json.loads(raw)
+            elif isinstance(raw, dict):
+                # Some adapters return {content:{...}}; prefer nested content if present
+                if isinstance(raw.get("content"), dict):
+                    content_obj = raw.get("content")  # type: ignore
+                else:
+                    content_obj = raw  # type: ignore
+        except Exception:
+            content_obj = None
+
+        if content_obj is not None and isinstance(content_obj, dict):
+            try:
+                # Do not overwrite if provider already returned a model field
+                content_obj.setdefault("model", model)
+            except Exception:
+                pass
+            # Return a normalized shape with a json field for the UI
+            return JSONResponse({"ok": True, "data": {"json": content_obj, "raw": raw}})
+
+        # Fallback: still provide a minimal JSON with the model, plus raw
+        minimal = {"ok": True, "model": model}
+        return JSONResponse({"ok": True, "data": {"json": minimal, "raw": raw}})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    finally:
+        try:
+            if temp_path and os.path.isfile(temp_path):
+                os.remove(temp_path)
+        except Exception:
+            pass
+
+
+@app.post("/api/ux/mock/generate")
+async def http_generate_mock():
+    sample = {
+        "title": "INFERRED_Table_Example",
+        "columns": ["Col A", "Col B", "Col C"],
+        "data": [["A1", "B1", "C1"], ["A2", "B2", "C2"]],
+    }
+    return JSONResponse({"ok": True, "data": sample})
+
+
+# LLM health: trivial JSON round-trip via litellm_call
+@app.get("/api/health/llm")
+async def api_health_llm(model: str | None = None, timeout: float = 20.0):
+    prompt = 'Return only {"ok":true} as JSON.'
+    eff_model = (
+        model
+        or os.getenv("LITELLM_DEFAULT_MODEL")
+        or os.getenv("DEFAULT_LITELLM_MODEL")
+        or os.getenv("LITELLM_VLM_MODEL", "gemini/gemini-2.5-flash")
+    )
+    t0 = time.perf_counter()
+    try:
+        results = await litellm_call(
+            [{"text": prompt, "model": eff_model}],
+            wrap_json=False,
+            response_format="json_object",
+            request_timeout=timeout,
+            concurrency=1,
+            desc="LLM Health (Tabbed)",
+        )
+        out = results[0] if results else ""
+        elapsed_ms = int((time.perf_counter() - t0) * 1000)
+        ok = False
+        data = None
+        try:
+            data = json.loads((out or "").strip())
+            if isinstance(data, dict):
+                ok = bool(data.get("ok") is True)
+                if not ok:
+                    content = data.get("content")
+                    if isinstance(content, dict):
+                        ok = bool(content.get("ok") is True)
+        except Exception:
+            ok = False
+
+        payload = {
+            "ok": ok,
+            "model": eff_model,
+            "elapsed_ms": elapsed_ms,
+            "content": data,
+        }
+        if ok:
+            return payload
+        return JSONResponse(payload, status_code=502)
+    except Exception as e:
+        elapsed_ms = int((time.perf_counter() - t0) * 1000)
+        return JSONResponse(
+            {"ok": False, "error": str(e), "model": eff_model, "elapsed_ms": elapsed_ms},
+            status_code=500,
+        )
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: docs/workflow.md ======
+```markdown
+# Fast Local Workflow (Human ↔ Agent)
+
+This project optimizes for a fast, local loop: issues with screenshots, targeted smokes, minimal code changes, clear artifacts.
+
+## Process Overview
+
+1) Author an issue under `prototypes/tabbed/issues/` (include a screenshot and acceptance).
+2) Agent normalizes the issue (formats acceptance) and scaffolds a smoke.
+3) Agent writes/fixes code to make the smoke pass.
+4) Run the full suite (saves artifacts). Paste paths back into the issue.
+
+## Scaffolding (1 minute)
+
+- VS Code: `Issue: Scaffold (tabbed)`
+  - Creates `issues/NNN_slug.md` from template
+  - Creates `scripts/smokes/issue_NNN.mjs` stub (initially failing)
+  - Adds a VS Code task to run the smoke: `Smokes: Issue NNN`
+
+### Multi-topic drafts (incoming/)
+
+- Drop rough notes/screenshots into `prototypes/tabbed/issues/incoming/*.md`
+- Run VS Code: `Issues: Promote incoming (tabbed)`
+  - Splits draft into atomic issues under `prototypes/tabbed/issues/`
+  - Scaffolds `scripts/smokes/issue_NNN.mjs` and adds VS Code tasks
+  - Moves original draft to `incoming/archive/` with back-links
+
+Issue template (fields): Context, Desired Behavior, Acceptance, Routes, Selectors, Smokes to add, Artifacts, Meta.
+
+## Writing a smoke first (why)
+
+- Forces clear acceptance (objective DOM/text/behavior)
+- Guides the smallest code changes
+- Produces artifacts (log/screenshot) you can paste in the issue
+
+### Example (UI smoke)
+
+```js
+// scripts/smokes/issue_007.mjs
+await page.goto(BASE+'/classic');
+await page.waitForSelector('[data-testid="page-label"]');
+// assert presence + tooltip
+await page.waitForSelector('[data-testid="btn-add-annotation-top"]');
+await page.hover('[data-testid="btn-add-annotation-top"]');
+```
+
+### Example (API smoke)
+
+```js
+// scripts/smokes/api_generate_model.mjs
+// GET /api/health/llm -> expected model
+// POST /api/ux/generate -> assert data.json.model === expected
+```
+
+## Implement the change (small patches)
+
+- Keep UI changes minimal and targeted
+- Add tooltips/titles for discoverability
+- Use ShadCN loader components for non‑blocking feedback
+
+## Run tests
+
+- Quick checks:
+  - `ruff check . && black --check . && mypy src && pytest -q`
+  - `node scripts/smokes/api_generate_model.mjs`
+- UX suite:
+  - Start servers via VS Code (`Run Backend + Preview`) and ensure Browserless on 3000
+  - `node scripts/ux_check_cdp_auto.mjs`
+  - `node scripts/smokes/all.mjs`
+  - Or one command: `make ci` (verifies servers/CDP, fast gates, API smokes, full suite)
+
+Artifacts land in `scripts/artifacts/`.
+
+## Preventing regressions
+
+- Every issue adds/extends at least one smoke
+- Smokes live in `scripts/smokes/` and are included in the suite
+- `scripts/ci_local.sh` runs a full local gate:
+  - Verifies dev server + CDP
+  - Fast checks + API smoke
+  - Full UX suite (saves artifacts)
+
+## Backends/Frontends
+
+- Backend (Python FastAPI): API smokes (no browser) validate behavior like `/api/health/llm`, `/api/ux/generate` and model attachment.
+- Frontend (React + Tailwind + ShadCN): UI smokes validate routes, tooltips, thumbnails, non‑blocking loaders, dialogs, key interactions.
+
+## Why this approach
+
+- Keeps collaboration fast (no cloud CI required for heavy UX)
+- Every change is verified by a small, reliable test and a screenshot/log
+- Smokes are tiny and cheap to write; they capture user intent crisply
+- The suite grows with your real needs and guards against regressions
+
+## Commands
+
+- Scaffold issue: VS Code `Issue: Scaffold (tabbed)`
+- Local CI gate: `scripts/ci_local.sh`
+- Run all smokes: `node scripts/smokes/all.mjs`
+- Health gate: `node scripts/ux_check_cdp_auto.mjs`
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/.gitignore ======
+```
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/README.md ======
+```markdown
+# Welcome to your Lovable project
+
+## Project info
+
+**URL**: https://lovable.dev/projects/788255e6-c3d8-4d32-a3b1-fc76d66e9dfc
+
+## How can I edit this code?
+
+There are several ways of editing your application.
+
+**Use Lovable**
+
+Simply visit the [Lovable Project](https://lovable.dev/projects/788255e6-c3d8-4d32-a3b1-fc76d66e9dfc) and start prompting.
+
+Changes made via Lovable will be committed automatically to this repo.
+
+**Use your preferred IDE**
+
+If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+
+The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+
+Follow these steps:
+
+```sh
+# Step 1: Clone the repository using the project's Git URL.
+git clone <YOUR_GIT_URL>
+
+# Step 2: Navigate to the project directory.
+cd <YOUR_PROJECT_NAME>
+
+# Step 3: Install the necessary dependencies.
+npm i
+
+# Step 4: Start the development server with auto-reloading and an instant preview.
+npm run dev
+```
+
+**Edit a file directly in GitHub**
+
+- Navigate to the desired file(s).
+- Click the "Edit" button (pencil icon) at the top right of the file view.
+- Make your changes and commit the changes.
+
+**Use GitHub Codespaces**
+
+- Navigate to the main page of your repository.
+- Click on the "Code" button (green button) near the top right.
+- Select the "Codespaces" tab.
+- Click on "New codespace" to launch a new Codespace environment.
+- Edit files directly within the Codespace and commit and push your changes once you're done.
+
+## What technologies are used for this project?
+
+This project is built with:
+
+- Vite
+- TypeScript
+- React
+- shadcn-ui
+- Tailwind CSS
+
+## How can I deploy this project?
+
+Simply open [Lovable](https://lovable.dev/projects/788255e6-c3d8-4d32-a3b1-fc76d66e9dfc) and click on Share -> Publish.
+
+## Can I connect a custom domain to my Lovable project?
+
+Yes, you can!
+
+To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
+
+Read more here: [Setting up a custom domain](https://docs.lovable.dev/tips-tricks/custom-domain#step-by-step-guide)
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/eslint.config.js ======
+```javascript
+import js from "@eslint/js";
+import globals from "globals";
+import reactHooks from "eslint-plugin-react-hooks";
+import reactRefresh from "eslint-plugin-react-refresh";
+import tseslint from "typescript-eslint";
+
+export default tseslint.config(
+  { ignores: ["dist"] },
+  {
+    extends: [js.configs.recommended, ...tseslint.configs.recommended],
+    files: ["**/*.{ts,tsx}"],
+    languageOptions: {
+      ecmaVersion: 2020,
+      globals: globals.browser,
+    },
+    plugins: {
+      "react-hooks": reactHooks,
+      "react-refresh": reactRefresh,
+    },
+    rules: {
+      ...reactHooks.configs.recommended.rules,
+      "react-refresh/only-export-components": ["warn", { allowConstantExport: true }],
+      "@typescript-eslint/no-unused-vars": "off",
+    },
+  },
+);
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/index.html ======
+```html
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PDF Annotation System - Three Prototype Variations</title>
+    <meta name="description" content="Explore three different prototype variations for PDF annotation interfaces, each with unique layouts and workflows for document analysis." />
+    <meta name="author" content="Lovable" />
+
+    <meta property="og:title" content="788255e6-c3d8-4d32-a3b1-fc76d66e9dfc" />
+    <meta property="og:description" content="Lovable Generated Project" />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="https://lovable.dev/opengraph-image-p98pqg.png" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:site" content="@lovable_dev" />
+    <meta name="twitter:image" content="https://lovable.dev/opengraph-image-p98pqg.png" />
+  </head>
+
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/package.json ======
+```json
+{
+  "name": "vite_react_shadcn_ts",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:force": "vite --force",
+    "prebuild": "node ../../../scripts/write_build_info.mjs",
+    "build": "vite build",
+    "build:dev": "vite build --mode development",
+    "lint": "eslint .",
+    "prepreview:8080": "fuser -k 8080/tcp || true",
+    "preview": "vite preview",
+    "preview:8080": "vite preview --host 0.0.0.0 --port 8080 --strictPort"
+  },
+  "dependencies": {
+    "@hookform/resolvers": "^3.10.0",
+    "@radix-ui/react-accordion": "^1.2.11",
+    "@radix-ui/react-alert-dialog": "^1.1.14",
+    "@radix-ui/react-aspect-ratio": "^1.1.7",
+    "@radix-ui/react-avatar": "^1.1.10",
+    "@radix-ui/react-checkbox": "^1.3.2",
+    "@radix-ui/react-collapsible": "^1.1.11",
+    "@radix-ui/react-context-menu": "^2.2.15",
+    "@radix-ui/react-dialog": "^1.1.14",
+    "@radix-ui/react-dropdown-menu": "^2.1.15",
+    "@radix-ui/react-hover-card": "^1.1.14",
+    "@radix-ui/react-label": "^2.1.7",
+    "@radix-ui/react-menubar": "^1.1.15",
+    "@radix-ui/react-navigation-menu": "^1.2.13",
+    "@radix-ui/react-popover": "^1.1.14",
+    "@radix-ui/react-progress": "^1.1.7",
+    "@radix-ui/react-radio-group": "^1.3.7",
+    "@radix-ui/react-scroll-area": "^1.2.9",
+    "@radix-ui/react-select": "^2.2.5",
+    "@radix-ui/react-separator": "^1.1.7",
+    "@radix-ui/react-slider": "^1.3.5",
+    "@radix-ui/react-slot": "^1.2.3",
+    "@radix-ui/react-switch": "^1.2.5",
+    "@radix-ui/react-tabs": "^1.1.12",
+    "@radix-ui/react-toast": "^1.2.14",
+    "@radix-ui/react-toggle": "^1.1.9",
+    "@radix-ui/react-toggle-group": "^1.1.10",
+    "@radix-ui/react-tooltip": "^1.2.7",
+    "@tanstack/react-query": "^5.83.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "cmdk": "^1.1.1",
+    "date-fns": "^3.6.0",
+    "embla-carousel-react": "^8.6.0",
+    "input-otp": "^1.4.2",
+    "lucide-react": "^0.462.0",
+    "next-themes": "^0.3.0",
+    "pdfjs-dist": "^4.10.38",
+    "react": "^18.3.1",
+    "react-day-picker": "^8.10.1",
+    "react-dom": "^18.3.1",
+    "react-hook-form": "^7.61.1",
+    "react-resizable-panels": "^2.1.9",
+    "react-router-dom": "^6.30.1",
+    "react-virtuoso": "^4.14.0",
+    "recharts": "^2.15.4",
+    "sonner": "^1.7.4",
+    "tailwind-merge": "^2.6.0",
+    "tailwindcss-animate": "^1.0.7",
+    "vaul": "^0.9.9",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.32.0",
+    "@tailwindcss/typography": "^0.5.16",
+    "@types/node": "^22.16.5",
+    "@types/react": "^18.3.23",
+    "@types/react-dom": "^18.3.7",
+    "@vitejs/plugin-react-swc": "^3.11.0",
+    "autoprefixer": "^10.4.21",
+    "eslint": "^9.32.0",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "eslint-plugin-react-refresh": "^0.4.20",
+    "globals": "^15.15.0",
+    "lovable-tagger": "^1.1.9",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.8.3",
+    "typescript-eslint": "^8.38.0",
+    "vite": "^5.4.19"
+  }
+}
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/postcss.config.js ======
+```javascript
+export default {
+  plugins: {
+    tailwindcss: {},
+    autoprefixer: {},
+  },
+};
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/public/placeholder.svg ======
+```xml
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1200" fill="none"><rect width="1200" height="1200" fill="#EAEAEA" rx="3"/><g opacity=".5"><g opacity=".5"><path fill="#FAFAFA" d="M600.709 736.5c-75.454 0-136.621-61.167-136.621-136.62 0-75.454 61.167-136.621 136.621-136.621 75.453 0 136.62 61.167 136.62 136.621 0 75.453-61.167 136.62-136.62 136.62Z"/><path stroke="#C9C9C9" stroke-width="2.418" d="M600.709 736.5c-75.454 0-136.621-61.167-136.621-136.62 0-75.454 61.167-136.621 136.621-136.621 75.453 0 136.62 61.167 136.62 136.621 0 75.453-61.167 136.62-136.62 136.62Z"/></g><path stroke="url(#a)" stroke-width="2.418" d="M0-1.209h553.581" transform="scale(1 -1) rotate(45 1163.11 91.165)"/><path stroke="url(#b)" stroke-width="2.418" d="M404.846 598.671h391.726"/><path stroke="url(#c)" stroke-width="2.418" d="M599.5 795.742V404.017"/><path stroke="url(#d)" stroke-width="2.418" d="m795.717 796.597-391.441-391.44"/><path fill="#fff" d="M600.709 656.704c-31.384 0-56.825-25.441-56.825-56.824 0-31.384 25.441-56.825 56.825-56.825 31.383 0 56.824 25.441 56.824 56.825 0 31.383-25.441 56.824-56.824 56.824Z"/><g clip-path="url(#e)"><path fill="#666" fill-rule="evenodd" d="M616.426 586.58h-31.434v16.176l3.553-3.554.531-.531h9.068l.074-.074 8.463-8.463h2.565l7.18 7.181V586.58Zm-15.715 14.654 3.698 3.699 1.283 1.282-2.565 2.565-1.282-1.283-5.2-5.199h-6.066l-5.514 5.514-.073.073v2.876a2.418 2.418 0 0 0 2.418 2.418h26.598a2.418 2.418 0 0 0 2.418-2.418v-8.317l-8.463-8.463-7.181 7.181-.071.072Zm-19.347 5.442v4.085a6.045 6.045 0 0 0 6.046 6.045h26.598a6.044 6.044 0 0 0 6.045-6.045v-7.108l1.356-1.355-1.282-1.283-.074-.073v-17.989h-38.689v23.43l-.146.146.146.147Z" clip-rule="evenodd"/></g><path stroke="#C9C9C9" stroke-width="2.418" d="M600.709 656.704c-31.384 0-56.825-25.441-56.825-56.824 0-31.384 25.441-56.825 56.825-56.825 31.383 0 56.824 25.441 56.824 56.825 0 31.383-25.441 56.824-56.824 56.824Z"/></g><defs><linearGradient id="a" x1="554.061" x2="-.48" y1=".083" y2=".087" gradientUnits="userSpaceOnUse"><stop stop-color="#C9C9C9" stop-opacity="0"/><stop offset=".208" stop-color="#C9C9C9"/><stop offset=".792" stop-color="#C9C9C9"/><stop offset="1" stop-color="#C9C9C9" stop-opacity="0"/></linearGradient><linearGradient id="b" x1="796.912" x2="404.507" y1="599.963" y2="599.965" gradientUnits="userSpaceOnUse"><stop stop-color="#C9C9C9" stop-opacity="0"/><stop offset=".208" stop-color="#C9C9C9"/><stop offset=".792" stop-color="#C9C9C9"/><stop offset="1" stop-color="#C9C9C9" stop-opacity="0"/></linearGradient><linearGradient id="c" x1="600.792" x2="600.794" y1="403.677" y2="796.082" gradientUnits="userSpaceOnUse"><stop stop-color="#C9C9C9" stop-opacity="0"/><stop offset=".208" stop-color="#C9C9C9"/><stop offset=".792" stop-color="#C9C9C9"/><stop offset="1" stop-color="#C9C9C9" stop-opacity="0"/></linearGradient><linearGradient id="d" x1="404.85" x2="796.972" y1="403.903" y2="796.02" gradientUnits="userSpaceOnUse"><stop stop-color="#C9C9C9" stop-opacity="0"/><stop offset=".208" stop-color="#C9C9C9"/><stop offset=".792" stop-color="#C9C9C9"/><stop offset="1" stop-color="#C9C9C9" stop-opacity="0"/></linearGradient><clipPath id="e"><path fill="#fff" d="M581.364 580.535h38.689v38.689h-38.689z"/></clipPath></defs></svg>
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/public/robots.txt ======
+```text
+User-agent: Googlebot
+Allow: /
+
+User-agent: Bingbot
+Allow: /
+
+User-agent: Twitterbot
+Allow: /
+
+User-agent: facebookexternalhit
+Allow: /
+
+User-agent: *
+Allow: /
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/App.css ======
+```css
+#root {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 2rem;
+  text-align: center;
+}
+
+.logo {
+  height: 6em;
+  padding: 1.5em;
+  will-change: filter;
+  transition: filter 300ms;
+}
+.logo:hover {
+  filter: drop-shadow(0 0 2em #646cffaa);
+}
+.logo.react:hover {
+  filter: drop-shadow(0 0 2em #61dafbaa);
+}
+
+@keyframes logo-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  a:nth-of-type(2) .logo {
+    animation: logo-spin infinite 20s linear;
+  }
+}
+
+.card {
+  padding: 2em;
+}
+
+.read-the-docs {
+  color: #888;
+}
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/App.tsx ======
+```tsx
+import { Toaster } from "@/components/ui/toaster";
+import { Toaster as Sonner } from "@/components/ui/sonner";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { BrowserRouter, Routes, Route } from "react-router-dom";
+import React, { useEffect, useState } from "react";
+import Index from "./pages/Index";
+import ClassicLayout from "./pages/ClassicLayout";
+import TabbedLayout from "./pages/TabbedLayout";
+import DashboardLayout from "./pages/DashboardLayout";
+import NotFound from "./pages/NotFound";
+
+const queryClient = new QueryClient();
+
+function BuildChip() {
+  const [data, setData] = useState<any>(null);
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch('/build.json', { cache: 'no-store' });
+        const j = await r.json();
+        setData(j);
+      } catch { /* no-op */ }
+    })();
+  }, []);
+  if (!data) return null;
+  const ts = (() => { try { return new Date(data.built_at).toLocaleTimeString(); } catch { return data.built_at; } })();
+  return (
+    <div aria-label="build-info" className="fixed bottom-2 left-2 z-50 pointer-events-none text-[10px] text-muted-foreground bg-card/90 border rounded px-2 py-0.5">
+      {(data.git || 'dev') + ' · ' + ts}
+    </div>
+  );
+}
+
+const App = () => (
+  <QueryClientProvider client={queryClient}>
+    <TooltipProvider>
+      <Toaster />
+      <Sonner />
+      <BrowserRouter>
+        <Routes>
+          <Route path="/" element={<Index />} />
+          <Route path="/classic" element={<ClassicLayout />} />
+          <Route path="/main" element={<ClassicLayout />} />
+          <Route path="/tabbed" element={<TabbedLayout />} />
+          <Route path="/dashboard" element={<DashboardLayout />} />
+          {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+          <Route path="*" element={<NotFound />} />
+        </Routes>
+      </BrowserRouter>
+      <BuildChip />
+    </TooltipProvider>
+  </QueryClientProvider>
+);
+
+export default App;
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/components/PdfCanvas.tsx ======
+```tsx
+import React from "react";
+import type { PdfDoc } from "@/lib/pdf";
+import { renderPageCanvas } from "@/lib/pdf";
+
+export function PdfCanvas({ doc, page, zoom = 1 }: { doc: PdfDoc; page: number; zoom?: number }) {
+  const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
+  React.useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctrl = new AbortController();
+    (async () => {
+      await renderPageCanvas(doc, page, canvas, zoom, ctrl.signal);
+    })();
+    return () => ctrl.abort();
+  }, [doc, page, zoom]);
+
+  return <canvas ref={canvasRef} className="bg-white rounded" />;
+}
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/components/ThumbnailRail.tsx ======
+```tsx
+import React from "react";
+import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import type { PdfDoc } from "@/lib/pdf";
+import { renderPageThumbnail } from "@/lib/pdf";
+
+const memCache = new Map<string, string>();
+const MAX_CACHE = 500;
+function lruSet(key: string, val: string) {
+  if (memCache.has(key)) memCache.delete(key);
+  memCache.set(key, val);
+  if (memCache.size > MAX_CACHE) {
+    const first = memCache.keys().next().value as string | undefined;
+    if (first) memCache.delete(first);
+  }
+}
+
+export function ThumbnailRail({
+  doc,
+  pageCount,
+  currentPage,
+  onJump,
+  width = 144,
+  cacheKey,
+}: {
+  doc: PdfDoc;
+  pageCount: number;
+  currentPage: number; // 1-based
+  onJump: (n: number) => void;
+  width?: number;
+  cacheKey?: string;
+}) {
+  const ref = React.useRef<VirtuosoHandle>(null);
+
+  React.useEffect(() => {
+    ref.current?.scrollToIndex({ index: currentPage - 1, align: "center", behavior: "smooth" });
+  }, [currentPage]);
+
+  return (
+    <div className="w-40 border-r bg-muted/30 overflow-hidden">
+      <Virtuoso
+        ref={ref}
+        totalCount={pageCount}
+        overscan={8}
+        itemContent={(index) => (
+          <ThumbItem
+            key={index}
+            doc={doc}
+            n={index + 1}
+            isActive={index + 1 === currentPage}
+            onJump={onJump}
+            width={width}
+            cacheKey={cacheKey}
+          />
+        )}
+        computeItemKey={(i) => `p-${i + 1}`}
+        style={{ height: "100%" }}
+      />
+    </div>
+  );
+}
+
+function ThumbItem({
+  doc,
+  n,
+  isActive,
+  onJump,
+  width,
+  cacheKey,
+}: {
+  doc: PdfDoc;
+  n: number;
+  isActive: boolean;
+  onJump: (n: number) => void;
+  width: number;
+  cacheKey?: string;
+}) {
+  const [src, setSrc] = React.useState<string | undefined>(undefined);
+  React.useEffect(() => {
+    let cancelled = false;
+    const key = `${cacheKey || 'doc'}:${n}@${width}`;
+    const setCache = (val: string) => { lruSet(key, val); setSrc(val); };
+    const load = async (attempt = 0) => {
+      if (cancelled) return;
+      const hit = memCache.get(key);
+      if (hit) { setSrc(hit); return; }
+      const s = await renderPageThumbnail(doc, n, width).catch(()=>undefined);
+      if (cancelled || !s) {
+        if (attempt < 5) { setTimeout(() => load(attempt+1), 300); }
+        return;
+      }
+      // Treat non-PNG as placeholder and retry more aggressively
+      if (!s.startsWith('data:image/png')) {
+        if (attempt < 5) { setTimeout(() => load(attempt+1), 300); return; }
+        setSrc(s); return; // last resort
+      }
+      setCache(s);
+    };
+    load(0);
+    return () => {
+      cancelled = true;
+    };
+  }, [doc, n, width, cacheKey]);
+
+  return (
+    <button
+      onClick={() => onJump(n)}
+      className={cn(
+        "group w-full px-2 py-3 text-left focus:outline-none relative",
+        isActive && "bg-primary/10 before:absolute before:left-0 before:top-0 before:bottom-0 before:w-0.5 before:bg-primary"
+      )}
+      aria-current={isActive ? "page" : undefined}
+    >
+      <div
+        className={cn(
+          "aspect-[3/4] w-full rounded-xl overflow-hidden shadow-sm ring-1 ring-border",
+          "group-hover:ring-primary"
+        )}
+      >
+        {src ? (
+          <img src={src} alt={`Page ${n}`} className="w-full h-full object-cover" />
+        ) : (
+          <div className="w-full h-full animate-pulse bg-muted" />
+        )}
+      </div>
+      <div className="mt-2 text-xs text-muted-foreground flex items-center justify-between">
+        <span>P.{n}</span>
+      </div>
+    </button>
+  );
+}
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/components/ThumbnailStrip.tsx ======
+```tsx
+import React from "react";
+import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
+import type { PdfDoc } from "@/lib/pdf";
+import { renderPageThumbnail } from "@/lib/pdf";
+import { cn } from "@/lib/utils";
+
+const memCache = new Map<string, string>();
+const MAX_CACHE = 500;
+function lruSet(key: string, val: string) {
+  if (memCache.has(key)) memCache.delete(key);
+  memCache.set(key, val);
+  if (memCache.size > MAX_CACHE) {
+    const first = memCache.keys().next().value as string | undefined;
+    if (first) memCache.delete(first);
+  }
+}
+
+export function ThumbnailStrip({
+  doc,
+  pageCount,
+  currentPage,
+  onJump,
+  height = 132,
+  itemWidth = 120,
+  cacheKey,
+}: {
+  doc: PdfDoc;
+  pageCount: number;
+  currentPage: number; // 1-based
+  onJump: (n: number) => void;
+  height?: number;
+  itemWidth?: number;
+  cacheKey?: string;
+}) {
+  const ref = React.useRef<VirtuosoHandle>(null);
+
+  React.useEffect(() => {
+    ref.current?.scrollToIndex({ index: currentPage - 1, align: "center", behavior: "smooth" });
+  }, [currentPage]);
+
+  // For small docs, render a simple row so multiple thumbs are visible without scrolling
+  if (pageCount <= 4) {
+    return (
+      <div className="w-full border rounded-md bg-muted/30 overflow-x-auto" style={{ height }}>
+        <div className="h-full flex items-stretch gap-2 px-2">
+          {Array.from({ length: pageCount }).map((_, idx) => (
+            <ThumbItem
+              key={idx}
+              doc={doc}
+              n={idx + 1}
+              isActive={idx + 1 === currentPage}
+              onJump={onJump}
+              width={itemWidth}
+              cacheKey={cacheKey}
+            />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="w-full border rounded-md bg-muted/30 overflow-hidden" style={{ height }}>
+      <Virtuoso
+        ref={ref}
+        totalCount={pageCount}
+        overscan={10}
+        horizontal
+        itemContent={(index) => (
+          <ThumbItem
+            key={index}
+            doc={doc}
+            n={index + 1}
+            isActive={index + 1 === currentPage}
+            onJump={onJump}
+            width={itemWidth}
+            cacheKey={cacheKey}
+          />
+        )}
+        computeItemKey={(i) => `ph-${i + 1}`}
+        style={{ height: "100%" }}
+      />
+    </div>
+  );
+}
+
+function ThumbItem({ doc, n, isActive, onJump, width, cacheKey }: { doc: PdfDoc; n: number; isActive: boolean; onJump: (n: number) => void; width: number; cacheKey?: string; }) {
+  const [src, setSrc] = React.useState<string | undefined>(undefined);
+  React.useEffect(() => {
+    let cancelled = false;
+    const key = `${cacheKey || 'doc'}:${n}@${width}`;
+    const setCache = (val: string) => { lruSet(key, val); setSrc(val); };
+    const load = async (attempt = 0) => {
+      if (cancelled) return;
+      const hit = memCache.get(key);
+      if (hit) { setSrc(hit); return; }
+      const s = await renderPageThumbnail(doc, n, width).catch(()=>undefined);
+      if (cancelled || !s) { if (attempt < 5) { setTimeout(() => load(attempt+1), 300); } return; }
+      // Avoid caching non-PNG outputs (placeholders) — retry instead
+      if (!s.startsWith('data:image/png')) {
+        if (attempt < 5) { setTimeout(() => load(attempt+1), 300); return; }
+        // last resort, still show but don't cache to allow future refreshes
+        setSrc(s); return;
+      }
+      setCache(s);
+    };
+    load(0);
+    return () => { cancelled = true; };
+  }, [doc, n, width, cacheKey]);
+
+  return (
+    <button
+      onClick={() => onJump(n)}
+      className={cn(
+        "px-2 py-2 h-full inline-flex items-center",
+        isActive && "bg-primary/10"
+      )}
+      aria-current={isActive ? "page" : undefined}
+      style={{ width: width + 16 }}
+    >
+      <div className={cn("w-full h-full rounded-md overflow-hidden shadow-sm ring-1 ring-border")}
+           style={{ aspectRatio: "3 / 4" }}>
+        {src ? (
+          <img src={src} alt={`Page ${n}`} className="w-full h-full object-cover" />
+        ) : (
+          <div className="w-full h-full animate-pulse bg-muted" />
+        )}
+      </div>
+      <span className="ml-2 text-xs text-muted-foreground">P.{n}</span>
+    </button>
+  );
+}
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/components/ui/accordion.tsx ======
+```tsx
+import * as React from "react";
+import * as AccordionPrimitive from "@radix-ui/react-accordion";
+import { ChevronDown } from "lucide-react";
+
+import { cn } from "@/lib/utils";
+
+const Accordion = AccordionPrimitive.Root;
+
+const AccordionItem = React.forwardRef<
+  React.ElementRef<typeof AccordionPrimitive.Item>,
+  React.ComponentPropsWithoutRef<typeof AccordionPrimitive.Item>
+>(({ className, ...props }, ref) => (
+  <AccordionPrimitive.Item ref={ref} className={cn("border-b", className)} {...props} />
+));
+AccordionItem.displayName = "AccordionItem";
+
+const AccordionTrigger = React.forwardRef<
+  React.ElementRef<typeof AccordionPrimitive.Trigger>,
+  React.ComponentPropsWithoutRef<typeof AccordionPrimitive.Trigger>
+>(({ className, children, ...props }, ref) => (
+  <AccordionPrimitive.Header className="flex">
+    <AccordionPrimitive.Trigger
+      ref={ref}
+      className={cn(
+        "flex flex-1 items-center justify-between py-4 font-medium transition-all hover:underline [&[data-state=open]>svg]:rotate-180",
+        className,
+      )}
+      {...props}
+    >
+      {children}
+      <ChevronDown className="h-4 w-4 shrink-0 transition-transform duration-200" />
+    </AccordionPrimitive.Trigger>
+  </AccordionPrimitive.Header>
+));
+AccordionTrigger.displayName = AccordionPrimitive.Trigger.displayName;
+
+const AccordionContent = React.forwardRef<
+  React.ElementRef<typeof AccordionPrimitive.Content>,
+  React.ComponentPropsWithoutRef<typeof AccordionPrimitive.Content>
+>(({ className, children, ...props }, ref) => (
+  <AccordionPrimitive.Content
+    ref={ref}
+    className="overflow-hidden text-sm transition-all data-[state=closed]:animate-accordion-up data-[state=open]:animate-accordion-down"
+    {...props}
+  >
+    <div className={cn("pb-4 pt-0", className)}>{children}</div>
+  </AccordionPrimitive.Content>
+));
+
+AccordionContent.displayName = AccordionPrimitive.Content.displayName;
+
+export { Accordion, AccordionItem, AccordionTrigger, AccordionContent };
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/components/ui/alert-dialog.tsx ======
+```tsx
+import * as React from "react";
+import * as AlertDialogPrimitive from "@radix-ui/react-alert-dialog";
+
+import { cn } from "@/lib/utils";
+import { buttonVariants } from "@/components/ui/button";
+
+const AlertDialog = AlertDialogPrimitive.Root;
+
+const AlertDialogTrigger = AlertDialogPrimitive.Trigger;
+
+const AlertDialogPortal = AlertDialogPrimitive.Portal;
+
+const AlertDialogOverlay = React.forwardRef<
+  React.ElementRef<typeof AlertDialogPrimitive.Overlay>,
+  React.ComponentPropsWithoutRef<typeof AlertDialogPrimitive.Overlay>
+>(({ className, ...props }, ref) => (
+  <AlertDialogPrimitive.Overlay
+    className={cn(
+      "fixed inset-0 z-50 bg-black/80 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
+      className,
+    )}
+    {...props}
+    ref={ref}
+  />
+));
+AlertDialogOverlay.displayName = AlertDialogPrimitive.Overlay.displayName;
+
+const AlertDialogContent = React.forwardRef<
+  React.ElementRef<typeof AlertDialogPrimitive.Content>,
+  React.ComponentPropsWithoutRef<typeof AlertDialogPrimitive.Content>
+>(({ className, ...props }, ref) => (
+  <AlertDialogPortal>
+    <AlertDialogOverlay />
+    <AlertDialogPrimitive.Content
+      ref={ref}
+      className={cn(
+        "fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-6 shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] sm:rounded-lg",
+        className,
+      )}
+      {...props}
+    />
+  </AlertDialogPortal>
+));
+AlertDialogContent.displayName = AlertDialogPrimitive.Content.displayName;
+
+const AlertDialogHeader = ({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
+  <div className={cn("flex flex-col space-y-2 text-center sm:text-left", className)} {...props} />
+);
+AlertDialogHeader.displayName = "AlertDialogHeader";
+
+const AlertDialogFooter = ({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
+  <div className={cn("flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2", className)} {...props} />
+);
+AlertDialogFooter.displayName = "AlertDialogFooter";
+
+const AlertDialogTitle = React.forwardRef<
+  React.ElementRef<typeof AlertDialogPrimitive.Title>,
+  React.ComponentPropsWithoutRef<typeof AlertDialogPrimitive.Title>
+>(({ className, ...props }, ref) => (
+  <AlertDialogPrimitive.Title ref={ref} className={cn("text-lg font-semibold", className)} {...props} />
+));
+AlertDialogTitle.displayName = AlertDialogPrimitive.Title.displayName;
+
+const AlertDialogDescription = React.forwardRef<
+  React.ElementRef<typeof AlertDialogPrimitive.Description>,
+  React.ComponentPropsWithoutRef<typeof AlertDialogPrimitive.Description>
+>(({ className, ...props }, ref) => (
+  <AlertDialogPrimitive.Description ref={ref} className={cn("text-sm text-muted-foreground", className)} {...props} />
+));
+AlertDialogDescription.displayName = AlertDialogPrimitive.Description.displayName;
+
+const AlertDialogAction = React.forwardRef<
+  React.ElementRef<typeof AlertDialogPrimitive.Action>,
+  React.ComponentPropsWithoutRef<typeof AlertDialogPrimitive.Action>
+>(({ className, ...props }, ref) => (
+  <AlertDialogPrimitive.Action ref={ref} className={cn(buttonVariants(), className)} {...props} />
+));
+AlertDialogAction.displayName = AlertDialogPrimitive.Action.displayName;
+
+const AlertDialogCancel = React.forwardRef<
+  React.ElementRef<typeof AlertDialogPrimitive.Cancel>,
+  React.ComponentPropsWithoutRef<typeof AlertDialogPrimitive.Cancel>
+>(({ className, ...props }, ref) => (
+  <AlertDialogPrimitive.Cancel
+    ref={ref}
+    className={cn(buttonVariants({ variant: "outline" }), "mt-2 sm:mt-0", className)}
+    {...props}
+  />
+));
+AlertDialogCancel.displayName = AlertDialogPrimitive.Cancel.displayName;
+
+export {
+  AlertDialog,
+  AlertDialogPortal,
+  AlertDialogOverlay,
+  AlertDialogTrigger,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogFooter,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogAction,
+  AlertDialogCancel,
+};
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/components/ui/alert.tsx ======
+```tsx
+import * as React from "react";
+import { cva, type VariantProps } from "class-variance-authority";
+
+import { cn } from "@/lib/utils";
+
+const alertVariants = cva(
+  "relative w-full rounded-lg border p-4 [&>svg~*]:pl-7 [&>svg+div]:translate-y-[-3px] [&>svg]:absolute [&>svg]:left-4 [&>svg]:top-4 [&>svg]:text-foreground",
+  {
+    variants: {
+      variant: {
+        default: "bg-background text-foreground",
+        destructive: "border-destructive/50 text-destructive dark:border-destructive [&>svg]:text-destructive",
+      },
+    },
+    defaultVariants: {
+      variant: "default",
+    },
+  },
+);
+
+const Alert = React.forwardRef<
+  HTMLDivElement,
+  React.HTMLAttributes<HTMLDivElement> & VariantProps<typeof alertVariants>
+>(({ className, variant, ...props }, ref) => (
+  <div ref={ref} role="alert" className={cn(alertVariants({ variant }), className)} {...props} />
+));
+Alert.displayName = "Alert";
+
+const AlertTitle = React.forwardRef<HTMLParagraphElement, React.HTMLAttributes<HTMLHeadingElement>>(
+  ({ className, ...props }, ref) => (
+    <h5 ref={ref} className={cn("mb-1 font-medium leading-none tracking-tight", className)} {...props} />
+  ),
+);
+AlertTitle.displayName = "AlertTitle";
+
+const AlertDescription = React.forwardRef<HTMLParagraphElement, React.HTMLAttributes<HTMLParagraphElement>>(
+  ({ className, ...props }, ref) => (
+    <div ref={ref} className={cn("text-sm [&_p]:leading-relaxed", className)} {...props} />
+  ),
+);
+AlertDescription.displayName = "AlertDescription";
+
+export { Alert, AlertTitle, AlertDescription };
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/components/ui/aspect-ratio.tsx ======
+```tsx
+import * as AspectRatioPrimitive from "@radix-ui/react-aspect-ratio";
+
+const AspectRatio = AspectRatioPrimitive.Root;
+
+export { AspectRatio };
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/components/ui/avatar.tsx ======
+```tsx
+import * as React from "react";
+import * as AvatarPrimitive from "@radix-ui/react-avatar";
+
+import { cn } from "@/lib/utils";
+
+const Avatar = React.forwardRef<
+  React.ElementRef<typeof AvatarPrimitive.Root>,
+  React.ComponentPropsWithoutRef<typeof AvatarPrimitive.Root>
+>(({ className, ...props }, ref) => (
+  <AvatarPrimitive.Root
+    ref={ref}
+    className={cn("relative flex h-10 w-10 shrink-0 overflow-hidden rounded-full", className)}
+    {...props}
+  />
+));
+Avatar.displayName = AvatarPrimitive.Root.displayName;
+
+const AvatarImage = React.forwardRef<
+  React.ElementRef<typeof AvatarPrimitive.Image>,
+  React.ComponentPropsWithoutRef<typeof AvatarPrimitive.Image>
+>(({ className, ...props }, ref) => (
+  <AvatarPrimitive.Image ref={ref} className={cn("aspect-square h-full w-full", className)} {...props} />
+));
+AvatarImage.displayName = AvatarPrimitive.Image.displayName;
+
+const AvatarFallback = React.forwardRef<
+  React.ElementRef<typeof AvatarPrimitive.Fallback>,
+  React.ComponentPropsWithoutRef<typeof AvatarPrimitive.Fallback>
+>(({ className, ...props }, ref) => (
+  <AvatarPrimitive.Fallback
+    ref={ref}
+    className={cn("flex h-full w-full items-center justify-center rounded-full bg-muted", className)}
+    {...props}
+  />
+));
+AvatarFallback.displayName = AvatarPrimitive.Fallback.displayName;
+
+export { Avatar, AvatarImage, AvatarFallback };
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/components/ui/badge.tsx ======
+```tsx
+import * as React from "react";
+import { cva, type VariantProps } from "class-variance-authority";
+
+import { cn } from "@/lib/utils";
+
+const badgeVariants = cva(
+  "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
+  {
+    variants: {
+      variant: {
+        default: "border-transparent bg-primary text-primary-foreground hover:bg-primary/80",
+        secondary: "border-transparent bg-secondary text-secondary-foreground hover:bg-secondary/80",
+        destructive: "border-transparent bg-destructive text-destructive-foreground hover:bg-destructive/80",
+        outline: "text-foreground",
+      },
+    },
+    defaultVariants: {
+      variant: "default",
+    },
+  },
+);
+
+export interface BadgeProps extends React.HTMLAttributes<HTMLDivElement>, VariantProps<typeof badgeVariants> {}
+
+function Badge({ className, variant, ...props }: BadgeProps) {
+  return <div className={cn(badgeVariants({ variant }), className)} {...props} />;
+}
+
+export { Badge, badgeVariants };
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/components/ui/breadcrumb.tsx ======
+```tsx
+import * as React from "react";
+import { Slot } from "@radix-ui/react-slot";
+import { ChevronRight, MoreHorizontal } from "lucide-react";
+
+import { cn } from "@/lib/utils";
+
+const Breadcrumb = React.forwardRef<
+  HTMLElement,
+  React.ComponentPropsWithoutRef<"nav"> & {
+    separator?: React.ReactNode;
+  }
+>(({ ...props }, ref) => <nav ref={ref} aria-label="breadcrumb" {...props} />);
+Breadcrumb.displayName = "Breadcrumb";
+
+const BreadcrumbList = React.forwardRef<HTMLOListElement, React.ComponentPropsWithoutRef<"ol">>(
+  ({ className, ...props }, ref) => (
+    <ol
+      ref={ref}
+      className={cn(
+        "flex flex-wrap items-center gap-1.5 break-words text-sm text-muted-foreground sm:gap-2.5",
+        className,
+      )}
+      {...props}
+    />
+  ),
+);
+BreadcrumbList.displayName = "BreadcrumbList";
+
+const BreadcrumbItem = React.forwardRef<HTMLLIElement, React.ComponentPropsWithoutRef<"li">>(
+  ({ className, ...props }, ref) => (
+    <li ref={ref} className={cn("inline-flex items-center gap-1.5", className)} {...props} />
+  ),
+);
+BreadcrumbItem.displayName = "BreadcrumbItem";
+
+const BreadcrumbLink = React.forwardRef<
+  HTMLAnchorElement,
+  React.ComponentPropsWithoutRef<"a"> & {
+    asChild?: boolean;
+  }
+>(({ asChild, className, ...props }, ref) => {
+  const Comp = asChild ? Slot : "a";
+
+  return <Comp ref={ref} className={cn("transition-colors hover:text-foreground", className)} {...props} />;
+});
+BreadcrumbLink.displayName = "BreadcrumbLink";
+
+const BreadcrumbPage = React.forwardRef<HTMLSpanElement, React.ComponentPropsWithoutRef<"span">>(
+  ({ className, ...props }, ref) => (
+    <span
+      ref={ref}
+      role="link"
+      aria-disabled="true"
+      aria-current="page"
+      className={cn("font-normal text-foreground", className)}
+      {...props}
+    />
+  ),
+);
+BreadcrumbPage.displayName = "BreadcrumbPage";
+
+const BreadcrumbSeparator = ({ children, className, ...props }: React.ComponentProps<"li">) => (
+  <li role="presentation" aria-hidden="true" className={cn("[&>svg]:size-3.5", className)} {...props}>
+    {children ?? <ChevronRight />}
+  </li>
+);
+BreadcrumbSeparator.displayName = "BreadcrumbSeparator";
+
+const BreadcrumbEllipsis = ({ className, ...props }: React.ComponentProps<"span">) => (
+  <span
+    role="presentation"
+    aria-hidden="true"
+    className={cn("flex h-9 w-9 items-center justify-center", className)}
+    {...props}
+  >
+    <MoreHorizontal className="h-4 w-4" />
+    <span className="sr-only">More</span>
+  </span>
+);
+BreadcrumbEllipsis.displayName = "BreadcrumbElipssis";
+
+export {
+  Breadcrumb,
+  BreadcrumbList,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+  BreadcrumbEllipsis,
+};
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/components/ui/button.tsx ======
+```tsx
+import * as React from "react";
+import { Slot } from "@radix-ui/react-slot";
+import { cva, type VariantProps } from "class-variance-authority";
+
+import { cn } from "@/lib/utils";
+
+const buttonVariants = cva(
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
+  {
+    variants: {
+      variant: {
+        default: "bg-primary text-primary-foreground hover:bg-primary/90",
+        destructive: "bg-destructive text-destructive-foreground hover:bg-destructive/90",
+        outline: "border border-input bg-background hover:bg-accent hover:text-accent-foreground",
+        secondary: "bg-secondary text-secondary-foreground hover:bg-secondary/80",
+        ghost: "hover:bg-accent hover:text-accent-foreground",
+        link: "text-primary underline-offset-4 hover:underline",
+      },
+      size: {
+        default: "h-10 px-4 py-2",
+        sm: "h-9 rounded-md px-3",
+        lg: "h-11 rounded-md px-8",
+        icon: "h-10 w-10",
+      },
+    },
+    defaultVariants: {
+      variant: "default",
+      size: "default",
+    },
+  },
+);
+
+export interface ButtonProps
+  extends React.ButtonHTMLAttributes<HTMLButtonElement>,
+    VariantProps<typeof buttonVariants> {
+  asChild?: boolean;
+}
+
+const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
+  ({ className, variant, size, asChild = false, ...props }, ref) => {
+    const Comp = asChild ? Slot : "button";
+    return <Comp className={cn(buttonVariants({ variant, size, className }))} ref={ref} {...props} />;
+  },
+);
+Button.displayName = "Button";
+
+export { Button, buttonVariants };
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/components/ui/calendar.tsx ======
+```tsx
+import * as React from "react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
+import { DayPicker } from "react-day-picker";
+
+import { cn } from "@/lib/utils";
+import { buttonVariants } from "@/components/ui/button";
+
+export type CalendarProps = React.ComponentProps<typeof DayPicker>;
+
+function Calendar({ className, classNames, showOutsideDays = true, ...props }: CalendarProps) {
+  return (
+    <DayPicker
+      showOutsideDays={showOutsideDays}
+      className={cn("p-3", className)}
+      classNames={{
+        months: "flex flex-col sm:flex-row space-y-4 sm:space-x-4 sm:space-y-0",
+        month: "space-y-4",
+        caption: "flex justify-center pt-1 relative items-center",
+        caption_label: "text-sm font-medium",
+        nav: "space-x-1 flex items-center",
+        nav_button: cn(
+          buttonVariants({ variant: "outline" }),
+          "h-7 w-7 bg-transparent p-0 opacity-50 hover:opacity-100",
+        ),
+        nav_button_previous: "absolute left-1",
+        nav_button_next: "absolute right-1",
+        table: "w-full border-collapse space-y-1",
+        head_row: "flex",
+        head_cell: "text-muted-foreground rounded-md w-9 font-normal text-[0.8rem]",
+        row: "flex w-full mt-2",
+        cell: "h-9 w-9 text-center text-sm p-0 relative [&:has([aria-selected].day-range-end)]:rounded-r-md [&:has([aria-selected].day-outside)]:bg-accent/50 [&:has([aria-selected])]:bg-accent first:[&:has([aria-selected])]:rounded-l-md last:[&:has([aria-selected])]:rounded-r-md focus-within:relative focus-within:z-20",
+        day: cn(buttonVariants({ variant: "ghost" }), "h-9 w-9 p-0 font-normal aria-selected:opacity-100"),
+        day_range_end: "day-range-end",
+        day_selected:
+          "bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground focus:bg-primary focus:text-primary-foreground",
+        day_today: "bg-accent text-accent-foreground",
+        day_outside:
+          "day-outside text-muted-foreground opacity-50 aria-selected:bg-accent/50 aria-selected:text-muted-foreground aria-selected:opacity-30",
+        day_disabled: "text-muted-foreground opacity-50",
+        day_range_middle: "aria-selected:bg-accent aria-selected:text-accent-foreground",
+        day_hidden: "invisible",
+        ...classNames,
+      }}
+      components={{
+        IconLeft: ({ ..._props }) => <ChevronLeft className="h-4 w-4" />,
+        IconRight: ({ ..._props }) => <ChevronRight className="h-4 w-4" />,
+      }}
+      {...props}
+    />
+  );
+}
+Calendar.displayName = "Calendar";
+
+export { Calendar };
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/components/ui/card.tsx ======
+```tsx
+import * as React from "react";
+
+import { cn } from "@/lib/utils";
+
+const Card = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(({ className, ...props }, ref) => (
+  <div ref={ref} className={cn("rounded-lg border bg-card text-card-foreground shadow-sm", className)} {...props} />
+));
+Card.displayName = "Card";
+
+const CardHeader = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
+  ({ className, ...props }, ref) => (
+    <div ref={ref} className={cn("flex flex-col space-y-1.5 p-6", className)} {...props} />
+  ),
+);
+CardHeader.displayName = "CardHeader";
+
+const CardTitle = React.forwardRef<HTMLParagraphElement, React.HTMLAttributes<HTMLHeadingElement>>(
+  ({ className, ...props }, ref) => (
+    <h3 ref={ref} className={cn("text-2xl font-semibold leading-none tracking-tight", className)} {...props} />
+  ),
+);
+CardTitle.displayName = "CardTitle";
+
+const CardDescription = React.forwardRef<HTMLParagraphElement, React.HTMLAttributes<HTMLParagraphElement>>(
+  ({ className, ...props }, ref) => (
+    <p ref={ref} className={cn("text-sm text-muted-foreground", className)} {...props} />
+  ),
+);
+CardDescription.displayName = "CardDescription";
+
+const CardContent = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
+  ({ className, ...props }, ref) => <div ref={ref} className={cn("p-6 pt-0", className)} {...props} />,
+);
+CardContent.displayName = "CardContent";
+
+const CardFooter = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
+  ({ className, ...props }, ref) => (
+    <div ref={ref} className={cn("flex items-center p-6 pt-0", className)} {...props} />
+  ),
+);
+CardFooter.displayName = "CardFooter";
+
+export { Card, CardHeader, CardFooter, CardTitle, CardDescription, CardContent };
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/components/ui/carousel.tsx ======
+```tsx
+import * as React from "react";
+import useEmblaCarousel, { type UseEmblaCarouselType } from "embla-carousel-react";
+import { ArrowLeft, ArrowRight } from "lucide-react";
+
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+
+type CarouselApi = UseEmblaCarouselType[1];
+type UseCarouselParameters = Parameters<typeof useEmblaCarousel>;
+type CarouselOptions = UseCarouselParameters[0];
+type CarouselPlugin = UseCarouselParameters[1];
+
+type CarouselProps = {
+  opts?: CarouselOptions;
+  plugins?: CarouselPlugin;
+  orientation?: "horizontal" | "vertical";
+  setApi?: (api: CarouselApi) => void;
+};
+
+type CarouselContextProps = {
+  carouselRef: ReturnType<typeof useEmblaCarousel>[0];
+  api: ReturnType<typeof useEmblaCarousel>[1];
+  scrollPrev: () => void;
+  scrollNext: () => void;
+  canScrollPrev: boolean;
+  canScrollNext: boolean;
+} & CarouselProps;
+
+const CarouselContext = React.createContext<CarouselContextProps | null>(null);
+
+function useCarousel() {
+  const context = React.useContext(CarouselContext);
+
+  if (!context) {
+    throw new Error("useCarousel must be used within a <Carousel />");
+  }
+
+  return context;
+}
+
+const Carousel = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement> & CarouselProps>(
+  ({ orientation = "horizontal", opts, setApi, plugins, className, children, ...props }, ref) => {
+    const [carouselRef, api] = useEmblaCarousel(
+      {
+        ...opts,
+        axis: orientation === "horizontal" ? "x" : "y",
+      },
+      plugins,
+    );
+    const [canScrollPrev, setCanScrollPrev] = React.useState(false);
+    const [canScrollNext, setCanScrollNext] = React.useState(false);
+
+    const onSelect = React.useCallback((api: CarouselApi) => {
+      if (!api) {
+        return;
+      }
+
+      setCanScrollPrev(api.canScrollPrev());
+      setCanScrollNext(api.canScrollNext());
+    }, []);
+
+    const scrollPrev = React.useCallback(() => {
+      api?.scrollPrev();
+    }, [api]);
+
+    const scrollNext = React.useCallback(() => {
+      api?.scrollNext();
+    }, [api]);
+
+    const handleKeyDown = React.useCallback(
+      (event: React.KeyboardEvent<HTMLDivElement>) => {
+        if (event.key === "ArrowLeft") {
+          event.preventDefault();
+          scrollPrev();
+        } else if (event.key === "ArrowRight") {
+          event.preventDefault();
+          scrollNext();
+        }
+      },
+      [scrollPrev, scrollNext],
+    );
+
+    React.useEffect(() => {
+      if (!api || !setApi) {
+        return;
+      }
+
+      setApi(api);
+    }, [api, setApi]);
+
+    React.useEffect(() => {
+      if (!api) {
+        return;
+      }
+
+      onSelect(api);
+      api.on("reInit", onSelect);
+      api.on("select", onSelect);
+
+      return () => {
+        api?.off("select", onSelect);
+      };
+    }, [api, onSelect]);
+
+    return (
+      <CarouselContext.Provider
+        value={{
+          carouselRef,
+          api: api,
+          opts,
+          orientation: orientation || (opts?.axis === "y" ? "vertical" : "horizontal"),
+          scrollPrev,
+          scrollNext,
+          canScrollPrev,
+          canScrollNext,
+        }}
+      >
+        <div
+          ref={ref}
+          onKeyDownCapture={handleKeyDown}
+          className={cn("relative", className)}
+          role="region"
+          aria-roledescription="carousel"
+          {...props}
+        >
+          {children}
+        </div>
+      </CarouselContext.Provider>
+    );
+  },
+);
+Carousel.displayName = "Carousel";
+
+const CarouselContent = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
+  ({ className, ...props }, ref) => {
+    const { carouselRef, orientation } = useCarousel();
+
+    return (
+      <div ref={carouselRef} className="overflow-hidden">
+        <div
+          ref={ref}
+          className={cn("flex", orientation === "horizontal" ? "-ml-4" : "-mt-4 flex-col", className)}
+          {...props}
+        />
+      </div>
+    );
+  },
+);
+CarouselContent.displayName = "CarouselContent";
+
+const CarouselItem = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
+  ({ className, ...props }, ref) => {
+    const { orientation } = useCarousel();
+
+    return (
+      <div
+        ref={ref}
+        role="group"
+        aria-roledescription="slide"
+        className={cn("min-w-0 shrink-0 grow-0 basis-full", orientation === "horizontal" ? "pl-4" : "pt-4", className)}
+        {...props}
+      />
+    );
+  },
+);
+CarouselItem.displayName = "CarouselItem";
+
+const CarouselPrevious = React.forwardRef<HTMLButtonElement, React.ComponentProps<typeof Button>>(
+  ({ className, variant = "outline", size = "icon", ...props }, ref) => {
+    const { orientation, scrollPrev, canScrollPrev } = useCarousel();
+
+    return (
+      <Button
+        ref={ref}
+        variant={variant}
+        size={size}
+        className={cn(
+          "absolute h-8 w-8 rounded-full",
+          orientation === "horizontal"
+            ? "-left-12 top-1/2 -translate-y-1/2"
+            : "-top-12 left-1/2 -translate-x-1/2 rotate-90",
+          className,
+        )}
+        disabled={!canScrollPrev}
+        onClick={scrollPrev}
+        {...props}
+      >
+        <ArrowLeft className="h-4 w-4" />
+        <span className="sr-only">Previous slide</span>
+      </Button>
+    );
+  },
+);
+CarouselPrevious.displayName = "CarouselPrevious";
+
+const CarouselNext = React.forwardRef<HTMLButtonElement, React.ComponentProps<typeof Button>>(
+  ({ className, variant = "outline", size = "icon", ...props }, ref) => {
+    const { orientation, scrollNext, canScrollNext } = useCarousel();
+
+    return (
+      <Button
+        ref={ref}
+        variant={variant}
+        size={size}
+        className={cn(
+          "absolute h-8 w-8 rounded-full",
+          orientation === "horizontal"
+            ? "-right-12 top-1/2 -translate-y-1/2"
+            : "-bottom-12 left-1/2 -translate-x-1/2 rotate-90",
+          className,
+        )}
+        disabled={!canScrollNext}
+        onClick={scrollNext}
+        {...props}
+      >
+        <ArrowRight className="h-4 w-4" />
+        <span className="sr-only">Next slide</span>
+      </Button>
+    );
+  },
+);
+CarouselNext.displayName = "CarouselNext";
+
+export { type CarouselApi, Carousel, CarouselContent, CarouselItem, CarouselPrevious, CarouselNext };
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/components/ui/chart.tsx ======
+```tsx
+import * as React from "react";
+import * as RechartsPrimitive from "recharts";
+
+import { cn } from "@/lib/utils";
+
+// Format: { THEME_NAME: CSS_SELECTOR }
+const THEMES = { light: "", dark: ".dark" } as const;
+
+export type ChartConfig = {
+  [k in string]: {
+    label?: React.ReactNode;
+    icon?: React.ComponentType;
+  } & ({ color?: string; theme?: never } | { color?: never; theme: Record<keyof typeof THEMES, string> });
+};
+
+type ChartContextProps = {
+  config: ChartConfig;
+};
+
+const ChartContext = React.createContext<ChartContextProps | null>(null);
+
+function useChart() {
+  const context = React.useContext(ChartContext);
+
+  if (!context) {
+    throw new Error("useChart must be used within a <ChartContainer />");
+  }
+
+  return context;
+}
+
+const ChartContainer = React.forwardRef<
+  HTMLDivElement,
+  React.ComponentProps<"div"> & {
+    config: ChartConfig;
+    children: React.ComponentProps<typeof RechartsPrimitive.ResponsiveContainer>["children"];
+  }
+>(({ id, className, children, config, ...props }, ref) => {
+  const uniqueId = React.useId();
+  const chartId = `chart-${id || uniqueId.replace(/:/g, "")}`;
+
+  return (
+    <ChartContext.Provider value={{ config }}>
+      <div
+        data-chart={chartId}
+        ref={ref}
+        className={cn(
+          "flex aspect-video justify-center text-xs [&_.recharts-cartesian-axis-tick_text]:fill-muted-foreground [&_.recharts-cartesian-grid_line[stroke='#ccc']]:stroke-border/50 [&_.recharts-curve.recharts-tooltip-cursor]:stroke-border [&_.recharts-dot[stroke='#fff']]:stroke-transparent [&_.recharts-layer]:outline-none [&_.recharts-polar-grid_[stroke='#ccc']]:stroke-border [&_.recharts-radial-bar-background-sector]:fill-muted [&_.recharts-rectangle.recharts-tooltip-cursor]:fill-muted [&_.recharts-reference-line_[stroke='#ccc']]:stroke-border [&_.recharts-sector[stroke='#fff']]:stroke-transparent [&_.recharts-sector]:outline-none [&_.recharts-surface]:outline-none",
+          className,
+        )}
+        {...props}
+      >
+        <ChartStyle id={chartId} config={config} />
+        <RechartsPrimitive.ResponsiveContainer>{children}</RechartsPrimitive.ResponsiveContainer>
+      </div>
+    </ChartContext.Provider>
+  );
+});
+ChartContainer.displayName = "Chart";
+
+const ChartStyle = ({ id, config }: { id: string; config: ChartConfig }) => {
+  const colorConfig = Object.entries(config).filter(([_, config]) => config.theme || config.color);
+
+  if (!colorConfig.length) {
+    return null;
+  }
+
+  return (
+    <style
+      dangerouslySetInnerHTML={{
+        __html: Object.entries(THEMES)
+          .map(
+            ([theme, prefix]) => `
+${prefix} [data-chart=${id}] {
+${colorConfig
+  .map(([key, itemConfig]) => {
+    const color = itemConfig.theme?.[theme as keyof typeof itemConfig.theme] || itemConfig.color;
+    return color ? `  --color-${key}: ${color};` : null;
+  })
+  .join("\n")}
+}
+`,
+          )
+          .join("\n"),
+      }}
+    />
+  );
+};
+
+const ChartTooltip = RechartsPrimitive.Tooltip;
+
+const ChartTooltipContent = React.forwardRef<
+  HTMLDivElement,
+  React.ComponentProps<typeof RechartsPrimitive.Tooltip> &
+    React.ComponentProps<"div"> & {
+      hideLabel?: boolean;
+      hideIndicator?: boolean;
+      indicator?: "line" | "dot" | "dashed";
+      nameKey?: string;
+      labelKey?: string;
+    }
+>(
+  (
+    {
+      active,
+      payload,
+      className,
+      indicator = "dot",
+      hideLabel = false,
+      hideIndicator = false,
+      label,
+      labelFormatter,
+      labelClassName,
+      formatter,
+      color,
+      nameKey,
+      labelKey,
+    },
+    ref,
+  ) => {
+    const { config } = useChart();
+
+    const tooltipLabel = React.useMemo(() => {
+      if (hideLabel || !payload?.length) {
+        return null;
+      }
+
+      const [item] = payload;
+      const key = `${labelKey || item.dataKey || item.name || "value"}`;
+      const itemConfig = getPayloadConfigFromPayload(config, item, key);
+      const value =
+        !labelKey && typeof label === "string"
+          ? config[label as keyof typeof config]?.label || label
+          : itemConfig?.label;
+
+      if (labelFormatter) {
+        return <div className={cn("font-medium", labelClassName)}>{labelFormatter(value, payload)}</div>;
+      }
+
+      if (!value) {
+        return null;
+      }
+
+      return <div className={cn("font-medium", labelClassName)}>{value}</div>;
+    }, [label, labelFormatter, payload, hideLabel, labelClassName, config, labelKey]);
+
+    if (!active || !payload?.length) {
+      return null;
+    }
+
+    const nestLabel = payload.length === 1 && indicator !== "dot";
+
+    return (
+      <div
+        ref={ref}
+        className={cn(
+          "grid min-w-[8rem] items-start gap-1.5 rounded-lg border border-border/50 bg-background px-2.5 py-1.5 text-xs shadow-xl",
+          className,
+        )}
+      >
+        {!nestLabel ? tooltipLabel : null}
+        <div className="grid gap-1.5">
+          {payload.map((item, index) => {
+            const key = `${nameKey || item.name || item.dataKey || "value"}`;
+            const itemConfig = getPayloadConfigFromPayload(config, item, key);
+            const indicatorColor = color || item.payload.fill || item.color;
+
+            return (
+              <div
+                key={item.dataKey}
+                className={cn(
+                  "flex w-full flex-wrap items-stretch gap-2 [&>svg]:h-2.5 [&>svg]:w-2.5 [&>svg]:text-muted-foreground",
+                  indicator === "dot" && "items-center",
+                )}
+              >
+                {formatter && item?.value !== undefined && item.name ? (
+                  formatter(item.value, item.name, item, index, item.payload)
+                ) : (
+                  <>
+                    {itemConfig?.icon ? (
+                      <itemConfig.icon />
+                    ) : (
+                      !hideIndicator && (
+                        <div
+                          className={cn("shrink-0 rounded-[2px] border-[--color-border] bg-[--color-bg]", {
+                            "h-2.5 w-2.5": indicator === "dot",
+                            "w-1": indicator === "line",
+                            "w-0 border-[1.5px] border-dashed bg-transparent": indicator === "dashed",
+                            "my-0.5": nestLabel && indicator === "dashed",
+                          })}
+                          style={
+                            {
+                              "--color-bg": indicatorColor,
+                              "--color-border": indicatorColor,
+                            } as React.CSSProperties
+                          }
+                        />
+                      )
+                    )}
+                    <div
+                      className={cn(
+                        "flex flex-1 justify-between leading-none",
+                        nestLabel ? "items-end" : "items-center",
+                      )}
+                    >
+                      <div className="grid gap-1.5">
+                        {nestLabel ? tooltipLabel : null}
+                        <span className="text-muted-foreground">{itemConfig?.label || item.name}</span>
+                      </div>
+                      {item.value && (
+                        <span className="font-mono font-medium tabular-nums text-foreground">
+                          {item.value.toLocaleString()}
+                        </span>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  },
+);
+ChartTooltipContent.displayName = "ChartTooltip";
+
+const ChartLegend = RechartsPrimitive.Legend;
+
+const ChartLegendContent = React.forwardRef<
+  HTMLDivElement,
+  React.ComponentProps<"div"> &
+    Pick<RechartsPrimitive.LegendProps, "payload" | "verticalAlign"> & {
+      hideIcon?: boolean;
+      nameKey?: string;
+    }
+>(({ className, hideIcon = false, payload, verticalAlign = "bottom", nameKey }, ref) => {
+  const { config } = useChart();
+
+  if (!payload?.length) {
+    return null;
+  }
+
+  return (
+    <div
+      ref={ref}
+      className={cn("flex items-center justify-center gap-4", verticalAlign === "top" ? "pb-3" : "pt-3", className)}
+    >
+      {payload.map((item) => {
+        const key = `${nameKey || item.dataKey || "value"}`;
+        const itemConfig = getPayloadConfigFromPayload(config, item, key);
+
+        return (
+          <div
+            key={item.value}
+            className={cn("flex items-center gap-1.5 [&>svg]:h-3 [&>svg]:w-3 [&>svg]:text-muted-foreground")}
+          >
+            {itemConfig?.icon && !hideIcon ? (
+              <itemConfig.icon />
+            ) : (
+              <div
+                className="h-2 w-2 shrink-0 rounded-[2px]"
+                style={{
+                  backgroundColor: item.color,
+                }}
+              />
+            )}
+            {itemConfig?.label}
+          </div>
+        );
+      })}
+    </div>
+  );
+});
+ChartLegendContent.displayName = "ChartLegend";
+
+// Helper to extract item config from a payload.
+function getPayloadConfigFromPayload(config: ChartConfig, payload: unknown, key: string) {
+  if (typeof payload !== "object" || payload === null) {
+    return undefined;
+  }
+
+  const payloadPayload =
+    "payload" in payload && typeof payload.payload === "object" && payload.payload !== null
+      ? payload.payload
+      : undefined;
+
+  let configLabelKey: string = key;
+
+  if (key in payload && typeof payload[key as keyof typeof payload] === "string") {
+    configLabelKey = payload[key as keyof typeof payload] as string;
+  } else if (
+    payloadPayload &&
+    key in payloadPayload &&
+    typeof payloadPayload[key as keyof typeof payloadPayload] === "string"
+  ) {
+    configLabelKey = payloadPayload[key as keyof typeof payloadPayload] as string;
+  }
+
+  return configLabelKey in config ? config[configLabelKey] : config[key as keyof typeof config];
+}
+
+export { ChartContainer, ChartTooltip, ChartTooltipContent, ChartLegend, ChartLegendContent, ChartStyle };
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/components/ui/checkbox.tsx ======
+```tsx
+import * as React from "react";
+import * as CheckboxPrimitive from "@radix-ui/react-checkbox";
+import { Check } from "lucide-react";
+
+import { cn } from "@/lib/utils";
+
+const Checkbox = React.forwardRef<
+  React.ElementRef<typeof CheckboxPrimitive.Root>,
+  React.ComponentPropsWithoutRef<typeof CheckboxPrimitive.Root>
+>(({ className, ...props }, ref) => (
+  <CheckboxPrimitive.Root
+    ref={ref}
+    className={cn(
+      "peer h-4 w-4 shrink-0 rounded-sm border border-primary ring-offset-background data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50",
+      className,
+    )}
+    {...props}
+  >
+    <CheckboxPrimitive.Indicator className={cn("flex items-center justify-center text-current")}>
+      <Check className="h-4 w-4" />
+    </CheckboxPrimitive.Indicator>
+  </CheckboxPrimitive.Root>
+));
+Checkbox.displayName = CheckboxPrimitive.Root.displayName;
+
+export { Checkbox };
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/components/ui/collapsible.tsx ======
+```tsx
+import * as CollapsiblePrimitive from "@radix-ui/react-collapsible";
+
+const Collapsible = CollapsiblePrimitive.Root;
+
+const CollapsibleTrigger = CollapsiblePrimitive.CollapsibleTrigger;
+
+const CollapsibleContent = CollapsiblePrimitive.CollapsibleContent;
+
+export { Collapsible, CollapsibleTrigger, CollapsibleContent };
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/components/ui/command.tsx ======
+```tsx
+import * as React from "react";
+import { type DialogProps } from "@radix-ui/react-dialog";
+import { Command as CommandPrimitive } from "cmdk";
+import { Search } from "lucide-react";
+
+import { cn } from "@/lib/utils";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
+
+const Command = React.forwardRef<
+  React.ElementRef<typeof CommandPrimitive>,
+  React.ComponentPropsWithoutRef<typeof CommandPrimitive>
+>(({ className, ...props }, ref) => (
+  <CommandPrimitive
+    ref={ref}
+    className={cn(
+      "flex h-full w-full flex-col overflow-hidden rounded-md bg-popover text-popover-foreground",
+      className,
+    )}
+    {...props}
+  />
+));
+Command.displayName = CommandPrimitive.displayName;
+
+interface CommandDialogProps extends DialogProps {}
+
+const CommandDialog = ({ children, ...props }: CommandDialogProps) => {
+  return (
+    <Dialog {...props}>
+      <DialogContent className="overflow-hidden p-0 shadow-lg">
+        <Command className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-group]]:px-2 [&_[cmdk-input-wrapper]_svg]:h-5 [&_[cmdk-input-wrapper]_svg]:w-5 [&_[cmdk-input]]:h-12 [&_[cmdk-item]]:px-2 [&_[cmdk-item]]:py-3 [&_[cmdk-item]_svg]:h-5 [&_[cmdk-item]_svg]:w-5">
+          {children}
+        </Command>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
+const CommandInput = React.forwardRef<
+  React.ElementRef<typeof CommandPrimitive.Input>,
+  React.ComponentPropsWithoutRef<typeof CommandPrimitive.Input>
+>(({ className, ...props }, ref) => (
+  <div className="flex items-center border-b px-3" cmdk-input-wrapper="">
+    <Search className="mr-2 h-4 w-4 shrink-0 opacity-50" />
+    <CommandPrimitive.Input
+      ref={ref}
+      className={cn(
+        "flex h-11 w-full rounded-md bg-transparent py-3 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50",
+        className,
+      )}
+      {...props}
+    />
+  </div>
+));
+
+CommandInput.displayName = CommandPrimitive.Input.displayName;
+
+const CommandList = React.forwardRef<
+  React.ElementRef<typeof CommandPrimitive.List>,
+  React.ComponentPropsWithoutRef<typeof CommandPrimitive.List>
+>(({ className, ...props }, ref) => (
+  <CommandPrimitive.List
+    ref={ref}
+    className={cn("max-h-[300px] overflow-y-auto overflow-x-hidden", className)}
+    {...props}
+  />
+));
+
+CommandList.displayName = CommandPrimitive.List.displayName;
+
+const CommandEmpty = React.forwardRef<
+  React.ElementRef<typeof CommandPrimitive.Empty>,
+  React.ComponentPropsWithoutRef<typeof CommandPrimitive.Empty>
+>((props, ref) => <CommandPrimitive.Empty ref={ref} className="py-6 text-center text-sm" {...props} />);
+
+CommandEmpty.displayName = CommandPrimitive.Empty.displayName;
+
+const CommandGroup = React.forwardRef<
+  React.ElementRef<typeof CommandPrimitive.Group>,
+  React.ComponentPropsWithoutRef<typeof CommandPrimitive.Group>
+>(({ className, ...props }, ref) => (
+  <CommandPrimitive.Group
+    ref={ref}
+    className={cn(
+      "overflow-hidden p-1 text-foreground [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground",
+      className,
+    )}
+    {...props}
+  />
+));
+
+CommandGroup.displayName = CommandPrimitive.Group.displayName;
+
+const CommandSeparator = React.forwardRef<
+  React.ElementRef<typeof CommandPrimitive.Separator>,
+  React.ComponentPropsWithoutRef<typeof CommandPrimitive.Separator>
+>(({ className, ...props }, ref) => (
+  <CommandPrimitive.Separator ref={ref} className={cn("-mx-1 h-px bg-border", className)} {...props} />
+));
+CommandSeparator.displayName = CommandPrimitive.Separator.displayName;
+
+const CommandItem = React.forwardRef<
+  React.ElementRef<typeof CommandPrimitive.Item>,
+  React.ComponentPropsWithoutRef<typeof CommandPrimitive.Item>
+>(({ className, ...props }, ref) => (
+  <CommandPrimitive.Item
+    ref={ref}
+    className={cn(
+      "relative flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none data-[disabled=true]:pointer-events-none data-[selected='true']:bg-accent data-[selected=true]:text-accent-foreground data-[disabled=true]:opacity-50",
+      className,
+    )}
+    {...props}
+  />
+));
+
+CommandItem.displayName = CommandPrimitive.Item.displayName;
+
+const CommandShortcut = ({ className, ...props }: React.HTMLAttributes<HTMLSpanElement>) => {
+  return <span className={cn("ml-auto text-xs tracking-widest text-muted-foreground", className)} {...props} />;
+};
+CommandShortcut.displayName = "CommandShortcut";
+
+export {
+  Command,
+  CommandDialog,
+  CommandInput,
+  CommandList,
+  CommandEmpty,
+  CommandGroup,
+  CommandItem,
+  CommandShortcut,
+  CommandSeparator,
+};
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/components/ui/context-menu.tsx ======
+```tsx
+import * as React from "react";
+import * as ContextMenuPrimitive from "@radix-ui/react-context-menu";
+import { Check, ChevronRight, Circle } from "lucide-react";
+
+import { cn } from "@/lib/utils";
+
+const ContextMenu = ContextMenuPrimitive.Root;
+
+const ContextMenuTrigger = ContextMenuPrimitive.Trigger;
+
+const ContextMenuGroup = ContextMenuPrimitive.Group;
+
+const ContextMenuPortal = ContextMenuPrimitive.Portal;
+
+const ContextMenuSub = ContextMenuPrimitive.Sub;
+
+const ContextMenuRadioGroup = ContextMenuPrimitive.RadioGroup;
+
+const ContextMenuSubTrigger = React.forwardRef<
+  React.ElementRef<typeof ContextMenuPrimitive.SubTrigger>,
+  React.ComponentPropsWithoutRef<typeof ContextMenuPrimitive.SubTrigger> & {
+    inset?: boolean;
+  }
+>(({ className, inset, children, ...props }, ref) => (
+  <ContextMenuPrimitive.SubTrigger
+    ref={ref}
+    className={cn(
+      "flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none data-[state=open]:bg-accent data-[state=open]:text-accent-foreground focus:bg-accent focus:text-accent-foreground",
+      inset && "pl-8",
+      className,
+    )}
+    {...props}
+  >
+    {children}
+    <ChevronRight className="ml-auto h-4 w-4" />
+  </ContextMenuPrimitive.SubTrigger>
+));
+ContextMenuSubTrigger.displayName = ContextMenuPrimitive.SubTrigger.displayName;
+
+const ContextMenuSubContent = React.forwardRef<
+  React.ElementRef<typeof ContextMenuPrimitive.SubContent>,
+  React.ComponentPropsWithoutRef<typeof ContextMenuPrimitive.SubContent>
+>(({ className, ...props }, ref) => (
+  <ContextMenuPrimitive.SubContent
+    ref={ref}
+    className={cn(
+      "z-50 min-w-[8rem] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
+      className,
+    )}
+    {...props}
+  />
+));
+ContextMenuSubContent.displayName = ContextMenuPrimitive.SubContent.displayName;
+
+const ContextMenuContent = React.forwardRef<
+  React.ElementRef<typeof ContextMenuPrimitive.Content>,
+  React.ComponentPropsWithoutRef<typeof ContextMenuPrimitive.Content>
+>(({ className, ...props }, ref) => (
+  <ContextMenuPrimitive.Portal>
+    <ContextMenuPrimitive.Content
+      ref={ref}
+      className={cn(
+        "z-50 min-w-[8rem] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md animate-in fade-in-80 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
+        className,
+      )}
+      {...props}
+    />
+  </ContextMenuPrimitive.Portal>
+));
+ContextMenuContent.displayName = ContextMenuPrimitive.Content.displayName;
+
+const ContextMenuItem = React.forwardRef<
+  React.ElementRef<typeof ContextMenuPrimitive.Item>,
+  React.ComponentPropsWithoutRef<typeof ContextMenuPrimitive.Item> & {
+    inset?: boolean;
+  }
+>(({ className, inset, ...props }, ref) => (
+  <ContextMenuPrimitive.Item
+    ref={ref}
+    className={cn(
+      "relative flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 focus:bg-accent focus:text-accent-foreground",
+      inset && "pl-8",
+      className,
+    )}
+    {...props}
+  />
+));
+ContextMenuItem.displayName = ContextMenuPrimitive.Item.displayName;
+
+const ContextMenuCheckboxItem = React.forwardRef<
+  React.ElementRef<typeof ContextMenuPrimitive.CheckboxItem>,
+  React.ComponentPropsWithoutRef<typeof ContextMenuPrimitive.CheckboxItem>
+>(({ className, children, checked, ...props }, ref) => (
+  <ContextMenuPrimitive.CheckboxItem
+    ref={ref}
+    className={cn(
+      "relative flex cursor-default select-none items-center rounded-sm py-1.5 pl-8 pr-2 text-sm outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 focus:bg-accent focus:text-accent-foreground",
+      className,
+    )}
+    checked={checked}
+    {...props}
+  >
+    <span className="absolute left-2 flex h-3.5 w-3.5 items-center justify-center">
+      <ContextMenuPrimitive.ItemIndicator>
+        <Check className="h-4 w-4" />
+      </ContextMenuPrimitive.ItemIndicator>
+    </span>
+    {children}
+  </ContextMenuPrimitive.CheckboxItem>
+));
+ContextMenuCheckboxItem.displayName = ContextMenuPrimitive.CheckboxItem.displayName;
+
+const ContextMenuRadioItem = React.forwardRef<
+  React.ElementRef<typeof ContextMenuPrimitive.RadioItem>,
+  React.ComponentPropsWithoutRef<typeof ContextMenuPrimitive.RadioItem>
+>(({ className, children, ...props }, ref) => (
+  <ContextMenuPrimitive.RadioItem
+    ref={ref}
+    className={cn(
+      "relative flex cursor-default select-none items-center rounded-sm py-1.5 pl-8 pr-2 text-sm outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 focus:bg-accent focus:text-accent-foreground",
+      className,
+    )}
+    {...props}
+  >
+    <span className="absolute left-2 flex h-3.5 w-3.5 items-center justify-center">
+      <ContextMenuPrimitive.ItemIndicator>
+        <Circle className="h-2 w-2 fill-current" />
+      </ContextMenuPrimitive.ItemIndicator>
+    </span>
+    {children}
+  </ContextMenuPrimitive.RadioItem>
+));
+ContextMenuRadioItem.displayName = ContextMenuPrimitive.RadioItem.displayName;
+
+const ContextMenuLabel = React.forwardRef<
+  React.ElementRef<typeof ContextMenuPrimitive.Label>,
+  React.ComponentPropsWithoutRef<typeof ContextMenuPrimitive.Label> & {
+    inset?: boolean;
+  }
+>(({ className, inset, ...props }, ref) => (
+  <ContextMenuPrimitive.Label
+    ref={ref}
+    className={cn("px-2 py-1.5 text-sm font-semibold text-foreground", inset && "pl-8", className)}
+    {...props}
+  />
+));
+ContextMenuLabel.displayName = ContextMenuPrimitive.Label.displayName;
+
+const ContextMenuSeparator = React.forwardRef<
+  React.ElementRef<typeof ContextMenuPrimitive.Separator>,
+  React.ComponentPropsWithoutRef<typeof ContextMenuPrimitive.Separator>
+>(({ className, ...props }, ref) => (
+  <ContextMenuPrimitive.Separator ref={ref} className={cn("-mx-1 my-1 h-px bg-border", className)} {...props} />
+));
+ContextMenuSeparator.displayName = ContextMenuPrimitive.Separator.displayName;
+
+const ContextMenuShortcut = ({ className, ...props }: React.HTMLAttributes<HTMLSpanElement>) => {
+  return <span className={cn("ml-auto text-xs tracking-widest text-muted-foreground", className)} {...props} />;
+};
+ContextMenuShortcut.displayName = "ContextMenuShortcut";
+
+export {
+  ContextMenu,
+  ContextMenuTrigger,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuCheckboxItem,
+  ContextMenuRadioItem,
+  ContextMenuLabel,
+  ContextMenuSeparator,
+  ContextMenuShortcut,
+  ContextMenuGroup,
+  ContextMenuPortal,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
+  ContextMenuRadioGroup,
+};
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/components/ui/dialog.tsx ======
+```tsx
+import * as React from "react";
+import * as DialogPrimitive from "@radix-ui/react-dialog";
+import { X } from "lucide-react";
+
+import { cn } from "@/lib/utils";
+
+const Dialog = DialogPrimitive.Root;
+
+const DialogTrigger = DialogPrimitive.Trigger;
+
+const DialogPortal = DialogPrimitive.Portal;
+
+const DialogClose = DialogPrimitive.Close;
+
+const DialogOverlay = React.forwardRef<
+  React.ElementRef<typeof DialogPrimitive.Overlay>,
+  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Overlay>
+>(({ className, ...props }, ref) => (
+  <DialogPrimitive.Overlay
+    ref={ref}
+    className={cn(
+      "fixed inset-0 z-50 bg-black/80 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
+      className,
+    )}
+    {...props}
+  />
+));
+DialogOverlay.displayName = DialogPrimitive.Overlay.displayName;
+
+const DialogContent = React.forwardRef<
+  React.ElementRef<typeof DialogPrimitive.Content>,
+  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
+>(({ className, children, ...props }, ref) => (
+  <DialogPortal>
+    <DialogOverlay />
+    <DialogPrimitive.Content
+      ref={ref}
+      className={cn(
+        "fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-6 shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] sm:rounded-lg",
+        className,
+      )}
+      {...props}
+    >
+      {children}
+      <DialogPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity data-[state=open]:bg-accent data-[state=open]:text-muted-foreground hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none">
+        <X className="h-4 w-4" />
+        <span className="sr-only">Close</span>
+      </DialogPrimitive.Close>
+    </DialogPrimitive.Content>
+  </DialogPortal>
+));
+DialogContent.displayName = DialogPrimitive.Content.displayName;
+
+const DialogHeader = ({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
+  <div className={cn("flex flex-col space-y-1.5 text-center sm:text-left", className)} {...props} />
+);
+DialogHeader.displayName = "DialogHeader";
+
+const DialogFooter = ({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
+  <div className={cn("flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2", className)} {...props} />
+);
+DialogFooter.displayName = "DialogFooter";
+
+const DialogTitle = React.forwardRef<
+  React.ElementRef<typeof DialogPrimitive.Title>,
+  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Title>
+>(({ className, ...props }, ref) => (
+  <DialogPrimitive.Title
+    ref={ref}
+    className={cn("text-lg font-semibold leading-none tracking-tight", className)}
+    {...props}
+  />
+));
+DialogTitle.displayName = DialogPrimitive.Title.displayName;
+
+const DialogDescription = React.forwardRef<
+  React.ElementRef<typeof DialogPrimitive.Description>,
+  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Description>
+>(({ className, ...props }, ref) => (
+  <DialogPrimitive.Description ref={ref} className={cn("text-sm text-muted-foreground", className)} {...props} />
+));
+DialogDescription.displayName = DialogPrimitive.Description.displayName;
+
+export {
+  Dialog,
+  DialogPortal,
+  DialogOverlay,
+  DialogClose,
+  DialogTrigger,
+  DialogContent,
+  DialogHeader,
+  DialogFooter,
+  DialogTitle,
+  DialogDescription,
+};
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/components/ui/drawer.tsx ======
+```tsx
+import * as React from "react";
+import { Drawer as DrawerPrimitive } from "vaul";
+
+import { cn } from "@/lib/utils";
+
+const Drawer = ({ shouldScaleBackground = true, ...props }: React.ComponentProps<typeof DrawerPrimitive.Root>) => (
+  <DrawerPrimitive.Root shouldScaleBackground={shouldScaleBackground} {...props} />
+);
+Drawer.displayName = "Drawer";
+
+const DrawerTrigger = DrawerPrimitive.Trigger;
+
+const DrawerPortal = DrawerPrimitive.Portal;
+
+const DrawerClose = DrawerPrimitive.Close;
+
+const DrawerOverlay = React.forwardRef<
+  React.ElementRef<typeof DrawerPrimitive.Overlay>,
+  React.ComponentPropsWithoutRef<typeof DrawerPrimitive.Overlay>
+>(({ className, ...props }, ref) => (
+  <DrawerPrimitive.Overlay ref={ref} className={cn("fixed inset-0 z-50 bg-black/80", className)} {...props} />
+));
+DrawerOverlay.displayName = DrawerPrimitive.Overlay.displayName;
+
+const DrawerContent = React.forwardRef<
+  React.ElementRef<typeof DrawerPrimitive.Content>,
+  React.ComponentPropsWithoutRef<typeof DrawerPrimitive.Content>
+>(({ className, children, ...props }, ref) => (
+  <DrawerPortal>
+    <DrawerOverlay />
+    <DrawerPrimitive.Content
+      ref={ref}
+      className={cn(
+        "fixed inset-x-0 bottom-0 z-50 mt-24 flex h-auto flex-col rounded-t-[10px] border bg-background",
+        className,
+      )}
+      {...props}
+    >
+      <div className="mx-auto mt-4 h-2 w-[100px] rounded-full bg-muted" />
+      {children}
+    </DrawerPrimitive.Content>
+  </DrawerPortal>
+));
+DrawerContent.displayName = "DrawerContent";
+
+const DrawerHeader = ({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
+  <div className={cn("grid gap-1.5 p-4 text-center sm:text-left", className)} {...props} />
+);
+DrawerHeader.displayName = "DrawerHeader";
+
+const DrawerFooter = ({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
+  <div className={cn("mt-auto flex flex-col gap-2 p-4", className)} {...props} />
+);
+DrawerFooter.displayName = "DrawerFooter";
+
+const DrawerTitle = React.forwardRef<
+  React.ElementRef<typeof DrawerPrimitive.Title>,
+  React.ComponentPropsWithoutRef<typeof DrawerPrimitive.Title>
+>(({ className, ...props }, ref) => (
+  <DrawerPrimitive.Title
+    ref={ref}
+    className={cn("text-lg font-semibold leading-none tracking-tight", className)}
+    {...props}
+  />
+));
+DrawerTitle.displayName = DrawerPrimitive.Title.displayName;
+
+const DrawerDescription = React.forwardRef<
+  React.ElementRef<typeof DrawerPrimitive.Description>,
+  React.ComponentPropsWithoutRef<typeof DrawerPrimitive.Description>
+>(({ className, ...props }, ref) => (
+  <DrawerPrimitive.Description ref={ref} className={cn("text-sm text-muted-foreground", className)} {...props} />
+));
+DrawerDescription.displayName = DrawerPrimitive.Description.displayName;
+
+export {
+  Drawer,
+  DrawerPortal,
+  DrawerOverlay,
+  DrawerTrigger,
+  DrawerClose,
+  DrawerContent,
+  DrawerHeader,
+  DrawerFooter,
+  DrawerTitle,
+  DrawerDescription,
+};
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/components/ui/dropdown-menu.tsx ======
+```tsx
+import * as React from "react";
+import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
+import { Check, ChevronRight, Circle } from "lucide-react";
+
+import { cn } from "@/lib/utils";
+
+const DropdownMenu = DropdownMenuPrimitive.Root;
+
+const DropdownMenuTrigger = DropdownMenuPrimitive.Trigger;
+
+const DropdownMenuGroup = DropdownMenuPrimitive.Group;
+
+const DropdownMenuPortal = DropdownMenuPrimitive.Portal;
+
+const DropdownMenuSub = DropdownMenuPrimitive.Sub;
+
+const DropdownMenuRadioGroup = DropdownMenuPrimitive.RadioGroup;
+
+const DropdownMenuSubTrigger = React.forwardRef<
+  React.ElementRef<typeof DropdownMenuPrimitive.SubTrigger>,
+  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.SubTrigger> & {
+    inset?: boolean;
+  }
+>(({ className, inset, children, ...props }, ref) => (
+  <DropdownMenuPrimitive.SubTrigger
+    ref={ref}
+    className={cn(
+      "flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none data-[state=open]:bg-accent focus:bg-accent",
+      inset && "pl-8",
+      className,
+    )}
+    {...props}
+  >
+    {children}
+    <ChevronRight className="ml-auto h-4 w-4" />
+  </DropdownMenuPrimitive.SubTrigger>
+));
+DropdownMenuSubTrigger.displayName = DropdownMenuPrimitive.SubTrigger.displayName;
+
+const DropdownMenuSubContent = React.forwardRef<
+  React.ElementRef<typeof DropdownMenuPrimitive.SubContent>,
+  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.SubContent>
+>(({ className, ...props }, ref) => (
+  <DropdownMenuPrimitive.SubContent
+    ref={ref}
+    className={cn(
+      "z-50 min-w-[8rem] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-lg data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
+      className,
+    )}
+    {...props}
+  />
+));
+DropdownMenuSubContent.displayName = DropdownMenuPrimitive.SubContent.displayName;
+
+const DropdownMenuContent = React.forwardRef<
+  React.ElementRef<typeof DropdownMenuPrimitive.Content>,
+  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Content>
+>(({ className, sideOffset = 4, ...props }, ref) => (
+  <DropdownMenuPrimitive.Portal>
+    <DropdownMenuPrimitive.Content
+      ref={ref}
+      sideOffset={sideOffset}
+      className={cn(
+        "z-50 min-w-[8rem] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
+        className,
+      )}
+      {...props}
+    />
+  </DropdownMenuPrimitive.Portal>
+));
+DropdownMenuContent.displayName = DropdownMenuPrimitive.Content.displayName;
+
+const DropdownMenuItem = React.forwardRef<
+  React.ElementRef<typeof DropdownMenuPrimitive.Item>,
+  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Item> & {
+    inset?: boolean;
+  }
+>(({ className, inset, ...props }, ref) => (
+  <DropdownMenuPrimitive.Item
+    ref={ref}
+    className={cn(
+      "relative flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none transition-colors data-[disabled]:pointer-events-none data-[disabled]:opacity-50 focus:bg-accent focus:text-accent-foreground",
+      inset && "pl-8",
+      className,
+    )}
+    {...props}
+  />
+));
+DropdownMenuItem.displayName = DropdownMenuPrimitive.Item.displayName;
+
+const DropdownMenuCheckboxItem = React.forwardRef<
+  React.ElementRef<typeof DropdownMenuPrimitive.CheckboxItem>,
+  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.CheckboxItem>
+>(({ className, children, checked, ...props }, ref) => (
+  <DropdownMenuPrimitive.CheckboxItem
+    ref={ref}
+    className={cn(
+      "relative flex cursor-default select-none items-center rounded-sm py-1.5 pl-8 pr-2 text-sm outline-none transition-colors data-[disabled]:pointer-events-none data-[disabled]:opacity-50 focus:bg-accent focus:text-accent-foreground",
+      className,
+    )}
+    checked={checked}
+    {...props}
+  >
+    <span className="absolute left-2 flex h-3.5 w-3.5 items-center justify-center">
+      <DropdownMenuPrimitive.ItemIndicator>
+        <Check className="h-4 w-4" />
+      </DropdownMenuPrimitive.ItemIndicator>
+    </span>
+    {children}
+  </DropdownMenuPrimitive.CheckboxItem>
+));
+DropdownMenuCheckboxItem.displayName = DropdownMenuPrimitive.CheckboxItem.displayName;
+
+const DropdownMenuRadioItem = React.forwardRef<
+  React.ElementRef<typeof DropdownMenuPrimitive.RadioItem>,
+  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.RadioItem>
+>(({ className, children, ...props }, ref) => (
+  <DropdownMenuPrimitive.RadioItem
+    ref={ref}
+    className={cn(
+      "relative flex cursor-default select-none items-center rounded-sm py-1.5 pl-8 pr-2 text-sm outline-none transition-colors data-[disabled]:pointer-events-none data-[disabled]:opacity-50 focus:bg-accent focus:text-accent-foreground",
+      className,
+    )}
+    {...props}
+  >
+    <span className="absolute left-2 flex h-3.5 w-3.5 items-center justify-center">
+      <DropdownMenuPrimitive.ItemIndicator>
+        <Circle className="h-2 w-2 fill-current" />
+      </DropdownMenuPrimitive.ItemIndicator>
+    </span>
+    {children}
+  </DropdownMenuPrimitive.RadioItem>
+));
+DropdownMenuRadioItem.displayName = DropdownMenuPrimitive.RadioItem.displayName;
+
+const DropdownMenuLabel = React.forwardRef<
+  React.ElementRef<typeof DropdownMenuPrimitive.Label>,
+  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Label> & {
+    inset?: boolean;
+  }
+>(({ className, inset, ...props }, ref) => (
+  <DropdownMenuPrimitive.Label
+    ref={ref}
+    className={cn("px-2 py-1.5 text-sm font-semibold", inset && "pl-8", className)}
+    {...props}
+  />
+));
+DropdownMenuLabel.displayName = DropdownMenuPrimitive.Label.displayName;
+
+const DropdownMenuSeparator = React.forwardRef<
+  React.ElementRef<typeof DropdownMenuPrimitive.Separator>,
+  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Separator>
+>(({ className, ...props }, ref) => (
+  <DropdownMenuPrimitive.Separator ref={ref} className={cn("-mx-1 my-1 h-px bg-muted", className)} {...props} />
+));
+DropdownMenuSeparator.displayName = DropdownMenuPrimitive.Separator.displayName;
+
+const DropdownMenuShortcut = ({ className, ...props }: React.HTMLAttributes<HTMLSpanElement>) => {
+  return <span className={cn("ml-auto text-xs tracking-widest opacity-60", className)} {...props} />;
+};
+DropdownMenuShortcut.displayName = "DropdownMenuShortcut";
+
+export {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuCheckboxItem,
+  DropdownMenuRadioItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuShortcut,
+  DropdownMenuGroup,
+  DropdownMenuPortal,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuRadioGroup,
+};
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/components/ui/form.tsx ======
+```tsx
+import * as React from "react";
+import * as LabelPrimitive from "@radix-ui/react-label";
+import { Slot } from "@radix-ui/react-slot";
+import { Controller, ControllerProps, FieldPath, FieldValues, FormProvider, useFormContext } from "react-hook-form";
+
+import { cn } from "@/lib/utils";
+import { Label } from "@/components/ui/label";
+
+const Form = FormProvider;
+
+type FormFieldContextValue<
+  TFieldValues extends FieldValues = FieldValues,
+  TName extends FieldPath<TFieldValues> = FieldPath<TFieldValues>,
+> = {
+  name: TName;
+};
+
+const FormFieldContext = React.createContext<FormFieldContextValue>({} as FormFieldContextValue);
+
+const FormField = <
+  TFieldValues extends FieldValues = FieldValues,
+  TName extends FieldPath<TFieldValues> = FieldPath<TFieldValues>,
+>({
+  ...props
+}: ControllerProps<TFieldValues, TName>) => {
+  return (
+    <FormFieldContext.Provider value={{ name: props.name }}>
+      <Controller {...props} />
+    </FormFieldContext.Provider>
+  );
+};
+
+const useFormField = () => {
+  const fieldContext = React.useContext(FormFieldContext);
+  const itemContext = React.useContext(FormItemContext);
+  const { getFieldState, formState } = useFormContext();
+
+  const fieldState = getFieldState(fieldContext.name, formState);
+
+  if (!fieldContext) {
+    throw new Error("useFormField should be used within <FormField>");
+  }
+
+  const { id } = itemContext;
+
+  return {
+    id,
+    name: fieldContext.name,
+    formItemId: `${id}-form-item`,
+    formDescriptionId: `${id}-form-item-description`,
+    formMessageId: `${id}-form-item-message`,
+    ...fieldState,
+  };
+};
+
+type FormItemContextValue = {
+  id: string;
+};
+
+const FormItemContext = React.createContext<FormItemContextValue>({} as FormItemContextValue);
+
+const FormItem = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
+  ({ className, ...props }, ref) => {
+    const id = React.useId();
+
+    return (
+      <FormItemContext.Provider value={{ id }}>
+        <div ref={ref} className={cn("space-y-2", className)} {...props} />
+      </FormItemContext.Provider>
+    );
+  },
+);
+FormItem.displayName = "FormItem";
+
+const FormLabel = React.forwardRef<
+  React.ElementRef<typeof LabelPrimitive.Root>,
+  React.ComponentPropsWithoutRef<typeof LabelPrimitive.Root>
+>(({ className, ...props }, ref) => {
+  const { error, formItemId } = useFormField();
+
+  return <Label ref={ref} className={cn(error && "text-destructive", className)} htmlFor={formItemId} {...props} />;
+});
+FormLabel.displayName = "FormLabel";
+
+const FormControl = React.forwardRef<React.ElementRef<typeof Slot>, React.ComponentPropsWithoutRef<typeof Slot>>(
+  ({ ...props }, ref) => {
+    const { error, formItemId, formDescriptionId, formMessageId } = useFormField();
+
+    return (
+      <Slot
+        ref={ref}
+        id={formItemId}
+        aria-describedby={!error ? `${formDescriptionId}` : `${formDescriptionId} ${formMessageId}`}
+        aria-invalid={!!error}
+        {...props}
+      />
+    );
+  },
+);
+FormControl.displayName = "FormControl";
+
+const FormDescription = React.forwardRef<HTMLParagraphElement, React.HTMLAttributes<HTMLParagraphElement>>(
+  ({ className, ...props }, ref) => {
+    const { formDescriptionId } = useFormField();
+
+    return <p ref={ref} id={formDescriptionId} className={cn("text-sm text-muted-foreground", className)} {...props} />;
+  },
+);
+FormDescription.displayName = "FormDescription";
+
+const FormMessage = React.forwardRef<HTMLParagraphElement, React.HTMLAttributes<HTMLParagraphElement>>(
+  ({ className, children, ...props }, ref) => {
+    const { error, formMessageId } = useFormField();
+    const body = error ? String(error?.message) : children;
+
+    if (!body) {
+      return null;
+    }
+
+    return (
+      <p ref={ref} id={formMessageId} className={cn("text-sm font-medium text-destructive", className)} {...props}>
+        {body}
+      </p>
+    );
+  },
+);
+FormMessage.displayName = "FormMessage";
+
+export { useFormField, Form, FormItem, FormLabel, FormControl, FormDescription, FormMessage, FormField };
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/components/ui/hover-card.tsx ======
+```tsx
+import * as React from "react";
+import * as HoverCardPrimitive from "@radix-ui/react-hover-card";
+
+import { cn } from "@/lib/utils";
+
+const HoverCard = HoverCardPrimitive.Root;
+
+const HoverCardTrigger = HoverCardPrimitive.Trigger;
+
+const HoverCardContent = React.forwardRef<
+  React.ElementRef<typeof HoverCardPrimitive.Content>,
+  React.ComponentPropsWithoutRef<typeof HoverCardPrimitive.Content>
+>(({ className, align = "center", sideOffset = 4, ...props }, ref) => (
+  <HoverCardPrimitive.Content
+    ref={ref}
+    align={align}
+    sideOffset={sideOffset}
+    className={cn(
+      "z-50 w-64 rounded-md border bg-popover p-4 text-popover-foreground shadow-md outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
+      className,
+    )}
+    {...props}
+  />
+));
+HoverCardContent.displayName = HoverCardPrimitive.Content.displayName;
+
+export { HoverCard, HoverCardTrigger, HoverCardContent };
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/components/ui/input-otp.tsx ======
+```tsx
+import * as React from "react";
+import { OTPInput, OTPInputContext } from "input-otp";
+import { Dot } from "lucide-react";
+
+import { cn } from "@/lib/utils";
+
+const InputOTP = React.forwardRef<React.ElementRef<typeof OTPInput>, React.ComponentPropsWithoutRef<typeof OTPInput>>(
+  ({ className, containerClassName, ...props }, ref) => (
+    <OTPInput
+      ref={ref}
+      containerClassName={cn("flex items-center gap-2 has-[:disabled]:opacity-50", containerClassName)}
+      className={cn("disabled:cursor-not-allowed", className)}
+      {...props}
+    />
+  ),
+);
+InputOTP.displayName = "InputOTP";
+
+const InputOTPGroup = React.forwardRef<React.ElementRef<"div">, React.ComponentPropsWithoutRef<"div">>(
+  ({ className, ...props }, ref) => <div ref={ref} className={cn("flex items-center", className)} {...props} />,
+);
+InputOTPGroup.displayName = "InputOTPGroup";
+
+const InputOTPSlot = React.forwardRef<
+  React.ElementRef<"div">,
+  React.ComponentPropsWithoutRef<"div"> & { index: number }
+>(({ index, className, ...props }, ref) => {
+  const inputOTPContext = React.useContext(OTPInputContext);
+  const { char, hasFakeCaret, isActive } = inputOTPContext.slots[index];
+
+  return (
+    <div
+      ref={ref}
+      className={cn(
+        "relative flex h-10 w-10 items-center justify-center border-y border-r border-input text-sm transition-all first:rounded-l-md first:border-l last:rounded-r-md",
+        isActive && "z-10 ring-2 ring-ring ring-offset-background",
+        className,
+      )}
+      {...props}
+    >
+      {char}
+      {hasFakeCaret && (
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+          <div className="animate-caret-blink h-4 w-px bg-foreground duration-1000" />
+        </div>
+      )}
+    </div>
+  );
+});
+InputOTPSlot.displayName = "InputOTPSlot";
+
+const InputOTPSeparator = React.forwardRef<React.ElementRef<"div">, React.ComponentPropsWithoutRef<"div">>(
+  ({ ...props }, ref) => (
+    <div ref={ref} role="separator" {...props}>
+      <Dot />
+    </div>
+  ),
+);
+InputOTPSeparator.displayName = "InputOTPSeparator";
+
+export { InputOTP, InputOTPGroup, InputOTPSlot, InputOTPSeparator };
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/components/ui/input.tsx ======
+```tsx
+import * as React from "react";
+
+import { cn } from "@/lib/utils";
+
+const Input = React.forwardRef<HTMLInputElement, React.ComponentProps<"input">>(
+  ({ className, type, ...props }, ref) => {
+    return (
+      <input
+        type={type}
+        className={cn(
+          "flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-base ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 md:text-sm",
+          className,
+        )}
+        ref={ref}
+        {...props}
+      />
+    );
+  },
+);
+Input.displayName = "Input";
+
+export { Input };
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/components/ui/label.tsx ======
+```tsx
+import * as React from "react";
+import * as LabelPrimitive from "@radix-ui/react-label";
+import { cva, type VariantProps } from "class-variance-authority";
+
+import { cn } from "@/lib/utils";
+
+const labelVariants = cva("text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70");
+
+const Label = React.forwardRef<
+  React.ElementRef<typeof LabelPrimitive.Root>,
+  React.ComponentPropsWithoutRef<typeof LabelPrimitive.Root> & VariantProps<typeof labelVariants>
+>(({ className, ...props }, ref) => (
+  <LabelPrimitive.Root ref={ref} className={cn(labelVariants(), className)} {...props} />
+));
+Label.displayName = LabelPrimitive.Root.displayName;
+
+export { Label };
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/components/ui/loader.tsx ======
+```tsx
+import * as React from "react";
+import { cn } from "@/lib/utils";
+
+// Minimal ShadCN-style spinner (accessible)
+export function Loader({ className, size = 16, label }: { className?: string; size?: number; label?: string }) {
+  const s = `${size}px`;
+  return (
+    <div className={cn("inline-flex items-center gap-2", className)} role="status" aria-live="polite" aria-busy="true">
+      <span
+        className="inline-block rounded-full border-2 border-muted-foreground/30 border-t-primary animate-spin"
+        style={{ width: s, height: s }}
+      />
+      {label ? <span className="sr-only">{label}</span> : null}
+    </div>
+  );
+}
+
+// Three-dot pulse loader
+export function LoaderDots({ className, label }: { className?: string; label?: string }) {
+  return (
+    <div className={cn("inline-flex items-center gap-1", className)} role="status" aria-live="polite" aria-busy="true">
+      <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground animate-pulse [animation-delay:0ms]" />
+      <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground animate-pulse [animation-delay:120ms]" />
+      <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground animate-pulse [animation-delay:240ms]" />
+      {label ? <span className="sr-only">{label}</span> : null}
+    </div>
+  );
+}
+
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/components/ui/menubar.tsx ======
+```tsx
+import * as React from "react";
+import * as MenubarPrimitive from "@radix-ui/react-menubar";
+import { Check, ChevronRight, Circle } from "lucide-react";
+
+import { cn } from "@/lib/utils";
+
+const MenubarMenu = MenubarPrimitive.Menu;
+
+const MenubarGroup = MenubarPrimitive.Group;
+
+const MenubarPortal = MenubarPrimitive.Portal;
+
+const MenubarSub = MenubarPrimitive.Sub;
+
+const MenubarRadioGroup = MenubarPrimitive.RadioGroup;
+
+const Menubar = React.forwardRef<
+  React.ElementRef<typeof MenubarPrimitive.Root>,
+  React.ComponentPropsWithoutRef<typeof MenubarPrimitive.Root>
+>(({ className, ...props }, ref) => (
+  <MenubarPrimitive.Root
+    ref={ref}
+    className={cn("flex h-10 items-center space-x-1 rounded-md border bg-background p-1", className)}
+    {...props}
+  />
+));
+Menubar.displayName = MenubarPrimitive.Root.displayName;
+
+const MenubarTrigger = React.forwardRef<
+  React.ElementRef<typeof MenubarPrimitive.Trigger>,
+  React.ComponentPropsWithoutRef<typeof MenubarPrimitive.Trigger>
+>(({ className, ...props }, ref) => (
+  <MenubarPrimitive.Trigger
+    ref={ref}
+    className={cn(
+      "flex cursor-default select-none items-center rounded-sm px-3 py-1.5 text-sm font-medium outline-none data-[state=open]:bg-accent data-[state=open]:text-accent-foreground focus:bg-accent focus:text-accent-foreground",
+      className,
+    )}
+    {...props}
+  />
+));
+MenubarTrigger.displayName = MenubarPrimitive.Trigger.displayName;
+
+const MenubarSubTrigger = React.forwardRef<
+  React.ElementRef<typeof MenubarPrimitive.SubTrigger>,
+  React.ComponentPropsWithoutRef<typeof MenubarPrimitive.SubTrigger> & {
+    inset?: boolean;
+  }
+>(({ className, inset, children, ...props }, ref) => (
+  <MenubarPrimitive.SubTrigger
+    ref={ref}
+    className={cn(
+      "flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none data-[state=open]:bg-accent data-[state=open]:text-accent-foreground focus:bg-accent focus:text-accent-foreground",
+      inset && "pl-8",
+      className,
+    )}
+    {...props}
+  >
+    {children}
+    <ChevronRight className="ml-auto h-4 w-4" />
+  </MenubarPrimitive.SubTrigger>
+));
+MenubarSubTrigger.displayName = MenubarPrimitive.SubTrigger.displayName;
+
+const MenubarSubContent = React.forwardRef<
+  React.ElementRef<typeof MenubarPrimitive.SubContent>,
+  React.ComponentPropsWithoutRef<typeof MenubarPrimitive.SubContent>
+>(({ className, ...props }, ref) => (
+  <MenubarPrimitive.SubContent
+    ref={ref}
+    className={cn(
+      "z-50 min-w-[8rem] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
+      className,
+    )}
+    {...props}
+  />
+));
+MenubarSubContent.displayName = MenubarPrimitive.SubContent.displayName;
+
+const MenubarContent = React.forwardRef<
+  React.ElementRef<typeof MenubarPrimitive.Content>,
+  React.ComponentPropsWithoutRef<typeof MenubarPrimitive.Content>
+>(({ className, align = "start", alignOffset = -4, sideOffset = 8, ...props }, ref) => (
+  <MenubarPrimitive.Portal>
+    <MenubarPrimitive.Content
+      ref={ref}
+      align={align}
+      alignOffset={alignOffset}
+      sideOffset={sideOffset}
+      className={cn(
+        "z-50 min-w-[12rem] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md data-[state=open]:animate-in data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
+        className,
+      )}
+      {...props}
+    />
+  </MenubarPrimitive.Portal>
+));
+MenubarContent.displayName = MenubarPrimitive.Content.displayName;
+
+const MenubarItem = React.forwardRef<
+  React.ElementRef<typeof MenubarPrimitive.Item>,
+  React.ComponentPropsWithoutRef<typeof MenubarPrimitive.Item> & {
+    inset?: boolean;
+  }
+>(({ className, inset, ...props }, ref) => (
+  <MenubarPrimitive.Item
+    ref={ref}
+    className={cn(
+      "relative flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 focus:bg-accent focus:text-accent-foreground",
+      inset && "pl-8",
+      className,
+    )}
+    {...props}
+  />
+));
+MenubarItem.displayName = MenubarPrimitive.Item.displayName;
+
+const MenubarCheckboxItem = React.forwardRef<
+  React.ElementRef<typeof MenubarPrimitive.CheckboxItem>,
+  React.ComponentPropsWithoutRef<typeof MenubarPrimitive.CheckboxItem>
+>(({ className, children, checked, ...props }, ref) => (
+  <MenubarPrimitive.CheckboxItem
+    ref={ref}
+    className={cn(
+      "relative flex cursor-default select-none items-center rounded-sm py-1.5 pl-8 pr-2 text-sm outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 focus:bg-accent focus:text-accent-foreground",
+      className,
+    )}
+    checked={checked}
+    {...props}
+  >
+    <span className="absolute left-2 flex h-3.5 w-3.5 items-center justify-center">
+      <MenubarPrimitive.ItemIndicator>
+        <Check className="h-4 w-4" />
+      </MenubarPrimitive.ItemIndicator>
+    </span>
+    {children}
+  </MenubarPrimitive.CheckboxItem>
+));
+MenubarCheckboxItem.displayName = MenubarPrimitive.CheckboxItem.displayName;
+
+const MenubarRadioItem = React.forwardRef<
+  React.ElementRef<typeof MenubarPrimitive.RadioItem>,
+  React.ComponentPropsWithoutRef<typeof MenubarPrimitive.RadioItem>
+>(({ className, children, ...props }, ref) => (
+  <MenubarPrimitive.RadioItem
+    ref={ref}
+    className={cn(
+      "relative flex cursor-default select-none items-center rounded-sm py-1.5 pl-8 pr-2 text-sm outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 focus:bg-accent focus:text-accent-foreground",
+      className,
+    )}
+    {...props}
+  >
+    <span className="absolute left-2 flex h-3.5 w-3.5 items-center justify-center">
+      <MenubarPrimitive.ItemIndicator>
+        <Circle className="h-2 w-2 fill-current" />
+      </MenubarPrimitive.ItemIndicator>
+    </span>
+    {children}
+  </MenubarPrimitive.RadioItem>
+));
+MenubarRadioItem.displayName = MenubarPrimitive.RadioItem.displayName;
+
+const MenubarLabel = React.forwardRef<
+  React.ElementRef<typeof MenubarPrimitive.Label>,
+  React.ComponentPropsWithoutRef<typeof MenubarPrimitive.Label> & {
+    inset?: boolean;
+  }
+>(({ className, inset, ...props }, ref) => (
+  <MenubarPrimitive.Label
+    ref={ref}
+    className={cn("px-2 py-1.5 text-sm font-semibold", inset && "pl-8", className)}
+    {...props}
+  />
+));
+MenubarLabel.displayName = MenubarPrimitive.Label.displayName;
+
+const MenubarSeparator = React.forwardRef<
+  React.ElementRef<typeof MenubarPrimitive.Separator>,
+  React.ComponentPropsWithoutRef<typeof MenubarPrimitive.Separator>
+>(({ className, ...props }, ref) => (
+  <MenubarPrimitive.Separator ref={ref} className={cn("-mx-1 my-1 h-px bg-muted", className)} {...props} />
+));
+MenubarSeparator.displayName = MenubarPrimitive.Separator.displayName;
+
+const MenubarShortcut = ({ className, ...props }: React.HTMLAttributes<HTMLSpanElement>) => {
+  return <span className={cn("ml-auto text-xs tracking-widest text-muted-foreground", className)} {...props} />;
+};
+MenubarShortcut.displayname = "MenubarShortcut";
+
+export {
+  Menubar,
+  MenubarMenu,
+  MenubarTrigger,
+  MenubarContent,
+  MenubarItem,
+  MenubarSeparator,
+  MenubarLabel,
+  MenubarCheckboxItem,
+  MenubarRadioGroup,
+  MenubarRadioItem,
+  MenubarPortal,
+  MenubarSubContent,
+  MenubarSubTrigger,
+  MenubarGroup,
+  MenubarSub,
+  MenubarShortcut,
+};
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/components/ui/navigation-menu.tsx ======
+```tsx
+import * as React from "react";
+import * as NavigationMenuPrimitive from "@radix-ui/react-navigation-menu";
+import { cva } from "class-variance-authority";
+import { ChevronDown } from "lucide-react";
+
+import { cn } from "@/lib/utils";
+
+const NavigationMenu = React.forwardRef<
+  React.ElementRef<typeof NavigationMenuPrimitive.Root>,
+  React.ComponentPropsWithoutRef<typeof NavigationMenuPrimitive.Root>
+>(({ className, children, ...props }, ref) => (
+  <NavigationMenuPrimitive.Root
+    ref={ref}
+    className={cn("relative z-10 flex max-w-max flex-1 items-center justify-center", className)}
+    {...props}
+  >
+    {children}
+    <NavigationMenuViewport />
+  </NavigationMenuPrimitive.Root>
+));
+NavigationMenu.displayName = NavigationMenuPrimitive.Root.displayName;
+
+const NavigationMenuList = React.forwardRef<
+  React.ElementRef<typeof NavigationMenuPrimitive.List>,
+  React.ComponentPropsWithoutRef<typeof NavigationMenuPrimitive.List>
+>(({ className, ...props }, ref) => (
+  <NavigationMenuPrimitive.List
+    ref={ref}
+    className={cn("group flex flex-1 list-none items-center justify-center space-x-1", className)}
+    {...props}
+  />
+));
+NavigationMenuList.displayName = NavigationMenuPrimitive.List.displayName;
+
+const NavigationMenuItem = NavigationMenuPrimitive.Item;
+
+const navigationMenuTriggerStyle = cva(
+  "group inline-flex h-10 w-max items-center justify-center rounded-md bg-background px-4 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground focus:outline-none disabled:pointer-events-none disabled:opacity-50 data-[active]:bg-accent/50 data-[state=open]:bg-accent/50",
+);
+
+const NavigationMenuTrigger = React.forwardRef<
+  React.ElementRef<typeof NavigationMenuPrimitive.Trigger>,
+  React.ComponentPropsWithoutRef<typeof NavigationMenuPrimitive.Trigger>
+>(({ className, children, ...props }, ref) => (
+  <NavigationMenuPrimitive.Trigger
+    ref={ref}
+    className={cn(navigationMenuTriggerStyle(), "group", className)}
+    {...props}
+  >
+    {children}{" "}
+    <ChevronDown
+      className="relative top-[1px] ml-1 h-3 w-3 transition duration-200 group-data-[state=open]:rotate-180"
+      aria-hidden="true"
+    />
+  </NavigationMenuPrimitive.Trigger>
+));
+NavigationMenuTrigger.displayName = NavigationMenuPrimitive.Trigger.displayName;
+
+const NavigationMenuContent = React.forwardRef<
+  React.ElementRef<typeof NavigationMenuPrimitive.Content>,
+  React.ComponentPropsWithoutRef<typeof NavigationMenuPrimitive.Content>
+>(({ className, ...props }, ref) => (
+  <NavigationMenuPrimitive.Content
+    ref={ref}
+    className={cn(
+      "left-0 top-0 w-full data-[motion^=from-]:animate-in data-[motion^=to-]:animate-out data-[motion^=from-]:fade-in data-[motion^=to-]:fade-out data-[motion=from-end]:slide-in-from-right-52 data-[motion=from-start]:slide-in-from-left-52 data-[motion=to-end]:slide-out-to-right-52 data-[motion=to-start]:slide-out-to-left-52 md:absolute md:w-auto",
+      className,
+    )}
+    {...props}
+  />
+));
+NavigationMenuContent.displayName = NavigationMenuPrimitive.Content.displayName;
+
+const NavigationMenuLink = NavigationMenuPrimitive.Link;
+
+const NavigationMenuViewport = React.forwardRef<
+  React.ElementRef<typeof NavigationMenuPrimitive.Viewport>,
+  React.ComponentPropsWithoutRef<typeof NavigationMenuPrimitive.Viewport>
+>(({ className, ...props }, ref) => (
+  <div className={cn("absolute left-0 top-full flex justify-center")}>
+    <NavigationMenuPrimitive.Viewport
+      className={cn(
+        "origin-top-center relative mt-1.5 h-[var(--radix-navigation-menu-viewport-height)] w-full overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-lg data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-90 md:w-[var(--radix-navigation-menu-viewport-width)]",
+        className,
+      )}
+      ref={ref}
+      {...props}
+    />
+  </div>
+));
+NavigationMenuViewport.displayName = NavigationMenuPrimitive.Viewport.displayName;
+
+const NavigationMenuIndicator = React.forwardRef<
+  React.ElementRef<typeof NavigationMenuPrimitive.Indicator>,
+  React.ComponentPropsWithoutRef<typeof NavigationMenuPrimitive.Indicator>
+>(({ className, ...props }, ref) => (
+  <NavigationMenuPrimitive.Indicator
+    ref={ref}
+    className={cn(
+      "top-full z-[1] flex h-1.5 items-end justify-center overflow-hidden data-[state=visible]:animate-in data-[state=hidden]:animate-out data-[state=hidden]:fade-out data-[state=visible]:fade-in",
+      className,
+    )}
+    {...props}
+  >
+    <div className="relative top-[60%] h-2 w-2 rotate-45 rounded-tl-sm bg-border shadow-md" />
+  </NavigationMenuPrimitive.Indicator>
+));
+NavigationMenuIndicator.displayName = NavigationMenuPrimitive.Indicator.displayName;
+
+export {
+  navigationMenuTriggerStyle,
+  NavigationMenu,
+  NavigationMenuList,
+  NavigationMenuItem,
+  NavigationMenuContent,
+  NavigationMenuTrigger,
+  NavigationMenuLink,
+  NavigationMenuIndicator,
+  NavigationMenuViewport,
+};
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/components/ui/pagination.tsx ======
+```tsx
+import * as React from "react";
+import { ChevronLeft, ChevronRight, MoreHorizontal } from "lucide-react";
+
+import { cn } from "@/lib/utils";
+import { ButtonProps, buttonVariants } from "@/components/ui/button";
+
+const Pagination = ({ className, ...props }: React.ComponentProps<"nav">) => (
+  <nav
+    role="navigation"
+    aria-label="pagination"
+    className={cn("mx-auto flex w-full justify-center", className)}
+    {...props}
+  />
+);
+Pagination.displayName = "Pagination";
+
+const PaginationContent = React.forwardRef<HTMLUListElement, React.ComponentProps<"ul">>(
+  ({ className, ...props }, ref) => (
+    <ul ref={ref} className={cn("flex flex-row items-center gap-1", className)} {...props} />
+  ),
+);
+PaginationContent.displayName = "PaginationContent";
+
+const PaginationItem = React.forwardRef<HTMLLIElement, React.ComponentProps<"li">>(({ className, ...props }, ref) => (
+  <li ref={ref} className={cn("", className)} {...props} />
+));
+PaginationItem.displayName = "PaginationItem";
+
+type PaginationLinkProps = {
+  isActive?: boolean;
+} & Pick<ButtonProps, "size"> &
+  React.ComponentProps<"a">;
+
+const PaginationLink = ({ className, isActive, size = "icon", ...props }: PaginationLinkProps) => (
+  <a
+    aria-current={isActive ? "page" : undefined}
+    className={cn(
+      buttonVariants({
+        variant: isActive ? "outline" : "ghost",
+        size,
+      }),
+      className,
+    )}
+    {...props}
+  />
+);
+PaginationLink.displayName = "PaginationLink";
+
+const PaginationPrevious = ({ className, ...props }: React.ComponentProps<typeof PaginationLink>) => (
+  <PaginationLink aria-label="Go to previous page" size="default" className={cn("gap-1 pl-2.5", className)} {...props}>
+    <ChevronLeft className="h-4 w-4" />
+    <span>Previous</span>
+  </PaginationLink>
+);
+PaginationPrevious.displayName = "PaginationPrevious";
+
+const PaginationNext = ({ className, ...props }: React.ComponentProps<typeof PaginationLink>) => (
+  <PaginationLink aria-label="Go to next page" size="default" className={cn("gap-1 pr-2.5", className)} {...props}>
+    <span>Next</span>
+    <ChevronRight className="h-4 w-4" />
+  </PaginationLink>
+);
+PaginationNext.displayName = "PaginationNext";
+
+const PaginationEllipsis = ({ className, ...props }: React.ComponentProps<"span">) => (
+  <span aria-hidden className={cn("flex h-9 w-9 items-center justify-center", className)} {...props}>
+    <MoreHorizontal className="h-4 w-4" />
+    <span className="sr-only">More pages</span>
+  </span>
+);
+PaginationEllipsis.displayName = "PaginationEllipsis";
+
+export {
+  Pagination,
+  PaginationContent,
+  PaginationEllipsis,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+};
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/components/ui/popover.tsx ======
+```tsx
+import * as React from "react";
+import * as PopoverPrimitive from "@radix-ui/react-popover";
+
+import { cn } from "@/lib/utils";
+
+const Popover = PopoverPrimitive.Root;
+
+const PopoverTrigger = PopoverPrimitive.Trigger;
+
+const PopoverContent = React.forwardRef<
+  React.ElementRef<typeof PopoverPrimitive.Content>,
+  React.ComponentPropsWithoutRef<typeof PopoverPrimitive.Content>
+>(({ className, align = "center", sideOffset = 4, ...props }, ref) => (
+  <PopoverPrimitive.Portal>
+    <PopoverPrimitive.Content
+      ref={ref}
+      align={align}
+      sideOffset={sideOffset}
+      className={cn(
+        "z-50 w-72 rounded-md border bg-popover p-4 text-popover-foreground shadow-md outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
+        className,
+      )}
+      {...props}
+    />
+  </PopoverPrimitive.Portal>
+));
+PopoverContent.displayName = PopoverPrimitive.Content.displayName;
+
+export { Popover, PopoverTrigger, PopoverContent };
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/components/ui/progress.tsx ======
+```tsx
+import * as React from "react";
+import * as ProgressPrimitive from "@radix-ui/react-progress";
+
+import { cn } from "@/lib/utils";
+
+const Progress = React.forwardRef<
+  React.ElementRef<typeof ProgressPrimitive.Root>,
+  React.ComponentPropsWithoutRef<typeof ProgressPrimitive.Root>
+>(({ className, value, ...props }, ref) => (
+  <ProgressPrimitive.Root
+    ref={ref}
+    className={cn("relative h-4 w-full overflow-hidden rounded-full bg-secondary", className)}
+    {...props}
+  >
+    <ProgressPrimitive.Indicator
+      className="h-full w-full flex-1 bg-primary transition-all"
+      style={{ transform: `translateX(-${100 - (value || 0)}%)` }}
+    />
+  </ProgressPrimitive.Root>
+));
+Progress.displayName = ProgressPrimitive.Root.displayName;
+
+export { Progress };
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/components/ui/radio-group.tsx ======
+```tsx
+import * as React from "react";
+import * as RadioGroupPrimitive from "@radix-ui/react-radio-group";
+import { Circle } from "lucide-react";
+
+import { cn } from "@/lib/utils";
+
+const RadioGroup = React.forwardRef<
+  React.ElementRef<typeof RadioGroupPrimitive.Root>,
+  React.ComponentPropsWithoutRef<typeof RadioGroupPrimitive.Root>
+>(({ className, ...props }, ref) => {
+  return <RadioGroupPrimitive.Root className={cn("grid gap-2", className)} {...props} ref={ref} />;
+});
+RadioGroup.displayName = RadioGroupPrimitive.Root.displayName;
+
+const RadioGroupItem = React.forwardRef<
+  React.ElementRef<typeof RadioGroupPrimitive.Item>,
+  React.ComponentPropsWithoutRef<typeof RadioGroupPrimitive.Item>
+>(({ className, ...props }, ref) => {
+  return (
+    <RadioGroupPrimitive.Item
+      ref={ref}
+      className={cn(
+        "aspect-square h-4 w-4 rounded-full border border-primary text-primary ring-offset-background focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50",
+        className,
+      )}
+      {...props}
+    >
+      <RadioGroupPrimitive.Indicator className="flex items-center justify-center">
+        <Circle className="h-2.5 w-2.5 fill-current text-current" />
+      </RadioGroupPrimitive.Indicator>
+    </RadioGroupPrimitive.Item>
+  );
+});
+RadioGroupItem.displayName = RadioGroupPrimitive.Item.displayName;
+
+export { RadioGroup, RadioGroupItem };
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/components/ui/resizable.tsx ======
+```tsx
+import { GripVertical } from "lucide-react";
+import * as ResizablePrimitive from "react-resizable-panels";
+
+import { cn } from "@/lib/utils";
+
+const ResizablePanelGroup = ({ className, ...props }: React.ComponentProps<typeof ResizablePrimitive.PanelGroup>) => (
+  <ResizablePrimitive.PanelGroup
+    className={cn("flex h-full w-full data-[panel-group-direction=vertical]:flex-col", className)}
+    {...props}
+  />
+);
+
+const ResizablePanel = ResizablePrimitive.Panel;
+
+const ResizableHandle = ({
+  withHandle,
+  className,
+  ...props
+}: React.ComponentProps<typeof ResizablePrimitive.PanelResizeHandle> & {
+  withHandle?: boolean;
+}) => (
+  <ResizablePrimitive.PanelResizeHandle
+    className={cn(
+      "relative flex w-px items-center justify-center bg-border after:absolute after:inset-y-0 after:left-1/2 after:w-1 after:-translate-x-1/2 data-[panel-group-direction=vertical]:h-px data-[panel-group-direction=vertical]:w-full data-[panel-group-direction=vertical]:after:left-0 data-[panel-group-direction=vertical]:after:h-1 data-[panel-group-direction=vertical]:after:w-full data-[panel-group-direction=vertical]:after:-translate-y-1/2 data-[panel-group-direction=vertical]:after:translate-x-0 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 [&[data-panel-group-direction=vertical]>div]:rotate-90",
+      className,
+    )}
+    {...props}
+  >
+    {withHandle && (
+      <div className="z-10 flex h-4 w-3 items-center justify-center rounded-sm border bg-border">
+        <GripVertical className="h-2.5 w-2.5" />
+      </div>
+    )}
+  </ResizablePrimitive.PanelResizeHandle>
+);
+
+export { ResizablePanelGroup, ResizablePanel, ResizableHandle };
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/components/ui/scroll-area.tsx ======
+```tsx
+import * as React from "react";
+import * as ScrollAreaPrimitive from "@radix-ui/react-scroll-area";
+
+import { cn } from "@/lib/utils";
+
+const ScrollArea = React.forwardRef<
+  React.ElementRef<typeof ScrollAreaPrimitive.Root>,
+  React.ComponentPropsWithoutRef<typeof ScrollAreaPrimitive.Root>
+>(({ className, children, ...props }, ref) => (
+  <ScrollAreaPrimitive.Root ref={ref} className={cn("relative overflow-hidden", className)} {...props}>
+    <ScrollAreaPrimitive.Viewport className="h-full w-full rounded-[inherit]">{children}</ScrollAreaPrimitive.Viewport>
+    <ScrollBar />
+    <ScrollAreaPrimitive.Corner />
+  </ScrollAreaPrimitive.Root>
+));
+ScrollArea.displayName = ScrollAreaPrimitive.Root.displayName;
+
+const ScrollBar = React.forwardRef<
+  React.ElementRef<typeof ScrollAreaPrimitive.ScrollAreaScrollbar>,
+  React.ComponentPropsWithoutRef<typeof ScrollAreaPrimitive.ScrollAreaScrollbar>
+>(({ className, orientation = "vertical", ...props }, ref) => (
+  <ScrollAreaPrimitive.ScrollAreaScrollbar
+    ref={ref}
+    orientation={orientation}
+    className={cn(
+      "flex touch-none select-none transition-colors",
+      orientation === "vertical" && "h-full w-2.5 border-l border-l-transparent p-[1px]",
+      orientation === "horizontal" && "h-2.5 flex-col border-t border-t-transparent p-[1px]",
+      className,
+    )}
+    {...props}
+  >
+    <ScrollAreaPrimitive.ScrollAreaThumb className="relative flex-1 rounded-full bg-border" />
+  </ScrollAreaPrimitive.ScrollAreaScrollbar>
+));
+ScrollBar.displayName = ScrollAreaPrimitive.ScrollAreaScrollbar.displayName;
+
+export { ScrollArea, ScrollBar };
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/components/ui/select.tsx ======
+```tsx
+import * as React from "react";
+import * as SelectPrimitive from "@radix-ui/react-select";
+import { Check, ChevronDown, ChevronUp } from "lucide-react";
+
+import { cn } from "@/lib/utils";
+
+const Select = SelectPrimitive.Root;
+
+const SelectGroup = SelectPrimitive.Group;
+
+const SelectValue = SelectPrimitive.Value;
+
+const SelectTrigger = React.forwardRef<
+  React.ElementRef<typeof SelectPrimitive.Trigger>,
+  React.ComponentPropsWithoutRef<typeof SelectPrimitive.Trigger>
+>(({ className, children, ...props }, ref) => (
+  <SelectPrimitive.Trigger
+    ref={ref}
+    className={cn(
+      "flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1",
+      className,
+    )}
+    {...props}
+  >
+    {children}
+    <SelectPrimitive.Icon asChild>
+      <ChevronDown className="h-4 w-4 opacity-50" />
+    </SelectPrimitive.Icon>
+  </SelectPrimitive.Trigger>
+));
+SelectTrigger.displayName = SelectPrimitive.Trigger.displayName;
+
+const SelectScrollUpButton = React.forwardRef<
+  React.ElementRef<typeof SelectPrimitive.ScrollUpButton>,
+  React.ComponentPropsWithoutRef<typeof SelectPrimitive.ScrollUpButton>
+>(({ className, ...props }, ref) => (
+  <SelectPrimitive.ScrollUpButton
+    ref={ref}
+    className={cn("flex cursor-default items-center justify-center py-1", className)}
+    {...props}
+  >
+    <ChevronUp className="h-4 w-4" />
+  </SelectPrimitive.ScrollUpButton>
+));
+SelectScrollUpButton.displayName = SelectPrimitive.ScrollUpButton.displayName;
+
+const SelectScrollDownButton = React.forwardRef<
+  React.ElementRef<typeof SelectPrimitive.ScrollDownButton>,
+  React.ComponentPropsWithoutRef<typeof SelectPrimitive.ScrollDownButton>
+>(({ className, ...props }, ref) => (
+  <SelectPrimitive.ScrollDownButton
+    ref={ref}
+    className={cn("flex cursor-default items-center justify-center py-1", className)}
+    {...props}
+  >
+    <ChevronDown className="h-4 w-4" />
+  </SelectPrimitive.ScrollDownButton>
+));
+SelectScrollDownButton.displayName = SelectPrimitive.ScrollDownButton.displayName;
+
+const SelectContent = React.forwardRef<
+  React.ElementRef<typeof SelectPrimitive.Content>,
+  React.ComponentPropsWithoutRef<typeof SelectPrimitive.Content>
+>(({ className, children, position = "popper", ...props }, ref) => (
+  <SelectPrimitive.Portal>
+    <SelectPrimitive.Content
+      ref={ref}
+      className={cn(
+        "relative z-50 max-h-96 min-w-[8rem] overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
+        position === "popper" &&
+          "data-[side=bottom]:translate-y-1 data-[side=left]:-translate-x-1 data-[side=right]:translate-x-1 data-[side=top]:-translate-y-1",
+        className,
+      )}
+      position={position}
+      {...props}
+    >
+      <SelectScrollUpButton />
+      <SelectPrimitive.Viewport
+        className={cn(
+          "p-1",
+          position === "popper" &&
+            "h-[var(--radix-select-trigger-height)] w-full min-w-[var(--radix-select-trigger-width)]",
+        )}
+      >
+        {children}
+      </SelectPrimitive.Viewport>
+      <SelectScrollDownButton />
+    </SelectPrimitive.Content>
+  </SelectPrimitive.Portal>
+));
+SelectContent.displayName = SelectPrimitive.Content.displayName;
+
+const SelectLabel = React.forwardRef<
+  React.ElementRef<typeof SelectPrimitive.Label>,
+  React.ComponentPropsWithoutRef<typeof SelectPrimitive.Label>
+>(({ className, ...props }, ref) => (
+  <SelectPrimitive.Label ref={ref} className={cn("py-1.5 pl-8 pr-2 text-sm font-semibold", className)} {...props} />
+));
+SelectLabel.displayName = SelectPrimitive.Label.displayName;
+
+const SelectItem = React.forwardRef<
+  React.ElementRef<typeof SelectPrimitive.Item>,
+  React.ComponentPropsWithoutRef<typeof SelectPrimitive.Item>
+>(({ className, children, ...props }, ref) => (
+  <SelectPrimitive.Item
+    ref={ref}
+    className={cn(
+      "relative flex w-full cursor-default select-none items-center rounded-sm py-1.5 pl-8 pr-2 text-sm outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 focus:bg-accent focus:text-accent-foreground",
+      className,
+    )}
+    {...props}
+  >
+    <span className="absolute left-2 flex h-3.5 w-3.5 items-center justify-center">
+      <SelectPrimitive.ItemIndicator>
+        <Check className="h-4 w-4" />
+      </SelectPrimitive.ItemIndicator>
+    </span>
+
+    <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
+  </SelectPrimitive.Item>
+));
+SelectItem.displayName = SelectPrimitive.Item.displayName;
+
+const SelectSeparator = React.forwardRef<
+  React.ElementRef<typeof SelectPrimitive.Separator>,
+  React.ComponentPropsWithoutRef<typeof SelectPrimitive.Separator>
+>(({ className, ...props }, ref) => (
+  <SelectPrimitive.Separator ref={ref} className={cn("-mx-1 my-1 h-px bg-muted", className)} {...props} />
+));
+SelectSeparator.displayName = SelectPrimitive.Separator.displayName;
+
+export {
+  Select,
+  SelectGroup,
+  SelectValue,
+  SelectTrigger,
+  SelectContent,
+  SelectLabel,
+  SelectItem,
+  SelectSeparator,
+  SelectScrollUpButton,
+  SelectScrollDownButton,
+};
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/components/ui/separator.tsx ======
+```tsx
+import * as React from "react";
+import * as SeparatorPrimitive from "@radix-ui/react-separator";
+
+import { cn } from "@/lib/utils";
+
+const Separator = React.forwardRef<
+  React.ElementRef<typeof SeparatorPrimitive.Root>,
+  React.ComponentPropsWithoutRef<typeof SeparatorPrimitive.Root>
+>(({ className, orientation = "horizontal", decorative = true, ...props }, ref) => (
+  <SeparatorPrimitive.Root
+    ref={ref}
+    decorative={decorative}
+    orientation={orientation}
+    className={cn("shrink-0 bg-border", orientation === "horizontal" ? "h-[1px] w-full" : "h-full w-[1px]", className)}
+    {...props}
+  />
+));
+Separator.displayName = SeparatorPrimitive.Root.displayName;
+
+export { Separator };
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/components/ui/sheet.tsx ======
+```tsx
+import * as SheetPrimitive from "@radix-ui/react-dialog";
+import { cva, type VariantProps } from "class-variance-authority";
+import { X } from "lucide-react";
+import * as React from "react";
+
+import { cn } from "@/lib/utils";
+
+const Sheet = SheetPrimitive.Root;
+
+const SheetTrigger = SheetPrimitive.Trigger;
+
+const SheetClose = SheetPrimitive.Close;
+
+const SheetPortal = SheetPrimitive.Portal;
+
+const SheetOverlay = React.forwardRef<
+  React.ElementRef<typeof SheetPrimitive.Overlay>,
+  React.ComponentPropsWithoutRef<typeof SheetPrimitive.Overlay>
+>(({ className, ...props }, ref) => (
+  <SheetPrimitive.Overlay
+    className={cn(
+      "fixed inset-0 z-50 bg-black/80 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
+      className,
+    )}
+    {...props}
+    ref={ref}
+  />
+));
+SheetOverlay.displayName = SheetPrimitive.Overlay.displayName;
+
+const sheetVariants = cva(
+  "fixed z-50 gap-4 bg-background p-6 shadow-lg transition ease-in-out data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:duration-300 data-[state=open]:duration-500",
+  {
+    variants: {
+      side: {
+        top: "inset-x-0 top-0 border-b data-[state=closed]:slide-out-to-top data-[state=open]:slide-in-from-top",
+        bottom:
+          "inset-x-0 bottom-0 border-t data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom",
+        left: "inset-y-0 left-0 h-full w-3/4 border-r data-[state=closed]:slide-out-to-left data-[state=open]:slide-in-from-left sm:max-w-sm",
+        right:
+          "inset-y-0 right-0 h-full w-3/4  border-l data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right sm:max-w-sm",
+      },
+    },
+    defaultVariants: {
+      side: "right",
+    },
+  },
+);
+
+interface SheetContentProps
+  extends React.ComponentPropsWithoutRef<typeof SheetPrimitive.Content>,
+    VariantProps<typeof sheetVariants> {}
+
+const SheetContent = React.forwardRef<React.ElementRef<typeof SheetPrimitive.Content>, SheetContentProps>(
+  ({ side = "right", className, children, ...props }, ref) => (
+    <SheetPortal>
+      <SheetOverlay />
+      <SheetPrimitive.Content ref={ref} className={cn(sheetVariants({ side }), className)} {...props}>
+        {children}
+        <SheetPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity data-[state=open]:bg-secondary hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none">
+          <X className="h-4 w-4" />
+          <span className="sr-only">Close</span>
+        </SheetPrimitive.Close>
+      </SheetPrimitive.Content>
+    </SheetPortal>
+  ),
+);
+SheetContent.displayName = SheetPrimitive.Content.displayName;
+
+const SheetHeader = ({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
+  <div className={cn("flex flex-col space-y-2 text-center sm:text-left", className)} {...props} />
+);
+SheetHeader.displayName = "SheetHeader";
+
+const SheetFooter = ({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
+  <div className={cn("flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2", className)} {...props} />
+);
+SheetFooter.displayName = "SheetFooter";
+
+const SheetTitle = React.forwardRef<
+  React.ElementRef<typeof SheetPrimitive.Title>,
+  React.ComponentPropsWithoutRef<typeof SheetPrimitive.Title>
+>(({ className, ...props }, ref) => (
+  <SheetPrimitive.Title ref={ref} className={cn("text-lg font-semibold text-foreground", className)} {...props} />
+));
+SheetTitle.displayName = SheetPrimitive.Title.displayName;
+
+const SheetDescription = React.forwardRef<
+  React.ElementRef<typeof SheetPrimitive.Description>,
+  React.ComponentPropsWithoutRef<typeof SheetPrimitive.Description>
+>(({ className, ...props }, ref) => (
+  <SheetPrimitive.Description ref={ref} className={cn("text-sm text-muted-foreground", className)} {...props} />
+));
+SheetDescription.displayName = SheetPrimitive.Description.displayName;
+
+export {
+  Sheet,
+  SheetClose,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetOverlay,
+  SheetPortal,
+  SheetTitle,
+  SheetTrigger,
+};
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/components/ui/sidebar.tsx ======
+```tsx
+import * as React from "react";
+import { Slot } from "@radix-ui/react-slot";
+import { VariantProps, cva } from "class-variance-authority";
+import { PanelLeft } from "lucide-react";
+
+import { useIsMobile } from "@/hooks/use-mobile";
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Separator } from "@/components/ui/separator";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+
+const SIDEBAR_COOKIE_NAME = "sidebar:state";
+const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7;
+const SIDEBAR_WIDTH = "16rem";
+const SIDEBAR_WIDTH_MOBILE = "18rem";
+const SIDEBAR_WIDTH_ICON = "3rem";
+const SIDEBAR_KEYBOARD_SHORTCUT = "b";
+
+type SidebarContext = {
+  state: "expanded" | "collapsed";
+  open: boolean;
+  setOpen: (open: boolean) => void;
+  openMobile: boolean;
+  setOpenMobile: (open: boolean) => void;
+  isMobile: boolean;
+  toggleSidebar: () => void;
+};
+
+const SidebarContext = React.createContext<SidebarContext | null>(null);
+
+function useSidebar() {
+  const context = React.useContext(SidebarContext);
+  if (!context) {
+    throw new Error("useSidebar must be used within a SidebarProvider.");
+  }
+
+  return context;
+}
+
+const SidebarProvider = React.forwardRef<
+  HTMLDivElement,
+  React.ComponentProps<"div"> & {
+    defaultOpen?: boolean;
+    open?: boolean;
+    onOpenChange?: (open: boolean) => void;
+  }
+>(({ defaultOpen = true, open: openProp, onOpenChange: setOpenProp, className, style, children, ...props }, ref) => {
+  const isMobile = useIsMobile();
+  const [openMobile, setOpenMobile] = React.useState(false);
+
+  // This is the internal state of the sidebar.
+  // We use openProp and setOpenProp for control from outside the component.
+  const [_open, _setOpen] = React.useState(defaultOpen);
+  const open = openProp ?? _open;
+  const setOpen = React.useCallback(
+    (value: boolean | ((value: boolean) => boolean)) => {
+      const openState = typeof value === "function" ? value(open) : value;
+      if (setOpenProp) {
+        setOpenProp(openState);
+      } else {
+        _setOpen(openState);
+      }
+
+      // This sets the cookie to keep the sidebar state.
+      document.cookie = `${SIDEBAR_COOKIE_NAME}=${openState}; path=/; max-age=${SIDEBAR_COOKIE_MAX_AGE}`;
+    },
+    [setOpenProp, open],
+  );
+
+  // Helper to toggle the sidebar.
+  const toggleSidebar = React.useCallback(() => {
+    return isMobile ? setOpenMobile((open) => !open) : setOpen((open) => !open);
+  }, [isMobile, setOpen, setOpenMobile]);
+
+  // Adds a keyboard shortcut to toggle the sidebar.
+  React.useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === SIDEBAR_KEYBOARD_SHORTCUT && (event.metaKey || event.ctrlKey)) {
+        event.preventDefault();
+        toggleSidebar();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [toggleSidebar]);
+
+  // We add a state so that we can do data-state="expanded" or "collapsed".
+  // This makes it easier to style the sidebar with Tailwind classes.
+  const state = open ? "expanded" : "collapsed";
+
+  const contextValue = React.useMemo<SidebarContext>(
+    () => ({
+      state,
+      open,
+      setOpen,
+      isMobile,
+      openMobile,
+      setOpenMobile,
+      toggleSidebar,
+    }),
+    [state, open, setOpen, isMobile, openMobile, setOpenMobile, toggleSidebar],
+  );
+
+  return (
+    <SidebarContext.Provider value={contextValue}>
+      <TooltipProvider delayDuration={0}>
+        <div
+          style={
+            {
+              "--sidebar-width": SIDEBAR_WIDTH,
+              "--sidebar-width-icon": SIDEBAR_WIDTH_ICON,
+              ...style,
+            } as React.CSSProperties
+          }
+          className={cn("group/sidebar-wrapper flex min-h-svh w-full has-[[data-variant=inset]]:bg-sidebar", className)}
+          ref={ref}
+          {...props}
+        >
+          {children}
+        </div>
+      </TooltipProvider>
+    </SidebarContext.Provider>
+  );
+});
+SidebarProvider.displayName = "SidebarProvider";
+
+const Sidebar = React.forwardRef<
+  HTMLDivElement,
+  React.ComponentProps<"div"> & {
+    side?: "left" | "right";
+    variant?: "sidebar" | "floating" | "inset";
+    collapsible?: "offcanvas" | "icon" | "none";
+  }
+>(({ side = "left", variant = "sidebar", collapsible = "offcanvas", className, children, ...props }, ref) => {
+  const { isMobile, state, openMobile, setOpenMobile } = useSidebar();
+
+  if (collapsible === "none") {
+    return (
+      <div
+        className={cn("flex h-full w-[--sidebar-width] flex-col bg-sidebar text-sidebar-foreground", className)}
+        ref={ref}
+        {...props}
+      >
+        {children}
+      </div>
+    );
+  }
+
+  if (isMobile) {
+    return (
+      <Sheet open={openMobile} onOpenChange={setOpenMobile} {...props}>
+        <SheetContent
+          data-sidebar="sidebar"
+          data-mobile="true"
+          className="w-[--sidebar-width] bg-sidebar p-0 text-sidebar-foreground [&>button]:hidden"
+          style={
+            {
+              "--sidebar-width": SIDEBAR_WIDTH_MOBILE,
+            } as React.CSSProperties
+          }
+          side={side}
+        >
+          <div className="flex h-full w-full flex-col">{children}</div>
+        </SheetContent>
+      </Sheet>
+    );
+  }
+
+  return (
+    <div
+      ref={ref}
+      className="group peer hidden text-sidebar-foreground md:block"
+      data-state={state}
+      data-collapsible={state === "collapsed" ? collapsible : ""}
+      data-variant={variant}
+      data-side={side}
+    >
+      {/* This is what handles the sidebar gap on desktop */}
+      <div
+        className={cn(
+          "relative h-svh w-[--sidebar-width] bg-transparent transition-[width] duration-200 ease-linear",
+          "group-data-[collapsible=offcanvas]:w-0",
+          "group-data-[side=right]:rotate-180",
+          variant === "floating" || variant === "inset"
+            ? "group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)_+_theme(spacing.4))]"
+            : "group-data-[collapsible=icon]:w-[--sidebar-width-icon]",
+        )}
+      />
+      <div
+        className={cn(
+          "fixed inset-y-0 z-10 hidden h-svh w-[--sidebar-width] transition-[left,right,width] duration-200 ease-linear md:flex",
+          side === "left"
+            ? "left-0 group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)]"
+            : "right-0 group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)]",
+          // Adjust the padding for floating and inset variants.
+          variant === "floating" || variant === "inset"
+            ? "p-2 group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)_+_theme(spacing.4)_+2px)]"
+            : "group-data-[collapsible=icon]:w-[--sidebar-width-icon] group-data-[side=left]:border-r group-data-[side=right]:border-l",
+          className,
+        )}
+        {...props}
+      >
+        <div
+          data-sidebar="sidebar"
+          className="flex h-full w-full flex-col bg-sidebar group-data-[variant=floating]:rounded-lg group-data-[variant=floating]:border group-data-[variant=floating]:border-sidebar-border group-data-[variant=floating]:shadow"
+        >
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+});
+Sidebar.displayName = "Sidebar";
+
+const SidebarTrigger = React.forwardRef<React.ElementRef<typeof Button>, React.ComponentProps<typeof Button>>(
+  ({ className, onClick, ...props }, ref) => {
+    const { toggleSidebar } = useSidebar();
+
+    return (
+      <Button
+        ref={ref}
+        data-sidebar="trigger"
+        variant="ghost"
+        size="icon"
+        className={cn("h-7 w-7", className)}
+        onClick={(event) => {
+          onClick?.(event);
+          toggleSidebar();
+        }}
+        {...props}
+      >
+        <PanelLeft />
+        <span className="sr-only">Toggle Sidebar</span>
+      </Button>
+    );
+  },
+);
+SidebarTrigger.displayName = "SidebarTrigger";
+
+const SidebarRail = React.forwardRef<HTMLButtonElement, React.ComponentProps<"button">>(
+  ({ className, ...props }, ref) => {
+    const { toggleSidebar } = useSidebar();
+
+    return (
+      <button
+        ref={ref}
+        data-sidebar="rail"
+        aria-label="Toggle Sidebar"
+        tabIndex={-1}
+        onClick={toggleSidebar}
+        title="Toggle Sidebar"
+        className={cn(
+          "absolute inset-y-0 z-20 hidden w-4 -translate-x-1/2 transition-all ease-linear after:absolute after:inset-y-0 after:left-1/2 after:w-[2px] group-data-[side=left]:-right-4 group-data-[side=right]:left-0 hover:after:bg-sidebar-border sm:flex",
+          "[[data-side=left]_&]:cursor-w-resize [[data-side=right]_&]:cursor-e-resize",
+          "[[data-side=left][data-state=collapsed]_&]:cursor-e-resize [[data-side=right][data-state=collapsed]_&]:cursor-w-resize",
+          "group-data-[collapsible=offcanvas]:translate-x-0 group-data-[collapsible=offcanvas]:after:left-full group-data-[collapsible=offcanvas]:hover:bg-sidebar",
+          "[[data-side=left][data-collapsible=offcanvas]_&]:-right-2",
+          "[[data-side=right][data-collapsible=offcanvas]_&]:-left-2",
+          className,
+        )}
+        {...props}
+      />
+    );
+  },
+);
+SidebarRail.displayName = "SidebarRail";
+
+const SidebarInset = React.forwardRef<HTMLDivElement, React.ComponentProps<"main">>(({ className, ...props }, ref) => {
+  return (
+    <main
+      ref={ref}
+      className={cn(
+        "relative flex min-h-svh flex-1 flex-col bg-background",
+        "peer-data-[variant=inset]:min-h-[calc(100svh-theme(spacing.4))] md:peer-data-[variant=inset]:m-2 md:peer-data-[state=collapsed]:peer-data-[variant=inset]:ml-2 md:peer-data-[variant=inset]:ml-0 md:peer-data-[variant=inset]:rounded-xl md:peer-data-[variant=inset]:shadow",
+        className,
+      )}
+      {...props}
+    />
+  );
+});
+SidebarInset.displayName = "SidebarInset";
+
+const SidebarInput = React.forwardRef<React.ElementRef<typeof Input>, React.ComponentProps<typeof Input>>(
+  ({ className, ...props }, ref) => {
+    return (
+      <Input
+        ref={ref}
+        data-sidebar="input"
+        className={cn(
+          "h-8 w-full bg-background shadow-none focus-visible:ring-2 focus-visible:ring-sidebar-ring",
+          className,
+        )}
+        {...props}
+      />
+    );
+  },
+);
+SidebarInput.displayName = "SidebarInput";
+
+const SidebarHeader = React.forwardRef<HTMLDivElement, React.ComponentProps<"div">>(({ className, ...props }, ref) => {
+  return <div ref={ref} data-sidebar="header" className={cn("flex flex-col gap-2 p-2", className)} {...props} />;
+});
+SidebarHeader.displayName = "SidebarHeader";
+
+const SidebarFooter = React.forwardRef<HTMLDivElement, React.ComponentProps<"div">>(({ className, ...props }, ref) => {
+  return <div ref={ref} data-sidebar="footer" className={cn("flex flex-col gap-2 p-2", className)} {...props} />;
+});
+SidebarFooter.displayName = "SidebarFooter";
+
+const SidebarSeparator = React.forwardRef<React.ElementRef<typeof Separator>, React.ComponentProps<typeof Separator>>(
+  ({ className, ...props }, ref) => {
+    return (
+      <Separator
+        ref={ref}
+        data-sidebar="separator"
+        className={cn("mx-2 w-auto bg-sidebar-border", className)}
+        {...props}
+      />
+    );
+  },
+);
+SidebarSeparator.displayName = "SidebarSeparator";
+
+const SidebarContent = React.forwardRef<HTMLDivElement, React.ComponentProps<"div">>(({ className, ...props }, ref) => {
+  return (
+    <div
+      ref={ref}
+      data-sidebar="content"
+      className={cn(
+        "flex min-h-0 flex-1 flex-col gap-2 overflow-auto group-data-[collapsible=icon]:overflow-hidden",
+        className,
+      )}
+      {...props}
+    />
+  );
+});
+SidebarContent.displayName = "SidebarContent";
+
+const SidebarGroup = React.forwardRef<HTMLDivElement, React.ComponentProps<"div">>(({ className, ...props }, ref) => {
+  return (
+    <div
+      ref={ref}
+      data-sidebar="group"
+      className={cn("relative flex w-full min-w-0 flex-col p-2", className)}
+      {...props}
+    />
+  );
+});
+SidebarGroup.displayName = "SidebarGroup";
+
+const SidebarGroupLabel = React.forwardRef<HTMLDivElement, React.ComponentProps<"div"> & { asChild?: boolean }>(
+  ({ className, asChild = false, ...props }, ref) => {
+    const Comp = asChild ? Slot : "div";
+
+    return (
+      <Comp
+        ref={ref}
+        data-sidebar="group-label"
+        className={cn(
+          "flex h-8 shrink-0 items-center rounded-md px-2 text-xs font-medium text-sidebar-foreground/70 outline-none ring-sidebar-ring transition-[margin,opa] duration-200 ease-linear focus-visible:ring-2 [&>svg]:size-4 [&>svg]:shrink-0",
+          "group-data-[collapsible=icon]:-mt-8 group-data-[collapsible=icon]:opacity-0",
+          className,
+        )}
+        {...props}
+      />
+    );
+  },
+);
+SidebarGroupLabel.displayName = "SidebarGroupLabel";
+
+const SidebarGroupAction = React.forwardRef<HTMLButtonElement, React.ComponentProps<"button"> & { asChild?: boolean }>(
+  ({ className, asChild = false, ...props }, ref) => {
+    const Comp = asChild ? Slot : "button";
+
+    return (
+      <Comp
+        ref={ref}
+        data-sidebar="group-action"
+        className={cn(
+          "absolute right-3 top-3.5 flex aspect-square w-5 items-center justify-center rounded-md p-0 text-sidebar-foreground outline-none ring-sidebar-ring transition-transform hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 [&>svg]:size-4 [&>svg]:shrink-0",
+          // Increases the hit area of the button on mobile.
+          "after:absolute after:-inset-2 after:md:hidden",
+          "group-data-[collapsible=icon]:hidden",
+          className,
+        )}
+        {...props}
+      />
+    );
+  },
+);
+SidebarGroupAction.displayName = "SidebarGroupAction";
+
+const SidebarGroupContent = React.forwardRef<HTMLDivElement, React.ComponentProps<"div">>(
+  ({ className, ...props }, ref) => (
+    <div ref={ref} data-sidebar="group-content" className={cn("w-full text-sm", className)} {...props} />
+  ),
+);
+SidebarGroupContent.displayName = "SidebarGroupContent";
+
+const SidebarMenu = React.forwardRef<HTMLUListElement, React.ComponentProps<"ul">>(({ className, ...props }, ref) => (
+  <ul ref={ref} data-sidebar="menu" className={cn("flex w-full min-w-0 flex-col gap-1", className)} {...props} />
+));
+SidebarMenu.displayName = "SidebarMenu";
+
+const SidebarMenuItem = React.forwardRef<HTMLLIElement, React.ComponentProps<"li">>(({ className, ...props }, ref) => (
+  <li ref={ref} data-sidebar="menu-item" className={cn("group/menu-item relative", className)} {...props} />
+));
+SidebarMenuItem.displayName = "SidebarMenuItem";
+
+const sidebarMenuButtonVariants = cva(
+  "peer/menu-button flex w-full items-center gap-2 overflow-hidden rounded-md p-2 text-left text-sm outline-none ring-sidebar-ring transition-[width,height,padding] hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 group-has-[[data-sidebar=menu-action]]/menu-item:pr-8 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-[active=true]:bg-sidebar-accent data-[active=true]:font-medium data-[active=true]:text-sidebar-accent-foreground data-[state=open]:hover:bg-sidebar-accent data-[state=open]:hover:text-sidebar-accent-foreground group-data-[collapsible=icon]:!size-8 group-data-[collapsible=icon]:!p-2 [&>span:last-child]:truncate [&>svg]:size-4 [&>svg]:shrink-0",
+  {
+    variants: {
+      variant: {
+        default: "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+        outline:
+          "bg-background shadow-[0_0_0_1px_hsl(var(--sidebar-border))] hover:bg-sidebar-accent hover:text-sidebar-accent-foreground hover:shadow-[0_0_0_1px_hsl(var(--sidebar-accent))]",
+      },
+      size: {
+        default: "h-8 text-sm",
+        sm: "h-7 text-xs",
+        lg: "h-12 text-sm group-data-[collapsible=icon]:!p-0",
+      },
+    },
+    defaultVariants: {
+      variant: "default",
+      size: "default",
+    },
+  },
+);
+
+const SidebarMenuButton = React.forwardRef<
+  HTMLButtonElement,
+  React.ComponentProps<"button"> & {
+    asChild?: boolean;
+    isActive?: boolean;
+    tooltip?: string | React.ComponentProps<typeof TooltipContent>;
+  } & VariantProps<typeof sidebarMenuButtonVariants>
+>(({ asChild = false, isActive = false, variant = "default", size = "default", tooltip, className, ...props }, ref) => {
+  const Comp = asChild ? Slot : "button";
+  const { isMobile, state } = useSidebar();
+
+  const button = (
+    <Comp
+      ref={ref}
+      data-sidebar="menu-button"
+      data-size={size}
+      data-active={isActive}
+      className={cn(sidebarMenuButtonVariants({ variant, size }), className)}
+      {...props}
+    />
+  );
+
+  if (!tooltip) {
+    return button;
+  }
+
+  if (typeof tooltip === "string") {
+    tooltip = {
+      children: tooltip,
+    };
+  }
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{button}</TooltipTrigger>
+      <TooltipContent side="right" align="center" hidden={state !== "collapsed" || isMobile} {...tooltip} />
+    </Tooltip>
+  );
+});
+SidebarMenuButton.displayName = "SidebarMenuButton";
+
+const SidebarMenuAction = React.forwardRef<
+  HTMLButtonElement,
+  React.ComponentProps<"button"> & {
+    asChild?: boolean;
+    showOnHover?: boolean;
+  }
+>(({ className, asChild = false, showOnHover = false, ...props }, ref) => {
+  const Comp = asChild ? Slot : "button";
+
+  return (
+    <Comp
+      ref={ref}
+      data-sidebar="menu-action"
+      className={cn(
+        "absolute right-1 top-1.5 flex aspect-square w-5 items-center justify-center rounded-md p-0 text-sidebar-foreground outline-none ring-sidebar-ring transition-transform peer-hover/menu-button:text-sidebar-accent-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 [&>svg]:size-4 [&>svg]:shrink-0",
+        // Increases the hit area of the button on mobile.
+        "after:absolute after:-inset-2 after:md:hidden",
+        "peer-data-[size=sm]/menu-button:top-1",
+        "peer-data-[size=default]/menu-button:top-1.5",
+        "peer-data-[size=lg]/menu-button:top-2.5",
+        "group-data-[collapsible=icon]:hidden",
+        showOnHover &&
+          "group-focus-within/menu-item:opacity-100 group-hover/menu-item:opacity-100 data-[state=open]:opacity-100 peer-data-[active=true]/menu-button:text-sidebar-accent-foreground md:opacity-0",
+        className,
+      )}
+      {...props}
+    />
+  );
+});
+SidebarMenuAction.displayName = "SidebarMenuAction";
+
+const SidebarMenuBadge = React.forwardRef<HTMLDivElement, React.ComponentProps<"div">>(
+  ({ className, ...props }, ref) => (
+    <div
+      ref={ref}
+      data-sidebar="menu-badge"
+      className={cn(
+        "pointer-events-none absolute right-1 flex h-5 min-w-5 select-none items-center justify-center rounded-md px-1 text-xs font-medium tabular-nums text-sidebar-foreground",
+        "peer-hover/menu-button:text-sidebar-accent-foreground peer-data-[active=true]/menu-button:text-sidebar-accent-foreground",
+        "peer-data-[size=sm]/menu-button:top-1",
+        "peer-data-[size=default]/menu-button:top-1.5",
+        "peer-data-[size=lg]/menu-button:top-2.5",
+        "group-data-[collapsible=icon]:hidden",
+        className,
+      )}
+      {...props}
+    />
+  ),
+);
+SidebarMenuBadge.displayName = "SidebarMenuBadge";
+
+const SidebarMenuSkeleton = React.forwardRef<
+  HTMLDivElement,
+  React.ComponentProps<"div"> & {
+    showIcon?: boolean;
+  }
+>(({ className, showIcon = false, ...props }, ref) => {
+  // Random width between 50 to 90%.
+  const width = React.useMemo(() => {
+    return `${Math.floor(Math.random() * 40) + 50}%`;
+  }, []);
+
+  return (
+    <div
+      ref={ref}
+      data-sidebar="menu-skeleton"
+      className={cn("flex h-8 items-center gap-2 rounded-md px-2", className)}
+      {...props}
+    >
+      {showIcon && <Skeleton className="size-4 rounded-md" data-sidebar="menu-skeleton-icon" />}
+      <Skeleton
+        className="h-4 max-w-[--skeleton-width] flex-1"
+        data-sidebar="menu-skeleton-text"
+        style={
+          {
+            "--skeleton-width": width,
+          } as React.CSSProperties
+        }
+      />
+    </div>
+  );
+});
+SidebarMenuSkeleton.displayName = "SidebarMenuSkeleton";
+
+const SidebarMenuSub = React.forwardRef<HTMLUListElement, React.ComponentProps<"ul">>(
+  ({ className, ...props }, ref) => (
+    <ul
+      ref={ref}
+      data-sidebar="menu-sub"
+      className={cn(
+        "mx-3.5 flex min-w-0 translate-x-px flex-col gap-1 border-l border-sidebar-border px-2.5 py-0.5",
+        "group-data-[collapsible=icon]:hidden",
+        className,
+      )}
+      {...props}
+    />
+  ),
+);
+SidebarMenuSub.displayName = "SidebarMenuSub";
+
+const SidebarMenuSubItem = React.forwardRef<HTMLLIElement, React.ComponentProps<"li">>(({ ...props }, ref) => (
+  <li ref={ref} {...props} />
+));
+SidebarMenuSubItem.displayName = "SidebarMenuSubItem";
+
+const SidebarMenuSubButton = React.forwardRef<
+  HTMLAnchorElement,
+  React.ComponentProps<"a"> & {
+    asChild?: boolean;
+    size?: "sm" | "md";
+    isActive?: boolean;
+  }
+>(({ asChild = false, size = "md", isActive, className, ...props }, ref) => {
+  const Comp = asChild ? Slot : "a";
+
+  return (
+    <Comp
+      ref={ref}
+      data-sidebar="menu-sub-button"
+      data-size={size}
+      data-active={isActive}
+      className={cn(
+        "flex h-7 min-w-0 -translate-x-px items-center gap-2 overflow-hidden rounded-md px-2 text-sidebar-foreground outline-none ring-sidebar-ring aria-disabled:pointer-events-none aria-disabled:opacity-50 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 [&>span:last-child]:truncate [&>svg]:size-4 [&>svg]:shrink-0 [&>svg]:text-sidebar-accent-foreground",
+        "data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-accent-foreground",
+        size === "sm" && "text-xs",
+        size === "md" && "text-sm",
+        "group-data-[collapsible=icon]:hidden",
+        className,
+      )}
+      {...props}
+    />
+  );
+});
+SidebarMenuSubButton.displayName = "SidebarMenuSubButton";
+
+export {
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarGroup,
+  SidebarGroupAction,
+  SidebarGroupContent,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarInput,
+  SidebarInset,
+  SidebarMenu,
+  SidebarMenuAction,
+  SidebarMenuBadge,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarMenuSkeleton,
+  SidebarMenuSub,
+  SidebarMenuSubButton,
+  SidebarMenuSubItem,
+  SidebarProvider,
+  SidebarRail,
+  SidebarSeparator,
+  SidebarTrigger,
+  useSidebar,
+};
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/components/ui/skeleton.tsx ======
+```tsx
+import { cn } from "@/lib/utils";
+
+function Skeleton({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
+  return <div className={cn("animate-pulse rounded-md bg-muted", className)} {...props} />;
+}
+
+export { Skeleton };
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/components/ui/slider.tsx ======
+```tsx
+import * as React from "react";
+import * as SliderPrimitive from "@radix-ui/react-slider";
+
+import { cn } from "@/lib/utils";
+
+const Slider = React.forwardRef<
+  React.ElementRef<typeof SliderPrimitive.Root>,
+  React.ComponentPropsWithoutRef<typeof SliderPrimitive.Root>
+>(({ className, ...props }, ref) => (
+  <SliderPrimitive.Root
+    ref={ref}
+    className={cn("relative flex w-full touch-none select-none items-center", className)}
+    {...props}
+  >
+    <SliderPrimitive.Track className="relative h-2 w-full grow overflow-hidden rounded-full bg-secondary">
+      <SliderPrimitive.Range className="absolute h-full bg-primary" />
+    </SliderPrimitive.Track>
+    <SliderPrimitive.Thumb className="block h-5 w-5 rounded-full border-2 border-primary bg-background ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50" />
+  </SliderPrimitive.Root>
+));
+Slider.displayName = SliderPrimitive.Root.displayName;
+
+export { Slider };
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/components/ui/sonner.tsx ======
+```tsx
+import { useTheme } from "next-themes";
+import { Toaster as Sonner, toast } from "sonner";
+
+type ToasterProps = React.ComponentProps<typeof Sonner>;
+
+const Toaster = ({ ...props }: ToasterProps) => {
+  const { theme = "system" } = useTheme();
+
+  return (
+    <Sonner
+      theme={theme as ToasterProps["theme"]}
+      className="toaster group"
+      toastOptions={{
+        classNames: {
+          toast:
+            "group toast group-[.toaster]:bg-background group-[.toaster]:text-foreground group-[.toaster]:border-border group-[.toaster]:shadow-lg",
+          description: "group-[.toast]:text-muted-foreground",
+          actionButton: "group-[.toast]:bg-primary group-[.toast]:text-primary-foreground",
+          cancelButton: "group-[.toast]:bg-muted group-[.toast]:text-muted-foreground",
+        },
+      }}
+      {...props}
+    />
+  );
+};
+
+export { Toaster, toast };
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/components/ui/switch.tsx ======
+```tsx
+import * as React from "react";
+import * as SwitchPrimitives from "@radix-ui/react-switch";
+
+import { cn } from "@/lib/utils";
+
+const Switch = React.forwardRef<
+  React.ElementRef<typeof SwitchPrimitives.Root>,
+  React.ComponentPropsWithoutRef<typeof SwitchPrimitives.Root>
+>(({ className, ...props }, ref) => (
+  <SwitchPrimitives.Root
+    className={cn(
+      // Track
+      "peer relative inline-flex h-7 w-[50px] shrink-0 cursor-pointer items-center rounded-full border "+
+        "transition-colors duration-200 ease-out "+
+        // Strong, stateful track + border
+        "data-[state=checked]:bg-emerald-500 data-[state=checked]:border-emerald-600 "+
+        "data-[state=unchecked]:bg-neutral-300 data-[state=unchecked]:border-neutral-300 "+
+        "dark:data-[state=unchecked]:bg-neutral-700 dark:data-[state=unchecked]:border-neutral-600 "+
+        // Accessible focus ring (neutral to avoid color clash)
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-neutral-500 focus-visible:ring-offset-background "+
+        "disabled:cursor-not-allowed disabled:opacity-50",
+      className,
+    )}
+    {...props}
+    ref={ref}
+  >
+    <SwitchPrimitives.Thumb
+      className={cn(
+        // Thumb
+        "pointer-events-none absolute left-0 top-1/2 -translate-y-1/2 h-5 w-5 rounded-full bg-white "+
+          "border border-neutral-300 dark:border-neutral-500 shadow will-change-transform "+
+          "transition-transform duration-200 ease-out "+
+          "data-[state=unchecked]:translate-x-[2px] data-[state=checked]:translate-x-[26px]",
+      )}
+    />
+  </SwitchPrimitives.Root>
+));
+Switch.displayName = SwitchPrimitives.Root.displayName;
+
+export { Switch };
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/components/ui/table.tsx ======
+```tsx
+import * as React from "react";
+
+import { cn } from "@/lib/utils";
+
+const Table = React.forwardRef<HTMLTableElement, React.HTMLAttributes<HTMLTableElement>>(
+  ({ className, ...props }, ref) => (
+    <div className="relative w-full overflow-auto">
+      <table ref={ref} className={cn("w-full caption-bottom text-sm", className)} {...props} />
+    </div>
+  ),
+);
+Table.displayName = "Table";
+
+const TableHeader = React.forwardRef<HTMLTableSectionElement, React.HTMLAttributes<HTMLTableSectionElement>>(
+  ({ className, ...props }, ref) => <thead ref={ref} className={cn("[&_tr]:border-b", className)} {...props} />,
+);
+TableHeader.displayName = "TableHeader";
+
+const TableBody = React.forwardRef<HTMLTableSectionElement, React.HTMLAttributes<HTMLTableSectionElement>>(
+  ({ className, ...props }, ref) => (
+    <tbody ref={ref} className={cn("[&_tr:last-child]:border-0", className)} {...props} />
+  ),
+);
+TableBody.displayName = "TableBody";
+
+const TableFooter = React.forwardRef<HTMLTableSectionElement, React.HTMLAttributes<HTMLTableSectionElement>>(
+  ({ className, ...props }, ref) => (
+    <tfoot ref={ref} className={cn("border-t bg-muted/50 font-medium [&>tr]:last:border-b-0", className)} {...props} />
+  ),
+);
+TableFooter.displayName = "TableFooter";
+
+const TableRow = React.forwardRef<HTMLTableRowElement, React.HTMLAttributes<HTMLTableRowElement>>(
+  ({ className, ...props }, ref) => (
+    <tr
+      ref={ref}
+      className={cn("border-b transition-colors data-[state=selected]:bg-muted hover:bg-muted/50", className)}
+      {...props}
+    />
+  ),
+);
+TableRow.displayName = "TableRow";
+
+const TableHead = React.forwardRef<HTMLTableCellElement, React.ThHTMLAttributes<HTMLTableCellElement>>(
+  ({ className, ...props }, ref) => (
+    <th
+      ref={ref}
+      className={cn(
+        "h-12 px-4 text-left align-middle font-medium text-muted-foreground [&:has([role=checkbox])]:pr-0",
+        className,
+      )}
+      {...props}
+    />
+  ),
+);
+TableHead.displayName = "TableHead";
+
+const TableCell = React.forwardRef<HTMLTableCellElement, React.TdHTMLAttributes<HTMLTableCellElement>>(
+  ({ className, ...props }, ref) => (
+    <td ref={ref} className={cn("p-4 align-middle [&:has([role=checkbox])]:pr-0", className)} {...props} />
+  ),
+);
+TableCell.displayName = "TableCell";
+
+const TableCaption = React.forwardRef<HTMLTableCaptionElement, React.HTMLAttributes<HTMLTableCaptionElement>>(
+  ({ className, ...props }, ref) => (
+    <caption ref={ref} className={cn("mt-4 text-sm text-muted-foreground", className)} {...props} />
+  ),
+);
+TableCaption.displayName = "TableCaption";
+
+export { Table, TableHeader, TableBody, TableFooter, TableHead, TableRow, TableCell, TableCaption };
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/components/ui/tabs.tsx ======
+```tsx
+import * as React from "react";
+import * as TabsPrimitive from "@radix-ui/react-tabs";
+
+import { cn } from "@/lib/utils";
+
+const Tabs = TabsPrimitive.Root;
+
+const TabsList = React.forwardRef<
+  React.ElementRef<typeof TabsPrimitive.List>,
+  React.ComponentPropsWithoutRef<typeof TabsPrimitive.List>
+>(({ className, ...props }, ref) => (
+  <TabsPrimitive.List
+    ref={ref}
+    className={cn(
+      "inline-flex h-10 items-center justify-center rounded-md bg-muted p-1 text-muted-foreground",
+      className,
+    )}
+    {...props}
+  />
+));
+TabsList.displayName = TabsPrimitive.List.displayName;
+
+const TabsTrigger = React.forwardRef<
+  React.ElementRef<typeof TabsPrimitive.Trigger>,
+  React.ComponentPropsWithoutRef<typeof TabsPrimitive.Trigger>
+>(({ className, ...props }, ref) => (
+  <TabsPrimitive.Trigger
+    ref={ref}
+    className={cn(
+      "inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium ring-offset-background transition-all data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50",
+      className,
+    )}
+    {...props}
+  />
+));
+TabsTrigger.displayName = TabsPrimitive.Trigger.displayName;
+
+const TabsContent = React.forwardRef<
+  React.ElementRef<typeof TabsPrimitive.Content>,
+  React.ComponentPropsWithoutRef<typeof TabsPrimitive.Content>
+>(({ className, ...props }, ref) => (
+  <TabsPrimitive.Content
+    ref={ref}
+    className={cn(
+      "mt-2 ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+      className,
+    )}
+    {...props}
+  />
+));
+TabsContent.displayName = TabsPrimitive.Content.displayName;
+
+export { Tabs, TabsList, TabsTrigger, TabsContent };
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/components/ui/textarea.tsx ======
+```tsx
+import * as React from "react";
+
+import { cn } from "@/lib/utils";
+
+export interface TextareaProps extends React.TextareaHTMLAttributes<HTMLTextAreaElement> {}
+
+const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(({ className, ...props }, ref) => {
+  return (
+    <textarea
+      className={cn(
+        "flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50",
+        className,
+      )}
+      ref={ref}
+      {...props}
+    />
+  );
+});
+Textarea.displayName = "Textarea";
+
+export { Textarea };
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/components/ui/toast.tsx ======
+```tsx
+import * as React from "react";
+import * as ToastPrimitives from "@radix-ui/react-toast";
+import { cva, type VariantProps } from "class-variance-authority";
+import { X } from "lucide-react";
+
+import { cn } from "@/lib/utils";
+
+const ToastProvider = ToastPrimitives.Provider;
+
+const ToastViewport = React.forwardRef<
+  React.ElementRef<typeof ToastPrimitives.Viewport>,
+  React.ComponentPropsWithoutRef<typeof ToastPrimitives.Viewport>
+>(({ className, ...props }, ref) => (
+  <ToastPrimitives.Viewport
+    ref={ref}
+    className={cn(
+      "fixed top-0 z-[100] flex max-h-screen w-full flex-col-reverse p-4 sm:bottom-0 sm:right-0 sm:top-auto sm:flex-col md:max-w-[420px]",
+      className,
+    )}
+    {...props}
+  />
+));
+ToastViewport.displayName = ToastPrimitives.Viewport.displayName;
+
+const toastVariants = cva(
+  "group pointer-events-auto relative flex w-full items-center justify-between space-x-4 overflow-hidden rounded-md border p-6 pr-8 shadow-lg transition-all data-[swipe=cancel]:translate-x-0 data-[swipe=end]:translate-x-[var(--radix-toast-swipe-end-x)] data-[swipe=move]:translate-x-[var(--radix-toast-swipe-move-x)] data-[swipe=move]:transition-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[swipe=end]:animate-out data-[state=closed]:fade-out-80 data-[state=closed]:slide-out-to-right-full data-[state=open]:slide-in-from-top-full data-[state=open]:sm:slide-in-from-bottom-full",
+  {
+    variants: {
+      variant: {
+        default: "border bg-background text-foreground",
+        destructive: "destructive group border-destructive bg-destructive text-destructive-foreground",
+      },
+    },
+    defaultVariants: {
+      variant: "default",
+    },
+  },
+);
+
+const Toast = React.forwardRef<
+  React.ElementRef<typeof ToastPrimitives.Root>,
+  React.ComponentPropsWithoutRef<typeof ToastPrimitives.Root> & VariantProps<typeof toastVariants>
+>(({ className, variant, ...props }, ref) => {
+  return <ToastPrimitives.Root ref={ref} className={cn(toastVariants({ variant }), className)} {...props} />;
+});
+Toast.displayName = ToastPrimitives.Root.displayName;
+
+const ToastAction = React.forwardRef<
+  React.ElementRef<typeof ToastPrimitives.Action>,
+  React.ComponentPropsWithoutRef<typeof ToastPrimitives.Action>
+>(({ className, ...props }, ref) => (
+  <ToastPrimitives.Action
+    ref={ref}
+    className={cn(
+      "inline-flex h-8 shrink-0 items-center justify-center rounded-md border bg-transparent px-3 text-sm font-medium ring-offset-background transition-colors group-[.destructive]:border-muted/40 hover:bg-secondary group-[.destructive]:hover:border-destructive/30 group-[.destructive]:hover:bg-destructive group-[.destructive]:hover:text-destructive-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 group-[.destructive]:focus:ring-destructive disabled:pointer-events-none disabled:opacity-50",
+      className,
+    )}
+    {...props}
+  />
+));
+ToastAction.displayName = ToastPrimitives.Action.displayName;
+
+const ToastClose = React.forwardRef<
+  React.ElementRef<typeof ToastPrimitives.Close>,
+  React.ComponentPropsWithoutRef<typeof ToastPrimitives.Close>
+>(({ className, ...props }, ref) => (
+  <ToastPrimitives.Close
+    ref={ref}
+    className={cn(
+      "absolute right-2 top-2 rounded-md p-1 text-foreground/50 opacity-0 transition-opacity group-hover:opacity-100 group-[.destructive]:text-red-300 hover:text-foreground group-[.destructive]:hover:text-red-50 focus:opacity-100 focus:outline-none focus:ring-2 group-[.destructive]:focus:ring-red-400 group-[.destructive]:focus:ring-offset-red-600",
+      className,
+    )}
+    toast-close=""
+    {...props}
+  >
+    <X className="h-4 w-4" />
+  </ToastPrimitives.Close>
+));
+ToastClose.displayName = ToastPrimitives.Close.displayName;
+
+const ToastTitle = React.forwardRef<
+  React.ElementRef<typeof ToastPrimitives.Title>,
+  React.ComponentPropsWithoutRef<typeof ToastPrimitives.Title>
+>(({ className, ...props }, ref) => (
+  <ToastPrimitives.Title ref={ref} className={cn("text-sm font-semibold", className)} {...props} />
+));
+ToastTitle.displayName = ToastPrimitives.Title.displayName;
+
+const ToastDescription = React.forwardRef<
+  React.ElementRef<typeof ToastPrimitives.Description>,
+  React.ComponentPropsWithoutRef<typeof ToastPrimitives.Description>
+>(({ className, ...props }, ref) => (
+  <ToastPrimitives.Description ref={ref} className={cn("text-sm opacity-90", className)} {...props} />
+));
+ToastDescription.displayName = ToastPrimitives.Description.displayName;
+
+type ToastProps = React.ComponentPropsWithoutRef<typeof Toast>;
+
+type ToastActionElement = React.ReactElement<typeof ToastAction>;
+
+export {
+  type ToastProps,
+  type ToastActionElement,
+  ToastProvider,
+  ToastViewport,
+  Toast,
+  ToastTitle,
+  ToastDescription,
+  ToastClose,
+  ToastAction,
+};
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/components/ui/toaster.tsx ======
+```tsx
+import { useToast } from "@/hooks/use-toast";
+import { Toast, ToastClose, ToastDescription, ToastProvider, ToastTitle, ToastViewport } from "@/components/ui/toast";
+
+export function Toaster() {
+  const { toasts } = useToast();
+
+  return (
+    <ToastProvider>
+      {toasts.map(function ({ id, title, description, action, ...props }) {
+        return (
+          <Toast key={id} {...props}>
+            <div className="grid gap-1">
+              {title && <ToastTitle>{title}</ToastTitle>}
+              {description && <ToastDescription>{description}</ToastDescription>}
+            </div>
+            {action}
+            <ToastClose />
+          </Toast>
+        );
+      })}
+      <ToastViewport />
+    </ToastProvider>
+  );
+}
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/components/ui/toggle-group.tsx ======
+```tsx
+import * as React from "react";
+import * as ToggleGroupPrimitive from "@radix-ui/react-toggle-group";
+import { type VariantProps } from "class-variance-authority";
+
+import { cn } from "@/lib/utils";
+import { toggleVariants } from "@/components/ui/toggle";
+
+const ToggleGroupContext = React.createContext<VariantProps<typeof toggleVariants>>({
+  size: "default",
+  variant: "default",
+});
+
+const ToggleGroup = React.forwardRef<
+  React.ElementRef<typeof ToggleGroupPrimitive.Root>,
+  React.ComponentPropsWithoutRef<typeof ToggleGroupPrimitive.Root> & VariantProps<typeof toggleVariants>
+>(({ className, variant, size, children, ...props }, ref) => (
+  <ToggleGroupPrimitive.Root ref={ref} className={cn("flex items-center justify-center gap-1", className)} {...props}>
+    <ToggleGroupContext.Provider value={{ variant, size }}>{children}</ToggleGroupContext.Provider>
+  </ToggleGroupPrimitive.Root>
+));
+
+ToggleGroup.displayName = ToggleGroupPrimitive.Root.displayName;
+
+const ToggleGroupItem = React.forwardRef<
+  React.ElementRef<typeof ToggleGroupPrimitive.Item>,
+  React.ComponentPropsWithoutRef<typeof ToggleGroupPrimitive.Item> & VariantProps<typeof toggleVariants>
+>(({ className, children, variant, size, ...props }, ref) => {
+  const context = React.useContext(ToggleGroupContext);
+
+  return (
+    <ToggleGroupPrimitive.Item
+      ref={ref}
+      className={cn(
+        toggleVariants({
+          variant: context.variant || variant,
+          size: context.size || size,
+        }),
+        className,
+      )}
+      {...props}
+    >
+      {children}
+    </ToggleGroupPrimitive.Item>
+  );
+});
+
+ToggleGroupItem.displayName = ToggleGroupPrimitive.Item.displayName;
+
+export { ToggleGroup, ToggleGroupItem };
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/components/ui/toggle.tsx ======
+```tsx
+import * as React from "react";
+import * as TogglePrimitive from "@radix-ui/react-toggle";
+import { cva, type VariantProps } from "class-variance-authority";
+
+import { cn } from "@/lib/utils";
+
+const toggleVariants = cva(
+  "inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors hover:bg-muted hover:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 data-[state=on]:bg-accent data-[state=on]:text-accent-foreground",
+  {
+    variants: {
+      variant: {
+        default: "bg-transparent",
+        outline: "border border-input bg-transparent hover:bg-accent hover:text-accent-foreground",
+      },
+      size: {
+        default: "h-10 px-3",
+        sm: "h-9 px-2.5",
+        lg: "h-11 px-5",
+      },
+    },
+    defaultVariants: {
+      variant: "default",
+      size: "default",
+    },
+  },
+);
+
+const Toggle = React.forwardRef<
+  React.ElementRef<typeof TogglePrimitive.Root>,
+  React.ComponentPropsWithoutRef<typeof TogglePrimitive.Root> & VariantProps<typeof toggleVariants>
+>(({ className, variant, size, ...props }, ref) => (
+  <TogglePrimitive.Root ref={ref} className={cn(toggleVariants({ variant, size, className }))} {...props} />
+));
+
+Toggle.displayName = TogglePrimitive.Root.displayName;
+
+export { Toggle, toggleVariants };
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/components/ui/tooltip.tsx ======
+```tsx
+import * as React from "react";
+import * as TooltipPrimitive from "@radix-ui/react-tooltip";
+
+import { cn } from "@/lib/utils";
+
+const TooltipProvider = TooltipPrimitive.Provider;
+
+const Tooltip = TooltipPrimitive.Root;
+
+const TooltipTrigger = TooltipPrimitive.Trigger;
+
+const TooltipContent = React.forwardRef<
+  React.ElementRef<typeof TooltipPrimitive.Content>,
+  React.ComponentPropsWithoutRef<typeof TooltipPrimitive.Content>
+>(({ className, sideOffset = 4, ...props }, ref) => (
+  <TooltipPrimitive.Portal>
+    <TooltipPrimitive.Content
+      ref={ref}
+      sideOffset={sideOffset}
+      className={cn(
+        "z-50 overflow-hidden rounded-md border bg-popover px-3 py-1.5 text-sm text-popover-foreground shadow-md animate-in fade-in-0 zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
+        className,
+      )}
+      {...props}
+    />
+  </TooltipPrimitive.Portal>
+));
+TooltipContent.displayName = TooltipPrimitive.Content.displayName;
+
+export { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider };
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/components/ui/use-toast.ts ======
+```ts
+import { useToast, toast } from "@/hooks/use-toast";
+
+export { useToast, toast };
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/hooks/use-mobile.tsx ======
+```tsx
+import * as React from "react";
+
+const MOBILE_BREAKPOINT = 768;
+
+export function useIsMobile() {
+  const [isMobile, setIsMobile] = React.useState<boolean | undefined>(undefined);
+
+  React.useEffect(() => {
+    const mql = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT - 1}px)`);
+    const onChange = () => {
+      setIsMobile(window.innerWidth < MOBILE_BREAKPOINT);
+    };
+    mql.addEventListener("change", onChange);
+    setIsMobile(window.innerWidth < MOBILE_BREAKPOINT);
+    return () => mql.removeEventListener("change", onChange);
+  }, []);
+
+  return !!isMobile;
+}
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/hooks/use-toast.ts ======
+```ts
+import * as React from "react";
+
+import type { ToastActionElement, ToastProps } from "@/components/ui/toast";
+
+const TOAST_LIMIT = 1;
+const TOAST_REMOVE_DELAY = 1000000;
+
+type ToasterToast = ToastProps & {
+  id: string;
+  title?: React.ReactNode;
+  description?: React.ReactNode;
+  action?: ToastActionElement;
+};
+
+const actionTypes = {
+  ADD_TOAST: "ADD_TOAST",
+  UPDATE_TOAST: "UPDATE_TOAST",
+  DISMISS_TOAST: "DISMISS_TOAST",
+  REMOVE_TOAST: "REMOVE_TOAST",
+} as const;
+
+let count = 0;
+
+function genId() {
+  count = (count + 1) % Number.MAX_SAFE_INTEGER;
+  return count.toString();
+}
+
+type ActionType = typeof actionTypes;
+
+type Action =
+  | {
+      type: ActionType["ADD_TOAST"];
+      toast: ToasterToast;
+    }
+  | {
+      type: ActionType["UPDATE_TOAST"];
+      toast: Partial<ToasterToast>;
+    }
+  | {
+      type: ActionType["DISMISS_TOAST"];
+      toastId?: ToasterToast["id"];
+    }
+  | {
+      type: ActionType["REMOVE_TOAST"];
+      toastId?: ToasterToast["id"];
+    };
+
+interface State {
+  toasts: ToasterToast[];
+}
+
+const toastTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
+
+const addToRemoveQueue = (toastId: string) => {
+  if (toastTimeouts.has(toastId)) {
+    return;
+  }
+
+  const timeout = setTimeout(() => {
+    toastTimeouts.delete(toastId);
+    dispatch({
+      type: "REMOVE_TOAST",
+      toastId: toastId,
+    });
+  }, TOAST_REMOVE_DELAY);
+
+  toastTimeouts.set(toastId, timeout);
+};
+
+export const reducer = (state: State, action: Action): State => {
+  switch (action.type) {
+    case "ADD_TOAST":
+      return {
+        ...state,
+        toasts: [action.toast, ...state.toasts].slice(0, TOAST_LIMIT),
+      };
+
+    case "UPDATE_TOAST":
+      return {
+        ...state,
+        toasts: state.toasts.map((t) => (t.id === action.toast.id ? { ...t, ...action.toast } : t)),
+      };
+
+    case "DISMISS_TOAST": {
+      const { toastId } = action;
+
+      // ! Side effects ! - This could be extracted into a dismissToast() action,
+      // but I'll keep it here for simplicity
+      if (toastId) {
+        addToRemoveQueue(toastId);
+      } else {
+        state.toasts.forEach((toast) => {
+          addToRemoveQueue(toast.id);
+        });
+      }
+
+      return {
+        ...state,
+        toasts: state.toasts.map((t) =>
+          t.id === toastId || toastId === undefined
+            ? {
+                ...t,
+                open: false,
+              }
+            : t,
+        ),
+      };
+    }
+    case "REMOVE_TOAST":
+      if (action.toastId === undefined) {
+        return {
+          ...state,
+          toasts: [],
+        };
+      }
+      return {
+        ...state,
+        toasts: state.toasts.filter((t) => t.id !== action.toastId),
+      };
+  }
+};
+
+const listeners: Array<(state: State) => void> = [];
+
+let memoryState: State = { toasts: [] };
+
+function dispatch(action: Action) {
+  memoryState = reducer(memoryState, action);
+  listeners.forEach((listener) => {
+    listener(memoryState);
+  });
+}
+
+type Toast = Omit<ToasterToast, "id">;
+
+function toast({ ...props }: Toast) {
+  const id = genId();
+
+  const update = (props: ToasterToast) =>
+    dispatch({
+      type: "UPDATE_TOAST",
+      toast: { ...props, id },
+    });
+  const dismiss = () => dispatch({ type: "DISMISS_TOAST", toastId: id });
+
+  dispatch({
+    type: "ADD_TOAST",
+    toast: {
+      ...props,
+      id,
+      open: true,
+      onOpenChange: (open) => {
+        if (!open) dismiss();
+      },
+    },
+  });
+
+  return {
+    id: id,
+    dismiss,
+    update,
+  };
+}
+
+function useToast() {
+  const [state, setState] = React.useState<State>(memoryState);
+
+  React.useEffect(() => {
+    listeners.push(setState);
+    return () => {
+      const index = listeners.indexOf(setState);
+      if (index > -1) {
+        listeners.splice(index, 1);
+      }
+    };
+  }, [state]);
+
+  return {
+    ...state,
+    toast,
+    dismiss: (toastId?: string) => dispatch({ type: "DISMISS_TOAST", toastId }),
+  };
+}
+
+export { useToast, toast };
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/index.css ======
+```css
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
+All colors MUST be HSL.
+*/
+
+@layer base {
+  :root {
+    --background: 248 250 252;
+    --foreground: 15 23 42;
+
+    --card: 0 0% 100%;
+    --card-foreground: 15 23 42;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 15 23 42;
+
+    --primary: 239 68% 68%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 241 10% 91%;
+    --secondary-foreground: 15 23 42;
+
+    --muted: 241 10% 96%;
+    --muted-foreground: 100 7% 40%;
+
+    --accent: 217 91% 60%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 226 24% 88%;
+    --input: 226 24% 88%;
+    --ring: 239 68% 68%;
+
+    --radius: 0.75rem;
+
+    /* PDF Annotation specific colors */
+    --annotation-section: 0 84% 60%;
+    --annotation-table: 217 91% 60%;
+    --annotation-figure: 142 76% 36%;
+    --annotation-text: 38 92% 50%;
+    
+    /* Status colors */
+    --status-pending: 38 92% 50%;
+    --status-complete: 142 76% 36%;
+    --status-error: 0 84% 60%;
+    
+    /* Interface colors */
+    --panel-bg: 0 0% 100%;
+    --viewer-bg: 226 24% 88%;
+    --toolbar-bg: 0 0% 100%;
+    
+    /* Gradients */
+    --gradient-primary: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--accent)));
+    --gradient-subtle: linear-gradient(180deg, hsl(var(--background)), hsl(var(--muted)));
+    
+    /* Shadows */
+    --shadow-panel: 0 10px 25px -5px hsl(var(--foreground) / 0.1);
+    --shadow-toolbar: 0 4px 12px -2px hsl(var(--foreground) / 0.1);
+    --shadow-annotation: 0 0 0 2px hsl(var(--primary) / 0.2);
+    
+    /* Animations */
+    --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-bounce: all 0.2s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+
+    --sidebar-background: 0 0% 98%;
+
+    --sidebar-foreground: 240 5.3% 26.1%;
+
+    --sidebar-primary: 240 5.9% 10%;
+
+    --sidebar-primary-foreground: 0 0% 98%;
+
+    --sidebar-accent: 240 4.8% 95.9%;
+
+    --sidebar-accent-foreground: 240 5.9% 10%;
+
+    --sidebar-border: 220 13% 91%;
+
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+
+  .dark {
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+
+    --card: 222.2 84% 4.9%;
+    --card-foreground: 210 40% 98%;
+
+    --popover: 222.2 84% 4.9%;
+    --popover-foreground: 210 40% 98%;
+
+    --primary: 210 40% 98%;
+    --primary-foreground: 222.2 47.4% 11.2%;
+
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 210 40% 98%;
+
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+
+    --accent: 217.2 32.6% 17.5%;
+    --accent-foreground: 210 40% 98%;
+
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
+    --ring: 212.7 26.8% 83.9%;
+    --sidebar-background: 240 5.9% 10%;
+    --sidebar-foreground: 240 4.8% 95.9%;
+    --sidebar-primary: 224.3 76.3% 48%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 240 3.7% 15.9%;
+    --sidebar-accent-foreground: 240 4.8% 95.9%;
+    --sidebar-border: 240 3.7% 15.9%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/lib/labels.ts ======
+```ts
+export type LabelDef = {
+  id: string; // display name & type id
+  icon: string; // lucide icon name (for future use)
+  color: string; // tailwind token like 'annotation-section'
+  description?: string;
+};
+
+export const DEFAULT_LABELS: LabelDef[] = [
+  { id: 'Section', icon: 'Heading', color: 'annotation-section', description: 'Section header' },
+  { id: 'Table', icon: 'Table', color: 'annotation-table', description: 'Data table' },
+  { id: 'Figure', icon: 'Image', color: 'annotation-figure', description: 'Figure or image' },
+];
+
+const LS_KEY = 'anno_labels';
+
+export function loadLabels(): LabelDef[] {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    const extra: LabelDef[] = raw ? JSON.parse(raw) : [];
+    const map = new Map<string, LabelDef>();
+    for (const l of DEFAULT_LABELS) map.set(l.id.toLowerCase(), l);
+    for (const l of extra) map.set(l.id.toLowerCase(), l);
+    return Array.from(map.values());
+  } catch {
+    return DEFAULT_LABELS.slice();
+  }
+}
+
+export function saveLabel(newLabel: LabelDef): { ok: boolean; reason?: string } {
+  try {
+    const existing = loadLabels();
+    if (existing.find((l) => l.id.toLowerCase() === newLabel.id.toLowerCase())) {
+      return { ok: false, reason: 'duplicate' };
+    }
+    const extra = (JSON.parse(localStorage.getItem(LS_KEY) || '[]') as LabelDef[]);
+    extra.push(newLabel);
+    localStorage.setItem(LS_KEY, JSON.stringify(extra));
+    return { ok: true };
+  } catch {
+    return { ok: false, reason: 'storage' };
+  }
+}
+
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/main.tsx ======
+```tsx
+import { createRoot } from "react-dom/client";
+import App from "./App.tsx";
+import "./index.css";
+
+createRoot(document.getElementById("root")!).render(<App />);
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/pages/ClassicLayout.tsx ======
+```tsx
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import {
+  Upload, Search, Archive, Copy, Trash2, Plus, SquareDashed, Loader2,
+  ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronDown,
+  Edit, Sparkles, ArrowLeft, Tag, Moon, Info, Braces, FileText, Download, MoreHorizontal
+} from "lucide-react";
+import { Link } from "react-router-dom";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Card } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Separator } from "@/components/ui/separator";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { Switch } from "@/components/ui/switch";
+import { Loader, LoaderDots } from "@/components/ui/loader";
+import { toast } from "@/components/ui/sonner";
+import { ThumbnailRail } from "@/components/ThumbnailRail";
+import { ThumbnailStrip } from "@/components/ThumbnailStrip";
+import { PdfCanvas } from "@/components/PdfCanvas";
+import { loadPdf, type PdfDoc } from "@/lib/pdf";
+import { DEFAULT_LABELS, loadLabels, saveLabel, type LabelDef } from "@/lib/labels";
+import { cn } from "@/lib/utils";
+import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
+
+// Types
+type Box = {
+  id: string;
+  type: string;
+  instanceId: string;
+  x: number; // 0..1
+  y: number; // 0..1
+  w: number; // 0..1
+  h: number; // 0..1
+};
+
+const SNAP = 0.01; // 1% snap
+const MIN_SIZE = 0.02; // 2% minimum
+
+const ClassicLayout = () => {
+  // Prototype state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [doc, setDoc] = useState<PdfDoc | null>(null);
+  const [totalPages, setTotalPages] = useState<number>(2);
+  const [zoom, setZoom] = useState(1);
+
+  // Boxes per page
+  const [boxesByPage, setBoxesByPage] = useState<Record<number, Box[]>>({
+    5: [
+      { id: "section", type: "Section", instanceId: "sec-001", x: 0.10, y: 0.15, w: 0.80, h: 0.15 },
+      { id: "table", type: "Table", instanceId: "tbl-001", x: 0.15, y: 0.40, w: 0.70, h: 0.40 },
+    ],
+  });
+  const [selectedId, setSelectedId] = useState<string | null>("section");
+  const [defaultNewType, setDefaultNewType] = useState<string>("Section");
+  const [labels, setLabels] = useState<LabelDef[]>(() => (typeof window !== 'undefined' ? loadLabels() : DEFAULT_LABELS));
+  useEffect(() => { setLabels(loadLabels()); }, []);
+
+  const [jsonOpen, setJsonOpen] = useState(false);
+  const [jsonText, setJsonText] = useState("{}");
+  const [strictMatch, setStrictMatch] = useState<boolean>(() => {
+    try { return localStorage.getItem('strict_json_match') === '1'; } catch { return false; }
+  });
+  useEffect(() => { try { localStorage.setItem('strict_json_match', strictMatch ? '1' : '0'); } catch {} }, [strictMatch]);
+
+  // Resizable panes (left/right) with persistence
+  const [leftW, setLeftW] = useState<number>(() => { const v = Number(localStorage.getItem('pane_left_w')); return Number.isFinite(v) && v >= 200 ? v : 320; });
+  const [rightW, setRightW] = useState<number>(() => { const v = Number(localStorage.getItem('pane_right_w')); return Number.isFinite(v) && v >= 220 ? v : 320; });
+  useEffect(() => { try { localStorage.setItem('pane_left_w', String(leftW)); } catch {} }, [leftW]);
+  useEffect(() => { try { localStorage.setItem('pane_right_w', String(rightW)); } catch {} }, [rightW]);
+  const paneDragRef = useRef<{ side: 'left'|'right'; startX: number; startW: number } | null>(null);
+  const paneBeginDrag = (side: 'left'|'right', e: React.PointerEvent<HTMLDivElement>) => {
+    (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+    paneDragRef.current = { side, startX: e.clientX, startW: side==='left'?leftW:rightW };
+  };
+  const paneOnDragMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!paneDragRef.current) return;
+    const dx = e.clientX - paneDragRef.current.startX;
+    if (paneDragRef.current.side === 'left') setLeftW(Math.max(200, Math.min(480, paneDragRef.current.startW + dx)));
+    else setRightW(Math.max(220, Math.min(480, paneDragRef.current.startW - dx)));
+  };
+  const paneEndDrag = () => { paneDragRef.current = null; };
+  const paneHandleKey = (side: 'left'|'right', e: React.KeyboardEvent<HTMLDivElement>) => {
+    const step = e.shiftKey ? 20 : 10;
+    if (side === 'left') {
+      if (e.key === 'ArrowLeft') setLeftW(w => Math.max(200, w - step));
+      if (e.key === 'ArrowRight') setLeftW(w => Math.min(480, w + step));
+    } else {
+      if (e.key === 'ArrowLeft') setRightW(w => Math.min(480, w + step));
+      if (e.key === 'ArrowRight') setRightW(w => Math.max(220, w - step));
+    }
+  };
+
+  // Scroll active thumbnail into view (pager chips removed; still keep util)
+  const thumbRefs = useRef<Record<number, HTMLButtonElement | null>>({});
+  useEffect(() => {
+    thumbRefs.current[currentPage]?.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+  }, [currentPage]);
+
+  // Server-provided list (via FastAPI /api/list) for real PDFs in dev
+  type PdfItem = { name: string; rel: string; size?: number; mtime?: number };
+  const [pdfItems, setPdfItems] = useState<PdfItem[]>([]);
+  const [openDialog, setOpenDialog] = useState(false);
+  const [openFilter, setOpenFilter] = useState("");
+  const [currentPdfName, setCurrentPdfName] = useState<string | null>(null);
+  const filteredFiles = useMemo(() => {
+    const list = pdfItems.length ? pdfItems : [{ name: currentPdfName || 'Demo Placeholder', rel: '' } as any];
+    const q = openFilter.toLowerCase();
+    return list.filter((it: any)=> it.name?.toLowerCase().includes(q));
+  }, [pdfItems, openFilter, currentPdfName]);
+
+  // Load server list + preload target PDF
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const r = await fetch('/api/list', { credentials: 'omit' });
+        const j = await r.json();
+        if (!mounted) return;
+        if (j?.ok && Array.isArray(j.items)) {
+          setPdfItems(j.items);
+          const target = j.items.find((it: PdfItem) => it.name.toLowerCase() === 'bht cv32a65x.pdf');
+          const first = target || j.items[0];
+          if (first) {
+            const url = `/api/pdf?rel=${encodeURIComponent(first.rel)}`;
+            const d = await loadPdf(url);
+            if (!mounted) return;
+            setDoc(d); setTotalPages(d.numPages || 2); setCurrentPdfName(first.name);
+          }
+          return;
+        }
+      } catch { /* fallthrough to placeholder */ }
+      // Backend not reachable or list failed; try direct API target first, then static fallback
+      try {
+        const d0 = await loadPdf('/api/pdf?rel=' + encodeURIComponent('BHT CV32A65X.pdf'));
+        if (!mounted) return;
+        setDoc(d0); setTotalPages(d0.numPages || 2); setCurrentPdfName('BHT CV32A65X.pdf');
+        return;
+      } catch {}
+      const d = await loadPdf('/bht.pdf');
+      if (!mounted) return;
+      setDoc(d); setTotalPages(d.numPages || 2); setCurrentPdfName('Demo Placeholder');
+    })();
+    return () => { mounted = false };
+  }, []);
+
+  // Thumbnails mode (left | bottom | off) with persistence
+  type ThumbMode = "left" | "bottom" | "off";
+  const [thumbMode, setThumbMode] = useState<ThumbMode>(() => (localStorage.getItem("anno_thumb_mode") as ThumbMode) || "left");
+  useEffect(() => { localStorage.setItem("anno_thumb_mode", thumbMode); }, [thumbMode]);
+  // Bust thumbnail cache when document changes to avoid stale placeholders
+  const [thumbRev, setThumbRev] = useState(0);
+  useEffect(() => { setThumbRev((n) => n + 1); }, [doc, currentPdfName]);
+  // Night page mode
+  const [night, setNight] = useState<boolean>(() => { try { return localStorage.getItem('night_page') === '1'; } catch { return false; } });
+  useEffect(() => { try { localStorage.setItem('night_page', night ? '1' : '0'); } catch {} }, [night]);
+
+  // (Removed) Featured Lessons UI was for agent use only; keep lessons out of the app
+
+  // Derived helpers for current page
+  const pageBoxes = useMemo(() => boxesByPage[currentPage] || [], [boxesByPage, currentPage]);
+  const selectedBox = useMemo(() => pageBoxes.find((b) => b.id === selectedId) || null, [pageBoxes, selectedId]);
+  const setPageBoxes = (updater: (prev: Box[]) => Box[]) => {
+    setBoxesByPage((prev) => ({ ...prev, [currentPage]: updater(prev[currentPage] || []) }));
+  };
+
+  // Ensure selection valid on page change
+  useEffect(() => {
+    const boxes = boxesByPage[currentPage] || [];
+    if (!boxes.length) setSelectedId(null);
+    else if (!boxes.find((b) => b.id === selectedId)) setSelectedId(boxes[boxes.length - 1].id);
+  }, [currentPage, boxesByPage, selectedId]);
+
+  // Overlay interactivity
+  const overlayRef = useRef<HTMLDivElement | null>(null);
+  const dragRef = useRef<
+    | null
+    | {
+        id: string;
+        mode: "move" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w" | "nw";
+        startX: number;
+        startY: number;
+        startBox: Box;
+        rect: { width: number; height: number };
+      }
+  >(null);
+
+  // Drawing state
+  const drawRef = useRef<
+    | null
+    | { startX: number; startY: number; rect: { width: number; height: number }; alt: boolean }
+  >(null);
+  const [draftBox, setDraftBox] = useState<Box | null>(null);
+  const [drawArmed, setDrawArmed] = useState(false);
+  const [showHud, setShowHud] = useState(false);
+  // HUD state
+  type HudMode = "free" | "attach";
+  const [hudMode, setHudMode] = useState<HudMode>(() => (localStorage.getItem("anno_hud_mode") as HudMode) || "free");
+  const [hudPos, setHudPos] = useState<{x:number;y:number}>(() => { try { return JSON.parse(localStorage.getItem("anno_hud_pos") || ""); } catch { return { x: 12, y: 12 }; } });
+  useEffect(() => { localStorage.setItem("anno_hud_mode", hudMode); }, [hudMode]);
+  useEffect(() => { if (hudPos && Number.isFinite(hudPos.x)) localStorage.setItem("anno_hud_pos", JSON.stringify(hudPos)); }, [hudPos]);
+  const hudStyle = useMemo(() => {
+    const base: any = { opacity: 0.98 };
+    if (hudMode === "free") return { ...base, left: hudPos?.x ?? 12, top: hudPos?.y ?? 12 };
+    const m = 8;
+    const r = overlayRef.current?.getBoundingClientRect();
+    const b = selectedBox;
+    if (!r || !b) return { ...base, left: 12, top: 12 };
+    const x = b.x * r.width + Math.min(20, (b.w * r.width) / 2);
+    const y = Math.max(m, b.y * r.height - 40);
+    return { ...base, left: Math.min(Math.max(m, x), r.width - 160), top: Math.min(Math.max(m, y), r.height - 44) };
+  }, [hudMode, hudPos, selectedBox]);
+
+  // Generate JSON via backend using a cropped image around selected box (expanded by 20%)
+  // All generate events are non-blocking (chip+toast)
+  const [llmPending, setLlmPending] = useState(0);
+  // Exact JSON Match – canonical stringifier (sorted keys)
+  const stableStringify = (val: any): string => {
+    const seen = new WeakSet();
+    const helper = (v: any): any => {
+      if (v && typeof v === 'object') {
+        if (seen.has(v)) return null;
+        seen.add(v);
+        if (Array.isArray(v)) return v.map(helper);
+        const out: any = {};
+        for (const k of Object.keys(v).sort()) out[k] = helper(v[k]);
+        return out;
+      }
+      return v;
+    };
+    try { return JSON.stringify(helper(val)); } catch { return ''; }
+  };
+
+  function deepEqual(a: any, b: any): boolean {
+    if (a === b) return true;
+    if (typeof a !== typeof b) return false;
+    if (a === null || b === null) return a === b;
+    if (Array.isArray(a)) {
+      if (!Array.isArray(b)) return false;
+      if (a.length !== b.length) return false;
+      for (let i = 0; i < a.length; i++) if (!deepEqual(a[i], b[i])) return false;
+      return true;
+    }
+    if (typeof a === 'object') {
+      const ak = Object.keys(a).sort();
+      const bk = Object.keys(b).sort();
+      if (ak.length !== bk.length) return false;
+      for (let i = 0; i < ak.length; i++) if (ak[i] !== bk[i]) return false;
+      for (const k of ak) if (!deepEqual(a[k], b[k])) return false;
+      return true;
+    }
+    return false;
+  }
+
+  const generateFromSelection = async () => {
+    if (!overlayRef.current) return;
+    const sel = selectedBox;
+    if (!doc || !sel) return;
+    const canvas = overlayRef.current.querySelector('canvas') as HTMLCanvasElement | null;
+    if (!canvas) return;
+    const clamp = (v: number, min = 0, max = 1) => Math.max(min, Math.min(max, v));
+    // expand by 20% keeping center
+    const cx = sel.x + sel.w / 2; const cy = sel.y + sel.h / 2;
+    const nw = clamp(sel.w * 1.2); const nh = clamp(sel.h * 1.2);
+    const nx = clamp(cx - nw / 2); const ny = clamp(cy - nh / 2);
+    const sx = Math.round(nx * canvas.width);
+    const sy = Math.round(ny * canvas.height);
+    const sw = Math.round(Math.min(canvas.width - sx, nw * canvas.width));
+    const sh = Math.round(Math.min(canvas.height - sy, nh * canvas.height));
+    if (sw <= 2 || sh <= 2) return;
+    const off = document.createElement('canvas');
+    off.width = sw; off.height = sh;
+    const ctx = off.getContext('2d');
+    if (!ctx) return;
+    ctx.drawImage(canvas, sx, sy, sw, sh, 0, 0, sw, sh);
+    const dataUrl = off.toDataURL('image/png');
+
+    const prompt = `You are an expert table extractor. Given an image of a table from a PDF, return ONLY a strict JSON object with keys: title (string), columns (string[]), data (array of arrays). If no explicit title exists, infer a concise title and prefix with INFERRED_. Do not include commentary.`;
+
+    setLlmPending((n) => n + 1);
+    try {
+      const r = await fetch('/api/ux/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt, image: dataUrl }) });
+      const j = await r.json().catch(()=>null);
+      let out: any = null;
+      if (j && j.ok && j.data) out = (j.data.json || j.data.output || j.data.text || j.data);
+      if (typeof out === 'string') { try { out = JSON.parse(out); } catch {} }
+      if (!out || typeof out !== 'object') {
+        if (!strictMatch) {
+          setJsonText(JSON.stringify(j ?? { error: 'no_output' }, null, 2));
+          setJsonOpen(true);
+        } else {
+          toast.error('Exact JSON Match failed: invalid model output');
+        }
+        return;
+      }
+
+      if (strictMatch) {
+        try {
+          const gold = JSON.parse(jsonText || '{}');
+          if (stableStringify(gold) === stableStringify(out)) {
+            toast.success('Exact JSON Match passed');
+          } else {
+            toast.error('Exact JSON Match failed: mismatch');
+          }
+        } catch {
+          toast.error('Exact JSON Match failed: invalid gold JSON');
+        }
+      } else {
+        setJsonText(JSON.stringify(out, null, 2));
+        setJsonOpen(true);
+        toast.success('Generated');
+      }
+    } catch (e) {
+      if (strictMatch) toast.error('Exact JSON Match failed'); else toast.error('Failed to generate');
+    } finally {
+      setLlmPending((n) => Math.max(0, n - 1));
+    }
+  };
+
+  // Dev-only helpers for tests (window.__ux)
+  useEffect(() => {
+    // @ts-ignore
+    (window as any).__ux = {
+      setPage: (n: number) => setCurrentPage(Math.max(1, Math.min(totalPages, Math.floor(n)))),
+      drawBox: (page: number, x0: number, y0: number, x1: number, y1: number, type?: string) => {
+        const x = Math.min(x0, x1);
+        const y = Math.min(y0, y1);
+        const w = Math.abs(x1 - x0);
+        const h = Math.abs(y1 - y0);
+        setCurrentPage(Math.max(1, Math.min(totalPages, Math.floor(page))));
+        const t = (type || defaultNewType) as string;
+        const id = `box-${Math.random().toString(36).slice(2,7)}`;
+        setPageBoxes(prev => [...prev, { id, type: t, instanceId: `${t.toLowerCase()}-${Math.random().toString(36).slice(2,5)}`, x, y, w, h }]);
+      }
+    };
+    return () => { try { /* @ts-ignore */ delete (window as any).__ux; } catch { /* noop */ } };
+  }, [totalPages, defaultNewType, setPageBoxes]);
+
+  // Add Label dialog state
+  const [addOpen, setAddOpen] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newIcon, setNewIcon] = useState("Heading");
+  const [newColor, setNewColor] = useState("annotation-section");
+  const [newDesc, setNewDesc] = useState("");
+  const [helpOpen, setHelpOpen] = useState(false);
+
+
+  // Utils
+  const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
+  const collectGuides = (excludeId?: string) => {
+    const v: number[] = [0, 1];
+    const h: number[] = [0, 1];
+    for (const b of pageBoxes) {
+      if (b.id === excludeId) continue;
+      v.push(b.x, b.x + b.w);
+      h.push(b.y, b.y + b.h);
+    }
+    return { v, h };
+  };
+  const snapTo = (value: number, guides: number[], tol = SNAP) => {
+    let best = value, bestDelta = tol + 1;
+    for (const g of guides) {
+      const d = Math.abs(value - g);
+      if (d < tol && d < bestDelta) { best = g; bestDelta = d; }
+    }
+    return best;
+  };
+
+  const beginDrag = (
+    id: string,
+    e: React.PointerEvent,
+    mode: "move" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w" | "nw"
+  ) => {
+    if (!overlayRef.current) return;
+    const rect = overlayRef.current.getBoundingClientRect();
+    const startBox = pageBoxes.find((b) => b.id === id);
+    if (!startBox) return;
+    (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+    dragRef.current = {
+      id,
+      mode,
+      startX: e.clientX,
+      startY: e.clientY,
+      startBox: { ...startBox },
+      rect: { width: rect.width, height: rect.height },
+    };
+    setSelectedId(id);
+  };
+
+  useEffect(() => {
+    const onMove = (e: PointerEvent) => {
+      // Dragging
+      if (dragRef.current) {
+        const d = dragRef.current;
+        const dx = (e.clientX - d.startX) / Math.max(1, d.rect.width);
+        const dy = (e.clientY - d.startY) / Math.max(1, d.rect.height);
+        setPageBoxes((prev) => prev.map((b) => {
+          if (b.id !== d.id) return b;
+          const guides = collectGuides(b.id);
+          let { x, y, w, h } = d.startBox;
+          if (d.mode === "move") {
+            x = clamp01(Math.min(1 - w, x + dx));
+            y = clamp01(Math.min(1 - h, y + dy));
+            if (!e.altKey) {
+              const L = snapTo(x, guides.v);
+              const R = snapTo(x + w, guides.v);
+              x = Math.abs(L - x) < Math.abs(R - (x + w)) ? L : R - w;
+              const T = snapTo(y, guides.h);
+              const B = snapTo(y + h, guides.h);
+              y = Math.abs(T - y) < Math.abs(B - (y + h)) ? T : B - h;
+              x = clamp01(Math.min(1 - w, x));
+              y = clamp01(Math.min(1 - h, y));
+            }
+          } else {
+            if (d.mode.includes("n")) {
+              let newY = clamp01(Math.min(d.startBox.y + d.startBox.h - MIN_SIZE, d.startBox.y + dy));
+              if (!e.altKey) newY = snapTo(newY, guides.h);
+              h = d.startBox.h + (d.startBox.y - newY);
+              y = newY;
+            }
+            if (d.mode.includes("s")) {
+              let newB = clamp01(d.startBox.y + d.startBox.h + dy);
+              if (!e.altKey) newB = snapTo(newB, guides.h);
+              h = Math.max(MIN_SIZE, Math.min(1 - d.startBox.y, newB - d.startBox.y));
+              y = d.startBox.y;
+            }
+            if (d.mode.includes("w")) {
+              let newX = clamp01(Math.min(d.startBox.x + d.startBox.w - MIN_SIZE, d.startBox.x + dx));
+              if (!e.altKey) newX = snapTo(newX, guides.v);
+              w = d.startBox.w + (d.startBox.x - newX);
+              x = newX;
+            }
+            if (d.mode.includes("e")) {
+              let newR = clamp01(d.startBox.x + d.startBox.w + dx);
+              if (!e.altKey) newR = snapTo(newR, guides.v);
+              w = Math.max(MIN_SIZE, Math.min(1 - d.startBox.x, newR - d.startBox.x));
+              x = d.startBox.x;
+            }
+          }
+          return { ...b, x, y, w, h };
+        }));
+        return;
+      }
+      // Drawing
+      if (drawRef.current && overlayRef.current) {
+        const rect = overlayRef.current.getBoundingClientRect();
+        const curX = (e.clientX - rect.left) / Math.max(1, rect.width);
+        const curY = (e.clientY - rect.top) / Math.max(1, rect.height);
+        let x = Math.min(drawRef.current.startX, curX);
+        let y = Math.min(drawRef.current.startY, curY);
+        let w = Math.abs(curX - drawRef.current.startX);
+        let h = Math.abs(curY - drawRef.current.startY);
+        if (!drawRef.current.alt) {
+          const guides = collectGuides();
+          const L = snapTo(x, guides.v);
+          const R = snapTo(x + w, guides.v);
+          const T = snapTo(y, guides.h);
+          const B = snapTo(y + h, guides.h);
+          x = L; y = T; w = Math.max(0, R - L); h = Math.max(0, B - T);
+        }
+        
+        // Constrain with Shift to ~4:3 (w : h = 4 : 3)
+        if (e.shiftKey) {
+          const sx = drawRef.current.startX; const sy = drawRef.current.startY;
+          const ratio = 3/4;
+          let newH = w * ratio;
+          if (curY >= sy) { // dragging downward
+            y = sy;
+          } else {
+            y = sy - newH;
+          }
+          h = newH;
+        }
+        setDraftBox({ id: "draft", type: defaultNewType, instanceId: "new", x, y, w, h });
+
+      }
+    };
+    const onUp = () => {
+      if (dragRef.current) dragRef.current = null;
+      if (drawRef.current) {
+        const d = draftBox;
+        drawRef.current = null;
+        setDraftBox(null);
+        if (d && d.w >= MIN_SIZE && d.h >= MIN_SIZE) {
+          const newBox: Box = {
+            id: `box-${Math.random().toString(36).slice(2, 7)}`,
+            type: defaultNewType,
+            instanceId: `${defaultNewType.toLowerCase()}-${Math.random().toString(36).slice(2, 5)}`,
+            x: clamp01(d.x), y: clamp01(d.y), w: clamp01(d.w), h: clamp01(d.h),
+          };
+          setPageBoxes((prev) => [...prev, newBox]);
+          setSelectedId(newBox.id);
+        }
+        setDrawArmed(false);
+      }
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+  }, [draftBox, defaultNewType, pageBoxes]);
+
+  // Persist boxes across reloads (demo)
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("anno_boxes_by_page");
+      if (raw) setBoxesByPage(JSON.parse(raw));
+    } catch {}
+  }, []);
+  useEffect(() => {
+    try { localStorage.setItem("anno_boxes_by_page", JSON.stringify(boxesByPage)); } catch {}
+  }, [boxesByPage]);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const isTyping = (el: EventTarget | null) => {
+      if (!(el instanceof HTMLElement)) return false;
+      const tag = el.tagName.toLowerCase();
+      return tag === "input" || tag === "textarea" || el.isContentEditable;
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (isTyping(e.target)) return;
+      if (e.key === "[") { e.preventDefault(); setCurrentPage((p) => Math.max(1, p - 1)); return; }
+      if (e.key === "]") { e.preventDefault(); setCurrentPage((p) => Math.min(totalPages, p + 1)); return; }
+      if (e.key === "+" || e.key === "=") { e.preventDefault(); setZoom(z => Math.min(2, Math.round((z + 0.1) * 10) / 10)); return; }
+      if (e.key === "-") { e.preventDefault(); setZoom(z => Math.max(0.5, Math.round((z - 0.1) * 10) / 10)); return; }
+      if ((e.ctrlKey || e.metaKey) && e.key === "0") { e.preventDefault(); setZoom(1); return; }
+      if (e.key.toLowerCase() === "h") { e.preventDefault(); setHudMode((m)=> m === "free" ? "attach" : "free"); return; }
+      if (e.key.toLowerCase() === "r") { e.preventDefault(); setHudPos({ x: 12, y: 12 }); setHudMode("free"); return; }
+      if (e.key.toLowerCase() === "n") { e.preventDefault(); setDrawArmed(true); return; }
+      if (e.key === "Escape") { e.preventDefault(); if (drawRef.current || drawArmed) { drawRef.current = null; setDraftBox(null); setDrawArmed(false); } return; }
+      if (e.key.toLowerCase() === "d" || (e.ctrlKey && e.key.toLowerCase() === "d")) {
+        e.preventDefault();
+        if (!selectedId) return;
+        setPageBoxes((prev) => {
+          const src = prev.find((b) => b.id === selectedId);
+          if (!src) return prev;
+          const copy: Box = { ...src, id: `${src.id}-${Math.random().toString(36).slice(2,6)}`, x: Math.min(0.98 - src.w, src.x + 0.02), y: Math.min(0.98 - src.h, src.y + 0.02) };
+          const next = [...prev, copy];
+          setSelectedId(copy.id);
+          return next;
+        });
+        return;
+      }
+      if (e.key === "Delete") {
+        e.preventDefault();
+        if (!selectedId) return;
+        setPageBoxes((prev) => {
+          const filtered = prev.filter((b) => b.id !== selectedId);
+          setSelectedId(filtered.length ? filtered[filtered.length-1].id : null);
+          return filtered;
+        });
+        return;
+      }
+      if (["ArrowLeft","ArrowRight","ArrowUp","ArrowDown"].includes(e.key)) {
+        e.preventDefault();
+        if (!selectedId) return;
+        const step = e.shiftKey ? 0.02 : 0.005;
+        setPageBoxes((prev) => prev.map((b) => {
+          if (b.id !== selectedId) return b;
+          let { x, y } = b;
+          if (e.key === "ArrowLeft") x = Math.max(0, x - step);
+          if (e.key === "ArrowRight") x = Math.min(1 - b.w, x + step);
+          if (e.key === "ArrowUp") y = Math.max(0, y - step);
+          if (e.key === "ArrowDown") y = Math.min(1 - b.h, y + step);
+          return { ...b, x, y };
+        }));
+        return;
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selectedId, totalPages]);
+
+  // JSON helpers
+  const formatJson = () => {
+    try { const obj = JSON.parse(jsonText); setJsonText(JSON.stringify(obj, null, 2)); } catch (_) {}
+  };
+
+  return (
+    <div className="h-screen bg-background overflow-hidden">
+      {/* Header */}
+      <header className="h-16 border-b bg-card flex items-center px-6">
+        <Link to="/" className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors">
+          <ArrowLeft className="h-4 w-4" />
+          Back to Prototypes
+        </Link>
+        <div className="flex-1 text-center">
+          <h1 className="text-lg font-semibold">Classic Three-Panel Layout</h1>
+        </div>
+        {/* Removed legacy header-level Add Label button; action now lives in the top center toolbar */}
+      </header>
+
+      {/* Add Label Dialog (moved to root so header button can open it) */}
+      <Dialog open={addOpen} onOpenChange={setAddOpen}>
+        <DialogContent data-testid="label-add-dialog" className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Add Label</DialogTitle>
+            <DialogDescription>Create a new label type for the palette.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div>
+              <label className="text-sm font-medium">Name</label>
+              <Input data-testid="label-name" value={newName} onChange={(e)=>setNewName(e.target.value)} placeholder="Equation" />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-sm font-medium">Icon</label>
+                <Select value={newIcon} onValueChange={setNewIcon}>
+                  <SelectTrigger data-testid="icon-select" aria-label="Label icon"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem data-testid="icon-option-Heading" value="Heading">Heading</SelectItem>
+                    <SelectItem data-testid="icon-option-Table" value="Table">Table</SelectItem>
+                    <SelectItem data-testid="icon-option-Image" value="Image">Image</SelectItem>
+                    <SelectItem data-testid="icon-option-Sigma" value="Sigma">Sigma</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label className="text-sm font-medium">Color</label>
+                <Select value={newColor} onValueChange={setNewColor}>
+                  <SelectTrigger data-testid="color-select" aria-label="Label color"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem data-testid="color-option-annotation-section" value="annotation-section">Section</SelectItem>
+                    <SelectItem data-testid="color-option-annotation-table" value="annotation-table">Table</SelectItem>
+                    <SelectItem data-testid="color-option-annotation-figure" value="annotation-figure">Figure</SelectItem>
+                    <SelectItem data-testid="color-option-annotation-equation" value="annotation-equation">Equation</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div>
+              <label className="text-sm font-medium">Description</label>
+              <Input value={newDesc} onChange={(e)=>setNewDesc(e.target.value)} placeholder="Short description (optional)" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={()=>setAddOpen(false)}>Cancel</Button>
+            <Button data-testid="label-save" onClick={()=>{
+              const name = newName.trim();
+              if (!name) return;
+              const res = saveLabel({ id: name, icon: newIcon, color: newColor, description: newDesc });
+              if (res.ok) {
+                setLabels(loadLabels());
+                setAddOpen(false);
+                setNewName(""); setNewIcon("Heading"); setNewColor("annotation-section"); setNewDesc("");
+              }
+            }} disabled={!newName.trim()}>
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <div className="relative flex h-[calc(100vh-4rem)]" onPointerMove={paneOnDragMove} onPointerUp={paneEndDrag}>
+        {/* Explorer Panel */}
+        <div className="border-r bg-card p-6 flex flex-col" style={{ width: leftW }}>
+
+          <div className="space-y-3 mb-4">
+            <Button data-testid="btn-open-pdf" variant="default" className="w-full justify-start" onClick={()=> setOpenDialog(true)} title="Open PDF" aria-label="Open PDF">
+              <Upload className="mr-2 h-4 w-4" /> Open PDF
+            </Button>
+            <div className="relative">
+              <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <input
+                value={openFilter}
+                onChange={(e)=>setOpenFilter(e.target.value)}
+                placeholder="type to filter..."
+                className="w-full pl-9 pr-3 py-2 rounded-md border bg-background text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                aria-label="Filter files"
+              />
+            </div>
+            {/* Removed duplicate toggle from left rail to avoid ambiguity */}
+          </div>
+
+          <div className="flex-1 overflow-y-auto pr-2" data-testid="file-list">
+            <Virtuoso
+              totalCount={filteredFiles.length}
+              itemContent={(index) => {
+                const it: any = filteredFiles[index];
+                const isActive = it.name === currentPdfName;
+                const [lastFormat, setLastFormatState] = [
+                  (localStorage.getItem('export_last_format') as 'json'|'annotated'|'both') || 'json',
+                  (fmt: 'json'|'annotated'|'both') => { try { localStorage.setItem('export_last_format', fmt); } catch {} }
+                ];
+                const doExportJson = async () => {
+                  if (!isActive) return;
+                  const payload = { rel: it.rel, boxes_by_page: boxesByPage };
+                  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url; a.download = `${(it.name||'document').replace(/\.pdf$/i,'')}.annotations.json`;
+                  document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+                  toast.success('Exported JSON');
+                };
+                const doExportPdf = async () => {
+                  if (!isActive) return;
+                  try {
+                    const r = await fetch('/api/export/pdf', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rel: it.rel, boxes_by_page: boxesByPage }) });
+                    if (!r.ok) { const e = await r.json().catch(()=>null); throw new Error(e?.error || 'export_failed'); }
+                    const blob = await r.blob();
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url; a.download = `annotated_${(it.name||'document').replace(/\.pdf$/i,'')}.pdf`;
+                    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+                    toast.success('Exported annotated PDF');
+                  } catch (e: any) {
+                    toast.error('Export failed');
+                  }
+                };
+                const doExportBoth = async () => {
+                  if (!isActive) return;
+                  try {
+                    const r = await fetch('/api/export/zip', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rel: it.rel, boxes_by_page: boxesByPage }) });
+                    if (!r.ok) { const e = await r.json().catch(()=>null); throw new Error(e?.error || 'export_failed'); }
+                    const blob = await r.blob();
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url; a.download = `export_${(it.name||'document').replace(/\.pdf$/i,'')}.zip`;
+                    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+                    toast.success('Exported ZIP');
+                  } catch (e: any) {
+                    toast.error('Export failed');
+                  }
+                };
+
+                const primaryLabel = lastFormat === 'json' ? 'Export JSON' : lastFormat === 'annotated' ? 'Export Annotated PDF' : 'Export Both';
+                return (
+                  <Card
+                    data-testid="file-row"
+                    role="option"
+                    aria-selected={isActive}
+                    data-selected={isActive}
+                    tabIndex={0}
+                    onKeyDown={async (e)=>{
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        if (!it.rel) return;
+                        const url = `/api/pdf?rel=${encodeURIComponent(it.rel)}`;
+                        const d = await loadPdf(url);
+                        setDoc(d); setTotalPages(d.numPages || 2); setCurrentPdfName(it.name);
+                      }
+                    }}
+                    onClick={async ()=>{
+                      if (!it.rel) return;
+                      const url = `/api/pdf?rel=${encodeURIComponent(it.rel)}`;
+                      const d = await loadPdf(url);
+                      setDoc(d); setTotalPages(d.numPages || 2); setCurrentPdfName(it.name);
+                    }}
+                    className={cn(
+                      "group relative h-12 px-3 rounded-xl flex items-center justify-between text-left transition-colors hover:bg-muted cursor-pointer my-1",
+                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+                      isActive && "ring-1 ring-primary before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:bg-primary before:rounded"
+                    )}
+                    aria-label={it.name}
+                    title={it.name}
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium text-sm truncate" title={it.name}>{it.name}</div>
+                      <div className="text-xs text-muted-foreground truncate">{it.size ? `${Math.round(it.size/1024)} KB` : ''}</div>
+                    </div>
+                    {/* Trailing actions: tiny, reveal on hover/focus */}
+                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            data-testid="btn-export-left"
+                            variant="ghost" size="icon"
+                            aria-label="Export"
+                            title="Export options"
+                            onClick={(e)=> e.stopPropagation()}
+                          >
+                            <Download className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-56" onClick={(e)=> e.stopPropagation()}>
+                          <DropdownMenuItem
+                            data-testid="item-export-json-left"
+                            disabled={!isActive}
+                            onClick={()=>{ if (!isActive) return; setLastFormatState('json'); doExportJson(); }}
+                            title={!isActive ? 'Open this PDF to export annotations' : ''}
+                          >
+                            <Braces className="mr-2 h-4 w-4" /> Export JSON
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            data-testid="item-export-pdf-left"
+                            disabled={!isActive}
+                            onClick={()=>{ if (!isActive) return; setLastFormatState('annotated'); doExportPdf(); }}
+                            title={!isActive ? 'Open this PDF to export annotations' : ''}
+                          >
+                            <FileText className="mr-2 h-4 w-4" /> Export Annotated PDF
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            data-testid="item-export-both-left"
+                            disabled={!isActive}
+                            onClick={()=>{ if (!isActive) return; setLastFormatState('both'); doExportBoth(); }}
+                            title={!isActive ? 'Open this PDF to export annotations' : ''}
+                          >
+                            <Archive className="mr-2 h-4 w-4" /> Export Both (ZIP)
+                          </DropdownMenuItem>
+                          <div className="my-1 h-px bg-border" />
+                          <DropdownMenuItem disabled>Settings…</DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                  </Card>
+                );
+              }}
+              style={{ height: '100%' }}
+            />
+          </div>
+
+          <Button data-testid="btn-export-all" variant="default" className="w-full mt-4" aria-label="Export All JSON">
+            <Archive className="mr-2 h-4 w-4" /> Export All JSON
+          </Button>
+        </div>
+
+        {/* Drag handle (left) – visual line with enlarged hit area */}
+        <div className="relative w-1.5 bg-border hover:bg-primary transition-colors" aria-hidden="true">
+          <div
+            role="slider"
+            aria-orientation="vertical"
+            aria-label="Resize left pane"
+            aria-valuemin={200}
+            aria-valuemax={480}
+            aria-valuenow={leftW}
+            tabIndex={0}
+            data-testid="handle-left"
+            onPointerDown={(e)=>paneBeginDrag('left', e)}
+            onKeyDown={(e)=>paneHandleKey('left', e)}
+            className="absolute inset-y-0 -left-2 -right-2 cursor-col-resize"
+          />
+        </div>
+
+        {/* Annotation Panel */}
+        <div className="flex-1 p-6 flex flex-col min-w-0">
+
+          <div className="flex-1 rounded-lg relative mb-4 overflow-hidden bg-muted flex flex-col min-h-0">
+            {/* Top toolbar (sticky, non-overlapping) */}
+            <div data-testid="top-toolbar" className="sticky top-0 z-10 w-full bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/75 border-b px-3 py-2 flex items-center gap-3">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button size="sm" variant="outline" title="New Box (N)" onClick={() => setDrawArmed(true)}>
+                    <SquareDashed className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>New box (N)</TooltipContent>
+              </Tooltip>
+              <div className="text-xs text-muted-foreground">Type:</div>
+              <ToggleGroup type="single" value={defaultNewType} onValueChange={(v)=>{ if (!v) return; setDefaultNewType(v); if (selectedId) setPageBoxes((prev)=> prev.map(b=> b.id===selectedId? { ...b, type: v }: b)); }} aria-label="Default label type">
+                <ToggleGroupItem data-testid="btn-type-sec" value="Section" aria-label="Section">Sec</ToggleGroupItem>
+                <ToggleGroupItem data-testid="btn-type-tbl" value="Table" aria-label="Table">Tbl</ToggleGroupItem>
+              </ToggleGroup>
+              {/* Pager controls kept at bottom to avoid crowding zoom */}
+              <Separator orientation="vertical" className="mx-2" />
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button size="sm" variant="outline" title="Duplicate (D)" onClick={() => { if (!selectedId) return; setPageBoxes((prev) => { const src = prev.find((b) => b.id === selectedId); if (!src) return prev; const copy: Box = { ...src, id: `${src.id}-${Math.random().toString(36).slice(2, 6)}`, x: Math.min(0.98 - src.w, src.x + 0.02), y: Math.min(0.98 - src.h, src.y + 0.02) }; const next = [...prev, copy]; setSelectedId(copy.id); return next; }); }}>
+                    <Copy className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Duplicate (D)</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button size="sm" variant="outline" title="Delete (Del)" onClick={() => { if (!selectedId) return; setPageBoxes((prev) => { const filtered = prev.filter((b) => b.id !== selectedId); setSelectedId(filtered.length ? filtered[filtered.length - 1].id : null); return filtered; }); }}>
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Delete (Del)</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button size="sm" variant="outline" title="Export JSON" onClick={() => { const exportObj = pageBoxes.map((b) => ({ type: b.type, instance_id: b.instanceId, bounding_box: [Number(b.x.toFixed(4)), Number(b.y.toFixed(4)), Number(b.w.toFixed(4)), Number(b.h.toFixed(4))], })); setJsonText(JSON.stringify({ page: currentPage, boxes: exportObj }, null, 2)); setJsonOpen(true); }}>
+                    <Archive className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Export JSON</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    data-testid="btn-add-annotation-top"
+                    size="sm"
+                    variant="outline"
+                    title="Add label type"
+                    onClick={() => setAddOpen(true)}
+                  >
+                    <Tag className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Add label type</TooltipContent>
+              </Tooltip>
+              <Separator orientation="vertical" className="mx-2" />
+              {/* HUD toggle removed per spec */}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button size="sm" variant="outline" onClick={()=>setHelpOpen(true)} title="Help">?</Button>
+                </TooltipTrigger>
+                <TooltipContent>Help</TooltipContent>
+              </Tooltip>
+              <div className="ml-auto hidden lg:flex items-center gap-2 text-sm text-muted-foreground">
+                {/* Compact top pager (wide screens) */}
+                <Tooltip><TooltipTrigger asChild>
+                  <Button data-testid="btn-first-top" size="sm" variant="outline" title="First page" onClick={() => setCurrentPage(1)} aria-label="First Page"><ChevronsLeft className="h-4 w-4" /></Button>
+                </TooltipTrigger><TooltipContent>First page</TooltipContent></Tooltip>
+                <Tooltip><TooltipTrigger asChild>
+                  <Button data-testid="btn-prev-top" size="sm" variant="outline" title="Previous page" onClick={() => setCurrentPage((p) => Math.max(1, p - 1))} aria-label="Previous Page"><ChevronLeft className="h-4 w-4" /></Button>
+                </TooltipTrigger><TooltipContent>Previous page</TooltipContent></Tooltip>
+                <div className="text-xs text-muted-foreground whitespace-nowrap" data-testid="page-label-top">{currentPage} / {totalPages}</div>
+                <Tooltip><TooltipTrigger asChild>
+                  <Button data-testid="btn-next-top" size="sm" variant="outline" title="Next page" onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))} aria-label="Next Page"><ChevronRight className="h-4 w-4" /></Button>
+                </TooltipTrigger><TooltipContent>Next page</TooltipContent></Tooltip>
+                <Tooltip><TooltipTrigger asChild>
+                  <Button data-testid="btn-last-top" size="sm" variant="outline" title="Last page" onClick={() => setCurrentPage(totalPages)} aria-label="Last Page"><ChevronsRight className="h-4 w-4" /></Button>
+                </TooltipTrigger><TooltipContent>Last page</TooltipContent></Tooltip>
+                <Separator orientation="vertical" className="mx-2" />
+                <span>Zoom</span>
+                <input data-testid="zoom-top" type="range" min={0.5} max={2} step={0.1} value={zoom} onChange={(e) => setZoom(Number(e.target.value))} />
+                <span>{Math.round(zoom * 100)}%</span>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button data-testid="toggle-night" size="sm" variant={night ? "default" : "outline"} onClick={()=> setNight(v=>!v)} aria-pressed={night} aria-label="Night page">
+                      <Moon className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Night page (invert)</TooltipContent>
+                </Tooltip>
+              </div>
+            </div>
+            <div className="flex min-h-0 flex-1">
+              {/* Vertical thumbnail rail */}
+              {doc && thumbMode === "left" && (
+                <ThumbnailRail
+                  doc={doc}
+                  pageCount={totalPages}
+                  currentPage={currentPage}
+                  onJump={(n) => setCurrentPage(n)}
+                  cacheKey={`${currentPdfName || 'doc'}#${thumbRev}`}
+                />
+              )}
+
+              {/* Canvas viewer */}
+              <div className="flex-1 p-4 overflow-auto flex items-start justify-center min-h-0">
+              {doc ? (
+                <div
+                  className={`relative inline-block ${drawArmed ? "cursor-crosshair" : ""}`}
+                  ref={overlayRef}
+                  onPointerDown={(e) => {
+                    if (!overlayRef.current) return;
+                    if (!drawArmed) return;
+                    const rect = overlayRef.current.getBoundingClientRect();
+                    (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+                    drawRef.current = {
+                      startX: (e.clientX - rect.left) / Math.max(1, rect.width),
+                      startY: (e.clientY - rect.top) / Math.max(1, rect.height),
+                      rect: { width: rect.width, height: rect.height },
+                      alt: e.altKey,
+                    };
+                    setDraftBox({ id: "draft", type: defaultNewType, instanceId: "new", x: 0, y: 0, w: 0, h: 0 });
+                  }}
+                >
+                  <div className={night ? "invert hue-rotate-180" : ""}>
+                    <PdfCanvas doc={doc} page={currentPage} zoom={zoom} />
+                  </div>
+                  {/* Annotation overlay */}
+                  <div className="absolute inset-0" data-testid="overlay" onClick={() => setSelectedId(null)}>
+                    {/* Draft box rendered while drawing */}
+                    {draftBox && (
+                      <div
+                        className="absolute border-2 border-dashed border-primary/60 bg-primary/10"
+                        style={{ left: `${draftBox.x * 100}%`, top: `${draftBox.y * 100}%`, width: `${draftBox.w * 100}%`, height: `${draftBox.h * 100}%` }}
+                      />
+                    )}
+                    {pageBoxes.map((b) => {
+                      const isSelected = b.id === selectedId;
+                      const borderClass = b.type === 'Section' ? 'border-annotation-section'
+                        : b.type === 'Table' ? 'border-annotation-table'
+                        : b.type === 'Figure' ? 'border-annotation-figure'
+                        : 'border-annotation-section';
+                      const chipBg = b.type === 'Section' ? 'bg-annotation-section'
+                        : b.type === 'Table' ? 'bg-annotation-table'
+                        : b.type === 'Figure' ? 'bg-annotation-figure'
+                        : 'bg-annotation-section';
+                      return (
+                        <div data-testid="box"
+                          key={b.id}
+                          className={`absolute border-2 border-dashed cursor-move transition-all ${isSelected ? "ring-2 ring-primary ring-offset-2" : ""} ${borderClass}`}
+                          style={{ left: `${b.x * 100}%`, top: `${b.y * 100}%`, width: `${b.w * 100}%`, height: `${b.h * 100}%` }}
+                          onPointerDown={(e) => { e.stopPropagation(); beginDrag(b.id, e, "move"); }}
+                          onClick={(e) => { e.stopPropagation(); setSelectedId(b.id); }}
+                        >
+                          {/* Label chip (subtle tag) */}
+                          <div
+                            data-testid="box-chip"
+                            className={cn(
+                              'absolute -top-6 left-0 px-2 py-0.5 text-xs font-medium rounded-md ring-1 backdrop-blur-[1px]',
+                              b.type === 'Section' && 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+                              b.type === 'Table' && 'bg-blue-50 text-blue-700 ring-blue-200',
+                              b.type === 'Figure' && 'bg-violet-50 text-violet-700 ring-violet-200',
+                              !(['Section','Table','Figure'].includes(b.type)) && 'bg-slate-50 text-slate-700 ring-slate-200',
+                              isSelected && 'ring-2 ring-primary ring-offset-1 ring-offset-background shadow-sm'
+                            )}
+                            aria-label={`Annotation ${b.type} ${b.instanceId}`}
+                          >
+                            {b.type} · {b.instanceId}
+                          </div>
+                          {/* Resize handles */}
+                          {["nw","n","ne","e","se","s","sw","w"].map((h) => (
+                            <div
+                              key={h}
+                              onPointerDown={(e) => { e.stopPropagation(); beginDrag(b.id, e, h as any); }}
+                              className={`absolute w-3 h-3 bg-primary rounded-full shadow -translate-x-1/2 -translate-y-1/2 ${
+                                h === "nw" ? "left-0 top-0 cursor-nwse-resize" :
+                                h === "n"  ? "left-1/2 top-0 cursor-ns-resize" :
+                                h === "ne" ? "left-full top-0 cursor-nesw-resize" :
+                                h === "e"  ? "left-full top-1/2 cursor-ew-resize" :
+                                h === "se" ? "left-full top-full cursor-nwse-resize" :
+                                h === "s"  ? "left-1/2 top-full cursor-ns-resize" :
+                                h === "sw" ? "left-0 top-full cursor-nesw-resize" :
+                                             "left-0 top-1/2 cursor-ew-resize"}
+                              `}
+                            />
+                          ))}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : (
+                <div className="text-muted-foreground">Loading document…</div>
+              )}
+              </div>
+            </div>
+
+            {/* Floating HUD (draggable, attach) */}
+            {showHud && (
+            <div
+              data-testid="hud"
+              className="absolute bg-card rounded-lg shadow-lg p-2 flex gap-2 items-center cursor-grab"
+              style={hudStyle}
+              onPointerDown={(e) => {
+                if (hudMode !== "free") return;
+                const t = e.target as HTMLElement;
+                if (t && (t.closest('button') || t.closest('[role="button"]') || t.closest('[data-interactive="true"]'))) return;
+                const sx = e.clientX, sy = e.clientY; const start = { ...hudPos };
+                (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+                const move = (ev: PointerEvent) => {
+                  const rect = overlayRef.current?.getBoundingClientRect();
+                  const el = e.currentTarget as HTMLElement;
+                  let nx = start.x + (ev.clientX - sx); let ny = start.y + (ev.clientY - sy);
+                  if (rect) {
+                    nx = Math.max(8, Math.min(rect.width - el.offsetWidth - 8, nx));
+                    ny = Math.max(8, Math.min(rect.height - el.offsetHeight - 8, ny));
+                  }
+                  setHudPos({ x: nx, y: ny });
+                };
+                const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
+                window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
+              }}
+            >
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button data-testid="hud-plus" size="sm" variant="outline" title="Label palette"><Plus className="h-4 w-4" /></Button>
+              </PopoverTrigger>
+              <PopoverContent data-testid="label-palette" className="w-64">
+                  <div className="text-xs font-medium mb-2">Set label</div>
+                  <div className="grid grid-cols-3 gap-2 mb-3">
+                    {labels.map((l) => (
+                      <Button key={l.id} data-testid={`label-item-${l.id.toLowerCase()}`} variant="outline" size="sm" onClick={() => {
+                        if (selectedId) setPageBoxes((p)=>p.map(b=>b.id===selectedId?{...b,type:l.id}:b)); else setDefaultNewType(l.id);
+                      }}>{l.id}</Button>
+                    ))}
+                  </div>
+                  <Separator className="my-2" />
+                  <Button data-testid="label-add" size="sm" onClick={() => setAddOpen(true)}>Add Label</Button>
+                </PopoverContent>
+              </Popover>
+              <Button data-testid="hud-new" size="sm" variant="outline" title="New Box (N)" onClick={() => setDrawArmed(true)}>
+                <SquareDashed className="h-4 w-4" />
+              </Button>
+              <Button
+                data-testid="hud-mode-toggle"
+                size="sm"
+                variant={hudMode === 'attach' ? 'default' : 'outline'}
+                title={hudMode === 'attach' ? 'Attached (H to toggle)' : 'Free (H to toggle)'}
+                onClick={() => setHudMode(m => m === 'free' ? 'attach' : 'free')}
+              >
+                {hudMode === 'attach' ? 'Attached' : 'Free'}
+              </Button>
+              <Button size="sm" variant="outline" title="Help (?)" onClick={()=>setHelpOpen(true)}>?</Button>
+              <div className="text-xs text-muted-foreground">Type:</div>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button data-testid="btn-type-sec" size="sm" variant={defaultNewType === "Section" ? "default" : "outline"} onClick={() => {
+                    setDefaultNewType("Section");
+                    if (selectedId) setPageBoxes((prev) => prev.map((b) => b.id === selectedId ? { ...b, type: "Section" } : b));
+                  }}>Sec</Button>
+                </TooltipTrigger>
+                <TooltipContent>Section label</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button data-testid="btn-type-tbl" size="sm" variant={defaultNewType === "Table" ? "default" : "outline"} onClick={() => {
+                    setDefaultNewType("Table");
+                    if (selectedId) setPageBoxes((prev) => prev.map((b) => b.id === selectedId ? { ...b, type: "Table" } : b));
+                  }}>Tbl</Button>
+                </TooltipTrigger>
+                <TooltipContent>Table label</TooltipContent>
+              </Tooltip>
+              <Button
+                data-testid="btn-duplicate"
+                size="sm"
+                variant="outline"
+                title="Duplicate (D)"
+                onClick={() => {
+                  if (!selectedId) return;
+                  setPageBoxes((prev) => {
+                    const src = prev.find((b) => b.id === selectedId);
+                    if (!src) return prev;
+                    const copy: Box = { ...src, id: `${src.id}-${Math.random().toString(36).slice(2, 6)}`, x: Math.min(0.98 - src.w, src.x + 0.02), y: Math.min(0.98 - src.h, src.y + 0.02) };
+                    const next = [...prev, copy];
+                    setSelectedId(copy.id);
+                    return next;
+                  });
+                }}
+              >
+                <Copy className="h-4 w-4" />
+              </Button>
+              <Button
+                data-testid="btn-delete"
+                size="sm"
+                variant="outline"
+                title="Delete (Del)"
+                onClick={() => {
+                  if (!selectedId) return;
+                  setPageBoxes((prev) => {
+                    const filtered = prev.filter((b) => b.id !== selectedId);
+                    setSelectedId(filtered.length ? filtered[filtered.length - 1].id : null);
+                    return filtered;
+                  });
+                }}
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+              <Button data-testid="btn-export-json" size="sm" variant="outline" title="Export current page JSON"
+                onClick={() => {
+                  const exportObj = pageBoxes.map((b) => ({
+                    type: b.type,
+                    instance_id: b.instanceId,
+                    bounding_box: [Number(b.x.toFixed(4)), Number(b.y.toFixed(4)), Number(b.w.toFixed(4)), Number(b.h.toFixed(4))],
+                  }));
+                  setJsonText(JSON.stringify({ page: currentPage, boxes: exportObj }, null, 2));
+                  setJsonOpen(true);
+                }}
+              >
+                <Archive className="h-4 w-4" />
+              </Button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    data-testid="btn-add-annotation-top"
+                    size="sm"
+                    variant="outline"
+                    title="Add label type"
+                    onClick={() => setAddOpen(true)}
+                  >
+                    <Tag className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Add label type</TooltipContent>
+              </Tooltip>
+            </div>
+            )}
+          </div>
+
+          {/* Pager: thumbnails + single-row controls (bottom-aligned) */}
+          <div className="space-y-2">
+            {doc && thumbMode === "bottom" && (
+              <ThumbnailStrip
+                doc={doc}
+                pageCount={totalPages}
+                currentPage={currentPage}
+                onJump={(n) => setCurrentPage(n)}
+                height={96}
+                itemWidth={100}
+                cacheKey={`${currentPdfName || 'doc'}#${thumbRev}`}
+              />
+            )}
+            <div data-testid="page-controls" className="flex items-center justify-between gap-3 border-t pt-2">
+              <div className="flex items-center gap-1">
+                <Tooltip><TooltipTrigger asChild>
+                  <Button data-testid="btn-first" size="sm" variant="outline" title="First page" onClick={() => setCurrentPage(1)} aria-label="First Page"><ChevronsLeft className="h-4 w-4" /></Button>
+                </TooltipTrigger><TooltipContent>First page</TooltipContent></Tooltip>
+                <Tooltip><TooltipTrigger asChild>
+                  <Button data-testid="btn-prev" size="sm" variant="outline" title="Previous page" onClick={() => setCurrentPage((p) => Math.max(1, p - 1))} aria-label="Previous Page"><ChevronLeft className="h-4 w-4" /></Button>
+                </TooltipTrigger><TooltipContent>Previous page</TooltipContent></Tooltip>
+              </div>
+              <div className="flex items-center gap-3 flex-1 max-w-md px-2">
+              <input
+                data-testid="pager-slider"
+                type="range"
+                min={1}
+                max={totalPages}
+                value={currentPage}
+                onChange={(e) => setCurrentPage(Number(e.target.value))}
+                className="w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                aria-label="Page slider"
+                aria-valuetext={`Page ${currentPage} of ${totalPages}`}
+              />
+                <div className="text-sm text-muted-foreground whitespace-nowrap" data-testid="page-label">Page {currentPage} of {totalPages}</div>
+              </div>
+              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-1">
+                <Tooltip><TooltipTrigger asChild>
+                  <Button data-testid="btn-next" size="sm" variant="outline" title="Next page" onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))} aria-label="Next Page"><ChevronRight className="h-4 w-4" /></Button>
+                </TooltipTrigger><TooltipContent>Next page</TooltipContent></Tooltip>
+                <Tooltip><TooltipTrigger asChild>
+                  <Button data-testid="btn-last" size="sm" variant="outline" title="Last page" onClick={() => setCurrentPage(totalPages)} aria-label="Last Page"><ChevronsRight className="h-4 w-4" /></Button>
+                </TooltipTrigger><TooltipContent>Last page</TooltipContent></Tooltip>
+              </div>
+                <div className="h-6 w-px bg-border" aria-hidden />
+                <div className="flex items-center gap-2 text-sm text-muted-foreground" data-testid="thumbs-selector-inline">
+                  <span>Thumbs</span>
+                  <Select value={thumbMode} onValueChange={(v) => setThumbMode(v as ThumbMode)}>
+                    <SelectTrigger className="w-[150px]" aria-label="Thumbnails placement"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="left">Left rail</SelectItem>
+                      <SelectItem value="bottom">Bottom filmstrip</SelectItem>
+                      <SelectItem value="off">Off</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Drag handle (right) – visual line with enlarged hit area */}
+        <div className="relative w-1.5 bg-border hover:bg-primary transition-colors" aria-hidden="true">
+          <div
+            role="slider"
+            aria-orientation="vertical"
+            aria-label="Resize right pane"
+            aria-valuemin={220}
+            aria-valuemax={480}
+            aria-valuenow={rightW}
+            tabIndex={0}
+            data-testid="handle-right"
+            onPointerDown={(e)=>paneBeginDrag('right', e)}
+            onKeyDown={(e)=>paneHandleKey('right', e)}
+            className="absolute inset-y-0 -left-2 -right-2 cursor-col-resize"
+          />
+        </div>
+
+        {/* Inspector Panel */}
+        <div className="border-l bg-card p-6 flex flex-col" style={{ width: rightW }}>
+
+          <div className="space-y-3 flex-1">
+            <div>
+              <label className="text-sm font-medium mb-2 block flex justify-between items-center">
+                <span>Label Type</span>
+                <span className="text-xs bg-muted px-2 py-1 rounded">L</span>
+              </label>
+              <Select
+                value={selectedBox?.type ?? defaultNewType}
+                onValueChange={(val) => {
+                  if (selectedId) setPageBoxes((prev) => prev.map((b) => {
+                    if (b.id !== selectedId) return b;
+                    const newType = String(val);
+                    let newInstanceId = b.instanceId || '';
+                    const idx = newInstanceId.indexOf('-');
+                    if (idx > 0) {
+                      const suffix = newInstanceId.slice(idx); // includes '-'
+                      newInstanceId = newType.toLowerCase() + suffix;
+                    }
+                    return { ...b, type: newType, instanceId: newInstanceId };
+                  }));
+                  else setDefaultNewType(val as string);
+                }}
+              >
+                <SelectTrigger className="w-full" data-testid="inspector-label-type">
+                  <SelectValue placeholder="Choose label type" />
+                </SelectTrigger>
+                <SelectContent>
+                  {labels.map(l => (
+                    <SelectItem key={l.id} value={l.id}>{l.id}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div>
+              <label className="text-sm font-medium mb-2 block">Instance ID</label>
+              <Input
+                data-testid="inspector-instance-id"
+                value={selectedBox?.instanceId ?? ""}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  if (!selectedId) return;
+                  setPageBoxes((prev) => prev.map((b) => (b.id === selectedId ? { ...b, instanceId: val } : b)));
+                }}
+                placeholder="Unique identifier"
+              />
+            </div>
+
+            <div>
+              <label className="text-sm font-medium mb-2 block">Gold Standard Result</label>
+              <div className="flex gap-2">
+                <Button data-testid="btn-generate-inspector" variant="default" className="flex-1" disabled={!selectedBox} onClick={generateFromSelection} title={selectedBox ? 'Generate JSON from selection' : 'Select a box first'} aria-label="Generate JSON">
+                  <Sparkles className="mr-2 h-4 w-4" /> Generate JSON
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => setJsonOpen(true)} title="Edit JSON" aria-label="Edit JSON">
+                  <Edit className="h-4 w-4" />
+                </Button>
+              </div>
+              {/* Non‑blocking toggle removed: always non‑blocking */}
+              <div className="mt-2 flex items-center justify-between">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="text-sm text-foreground cursor-help">Exact JSON Match</span>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    Compares canonical JSON (sorted keys, no whitespace). Use when the generated JSON must exactly equal the Gold Standard.
+                  </TooltipContent>
+                </Tooltip>
+                <Switch
+                  id="toggle-exact-json"
+                  data-testid="toggle-exact-json"
+                  aria-label="Exact JSON Match"
+                  aria-checked={strictMatch}
+                  checked={strictMatch}
+                  onCheckedChange={(v)=>setStrictMatch(Boolean(v))}
+                />
+              </div>
+            </div>
+
+            {/* Featured Lessons UI intentionally omitted (agent-only resource) */}
+
+            <div className="flex-1 flex flex-col min-h-0">
+              <label className="text-sm font-medium mb-2 block">Notes</label>
+              <Textarea className="flex-1 min-h-[100px] resize-none" placeholder="Add your notes here..." />
+            </div>
+
+            {/* Annotations list (virtualized) */}
+            <div>
+              <label className="text-sm font-medium mb-2 block">Annotations on this page</label>
+              <div className="h-40 rounded border bg-muted/30" data-testid="anno-list">
+                <Virtuoso
+                  totalCount={pageBoxes.length}
+                  itemContent={(index) => {
+                    const b = pageBoxes[index];
+                    const lp = Math.round(b.x * 100), tp = Math.round(b.y * 100), wp = Math.round(b.w * 100), hp = Math.round(b.h * 100);
+                    const rect = overlayRef.current?.getBoundingClientRect();
+                    const lx = rect ? Math.round(b.x * rect.width) : undefined;
+                    const ly = rect ? Math.round(b.y * rect.height) : undefined;
+                    const lw = rect ? Math.round(b.w * rect.width) : undefined;
+                    const lh = rect ? Math.round(b.h * rect.height) : undefined;
+                    const tip = rect
+                      ? `Left ${lp}% (${lx}px) • Top ${tp}% (${ly}px) • Width ${wp}% (${lw}px) • Height ${hp}% (${lh}px)`
+                      : `Left ${lp}% • Top ${tp}% • Width ${wp}% • Height ${hp}%`;
+                    return (
+                      <button
+                        data-testid="anno-row"
+                        onClick={() => setSelectedId(b.id)}
+                        className={cn('w-full text-left px-3 py-2 hover:bg-muted flex items-center justify-between rounded focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background', b.id===selectedId && 'bg-muted')}
+                        aria-label={`Select annotation ${b.type} ${b.instanceId}`}
+                      >
+                        <div className="flex-1 min-w-0">
+                          <div className="truncate text-sm">{b.type} · {b.instanceId}</div>
+                          <div className="text-xs text-muted-foreground truncate">L{lp}% T{tp}% · W{wp}% H{hp}%</div>
+                        </div>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span className="ml-2 text-muted-foreground" aria-label="Details"><Info className="h-4 w-4" /></span>
+                          </TooltipTrigger>
+                          <TooltipContent>{tip}</TooltipContent>
+                        </Tooltip>
+                      </button>
+                    );
+                  }}
+                  style={{ height: '100%' }}
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-4 pt-4 border-t">
+            <div className="text-xs text-muted-foreground space-y-1 text-center">
+              <p><span className="bg-muted px-2 py-1 rounded">N</span>: New Box</p>
+              <p><span className="bg-muted px-2 py-1 rounded">Ctrl+D</span>: Duplicate Box</p>
+              <p><span className="bg-muted px-2 py-1 rounded">[</span> / <span className="bg-muted px-2 py-1 rounded">]</span>: Navigate</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Non-blocking only: blocking dialog removed */}
+
+        {/* Non-blocking LLM activity chip (bottom-right) */}
+        {llmPending > 0 && (
+          <div className="pointer-events-none fixed bottom-4 right-4 z-50">
+            <div data-testid="llm-chip" className="pointer-events-auto flex items-center gap-2 text-xs bg-card/95 border rounded-full px-3 py-1 shadow">
+              <LoaderDots />
+              <span>Generating…</span>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Fullscreen JSON Dialog */}
+      <Dialog open={jsonOpen} onOpenChange={setJsonOpen}>
+        <DialogContent data-testid="json-dialog" className="max-w-4xl h-[85vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle>JSON</DialogTitle>
+            <DialogDescription>Export preview or free edit. Esc to close, Cmd/Ctrl+Enter to save.</DialogDescription>
+          </DialogHeader>
+          <Separator className="my-2" />
+          <div className="flex-1 overflow-auto">
+            <textarea
+              className="w-full h-full font-mono text-sm leading-6 outline-none resize-none bg-muted/30 p-3 rounded"
+              value={jsonText}
+              onChange={(e) => setJsonText(e.target.value)}
+            />
+          </div>
+          <Separator className="my-2" />
+          <DialogFooter className="flex items-center gap-2 justify-end">
+            <Button variant="outline" onClick={formatJson}>Format</Button>
+            <Button variant="outline" onClick={() => navigator.clipboard.writeText(jsonText)}>Copy</Button>
+            <Button onClick={() => setJsonOpen(false)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      {/* Open PDF Dialog */}
+      <Dialog open={openDialog} onOpenChange={setOpenDialog}>
+        <DialogContent className="max-w-2xl" data-testid="open-dialog">
+          <DialogHeader>
+            <DialogTitle>Select a PDF</DialogTitle>
+            <DialogDescription>Listing from server root (SERVER_PDFS_ROOT).</DialogDescription>
+          </DialogHeader>
+          <div className="mb-2">
+            <Input placeholder="Filter files" value={openFilter} onChange={(e)=>setOpenFilter(e.target.value)} />
+          </div>
+          <div className="max-h-[50vh] overflow-auto rounded-md border">
+            <ul>
+              {pdfItems
+                .filter((it)=> it.name.toLowerCase().includes(openFilter.toLowerCase()))
+                .map((it)=> (
+                  <li key={it.rel}>
+                    <button
+                      className={cn(
+                        "group w-full h-12 px-3 rounded-xl flex items-center justify-between text-left transition-colors",
+                        // hover — subtle, neutral variant to ensure computed bg
+                        "hover:bg-muted",
+                        // selected/current state
+                        "data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground",
+                        // keyboard focus
+                        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                      )}
+                      aria-selected={it.name === currentPdfName}
+                      data-selected={it.name === currentPdfName}
+                      data-testid="open-item"
+                      data-name={it.name}
+                      onClick={async ()=>{
+                        const url = `/api/pdf?rel=${encodeURIComponent(it.rel)}`;
+                        const d = await loadPdf(url);
+                        setDoc(d); setTotalPages(d.numPages || 2); setCurrentPdfName(it.name); setOpenDialog(false);
+                      }}
+                    >
+                      <span className="truncate" title={it.name}>{it.name}</span>
+                      <span className="text-xs text-muted-foreground ml-3">{it.size ? `${Math.round(it.size/1024)} KB` : ''}</span>
+                    </button>
+                  </li>
+                ))}
+            </ul>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={()=> setOpenDialog(false)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      {/* Help Overlay */}
+      <Dialog open={helpOpen} onOpenChange={setHelpOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Shortcuts & Modes</DialogTitle>
+            <DialogDescription>Quick reference for annotating.</DialogDescription>
+          </DialogHeader>
+          <div className="text-sm space-y-2">
+            <p><b>N</b>: New (arm Draw mode) · <b>ESC</b>: cancel draw · <b>Shift</b>: constrain 4:3</p>
+            <p><b>[</b> / <b>]</b>: page prev/next · <b>D</b>/<b>Ctrl+D</b>: duplicate · <b>Delete</b>: remove</p>
+            <p><b>H</b>: toggle HUD attach/free · <b>R</b>: reset HUD position</p>
+            <p>Thumbs: Left rail / Bottom filmstrip / Off via selector</p>
+          </div>
+          <DialogFooter>
+            <Button onClick={()=>setHelpOpen(false)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+};
+
+export default ClassicLayout;
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/pages/DashboardLayout.tsx ======
+```tsx
+import { useState } from "react";
+import { 
+  Upload, Copy, Trash2, Plus, ArrowLeft, FileText, Tag, 
+  ChevronLeft, ChevronRight, Play, Pause, RotateCcw, 
+  Check, X, Zap, Target
+} from "lucide-react";
+import { Link } from "react-router-dom";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+
+const DashboardLayout = () => {
+  const [activeDocuments, setActiveDocuments] = useState([
+    { id: 1, name: "Research Paper 2024", currentPage: 5, totalPages: 45, annotations: 12, isActive: true },
+    { id: 2, name: "Tech Specification", currentPage: 23, totalPages: 89, annotations: 34, isActive: true },
+    { id: 3, name: "User Manual Draft", currentPage: 67, totalPages: 120, annotations: 45, isActive: false }
+  ]);
+  const [selectedTool, setSelectedTool] = useState("section");
+  const [batchMode, setBatchMode] = useState(false);
+  const [rapidMode, setRapidMode] = useState(false);
+
+  const annotationTools = [
+    { id: "section", name: "Section", color: "annotation-section", shortcut: "S" },
+    { id: "table", name: "Table", color: "annotation-table", shortcut: "T" },
+    { id: "figure", name: "Figure", color: "annotation-figure", shortcut: "F" },
+    { id: "text", name: "Text", color: "annotation-text", shortcut: "P" }
+  ];
+
+  const toggleDocumentActive = (docId: number) => {
+    setActiveDocuments(docs => docs.map(doc => 
+      doc.id === docId ? { ...doc, isActive: !doc.isActive } : doc
+    ));
+  };
+
+  const navigatePage = (docId: number, direction: 'prev' | 'next') => {
+    setActiveDocuments(docs => docs.map(doc => {
+      if (doc.id === docId) {
+        const newPage = direction === 'next' 
+          ? Math.min(doc.currentPage + 1, doc.totalPages)
+          : Math.max(doc.currentPage - 1, 1);
+        return { ...doc, currentPage: newPage };
+      }
+      return doc;
+    }));
+  };
+
+  return (
+    <div className="h-screen bg-background overflow-hidden">
+      {/* Header */}
+      <header className="h-16 border-b bg-card flex items-center px-6">
+        <Link to="/" className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors">
+          <ArrowLeft className="h-4 w-4" />
+          Back to Prototypes
+        </Link>
+        <div className="flex-1 text-center">
+          <h1 className="text-lg font-semibold">Multi-Document Rapid Annotation</h1>
+        </div>
+        <div className="flex gap-2">
+          <Button
+            variant={rapidMode ? "default" : "outline"}
+            size="sm"
+            onClick={() => setRapidMode(!rapidMode)}
+          >
+            <Zap className="mr-2 h-4 w-4" />
+            Rapid Mode
+          </Button>
+          <Button
+            variant={batchMode ? "default" : "outline"}
+            size="sm"
+            onClick={() => setBatchMode(!batchMode)}
+          >
+            <Target className="mr-2 h-4 w-4" />
+            Batch Mode
+          </Button>
+        </div>
+      </header>
+
+      <div className="flex h-[calc(100vh-4rem)]">
+        {/* Quick Tools Sidebar */}
+        <div className="w-64 border-r bg-card p-4 flex flex-col">
+          <div className="mb-6">
+            <h3 className="font-semibold mb-4">Annotation Tools</h3>
+            <div className="space-y-2">
+              {annotationTools.map((tool) => (
+                <Button
+                  key={tool.id}
+                  variant={selectedTool === tool.id ? "default" : "outline"}
+                  className="w-full justify-start"
+                  onClick={() => setSelectedTool(tool.id)}
+                >
+                  <Tag className={`mr-2 h-4 w-4 text-${tool.color}`} />
+                  {tool.name}
+                  <Badge variant="secondary" className="ml-auto text-xs">
+                    {tool.shortcut}
+                  </Badge>
+                </Button>
+              ))}
+            </div>
+          </div>
+
+          <div className="mb-6">
+            <h3 className="font-semibold mb-4">Quick Actions</h3>
+            <div className="space-y-2">
+              <Button variant="outline" className="w-full justify-start" size="sm">
+                <Copy className="mr-2 h-4 w-4" />
+                Copy Last
+              </Button>
+              <Button variant="outline" className="w-full justify-start" size="sm">
+                <RotateCcw className="mr-2 h-4 w-4" />
+                Undo
+              </Button>
+              <Button variant="outline" className="w-full justify-start" size="sm">
+                <Trash2 className="mr-2 h-4 w-4" />
+                Delete
+              </Button>
+            </div>
+          </div>
+
+          <div className="mt-auto">
+            <Button className="w-full" variant="outline">
+              <Upload className="mr-2 h-4 w-4" />
+              Load More PDFs
+            </Button>
+          </div>
+        </div>
+
+        {/* Multi-Document Workspace */}
+        <div className="flex-1 p-4 overflow-y-auto">
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="text-lg font-semibold">Active Documents</h2>
+            <div className="text-sm text-muted-foreground">
+              {activeDocuments.filter(doc => doc.isActive).length} documents active
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
+            {activeDocuments.map((doc) => (
+              <Card 
+                key={doc.id} 
+                className={`transition-all ${
+                  doc.isActive 
+                    ? "ring-2 ring-primary shadow-lg" 
+                    : "opacity-60 hover:opacity-80"
+                }`}
+              >
+                <CardHeader className="pb-3">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-sm font-medium truncate">
+                      {doc.name}
+                    </CardTitle>
+                    <div className="flex gap-1">
+                      <Button
+                        size="sm"
+                        variant={doc.isActive ? "default" : "outline"}
+                        onClick={() => toggleDocumentActive(doc.id)}
+                      >
+                        {doc.isActive ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    Page {doc.currentPage} of {doc.totalPages} • {doc.annotations} annotations
+                  </div>
+                </CardHeader>
+
+                <CardContent className="space-y-4">
+                  {/* PDF Preview Area */}
+                  <div className="aspect-[3/4] bg-muted rounded border-2 border-dashed border-muted-foreground/20 relative overflow-hidden">
+                    <div className="absolute inset-0 flex items-center justify-center text-xs text-muted-foreground">
+                      PDF Page {doc.currentPage}
+                    </div>
+                    
+                    {/* Sample annotation overlays for active documents */}
+                    {doc.isActive && (
+                      <>
+                        <div className="absolute top-[15%] left-[10%] w-[80%] h-[12%] border-2 border-dashed border-annotation-section cursor-crosshair hover:bg-annotation-section/10 transition-colors">
+                          <div className="absolute -top-5 left-0 px-1 py-0.5 text-xs font-medium text-white bg-annotation-section rounded text-[10px]">
+                            Section
+                          </div>
+                        </div>
+                        
+                        <div className="absolute top-[35%] left-[15%] w-[70%] h-[30%] border-2 border-dashed border-annotation-table cursor-crosshair hover:bg-annotation-table/10 transition-colors">
+                          <div className="absolute -top-5 left-0 px-1 py-0.5 text-xs font-medium text-white bg-annotation-table rounded text-[10px]">
+                            Table
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
+
+                  {/* Quick Navigation */}
+                  <div className="flex items-center justify-between">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => navigatePage(doc.id, 'prev')}
+                      disabled={doc.currentPage === 1}
+                    >
+                      <ChevronLeft className="h-3 w-3" />
+                    </Button>
+                    
+                    <div className="flex-1 mx-3">
+                      <Input
+                        type="number"
+                        value={doc.currentPage}
+                        min={1}
+                        max={doc.totalPages}
+                        className="text-center h-8 text-sm"
+                        onChange={(e) => {
+                          const page = Math.max(1, Math.min(Number(e.target.value), doc.totalPages));
+                          setActiveDocuments(docs => docs.map(d => 
+                            d.id === doc.id ? { ...d, currentPage: page } : d
+                          ));
+                        }}
+                      />
+                    </div>
+                    
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => navigatePage(doc.id, 'next')}
+                      disabled={doc.currentPage === doc.totalPages}
+                    >
+                      <ChevronRight className="h-3 w-3" />
+                    </Button>
+                  </div>
+
+                  {/* Quick Annotation Buttons */}
+                  {doc.isActive && (
+                    <div className="grid grid-cols-2 gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="text-xs"
+                        onClick={() => {/* Add section annotation */}}
+                      >
+                        <Check className="mr-1 h-3 w-3 text-annotation-section" />
+                        Section
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="text-xs"
+                        onClick={() => {/* Add table annotation */}}
+                      >
+                        <Check className="mr-1 h-3 w-3 text-annotation-table" />
+                        Table
+                      </Button>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            ))}
+
+            {/* Add New Document Card */}
+            <Card className="border-dashed border-2 border-muted-foreground/30 hover:border-primary/50 transition-colors cursor-pointer">
+              <CardContent className="flex items-center justify-center h-full min-h-[300px]">
+                <div className="text-center">
+                  <Plus className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
+                  <p className="text-sm text-muted-foreground">Add PDF Document</p>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Batch Processing Tools */}
+          {batchMode && (
+            <Card className="mt-6 border-primary/20">
+              <CardHeader>
+                <CardTitle className="text-base">Batch Processing</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="flex items-center gap-4">
+                  <Button>Apply to All Active</Button>
+                  <Button variant="outline">Next Unannnotated</Button>
+                  <Button variant="outline">Auto-detect Tables</Button>
+                  <div className="ml-auto text-sm text-muted-foreground">
+                    Processing {activeDocuments.filter(doc => doc.isActive).length} documents
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default DashboardLayout;
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/pages/Index.tsx ======
+```tsx
+import { Link } from "react-router-dom";
+import { FileText, Layout, Grid3X3, Layers } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+
+const Index = () => {
+  const prototypes = [
+    {
+      id: 1,
+      title: "Classic Three-Panel",
+      description: "Traditional layout with dedicated panels for exploration, annotation, and inspection. Perfect for detailed document analysis workflows.",
+      icon: Layout,
+      route: "/classic",
+      features: ["Three-panel layout", "Contextual toolbars", "Advanced navigation", "Detailed inspector"]
+    },
+    {
+      id: 2,
+      title: "Tabbed Interface",
+      description: "Modern tabbed design with floating annotation tools and collapsible sidebars for maximum document viewing space.",
+      icon: Layers,
+      route: "/tabbed",
+      features: ["Floating toolbars", "Tabbed sidebars", "Compact design", "Focus mode"]
+    },
+    {
+      id: 3,
+      title: "Dashboard Cards",
+      description: "Card-based modular interface with drag-and-drop functionality and visual project management approach.",
+      icon: Grid3X3,
+      route: "/dashboard",
+      features: ["Modular cards", "Drag & drop", "Visual workflow", "Project-focused"]
+    }
+  ];
+
+  return (
+    <div className="min-h-screen bg-background">
+      <header className="border-b bg-card">
+        <div className="container mx-auto px-6 py-8">
+          <div className="flex items-center gap-3 mb-4">
+            <FileText className="h-8 w-8 text-primary" />
+            <h1 className="text-3xl font-bold text-foreground">PDF Annotation System</h1>
+          </div>
+          <p className="text-lg text-muted-foreground max-w-2xl">
+            Explore three different prototype variations for document annotation workflows. Each design offers unique approaches to PDF annotation and document management.
+          </p>
+        </div>
+      </header>
+
+      <main className="container mx-auto px-6 py-12">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+          {prototypes.map((prototype) => {
+            const IconComponent = prototype.icon;
+            return (
+              <Card key={prototype.id} className="group hover:shadow-lg transition-all duration-300 border-2 hover:border-primary/20">
+                <CardHeader className="text-center pb-4">
+                  <div className="mx-auto mb-4 p-3 bg-primary/10 rounded-full w-fit group-hover:bg-primary/20 transition-colors">
+                    <IconComponent className="h-8 w-8 text-primary" />
+                  </div>
+                  <CardTitle className="text-xl">{prototype.title}</CardTitle>
+                  <CardDescription className="text-sm leading-relaxed">
+                    {prototype.description}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="space-y-2">
+                    <h4 className="font-medium text-sm text-muted-foreground">Key Features:</h4>
+                    <ul className="space-y-1">
+                      {prototype.features.map((feature, index) => (
+                        <li key={index} className="text-sm flex items-center gap-2">
+                          <div className="w-1.5 h-1.5 bg-primary rounded-full" />
+                          {feature}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                  <Link to={prototype.route} className="block pt-4">
+                    <Button className="w-full group-hover:shadow-md transition-all">
+                      View Prototype
+                    </Button>
+                  </Link>
+                </CardContent>
+              </Card>
+            );
+          })}
+        </div>
+
+        <div className="mt-16 text-center">
+          <h2 className="text-2xl font-bold mb-4">About These Prototypes</h2>
+          <p className="text-muted-foreground max-w-3xl mx-auto leading-relaxed">
+            Each prototype demonstrates different approaches to PDF annotation interfaces, from traditional three-panel layouts to modern card-based designs. 
+            They maintain core functionality while exploring various UX patterns and workflows suitable for different user preferences and use cases.
+          </p>
+        </div>
+      </main>
+    </div>
+  );
+};
+
+export default Index;
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/pages/NotFound.tsx ======
+```tsx
+import { useLocation } from "react-router-dom";
+import { useEffect } from "react";
+
+const NotFound = () => {
+  const location = useLocation();
+
+  useEffect(() => {
+    console.error("404 Error: User attempted to access non-existent route:", location.pathname);
+  }, [location.pathname]);
+
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-gray-100">
+      <div className="text-center">
+        <h1 className="mb-4 text-4xl font-bold">404</h1>
+        <p className="mb-4 text-xl text-gray-600">Oops! Page not found</p>
+        <a href="/" className="text-blue-500 underline hover:text-blue-700">
+          Return to Home
+        </a>
+      </div>
+    </div>
+  );
+};
+
+export default NotFound;
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/pages/TabbedLayout.tsx ======
+```tsx
+import { useState } from "react";
+import { 
+  Upload, Search, Archive, Copy, Trash2, Plus, Minus,
+  ChevronLeft, ChevronRight, Edit, Sparkles, ArrowLeft,
+  File, Tag, MessageSquare, Settings
+} from "lucide-react";
+import { Link } from "react-router-dom";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Card } from "@/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+
+const TabbedLayout = () => {
+  const [currentPage, setCurrentPage] = useState(345);
+  const [leftSidebarOpen, setLeftSidebarOpen] = useState(true);
+  const [rightSidebarOpen, setRightSidebarOpen] = useState(true);
+  const [selectedAnnotation, setSelectedAnnotation] = useState("section");
+
+  const pdfFiles = [
+    { name: "Research Paper 2024", pages: 45, status: "complete" },
+    { name: "Technical Specification", pages: 89, status: "pending" },
+    { name: "User Manual Draft", pages: 120, status: "complete" }
+  ];
+
+  return (
+    <div className="h-screen bg-background overflow-hidden">
+      {/* Header */}
+      <header className="h-16 border-b bg-card flex items-center px-6">
+        <Link to="/" className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors">
+          <ArrowLeft className="h-4 w-4" />
+          Back to Prototypes
+        </Link>
+        <div className="flex-1 text-center">
+          <h1 className="text-lg font-semibold">Tabbed Interface with Floating Tools</h1>
+        </div>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setLeftSidebarOpen(!leftSidebarOpen)}
+          >
+            {leftSidebarOpen ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+            Files
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setRightSidebarOpen(!rightSidebarOpen)}
+          >
+            Properties
+            {rightSidebarOpen ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+          </Button>
+        </div>
+      </header>
+
+      <div className="flex h-[calc(100vh-4rem)]">
+        {/* Left Sidebar */}
+        {leftSidebarOpen && (
+          <div className="w-72 border-r bg-card">
+            <Tabs defaultValue="files" className="h-full flex flex-col">
+              <TabsList className="grid w-full grid-cols-2 m-4 mb-0">
+                <TabsTrigger value="files" className="flex items-center gap-2">
+                  <File className="h-4 w-4" />
+                  Files
+                </TabsTrigger>
+                <TabsTrigger value="search" className="flex items-center gap-2">
+                  <Search className="h-4 w-4" />
+                  Search
+                </TabsTrigger>
+              </TabsList>
+              
+              <TabsContent value="files" className="flex-1 p-4 pt-6 space-y-4">
+                <Button className="w-full">
+                  <Upload className="mr-2 h-4 w-4" />
+                  Load PDF
+                </Button>
+                
+                <div className="space-y-2">
+                  {pdfFiles.map((file, index) => (
+                    <Card
+                      key={index}
+                      className="group h-12 px-3 rounded-xl flex items-center justify-between text-left transition-colors hover:bg-muted cursor-pointer"
+                      role="button"
+                      aria-label={`Open ${file.name}`}
+                    >
+                      <div className="min-w-0">
+                        <div className="font-medium text-sm truncate">{file.name}</div>
+                        <div className="text-xs text-muted-foreground truncate">
+                          {file.pages} pages | <span className={`text-status-${file.status}`}>{file.status}</span>
+                        </div>
+                      </div>
+                      <Button variant="ghost" size="icon" className="opacity-0 group-hover:opacity-100 transition-opacity" aria-label="Archive">
+                        <Archive className="h-4 w-4" />
+                      </Button>
+                    </Card>
+                  ))}
+                </div>
+              </TabsContent>
+              
+              <TabsContent value="search" className="flex-1 p-4 pt-6 space-y-4">
+                <Input placeholder="Search in documents..." />
+                <div className="text-sm text-muted-foreground">
+                  Advanced search functionality would be implemented here.
+                </div>
+              </TabsContent>
+            </Tabs>
+          </div>
+        )}
+
+        {/* Main Content Area */}
+        <div className="flex-1 relative">
+          {/* Floating Annotation Toolbar */}
+          <div className="absolute top-4 left-4 z-10 bg-card rounded-lg shadow-lg p-2 flex gap-2">
+            <Button size="sm" variant="outline" title="Section Annotation">
+              <Tag className="h-4 w-4 text-annotation-section" />
+            </Button>
+            <Button size="sm" variant="outline" title="Table Annotation">
+              <Tag className="h-4 w-4 text-annotation-table" />
+            </Button>
+            <Button size="sm" variant="outline" title="Figure Annotation">
+              <Tag className="h-4 w-4 text-annotation-figure" />
+            </Button>
+            <div className="border-l mx-1" />
+            <Button size="sm" variant="outline" title="Copy">
+              <Copy className="h-4 w-4" />
+            </Button>
+            <Button size="sm" variant="outline" title="Delete">
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          </div>
+
+          {/* PDF Viewer */}
+          <div className="h-full bg-muted flex items-center justify-center relative">
+            <div className="text-muted-foreground font-medium">
+              Rendered PDF Page {currentPage}
+            </div>
+            
+            {/* Annotation overlays */}
+            <div className="absolute top-[15%] left-[10%] w-[60%] h-[15%] border-2 border-dashed border-annotation-section cursor-pointer hover:bg-annotation-section/10 transition-colors">
+              <div className="absolute -top-6 left-0 px-2 py-1 text-xs font-medium text-white bg-annotation-section rounded">
+                Section
+              </div>
+            </div>
+            
+            <div className="absolute top-[40%] left-[15%] w-[50%] h-[35%] border-2 border-dashed border-annotation-table cursor-pointer hover:bg-annotation-table/10 transition-colors">
+              <div className="absolute -top-6 left-0 px-2 py-1 text-xs font-medium text-white bg-annotation-table rounded">
+                Table
+              </div>
+            </div>
+          </div>
+
+          {/* Bottom Navigation Bar */}
+          <div className="absolute bottom-0 left-0 right-0 bg-card border-t p-4">
+            <div className="flex items-center justify-center gap-4">
+              <Button size="sm" variant="outline">
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">Page</span>
+                <Input
+                  type="number"
+                  value={currentPage}
+                  onChange={(e) => setCurrentPage(Number(e.target.value))}
+                  className="w-20 text-center"
+                />
+                <span className="text-sm text-muted-foreground">of 1000</span>
+              </div>
+              
+              <input
+                type="range"
+                min="1"
+                max="1000"
+                value={currentPage}
+                onChange={(e) => setCurrentPage(Number(e.target.value))}
+                className="flex-1 max-w-xs"
+              />
+              
+              <Button size="sm" variant="outline">
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        </div>
+
+        {/* Right Sidebar */}
+        {rightSidebarOpen && (
+          <div className="w-80 border-l bg-card">
+            <Tabs defaultValue="properties" className="h-full flex flex-col">
+              <TabsList className="grid w-full grid-cols-3 m-4 mb-0">
+                <TabsTrigger value="properties" className="flex items-center gap-1">
+                  <Settings className="h-3 w-3" />
+                  Props
+                </TabsTrigger>
+                <TabsTrigger value="annotations" className="flex items-center gap-1">
+                  <Tag className="h-3 w-3" />
+                  Tags
+                </TabsTrigger>
+                <TabsTrigger value="notes" className="flex items-center gap-1">
+                  <MessageSquare className="h-3 w-3" />
+                  Notes
+                </TabsTrigger>
+              </TabsList>
+              
+              <TabsContent value="properties" className="flex-1 p-4 pt-6 space-y-4">
+                <div>
+                  <label className="text-sm font-medium mb-2 block">Label Type</label>
+                  <Input defaultValue="Section" />
+                </div>
+                
+                <div>
+                  <label className="text-sm font-medium mb-2 block">Instance ID</label>
+                  <Input defaultValue="sec-001" />
+                </div>
+                
+                <div>
+                  <label className="text-sm font-medium mb-2 block">Confidence</label>
+                  <Input type="number" defaultValue="95" min="0" max="100" />
+                </div>
+                
+                <Button variant="outline" className="w-full">
+                  <Sparkles className="mr-2 h-4 w-4" />
+                  Generate JSON
+                </Button>
+              </TabsContent>
+              
+              <TabsContent value="annotations" className="flex-1 p-4 pt-6 space-y-4">
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 p-2 rounded border">
+                    <div className="w-3 h-3 bg-annotation-section rounded-full"></div>
+                    <span className="text-sm">Section Header</span>
+                  </div>
+                  <div className="flex items-center gap-2 p-2 rounded border">
+                    <div className="w-3 h-3 bg-annotation-table rounded-full"></div>
+                    <span className="text-sm">Data Table</span>
+                  </div>
+                </div>
+              </TabsContent>
+              
+              <TabsContent value="notes" className="flex-1 p-4 pt-6">
+                <Textarea
+                  className="h-full min-h-[200px] resize-none"
+                  placeholder="Add your notes here..."
+                />
+              </TabsContent>
+            </Tabs>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+export default TabbedLayout;
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/src/vite-env.d.ts ======
+```ts
+/// <reference types="vite/client" />
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/tailwind.config.ts ======
+```ts
+import type { Config } from "tailwindcss";
+
+export default {
+  darkMode: ["class"],
+  content: ["./pages/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}", "./app/**/*.{ts,tsx}", "./src/**/*.{ts,tsx}"],
+  prefix: "",
+  theme: {
+    container: {
+      center: true,
+      padding: "2rem",
+      screens: {
+        "2xl": "1400px",
+      },
+    },
+    extend: {
+      colors: {
+        border: "hsl(var(--border))",
+        input: "hsl(var(--input))",
+        ring: "hsl(var(--ring))",
+        background: "hsl(var(--background))",
+        foreground: "hsl(var(--foreground))",
+        primary: {
+          DEFAULT: "hsl(var(--primary))",
+          foreground: "hsl(var(--primary-foreground))",
+        },
+        secondary: {
+          DEFAULT: "hsl(var(--secondary))",
+          foreground: "hsl(var(--secondary-foreground))",
+        },
+        destructive: {
+          DEFAULT: "hsl(var(--destructive))",
+          foreground: "hsl(var(--destructive-foreground))",
+        },
+        muted: {
+          DEFAULT: "hsl(var(--muted))",
+          foreground: "hsl(var(--muted-foreground))",
+        },
+        accent: {
+          DEFAULT: "hsl(var(--accent))",
+          foreground: "hsl(var(--accent-foreground))",
+        },
+        popover: {
+          DEFAULT: "hsl(var(--popover))",
+          foreground: "hsl(var(--popover-foreground))",
+        },
+        card: {
+          DEFAULT: "hsl(var(--card))",
+          foreground: "hsl(var(--card-foreground))",
+        },
+        annotation: {
+          section: "hsl(var(--annotation-section))",
+          table: "hsl(var(--annotation-table))",
+          figure: "hsl(var(--annotation-figure))",
+          text: "hsl(var(--annotation-text))",
+        },
+        status: {
+          pending: "hsl(var(--status-pending))",
+          complete: "hsl(var(--status-complete))",
+          error: "hsl(var(--status-error))",
+        },
+        sidebar: {
+          DEFAULT: "hsl(var(--sidebar-background))",
+          foreground: "hsl(var(--sidebar-foreground))",
+          primary: "hsl(var(--sidebar-primary))",
+          "primary-foreground": "hsl(var(--sidebar-primary-foreground))",
+          accent: "hsl(var(--sidebar-accent))",
+          "accent-foreground": "hsl(var(--sidebar-accent-foreground))",
+          border: "hsl(var(--sidebar-border))",
+          ring: "hsl(var(--sidebar-ring))",
+        },
+      },
+      borderRadius: {
+        lg: "var(--radius)",
+        md: "calc(var(--radius) - 2px)",
+        sm: "calc(var(--radius) - 4px)",
+      },
+      keyframes: {
+        "accordion-down": {
+          from: {
+            height: "0",
+          },
+          to: {
+            height: "var(--radix-accordion-content-height)",
+          },
+        },
+        "accordion-up": {
+          from: {
+            height: "var(--radix-accordion-content-height)",
+          },
+          to: {
+            height: "0",
+          },
+        },
+        sheen: {
+          '0%, 100%': {
+            backgroundPosition: '0% 50%',
+          },
+          '50%': {
+            backgroundPosition: '100% 50%',
+          },
+        },
+      },
+      animation: {
+        "accordion-down": "accordion-down 0.2s ease-out",
+        "accordion-up": "accordion-up 0.2s ease-out",
+        sheen: "sheen 3s ease infinite",
+      },
+    },
+  },
+  plugins: [require("tailwindcss-animate")],
+} satisfies Config;
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/tsconfig.json ======
+```json
+{
+  "files": [],
+  "references": [{ "path": "./tsconfig.app.json" }, { "path": "./tsconfig.node.json" }],
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"]
+    },
+    "noImplicitAny": false,
+    "noUnusedParameters": false,
+    "skipLibCheck": true,
+    "allowJs": true,
+    "noUnusedLocals": false,
+    "strictNullChecks": false
+  }
+}
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: html/vite.config.ts ======
+```ts
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react-swc";
+import path from "path";
+import { componentTagger } from "lovable-tagger";
+
+// https://vitejs.dev/config/
+async function detectProxyTarget(): Promise<string> {
+  if (process.env.VITE_API_PROXY) return process.env.VITE_API_PROXY;
+  const candidates = [
+    'http://127.0.0.1:8000',
+    'http://localhost:8000',
+    'http://127.0.0.1:8001',
+    'http://localhost:8001',
+  ];
+  for (const base of candidates) {
+    try {
+      const r = await fetch(base + '/api/build', { method: 'GET', signal: AbortSignal.timeout(300) });
+      if (r.ok) return base;
+    } catch {}
+  }
+  return 'http://localhost:8000';
+}
+
+export default defineConfig(async ({ mode }) => ({
+  server: {
+    host: "0.0.0.0",
+    port: 8080,
+    strictPort: true,
+    headers: mode === "development" ? {
+      "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+      "Pragma": "no-cache",
+      "Expires": "0",
+      "Surrogate-Control": "no-store",
+    } : undefined,
+    proxy: {
+      // Proxy API calls during dev to FastAPI backend (uvicorn on :8000)
+      "/api": {
+        target: await detectProxyTarget(),
+        changeOrigin: true,
+        // Keep the /api prefix so backend endpoints like /api/health resolve correctly
+      },
+      "/ws": {
+        target: await detectProxyTarget(),
+        changeOrigin: true,
+        ws: true,
+      },
+    },
+  },
+  preview: {
+    host: "0.0.0.0",
+    port: 8080,
+    strictPort: true,
+    headers: {
+      "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+      "Pragma": "no-cache",
+      "Expires": "0",
+      "Surrogate-Control": "no-store",
+    },
+  },
+  plugins: [react(), mode === "development" && componentTagger()].filter(Boolean),
+  resolve: {
+    alias: {
+      "@": path.resolve(__dirname, "./src"),
+    },
+  },
+}));
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: issues/001_preload_pdf.md ======
+```markdown
+
+#url:
+http://192.168.86.49:8080/classic?v=2
+
+## Issue 1:
+Location: Center Pane
+Task: the app needs to preload the prototypes/tabbed/pdfs/BHT CV32A65X.pdf
+for easier debugging. Currently you are preloading a placeholder
+
+![alt text](image.png)
+
+## Issue 2
+Location: Left Pane
+Task: the 'open pdf' button is inoperable. It needs to prove a modal to prototypes/tabbed/pdfs or somewhere relevant
+
+---
+
+Resolution (implemented)
+
+- Preload default PDF via backend list:
+  - On load, the app calls `/api/list` and selects `BHT CV32A65X.pdf` if present, else the first item.
+  - Loads the PDF with `/api/pdf?rel=...` using pdfjs; falls back to a placeholder if backend is unavailable.
+- Open PDF modal wired:
+  - “Open PDF” opens a dialog listing files from `/api/list` (root = `SERVER_PDFS_ROOT`).
+  - Filter field narrows results; selecting a file loads it into the center canvas and updates the left list highlight.
+- Dev runner updated:
+  - `scripts/dev.sh` sets `SERVER_PDFS_ROOT` to `prototypes/tabbed/pdfs` when present (fallback `data/pdfs`).
+  - Vite proxy targets the actual backend port (8001 preferred, auto‑fallback to 8000 if 8001 busy).
+
+Acceptance
+
+1) Start with VS Code task `Dev: Clean + Backend(8001) + Vite(8080)`.
+2) Visit `http://127.0.0.1:8080/classic`.
+3) Center pane should display the BHT PDF (file name shown as selected in left list).
+4) Click “Open PDF” → modal shows files under `prototypes/tabbed/pdfs`; filter works; selecting another file switches the viewer.
+5) If backend is down, the viewer still works with a placeholder and no fatal errors.
+
+Artifacts/Files
+
+- `prototypes/tabbed/html/src/pages/ClassicLayout.tsx` (preload logic, Open PDF modal, server list integration)
+- `scripts/dev.sh` (SERVER_PDFS_ROOT + proxy port detection)
+- `scripts/smokes/tabbed_preload.mjs` (CDP smoke: preload + open modal + select BHT)
+
+Status: Done
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: issues/002_pdf_resolution.md ======
+```markdown
+
+## Issues
+
+### 1) PDF blurry
+The PDF image resolution is too low. Increase resolution to prevent blurriness.
+![alt text](image-1.png)
+
+### 2) Top menu overlay over center pane
+The top menu overlays the PDF area. It must be a separate top area (like the bottom pager) and must not obscure the PDF.
+![alt text](image-2.png)
+
+---
+
+Resolution
+
+- Crisp PDF rendering
+  - Updated `renderPageCanvas` to render at `devicePixelRatio` (DPR-aware) and set CSS size separately.
+  - Canvas backing store now uses DPR-scaled width/height for crispness on HiDPI; CSS size remains at layout pixels.
+- Top toolbar separated
+  - Added a sticky top toolbar row inside the annotation panel (`data-testid="top-toolbar"`).
+  - The viewer/canvas scroll area is below it (`min-h-0` to avoid overlap). Toolbar includes New, Type toggles, Duplicate, Delete, Export, Zoom, Help, and HUD toggle.
+  - The floating HUD remains available but is hidden by default and can be toggled; this prevents accidental obstruction.
+
+Acceptance
+
+- [ ] On `/classic`, a canvas appears under a non-overlapping top toolbar.
+- [ ] Canvas is crisp on HiDPI: backstore/CSS width ratio ~= `devicePixelRatio`.
+- [ ] Opening “HUD” overlay is optional and default is hidden.
+- [ ] Scrolling does not cause toolbar to cover the canvas.
+
+Artifacts/Files
+
+- `prototypes/tabbed/html/src/lib/pdf.ts` (DPR-aware render)
+- `prototypes/tabbed/html/src/pages/ClassicLayout.tsx` (sticky top toolbar, HUD toggle, layout fixes)
+- Smokes:
+  - `scripts/smokes/tabbed_crisp_toolbar.mjs` (checks crispness and toolbar non-overlap)
+  - Included in `scripts/smokes/all.mjs`
+
+Status: Done
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: issues/003_zoom_tooltip.md ======
+```markdown
+## Issues
+
+### Duplicate Zoom slider
+- Location: Top and Bottom Menu
+- There is a zoom slider in the top pane and in the bottom pane. Pick one location.
+![alt text](image-3.png)
+
+### Tooltips
+- Location: Entire Interface
+- All buttons and widgets need concise, friendly tooltips (ShadCN-style).
+
+### Target and HUD Buttons not necessary
+- Location: Top Menu
+- Remove HUD button; clarify or remove the target icon.
+
+### Page Slider Unbalanced
+- Location: Bottom Menu
+- Match: `[« ‹] [──── slider ────] Page 1 / 2 [› »]`
+![alt text](image-4.png)
+
+#### Notes:
+Got it — here’s a unified ShadCN/Tailwind component that combines **pagination arrows**, a **page slider**, a **page indicator**, and optional **zoom controls** into one balanced toolbar.
+
+```tsx
+"use client"
+
+import * as React from "react"
+import { Button } from "@/components/ui/button"
+import { Slider } from "@/components/ui/slider"
+import { cn } from "@/lib/utils"
+import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react"
+
+interface PageControlsProps {
+  page: number
+  totalPages: number
+  zoom: number
+  onPageChange: (page: number) => void
+  onZoomChange?: (zoom: number) => void
+}
+
+export function PageControls({
+  page,
+  totalPages,
+  zoom,
+  onPageChange,
+  onZoomChange,
+}: PageControlsProps) {
+  return (
+    <div className="flex items-center justify-between w-full px-4 py-2 border-t bg-background">
+      {/* Left: navigation controls */}
+      <div className="flex items-center space-x-1">
+        <Button
+          variant="outline"
+          size="icon"
+          onClick={() => onPageChange(1)}
+          disabled={page === 1}
+        >
+          <ChevronsLeft className="h-4 w-4" />
+        </Button>
+        <Button
+          variant="outline"
+          size="icon"
+          onClick={() => onPageChange(Math.max(1, page - 1))}
+          disabled={page === 1}
+        >
+          <ChevronLeft className="h-4 w-4" />
+        </Button>
+      </div>
+
+      {/* Center: page slider + indicator */}
+      <div className="flex items-center space-x-3 flex-1 max-w-md px-4">
+        <Slider
+          value={[page]}
+          min={1}
+          max={totalPages}
+          step={1}
+          onValueChange={(val) => onPageChange(val[0])}
+          className="flex-1"
+        />
+        <span className="text-sm text-muted-foreground whitespace-nowrap">
+          Page {page} / {totalPages}
+        </span>
+      </div>
+
+      {/* Right: navigation forward + zoom */}
+      <div className="flex items-center space-x-3">
+        <Button
+          variant="outline"
+          size="icon"
+          onClick={() => onPageChange(Math.min(totalPages, page + 1))}
+          disabled={page === totalPages}
+        >
+          <ChevronRight className="h-4 w-4" />
+        </Button>
+        <Button
+          variant="outline"
+          size="icon"
+          onClick={() => onPageChange(totalPages)}
+          disabled={page === totalPages}
+        >
+          <ChevronsRight className="h-4 w-4" />
+        </Button>
+
+        {onZoomChange && (
+          <div className="flex items-center space-x-2 w-32">
+            <Slider
+              value={[zoom]}
+              min={25}
+              max={200}
+              step={5}
+              onValueChange={(val) => onZoomChange(val[0])}
+            />
+            <span className="text-sm w-10">{zoom}%</span>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+```
+
+---
+
+### ✅ Features
+
+* **Balanced layout:**
+
+  * Left: navigation buttons (`« ‹`)
+  * Center: slider with page indicator (`Page x / y`)
+  * Right: forward navigation (`› »`) and zoom (optional).
+* **ShadCN styling:** Uses `<Button>` + `<Slider>` from ShadCN UI.
+* **Keyboard-friendly:** Buttons are disabled at limits.
+* **Configurable:** You can pass `onZoomChange` if zoom is needed, or leave it out for a pure page scroller.
+
+---
+
+Do you want me to also show you a **minimal version** (without zoom, just `[« ‹] [──── slider ────] Page x / y [› »]`) so you can drop it in immediately?
+
+---
+
+Resolution (implemented)
+
+- Zoom location
+  - Kept zoom only in the top toolbar, removed the bottom zoom (duplicate). Top slider has `data-testid="zoom-top"`.
+- Tooltips
+  - Added ShadCN `<Tooltip>` wrappers to top toolbar buttons (New, Duplicate, Delete, Export JSON, Help). Titles remain as fallback.
+- HUD + Target
+  - Removed HUD toggle from the toolbar. Kept the target/crosshair but clarified with tooltip “Draw new annotation (N)”. If you prefer to drop it entirely, I can remove it; keyboard shortcut N still works.
+- Balanced bottom pager
+  - Bottom controls now strictly follow: left arrows · slider + “Page x of y” · right arrows. No zoom or extra controls.
+
+Acceptance
+
+- [ ] Only one zoom slider exists, in the top toolbar; no bottom zoom.
+- [ ] Top toolbar buttons show tooltips on hover (or have titles as fallback).
+- [ ] HUD toggle is gone; crosshair has a descriptive tooltip.
+- [ ] Bottom pager matches the requested layout and centers the page label beside the slider.
+
+Artifacts/Files
+
+- `prototypes/tabbed/html/src/pages/ClassicLayout.tsx` (toolbar tooltips, remove HUD toggle, balanced bottom pager, zoom-top testid)
+- Smokes:
+  - `scripts/smokes/tabbed_zoom_tooltip.mjs` (enforces single zoom + presence of titles)
+  - Included in `scripts/smokes/all.mjs`
+
+Status: Done (Crosshair removable on request)
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: issues/004_zoom_top_menu.md ======
+```markdown
+## Issues
+
+### Place zoom slider in Top Menu
+- Location: Top and Bottom Menu
+- The bottom menu is now unbalnced and twice the height as the top menu. Put the zoom slider in the top menu so the bottom and top menu will be the same height and maximuize the center pane pdf annotation area
+
+![alt text](image-5.png)
+
+---
+
+Resolution
+
+- Zoom placement
+  - Moved Zoom to the Top Menu (data-testid="zoom-top").
+  - Removed duplicate zoom from the bottom controls to keep both bars same height; center pane maximized.
+- Generate JSON button (Right Pane)
+  - Implemented an image-crop → LLM flow:
+    - Captures the selected box area expanded by 20% from the PDF canvas.
+    - Sends image to backend `/api/ux/generate` with a strict JSON prompt.
+    - Backend uses `LITELLM_DEFAULT_MODEL` (preferred) or `DEFAULT_LITELLM_MODEL` (falls back to `LITELLM_VLM_MODEL`) via existing `litellm_call` wrapper.
+    - Displays the returned object with keys: `title`, `columns`, `data`.
+    - If no explicit title: prompt instructs the model to infer with `INFERRED_` prefix.
+
+Acceptance
+
+- [ ] Top menu shows a Zoom slider; bottom menu has no Zoom.
+- [ ] Clicking “Generate JSON” with a selection sends an LLM request and opens JSON dialog with structured output.
+- [ ] If no selection, button is disabled or shows helpful tooltip.
+
+Artifacts/Files
+
+- Frontend: `prototypes/tabbed/html/src/pages/ClassicLayout.tsx`
+  - Top zoom (`zoom-top`) added; bottom zoom removed
+  - Inspector “Generate JSON” wired to crop and POST `/api/ux/generate`
+- Backend: `src/extractor/core/scripts/server.py`
+  - `/api/ux/generate`: prefer `LITELLM_DEFAULT_MODEL` (or `DEFAULT_LITELLM_MODEL`) when model not provided
+- Smokes: `scripts/smokes/tabbed_zoom_tooltip.mjs` (updated to assert top-only zoom)
+
+Status: Done
+
+### Generate Json Button
+- Location: Right Pane
+The 'generate json' button needs to copy the drawn box +20% expanded image area and send the image to the default model in `.env` (`LITELLM_DEFAULT_MODEL` or `DEFAULT_LITELLM_MODEL`). You will use src/extractor/pipeline/utils/litellm_call.py or similar to make the litellm call to the default model and return a pandas json version with columns and data field and a table title from surrounding text if it exists. If the table has surround text and NO expliciti title, then the LLM should infer a title title and prepend with INFERRED_
+Ask the human calrifying questions if confused. 
+You can also start simply with a customized prompt and a call like
+```python
+from litellm import completion   
+import os   
+import json
+
+os.environ['GEMINI_API_KEY'] = ""  
+
+messages = [  
+  {  
+    "role": "user",  
+    "content": "List 5 popular cookie recipes."  
+  }  
+]  
+
+completion(  
+  model="gemini/gemini-1.5-pro",   
+  messages=messages,   
+  response_format={"type": "json_object"} 
+)  
+```
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: issues/005_single_width_bottom_pane.md ======
+```markdown
+## Single-Row Bottom Pane (Classic)
+
+Location: Bottom pane (Classic layout)
+
+Problem
+- Bottom area used two vertical rows: filmstrip, page controls, and a separate “Thumbs” selector row.
+- This reduced the center canvas height and felt “double width”.
+
+Why
+- Keep the center pane as large as possible for annotation.
+
+Fix
+- Consolidate controls into one bottom row:
+  - Inline the “Thumbs” selector inside page controls (right-aligned).
+  - Reduce filmstrip height for a slimmer footprint.
+
+Acceptance
+- Bottom filmstrip mode shows a single-row controls bar beneath the thumbnails.
+- “Thumbs” selector appears inside the page controls row (no extra row).
+- A smoke test validates the layout and saves artifacts to `scripts/artifacts/`.
+
+Screenshot (pre-fix for reference)
+![pre-fix](image-6.png)
+
+Smoke
+- VS Code: task “Smokes: Tabbed (bottom single row)”
+- CLI: `BASE_URL="http://127.0.0.1:8080/main" node scripts/smokes/tabbed_bottom_single_row.mjs`
+
+Artifacts
+- `scripts/artifacts/bottom_single_row_*.png`
+- `scripts/artifacts/bottom_single_row_*.log`
+
+---
+
+## Generate JSON Button (Right Pane)
+
+Problem
+- The button should base64-encode the crop and call the LLM endpoint, returning well‑formatted JSON. Currently it produces only an image.
+
+Status
+- Real LLM smoke exists to validate end‑to‑end (see “Smokes: Tabbed (generate json REAL)”).
+
+Screenshot (current)
+![current](image-7.png)
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: issues/006_page_tnails.md ======
+```markdown
+### No Page Thumbnails
+Location: Left rail and bottom filmstrip
+
+- Left Rail Mode — thumbnails render as placeholders only
+  - Fixed: auto‑load first PDF and ensure image data URLs produced for page thumbs
+  - Smoke: `scripts/smokes/tabbed_thumbnails_left.mjs`
+    - Asserts at least two page thumbnail images are present
+
+- Bottom Filmstrip Mode — only one thumbnail shows although doc has 2 pages
+  - Fixed: for small docs (≤ 4 pages) render a simple row (no virtualization) so multiple thumbs are visible without scrolling
+  - Smoke: `scripts/smokes/tabbed_thumbnails_bottom.mjs`
+    - Asserts at least two page thumbnail images are present
+  
+Screenshots:
+![left-rail](image-8.png)
+![filmstrip](image-9.png)
+
+### Tooltips have no text
+- Location: App-wide
+- Fix/Verify: ShadCN TooltipProvider is at root; added tooltip on the new header button to validate behavior.
+- Smoke: `scripts/smokes/tooltips_text.mjs` (checks tooltip content appears on hover)
+![tooltips](image-11.png)
+![tooltips2](image-12.png)
+
+### Delete Keypress
+Location: Middle Pane
+- Behavior exists (window keydown). Verified via smoke.
+- Smoke: `scripts/smokes/delete_keypress.mjs` (draw → Delete → count decreases)
+
+### Missing “Add Annotation”
+- Location: Top menu
+- Added: header button (Tag icon) opens Add Label dialog (`data-testid="btn-add-annotation"`)
+- Smoke: `scripts/smokes/add_annotation_button.mjs` (click opens dialog)
+![menu](image-13.png)
+
+---
+
+Split & Tracked
+- 008_thumbnails_left_rail.md
+- 009_thumbnails_bottom_filmstrip.md
+- 010_tooltips_text.md
+- 011_delete_keypress.md
+- 012_add_label_top_menu.md
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: issues/007_label.md ======
+```markdown
+## Add Label icon in top center menu
+
+Problem
+- The “Add Label” (tag) icon was not visible in the main top center toolbar above the canvas as requested.
+
+Fix
+- Added a compact Tag icon button to the page controls toolbar (the top center row above the canvas), next to Duplicate / Delete / Export actions.
+- The button opens the same “Add Label” dialog used in the HUD and header.
+- Tooltip added: “Add label type”.
+
+Files
+- `prototypes/tabbed/html/src/pages/ClassicLayout.tsx`
+  - New button: `data-testid="btn-add-annotation-top"`
+  - Tooltip+title included for mouseover text.
+
+Smoke (verification)
+- Script: `scripts/smokes/add_annotation_top_menu.mjs`
+  - Checks that `btn-add-annotation-top` exists on `/classic`.
+  - Artifact: `scripts/artifacts/add_top_menu_*.{log,png}`
+
+How to run
+1) Ensure dev server is running on 8080.
+2) Run: `BASE_URL="http://127.0.0.1:8080" node scripts/smokes/add_annotation_top_menu.mjs`
+3) Expect: `exists=true` in log and the Tag icon visible in the top toolbar next to Duplicate/Delete/Export.
+
+Note
+- A header button also exists (right of the page title) for easy access. The new toolbar icon ensures the action is available where the annotation buttons live.
+
+Screenshot reference:
+![desired](image-14.png)
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: issues/008_thumbnails_left_rail.md ======
+```markdown
+# url:
+
+## Issue
+Location: Classic / left rail
+Task: Thumbnails show placeholders instead of real page images
+
+## Desired Behavior
+- Left rail renders real PNG thumbnails (not SVG placeholders)
+
+## Acceptance
+- [ ] At least two PNG thumbnails present under left rail
+- [ ] Thumbnails have visible non‑white pixels (>2% per thumb)
+
+## Smokes to add
+- scripts/smokes/tabbed_thumbnails_left.mjs (already added)
+
+## Artifacts
+- scripts/artifacts/thumbs_left_*.{log,png}
+
+## Meta
+- id: 008
+- Status: Fixed
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: issues/009_thumbnails_bottom_filmstrip.md ======
+```markdown
+# url:
+
+## Issue
+Location: Classic / bottom filmstrip
+Task: Only one thumbnail loads; others are placeholders
+
+## Desired Behavior
+- Bottom strip renders multiple PNG thumbnails immediately
+
+## Acceptance
+- [ ] ≥2 PNG thumbnails present in bottom strip
+- [ ] Each has >2% non‑white pixels (pixel check)
+
+## Smokes to add
+- scripts/smokes/tabbed_thumbnails_bottom.mjs (already added)
+
+## Artifacts
+- scripts/artifacts/thumbs_bottom_*.{log,png}
+
+## Meta
+- id: 009
+- Status: Fixed
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: issues/010_tooltips_text.md ======
+```markdown
+# url:
+
+## Issue
+Location: App‑wide controls
+Task: Tooltips do not show visible text on mouseover
+
+## Desired Behavior
+- Tooltips or title text visible on hover for key controls
+
+## Acceptance
+- [ ] Header/tool button tooltip visible
+- [ ] Pagination buttons provide tooltip or title text
+
+## Smokes to add
+- scripts/smokes/tooltips_text.mjs
+- scripts/smokes/tooltips_controls.mjs
+
+## Artifacts
+- scripts/artifacts/tooltips_*.{log,png}
+- scripts/artifacts/tooltips_controls_*.{log,png}
+
+## Meta
+- id: 010
+- Status: Fixed
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: issues/011_delete_keypress.md ======
+```markdown
+# url:
+
+## Issue
+Location: Canvas overlay
+Task: Delete key does not delete the selected box
+
+## Desired Behavior
+- Pressing Delete removes the selected annotation box
+
+## Acceptance
+- [ ] Box count decreases after Delete
+
+## Smokes to add
+- scripts/smokes/delete_keypress.mjs
+
+## Artifacts
+- scripts/artifacts/delete_key_*.{log,png}
+
+## Meta
+- id: 011
+- Status: Fixed
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: issues/012_add_label_top_menu.md ======
+```markdown
+# url:
+
+## Issue
+Location: Top center toolbar
+Task: Add Label (tag) action missing from toolbar next to annotation actions
+
+## Desired Behavior
+- A compact tag icon button exists in the top controls row with a tooltip
+- The legacy header button is removed
+
+## Acceptance
+- [ ] Button exists: [data-testid="btn-add-annotation-top"]
+- [ ] Tooltip or title visible on hover
+- [ ] No header button [data-testid="btn-add-annotation"] present
+
+## Smokes to add
+- scripts/smokes/add_annotation_top_menu.mjs
+
+## Artifacts
+- scripts/artifacts/add_top_menu_*.{log,png}
+
+## Meta
+- id: 012
+- Status: Fixed
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: issues/013_remove_pane_labels.md ======
+```markdown
+# url:
+
+## Issue
+Location: /classic (Classic Three-Panel Layout)
+Task: Remove the pane labels (Explorer, Annotation, Inspector) and reclaim ~70px whitespace so the center pane has more annotation space.
+
+## Context
+Current layout renders three H2 pane labels above the panels:
+- Explorer (left)
+- Annotation (center)
+- Inspector (right)
+
+These headings and their margins consume valuable vertical space; they are no longer needed.
+
+## Desired Behavior
+- No "Explorer", "Annotation", or "Inspector" pane labels are visible.
+- The center canvas sits closer to the top container (gap noticeably reduced, target < 24px).
+
+## Acceptance
+- [ ] No H2 (or visible element) with innerText matching Explorer|Annotation|Inspector.
+- [ ] The vertical gap from the center content container to the canvas top is < 24px.
+
+## Routes
+- /classic
+
+## Selectors (if known)
+- Canvas: `document.querySelector('canvas')`
+- Center overlay container: `document.querySelector('[data-testid="overlay"]')`
+
+## Smokes to add
+- scripts/smokes/issue_013.mjs
+
+## Artifacts
+- scripts/artifacts/issue_013_*.{log,png}
+
+## Meta
+- id: 013
+- created_at: (auto)
+
+Last_smoke_at: (pending)
+Last_suite_at: (pending)
+Status: Open
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: issues/014_exact_match.md ======
+```markdown
+## Issue
+Location: /classic (Classic Three-Panel Layout) → Inspector panel (right)
+Task: Add a toggle “Exact JSON Match” in the Inspector panel (right), below the “Generate JSON” controls, that enforces strict equality between the generated JSON and the annotated “Gold Standard Result” JSON. When enabled, any mismatch fails with a toast and does not overwrite the gold JSON. Non-blocking flow remains the only path.
+
+## Context
+Annotators can generate JSON for a selected region via the non‑blocking LLM flow. Today the output always opens in the JSON dialog. We need a mode to strictly validate the model’s output against the curated “Gold Standard Result” before allowing any overwrite.
+
+## Desired Behavior
+- Toggle labeled “Exact JSON Match” appears under the “Generate JSON” controls in the Inspector panel.
+- When ON and user clicks “Generate JSON”:
+  - Parse model JSON and the current JSON dialog contents (gold) and deep-compare for exact equality.
+  - If equal: show success toast “Exact JSON Match passed”; do not open or overwrite JSON.
+  - If not equal: show error toast “Exact JSON Match failed: mismatch”; do not open or overwrite JSON.
+- When OFF: Existing behavior preserved (open JSON dialog with generated JSON).
+
+## Acceptance
+- [ ] A toggle labeled “Exact JSON Match” with data-testid `toggle-exact-json` appears under the “Generate JSON” controls.
+- [ ] With toggle ON and a mismatch, a toast error appears and JSON is not overwritten (dialog remains as‑is).
+- [ ] With toggle ON and an exact match, a toast success appears (and no unintended overwrites occur).
+- [ ] With toggle OFF, current behavior is preserved.
+
+## Routes
+- /classic
+
+## Selectors (if known)
+- Toggle: `[data-testid="toggle-exact-json"]`
+- Generate button: `[data-testid="btn-export-json"]` (JSON modal open) and Inspector “Generate JSON” button next to it
+- JSON dialog textarea: `textarea` in the JSON Dialog
+- LLM chip: `[data-testid="llm-chip"]`
+
+## Smokes to add
+- scripts/smokes/issue_014.mjs
+  - Assert the “Exact JSON Match” text is present.
+  - Assert clicking “Generate JSON” opens the JSON dialog (non‑blocking).
+
+## Artifacts
+- scripts/artifacts/issue_014_*.{log,png}
+
+## Meta
+- id: 014
+- created_at: (auto)
+
+Last_smoke_at: (pending)
+Last_suite_at: (pending)
+Status: Open
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: issues/015_button_hierarchy_spacing.md ======
+```markdown
+## Issue
+Location: /classic (Explorer + Inspector)
+Task: Apply clear button hierarchy and consistent spacing rhythm.
+
+## Context
+- Primary actions should lead visually: Open PDF, Generate JSON, Export All.
+- Secondary/tertiary actions should be outline/ghost.
+- Adopt an 8px spacing grid for consistent rhythm.
+
+## Desired Behavior
+- Open PDF, Generate JSON, Export All use primary styling (brand color).
+- Per-file export buttons use outline styling.
+- Core stacks use gap-2/3/4/6 and space-y-3 consistently.
+
+## Acceptance
+- [ ] `btn-open-pdf` has a non-transparent background color (primary).
+- [ ] `btn-generate-inspector` has primary styling.
+- [ ] `btn-export-all` has primary styling.
+- [ ] Left/Right panel group spacing uses `space-y-3`.
+
+## Routes
+- /classic
+
+## Selectors
+- `[data-testid="btn-open-pdf"]`
+- `[data-testid="btn-generate-inspector"]`
+- `[data-testid="btn-export-all"]`
+
+## Smokes
+- scripts/smokes/toolbar_hierarchy.mjs
+
+## Meta
+- id: 015
+Last_smoke_at: (pending)
+Last_suite_at: (pending)
+Status: Open
+
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: issues/016_pager_top_toolbar.md ======
+```markdown
+## Issue
+Location: /classic (Viewer Top Toolbar)
+Task: Promote page navigation controls to the top toolbar alongside zoom.
+
+## Context
+Bottom-centered chevrons are easy to miss. Co-locating pager with primary controls improves discoverability.
+
+## Desired Behavior
+- Top toolbar contains: first/prev, slider, page label, next/last (duplicates allowed initially).
+- Controls operate the same as bottom controls.
+
+## Acceptance
+- [ ] `[data-testid="top-toolbar"]` contains pager controls (btn-first/prev/next/last) and a range input (`pager-slider-top`).
+- [ ] Changing the top slider updates the page label.
+
+## Routes
+- /classic
+
+## Smokes
+- scripts/smokes/page_controls_top_toolbar.mjs
+
+## Meta
+- id: 016
+Last_smoke_at: (pending)
+Last_suite_at: (pending)
+Status: Open
+
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: issues/017_typography_accessibility.md ======
+```markdown
+## Issue
+Location: /classic (global)
+Task: Typographic scale + focus/contrast AA pass.
+
+## Context
+Hierarchy and focus visibility need a consistent system:
+- Titles (text-lg/semibold)
+- Group labels (text-sm/medium)
+- Help text (text-xs text-muted-foreground)
+- Body (text-sm)
+Ensure focus rings are consistent and WCAG AA contrast holds across light/dark.
+
+## Desired Behavior
+- All actionable controls have `focus-visible:ring-2 ring-offset-2` and maintain AA contrast.
+- Labels use standardized sizes; help text is consistently muted.
+- Chips/tags and toolbar elements meet AA when over tinted backgrounds.
+
+## Acceptance
+- [ ] Random sampling of buttons/inputs/switches shows consistent focus ring classes.
+- [ ] Labels/help text sizes match the scale above.
+- [ ] Contrast spot checks (3 samples across panes) pass AA (manual audit acceptable for now).
+
+## Routes
+- /classic
+
+## Meta
+- id: 017
+Last_smoke_at: (pending)
+Last_suite_at: (pending)
+Status: Open
+
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: issues/018_hit_area.md ======
+```markdown
+Short answer: no—the hover blue doesn’t need to be that large or saturated.
+
+### Best practice for list-item hovers (ShadCN/Tailwind)
+
+* **Keep the hit area full-row**, but use a **subtle hover** (2–6% tint) so scanning the list isn’t interrupted. Reserve strong color fills for **selected/current** states.
+* **Differentiate states clearly**:
+
+  * *Hover*: light bg (accent/muted), no bolding.
+  * *Selected/current*: stronger bg + foreground swap.
+  * *Keyboard focus*: ring, not a heavy fill.
+* **Show trailing actions (e.g., download) on hover** with fade-in; keep them visible when selected.
+* **Accessibility**: maintain 40–48px row height; `aria-selected`/`aria-current`; `focus-visible` ring.
+
+### Recommended styles
+
+Use ShadCN tokens so it themes correctly:
+
+```tsx
+<li>
+  <button
+    className={cn(
+      "group w-full h-12 px-3 rounded-xl flex items-center justify-between text-left",
+      "transition-colors",
+      // hover — subtle, not a heavy blue slab
+      "hover:bg-accent/40 dark:hover:bg-accent/30",
+      // selected/current
+      "data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground",
+      // keyboard focus
+      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+    )}
+    aria-selected={selected}
+    data-selected={selected}
+  >
+    <span className="truncate">2507.00114v1_astrophysics.pdf</span>
+
+    <Button
+      variant="ghost"
+      size="icon"
+      className="opacity-0 group-hover:opacity-100 data-[selected=true]:opacity-100"
+      aria-label="Download"
+    >
+      <Download className="h-4 w-4" />
+    </Button>
+  </button>
+</li>
+```
+
+### Optional variant (even lighter)
+
+Keep hover neutral and use a **left border** for selected:
+
+```tsx
+"hover:bg-muted",
+"data-[selected=true]:border-l-2 data-[selected=true]:border-primary",
+```
+
+This approach keeps the list calm, improves scanability, and preserves strong color for selection/focus instead of every hover.
+
+![alt text](image-15.png)
+
+---
+
+Artifacts
+
+- UX health (classic):
+  - log: scripts/artifacts/ux_check_2025-09-15T16-44-17-969Z.log
+  - screenshot: scripts/artifacts/ux_check_2025-09-15T16-44-17-969Z.png
+- Smoke (issue_018: dialog item hit-area/hover):
+  - log: scripts/artifacts/issue_018_2025-09-15T16-48-56-749Z.log
+  - screenshot: scripts/artifacts/issue_018_2025-09-15T16-48-56-749Z.png
+
+Notes
+
+- Implemented subtle full-row hover and 48px hit area for PDF picker items in `prototypes/tabbed/html/src/pages/ClassicLayout.tsx`.
+- Selection now uses `aria-selected` and `data-selected` with ShadCN tokens; focus shows a ring.
+- Verified typecheck and health gate; added `scripts/smokes/issue_018.mjs` for regression coverage.
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: issues/019_dynamic_id_change.md ======
+```markdown
+Title: Dynamic ID prefix updates when label type changes
+
+Summary
+- Changing a selected annotation’s label type must update its instance ID prefix accordingly and reflect immediately in the center-pane label chip.
+- Example: switching type to Section updates `table-ro3` → `section-ro3` (preserve suffix), and the chip shows the new instance id.
+
+Context
+- Source request: src/extractor/pipeline/steps/015_id_change.md
+- Area: Classic layout, Right Inspector (Label Type, Instance ID) and Center canvas chip above the box.
+
+Acceptance
+- Add stable test ids:
+  - `data-testid="inspector-label-type"` on the Label Type select trigger.
+  - `data-testid="inspector-instance-id"` on the Instance ID input.
+  - `data-testid="box-chip"` on the small label chip rendered above each box.
+- Behavior:
+  - Given a selected box with instance id `table-ro3`, when the Label Type is changed to `Section` then:
+    - The instance id input updates to `section-ro3` automatically.
+    - The chip above the selected box updates to display `Section · section-ro3`.
+  - Suffix logic: keep the suffix after the first `-` unchanged; only replace the prefix with the new type in lowercase.
+  - Works when switching between any existing types (Section/Table/Figure and custom label types from the palette).
+
+Verification (Smoke: scripts/smokes/issue_019.mjs)
+- Loads /classic, selects a box, sets `instance-id` to `table-ro3`, changes type to `Section` via `inspector-label-type` and asserts:
+  - `inspector-instance-id` value becomes `section-ro3`.
+  - `[data-testid=box-chip]` for the selected box contains `Section · section-ro3`.
+- Artifacts saved under scripts/artifacts/ (log + screenshot) and failure explains missing selectors/behavior.
+
+Notes
+- Ensure updates are debounced minimally (instant for this prototype is fine).
+- Keep behavior reversible (changing back to Table restores `table-…` prefix while preserving suffix).
+
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: issues/020_label_highlight.md ======
+```markdown
+Title: Selected box label chip highlights with tasteful ring
+
+Summary
+- When a box is selected, the small label chip displayed above the rectangle should also visually highlight (subtle ring/stroke consistent with ShadCN tokens) to mirror selection state.
+
+Context
+- Source request: src/extractor/pipeline/steps/015_id_change.md (Label Highlight section)
+- Area: Classic layout, center canvas overlay; label chip is rendered above each annotation rectangle.
+
+Acceptance
+- Add a stable test id on the chip element for each box: `data-testid="box-chip"`.
+- Behavior:
+  - Selecting a box adds a visible but tasteful highlight to its chip (e.g., `ring-2 ring-primary ring-offset-1 ring-offset-background` or a subtle token-based border).
+  - Non-selected boxes’ chips remain unhighlighted.
+  - Works for all label types and regardless of zoom or night mode.
+
+Verification (Smoke: scripts/smokes/issue_020.mjs)
+- Loads /classic, selects a box, and asserts that the selected box’s `[data-testid=box-chip]` has a ring/border highlight while another unselected box’s chip does not.
+- Artifacts saved under scripts/artifacts/ (log + screenshot). If selectors are missing, the smoke fails with reason `selector_missing`.
+
+Notes
+- Keep highlight subtle; prefer ShadCN ring tokens for theme compatibility.
+- Ensure no layout shift or overlap with the annotation rectangle.
+
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: issues/README.md ======
+```markdown
+# Issues (Tabbed)
+
+## Template
+
+Copy this into a new `NNN_slug.md` file (use the “Issue: Scaffold (tabbed)” task for convenience):
+
+```
+# url:
+
+## Issue
+Location: __FILL_ME__
+Task: __FILL_ME__
+
+## Context
+Short context and screenshot.
+
+## Desired Behavior
+What the user expects to see/do.
+
+## Acceptance
+- [ ] Failing smoke exists and passes after fix
+- [ ] Verified on /classic
+- [ ] Artifacts linked below
+
+## Routes
+- /classic
+
+## Selectors (if known)
+- __FILL_ME__
+
+## Smokes to add
+- scripts/smokes/issue_NNN.mjs
+
+## Artifacts
+- scripts/artifacts/issue_NNN_*.{log,png}
+
+## Meta
+- id: NNN
+- created_at: YYYY-MM-DD
+
+Last_smoke_at: (pending)
+Last_suite_at: (pending)
+Status: Open
+```
+
+## Workflow
+- For single issues, create via “Issue: Scaffold (tabbed)” (auto-creates a smoke stub + VS Code task).
+- For very simple issues, use “Issue: Quick (tabbed)” and supply route, selector, and optional contains text — it creates a minimal issue and a presence smoke automatically.
+- For multi-topic drafts, drop a raw md into `prototypes/tabbed/issues/incoming/` and run “Issues: Promote incoming (tabbed)”. The promoter splits into atomic issues and smokes.
+- Fill acceptance; keep it objective (DOM selectors, visibility, behavior).
+- Agent implements smoke first (failing), then code, then artifacts back to the issue.
+```
+
+====== END FILE ======
+
+
+====== BEGIN FILE: package.json ======
+```json
+{
+  "name": "tabbed-prototypes",
+  "private": true,
+  "workspaces": [
+    "html"
+  ]
+}
+
+```
+
+====== END FILE ======

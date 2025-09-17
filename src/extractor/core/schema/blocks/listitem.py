@@ -35,7 +35,9 @@ def replace_bullets(child_blocks):
 class ListItem(Block):
     block_type: BlockTypes = BlockTypes.ListItem
     list_indent_level: int = 0
-    block_description: str = "A list item that is part of a list.  This block is used to represent a single item in a list."
+    block_description: str = (
+        "A list item that is part of a list.  This block is used to represent a single item in a list."
+    )
     html: str | None = None
 
     def assemble_html(self, document, child_blocks, parent_structure):

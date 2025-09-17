@@ -7,32 +7,7 @@ import asyncio
 from litellm import Router
 from dotenv import load_dotenv, find_dotenv
 from extractor.pipeline.utils.litellm_cache import initialize_litellm_cache
-
-
-def _extract_content(resp):
-    # Try to normalize to a text string from OpenAI-style responses
-    try:
-        if isinstance(resp, dict):
-            choices = resp.get("choices") or []
-            if choices:
-                msg = choices[0].get("message")
-                if msg and msg.get("content") is not None:
-                    return msg["content"] or ""
-                txt = choices[0].get("text")
-                if isinstance(txt, str):
-                    return txt
-        else:
-            ch = getattr(resp, "choices", None)
-            if ch:
-                msg = getattr(ch[0], "message", None)
-                if msg is not None and getattr(msg, "content", None) is not None:
-                    return msg.content or ""
-                txt = getattr(ch[0], "text", None)
-                if isinstance(txt, str):
-                    return txt
-    except Exception:
-        pass
-    return ""
+from extractor.pipeline.utils.litellm_response_utils import extract_content
 
 
 async def main():
@@ -89,7 +64,8 @@ async def main():
     strip_b64 = (os.getenv("SMOKE_STRIP_BASE64", "1").lower() in ("1", "true", "yes", "y"))
 
     def _sanitize_messages(msgs):
-        import copy, re
+        import copy
+        import re
         mm = copy.deepcopy(msgs)
         for m in mm:
             content = m.get("content")
@@ -133,7 +109,7 @@ async def main():
         results_by_id[rid] = {
             "id": rid,
             "request": {"model": req["model"], "messages": safe_msgs},
-            "response": _extract_content(resp) if resp is not None else "",
+            "response": extract_content(resp) if resp is not None else "",
             "error": err,
         }
     # Preserve original order

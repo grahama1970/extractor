@@ -18,49 +18,16 @@ import asyncio
 import textwrap
 from pathlib import Path
 from dataclasses import dataclass, field
-from typing import List, Dict, Any, Optional, cast, Tuple
+from typing import List, Dict, Any, Optional, cast, Tuple, Annotated
 from datetime import datetime
 import uuid
 
 import fitz  # PyMuPDF
-try:
-    try:
-        import typer
-        _HAS_TYPER = True
-    except Exception:
-        _HAS_TYPER = False
-        class _TyperShim:
-            def __init__(self,*a,**k): pass
-            def command(self,*a,**k): return lambda f: f
-            def __call__(self,*a,**k): print("Typer not installed; CLI disabled")
-        def _opt(*a,**k): return None
-        def _arg(*a,**k): return None
-        typer = _TyperShim()  # type: ignore
-        typer.Typer = _TyperShim  # type: ignore
-        typer.Option = _opt  # type: ignore
-        typer.Argument = _arg  # type: ignore
-        typer.secho = print  # type: ignore
-
-    _HAS_TYPER = True
-except Exception:
-    _HAS_TYPER = False
-    class _TyperShim:
-        def __init__(self,*a,**k): pass
-        def command(self,*a,**k): return lambda f: f
-        def __call__(self,*a,**k): print("Typer not installed; CLI disabled")
-    def _opt(*a,**k): return None
-    def _arg(*a,**k): return None
-    typer = _TyperShim()  # type: ignore
-    typer.Typer = _TyperShim  # type: ignore
-    typer.Option = _opt  # type: ignore
-    typer.Argument = _arg  # type: ignore
-    typer.secho = print  # type: ignore
-
-from typing_extensions import Annotated
+import typer
 from dotenv import load_dotenv
 from loguru import logger
 
-from extractor.core.services.utils.litellm_cache import initialize_litellm_cache
+from extractor.pipeline.utils.litellm_cache import initialize_litellm_cache
 from extractor.pipeline.utils.prompt_builder import build_llm_context
 from extractor.pipeline.utils.ann_index import build_ann_index, query_ann_index
 from extractor.pipeline.utils.annotations import (
@@ -71,20 +38,40 @@ from extractor.pipeline.utils.annotations import (
     load_relevant_rules as _load_relevant_rules,
 )
 from extractor.pipeline.utils.litellm_call import litellm_call
-from extractor.pipeline.utils.diagnostics import start_resource_sampler, stop_resource_sampler, make_event, snapshot_resources, build_stage_timings, get_run_id, classify_llm_error, gpu_metrics_available
+from extractor.pipeline.utils.diagnostics import (
+    start_resource_sampler,
+    stop_resource_sampler,
+    make_event,
+    snapshot_resources,
+    build_stage_timings,
+    get_run_id,
+    classify_llm_error,
+    gpu_metrics_available,
+)
+
 try:
     import psutil  # type: ignore
 except Exception:
     psutil = None  # type: ignore
 import time
 
-initialize_litellm_cache()
+# Cache initialization will be handled within command execution to avoid import-time side effects.
+
 
 # ------------------------------------------------------------------
 # CONFIGURATION
 # ------------------------------------------------------------------
-load_dotenv()
-app = typer.Typer(help="Verify suspicious headers using a multimodal LLM.", add_completion=False)
+def build_cli():
+    import typer as _typer
+
+    app = _typer.Typer(
+        help="Verify suspicious headers using a multimodal LLM.", add_completion=False
+    )
+    # Expose the primary runner as a subcommand
+    app.command(name="run")(run)
+    app.command(name="debug-bundle")(debug_bundle)
+    return app
+
 
 def _env_vlm_model(default: str = "gemini/gemini-2.5-flash") -> str:
     """Return VLM model from a single environment variable for clarity.
@@ -116,10 +103,12 @@ class Config:
     # Whether to write suspicion fields back into blocks
     write_suspicion_fields: bool = True
 
+
 # ------------------------------------------------------------------
 # PROMPT
 # ------------------------------------------------------------------
-SYSTEM_PROMPT = textwrap.dedent("""
+SYSTEM_PROMPT = textwrap.dedent(
+    """
     You are an expert document analyst. Your task is to determine if a text block, which has been
     flagged as a "suspicious" section header, is actually a legitimate section header or if it has
     been misclassified.
@@ -135,7 +124,8 @@ SYSTEM_PROMPT = textwrap.dedent("""
     Provide a strict JSON response with:
     - "is_header": true|false
     - "reasoning": short explanation
-""")
+"""
+)
 
 # ------------------------------------------------------------------
 # HELPER FUNCTIONS
@@ -152,6 +142,8 @@ SYSTEM_PROMPT = textwrap.dedent("""
 # Crucial rules (optional) – used for weighting
 # --------------------
 RELEVANT_RULES = _load_relevant_rules()
+
+
 # --- Prior decisions retrieval (stub) ---
 def _retrieve_prior_decisions(header_text_norm: str, font_sig: str, limit: int = 5) -> list[dict]:
     """Stubbed prior retrieval to prevent NameError when --use-prior is enabled.
@@ -159,12 +151,9 @@ def _retrieve_prior_decisions(header_text_norm: str, font_sig: str, limit: int =
     """
     return []
 
+
 # --- Verify the User has selected a Multmodal (Vision) model
-async def verify_header_with_llm(
-    image_b64: str,
-    context_text: str,
-    model: str
-) -> Dict[str, Any]:
+async def verify_header_with_llm(image_b64: str, context_text: str, model: str) -> Dict[str, Any]:
     """Verify header using litellm_call (vision required) with strict JSON intent.
 
     Always sends an image; provider error will be raised to the caller.
@@ -177,6 +166,26 @@ async def verify_header_with_llm(
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": user_content},
     ]
+    # Optional contracts adapter path
+    if os.getenv("USE_LLM_ADAPTER", "").lower() in ("1", "true", "yes", "y"):
+        try:
+            try:
+                from src.llm_adapter.adapter import LLMAdapter  # type: ignore
+            except Exception:
+                from llm_adapter.adapter import LLMAdapter  # type: ignore
+            adapter = LLMAdapter()
+            hv = await adapter.verify_header(
+                model=model,
+                messages=messages,
+                prompt_version=os.getenv("STAGE03_PROMPT_VERSION", "header@0.1.0"),
+                doc_id="doc",
+                section_id="hdr",
+                request_id=f"hdr_{get_run_id()}",
+                timeout=30,
+            )
+            return {"is_header": hv.verdict == "accept", "reasoning": "; ".join(hv.reasons or [])}
+        except Exception:
+            pass
     sid = os.getenv("LITELLM_SESSION_ID") or get_run_id()
     results = await litellm_call(
         prompts=[{"model": model, "messages": messages}],
@@ -184,8 +193,16 @@ async def verify_header_with_llm(
         concurrency=1,
         desc="verify header",
         session_id=sid,
+        export="results",
     )
-    answer = results[0] if results else ""
+    r = results[0] if results else None
+    try:
+        from loguru import logger as _logger
+        if r:
+            _logger.info(f"verify_header: model={r.request.model} ok={r.exception is None}")
+    except Exception:
+        pass
+    answer = r.content if r else ""
     try:
         payload = json.loads(answer) if answer else {}
     except Exception:
@@ -200,12 +217,14 @@ async def verify_header_with_llm(
     payload["reasoning"] = str(payload.get("reasoning", ""))
     return payload
 
+
 # ------------------------------------------------------------------
 # MAIN PIPELINE
 # ------------------------------------------------------------------
 @dataclass
 class VerificationTask:
     """Holds all necessary info for a single verification task."""
+
     page_idx: int
     block_idx: int
     page_blocks: List[Dict[str, Any]]
@@ -213,7 +232,9 @@ class VerificationTask:
     config: Config
     image_output_dir: Path
 
-    def get_context_blocks(self) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
+    def get_context_blocks(
+        self,
+    ) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
         """Return (target, above, below) where above/below skip empty blocks.
 
         Empty means:
@@ -223,6 +244,7 @@ class VerificationTask:
         Preference: textual neighbors; fallback to any block with a non-zero bbox
         within a small window.
         """
+
         def _has_text(b: Optional[Dict[str, Any]]) -> bool:
             if not b:
                 return False
@@ -230,8 +252,8 @@ class VerificationTask:
             if t:
                 return True
             # legacy shape
-            for ln in (b.get("lines") or []):
-                for sp in (ln.get("spans") or []):
+            for ln in b.get("lines") or []:
+                for sp in ln.get("spans") or []:
                     if (sp.get("text") or "").strip():
                         return True
             return False
@@ -255,7 +277,11 @@ class VerificationTask:
 
         # immediate neighbors
         above = self.page_blocks[self.block_idx - 1] if self.block_idx > 0 else None
-        below = self.page_blocks[self.block_idx + 1] if self.block_idx < len(self.page_blocks) - 1 else None
+        below = (
+            self.page_blocks[self.block_idx + 1]
+            if self.block_idx < len(self.page_blocks) - 1
+            else None
+        )
 
         # If neighbor is empty, scan up to ±5 blocks to find a non-empty one
         MAX_SCAN = 5
@@ -269,7 +295,9 @@ class VerificationTask:
                     break
 
         if not _non_empty(below):
-            for i in range(self.block_idx + 2, min(len(self.page_blocks), self.block_idx + 2 + MAX_SCAN)):
+            for i in range(
+                self.block_idx + 2, min(len(self.page_blocks), self.block_idx + 2 + MAX_SCAN)
+            ):
                 cand = self.page_blocks[i]
                 if _non_empty(cand):
                     below = cand
@@ -280,34 +308,34 @@ class VerificationTask:
     def render_context_image_b64(self) -> str:
         """Renders an image of the block and its neighbors, saves it, and returns base64."""
         target, above, below = self.get_context_blocks()
-        
-        expanded_rect = fitz.Rect(target['bbox'])
-        
-        if above and 'bbox' in above:
-            expanded_rect.include_rect(fitz.Rect(above['bbox']))
-        if below and 'bbox' in below:
-            expanded_rect.include_rect(fitz.Rect(below['bbox']))
-            
+
+        expanded_rect = fitz.Rect(target["bbox"])
+
+        if above and "bbox" in above:
+            expanded_rect.include_rect(fitz.Rect(above["bbox"]))
+        if below and "bbox" in below:
+            expanded_rect.include_rect(fitz.Rect(below["bbox"]))
+
         expanded_rect.x0 -= 10
         expanded_rect.y0 -= 10
         expanded_rect.x1 += 10
         expanded_rect.y1 += 10
-        
+
         # ensure expanded rect stays within page bounds across PyMuPDF versions
         expanded_rect = expanded_rect & self.page_obj.rect
 
         matrix = fitz.Matrix(self.config.render_dpi / 72, self.config.render_dpi / 72)
         pix = self.page_obj.get_pixmap(matrix=matrix, clip=expanded_rect)  # type: ignore[attr-defined]
-        
+
         # Save the image for inspection
         image_path = self.image_output_dir / f"suspicious_p{self.page_idx}_b{self.block_idx}.png"
         pix.save(str(image_path))
-        
+
         # Also update the block with the path to its context image
         self.page_blocks[self.block_idx]["context_image_path"] = str(image_path)
 
         # IMPORTANT: Encode as PNG to match data URL type
-        return base64.b64encode(pix.tobytes("png")).decode('utf-8')
+        return base64.b64encode(pix.tobytes("png")).decode("utf-8")
 
 
 async def process_pdf_pipeline(config: Config):
@@ -349,37 +377,50 @@ async def process_pdf_pipeline(config: Config):
     t_stage0 = time.monotonic()
     resources = snapshot_resources("start")
     import os
-    sampler = start_resource_sampler(float(os.getenv("SAMPLE_INTERVAL_SEC", "2"))) if os.getenv("ENABLE_RESOURCE_SAMPLING", "0").lower() in ("1","true","yes","y") else None
+
+    sampler = (
+        start_resource_sampler(float(os.getenv("SAMPLE_INTERVAL_SEC", "2")))
+        if os.getenv("ENABLE_RESOURCE_SAMPLING", "0").lower() in ("1", "true", "yes", "y")
+        else None
+    )
     try:
         if sampler and not gpu_metrics_available():
-            diagnostics.append(make_event("03_suspicious_headers","info","gpu_metrics_unavailable","NVML not available; GPU metrics disabled",{}))
+            diagnostics.append(
+                make_event(
+                    "03_suspicious_headers",
+                    "info",
+                    "gpu_metrics_unavailable",
+                    "NVML not available; GPU metrics disabled",
+                    {},
+                )
+            )
     except Exception:
         pass
     try:
         if psutil is not None:
             proc = psutil.Process()
-            resources["proc_rss_mb_start"] = int((proc.memory_info().rss or 0)/(1024*1024))
+            resources["proc_rss_mb_start"] = int((proc.memory_info().rss or 0) / (1024 * 1024))
             vm = psutil.virtual_memory()
-            resources["vmem_used_mb_start"] = int(getattr(vm, "used", 0)/(1024*1024))
+            resources["vmem_used_mb_start"] = int(getattr(vm, "used", 0) / (1024 * 1024))
     except Exception:
         pass
-    
+
     # Define clear output paths
     json_output_dir = config.output_dir / "json_output"
     image_output_dir = config.output_dir / "image_output"
     json_output_dir.mkdir(parents=True, exist_ok=True)
     image_output_dir.mkdir(parents=True, exist_ok=True)
-    
+
     # Load Stage 02 JSON
-    with open(config.input_json, 'r') as f:
+    with open(config.input_json, "r") as f:
         marker_data = json.load(f)
-    
+
     try:
         pdf_doc = fitz.open(config.input_pdf)
     except Exception as e:
         print(f"Failed to open PDF {config.input_pdf}: {e}")
         return {"success": False, "error": str(e)}
-    
+
     # Normalize: Stage 02 may be flat blocks — convert to pages for local processing
     if "pages" not in marker_data:
         all_blocks = marker_data.get("blocks", [])
@@ -389,8 +430,10 @@ async def process_pdf_pipeline(config: Config):
             if p_idx not in pages_dict:
                 pages_dict[p_idx] = []
             pages_dict[p_idx].append(block)
-        
-        marker_data["pages"] = [{"blocks": pages_dict.get(i, [])} for i in sorted(pages_dict.keys())]
+
+        marker_data["pages"] = [
+            {"blocks": pages_dict.get(i, [])} for i in sorted(pages_dict.keys())
+        ]
 
     # 2) Annotations — index by page, build global cue summary
     annotations_by_page: Dict[int, List[Dict[str, Any]]] = {}
@@ -407,9 +450,9 @@ async def process_pdf_pipeline(config: Config):
         except Exception as e:
             logger.warning(f"Failed to load annotations from {config.annotations_json}: {e}")
 
-# Load saved FAISS index from Stage 01 if present; else build ephemeral
-# NOTE: Removed misplaced FAISS/negatives block that executed at import time.
-# Annotation FAISS indexing and global negatives are handled inside process_pdf_pipeline.
+    # Load saved FAISS index from Stage 01 if present; else build ephemeral
+    # NOTE: Removed misplaced FAISS/negatives block that executed at import time.
+    # Annotation FAISS indexing and global negatives are handled inside process_pdf_pipeline.
 
     # 3) Candidate discovery — suspicious headers and fallbacks (or verify-all)
     # Preflight happens once we know we have candidates.
@@ -421,29 +464,32 @@ async def process_pdf_pipeline(config: Config):
         for b_idx, block in enumerate(page_blocks):
             sh_flag = bool(block.get("suspicious_header") is True)
             # Fallback: treat SectionHeader with is_suspicious True (or header-related reasons) as candidates
-            fallback_header_susp = (
-                (block.get("block_type") == "SectionHeader") and (
-                    bool(block.get("is_suspicious")) or any(
-                        "header" in str(r).lower() for r in (block.get("suspicious_reasons") or [])
+            fallback_header_susp = (block.get("block_type") == "SectionHeader") and (
+                bool(block.get("is_suspicious"))
+                or any("header" in str(r).lower() for r in (block.get("suspicious_reasons") or []))
+            )
+            verify_all = bool(getattr(config, "verify_all_headers", False)) and (
+                block.get("block_type") == "SectionHeader"
+            )
+            if sh_flag or fallback_header_susp or verify_all:
+                tasks.append(
+                    VerificationTask(
+                        page_idx=p_idx,
+                        block_idx=b_idx,
+                        page_blocks=page_blocks,
+                        page_obj=pdf_doc[p_idx],
+                        config=config,
+                        image_output_dir=image_output_dir,  # Pass image dir to task
                     )
                 )
-            )
-            verify_all = bool(getattr(config, "verify_all_headers", False)) and (block.get("block_type") == "SectionHeader")
-            if sh_flag or fallback_header_susp or verify_all:
-                tasks.append(VerificationTask(
-                    page_idx=p_idx,
-                    block_idx=b_idx,
-                    page_blocks=page_blocks,
-                    page_obj=pdf_doc[p_idx],
-                    config=config,
-                    image_output_dir=image_output_dir, # Pass image dir to task
-                ))
 
     # Optional limit for human debugging
     total_before = len(tasks)
     if config.task_limit and config.task_limit > 0:
         tasks = tasks[: config.task_limit]
-        logger.info(f"Limiting suspicious header verifications to first {len(tasks)} of {total_before}")
+        logger.info(
+            f"Limiting suspicious header verifications to first {len(tasks)} of {total_before}"
+        )
 
     if not tasks:
         print("No suspicious headers found to verify.")
@@ -467,7 +513,15 @@ async def process_pdf_pipeline(config: Config):
 
     print(f"Found {len(tasks)} suspicious headers. Starting verification...")
     try:
-        diagnostics.append(make_event("03_suspicious_headers","info","vision_preflight_ok", f"Model supports vision: {config.llm_model}", {"tasks": len(tasks)}))
+        diagnostics.append(
+            make_event(
+                "03_suspicious_headers",
+                "info",
+                "vision_preflight_ok",
+                f"Model supports vision: {config.llm_model}",
+                {"tasks": len(tasks)},
+            )
+        )
     except Exception:
         pass
 
@@ -476,19 +530,24 @@ async def process_pdf_pipeline(config: Config):
     try:
         sample_image_b64 = tasks[0].render_context_image_b64()
         t_pf0 = time.monotonic()
-        _ = await verify_header_with_llm(sample_image_b64, "Preflight vision capability check.", config.llm_model)
-        preflight_duration_ms = int((time.monotonic()-t_pf0)*1000)
+        _ = await verify_header_with_llm(
+            sample_image_b64, "Preflight vision capability check.", config.llm_model
+        )
+        preflight_duration_ms = int((time.monotonic() - t_pf0) * 1000)
         try:
             import os as _os
+
             _os.environ["VISION_PREFLIGHT_ASSUME_OK"] = "1"
         except Exception:
             pass
     except Exception as e:
         pdf_doc.close()
         raise RuntimeError(f"Selected model does not support vision or call failed: {e}")
+
     # Prior decisions disabled: ArangoDB deferred to Step 10+
     def _normalize_header_text(t: str) -> str:
         import re
+
         s = (t or "").strip().lower()
         # drop excessive whitespace
         s = " ".join(s.split())
@@ -499,7 +558,8 @@ async def process_pdf_pipeline(config: Config):
     def _font_signature(b: Dict[str, Any]) -> str:
         fs = b.get("first_span_font") or {}
         name = str(fs.get("name") or "?")
-        size = fs.get("size"); size = f"{float(size):.1f}" if isinstance(size, (int, float)) else str(size or "?")
+        size = fs.get("size")
+        size = f"{float(size):.1f}" if isinstance(size, (int, float)) else str(size or "?")
         bold = "b" if fs.get("bold") else "n"
         italic = "i" if fs.get("italic") else "n"
         color = str(fs.get("color_bucket") or "?")
@@ -518,10 +578,18 @@ async def process_pdf_pipeline(config: Config):
             # Optional FAISS advisory cue: similar annotations
             try:
                 if ann_index is not None:
-                    qtext = (target_block.get('text') or '')[:500]
+                    qtext = (target_block.get("text") or "")[:500]
                     sims = query_ann_index(ann_index, qtext, top_k=3)
                     if sims:
-                        diagnostics.append(make_event('03_suspicious_headers','info','ann_similar_support', 'Similar annotations found', {'top_k': len(sims)}))
+                        diagnostics.append(
+                            make_event(
+                                "03_suspicious_headers",
+                                "info",
+                                "ann_similar_support",
+                                "Similar annotations found",
+                                {"top_k": len(sims)},
+                            )
+                        )
             except Exception:
                 pass
 
@@ -533,11 +601,13 @@ async def process_pdf_pipeline(config: Config):
                 anns = annotations_by_page.get(task.page_idx, [])
                 cues: List[Tuple[int, float, str]] = []
                 bb = cast(List[float], target_block.get("bbox") or [0, 0, 0, 0])
+
                 def _is_relevant_03(a: Dict[str, Any]) -> bool:
                     try:
                         return "03" in (a.get("relevant_to") or [])
                     except Exception:
                         return False
+
                 anns_sorted = sorted(anns, key=lambda x: (not _is_relevant_03(x)))
                 any_relevant_negative = False
                 for a in anns_sorted:
@@ -552,7 +622,11 @@ async def process_pdf_pipeline(config: Config):
                         weight = st * min(1.0, 0.5 + overlap)
                         try:
                             if _is_relevant_03(a):
-                                boost = float((RELEVANT_RULES.get("boost_relevant_weight_for_stage") or {}).get("03", 1.25))
+                                boost = float(
+                                    (
+                                        RELEVANT_RULES.get("boost_relevant_weight_for_stage") or {}
+                                    ).get("03", 1.25)
+                                )
                                 weight = min(1.0, weight * boost)
                                 if pol < 0:
                                     any_relevant_negative = True
@@ -561,8 +635,14 @@ async def process_pdf_pipeline(config: Config):
                         cues.append((pol, weight, lbl))
                 human_summary, _ = _summarize_cues(cues)
                 if config.auto_reject_negatives and cues:
-                    default_th = float((RELEVANT_RULES.get("auto_reject_thresholds") or {}).get("default", 0.85))
-                    crucial_th = float((RELEVANT_RULES.get("auto_reject_thresholds") or {}).get("relevant_03", 0.75))
+                    default_th = float(
+                        (RELEVANT_RULES.get("auto_reject_thresholds") or {}).get("default", 0.85)
+                    )
+                    crucial_th = float(
+                        (RELEVANT_RULES.get("auto_reject_thresholds") or {}).get(
+                            "relevant_03", 0.75
+                        )
+                    )
                     threshold = crucial_th if any_relevant_negative else default_th
                     for pol, st, lbl in cues:
                         if pol < 0 and st >= threshold:
@@ -572,14 +652,22 @@ async def process_pdf_pipeline(config: Config):
 
             # --- Prior decisions retrieval (optional, read-only) ---
             prior_summary = None
-            if getattr(config, 'use_prior', True):
+            if getattr(config, "use_prior", True):
                 try:
-                    tnorm = _normalize_header_text((target_block.get('text') or ''))
+                    tnorm = _normalize_header_text((target_block.get("text") or ""))
                     fsig = _font_signature(target_block)
                     priors = _retrieve_prior_decisions(tnorm, fsig, limit=5)
                     if priors:
-                        rej = [p for p in priors if p.get('is_header') is False and (p.get('confidence') or 0) >= 0.85]
-                        acc = [p for p in priors if p.get('is_header') is True and (p.get('confidence') or 0) >= 0.85]
+                        rej = [
+                            p
+                            for p in priors
+                            if p.get("is_header") is False and (p.get("confidence") or 0) >= 0.85
+                        ]
+                        acc = [
+                            p
+                            for p in priors
+                            if p.get("is_header") is True and (p.get("confidence") or 0) >= 0.85
+                        ]
                         lines = []
                         if rej:
                             lines.append(f"Prior rejects: {len(rej)} (>=0.85 conf)")
@@ -589,15 +677,21 @@ async def process_pdf_pipeline(config: Config):
                         # Auto-reject based on strong prior evidence
                         if config.auto_reject_negatives and len(rej) >= 2:
                             auto_reject = True
-                            auto_reason = f"Auto-reject due to prior decisions: {len(rej)} strong rejections"
+                            auto_reason = (
+                                f"Auto-reject due to prior decisions: {len(rej)} strong rejections"
+                            )
                 except Exception as e:
                     logger.debug(f"Prior processing failed: {e}")
 
             combined_human_summary = human_summary
             if global_negative_examples_summary:
-                combined_human_summary = (human_summary + "\n\n" if human_summary else "") + global_negative_examples_summary
+                combined_human_summary = (
+                    human_summary + "\n\n" if human_summary else ""
+                ) + global_negative_examples_summary
             if prior_summary:
-                combined_human_summary = (combined_human_summary + "\n\n" if combined_human_summary else "") + f"Prior Decisions: {prior_summary}"
+                combined_human_summary = (
+                    combined_human_summary + "\n\n" if combined_human_summary else ""
+                ) + f"Prior Decisions: {prior_summary}"
 
             if auto_reject:
                 auto_results[idx] = {"is_header": False, "reasoning": auto_reason}
@@ -605,23 +699,38 @@ async def process_pdf_pipeline(config: Config):
 
             # Render context image and build prompt
             image_b64 = task.render_context_image_b64()
-            context_text = build_llm_context(target_block, above_block, below_block, human_annotations_summary=combined_human_summary)
+            context_text = build_llm_context(
+                target_block,
+                above_block,
+                below_block,
+                human_annotations_summary=combined_human_summary,
+            )
             messages = [
                 {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": [
-                    {"type": "text", "text": context_text},
-                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_b64}"}},
-                ]},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": context_text},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/png;base64,{image_b64}"},
+                        },
+                    ],
+                },
             ]
-            prepared.append({
-                "model": config.llm_model,
-                "messages": messages,
-                "response_format": {"type": "json_object"},
-            })
+            prepared.append(
+                {
+                    "model": config.llm_model,
+                    "messages": messages,
+                    "response_format": {"type": "json_object"},
+                }
+            )
             task_refs.append(task)
 
         except Exception as e:
-            logger.exception(f"Preparation failed for page {task.page_idx} block {task.block_idx}: {e}")
+            logger.exception(
+                f"Preparation failed for page {task.page_idx} block {task.block_idx}: {e}"
+            )
             auto_results[idx] = {"is_header": True, "reasoning": f"Preparation error: {e}"}
 
     # 6) LLM batch — verify and collect JSON payloads
@@ -630,30 +739,56 @@ async def process_pdf_pipeline(config: Config):
         try:
             t_llm0 = time.monotonic()
             sid = os.getenv("LITELLM_SESSION_ID") or run_id
-            coro = litellm_call(prepared, wrap_json=True, concurrency=config.llm_concurrency, desc="Verifying Headers", session_id=sid)
+            coro = litellm_call(
+                prepared,
+                wrap_json=True,
+                concurrency=config.llm_concurrency,
+                desc="Verifying Headers",
+                session_id=sid,
+            )
             if config.max_runtime_seconds and config.max_runtime_seconds > 0:
                 results = await asyncio.wait_for(coro, timeout=config.max_runtime_seconds)
             else:
                 results = await coro
-            llm_batch_duration_ms = int((time.monotonic()-t_llm0)*1000)
+            llm_batch_duration_ms = int((time.monotonic() - t_llm0) * 1000)
         except asyncio.TimeoutError as e:
             logger.error(f"Stage 03 model calls timed out after {config.max_runtime_seconds}s")
             info = classify_llm_error(e)
             try:
-                diagnostics.append(make_event("03_suspicious_headers","error", info["code"], info["message"], {"prepared": len(prepared)}))
+                diagnostics.append(
+                    make_event(
+                        "03_suspicious_headers",
+                        "error",
+                        info["code"],
+                        info["message"],
+                        {"prepared": len(prepared)},
+                    )
+                )
                 errors_count += 1
             except Exception:
                 pass
-            results = [json.dumps({"error": {"type": "Timeout", "message": info.get("message")}})] * len(prepared)
+            results = [
+                json.dumps({"error": {"type": "Timeout", "message": info.get("message")}})
+            ] * len(prepared)
         except Exception as e:
             logger.error(f"Stage 03 model calls failed: {e}")
             info = classify_llm_error(e)
             try:
-                diagnostics.append(make_event("03_suspicious_headers","error", info["code"], info["message"], {"prepared": len(prepared)}))
+                diagnostics.append(
+                    make_event(
+                        "03_suspicious_headers",
+                        "error",
+                        info["code"],
+                        info["message"],
+                        {"prepared": len(prepared)},
+                    )
+                )
                 errors_count += 1
             except Exception:
                 pass
-            results = [json.dumps({"error": {"type": type(e).__name__, "message": info.get("message")}})] * len(prepared)
+            results = [
+                json.dumps({"error": {"type": type(e).__name__, "message": info.get("message")}})
+            ] * len(prepared)
 
         for ans in results:
             try:
@@ -673,7 +808,10 @@ async def process_pdf_pipeline(config: Config):
             if payload.get("error"):
                 # Keep header on model error but record reasoning
                 err = payload["error"]
-                llm_result = {"is_header": True, "reasoning": f"LLM error: {err.get('type')}: {err.get('message')}"}
+                llm_result = {
+                    "is_header": True,
+                    "reasoning": f"LLM error: {err.get('type')}: {err.get('message')}",
+                }
             else:
                 payload = cast(Dict[str, Any], payload)
                 if payload.get("is_header") is None:
@@ -713,7 +851,9 @@ async def process_pdf_pipeline(config: Config):
                 # If model returned a confidence field, prefer it; else set a default high suspicion
                 try:
                     conf = llm_result.get("confidence")
-                    block_to_update["suspicion_confidence"] = float(conf) if isinstance(conf, (int, float)) else 0.9
+                    block_to_update["suspicion_confidence"] = (
+                        float(conf) if isinstance(conf, (int, float)) else 0.9
+                    )
                 except Exception:
                     block_to_update["suspicion_confidence"] = 0.9
                 block_to_update["requires_review"] = True
@@ -724,7 +864,7 @@ async def process_pdf_pipeline(config: Config):
 
     # 8) Save the updated JSON — flatten pages to top-level blocks
     output_json_path = json_output_dir / "03_verified_blocks.json"
-    
+
     # Flatten the pages structure back to a simple list of blocks
     final_blocks = [block for page in marker_data["pages"] for block in page["blocks"]]
     marker_data["blocks"] = final_blocks
@@ -738,15 +878,15 @@ async def process_pdf_pipeline(config: Config):
     try:
         if psutil is not None:
             proc = psutil.Process()
-            resources["proc_rss_mb_end"] = int((proc.memory_info().rss or 0)/(1024*1024))
+            resources["proc_rss_mb_end"] = int((proc.memory_info().rss or 0) / (1024 * 1024))
             vm = psutil.virtual_memory()
-            resources["vmem_used_mb_end"] = int(getattr(vm, "used", 0)/(1024*1024))
+            resources["vmem_used_mb_end"] = int(getattr(vm, "used", 0) / (1024 * 1024))
     except Exception:
         pass
     timings = {
         "stage_start_ts": stage_start_ts,
         "stage_end_ts": stage_end_ts,
-        "stage_duration_ms": int((time.monotonic()-t_stage0)*1000),
+        "stage_duration_ms": int((time.monotonic() - t_stage0) * 1000),
         "preflight_duration_ms": int(locals().get("preflight_duration_ms", 0)),
         "llm_batch_duration_ms": int(locals().get("llm_batch_duration_ms", 0)),
     }
@@ -760,30 +900,85 @@ async def process_pdf_pipeline(config: Config):
     marker_data["resources"] = resources
     with open(output_json_path, "w") as f:
         json.dump(marker_data, f, indent=2)
-    
+
     print(f"\nVerification complete. Updated JSON saved to: {output_json_path}")
 
 
 # ------------------------------------------------------------------
 # COMMAND-LINE INTERFACE
 # ------------------------------------------------------------------
-@app.command()
 def run(
-    input_json: Annotated[Path, typer.Argument(..., help="Path to the Marker JSON output from Stage 02.")],
-    pdf_dir: Annotated[Path, typer.Option("--pdf-dir", help="Directory containing the source and clean PDFs from Stage 01.")] = Path("data/results/pipeline/01_annotation_processor"),
-    output_dir: Annotated[Path, typer.Option("-o", help="Parent directory for pipeline results.")] = Path("data/results/pipeline"),
-    model: Annotated[Optional[str], typer.Option("--model", help="Name of the vision-capable LLM to use.")] = None,
+    input_json: Annotated[
+        Path, typer.Argument(..., help="Path to the Marker JSON output from Stage 02.")
+    ],
+    pdf_dir: Annotated[
+        Path,
+        typer.Option(
+            "--pdf-dir", help="Directory containing the source and clean PDFs from Stage 01."
+        ),
+    ] = Path("data/results/pipeline/01_annotation_processor"),
+    output_dir: Annotated[
+        Path, typer.Option("-o", help="Parent directory for pipeline results.")
+    ] = Path("data/results/pipeline"),
+    model: Annotated[
+        Optional[str], typer.Option("--model", help="Name of the vision-capable LLM to use.")
+    ] = None,
     concurrency: Annotated[int, typer.Option("-c", help="Number of concurrent API calls.")] = 5,
-    dpi: Annotated[int, typer.Option("--dpi", help="Rendering resolution for context images.")] = 200,
-    debug: Annotated[bool, typer.Option("--debug", help="Enable verbose logging to a stage log file.")] = False,
-    limit: Annotated[int, typer.Option("--limit", help="Limit number of suspicious headers to verify (0 = all).")] = 0,
-    timeout: Annotated[int, typer.Option("--timeout", help="Overall stage timeout in seconds (0 = no limit).")] = 0,
-    annotations_json: Annotated[Optional[Path], typer.Option("--annotations", help="Optional: Path to Stage 01 annotations JSON")]=None,
-    use_knowledge: Annotated[bool, typer.Option("--use-knowledge/--no-knowledge", help="Use on-page annotations for cues")] = True,
-    use_prior: Annotated[bool, typer.Option("--use-prior/--no-prior", help="Use prior decisions from ArangoDB for cues (retrieval-only)")] = True,
-    auto_reject: Annotated[bool, typer.Option("--auto-reject/--no-auto-reject", help="Auto-reject when cues strongly disagree with header")] = True,
-    persist_headers: Annotated[bool, typer.Option("--persist-headers/--no-persist-headers", help="Persist decisions to ArangoDB (off by default)")] = False,
-    verify_all_headers: Annotated[bool, typer.Option("--verify-all-headers/--only-suspicious", help="Verify all SectionHeader blocks, not only suspicious ones")] = False,
+    dpi: Annotated[
+        int, typer.Option("--dpi", help="Rendering resolution for context images.")
+    ] = 200,
+    debug: Annotated[
+        bool, typer.Option("--debug", help="Enable verbose logging to a stage log file.")
+    ] = False,
+    limit: Annotated[
+        int, typer.Option("--limit", help="Limit number of suspicious headers to verify (0 = all).")
+    ] = 0,
+    timeout: Annotated[
+        int, typer.Option("--timeout", help="Overall stage timeout in seconds (0 = no limit).")
+    ] = 0,
+    annotations_json: Annotated[
+        Optional[Path],
+        typer.Option("--annotations", help="Optional: Path to Stage 01 annotations JSON"),
+    ] = None,
+    use_knowledge: Annotated[
+        bool,
+        typer.Option("--use-knowledge/--no-knowledge", help="Use on-page annotations for cues"),
+    ] = True,
+    use_prior: Annotated[
+        bool,
+        typer.Option(
+            "--use-prior/--no-prior",
+            help="Use prior decisions from ArangoDB for cues (retrieval-only)",
+        ),
+    ] = True,
+    auto_reject: Annotated[
+        bool,
+        typer.Option(
+            "--auto-reject/--no-auto-reject",
+            help="Auto-reject when cues strongly disagree with header",
+        ),
+    ] = True,
+    persist_headers: Annotated[
+        bool,
+        typer.Option(
+            "--persist-headers/--no-persist-headers",
+            help="Persist decisions to ArangoDB (off by default)",
+        ),
+    ] = False,
+    verify_all_headers: Annotated[
+        bool,
+        typer.Option(
+            "--verify-all-headers/--only-suspicious",
+            help="Verify all SectionHeader blocks, not only suspicious ones",
+        ),
+    ] = False,
+    skip_llm: Annotated[
+        bool,
+        typer.Option(
+            "--skip-llm/--no-skip-llm",
+            help="Offline mode: skip LLM vision verification and pass through with structural normalization",
+        ),
+    ] = False,
 ):
     """
     Finds and verifies suspicious section headers in a Marker JSON file using a multimodal LLM.
@@ -807,9 +1002,27 @@ def run(
     json_output_dir.mkdir(exist_ok=True)
     image_output_dir.mkdir(exist_ok=True)
 
+    # Offline mode: pass-through with structural normalization
+    if skip_llm:
+        try:
+            data = json.loads(input_json.read_text())
+        except Exception as e:
+            raise typer.BadParameter(f"Failed to load input JSON: {e}")
+        blocks = data.get("blocks", [])
+        for b in blocks:
+            if isinstance(b, dict):
+                b["suspicious_header"] = False
+        data["suspicious_block_count"] = 0
+        data["status"] = "Completed"
+        out = json_output_dir / "03_verified_blocks.json"
+        out.write_text(json.dumps(data, indent=2))
+        typer.secho(f"[offline] LLM skipped; wrote {out}", fg=typer.colors.GREEN)
+        return
+
     # Configure logging sink per stage run
     try:
         from loguru import logger as _lg
+
         _lg.remove()
         _lg.add(
             str(stage_output_dir / "stage_03_suspicious_headers.log"),
@@ -826,7 +1039,9 @@ def run(
     # Enforce design: defer ArangoDB until after Step 09
     if persist_headers:
         try:
-            logger.warning("Ignoring --persist-headers: ArangoDB persistence is deferred until after Step 09 (export stages handle DB).")
+            logger.warning(
+                "Ignoring --persist-headers: ArangoDB persistence is deferred until after Step 09 (export stages handle DB)."
+            )
         except Exception:
             pass
         persist_headers = False
@@ -834,7 +1049,7 @@ def run(
     cfg = Config(
         input_pdf=clean_pdf_path,
         input_json=input_json,
-        output_dir=stage_output_dir, # Pass the specific stage directory
+        output_dir=stage_output_dir,  # Pass the specific stage directory
         llm_model=model or _env_vlm_model(),
         llm_concurrency=concurrency,
         render_dpi=dpi,
@@ -854,69 +1069,75 @@ def run(
 def debug_test():
     """Debug function to test with simulated suspicious headers."""
     import shutil
-    
+
     # Load the stage 2 output
     input_json = Path("stage_02_results.json")
     if not input_json.exists():
         print("Error: stage_02_results.json not found. Run 02_marker_extractor.py first.")
         return
-    
-    with open(input_json, 'r') as f:
+
+    with open(input_json, "r") as f:
         data = json.load(f)
-    
+
     # Create a test version with suspicious headers
     # Mark the bullet point items as suspicious headers (they shouldn't be headers)
     test_blocks = []
-    for block in data['blocks']:
+    for block in data["blocks"]:
         block_copy = block.copy()
-        
+
         # Mark ListItems as suspicious SectionHeaders for testing
-        if block['block_type'] == 'ListItem':
-            block_copy['block_type'] = 'SectionHeader'  # Misclassify as header
-            block_copy['is_suspicious'] = True
-            block_copy['suspicious_reasons'] = ['bullet_point_misclassified']
-            block_copy['suspicion_confidence'] = 0.9
+        if block["block_type"] == "ListItem":
+            block_copy["block_type"] = "SectionHeader"  # Misclassify as header
+            block_copy["is_suspicious"] = True
+            block_copy["suspicious_reasons"] = ["bullet_point_misclassified"]
+            block_copy["suspicion_confidence"] = 0.9
             print(f"Marked as suspicious: {block['text'][:50]}...")
-        
+
         test_blocks.append(block_copy)
-    
+
     # Convert to the format expected by this script (pages structure)
     pages_data = {}
     for block in test_blocks:
-        page_idx = block.get('page_idx', 0)
+        page_idx = block.get("page_idx", 0)
         if page_idx not in pages_data:
             pages_data[page_idx] = []
-        
+
         # Convert to expected format with suspicious_header field
         formatted_block = {
-            'block_type': block['block_type'],
-            'bbox': block['bbox'],
-            'text': block['text'],
-            'suspicious_header': block.get('is_suspicious', False),
+            "block_type": block["block_type"],
+            "bbox": block["bbox"],
+            "text": block["text"],
+            "suspicious_header": block.get("is_suspicious", False),
             # Add minimal lines/spans structure for the script
-            'lines': [{
-                'spans': [{
-                    'text': block['text'],
-                    'font_style': {
-                        'font_name': 'Unknown',
-                        'font_size': 'N/A'
-                    }
-                }]
-            }]
+            "lines": [
+                {
+                    "spans": [
+                        {
+                            "text": block["text"],
+                            "font_style": {"font_name": "Unknown", "font_size": "N/A"},
+                        }
+                    ]
+                }
+            ],
         }
         pages_data[page_idx].append(formatted_block)
-    
-    # Create the expected structure
-    marker_format = {
-        'pages': [
-            {'blocks': blocks} for _, blocks in sorted(pages_data.items())
-        ]
-    }
 
-@app.command("debug-bundle")
+    # Create the expected structure
+    marker_format = {"pages": [{"blocks": blocks} for _, blocks in sorted(pages_data.items())]}
+
+
 def debug_bundle(
-    bundle: Path = typer.Argument(..., exists=True, file_okay=True, dir_okay=False, readable=True, help="Bundle with keys: marker_blocks (Stage 02 output object), clean_pdf (path)"),
-    output_dir: Path = typer.Option("data/results/pipeline", "-o", help="Parent directory for pipeline results."),
+    bundle: Path = typer.Argument(
+        ...,
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        readable=True,
+        help="Bundle with keys: marker_blocks (Stage 02 output object), clean_pdf (path)",
+    ),
+    output_dir: Path = typer.Option(
+        "data/results/pipeline", "-o", help="Parent directory for pipeline results."
+    ),
     model: Optional[str] = typer.Option(None, "--model", help="LLM model to use (defaults to env)"),
     concurrency: int = typer.Option(5, "-c", help="Concurrent LLM calls"),
     dpi: int = typer.Option(200, "--dpi", help="Rendering DPI for context images"),
@@ -940,12 +1161,14 @@ def debug_bundle(
     try:
         data = json.loads(bundle.read_text())
     except Exception as e:
-        typer.secho(f"Failed to read bundle: {e}", fg=typer.colors.RED); raise typer.Exit(1)
+        typer.secho(f"Failed to read bundle: {e}", fg=typer.colors.RED)
+        raise typer.Exit(1)
 
-    marker_blocks = data.get('marker_blocks')
-    clean_pdf = data.get('clean_pdf')
+    marker_blocks = data.get("marker_blocks")
+    clean_pdf = data.get("clean_pdf")
     if not marker_blocks or not clean_pdf:
-        typer.secho("Bundle must include 'marker_blocks' and 'clean_pdf'", fg=typer.colors.RED); raise typer.Exit(1)
+        typer.secho("Bundle must include 'marker_blocks' and 'clean_pdf'", fg=typer.colors.RED)
+        raise typer.Exit(1)
 
     tmp_json = stage_output_dir / "_bundle_marker_blocks.json"
     tmp_json.write_text(json.dumps(marker_blocks))
@@ -966,8 +1189,4 @@ def debug_bundle(
 
 
 if __name__ == "__main__":
-    import sys
-    if len(sys.argv) > 1 and sys.argv[1] == "debug":
-        debug_test()
-    else:
-        app()
+    build_cli()()

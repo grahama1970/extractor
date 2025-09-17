@@ -80,7 +80,7 @@ def eval_reflow(
 
     # Titles inferred
     titles_ok = True
-    for blk in (tables[:1] + figures[:1]):
+    for blk in tables[:1] + figures[:1]:
         title = blk.get("title")
         if not isinstance(title, str) or "inferred" not in title.lower():
             titles_ok = False
@@ -104,19 +104,21 @@ def eval_reflow(
         )
         rows = t0.get("rows") or content.get("rows") or []
         if hints_cols:
-            cols_ok = (len(cols) == len(hints_cols))
+            cols_ok = len(cols) == len(hints_cols)
         if hints_shape and isinstance(hints_shape, list) and len(hints_shape) == 2:
             exp_rows = int(hints_shape[0] or 0)
             tol = max(1, int(round(row_tolerance * max(exp_rows, 1))))
             rows_ok = abs(len(rows) - exp_rows) <= tol
     out["table_columns_ok"] = cols_ok
     out["rows_within_tolerance"] = rows_ok
-    out["columns_mismatch"] = (cols_ok is False)
-    out["rows_out_of_tolerance"] = (rows_ok is False)
+    out["columns_mismatch"] = cols_ok is False
+    out["rows_out_of_tolerance"] = rows_ok is False
 
     # Good contiguous text ≥ 150 chars
     text_blocks = [b for b in blocks if isinstance(b, dict) and b.get("type") == "text"]
-    out["has_good_text"] = any(len(_get_text_content(b).strip()) >= int(text_min_chars) for b in text_blocks)
+    out["has_good_text"] = any(
+        len(_get_text_content(b).strip()) >= int(text_min_chars) for b in text_blocks
+    )
 
     # Final gate
     ok = out["has_reflowed_json"]

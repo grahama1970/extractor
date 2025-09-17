@@ -56,7 +56,13 @@ def main():
     access = get_access_token(host)
 
     label_config_xml = get_preset_label_config() if args.use_label_config_preset else None
-    pid = create_or_update_project(host, access, project_id=args.project_id, title=args.project_title, label_config=label_config_xml)
+    pid = create_or_update_project(
+        host,
+        access,
+        project_id=args.project_id,
+        title=args.project_title,
+        label_config=label_config_xml,
+    )
     print(f"Project ID: {pid}")
 
     pdf = Path(args.pdf)
@@ -75,4 +81,3 @@ def main():
 
 if __name__ == "__main__":  # pragma: no cover
     main()
-

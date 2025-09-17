@@ -44,7 +44,9 @@ class Settings(BaseSettings):
     GOOGLE_API_KEY: Optional[str] = ""
 
     # General models
-    TORCH_DEVICE: Optional[str] = None  # Note: MPS device does not work for text detection, and will default to CPU
+    TORCH_DEVICE: Optional[str] = (
+        None  # Note: MPS device does not work for text detection, and will default to CPU
+    )
 
     @computed_field
     @property

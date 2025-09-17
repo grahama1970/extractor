@@ -47,7 +47,9 @@ def create_annotation(host: str, access: str, task_id: int, result: List[Dict]):
     payload = {"result": result}
     r = requests.post(url, headers=auth_headers(access), json=payload, timeout=60)
     if r.status_code not in (200, 201):
-        raise RuntimeError(f"Create annotation failed (task {task_id}): HTTP {r.status_code} {r.text}")
+        raise RuntimeError(
+            f"Create annotation failed (task {task_id}): HTTP {r.status_code} {r.text}"
+        )
     return r.json()
 
 
@@ -59,7 +61,9 @@ def main():
     ap.add_argument("--project-id", type=int, default=None)
     ap.add_argument("--project-title", default=None)
     ap.add_argument("--export", required=True, help="Path to LS export JSON (with predictions)")
-    ap.add_argument("--type", default="section", help="Type to assign (table|requirements|section|figure)")
+    ap.add_argument(
+        "--type", default="section", help="Type to assign (table|requirements|section|figure)"
+    )
     ap.add_argument("--limit", type=int, default=10, help="Number of tasks to annotate (0=all)")
     args = ap.parse_args()
 
@@ -68,7 +72,9 @@ def main():
     access = args.access or get_access_token(host)
 
     # Ensure project exists (lookup or create)
-    pid = create_or_update_project(host, access, project_id=args.project_id, title=args.project_title, label_config=None)
+    pid = create_or_update_project(
+        host, access, project_id=args.project_id, title=args.project_title, label_config=None
+    )
     print(f"Using project ID: {pid}")
 
     data = json.loads(Path(args.export).read_text(encoding="utf-8"))
@@ -105,43 +111,55 @@ def main():
             rect_idx += 1
             coords = r.get("value", {})
             # Rectangle
-            result.append({
-                "from_name": "label",
-                "to_name": "image",
-                "type": "rectanglelabels",
-                "value": {
-                    "x": coords.get("x"),
-                    "y": coords.get("y"),
-                    "width": coords.get("width"),
-                    "height": coords.get("height"),
-                    "rotation": 0,
-                    "rectanglelabels": r.get("value", {}).get("rectanglelabels") or ["Figure"],
-                },
-            })
+            result.append(
+                {
+                    "from_name": "label",
+                    "to_name": "image",
+                    "type": "rectanglelabels",
+                    "value": {
+                        "x": coords.get("x"),
+                        "y": coords.get("y"),
+                        "width": coords.get("width"),
+                        "height": coords.get("height"),
+                        "rotation": 0,
+                        "rectanglelabels": r.get("value", {}).get("rectanglelabels") or ["Figure"],
+                    },
+                }
+            )
             rid = f"{doc_id}_page{page:02d}_r{rect_idx:02d}"
             # Metadata: type
-            result.append({
-                "from_name": "type",
-                "to_name": "image",
-                "type": "choices",
-                "value": {"choices": [args.type]},
-            })
+            result.append(
+                {
+                    "from_name": "type",
+                    "to_name": "image",
+                    "type": "choices",
+                    "value": {"choices": [args.type]},
+                }
+            )
             # Metadata: id
-            result.append({
-                "from_name": "id",
-                "to_name": "image",
-                "type": "textarea",
-                "value": {"text": [rid]},
-            })
+            result.append(
+                {
+                    "from_name": "id",
+                    "to_name": "image",
+                    "type": "textarea",
+                    "value": {"text": [rid]},
+                }
+            )
             # Metadata: expected_json
-            base = "sections" if args.type in {"requirements", "section"} else ("tables" if args.type == "table" else "figures")
+            base = (
+                "sections"
+                if args.type in {"requirements", "section"}
+                else ("tables" if args.type == "table" else "figures")
+            )
             epath = f"data/gold_standards/{base}/{rid}.json"
-            result.append({
-                "from_name": "expected_json",
-                "to_name": "image",
-                "type": "textarea",
-                "value": {"text": [epath]},
-            })
+            result.append(
+                {
+                    "from_name": "expected_json",
+                    "to_name": "image",
+                    "type": "textarea",
+                    "value": {"text": [epath]},
+                }
+            )
 
         if not result:
             continue

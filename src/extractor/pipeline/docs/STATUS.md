@@ -10,7 +10,7 @@ This note captures current state, defaults, and how to run/verify stages 01–10
 
 ## Model Defaults (env fallbacks)
 
-- Text/JSON: `LITELLM_DEFAULT_MODEL=openai/gpt-4o-mini`
+- Text/JSON: set a default via `LITELLM_DEFAULT_MODEL` (preferred) or `DEFAULT_LITELLM_MODEL`, e.g. `LITELLM_DEFAULT_MODEL=openai/gpt-4o-mini`
 - Vision: `LITELLM_VISION_MODEL=openai/gpt-4o`
 - Vision (figures/reflow): `LITELLM_VLM_MODEL=openai/gpt-4o`
 - Lean requirement extraction: `LEAN4_MODEL=openai/gpt-4o-mini`

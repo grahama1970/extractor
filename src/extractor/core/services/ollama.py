@@ -32,14 +32,10 @@ from extractor.core.services import BaseService
 
 
 class OllamaService(BaseService):
-    ollama_base_url: Annotated[
-        str,
-        "The base url to use for ollama.  No trailing slash."
-    ] = "http://localhost:11434"
-    ollama_model: Annotated[
-        str,
-        "The model name to use for ollama."
-    ] = "llama3.2-vision"
+    ollama_base_url: Annotated[str, "The base url to use for ollama.  No trailing slash."] = (
+        "http://localhost:11434"
+    )
+    ollama_model: Annotated[str, "The model name to use for ollama."] = "llama3.2-vision"
 
     def image_to_base64(self, image: PIL.Image.Image):
         image_bytes = BytesIO()
@@ -53,7 +49,7 @@ class OllamaService(BaseService):
         block: Block,
         response_schema: type[BaseModel],
         max_retries: int | None = None,
-        timeout: int | None = None
+        timeout: int | None = None,
     ):
         url = f"{self.ollama_base_url}/api/generate"
         headers = {"Content-Type": "application/json"}
@@ -62,7 +58,7 @@ class OllamaService(BaseService):
         format_schema = {
             "type": "object",
             "properties": schema["properties"],
-            "required": schema["required"]
+            "required": schema["required"],
         }
 
         if not isinstance(image, list):
@@ -75,7 +71,7 @@ class OllamaService(BaseService):
             "prompt": prompt,
             "stream": False,
             "format": format_schema,
-            "images": image_bytes
+            "images": image_bytes,
         }
 
         try:

@@ -71,7 +71,9 @@ def import_tasks(host: str, access: str, project_id: int, tasks: List[Dict]):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Ingest a PDF as images-only into Label Studio (API-only)")
+    ap = argparse.ArgumentParser(
+        description="Ingest a PDF as images-only into Label Studio (API-only)"
+    )
     ap.add_argument("--host", default=os.environ.get("LS_HOST", "http://localhost:8080"))
     ap.add_argument("--refresh", default=os.environ.get("LS_REFRESH"))
     ap.add_argument("--access", default=None)
@@ -87,7 +89,13 @@ def main():
     access = args.access or get_access_token(host)
 
     label_config_xml = get_preset_label_config() if args.use_label_config_preset else None
-    pid = create_or_update_project(host, access, project_id=args.project_id, title=args.project_title, label_config=label_config_xml)
+    pid = create_or_update_project(
+        host,
+        access,
+        project_id=args.project_id,
+        title=args.project_title,
+        label_config=label_config_xml,
+    )
     print(f"Project ID: {pid}")
 
     pdf = Path(args.pdf)

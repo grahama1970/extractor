@@ -1,0 +1,75 @@
+name: Gamified Smoke
+
+on:
+  push:
+    paths:
+      - 'prototypes/gamified/**'
+      - '.github/workflows/gamified-smoke.yml'
+  pull_request:
+    paths:
+      - 'prototypes/gamified/**'
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Ensure uv
+        run: |
+          python -m pip install -U uv
+
+      - name: Fast spec validation
+        run: |
+          uv run --with typer>=0.12 pyyaml             python -m prototypes.gamified.tools.prompt_opt               validate prototypes/gamified/docs/02_tokamak_prompt.md --strict
+
+      - name: Create minimal spec
+        run: |
+          cat > gamified.yaml << 'YAML'
+          version: 1
+          codebase:
+            repo_root: .
+          approaches:
+            - name: fueling_density_mpc
+            - name: edge_stability_mhd
+            - name: heat_extraction_adaptive
+          runner:
+            type: analysis_sim
+          scoring:
+            weights: { correctness: 35, robustness: 25, speed: 25, brevity: 15 }
+          constraints:
+            edge_density_threshold: 1.0e19
+            q_min: 2.0
+            beta_max: 0.04
+            heat_flux_peak_max: 10.0
+          optimizer:
+            rules: prototypes/gamified/rules/prompt_optimization.yaml
+          execution:
+            concurrency: 1
+            codex_exec: true
+            autostart_backend: false
+            autostart_dashboard: false
+          observability:
+            backend: arango
+            dashboard: false
+          YAML
+
+      - name: Smoke run (no backend)
+        env:
+          CODEX_BINARY_PATH: codex
+        run: |
+          # Run emit-only to avoid backend/Arango in CI
+          uv run --with typer>=0.12             python -m prototypes.gamified.cli run --spec gamified.yaml --emit-only --instances 1 --no-start-dashboard --no-autostart-backend
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gamified-smoke-artifacts
+          path: workspace/runs

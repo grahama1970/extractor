@@ -1,0 +1,15 @@
+.venv
+__pycache__
+*.pyc
+.mypy_cache
+.pytest_cache
+.git
+node_modules
+artifacts
+logs
+tmp
+prototypes/gamified/dashboard/node_modules
+prototypes/tabbed/html/node_modules
+tools/gold_annotator_web/node_modules
+**/.DS_Store
+**/*.log

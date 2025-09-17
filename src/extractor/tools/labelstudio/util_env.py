@@ -24,4 +24,3 @@ def load_ls_env(env_file: str = ".env.labelstudio") -> None:
         v = v.strip()
         if k and v and k not in os.environ:
             os.environ[k] = v
-

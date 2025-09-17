@@ -1,15 +1,14 @@
 import logging
 import warnings
 
+
 def configure_logging():
     # Setup marker logger
     logger = get_logger()
 
     if not logger.handlers:
         handler = logging.StreamHandler()
-        formatter = logging.Formatter(
-            "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
-        )
+        formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
         handler.setFormatter(formatter)
         logger.addHandler(handler)
 

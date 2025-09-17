@@ -8,19 +8,19 @@ class CodeProcessor(BaseProcessor):
     """
     A processor for formatting code blocks.
     """
-    block_types = (BlockTypes.Code, )
+
+    block_types = (BlockTypes.Code,)
 
     def __call__(self, document: Document):
         for page in document.pages:
             for block in page.contained_blocks(document, self.block_types):
                 self.format_block(document, block)
 
-
     def format_block(self, document: Document, block: Code):
         min_left = 9999  # will contain x- coord of column 0
         total_width = 0
         total_chars = 0
-        
+
         contained_lines = block.contained_blocks(document, (BlockTypes.Line,))
         for line in contained_lines:
             min_left = min(line.polygon.bbox[0], min_left)

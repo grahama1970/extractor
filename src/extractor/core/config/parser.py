@@ -22,17 +22,22 @@ from typing import Dict, Any, Optional
 import click
 
 from extractor.core.config.crawler import crawler
+
 # from extractor.core.config.table_parser import parse_table_config, table_options  # TODO: Fix this import
+
 
 # Temporary stub functions for table configuration
 def parse_table_config(options):
     """Parse table configuration from CLI options."""
     return {}
 
+
 def table_options(fn):
     """Add table-specific CLI options."""
     # For now, just return the function as-is
     return fn
+
+
 from extractor.core.converters.pdf import PdfConverter
 from extractor.core.renderers.html import HTMLRenderer
 from extractor.core.renderers.json import JSONRenderer
@@ -50,47 +55,117 @@ class ConfigParser:
 
     @staticmethod
     def common_options(fn):
-        fn = click.option("--output_dir", type=click.Path(exists=False), required=False, default=settings.OUTPUT_DIR,
-                          help="Directory to save output.")(fn)
-        fn = click.option('--debug', '-d', is_flag=True, help='Enable debug mode.')(fn)
-        fn = click.option("--output_format", type=click.Choice(["markdown", "json", "html", "arangodb_json", "hierarchical_json"]), default="markdown",
-                          help="Format to output results in.")(fn)
-        fn = click.option("--processors", type=str, default=None,
-                          help="Comma separated list of processors to use.  Must use full module path.")(fn)
-        fn = click.option("--config_json", type=str, default=None,
-                          help="Path to JSON file with additional configuration.")(fn)
-        fn = click.option("--disable_multiprocessing", is_flag=True, default=False, help="Disable multiprocessing.")(fn)
-        fn = click.option("--disable_image_extraction", is_flag=True, default=False, help="Disable image extraction.")(fn)
+        fn = click.option(
+            "--output_dir",
+            type=click.Path(exists=False),
+            required=False,
+            default=settings.OUTPUT_DIR,
+            help="Directory to save output.",
+        )(fn)
+        fn = click.option("--debug", "-d", is_flag=True, help="Enable debug mode.")(fn)
+        fn = click.option(
+            "--output_format",
+            type=click.Choice(["markdown", "json", "html", "arangodb_json", "hierarchical_json"]),
+            default="markdown",
+            help="Format to output results in.",
+        )(fn)
+        fn = click.option(
+            "--processors",
+            type=str,
+            default=None,
+            help="Comma separated list of processors to use.  Must use full module path.",
+        )(fn)
+        fn = click.option(
+            "--config_json",
+            type=str,
+            default=None,
+            help="Path to JSON file with additional configuration.",
+        )(fn)
+        fn = click.option(
+            "--disable_multiprocessing",
+            is_flag=True,
+            default=False,
+            help="Disable multiprocessing.",
+        )(fn)
+        fn = click.option(
+            "--disable_image_extraction",
+            is_flag=True,
+            default=False,
+            help="Disable image extraction.",
+        )(fn)
 
         # these are options that need a list transformation, i.e splitting/parsing a string
-        fn = click.option("--page_range", type=str, default=None,
-                          help="Page range to convert, specify comma separated page numbers or ranges.  Example: 0,5-10,20")(
-            fn)
-        fn = click.option("--languages", type=str, default=None, help="Comma separated list of languages to use for OCR.")(fn)
+        fn = click.option(
+            "--page_range",
+            type=str,
+            default=None,
+            help="Page range to convert, specify comma separated page numbers or ranges.  Example: 0,5-10,20",
+        )(fn)
+        fn = click.option(
+            "--languages",
+            type=str,
+            default=None,
+            help="Comma separated list of languages to use for OCR.",
+        )(fn)
 
         # we put common options here
-        fn = click.option("--use_llm", default=False, help="Enable higher quality processing with LLMs.")(fn)
-        
+        fn = click.option(
+            "--use_llm", default=False, help="Enable higher quality processing with LLMs."
+        )(fn)
+
         # Claude configuration options - support both underscore and hyphen
-        fn = click.option("--claude-config", "--claude_config", type=click.Choice(["disabled", "minimal", "tables_only", "accuracy", "research"]), 
-                         default="disabled", help="Claude configuration preset for AI-powered enhancements.")(fn)
-        fn = click.option("--claude_workspace", type=click.Path(exists=False), default=None,
-                         help="Directory for Claude workspace (default: /tmp/marker_claude).")(fn)
-        fn = click.option("--converter_cls", type=str, default=None, help="Converter class to use.  Defaults to PDF converter.")(fn)
-        fn = click.option("--llm_service", type=str, default=None, help="LLM service to use - should be full import path, like marker.services.litellm.LiteLLMService")(fn)
+        fn = click.option(
+            "--claude-config",
+            "--claude_config",
+            type=click.Choice(["disabled", "minimal", "tables_only", "accuracy", "research"]),
+            default="disabled",
+            help="Claude configuration preset for AI-powered enhancements.",
+        )(fn)
+        fn = click.option(
+            "--claude_workspace",
+            type=click.Path(exists=False),
+            default=None,
+            help="Directory for Claude workspace (default: /tmp/marker_claude).",
+        )(fn)
+        fn = click.option(
+            "--converter_cls",
+            type=str,
+            default=None,
+            help="Converter class to use.  Defaults to PDF converter.",
+        )(fn)
+        fn = click.option(
+            "--llm_service",
+            type=str,
+            default=None,
+            help="LLM service to use - should be full import path, like marker.services.litellm.LiteLLMService",
+        )(fn)
         # MARKER FORK ADDITION START - LiteLLM model selection
-        fn = click.option("--litellm_model", type=str, default=None, help="LiteLLM model to use in provider/model format (e.g. 'ollama/gemma3:27b')")(fn)
+        fn = click.option(
+            "--litellm_model",
+            type=str,
+            default=None,
+            help="LiteLLM model to use in provider/model format (e.g. 'ollama/gemma3:27b')",
+        )(fn)
         # MARKER FORK ADDITION END
 
         # enum options
-        fn = click.option("--force_layout_block", type=click.Choice(choices=[t.name for t in BlockTypes]), default=None,)(fn)
-        
+        fn = click.option(
+            "--force_layout_block",
+            type=click.Choice(choices=[t.name for t in BlockTypes]),
+            default=None,
+        )(fn)
+
         # Add summarization option
-        fn = click.option("--add_summaries", is_flag=True, default=False, help="Add LLM-generated summaries to sections and document.")(fn)
-        
+        fn = click.option(
+            "--add_summaries",
+            is_flag=True,
+            default=False,
+            help="Add LLM-generated summaries to sections and document.",
+        )(fn)
+
         # Add table-specific options
         fn = table_options(fn)
-        
+
         return fn
 
     def generate_config_dict(self) -> Dict[str, any]:
@@ -124,24 +199,25 @@ class ConfigParser:
         # Backward compatibility for google_api_key
         if settings.GOOGLE_API_KEY:
             config["gemini_api_key"] = settings.GOOGLE_API_KEY
-            
+
         # Parse table-specific configuration
         table_config = parse_table_config(self.cli_options)
         config["table"] = table_config
-        
+
         # Parse Claude configuration
         claude_config_name = self.cli_options.get("claude_config", "disabled")
         if claude_config_name != "disabled":
             from extractor.core.config.claude_config import get_recommended_config_for_use_case
+
             claude_config = get_recommended_config_for_use_case(claude_config_name)
-            
+
             # Override workspace if provided
             claude_workspace = self.cli_options.get("claude_workspace")
             if claude_workspace:
                 claude_config.claude_workspace_dir = claude_workspace
-                
+
             config["claude"] = claude_config
-            
+
         # MARKER FORK ADDITION START - Add litellm_model to config
         if self.cli_options.get("litellm_model"):
             config["litellm_model"] = self.cli_options["litellm_model"]
@@ -188,7 +264,7 @@ class ConfigParser:
                     print(f"Error loading processor: {p} with error: {e}")
                     raise
             return processors
-        
+
         if self.cli_options["output_format"] == "hierarchical_json":
             return "default+extractor.core.processors.enhanced.hierarchy_builder.HierarchyBuilder"
 
@@ -197,13 +273,13 @@ class ConfigParser:
         if claude_config_name != "disabled":
             # Add Claude post-processor to defaults
             return "default+marker.processors.claude_post_processor.ClaudePostProcessor"
-        
+
         # Check if summaries are requested
         if self.cli_options.get("add_summaries", False):
             # We'll need to append the summarizer to the default processors
             # by using a special marker that the PdfConverter can check
             return "default+marker.processors.simple_summarizer.SimpleSectionSummarizer"
-        
+
         # Return default processors if nothing else specified
         return "default"
 
@@ -228,4 +304,3 @@ class ConfigParser:
     def get_base_filename(self, filepath: str):
         basename = os.path.basename(filepath)
         return os.path.splitext(basename)[0]
-

@@ -34,18 +34,18 @@ from extractor.core.schema.document import Document
 from extractor.core.schema.text import Line
 
 
-
-async def call_claude_subprocess(prompt: str, image_path: Optional[str] = None, 
-                                      timeout: int = 30, use_ultrathink: bool = False) -> str:
+async def call_claude_subprocess(
+    prompt: str, image_path: Optional[str] = None, timeout: int = 30, use_ultrathink: bool = False
+) -> str:
     """
     Call Claude CLI using proper subprocess with correct syntax.
-    
+
     Args:
         prompt: The prompt to send to Claude
         image_path: Optional path to image file (will be included in prompt)
         timeout: Timeout in seconds
         use_ultrathink: Whether to prefix prompt with 'ultrathink:'
-        
+
     Returns:
         Claude's response as string
     """
@@ -54,22 +54,18 @@ async def call_claude_subprocess(prompt: str, image_path: Optional[str] = None,
     if image_path and os.path.exists(image_path):
         # Include image path in the prompt for Claude to analyze
         full_prompt = f"Please analyze the image at {image_path}\n\n{prompt}"
-    
+
     if use_ultrathink:
         full_prompt = f"ultrathink: {full_prompt}"
-    
+
     # Set up environment with proper PATH
     env = os.environ.copy()
     env["PATH"] = "/usr/bin:/bin:/usr/local/bin:/home/graham/.bun/bin:" + env.get("PATH", "")
     env["BUN_INSTALL"] = "/home/graham/.bun"
-    
+
     # Use correct claude -p syntax (NOT --print)
-    cmd = [
-        "/home/graham/.bun/bin/claude",
-        "-p",
-        "--dangerously-skip-permissions"
-    ]
-    
+    cmd = ["/home/graham/.bun/bin/claude", "-p", "--dangerously-skip-permissions"]
+
     try:
         # Create subprocess with proper stream handling
         proc = await asyncio.create_subprocess_exec(
@@ -77,22 +73,21 @@ async def call_claude_subprocess(prompt: str, image_path: Optional[str] = None,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            env=env
+            env=env,
         )
-        
+
         # Send prompt and get response
         stdout, stderr = await asyncio.wait_for(
-            proc.communicate(input=full_prompt.encode()),
-            timeout=timeout
+            proc.communicate(input=full_prompt.encode()), timeout=timeout
         )
-        
+
         if proc.returncode == 0 and stdout:
             return stdout.decode().strip()
         else:
             error_msg = stderr.decode() if stderr else "No error message"
             logger.error(f"Claude subprocess failed: {error_msg}")
             return ""
-            
+
     except asyncio.TimeoutError:
         logger.error(f"Claude subprocess timed out after {timeout}s")
         if proc:
@@ -103,13 +98,17 @@ async def call_claude_subprocess(prompt: str, image_path: Optional[str] = None,
         logger.error(f"Claude subprocess error: {e}")
         return ""
 
-def call_claude_subprocess_sync(prompt: str, image_path: Optional[str] = None,
-                                    timeout: int = 30, use_ultrathink: bool = False) -> str:
+
+def call_claude_subprocess_sync(
+    prompt: str, image_path: Optional[str] = None, timeout: int = 30, use_ultrathink: bool = False
+) -> str:
     """
     Synchronous version of call_claude_subprocess.
     """
     import asyncio
+
     return asyncio.run(call_claude_subprocess(prompt, image_path, timeout, use_ultrathink))
+
 
 class LLMInlineMathLinesProcessor(BaseLLMSimpleBlockProcessor):
     math_line_batch_size: Annotated[
@@ -183,24 +182,19 @@ analysis: The inline math in the lines is not in LaTeX format and is not surroun
             page_children = [p for p in page.children if p.structure]
             for block in page.contained_blocks(document, self.block_types):
                 # Ensure the line isn't an orphan, and that the parent hasn't already been inferenced (assigned html)
-                has_parent = any([
-                    (
-                        block.id in parent.structure
-                        and not getattr(parent, "html", None)
-                    )
-                    for parent in page_children
-                ])
+                has_parent = any(
+                    [
+                        (block.id in parent.structure and not getattr(parent, "html", None))
+                        for parent in page_children
+                    ]
+                )
 
                 if block.formats and "math" in block.formats and has_parent:
-                    blocks.append({
-                        "page": page,
-                        "block": block
-                    })
-
+                    blocks.append({"page": page, "block": block})
 
         out_blocks = []
         for i in range(0, len(blocks), self.math_line_batch_size):
-            batch = blocks[i:i + self.math_line_batch_size]
+            batch = blocks[i : i + self.math_line_batch_size]
             out_blocks.append(batch)
         return out_blocks
 
@@ -214,7 +208,7 @@ analysis: The inline math in the lines is not in LaTeX format and is not surroun
         total_width = max(widths)
         total_height = sum(heights) + 5 * len(images)
 
-        new_im = Image.new('RGB', (total_width, total_height), (255, 255, 255))
+        new_im = Image.new("RGB", (total_width, total_height), (255, 255, 255))
 
         y_offset = 0
         for im in images:
@@ -230,24 +224,26 @@ analysis: The inline math in the lines is not in LaTeX format and is not surroun
             pages = [b["page"] for b in block_data]
             block_lines = [block.formatted_text(document) for block in blocks]
 
-            prompt = (
-                self.text_math_rewriting_prompt
-                  .replace("{extracted_lines}",json.dumps({"extracted_lines": block_lines}, indent=2))
-                  .replace("{line_count}", str(len(block_lines)))
-            )
-            images = [self.extract_image(document, block, remove_blocks=self.image_remove_blocks) for block in blocks]
+            prompt = self.text_math_rewriting_prompt.replace(
+                "{extracted_lines}", json.dumps({"extracted_lines": block_lines}, indent=2)
+            ).replace("{line_count}", str(len(block_lines)))
+            images = [
+                self.extract_image(document, block, remove_blocks=self.image_remove_blocks)
+                for block in blocks
+            ]
             image = self.combine_images(images)
 
-            prompt_data.append({
-                "prompt": prompt,
-                "image": image,
-                "block": blocks[0],
-                "schema": LLMTextSchema,
-                "page": pages[0],
-                "additional_data": {"blocks": blocks, "pages": pages}
-            })
+            prompt_data.append(
+                {
+                    "prompt": prompt,
+                    "image": image,
+                    "block": blocks[0],
+                    "schema": LLMTextSchema,
+                    "page": pages[0],
+                    "additional_data": {"blocks": blocks, "pages": pages},
+                }
+            )
         return prompt_data
-
 
     def rewrite_block(self, response: dict, prompt_data: PromptData, document: Document):
         blocks = prompt_data["additional_data"]["blocks"]
@@ -260,18 +256,22 @@ analysis: The inline math in the lines is not in LaTeX format and is not surroun
             return
 
         corrected_lines = response["corrected_lines"]
-        balanced_math = all([line.count("<math") == line.count("</math>") for line in corrected_lines])
-        
+        balanced_math = all(
+            [line.count("<math") == line.count("</math>") for line in corrected_lines]
+        )
+
         # Enhanced suspicious detection for inline math processing
         suspicious_reasons = []
-        
+
         if not corrected_lines:
             suspicious_reasons.append("Empty response")
         elif len(corrected_lines) != len(blocks):
-            suspicious_reasons.append(f"Line count mismatch: expected {len(blocks)}, got {len(corrected_lines)}")
+            suspicious_reasons.append(
+                f"Line count mismatch: expected {len(blocks)}, got {len(corrected_lines)}"
+            )
         elif not balanced_math:
             suspicious_reasons.append("Unbalanced math tags")
-        
+
         # Check for error messages
         error_indicators = ["error", "failed", "cannot", "unable", "sorry"]
         for line in corrected_lines:
@@ -280,14 +280,14 @@ analysis: The inline math in the lines is not in LaTeX format and is not surroun
                 if indicator in line_lower and len(line) < 100:
                     suspicious_reasons.append(f"LLM may have returned error: '{indicator}'")
                     break
-        
+
         # Check for gibberish
         for i, line in enumerate(corrected_lines):
             if len(line) > 0:
                 alpha_ratio = sum(1 for c in line if c.isalpha()) / len(line)
                 if alpha_ratio < 0.2:
                     suspicious_reasons.append(f"Line {i+1} appears to be gibberish")
-        
+
         # Set suspicious flag if any issues found
         if suspicious_reasons:
             blocks[0].is_suspicious = True
@@ -298,6 +298,7 @@ analysis: The inline math in the lines is not in LaTeX format and is not surroun
         for text_line, page, corrected_text in zip(blocks, pages, corrected_lines):
             text_line.structure = []
             add_math_spans_to_line(corrected_text, text_line, page)
+
 
 class LLMTextSchema(BaseModel):
     analysis: str

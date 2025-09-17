@@ -24,6 +24,7 @@ class PageHeaderProcessor(BaseProcessor):
     """
     A processor for moving PageHeaders to the top
     """
+
     block_types = (BlockTypes.PageHeader,)
 
     def __call__(self, document: Document):
@@ -36,4 +37,3 @@ class PageHeaderProcessor(BaseProcessor):
         for block_id in page_header_block_ids:
             page.structure.remove(block_id)
         page.structure[:0] = page_header_block_ids
-

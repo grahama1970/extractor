@@ -28,38 +28,39 @@ class LineMergeProcessor(BaseProcessor):
     """
     A processor for merging inline math lines.
     """
-    block_types = (BlockTypes.Text, BlockTypes.TextInlineMath, BlockTypes.Caption, BlockTypes.Footnote, BlockTypes.SectionHeader)
+
+    block_types = (
+        BlockTypes.Text,
+        BlockTypes.TextInlineMath,
+        BlockTypes.Caption,
+        BlockTypes.Footnote,
+        BlockTypes.SectionHeader,
+    )
     min_merge_pct: Annotated[
-        float,
-        "The minimum percentage of intersection area to consider merging."
-    ] = .015
+        float, "The minimum percentage of intersection area to consider merging."
+    ] = 0.015
     block_expand_threshold: Annotated[
-        float,
-        "The percentage of the block width to expand the bounding box."
-    ] = .05
+        float, "The percentage of the block width to expand the bounding box."
+    ] = 0.05
     min_merge_ydist: Annotated[
-        float,
-        "The minimum y distance between lines to consider merging."
+        float, "The minimum y distance between lines to consider merging."
     ] = 5
     intersection_pct_threshold: Annotated[
-        float,
-        "The total amount of intersection area concentrated in the max intersection block."
-    ] = .5
+        float, "The total amount of intersection area concentrated in the max intersection block."
+    ] = 0.5
     vertical_overlap_pct_threshold: Annotated[
-        float,
-        "The minimum percentage of vertical overlap to consider merging."
-    ] = .8
-    use_llm: Annotated[
-        bool,
-        "Whether to use LLMs to improve accuracy."
-    ] = False
+        float, "The minimum percentage of vertical overlap to consider merging."
+    ] = 0.8
+    use_llm: Annotated[bool, "Whether to use LLMs to improve accuracy."] = False
 
     def __init__(self, config):
         super().__init__(config)
 
     def merge_lines(self, lines: List[Line], block: Block):
         lines = [l for l in lines if l.polygon.width * 5 > l.polygon.height]  # Skip vertical lines
-        line_bboxes = [l.polygon.expand(self.block_expand_threshold, 0).bbox for l in lines]  # Expand horizontally
+        line_bboxes = [
+            l.polygon.expand(self.block_expand_threshold, 0).bbox for l in lines
+        ]  # Expand horizontally
         intersections = matrix_intersection_area(line_bboxes, line_bboxes)
 
         merges = []
@@ -69,7 +70,9 @@ class LineMergeProcessor(BaseProcessor):
             intersection_row[i] = 0  # Zero out the current idx
 
             if i < len(line_bboxes) - 1:
-                intersection_row[i+1] = 0 # Zero out the next idx, so we only evaluate merge from the left
+                intersection_row[i + 1] = (
+                    0  # Zero out the next idx, so we only evaluate merge from the left
+                )
 
             if len(merge) == 0:
                 merge.append(i)
@@ -90,14 +93,16 @@ class LineMergeProcessor(BaseProcessor):
             vertical_overlap = max(0, vertical_overlap_end - vertical_overlap_start)
             vertical_overlap_pct = vertical_overlap / max(1, lines[i].polygon.height)
 
-            if all([
-                # Overlaps enough
-                intersection_pct >= self.min_merge_pct,
-                # Within same line
-                vertical_overlap_pct > self.vertical_overlap_pct_threshold,
-                # doesn't overlap with anything else
-                merge_intersection / total_intersection > self.intersection_pct_threshold
-            ]):
+            if all(
+                [
+                    # Overlaps enough
+                    intersection_pct >= self.min_merge_pct,
+                    # Within same line
+                    vertical_overlap_pct > self.vertical_overlap_pct_threshold,
+                    # doesn't overlap with anything else
+                    merge_intersection / total_intersection > self.intersection_pct_threshold,
+                ]
+            ):
                 merge.append(i)
             else:
                 merges.append(merge)
@@ -127,7 +132,6 @@ class LineMergeProcessor(BaseProcessor):
                 line.formats = ["math"]
             elif "math" not in line.formats:
                 line.formats.append("math")
-
 
     def __call__(self, document: Document):
         # Merging lines only needed for inline math

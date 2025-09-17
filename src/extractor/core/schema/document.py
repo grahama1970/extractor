@@ -52,7 +52,7 @@ class Document(BaseModel):
     pages: List[PageGroup]
     block_type: BlockTypes = BlockTypes.Document
     table_of_contents: List[TocItem] | None = None
-    debug_data_path: str | None = None # Path that debug data was saved to
+    debug_data_path: str | None = None  # Path that debug data was saved to
     metadata: Dict[str, Any] | None = None  # Metadata for the document
 
     def get_block(self, block_id: BlockId):
@@ -80,7 +80,7 @@ class Document(BaseModel):
             return next_block
 
         # If no block found, search subsequent pages
-        for page in self.pages[self.pages.index(page) + 1:]:
+        for page in self.pages[self.pages.index(page) + 1 :]:
             next_block = page.get_next_block(None, ignored_block_types)
             if next_block:
                 return next_block
@@ -101,7 +101,7 @@ class Document(BaseModel):
         if not prev_page:
             return None
         return prev_page.get_block(prev_page.structure[-1])
-    
+
     def get_prev_page(self, page: PageGroup):
         page_idx = self.pages.index(page)
         if page_idx > 0:
@@ -130,7 +130,7 @@ class Document(BaseModel):
             children=child_content,
             html=self.assemble_html(child_content),
             section_hierarchy=hierarchy,
-            section_breadcrumbs=breadcrumbs
+            section_breadcrumbs=breadcrumbs,
         )
 
     def contained_blocks(self, block_types: Sequence[BlockTypes] = None) -> List[Block]:
@@ -150,12 +150,11 @@ class Document(BaseModel):
         # We'll use render with a dummy block to extract the current section hierarchy
         from extractor.core.schema.blocks import Block
         from extractor.core.schema.polygon import PolygonBox
+
         dummy = Block(
-            polygon=PolygonBox(
-                polygon=[[0, 0], [1, 0], [1, 1], [0, 1]]
-            ),
+            polygon=PolygonBox(polygon=[[0, 0], [1, 0], [1, 1], [0, 1]]),
             block_description="Dummy block for extracting section hierarchy",
-            page_id=0
+            page_id=0,
         )
 
         # Build hierarchy without recursion
@@ -165,18 +164,30 @@ class Document(BaseModel):
             for page in self.pages:
                 page_sections = []
                 for block in page.children or []:
-                    if hasattr(block, 'block_type') and block.block_type == BlockTypes.SectionHeader:
-                        level = getattr(block, 'heading_level', 1)
+                    if (
+                        hasattr(block, "block_type")
+                        and block.block_type == BlockTypes.SectionHeader
+                    ):
+                        level = getattr(block, "heading_level", 1)
                         if str(level) not in hierarchy:
                             hierarchy[str(level)] = []
-                        
+
                         section_data = {
-                            "id": getattr(block, 'block_id', ''),
-                            "title": block.raw_text(self).strip() if hasattr(block, 'raw_text') else '',
+                            "id": getattr(block, "block_id", ""),
+                            "title": (
+                                block.raw_text(self).strip() if hasattr(block, "raw_text") else ""
+                            ),
                             "page_id": page.page_id,
-                            "bbox": block.polygon.bbox if hasattr(block, 'polygon') and block.polygon else [0, 0, 0, 0],
-                            "hash": hash(block.raw_text(self).strip() if hasattr(block, 'raw_text') else '') & 0xFFFFFFFF,
-                            "subsections": []
+                            "bbox": (
+                                block.polygon.bbox
+                                if hasattr(block, "polygon") and block.polygon
+                                else [0, 0, 0, 0]
+                            ),
+                            "hash": hash(
+                                block.raw_text(self).strip() if hasattr(block, "raw_text") else ""
+                            )
+                            & 0xFFFFFFFF,
+                            "subsections": [],
                         }
                         hierarchy[str(level)].append(section_data)
         except Exception as e:
@@ -206,17 +217,21 @@ class Document(BaseModel):
         # Group sections by level and build hierarchy
         hierarchy = {}
         for section in sections:
-            if not hasattr(section, 'heading_level') or section.heading_level is None:
+            if not hasattr(section, "heading_level") or section.heading_level is None:
                 continue
 
             level = section.heading_level
 
             # Compute hash if not already set
-            if not hasattr(section, 'section_hash') or not section.section_hash:
-                section.section_hash = hashlib.sha256(section.raw_text(self).encode('utf-8')).hexdigest()[:16]
+            if not hasattr(section, "section_hash") or not section.section_hash:
+                section.section_hash = hashlib.sha256(
+                    section.raw_text(self).encode("utf-8")
+                ).hexdigest()[:16]
 
             # Find content blocks
-            content_blocks = section.get_section_content(self) if hasattr(section, 'get_section_content') else []
+            content_blocks = (
+                section.get_section_content(self) if hasattr(section, "get_section_content") else []
+            )
             content_block_ids = [block.id for block in content_blocks]
 
             # Find subsections (sections with higher heading level until the next one at this level)
@@ -229,26 +244,37 @@ class Document(BaseModel):
                     continue
                 if s == section:
                     continue
-                if hasattr(s, 'heading_level') and s.heading_level == subsection_level:
+                if hasattr(s, "heading_level") and s.heading_level == subsection_level:
                     # Check if it's a subsection (after this section but before the next section at this level)
                     is_subsection = False
                     if s.page_id > section.page_id:
                         is_subsection = True
-                    elif s.page_id == section.page_id and s.polygon.bbox[1] > section.polygon.bbox[1]:
+                    elif (
+                        s.page_id == section.page_id and s.polygon.bbox[1] > section.polygon.bbox[1]
+                    ):
                         # Find the next section at this level
                         next_section = None
                         for next_s in sections:
                             if next_s == section:
                                 continue
-                            if (next_s.page_id > section.page_id or
-                                (next_s.page_id == section.page_id and next_s.polygon.bbox[1] > section.polygon.bbox[1])):
-                                if hasattr(next_s, 'heading_level') and next_s.heading_level == level:
+                            if next_s.page_id > section.page_id or (
+                                next_s.page_id == section.page_id
+                                and next_s.polygon.bbox[1] > section.polygon.bbox[1]
+                            ):
+                                if (
+                                    hasattr(next_s, "heading_level")
+                                    and next_s.heading_level == level
+                                ):
                                     next_section = next_s
                                     break
 
-                        if not next_section or (s.page_id < next_section.page_id or
-                                              (s.page_id == next_section.page_id and
-                                               s.polygon.bbox[1] < next_section.polygon.bbox[1])):
+                        if not next_section or (
+                            s.page_id < next_section.page_id
+                            or (
+                                s.page_id == next_section.page_id
+                                and s.polygon.bbox[1] < next_section.polygon.bbox[1]
+                            )
+                        ):
                             is_subsection = True
 
                     if is_subsection:
@@ -259,13 +285,15 @@ class Document(BaseModel):
             if level_str not in hierarchy:
                 hierarchy[level_str] = []
 
-            hierarchy[level_str].append({
-                "id": str(section.id),
-                "title": section.raw_text(self).strip(),
-                "hash": section.section_hash,
-                "content_blocks": [str(block_id) for block_id in content_block_ids],
-                "subsections": [str(block_id) for block_id in subsections]
-            })
+            hierarchy[level_str].append(
+                {
+                    "id": str(section.id),
+                    "title": section.raw_text(self).strip(),
+                    "hash": section.section_hash,
+                    "content_blocks": [str(block_id) for block_id in content_block_ids],
+                    "subsections": [str(block_id) for block_id in subsections],
+                }
+            )
 
         return hierarchy
 
@@ -296,11 +324,7 @@ class Document(BaseModel):
             level = int(level_str)
             for section in sections:
                 # Start with this section
-                path = [{
-                    "level": level,
-                    "title": section["title"],
-                    "hash": section["hash"]
-                }]
+                path = [{"level": level, "title": section["title"], "hash": section["hash"]}]
 
                 # Add all parent sections
                 current_level = level
@@ -312,11 +336,9 @@ class Document(BaseModel):
                         break
 
                     # Add parent to beginning of path
-                    path.insert(0, {
-                        "level": parent_level,
-                        "title": parent["title"],
-                        "hash": parent["hash"]
-                    })
+                    path.insert(
+                        0, {"level": parent_level, "title": parent["title"], "hash": parent["hash"]}
+                    )
 
                     # Move up to parent
                     current_level = parent_level

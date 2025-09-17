@@ -27,6 +27,7 @@ class OrderProcessor(BaseProcessor):
     """
     A processor for sorting the blocks in order if needed.  This can help when the layout image was sliced.
     """
+
     block_types = tuple()
 
     def __call__(self, document: Document):
@@ -42,7 +43,7 @@ class OrderProcessor(BaseProcessor):
             block_idxs = defaultdict(int)
             for block_id in page.structure:
                 block = document.get_block(block_id)
-                spans = block.contained_blocks(document, (BlockTypes.Span, ))
+                spans = block.contained_blocks(document, (BlockTypes.Span,))
                 if len(spans) == 0:
                     continue
 
@@ -80,4 +81,3 @@ class OrderProcessor(BaseProcessor):
                     block_idxs[block_id] = block_idxs[next_block.id] + block_idx_add
 
             page.structure = sorted(page.structure, key=lambda x: block_idxs[x])
-

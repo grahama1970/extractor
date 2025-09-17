@@ -32,30 +32,22 @@ from pydantic import BaseModel
 
 from extractor.core.schema.blocks import Block
 from extractor.core.services import BaseService
+from extractor.pipeline.utils.litellm_response_utils import extract_content
 
 
 class OpenAIService(BaseService):
     openai_base_url: Annotated[
-        str,
-        "The base url to use for OpenAI-like models.  No trailing slash."
+        str, "The base url to use for OpenAI-like models.  No trailing slash."
     ] = "https://api.openai.com/v1"
-    openai_model: Annotated[
-        str,
-        "The model name to use for OpenAI-like model."
-    ] = "gpt-4o-mini"
-    openai_api_key: Annotated[
-        str,
-        "The API key to use for the OpenAI-like service."
-    ] = None
+    openai_model: Annotated[str, "The model name to use for OpenAI-like model."] = "gpt-4o-mini"
+    openai_api_key: Annotated[str, "The API key to use for the OpenAI-like service."] = None
 
     def image_to_base64(self, image: PIL.Image.Image):
         image_bytes = BytesIO()
         image.save(image_bytes, format="WEBP")
         return base64.b64encode(image_bytes.getvalue()).decode("utf-8")
 
-    def prepare_images(
-        self, images: Union[Image.Image, List[Image.Image]]
-    ) -> List[dict]:
+    def prepare_images(self, images: Union[Image.Image, List[Image.Image]]) -> List[dict]:
         if isinstance(images, Image.Image):
             images = [images]
 
@@ -63,10 +55,8 @@ class OpenAIService(BaseService):
             {
                 "type": "image_url",
                 "image_url": {
-                    "url": "data:image/webp;base64,{}".format(
-                        self.image_to_base64(img)
-                    ),
-                }
+                    "url": "data:image/webp;base64,{}".format(self.image_to_base64(img)),
+                },
             }
             for img in images
         ]
@@ -115,7 +105,7 @@ class OpenAIService(BaseService):
                     timeout=timeout,
                     response_format=response_schema,
                 )
-                response_text = response.choices[0].message.content
+                response_text = extract_content(response)
                 total_tokens = response.usage.total_tokens
                 block.update_metadata(llm_tokens_used=total_tokens, llm_request_count=1)
                 return json.loads(response_text)

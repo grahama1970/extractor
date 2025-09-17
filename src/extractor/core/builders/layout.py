@@ -35,10 +35,11 @@ class LayoutBuilder(BaseBuilder):
     """
     A builder for performing layout detection on PDF pages and merging the results into the document.
     """
+
     layout_batch_size: Annotated[
         Optional[int],
         "The batch size to use for the layout model.",
-        "Default is None, which will use the default batch size for the model."
+        "Default is None, which will use the default batch size for the model.",
     ] = None
     force_layout_block: Annotated[
         str,
@@ -83,17 +84,15 @@ class LayoutBuilder(BaseBuilder):
                             polygon=page.polygon.polygon,
                         ),
                     ],
-                    sliced=False
+                    sliced=False,
                 )
             )
         return layout_results
 
-
     def surya_layout(self, pages: List[PageGroup]) -> List[LayoutResult]:
         self.layout_model.disable_tqdm = self.disable_tqdm
         layout_results = self.layout_model(
-            [p.get_image(highres=False) for p in pages],
-            batch_size=int(self.get_batch_size())
+            [p.get_image(highres=False) for p in pages], batch_size=int(self.get_batch_size())
         )
         return layout_results
 
@@ -101,16 +100,18 @@ class LayoutBuilder(BaseBuilder):
         for page, layout_result in zip(pages, layout_results):
             layout_page_size = PolygonBox.from_bbox(layout_result.image_bbox).size
             provider_page_size = page.polygon.size
-            page.layout_sliced = layout_result.sliced  # This indicates if the page was sliced by the layout model
+            page.layout_sliced = (
+                layout_result.sliced
+            )  # This indicates if the page was sliced by the layout model
             # Debug: print all unique labels from Surya
             unique_labels = set(bbox.label for bbox in layout_result.bboxes)
             logger.debug(f"Surya detected labels on page {page.page_id}: {unique_labels}")
-            
+
             for bbox in sorted(layout_result.bboxes, key=lambda x: x.position):
                 # Log SectionHeader detection
                 if bbox.label == "SectionHeader":
                     logger.debug(f"Processing SectionHeader at position {bbox.position}")
-                    
+
                 # Map label to BlockTypes enum (handle case differences)
                 try:
                     block_type = BlockTypes[bbox.label]
@@ -127,11 +128,15 @@ class LayoutBuilder(BaseBuilder):
                     except KeyError:
                         print(f"WARNING: Unknown block type '{bbox.label}', skipping")
                         continue
-                        
+
                 block_cls = get_block_class(block_type)
                 layout_block = page.add_block(block_cls, PolygonBox(polygon=bbox.polygon))
-                layout_block.polygon = layout_block.polygon.rescale(layout_page_size, provider_page_size)
-                layout_block.top_k = {BlockTypes[label]: prob for (label, prob) in bbox.top_k.items()}
+                layout_block.polygon = layout_block.polygon.rescale(
+                    layout_page_size, provider_page_size
+                )
+                layout_block.top_k = {
+                    BlockTypes[label]: prob for (label, prob) in bbox.top_k.items()
+                }
                 layout_block.confidence = bbox.confidence  # Add the confidence score from Surya
                 page.add_structure(layout_block)
 

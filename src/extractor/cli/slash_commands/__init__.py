@@ -8,6 +8,7 @@ enabling easy integration with Claude Desktop and other tools.
 
 from .base import SlashCommand, CommandRegistry
 from .extract import ExtractCommand
+
 # from .arangodb import ArangoDBCommands  # Temporarily disabled - module deleted in cleanup
 from .claude import ClaudeCommands
 from .qa import QACommands
@@ -20,7 +21,7 @@ __all__ = [
     "SlashCommand",
     "CommandRegistry",
     "ExtractCommand",
-    # "ArangoDBCommands",  # Temporarily disabled 
+    # "ArangoDBCommands",  # Temporarily disabled
     "ClaudeCommands",
     "QACommands",
     "WorkflowCommands",

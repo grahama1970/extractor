@@ -45,10 +45,10 @@ def compare_reflow_to_gold(reflow_path: Path, gold_path: Path) -> Dict[str, Any]
 
 if __name__ == "__main__":
     import argparse
+
     ap = argparse.ArgumentParser()
     ap.add_argument("--reflow", required=True)
     ap.add_argument("--gold", required=True)
     args = ap.parse_args()
     res = compare_reflow_to_gold(Path(args.reflow), Path(args.gold))
     print(json.dumps(res, indent=2, ensure_ascii=False))
-

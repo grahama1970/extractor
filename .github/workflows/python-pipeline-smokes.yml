@@ -1,0 +1,219 @@
+name: Python Pipeline Smokes
+
+on:
+  push:
+    branches: [ main, dev ]
+  pull_request:
+    branches: [ '**' ]
+
+jobs:
+  smokes-python:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup uv and Python
+        uses: astral-sh/setup-uv@v4
+        with:
+          python-version: '3.12'
+      - name: Install smokes extra
+        run: |
+          uv venv
+          . .venv/bin/activate
+          uv pip install -e .[smokes]
+      - name: Run Python smokes
+        env:
+          LITELLM_HTTPX: '1'
+          LITELLM_DEFAULT_MODEL: ${{ vars.LITELLM_DEFAULT_MODEL }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+        run: |
+          make smokes-python || (echo 'Python smokes failed' && exit 1)
+      - name: Run Stage 07 strict smokes
+        env:
+          LITELLM_HTTPX: '1'
+          LITELLM_DEBUG: '1'
+          LITELLM_DEFAULT_MODEL: ${{ vars.LITELLM_DEFAULT_MODEL }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+        run: |
+          make smokes-stage07-strict || (echo 'Stage 07 strict smokes failed' && exit 1)
+      - name: Upload smoke artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-smokes-artifacts
+          path: |
+            scripts/artifacts/**
+            data/results/pipeline/**
+          if-no-files-found: warn
+
+  pipeline-quick:
+    needs: smokes-python
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup uv and Python
+        uses: astral-sh/setup-uv@v4
+        with:
+          python-version: '3.12'
+      - name: Install smokes extra
+        run: |
+          uv venv
+          . .venv/bin/activate
+          uv pip install -e .[smokes]
+      - name: Run quick pipeline with gold checks
+        env:
+          LITELLM_HTTPX: '1'
+          LITELLM_DEFAULT_MODEL: ${{ vars.LITELLM_DEFAULT_MODEL }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+        run: |
+          make quick-pipeline || (echo 'Quick pipeline failed' && exit 1)
+      - name: Upload quick pipeline artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: quick-pipeline-artifacts
+          path: |
+            data/results/pipeline/**
+          if-no-files-found: warn
+
+  pipeline-full:
+    if: ${{ secrets.ARANGO_URL != '' && (secrets.OPENAI_API_KEY != '' || secrets.GOOGLE_API_KEY != '') }}
+    needs: pipeline-quick
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup uv and Python
+        uses: astral-sh/setup-uv@v4
+        with:
+          python-version: '3.12'
+      - name: Install full project
+        run: |
+          uv venv
+          . .venv/bin/activate
+          uv pip install -e .
+      - name: Run full pipeline (01→14)
+        env:
+          LITELLM_HTTPX: '1'
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          LITELLM_DEFAULT_MODEL: ${{ vars.LITELLM_DEFAULT_MODEL }}
+          ARANGO_URL: ${{ secrets.ARANGO_URL }}
+          ARANGO_DATABASE: ${{ vars.ARANGO_DATABASE }}
+          ARANGO_USERNAME: ${{ secrets.ARANGO_USERNAME }}
+          ARANGO_PASSWORD: ${{ secrets.ARANGO_PASSWORD }}
+          LEAN4_CLI_CMD: ${{ secrets.LEAN4_CLI_CMD }}
+        run: |
+          make pipeline-full
+      - name: Upload full pipeline artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-full-artifacts
+          path: |
+            data/results/pipeline/**
+          if-no-files-found: warn
+
+  pipeline-db-smokes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup uv and Python
+        uses: astral-sh/setup-uv@v4
+        with:
+          python-version: '3.12'
+      - name: Install smokes extra
+        run: |
+          uv venv
+          . .venv/bin/activate
+          uv pip install -e .[smokes]
+      - name: Start ArangoDB (Docker)
+        env:
+          ARANGO_PASSWORD: ${{ secrets.ARANGO_PASSWORD }}
+        run: |
+          make arango-up
+          # wait for health
+          for i in {1..20}; do
+            curl -fsS http://127.0.0.1:8529/_api/version && break || sleep 2;
+          done
+      - name: Run DB-backed pipeline smokes (10→12)
+        env:
+          ARANGO_HOST: 127.0.0.1
+          ARANGO_PORT: '8529'
+          ARANGO_USER: root
+          ARANGO_PASSWORD: ${{ secrets.ARANGO_PASSWORD }}
+          ARANGO_DATABASE: pdf_knowledge_base_test
+        run: |
+          . .venv/bin/activate
+          export PYTHONPATH=$(pwd)/src
+          make smokes-pipeline-db
+      - name: Stop ArangoDB (Docker)
+        if: always()
+        env:
+          ARANGO_PASSWORD: ${{ secrets.ARANGO_PASSWORD }}
+        run: |
+          make arango-down || true
+      - name: Upload DB smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-db-smokes-artifacts
+          path: |
+            scripts/artifacts/**
+            data/results/pipeline_db_smoke/**
+          if-no-files-found: warn
+
+  pipeline-happy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup uv and Python
+        uses: astral-sh/setup-uv@v4
+        with:
+          python-version: '3.12'
+      - name: Install smokes extra
+        run: |
+          uv venv
+          . .venv/bin/activate
+          uv pip install -e .[smokes]
+      - name: Start ArangoDB (Docker)
+        env:
+          ARANGO_PASSWORD: ${{ secrets.ARANGO_PASSWORD }}
+        run: |
+          make arango-up
+          for i in {1..20}; do
+            curl -fsS http://127.0.0.1:8529/_api/version && break || sleep 2;
+          done
+      - name: Run happy-path pipeline + summary
+        env:
+          ARANGO_HOST: 127.0.0.1
+          ARANGO_PORT: '8529'
+          ARANGO_USER: root
+          ARANGO_PASSWORD: ${{ secrets.ARANGO_PASSWORD }}
+          ARANGO_DATABASE: pdf_knowledge_base_test
+        run: |
+          . .venv/bin/activate
+          export PYTHONPATH=$(pwd)/src
+          python scripts/smokes/pipeline/smoke_pipeline_happy.py -o data/results/pipeline_happy_ci
+          python scripts/smokes/pipeline/smoke_run_summary.py -o data/results/pipeline_happy_ci
+          # Skip-01 variant (external annotations) and API bridge smoke
+          python scripts/smokes/pipeline/smoke_pipeline_happy_skip01.py -o data/results/pipeline_happy_skip01_ci
+          python scripts/smokes/pipeline/smoke_api_external_annotations.py
+      - name: Stop ArangoDB (Docker)
+        if: always()
+        env:
+          ARANGO_PASSWORD: ${{ secrets.ARANGO_PASSWORD }}
+        run: |
+          make arango-down || true
+      - name: Upload happy-path artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-happy-artifacts
+          path: |
+            scripts/artifacts/**
+            data/results/pipeline_happy_ci/**
+          if-no-files-found: warn

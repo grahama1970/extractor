@@ -18,50 +18,50 @@ from extractor.core.schema.document import Document
 
 class ArangoDBCommands(CommandGroup):
     """ArangoDB integration commands."""
-    
+
     def __init__(self):
         super().__init__(
             name="marker-db",
             description="ArangoDB database operations for marker documents",
-            category="database"
+            category="database",
         )
-    
+
     def _setup_commands(self):
         """Setup ArangoDB command handlers."""
         super()._setup_commands()
-        
+
         @self.app.command()
         def setup(
             url: str = typer.Option("http://localhost:8529", help="ArangoDB URL"),
             database: str = typer.Option("marker", help="Database name"),
             username: str = typer.Option("root", help="Username"),
             password: str = typer.Option("", help="Password", prompt=True, hide_input=True),
-            create_db: bool = typer.Option(True, help="Create database if not exists")
+            create_db: bool = typer.Option(True, help="Create database if not exists"),
         ):
             """Initialize ArangoDB for marker documents."""
             try:
                 from extractor.core.utils.arango_setup import setup_arangodb
-                
+
                 logger.info(f"Setting up ArangoDB at {url}")
-                
+
                 # Create database and collections
                 setup_arangodb(
                     url=url,
                     username=username,
                     password=password,
                     database=database,
-                    create_if_not_exists=create_db
+                    create_if_not_exists=create_db,
                 )
-                
+
                 print(f" ArangoDB setup complete")
                 print(f"  Database: {database}")
                 print(f"  Collections: documents, blocks, entities, relationships")
                 print(f"  Indexes created for efficient search")
-                
+
             except Exception as e:
                 logger.error(f"Setup failed: {e}")
                 raise typer.Exit(1)
-        
+
         @self.app.command()
         def import_doc(
             json_path: str = typer.Argument(..., help="Path to marker JSON output"),
@@ -70,46 +70,41 @@ class ArangoDBCommands(CommandGroup):
             username: str = typer.Option("root", help="Username"),
             password: str = typer.Option(None, help="Password"),
             batch_size: int = typer.Option(100, help="Batch size for import"),
-            skip_existing: bool = typer.Option(False, help="Skip documents that already exist")
+            skip_existing: bool = typer.Option(False, help="Skip documents that already exist"),
         ):
             """Import marker extraction results into ArangoDB."""
             try:
                 json_path = validate_file_path(json_path)
-                
+
                 # Prompt for password if not provided
                 if password is None:
                     password = typer.prompt("Password", hide_input=True)
-                
+
                 logger.info(f"Importing {json_path} to ArangoDB")
-                
+
                 # Create importer
                 importer = ArangoDBImporter(
-                    url=url,
-                    username=username,
-                    password=password,
-                    database=database
+                    url=url, username=username, password=password, database=database
                 )
-                
+
                 # Import document
                 stats = importer.import_document(
-                    json_path,
-                    batch_size=batch_size,
-                    skip_existing=skip_existing
+                    json_path, batch_size=batch_size, skip_existing=skip_existing
                 )
-                
+
                 print(f" Import complete")
                 print(f"  Documents: {stats.get('documents', 0)}")
                 print(f"  Blocks: {stats.get('blocks', 0)}")
                 print(f"  Entities: {stats.get('entities', 0)}")
                 print(f"  Relationships: {stats.get('relationships', 0)}")
-                
-                if stats.get('errors'):
+
+                if stats.get("errors"):
                     print(f"  ⚠️  Errors: {stats['errors']}")
-                
+
             except Exception as e:
                 logger.error(f"Import failed: {e}")
                 raise typer.Exit(1)
-        
+
         @self.app.command()
         def search(
             query: str = typer.Argument(..., help="Search query"),
@@ -119,20 +114,20 @@ class ArangoDBCommands(CommandGroup):
             password: str = typer.Option(None, help="Password"),
             collection: str = typer.Option("blocks", help="Collection to search"),
             limit: int = typer.Option(10, help="Maximum results"),
-            output_format: str = typer.Option("text", help="Output format (text, json, table)")
+            output_format: str = typer.Option("text", help="Output format (text, json, table)"),
         ):
             """Search extracted content in ArangoDB."""
             try:
                 # Prompt for password if not provided
                 if password is None:
                     password = typer.prompt("Password", hide_input=True)
-                
+
                 from arango import ArangoClient
-                
+
                 # Connect to ArangoDB
                 client = ArangoClient(hosts=url)
                 db = client.db(database, username=username, password=password)
-                
+
                 # Build AQL query
                 aql = f"""
                 FOR doc IN {collection}
@@ -146,21 +141,18 @@ class ArangoDBCommands(CommandGroup):
                         document: doc.document_id
                     }}
                 """
-                
+
                 # Execute search
-                cursor = db.aql.execute(
-                    aql,
-                    bind_vars={'query': query, 'limit': limit}
-                )
-                
+                cursor = db.aql.execute(aql, bind_vars={"query": query, "limit": limit})
+
                 results = list(cursor)
-                
+
                 if not results:
                     print(f"No results found for '{query}'")
                     return
-                
+
                 print(f"Found {len(results)} results for '{query}':\n")
-                
+
                 # Format output
                 if output_format == "json":
                     print(json.dumps(results, indent=2))
@@ -173,11 +165,11 @@ class ArangoDBCommands(CommandGroup):
                         print(f"   {result['text']}...")
                         print(f"   Document: {result['document']}")
                         print()
-                
+
             except Exception as e:
                 logger.error(f"Search failed: {e}")
                 raise typer.Exit(1)
-        
+
         @self.app.command()
         def export(
             document_id: str = typer.Argument(..., help="Document ID to export"),
@@ -186,28 +178,28 @@ class ArangoDBCommands(CommandGroup):
             database: str = typer.Option("marker", help="Database name"),
             username: str = typer.Option("root", help="Username"),
             password: str = typer.Option(None, help="Password"),
-            format: str = typer.Option("json", help="Export format (json, markdown)")
+            format: str = typer.Option("json", help="Export format (json, markdown)"),
         ):
             """Export a document from ArangoDB."""
             try:
                 # Prompt for password if not provided
                 if password is None:
                     password = typer.prompt("Password", hide_input=True)
-                
+
                 from arango import ArangoClient
-                
+
                 # Connect to ArangoDB
                 client = ArangoClient(hosts=url)
                 db = client.db(database, username=username, password=password)
-                
+
                 # Get document
-                doc_collection = db.collection('documents')
+                doc_collection = db.collection("documents")
                 doc_data = doc_collection.get(document_id)
-                
+
                 if not doc_data:
                     print(f"Document '{document_id}' not found")
                     raise typer.Exit(1)
-                
+
                 # Get associated blocks
                 aql = """
                 FOR block IN blocks
@@ -215,60 +207,61 @@ class ArangoDBCommands(CommandGroup):
                     SORT block.page_range[0], block.order
                     RETURN block
                 """
-                
-                cursor = db.aql.execute(aql, bind_vars={'doc_id': document_id})
+
+                cursor = db.aql.execute(aql, bind_vars={"doc_id": document_id})
                 blocks = list(cursor)
-                
+
                 # Reconstruct document
-                doc_data['blocks'] = blocks
-                
+                doc_data["blocks"] = blocks
+
                 # Setup output path
                 if output_path:
                     output_file = Path(output_path)
                 else:
                     output_file = Path(f"{document_id}_export.{format}")
-                
+
                 # Export based on format
                 if format == "json":
-                    with open(output_file, 'w', encoding='utf-8') as f:
+                    with open(output_file, "w", encoding="utf-8") as f:
                         json.dump(doc_data, f, indent=2, ensure_ascii=False)
                 elif format == "markdown":
                     # Convert to markdown
                     from extractor.core.renderers.markdown import MarkdownRenderer
+
                     # Note: This would need proper document reconstruction
                     # For now, just save as JSON
-                    with open(output_file, 'w', encoding='utf-8') as f:
+                    with open(output_file, "w", encoding="utf-8") as f:
                         json.dump(doc_data, f, indent=2, ensure_ascii=False)
-                
+
                 print(f" Exported document to: {output_file}")
-                
+
             except Exception as e:
                 logger.error(f"Export failed: {e}")
                 raise typer.Exit(1)
-        
+
         @self.app.command()
         def stats(
             url: str = typer.Option("http://localhost:8529", help="ArangoDB URL"),
             database: str = typer.Option("marker", help="Database name"),
             username: str = typer.Option("root", help="Username"),
-            password: str = typer.Option(None, help="Password")
+            password: str = typer.Option(None, help="Password"),
         ):
             """Show database statistics."""
             try:
                 # Prompt for password if not provided
                 if password is None:
                     password = typer.prompt("Password", hide_input=True)
-                
+
                 from arango import ArangoClient
-                
+
                 # Connect to ArangoDB
                 client = ArangoClient(hosts=url)
                 db = client.db(database, username=username, password=password)
-                
+
                 print(f" Database Statistics for '{database}':\n")
-                
+
                 # Get collection stats
-                collections = ['documents', 'blocks', 'entities', 'relationships']
+                collections = ["documents", "blocks", "entities", "relationships"]
                 for coll_name in collections:
                     try:
                         coll = db.collection(coll_name)
@@ -276,7 +269,7 @@ class ArangoDBCommands(CommandGroup):
                         print(f"  {coll_name}: {count:,} items")
                     except:
                         print(f"  {coll_name}: Not found")
-                
+
                 # Get block type distribution
                 aql = """
                 FOR block IN blocks
@@ -284,15 +277,15 @@ class ArangoDBCommands(CommandGroup):
                     SORT count DESC
                     RETURN {type: type, count: count}
                 """
-                
+
                 cursor = db.aql.execute(aql)
                 block_types = list(cursor)
-                
+
                 if block_types:
                     print(f"\n Block Type Distribution:")
                     for bt in block_types:
                         print(f"  {bt['type']}: {bt['count']:,}")
-                
+
                 # Get document stats
                 aql = """
                 FOR doc IN documents
@@ -304,22 +297,22 @@ class ArangoDBCommands(CommandGroup):
                         min_pages: MIN(doc.page_count)
                     }
                 """
-                
+
                 cursor = db.aql.execute(aql)
                 doc_stats = list(cursor)
-                
-                if doc_stats and doc_stats[0]['total'] > 0:
+
+                if doc_stats and doc_stats[0]["total"] > 0:
                     stats = doc_stats[0]
                     print(f"\n Document Statistics:")
                     print(f"  Total documents: {stats['total']:,}")
                     print(f"  Average pages: {stats['avg_pages']:.1f}")
                     print(f"  Min pages: {stats['min_pages']}")
                     print(f"  Max pages: {stats['max_pages']}")
-                
+
             except Exception as e:
                 logger.error(f"Failed to get stats: {e}")
                 raise typer.Exit(1)
-        
+
         @self.app.command()
         def visualize(
             document_id: Optional[str] = typer.Option(None, help="Specific document to visualize"),
@@ -328,20 +321,20 @@ class ArangoDBCommands(CommandGroup):
             database: str = typer.Option("marker", help="Database name"),
             username: str = typer.Option("root", help="Username"),
             password: str = typer.Option(None, help="Password"),
-            max_nodes: int = typer.Option(100, help="Maximum nodes to display")
+            max_nodes: int = typer.Option(100, help="Maximum nodes to display"),
         ):
             """Generate visualization of document structure."""
             try:
                 # Prompt for password if not provided
                 if password is None:
                     password = typer.prompt("Password", hide_input=True)
-                
+
                 from arango import ArangoClient
-                
+
                 # Connect to ArangoDB
                 client = ArangoClient(hosts=url)
                 db = client.db(database, username=username, password=password)
-                
+
                 # Build query based on whether document_id is provided
                 if document_id:
                     aql = """
@@ -373,7 +366,7 @@ class ArangoDBCommands(CommandGroup):
                         )
                     }
                     """
-                    bind_vars = {'doc_id': document_id, 'max_nodes': max_nodes}
+                    bind_vars = {"doc_id": document_id, "max_nodes": max_nodes}
                 else:
                     # Visualize overall structure
                     aql = """
@@ -410,12 +403,12 @@ class ArangoDBCommands(CommandGroup):
                         )
                     }
                     """
-                    bind_vars = {'max_nodes': max_nodes}
-                
+                    bind_vars = {"max_nodes": max_nodes}
+
                 # Execute query
                 cursor = db.aql.execute(aql, bind_vars=bind_vars)
-                graph_data = list(cursor)[0] if cursor else {'nodes': [], 'edges': []}
-                
+                graph_data = list(cursor)[0] if cursor else {"nodes": [], "edges": []}
+
                 # Generate HTML visualization
                 html_content = f"""
 <!DOCTYPE html>
@@ -535,21 +528,21 @@ class ArangoDBCommands(CommandGroup):
 </body>
 </html>
 """
-                
+
                 # Write HTML file
                 output_file = Path(output_path)
-                with open(output_file, 'w', encoding='utf-8') as f:
+                with open(output_file, "w", encoding="utf-8") as f:
                     f.write(html_content)
-                
+
                 print(f" Visualization saved to: {output_file}")
                 print(f"  Nodes: {len(graph_data['nodes'])}")
                 print(f"  Edges: {len(graph_data['edges'])}")
                 print(f"\nOpen in browser to view interactive graph")
-                
+
             except Exception as e:
                 logger.error(f"Visualization failed: {e}")
                 raise typer.Exit(1)
-    
+
     def get_examples(self) -> List[str]:
         """Get example usage."""
         return [

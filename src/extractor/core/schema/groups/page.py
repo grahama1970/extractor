@@ -79,9 +79,7 @@ class PageGroup(Group):
             image = image.copy()
             draw = ImageDraw.Draw(image)
             bad_blocks = [
-                block
-                for block in self.current_children
-                if block.block_type in remove_blocks
+                block for block in self.current_children if block.block_type in remove_blocks
             ]
             for bad_block in bad_blocks:
                 poly = bad_block.polygon.rescale(self.polygon.size, image.size).polygon
@@ -142,12 +140,12 @@ class PageGroup(Group):
             block = self.children[block_id.block_id]
             if block.block_id == block_id.block_id:
                 return block
-        
+
         # Fall back to searching - this handles non-sequential IDs
         for block in self.children:
             if block.block_id == block_id.block_id:
                 return block
-                
+
         # If not found, return None instead of crashing
         # This is a workaround for the block ID mismatch issue in our fork
         return None
@@ -164,9 +162,7 @@ class PageGroup(Group):
         max_intersections = {}
 
         block_bboxes = [block.polygon.bbox for block in blocks]
-        line_bboxes = [
-            provider_output.line.polygon.bbox for provider_output in provider_outputs
-        ]
+        line_bboxes = [provider_output.line.polygon.bbox for provider_output in provider_outputs]
 
         intersection_matrix = matrix_intersection_area(line_bboxes, block_bboxes)
 
@@ -274,9 +270,7 @@ class PageGroup(Group):
     ):
         # Add lines to the proper blocks, sorted in order
         for block_id, lines in block_lines.items():
-            line_extraction_methods = set(
-                [line[1].line.text_extraction_method for line in lines]
-            )
+            line_extraction_methods = set([line[1].line.text_extraction_method for line in lines])
             if len(line_extraction_methods) == 1:
                 lines = sorted(lines, key=lambda x: x[0])
                 lines = [line for _, line in lines]
@@ -325,9 +319,7 @@ class PageGroup(Group):
             if block.block_type not in self.excluded_block_types
         ]
 
-        max_intersections = self.compute_line_block_intersections(
-            valid_blocks, provider_outputs
-        )
+        max_intersections = self.compute_line_block_intersections(valid_blocks, provider_outputs)
 
         # Try to assign lines by intersection
         assigned_line_idxs = set()

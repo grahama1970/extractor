@@ -15,7 +15,7 @@ Requires: Python 3.10+, loguru, typer, tqdm
 
 from __future__ import annotations
 
-#--- Imports ---#
+# --- Imports ---#
 
 import asyncio
 import os
@@ -28,15 +28,26 @@ from enum import Enum, auto
 from typing import Callable, Iterable, Mapping, Optional, Sequence, List, Any, Dict
 
 from loguru import logger
-from tqdm.asyncio import as_completed as _tqdm_as_completed  # progress-enabled as_completed
+
+try:
+    from tqdm.asyncio import as_completed as _tqdm_as_completed  # progress-enabled as_completed
+except Exception:  # pragma: no cover - fallback when tqdm lacks asyncio helpers
+    import asyncio as _asyncio
+
+    def _tqdm_as_completed(tasks, total=None, desc: str | None = None):  # type: ignore[misc]
+        return _asyncio.as_completed(tasks)
+
+
 import typer
 
 
-#--- Data Structures ---#
+# --- Data Structures ---#
+
 
 @dataclass(frozen=True)
 class ExecResult:
     """Captured results of a Codex exec invocation, with outputs and timing."""
+
     args: list[str]
     returncode: Optional[int]
     duration_s: float
@@ -53,7 +64,8 @@ class ExecResult:
     stderr: str
 
 
-#--- Helpers ---#
+# --- Helpers ---#
+
 
 def _chunked(seq: List[Any], n: int) -> List[List[Any]]:
     """Return a list of slices of size n (last may be smaller)."""
@@ -64,12 +76,14 @@ def _chunked(seq: List[Any], n: int) -> List[List[Any]]:
 
 class _DeadlineResult(Enum):
     """Outcome of deadline checks: OK, overall timeout, or idle timeout."""
+
     OK = auto()
     OVERALL_TIMEOUT = auto()
     IDLE_TIMEOUT = auto()
 
 
-#--- Utilities ---#
+# --- Utilities ---#
+
 
 def _redact(seq: Sequence[str], redaction_markers: Sequence[str] | None) -> list[str]:
     """
@@ -204,7 +218,8 @@ def _apply_capture_limit(buf: bytearray, limit: Optional[int]) -> None:
         del buf[0 : len(buf) - limit]
 
 
-#--- Main Runner ---#
+# --- Main Runner ---#
+
 
 async def run_codex_exec(
     script_or_path: str,
@@ -235,24 +250,32 @@ async def run_codex_exec(
     yolo: bool | None = None,
     ask_for_approval: Optional[str] = None,
     sandbox_mode: Optional[str] = None,
+    # Advanced: allow raw command mode for testing (no implicit "exec" prefix)
+    prepend_exec: bool = True,
 ) -> ExecResult:
     """Run `codex exec <script_or_path> ...` with timeouts and streaming.
 
     Provides supervised execution, IO streaming, capture limits, and graceful
     termination. Returns ExecResult with timing/timeout flags and outputs.
     """
-    args = [codex_bin, "exec", script_or_path]
+    # Build argv
+    if prepend_exec:
+        args = [codex_bin, "exec", script_or_path]
+    else:
+        # Raw mode: treat codex_bin as the program and script_or_path as the first arg
+        args = [codex_bin, script_or_path]
 
     # Approvals / sandbox policy
     if yolo is None:
         yolo = bypass_approvals_and_sandbox
-    if yolo:
-        args.append("--dangerously-bypass-approvals-and-sandbox")
-    else:
-        if ask_for_approval:
-            args.extend(["--ask-for-approval", ask_for_approval])
-        if sandbox_mode:
-            args.extend(["--sandbox", sandbox_mode])
+    if prepend_exec:
+        if yolo:
+            args.append("--dangerously-bypass-approvals-and-sandbox")
+        else:
+            if ask_for_approval:
+                args.extend(["--ask-for-approval", ask_for_approval])
+            if sandbox_mode:
+                args.extend(["--sandbox", sandbox_mode])
 
     if extra_args:
         args.extend(extra_args)
@@ -320,7 +343,9 @@ async def run_codex_exec(
                 break
 
             now = time.monotonic()
-            outcome = _check_deadlines(now, t0, last_activity_ref[0], overall_timeout_s, idle_timeout_s)
+            outcome = _check_deadlines(
+                now, t0, last_activity_ref[0], overall_timeout_s, idle_timeout_s
+            )
             if outcome is _DeadlineResult.OVERALL_TIMEOUT:
                 timed_out = True
                 logger.warning(f"Overall timeout ({overall_timeout_s}s) hit; terminating...")
@@ -439,7 +464,8 @@ async def run_codex_exec(
     )
 
 
-#--- JSONL Helpers ---#
+# --- JSONL Helpers ---#
+
 
 async def run_codex_exec_jsonl(script_or_path: str, payload, **kwargs) -> ExecResult:
     """Serialize payload as JSONL, pipe to stdin, and run under Codex."""
@@ -459,12 +485,7 @@ async def run_codex_exec_jsonl(script_or_path: str, payload, **kwargs) -> ExecRe
 
 
 async def run_codex_batch_jsonl(
-    script_or_path: str,
-    payloads,
-    *,
-    concurrency: int = 4,
-    desc: str = "Codex Batch",
-    **kwargs
+    script_or_path: str, payloads, *, concurrency: int = 4, desc: str = "Codex Batch", **kwargs
 ) -> list[str]:
     """Run many JSONL payloads concurrently with progress; return last lines."""
     sem = asyncio.Semaphore(concurrency)
@@ -483,13 +504,14 @@ async def run_codex_batch_jsonl(
     return [r or "" for r in results]
 
 
-#--- Payload Construction ---#
+# --- Payload Construction ---#
+
 
 def _demo_payloads(model: Optional[str]) -> List[Dict[str, Any]]:
     """Load demo items from JSONL (env CODEX_DEMO_JSONL or default path)."""
     path = os.environ.get("CODEX_DEMO_JSONL", "data/demos/codex_call_demo_simple.jsonl")
     payloads: List[Dict[str, Any]] = []
-    with open(path, 'r', encoding='utf-8') as f:
+    with open(path, "r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line:
@@ -565,11 +587,10 @@ def build_payloads(
     return payloads
 
 
-#--- Typer CLI ---#
+# --- Typer CLI ---#
 
 app = typer.Typer(
-    name="codex_call",
-    help="Run batch prompts through Codex exec (mirrors litellm_call UX)."
+    name="codex_call", help="Run batch prompts through Codex exec (mirrors litellm_call UX)."
 )
 
 
@@ -577,7 +598,9 @@ app = typer.Typer(
 def run(
     prompts: List[str] = typer.Argument(None, help="Prompts to run (like litellm_call)."),
     demo: bool = typer.Option(False, "--demo", help="Run a built-in 5-item batch."),
-    model: Optional[str] = typer.Option(None, "--model", help="Model name to include in JSONL dicts (e.g., 'ollama/gemma3:12b')."),
+    model: Optional[str] = typer.Option(
+        None, "--model", help="Model name to include in JSONL dicts (e.g., 'ollama/gemma3:12b')."
+    ),
     reasoning_effort: Optional[str] = typer.Option(
         None,
         "--reasoning-effort",
@@ -586,21 +609,46 @@ def run(
     ),
     # Codex exec configuration
     codex_bin: str = typer.Option("codex", "--codex-bin", help="Path to Codex CLI."),
-    script: str = typer.Option("python", "--script", help="Command run under Codex (default: python)."),
-    target: str = typer.Option("", "--target", help="Optional worker script that accepts JSONL (e.g., litellm_call.py). If empty, use direct Codex mode."),
-    concurrency: int = typer.Option(3, "--concurrency", min=1, help="Max parallel calls (like litellm_call)."),
+    script: str = typer.Option(
+        "python", "--script", help="Command run under Codex (default: python)."
+    ),
+    target: str = typer.Option(
+        "",
+        "--target",
+        help="Optional worker script that accepts JSONL (e.g., litellm_call.py). If empty, use direct Codex mode.",
+    ),
+    concurrency: int = typer.Option(
+        3, "--concurrency", min=1, help="Max parallel calls (like litellm_call)."
+    ),
     # Approvals / sandbox
     yolo: bool = typer.Option(False, "--yolo", help="--dangerously-bypass-approvals-and-sandbox"),
-    ask_for_approval: Optional[str] = typer.Option(None, "--ask-for-approval", help="Approval mode (e.g., on-request)"),
-    sandbox: Optional[str] = typer.Option(None, "--sandbox", help="Sandbox mode (e.g., workspace-write)"),
+    ask_for_approval: Optional[str] = typer.Option(
+        None, "--ask-for-approval", help="Approval mode (e.g., on-request)"
+    ),
+    sandbox: Optional[str] = typer.Option(
+        None, "--sandbox", help="Sandbox mode (e.g., workspace-write)"
+    ),
     # Input sources
     stdin: bool = typer.Option(False, "--stdin", help="Read prompts from stdin"),
     jsonl: bool = typer.Option(False, "--jsonl", help="When reading stdin, parse JSON Lines"),
     # Timeouts
-    overall_timeout_sec: int = typer.Option(900, "--overall-timeout-sec", min=0, help="Overall wall timeout per exec (seconds). 0 disables."),
-    idle_timeout_sec: Optional[int] = typer.Option(None, "--idle-timeout-sec", help="Idle timeout per exec (seconds). Unset disables; triggers if no output for N seconds."),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Print JSONL payload and exit (no Codex exec)"),
-    emit_json: bool = typer.Option(False, "--emit-json", help="Emit a JSON array of {index,request,answer,rc,duration_s}"),
+    overall_timeout_sec: int = typer.Option(
+        900,
+        "--overall-timeout-sec",
+        min=0,
+        help="Overall wall timeout per exec (seconds). 0 disables.",
+    ),
+    idle_timeout_sec: Optional[int] = typer.Option(
+        None,
+        "--idle-timeout-sec",
+        help="Idle timeout per exec (seconds). Unset disables; triggers if no output for N seconds.",
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Print JSONL payload and exit (no Codex exec)"
+    ),
+    emit_json: bool = typer.Option(
+        False, "--emit-json", help="Emit a JSON array of {index,request,answer,rc,duration_s}"
+    ),
 ):
     """
     Runs a batch of prompts via Codex by invoking the LiteLLM helper as the child process.
@@ -704,7 +752,9 @@ def run(
                             answer = ln.strip()
                             break
                         if res.returncode not in (0, None):
-                            err_tail = (res.stderr or "").strip().splitlines()[-1:]  # last stderr line
+                            err_tail = (
+                                (res.stderr or "").strip().splitlines()[-1:]
+                            )  # last stderr line
                             tag = f"[rc={res.returncode}]"
                             if answer:
                                 answer = f"{tag} {answer}"
@@ -715,7 +765,11 @@ def run(
                         results[i] = answer
                         meta[i] = {
                             "index": i + 1,
-                            "request": item if isinstance(item, dict) else {"text": str(item), **({"model": model} if model else {})},
+                            "request": (
+                                item
+                                if isinstance(item, dict)
+                                else {"text": str(item), **({"model": model} if model else {})}
+                            ),
                             "answer": answer,
                             "rc": res.returncode,
                             "duration_s": res.duration_s,

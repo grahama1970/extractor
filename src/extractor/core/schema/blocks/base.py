@@ -38,10 +38,9 @@ class BlockMetadata(BaseModel):
     llm_tokens_used: int = 0
 
     def merge(self, model2):
-        return self.__class__(**{
-            field: getattr(self, field) + getattr(model2, field)
-            for field in self.model_fields
-        })
+        return self.__class__(
+            **{field: getattr(self, field) + getattr(model2, field) for field in self.model_fields}
+        )
 
 
 class BlockOutput(BaseModel):
@@ -75,18 +74,23 @@ class BlockId(BaseModel):
         if isinstance(other, str):
             return str(self) == other
         else:
-            return self.page_id == other.page_id and self.block_id == other.block_id and self.block_type == other.block_type
+            return (
+                self.page_id == other.page_id
+                and self.block_id == other.block_id
+                and self.block_type == other.block_type
+            )
 
     @field_validator("block_type")
     @classmethod
     def validate_block_type(cls, v):
         from extractor.core.schema import BlockTypes
+
         if not v in BlockTypes:
             raise ValueError(f"Invalid block type: {v}")
         return v
 
     def to_path(self):
-        return str(self).replace('/', '_')
+        return str(self).replace("/", "_")
 
 
 class Block(BaseModel):
@@ -95,42 +99,50 @@ class Block(BaseModel):
     block_type: Optional[BlockTypes] = None
     block_id: Optional[int] = None
     page_id: Optional[int] = None
-    text_extraction_method: Optional[Literal['pdftext', 'surya', 'gemini']] = None
-    structure: List[BlockId] | None = None  # The top-level page structure, which is the block ids in order
+    text_extraction_method: Optional[Literal["pdftext", "surya", "gemini"]] = None
+    structure: List[BlockId] | None = (
+        None  # The top-level page structure, which is the block ids in order
+    )
     ignore_for_output: bool = False  # Whether this block should be ignored in output
     replace_output_newlines: bool = False  # Whether to replace newlines with spaces in output
-    source: Literal['layout', 'heuristics', 'processor'] = 'layout'
+    source: Literal["layout", "heuristics", "processor"] = "layout"
     top_k: Optional[Dict[BlockTypes, float]] = None
     metadata: BlockMetadata | None = None
     lowres_image: Image.Image | None = None
     highres_image: Image.Image | None = None
-    removed: bool = False # Has block been replaced by new block?
-    
+    removed: bool = False  # Has block been replaced by new block?
+
     # Validation and quality fields
     is_suspicious: bool = False  # Whether this block has quality issues
-    suspicious_reasons: List[str] = Field(default_factory=list)  # Multiple reasons why the block is suspicious
+    suspicious_reasons: List[str] = Field(
+        default_factory=list
+    )  # Multiple reasons why the block is suspicious
     suspicion_confidence: Optional[float] = None  # Confidence that block is suspicious (0.0-1.0)
     confidence: Optional[float] = None  # Surya/extraction confidence score (0.0-1.0)
     quality_score: Optional[float] = None  # Overall quality assessment score
     requires_review: bool = False  # Whether human/LLM review is needed
-    validation_metadata: Dict[str, Any] = Field(default_factory=dict)  # Additional validation data (e.g., pattern matches)
+    validation_metadata: Dict[str, Any] = Field(
+        default_factory=dict
+    )  # Additional validation data (e.g., pattern matches)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     @property
     def id(self) -> BlockId:
-        return BlockId(
-            page_id=self.page_id,
-            block_id=self.block_id,
-            block_type=self.block_type
-        )
+        return BlockId(page_id=self.page_id, block_id=self.block_id, block_type=self.block_type)
 
     @classmethod
     def from_block(cls, block: Block) -> Block:
         block_attrs = block.model_dump(exclude=["id", "block_id", "block_type"])
         return cls(**block_attrs)
 
-    def get_image(self, document: Document, highres: bool = False, expansion: Tuple[float, float] | None = None, remove_blocks: Sequence[BlockTypes] | None = None) -> Image.Image | None:
+    def get_image(
+        self,
+        document: Document,
+        highres: bool = False,
+        expansion: Tuple[float, float] | None = None,
+        remove_blocks: Sequence[BlockTypes] | None = None,
+    ) -> Image.Image | None:
         image = self.highres_image if highres else self.lowres_image
         if image is None:
             page = document.get_page(self.page_id)
@@ -144,13 +156,17 @@ class Block(BaseModel):
             image = page_image.crop(bbox)
         return image
 
-
     def structure_blocks(self, document_page: Document | PageGroup) -> List[Block]:
         if self.structure is None:
             return []
         return [document_page.get_block(block_id) for block_id in self.structure]
 
-    def get_prev_block(self, document_page: Document | PageGroup, block: Block, ignored_block_types: Optional[List[BlockTypes]] = None):
+    def get_prev_block(
+        self,
+        document_page: Document | PageGroup,
+        block: Block,
+        ignored_block_types: Optional[List[BlockTypes]] = None,
+    ):
         if ignored_block_types is None:
             ignored_block_types = []
 
@@ -162,7 +178,12 @@ class Block(BaseModel):
             if prev_block_id.block_type not in ignored_block_types:
                 return document_page.get_block(prev_block_id)
 
-    def get_next_block(self, document_page: Document | PageGroup, block: Optional[Block] = None, ignored_block_types: Optional[List[BlockTypes]] = None):
+    def get_next_block(
+        self,
+        document_page: Document | PageGroup,
+        block: Optional[Block] = None,
+        ignored_block_types: Optional[List[BlockTypes]] = None,
+    ):
         if ignored_block_types is None:
             ignored_block_types = []
 
@@ -206,8 +227,8 @@ class Block(BaseModel):
 
         text = ""
         if document is None:
-            return getattr(self, 'text', "")
-            
+            return getattr(self, "text", "")
+
         for block_id in self.structure:
             block = document.get_block(block_id)
             if block:
@@ -216,7 +237,12 @@ class Block(BaseModel):
                     text += "\n"
         return text
 
-    def assemble_html(self, document: Document, child_blocks: List[BlockOutput], parent_structure: Optional[List[str]] = None):
+    def assemble_html(
+        self,
+        document: Document,
+        child_blocks: List[BlockOutput],
+        parent_structure: Optional[List[str]] = None,
+    ):
         if self.ignore_for_output:
             return ""
 
@@ -238,7 +264,9 @@ class Block(BaseModel):
         # Most blocks just pass through the section hierarchy unchanged
         return section_hierarchy
 
-    def contained_blocks(self, document: Document, block_types: Sequence[BlockTypes] = None) -> List[Block]:
+    def contained_blocks(
+        self, document: Document, block_types: Sequence[BlockTypes] = None
+    ) -> List[Block]:
         if self.structure is None:
             return []
 
@@ -262,7 +290,12 @@ class Block(BaseModel):
                     self.structure[i] = new_block.id
                     break
 
-    def render(self, document: Document, parent_structure: Optional[List[str]] = None, section_hierarchy: dict | None = None):
+    def render(
+        self,
+        document: Document,
+        parent_structure: Optional[List[str]] = None,
+        section_hierarchy: dict | None = None,
+    ):
         child_content = []
         if section_hierarchy is None:
             section_hierarchy = {}
@@ -275,7 +308,9 @@ class Block(BaseModel):
                     # Skip missing blocks - this is a workaround for block ID issues
                     continue
                 rendered = block.render(document, self.structure, section_hierarchy)
-                section_hierarchy = rendered.section_hierarchy.copy()  # Update the section hierarchy from the peer blocks
+                section_hierarchy = (
+                    rendered.section_hierarchy.copy()
+                )  # Update the section hierarchy from the peer blocks
                 child_content.append(rendered)
 
         return BlockOutput(
@@ -283,7 +318,7 @@ class Block(BaseModel):
             polygon=self.polygon,
             id=self.id,
             children=child_content,
-            section_hierarchy=section_hierarchy
+            section_hierarchy=section_hierarchy,
         )
 
     def line_height(self, document: Document) -> float:
@@ -304,31 +339,35 @@ class Block(BaseModel):
                 raise ValueError(f"Metadata attribute {key} is not an integer")
 
     def handle_html_output(self, document, child_blocks, parent_structure):
-        child_ref_blocks = [block for block in child_blocks if block.id.block_type == BlockTypes.Reference]
+        child_ref_blocks = [
+            block for block in child_blocks if block.id.block_type == BlockTypes.Reference
+        ]
         html = Block.assemble_html(self, document, child_ref_blocks, parent_structure)
         return html + self.html
-    
+
     # Suspicious block detection methods
-    def mark_suspicious(self, reason: str, confidence: float = 0.8, metadata: Optional[Dict[str, Any]] = None):
+    def mark_suspicious(
+        self, reason: str, confidence: float = 0.8, metadata: Optional[Dict[str, Any]] = None
+    ):
         """Mark this block as suspicious with a reason and confidence score."""
         self.is_suspicious = True
         if reason not in self.suspicious_reasons:
             self.suspicious_reasons.append(reason)
-        
+
         # Update suspicion confidence (take highest)
         if self.suspicion_confidence is None:
             self.suspicion_confidence = confidence
         else:
             self.suspicion_confidence = max(self.suspicion_confidence, confidence)
-        
+
         # Add any metadata
         if metadata:
             self.validation_metadata.update(metadata)
-        
+
         # Automatically mark for review if high suspicion
         if self.suspicion_confidence >= 0.7:
             self.requires_review = True
-    
+
     def clear_suspicion(self):
         """Clear all suspicion flags and reasons."""
         self.is_suspicious = False
@@ -336,23 +375,23 @@ class Block(BaseModel):
         self.suspicion_confidence = None
         self.requires_review = False
         self.validation_metadata = {}
-    
+
     def calculate_quality_score(self) -> float:
         """Calculate overall quality score based on confidence and suspicion."""
         base_score = self.confidence or 0.5
-        
+
         # Reduce score based on suspicion
         if self.is_suspicious and self.suspicion_confidence:
             penalty = self.suspicion_confidence * 0.5  # Max 50% reduction
             base_score = base_score * (1 - penalty)
-        
+
         # Further reduce if multiple reasons
         if len(self.suspicious_reasons) > 1:
-            base_score *= (1 - 0.1 * min(len(self.suspicious_reasons) - 1, 3))
-        
+            base_score *= 1 - 0.1 * min(len(self.suspicious_reasons) - 1, 3)
+
         self.quality_score = max(0.0, min(1.0, base_score))
         return self.quality_score
-    
+
     def get_suspicion_summary(self) -> Dict[str, Any]:
         """Get a summary of suspicion data for reporting."""
         return {
@@ -362,5 +401,5 @@ class Block(BaseModel):
             "extraction_confidence": self.confidence,
             "quality_score": self.quality_score or self.calculate_quality_score(),
             "requires_review": self.requires_review,
-            "metadata": self.validation_metadata
+            "metadata": self.validation_metadata,
         }

@@ -27,42 +27,40 @@ from extractor.core.providers.html import HTMLProvider
 from extractor.core.providers.pptx import PPTXProvider
 from extractor.core.providers.rst import RSTProvider
 from extractor.core.providers.spreadsheet import SpreadsheetProvider
+from extractor.core.providers.markdown import MarkdownProvider
 
 # ------------------------------------------------------------------
 # Provider factory
 # ------------------------------------------------------------------
 _PROVIDER_MAP: dict[str, Type] = {
     # images
-    "png":  ImageProvider,
-    "jpg":  ImageProvider,
+    "png": ImageProvider,
+    "jpg": ImageProvider,
     "jpeg": ImageProvider,
-    "gif":  ImageProvider,
-    "bmp":  ImageProvider,
+    "gif": ImageProvider,
+    "bmp": ImageProvider,
     "tiff": ImageProvider,
-    "svg":  ImageProvider,
+    "svg": ImageProvider,
     "webp": ImageProvider,
-
     # documents (native extraction)
     "docx": DOCXProvider,
-    "doc":  DOCXProvider,
-    "odt":  DOCXProvider,
-
+    "doc": DOCXProvider,
+    "odt": DOCXProvider,
     "xlsx": SpreadsheetProvider,
-    "xls":  SpreadsheetProvider,
+    "xls": SpreadsheetProvider,
     "xlsm": SpreadsheetProvider,
-    "ods":  SpreadsheetProvider,
-
+    "ods": SpreadsheetProvider,
     "pptx": PPTXProvider,
-    "ppt":  PPTXProvider,
-    "odp":  PPTXProvider,
-
+    "ppt": PPTXProvider,
+    "odp": PPTXProvider,
     "epub": EPUBProvider,
     "html": HTMLProvider,
-    "htm":  HTMLProvider,
-    "rst":  RSTProvider,
-
+    "htm": HTMLProvider,
+    "rst": RSTProvider,
+    "md": MarkdownProvider,
+    "markdown": MarkdownProvider,
     # PDF remains the fallback
-    "pdf":  PdfProvider,
+    "pdf": PdfProvider,
 }
 
 
@@ -85,22 +83,22 @@ def provider_from_filepath(filepath: str) -> Type:
 
     # 2. MIME detection
     mime = filetype.guess(str(path))
-    if mime and hasattr(mime, 'mime'):
+    if mime and hasattr(mime, "mime"):
         mime_map = {
-            "image":  ImageProvider,
+            "image": ImageProvider,
             "application/pdf": PdfProvider,
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document": DOCXProvider,
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":     SpreadsheetProvider,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": SpreadsheetProvider,
             "application/vnd.openxmlformats-officedocument.presentationml.presentation": PPTXProvider,
             "application/epub+zip": EPUBProvider,
-            "application/vnd.oasis.opendocument.text":        DOCXProvider,
+            "application/vnd.oasis.opendocument.text": DOCXProvider,
             "application/vnd.oasis.opendocument.spreadsheet": SpreadsheetProvider,
             "application/vnd.oasis.opendocument.presentation": PPTXProvider,
         }
         # Handle image MIME types that start with "image/"
         if mime.mime.startswith("image/"):
             return ImageProvider
-        
+
         provider = mime_map.get(mime.mime)
         if provider:
             return provider
@@ -111,6 +109,7 @@ def provider_from_filepath(filepath: str) -> Type:
             with path.open("r", encoding="utf-8", errors="ignore") as f:
                 head = f.read(2048)
             from bs4 import BeautifulSoup
+
             if BeautifulSoup(head, "html.parser").find():
                 return HTMLProvider
         except Exception:

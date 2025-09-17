@@ -5,7 +5,7 @@ Description: Package initialization and exports
 
 Provides additional functionality for:
 - Document processing and debugging
-- Table extraction and evaluation  
+- Table extraction and evaluation
 - Text chunking and summarization
 - Embedding and vector operations
 - ArangoDB setup and operations
@@ -25,8 +25,8 @@ except ImportError:
 
 # Export other utilities
 __all__ = [
-    'get_embedding',
-    'get_embedder_model',
-    'cosine_similarity',
-    'calculate_cosine_similarity'
+    "get_embedding",
+    "get_embedder_model",
+    "cosine_similarity",
+    "calculate_cosine_similarity",
 ]

@@ -13,7 +13,9 @@ set -a
 [[ -f "$ROOT_DIR/.env" ]] && source "$ROOT_DIR/.env"
 set +a
 
-MODEL="${LITELLM_MODEL:-gpt-4o-mini}"
+# Prefer LITELLM_DEFAULT_MODEL for testing, fallback to LITELLM_MODEL, then a safe default
+# Prefer LITELLM_DEFAULT_MODEL (project default), then DEFAULT_LITELLM_MODEL, then LITELLM_MODEL
+MODEL="${LITELLM_DEFAULT_MODEL:-${DEFAULT_LITELLM_MODEL:-${LITELLM_MODEL:-gpt-4o-mini}}}"
 
 # Optional: DEBUG=1 to include --wrap-json
 ARGS=()

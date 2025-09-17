@@ -9,6 +9,7 @@ Extract all figures/images from stage 02 output.
 
 import json
 import sys
+
 try:
     import fitz  # PyMuPDF
 except ImportError:
@@ -27,41 +28,19 @@ import os
 from datetime import datetime
 from dotenv import load_dotenv, find_dotenv
 import textwrap
-try:
-    try:
-        import typer
-        _HAS_TYPER = True
-    except Exception:
-        _HAS_TYPER = False
-        class _TyperShim:
-            def __init__(self,*a,**k): pass
-            def command(self,*a,**k): return lambda f: f
-            def __call__(self,*a,**k): print("Typer not installed; CLI disabled")
-        def _opt(*a,**k): return None
-        def _arg(*a,**k): return None
-        typer = _TyperShim()  # type: ignore
-        typer.Typer = _TyperShim  # type: ignore
-        typer.Option = _opt  # type: ignore
-        typer.Argument = _arg  # type: ignore
-        typer.secho = print  # type: ignore
+import typer
 
-    _HAS_TYPER = True
-except Exception:
-    _HAS_TYPER = False
-    class _TyperShim:
-        def __init__(self,*a,**k): pass
-        def command(self,*a,**k): return lambda f: f
-        def __call__(self,*a,**k): print("Typer not installed; CLI disabled")
-    def _opt(*a,**k): return None
-    def _arg(*a,**k): return None
-    typer = _TyperShim()  # type: ignore
-    typer.Typer = _TyperShim  # type: ignore
-    typer.Option = _opt  # type: ignore
-    typer.Argument = _arg  # type: ignore
-    typer.secho = print  # type: ignore
 
 from rich.console import Console
-from extractor.pipeline.utils.diagnostics import start_resource_sampler, stop_resource_sampler, get_run_id, iso_now, make_event, snapshot_resources, build_stage_timings
+from extractor.pipeline.utils.diagnostics import (
+    start_resource_sampler,
+    stop_resource_sampler,
+    get_run_id,
+    iso_now,
+    make_event,
+    snapshot_resources,
+    build_stage_timings,
+)
 from extractor.pipeline.utils.litellm_call import litellm_call
 from extractor.pipeline.utils.litellm_cache import initialize_litellm_cache
 
@@ -87,9 +66,9 @@ VERTICAL_PADDING_RATIO = float(os.getenv("FIGURE_VERTICAL_PADDING", "0.2"))
 # Use local model for simple image descriptions (2-3 sentences)
 VLM_MODEL = os.getenv("LITELLM_VLM_MODEL", "gemini/gemini-2.5-flash")
 
-app = typer.Typer(help="Robustly extracts and describes figures from a PDF.")
 
 # --- Core Functions ---
+
 
 async def describe_image_with_llm(image_data: bytes, context: str = "") -> str:
     """Describe an image via a single LiteLLM Chat call (Router.acompletion under the hood)."""
@@ -111,47 +90,62 @@ async def describe_image_with_llm(image_data: bytes, context: str = "") -> str:
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_content},
         ],
-        "max_tokens": 256,
         "timeout": 30,
     }
+    if "gemini" not in (model or "").lower():
+        params["max_tokens"] = 256
     # light temperature default
     params["temperature"] = 0.2
     sid = os.getenv("LITELLM_SESSION_ID") or get_run_id()
-    out = await litellm_call([params], desc="figure_description", session_id=sid)
-    content = (out[0] if out else "")
-    if isinstance(content, str) and content.strip():
-        return content.strip()
+    out = await litellm_call([params], desc="figure_description", session_id=sid, export="results")
+    r = out[0] if out else None
+    if r and isinstance(r.content, str) and r.content.strip():
+        try:
+            logger.info(f"figure_description: model={r.request.model} ok={r.exception is None}")
+        except Exception:
+            pass
+        return r.content.strip()
     raise RuntimeError("VLM returned empty content for figure description")
+
 
 async def extract_and_describe_figure(
     pdf_path: Path,
     block: Dict[str, Any],
     figure_id: str,
-    output_dir: Path
+    output_dir: Path,
+    skip_descriptions: bool = False,
 ) -> Optional[Dict[str, Any]]:
     """Extract a single figure with padding and get its description."""
     try:
         page_num = block.get("page_idx", 0)
         bbox = block.get("bbox")
-        
+
         with fitz.open(str(pdf_path)) as pdf_doc:
             if page_num >= len(pdf_doc):
-                logger.error(f"Page {page_num} out of range for {figure_id}"); return None
-                
+                logger.error(f"Page {page_num} out of range for {figure_id}")
+                return None
+
             page = pdf_doc[page_num]
-            
+
             # Bbox estimation logic
             if not bbox or bbox == [0, 0, 0, 0]:
                 image_list = page.get_images(full=True)
                 if image_list:
                     rects = page.get_image_rects(image_list[0][0])
-                    if rects: bbox = list(rects[0])
+                    if rects:
+                        bbox = list(rects[0])
                 if not bbox:
                     bbox = [50, 100, page.rect.width - 50, page.rect.height - 100]
                     logger.warning(f"Estimated bbox for {figure_id}: {bbox}")
                     try:
                         md = block.setdefault("metadata", {})
-                        ev = make_event("06_figure_extractor","warning","bbox_estimated", f"Estimated bbox for {figure_id}", {"page": page_num, "bbox": bbox})
+                        ev = make_event(
+                            "06_figure_extractor",
+                            "warning",
+                            "bbox_estimated",
+                            f"Estimated bbox for {figure_id}",
+                            {"page": page_num, "bbox": bbox},
+                        )
                         diags = md.setdefault("diagnostics", [])
                         diags.append(ev)
                     except Exception:
@@ -160,37 +154,58 @@ async def extract_and_describe_figure(
             # Vertical padding
             x0, y0, x1, y1 = bbox
             vertical_padding = (y1 - y0) * VERTICAL_PADDING_RATIO
-            expanded_bbox = [x0, max(0, y0 - vertical_padding), x1, min(page.rect.height, y1 + vertical_padding)]
-            
+            expanded_bbox = [
+                x0,
+                max(0, y0 - vertical_padding),
+                x1,
+                min(page.rect.height, y1 + vertical_padding),
+            ]
+
             # Image extraction
             pix = page.get_pixmap(matrix=fitz.Matrix(2, 2), clip=fitz.Rect(expanded_bbox))
             image_data = pix.tobytes("png")
-            
+
             # Save image
             img_path = output_dir / f"{figure_id}.png"
-            with open(img_path, 'wb') as f: f.write(image_data)
-            
+            with open(img_path, "wb") as f:
+                f.write(image_data)
+
             # Context extraction
             text_blocks = page.get_text("blocks")
-            nearby_text = " ".join([b[4].strip() for b in text_blocks if fitz.Rect(b[:4]).intersects(fitz.Rect(expanded_bbox))])
+            nearby_text = " ".join(
+                [
+                    b[4].strip()
+                    for b in text_blocks
+                    if fitz.Rect(b[:4]).intersects(fitz.Rect(expanded_bbox))
+                ]
+            )
             context = f"Nearby text on page: {nearby_text}"
 
-        # Get AI description using the robust, retrying function
-        try:
-            description = await describe_image_with_llm(image_data, context)
-        except Exception as e:
-            logger.error(f"LLM description for {figure_id} failed after all retries: {e}")
+        # Get AI description using the robust, retrying function (unless skipped)
+        if skip_descriptions:
+            description = "Description skipped (offline)"
+        else:
             try:
-                msg=str(e); code="llm_description_failed"
-                low=msg.lower()
-                if any(k in low for k in ["network","connect","connection","readtimeout","econn"]):
-                    code="llm_network_error"
-                ev = make_event("06_figure_extractor","error",code, msg, {"figure_id": figure_id})
-                figure_md_diags = []
-                figure_md_diags.append(ev)
-            except Exception:
-                figure_md_diags = []
-            description = f"Error: Failed to get description - {e}"
+                description = await describe_image_with_llm(image_data, context)
+            except Exception as e:
+                logger.error(f"LLM description for {figure_id} failed after all retries: {e}")
+                try:
+                    msg = str(e)
+                    code = "llm_description_failed"
+                    low = msg.lower()
+                    if any(
+                        k in low
+                        for k in ["network", "connect", "connection", "readtimeout", "econn"]
+                    ):
+                        code = "llm_network_error"
+                    ev = make_event(
+                        "06_figure_extractor", "error", code, msg, {"figure_id": figure_id}
+                    )
+                    figure_md_diags = []
+                    figure_md_diags.append(ev)
+                except Exception:
+                    figure_md_diags = []
+                description = f"Error: Failed to get description - {e}"
 
         return {
             "figure_id": figure_id,
@@ -199,38 +214,62 @@ async def extract_and_describe_figure(
             "image_path": str(img_path.relative_to(output_dir.parent.parent)),
             "bbox": [float(x0), float(y0), float(x1), float(y1)],
             "ai_description": description,
-            "metadata": {"diagnostics": figure_md_diags} if isinstance(locals().get("figure_md_diags"), list) else {} ,
-            "extraction_time": datetime.now().isoformat()
+            "metadata": (
+                {"diagnostics": figure_md_diags}
+                if isinstance(locals().get("figure_md_diags"), list)
+                else {}
+            ),
+            "extraction_time": datetime.now().isoformat(),
         }
     except Exception as e:
         logger.error(f"Fatal error extracting {figure_id}: {e}")
         return None
 
+
 async def process_figures_batch(
     pdf_path: Path,
     figure_blocks: List[Dict[str, Any]],
-    output_dir: Path
+    output_dir: Path,
+    skip_descriptions: bool = False,
 ) -> List[Dict[str, Any]]:
     """Process all figures concurrently with a progress bar."""
-    tasks = [extract_and_describe_figure(pdf_path, block, f"figure_{i+1:03d}", output_dir) for i, block in enumerate(figure_blocks)]
-    
+    tasks = [
+        extract_and_describe_figure(
+            pdf_path, block, f"figure_{i+1:03d}", output_dir, skip_descriptions=skip_descriptions
+        )
+        for i, block in enumerate(figure_blocks)
+    ]
+
     results = []
     logger.info(f"Processing {len(tasks)} figures concurrently...")
-    
+
     for f in tqdm_asyncio.as_completed(tasks, desc="Extracting and Describing Figures"):
         result = await f
         if result:
             results.append(result)
             logger.info(f"Completed {result['figure_id']}")
-    
+
     return results
 
-@app.command()
+
 def run(
     stage_02_json: Path = typer.Argument(..., help="Path to Stage 02 (Marker) JSON output."),
-    stage_04_json: Path = typer.Option(..., "--sections", help="Path to Stage 04 (Sections) JSON output."),
-    pdf_dir: Path = typer.Option("data/results/pipeline/01_annotation_processor", "--pdf-dir", help="Directory with the clean PDF from Stage 01."),
-    output_dir: Path = typer.Option("data/results/pipeline", "-o", help="Parent directory for pipeline results."),
+    stage_04_json: Path = typer.Option(
+        ..., "--sections", help="Path to Stage 04 (Sections) JSON output."
+    ),
+    pdf_dir: Path = typer.Option(
+        "data/results/pipeline/01_annotation_processor",
+        "--pdf-dir",
+        help="Directory with the clean PDF from Stage 01.",
+    ),
+    output_dir: Path = typer.Option(
+        "data/results/pipeline", "-o", help="Parent directory for pipeline results."
+    ),
+    skip_descriptions: bool = typer.Option(
+        False,
+        "--skip-descriptions/--no-skip-descriptions",
+        help="Offline mode: skip LLM descriptions and emit placeholders",
+    ),
 ):
     """Extracts figures, describes them, and associates them with sections."""
     console.print(f"[green]Extracting figures from: {stage_02_json.name}[/green]")
@@ -239,35 +278,54 @@ def run(
     errors_count = 0
     warnings_count = 0
     import time
+
     t0 = time.monotonic()
     stage_start_ts = iso_now()
     resources = snapshot_resources("start")
     import os
-    sampler = start_resource_sampler(float(os.getenv("SAMPLE_INTERVAL_SEC", "2"))) if os.getenv("ENABLE_RESOURCE_SAMPLING", "0").lower() in ("1","true","yes","y") else None
+
+    sampler = (
+        start_resource_sampler(float(os.getenv("SAMPLE_INTERVAL_SEC", "2")))
+        if os.getenv("ENABLE_RESOURCE_SAMPLING", "0").lower() in ("1", "true", "yes", "y")
+        else None
+    )
     try:
         if sampler and not gpu_metrics_available():
-            diagnostics.append(make_event("06_figure_extractor","info","gpu_metrics_unavailable","NVML not available; GPU metrics disabled",{}))
+            diagnostics.append(
+                make_event(
+                    "06_figure_extractor",
+                    "info",
+                    "gpu_metrics_unavailable",
+                    "NVML not available; GPU metrics disabled",
+                    {},
+                )
+            )
     except Exception:
         pass
 
     # --- Input Validation and Data Loading ---
     if not stage_02_json.exists():
-        console.print(f"[red]Stage 02 JSON not found: {stage_02_json}[/red]"); raise typer.Exit(1)
+        console.print(f"[red]Stage 02 JSON not found: {stage_02_json}[/red]")
+        raise typer.Exit(1)
     if not stage_04_json.exists():
-        console.print(f"[red]Stage 04 JSON not found: {stage_04_json}[/red]"); raise typer.Exit(1)
-        
+        console.print(f"[red]Stage 04 JSON not found: {stage_04_json}[/red]")
+        raise typer.Exit(1)
+
     try:
         pdf_path = next(pdf_dir.glob("*_clean.pdf"))
     except StopIteration:
-        console.print(f"[red]No '*_clean.pdf' found in --pdf-dir: {pdf_dir}[/red]"); raise typer.Exit(1)
+        console.print(f"[red]No '*_clean.pdf' found in --pdf-dir: {pdf_dir}[/red]")
+        raise typer.Exit(1)
 
     with open(stage_02_json) as f:
         stage_02_data = json.load(f)
     with open(stage_04_json) as f:
         sections_data = json.load(f)
     sections = sections_data.get("sections", [])
-    
-    figure_blocks = [b for b in stage_02_data.get("blocks", []) if b.get("block_type") in ["Figure", "Image"]]
+
+    figure_blocks = [
+        b for b in stage_02_data.get("blocks", []) if b.get("block_type") in ["Figure", "Image"]
+    ]
     if not figure_blocks:
         console.print("[yellow]No figure/image blocks found to process.[/yellow]")
         # Always produce an output JSON for downstream consistency
@@ -281,7 +339,7 @@ def run(
             "source_pdf": str(pdf_path),
             "status": "Completed",
             "figure_count": 0,
-            "figures": []
+            "figures": [],
         }
         (json_output_dir / "06_figures.json").write_text(json.dumps(empty, indent=2))
         return
@@ -298,21 +356,39 @@ def run(
     errors_count = 0
     warnings_count = 0
     import time
+
     t0 = time.monotonic()
     stage_start_ts = iso_now()
     resources = snapshot_resources("start")
     import os
-    sampler = start_resource_sampler(float(os.getenv("SAMPLE_INTERVAL_SEC", "2"))) if os.getenv("ENABLE_RESOURCE_SAMPLING", "0").lower() in ("1","true","yes","y") else None
+
+    sampler = (
+        start_resource_sampler(float(os.getenv("SAMPLE_INTERVAL_SEC", "2")))
+        if os.getenv("ENABLE_RESOURCE_SAMPLING", "0").lower() in ("1", "true", "yes", "y")
+        else None
+    )
     try:
         if sampler and not gpu_metrics_available():
-            diagnostics.append(make_event("06_figure_extractor","info","gpu_metrics_unavailable","NVML not available; GPU metrics disabled",{}))
+            diagnostics.append(
+                make_event(
+                    "06_figure_extractor",
+                    "info",
+                    "gpu_metrics_unavailable",
+                    "NVML not available; GPU metrics disabled",
+                    {},
+                )
+            )
     except Exception:
         pass
 
     # --- Figure Extraction and Description ---
     # build a stable map of figure_id -> source block
     fig_block_map = {f"figure_{i+1:03d}": b for i, b in enumerate(figure_blocks)}
-    extracted_figures = asyncio.run(process_figures_batch(pdf_path, figure_blocks, image_output_dir))
+    extracted_figures = asyncio.run(
+        process_figures_batch(
+            pdf_path, figure_blocks, image_output_dir, skip_descriptions=skip_descriptions
+        )
+    )
     # Ensure bbox/page present from the original blocks when available
     for fig in extracted_figures:
         blk = fig_block_map.get(fig["figure_id"]) if isinstance(fig.get("figure_id"), str) else None
@@ -331,7 +407,7 @@ def run(
                 if section_bbox.intersects(figure_bbox):
                     figure["section_id"] = section.get("id", "unknown")
                     break
-    
+
     # --- Final Payload and Output ---
     try:
         samples = stop_resource_sampler(sampler) if sampler else []
@@ -363,15 +439,31 @@ def run(
     }
 
     output_path = json_output_dir / "06_figures.json"
-    with open(output_path, 'w') as f:
+    with open(output_path, "w") as f:
         json.dump(result, f, indent=2)
 
-    console.print(f"✅ Figure extraction complete. Saved {len(extracted_figures)} figures to: {output_path}")
+    console.print(
+        f"✅ Figure extraction complete. Saved {len(extracted_figures)} figures to: {output_path}"
+    )
 
-@app.command("debug-bundle")
+
 def debug_bundle(
-    bundle: Path = typer.Argument(..., exists=True, file_okay=True, dir_okay=False, readable=True, help="Bundle with keys: marker_blocks, sections, clean_pdf"),
-    output_dir: Path = typer.Option("data/results/pipeline", "-o", help="Parent directory for pipeline results."),
+    bundle: Path = typer.Argument(
+        ...,
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        readable=True,
+        help="Bundle with keys: marker_blocks, sections, clean_pdf",
+    ),
+    output_dir: Path = typer.Option(
+        "data/results/pipeline", "-o", help="Parent directory for pipeline results."
+    ),
+    skip_descriptions: bool = typer.Option(
+        False,
+        "--skip-descriptions/--no-skip-descriptions",
+        help="Offline mode: skip LLM descriptions and emit placeholders",
+    ),
 ):
     """Run Stage 06 with a consolidated bundle (marker blocks + sections + clean PDF)."""
     stage_output_dir = output_dir / "06_figure_extractor"
@@ -385,22 +477,36 @@ def debug_bundle(
     errors_count = 0
     warnings_count = 0
     import time
+
     t0 = time.monotonic()
     stage_start_ts = iso_now()
     resources = snapshot_resources("start")
     import os
-    sampler = start_resource_sampler(float(os.getenv("SAMPLE_INTERVAL_SEC", "2"))) if os.getenv("ENABLE_RESOURCE_SAMPLING", "0").lower() in ("1","true","yes","y") else None
+
+    sampler = (
+        start_resource_sampler(float(os.getenv("SAMPLE_INTERVAL_SEC", "2")))
+        if os.getenv("ENABLE_RESOURCE_SAMPLING", "0").lower() in ("1", "true", "yes", "y")
+        else None
+    )
     try:
         if sampler and not gpu_metrics_available():
-            diagnostics.append(make_event("06_figure_extractor","info","gpu_metrics_unavailable","NVML not available; GPU metrics disabled",{}))
+            diagnostics.append(
+                make_event(
+                    "06_figure_extractor",
+                    "info",
+                    "gpu_metrics_unavailable",
+                    "NVML not available; GPU metrics disabled",
+                    {},
+                )
+            )
     except Exception:
         pass
 
     try:
         data = json.loads(bundle.read_text())
-        marker_blocks = data.get('marker_blocks')
-        sections_obj = data.get('sections')
-        clean_pdf = data.get('clean_pdf')
+        marker_blocks = data.get("marker_blocks")
+        sections_obj = data.get("sections")
+        clean_pdf = data.get("clean_pdf")
         if not marker_blocks or not sections_obj or not clean_pdf:
             raise ValueError("Bundle must include 'marker_blocks', 'sections', and 'clean_pdf'")
         tmp_marker = stage_output_dir / "_bundle_marker.json"
@@ -409,7 +515,8 @@ def debug_bundle(
         tmp_sections.write_text(json.dumps({"sections": sections_obj}))
         pdf_path = Path(clean_pdf)
     except Exception as e:
-        typer.secho(f"Failed to load bundle: {e}", fg=typer.colors.RED); raise typer.Exit(1)
+        typer.secho(f"Failed to load bundle: {e}", fg=typer.colors.RED)
+        raise typer.Exit(1)
 
     with open(tmp_marker) as f:
         stage_02_data = json.load(f)
@@ -417,12 +524,18 @@ def debug_bundle(
         sections_data = json.load(f)
     sections = sections_data.get("sections", [])
 
-    figure_blocks = [b for b in stage_02_data.get("blocks", []) if b.get("block_type") in ["Figure", "Image"]]
+    figure_blocks = [
+        b for b in stage_02_data.get("blocks", []) if b.get("block_type") in ["Figure", "Image"]
+    ]
     if not figure_blocks:
         console.print("[yellow]No figure/image blocks found to process.[/yellow]")
         return
 
-    extracted_figures = asyncio.run(process_figures_batch(pdf_path, figure_blocks, image_output_dir))
+    extracted_figures = asyncio.run(
+        process_figures_batch(
+            pdf_path, figure_blocks, image_output_dir, skip_descriptions=skip_descriptions
+        )
+    )
     fig_block_map = {f"figure_{i+1:03d}": b for i, b in enumerate(figure_blocks)}
     for fig in extracted_figures:
         blk = fig_block_map.get(fig["figure_id"]) if isinstance(fig.get("figure_id"), str) else None
@@ -434,8 +547,11 @@ def debug_bundle(
                 figure_bbox = fitz.Rect(fig["bbox"])
                 for section in sections:
                     section_bbox = fitz.Rect(section["bbox"])
-                    if section["page_start"] <= fig["page"] <= section["page_end"] and section_bbox.intersects(figure_bbox):
-                        fig["section_id"] = section.get("id", "unknown"); break
+                    if section["page_start"] <= fig["page"] <= section[
+                        "page_end"
+                    ] and section_bbox.intersects(figure_bbox):
+                        fig["section_id"] = section.get("id", "unknown")
+                        break
             except Exception:
                 pass
 
@@ -467,10 +583,19 @@ def debug_bundle(
         "resources": resources,
     }
     output_path = json_output_dir / "06_figures.json"
-    with open(output_path, 'w') as f:
+    with open(output_path, "w") as f:
         json.dump(result, f, indent=2)
     console.print(f"[green]Debug bundle: saved {len(extracted_figures)} figures to {output_path}")
 
 
+def build_cli():
+    import typer as _typer
+
+    app = _typer.Typer(help="Robustly extracts and describes figures from a PDF.")
+    app.command(name="run")(run)
+    app.command(name="debug-bundle")(debug_bundle)
+    return app
+
+
 if __name__ == "__main__":
-    app()
+    build_cli()()

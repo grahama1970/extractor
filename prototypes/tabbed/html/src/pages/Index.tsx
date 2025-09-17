@@ -28,6 +28,22 @@ const Index = () => {
       icon: Grid3X3,
       route: "/dashboard",
       features: ["Modular cards", "Drag & drop", "Visual workflow", "Project-focused"]
+    },
+    {
+      id: 4,
+      title: "Extract (Pipeline)",
+      description: "Run the PDF extraction pipeline and inspect artifacts.",
+      icon: FileText,
+      route: "/extract",
+      features: ["Run pipeline", "Status chip", "Browse artifacts"]
+    },
+    {
+      id: 5,
+      title: "Ask (Chat)",
+      description: "Chat with your processed PDFs; answers include citations.",
+      icon: FileText,
+      route: "/ask",
+      features: ["Search + Chat", "Citations", "Session memory (scaffold)"]
     }
   ];
 

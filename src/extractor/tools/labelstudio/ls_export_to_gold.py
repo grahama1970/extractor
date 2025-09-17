@@ -110,8 +110,12 @@ def _write_json(path: Path, obj: dict, force: bool, dry_run: bool):
 def main():
     ap = argparse.ArgumentParser(description="Create gold JSON stubs from LS export")
     ap.add_argument("--export", required=True, help="Label Studio export JSON path")
-    ap.add_argument("--repo-root", default=".", help="Repository root for resolving expected_json paths")
-    ap.add_argument("--force", action="store_true", help="Overwrite existing files (backup .orig.json)")
+    ap.add_argument(
+        "--repo-root", default=".", help="Repository root for resolving expected_json paths"
+    )
+    ap.add_argument(
+        "--force", action="store_true", help="Overwrite existing files (backup .orig.json)"
+    )
     ap.add_argument("--dry-run", action="store_true", help="Print actions without writing")
     args = ap.parse_args()
 
@@ -156,7 +160,13 @@ def main():
                     try:
                         obj = json.loads(r["gold_json"])
                     except Exception:
-                        obj = {"type": "section", "id": rid, "title": title, "columns": [], "rows": []}
+                        obj = {
+                            "type": "section",
+                            "id": rid,
+                            "title": title,
+                            "columns": [],
+                            "rows": [],
+                        }
                 else:
                     obj = {"type": "section", "id": rid, "title": title, "columns": [], "rows": []}
             else:

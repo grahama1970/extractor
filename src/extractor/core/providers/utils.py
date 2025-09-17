@@ -15,6 +15,7 @@ Example Usage:
 >>> # Add usage examples
 """
 
+
 def alphanum_ratio(text):
     text = text.replace(" ", "")
     text = text.replace("\n", "")

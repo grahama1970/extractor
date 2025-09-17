@@ -18,9 +18,21 @@ from typing import Any, Dict, List, Tuple
 import typer
 
 
-
 # ---- Helper utilities for item-level assertions ----
 from typing import Optional as _Optional
+from typing import Iterable as _Iterable
+
+# Optional similarity tools
+try:
+    from rapidfuzz.fuzz import token_set_ratio as _token_set_ratio  # type: ignore
+except Exception:  # pragma: no cover
+    def _token_set_ratio(a: str, b: str) -> float:  # type: ignore
+        return 0.0
+
+try:
+    from jsonpath_ng.ext import parse as _jp_parse  # type: ignore
+except Exception:  # pragma: no cover
+    _jp_parse = None  # type: ignore
 
 
 def _dict_subset_equal(expected: dict, actual: dict) -> bool:
@@ -80,8 +92,10 @@ def compare_sections(gs: Dict[str, Any], run07: Dict[str, Any]) -> Tuple[bool, D
     if gs_total is None:
         gs_total = len(gs.get("reflowed_sections", []))
     run_total = len(run07.get("reflowed_sections", []))
-    ok_total = (gs_total == run_total)
-    report["checks"].append({"name": "sections_total", "gold": gs_total, "run": run_total, "pass": ok_total})
+    ok_total = gs_total == run_total
+    report["checks"].append(
+        {"name": "sections_total", "gold": gs_total, "run": run_total, "pass": ok_total}
+    )
     ok &= ok_total
 
     # Titles parity (case-insensitive)
@@ -89,22 +103,30 @@ def compare_sections(gs: Dict[str, Any], run07: Dict[str, Any]) -> Tuple[bool, D
     rnt = ci_title_set(run07.get("reflowed_sections", []))
     missing = sorted(gst - rnt)
     extra = sorted(rnt - gst)
-    ok_titles = (not missing)  # tolerate extra titles but flag missing
-    report["checks"].append({
-        "name": "section_titles",
-        "missing_vs_gold": missing,
-        "extra_vs_gold": extra,
-        "pass": ok_titles,
-    })
+    ok_titles = not missing  # tolerate extra titles but flag missing
+    report["checks"].append(
+        {
+            "name": "section_titles",
+            "missing_vs_gold": missing,
+            "extra_vs_gold": extra,
+            "pass": ok_titles,
+        }
+    )
     ok &= ok_titles
 
     # Successful reflows parity
     gs_ok = gs.get("successful_reflows")
     if gs_ok is None:
-        gs_ok = sum(1 for s in gs.get("reflowed_sections", []) if s.get("reflow_status") == "success")
-    rn_ok = sum(1 for s in run07.get("reflowed_sections", []) if s.get("reflow_status") == "success")
-    ok_sr = (gs_ok == rn_ok)
-    report["checks"].append({"name": "successful_reflows", "gold": gs_ok, "run": rn_ok, "pass": ok_sr})
+        gs_ok = sum(
+            1 for s in gs.get("reflowed_sections", []) if s.get("reflow_status") == "success"
+        )
+    rn_ok = sum(
+        1 for s in run07.get("reflowed_sections", []) if s.get("reflow_status") == "success"
+    )
+    ok_sr = gs_ok == rn_ok
+    report["checks"].append(
+        {"name": "successful_reflows", "gold": gs_ok, "run": rn_ok, "pass": ok_sr}
+    )
     ok &= ok_sr
 
     report["pass"] = ok
@@ -120,14 +142,16 @@ def compare_lean4(gs: Dict[str, Any], run08: Dict[str, Any]) -> Tuple[bool, Dict
 
     gs_n = len(gs_list)
     rn_n = len(rn_list)
-    ok_n = (gs_n == rn_n)
+    ok_n = gs_n == rn_n
     report["checks"].append({"name": "lean4_total_items", "gold": gs_n, "run": rn_n, "pass": ok_n})
     ok &= ok_n
 
     gs_ok = sum(1 for p in gs_list if p.get("success"))
     rn_ok = sum(1 for p in rn_list if p.get("success"))
-    ok_s = (gs_ok == rn_ok)
-    report["checks"].append({"name": "lean4_success_count", "gold": gs_ok, "run": rn_ok, "pass": ok_s})
+    ok_s = gs_ok == rn_ok
+    report["checks"].append(
+        {"name": "lean4_success_count", "gold": gs_ok, "run": rn_ok, "pass": ok_s}
+    )
     ok &= ok_s
 
     report["pass"] = ok
@@ -138,17 +162,22 @@ def compare_lean4(gs: Dict[str, Any], run08: Dict[str, Any]) -> Tuple[bool, Dict
 def run(
     gold_path: Path = typer.Option(
         Path("data/gold_standards/pipeline/gold_standard_output.json"),
-        "--gold", help="Path to gold standard JSON"
+        "--gold",
+        help="Path to gold standard JSON",
     ),
     reflow_path: Path = typer.Option(
         Path("data/results/pipeline/07_reflow_section/json_output/07_reflowed.json"),
-        "--reflow", help="Path to Stage 07 reflowed JSON"
+        "--reflow",
+        help="Path to Stage 07 reflowed JSON",
     ),
     theorems_path: Path = typer.Option(
         Path("data/results/pipeline/08_lean4_theorem_prover/json_output/08_theorems.json"),
-        "--theorems", help="Path to Stage 08 theorems JSON"
+        "--theorems",
+        help="Path to Stage 08 theorems JSON",
     ),
-    json_out: bool = typer.Option(False, "--json", help="Output JSON summary instead of pretty text"),
+    json_out: bool = typer.Option(
+        False, "--json", help="Output JSON summary instead of pretty text"
+    ),
 ):
     """Validate Stage 07/08 against the gold standard and print a summary."""
     summary: Dict[str, Any] = {
@@ -209,7 +238,9 @@ def run(
             for c in sec.get("checks", []):
                 name = c.get("name")
                 passed = "PASS" if c.get("pass") else "FAIL"
-                print(f"[Sections] {name}: {passed} -> { {k:v for k,v in c.items() if k not in ('name','pass')} }")
+                print(
+                    f"[Sections] {name}: {passed} -> { {k:v for k,v in c.items() if k not in ('name','pass')} }"
+                )
 
         l4 = summary.get("lean4", {})
         if "error" in l4:
@@ -218,11 +249,55 @@ def run(
             for c in l4.get("checks", []):
                 name = c.get("name")
                 passed = "PASS" if c.get("pass") else "FAIL"
-                print(f"[Lean4]  {name}: {passed} -> { {k:v for k,v in c.items() if k not in ('name','pass')} }")
+                print(
+                    f"[Lean4]  {name}: {passed} -> { {k:v for k,v in c.items() if k not in ('name','pass')} }"
+                )
 
-        print("\nOVERALL:", "PASS" if overall_ok else "FAIL")
+    raise typer.Exit(0 if summary.get("pass") else 1)
 
-    raise typer.Exit(0 if overall_ok else 1)
+
+# ------------------------------------------------------------
+# Per‑stage validator (generic) — used by other tools
+# ------------------------------------------------------------
+
+_STAGE_TO_GS: dict[str, str] = {
+    "01": "001_annotation_processor_gs.json",
+    "02": "002_marker_extractor_gs.json",
+    "03": "003_suspicious_headers_gs.json",
+    "04": "004_section_builder_gs.json",
+    "05": "005_table_extractor_gs.json",
+    "06": "006_figure_extractor_gs.json",
+    "07": "007_reflow_section_gs.json",
+    "08": "008_lean4_theorem_prover_gs.json",
+    "09": "009_section_summarizer_gs.json",
+    "10": "010_arangodb_exporter_gs.json",
+    "11": "011_arango_create_graph_gs.json",
+    "12": "012_insert_annotations_gs.json",
+    "14": "014_report_generator_gs.json",
+}
+
+
+def _stage_name_for_print(sid: str) -> str:
+    mapping = {
+        "01": "01_annotation_processor",
+        "02": "02_marker_extractor",
+        "03": "03_suspicious_headers",
+        "04": "04_section_builder",
+        "05": "05_table_extractor",
+        "06": "06_figure_extractor",
+        "07": "07_reflow_section",
+        "08": "08_lean4_theorem_prover",
+        "09": "09_section_summarizer",
+        "10": "10_arangodb_exporter",
+        "11": "11_arango_create_graph",
+        "12": "12_insert_annotations",
+        "14": "14_report_generator",
+    }
+    return mapping.get(sid, sid)
+
+
+ 
+
 
 
 @app.command()
@@ -258,10 +333,21 @@ def stage(
 
     if sid == "01":
         ok &= add("has_clean_pdf_path", bool(data.get("clean_pdf_path")))
-        ok &= add("has_annotations_array", isinstance(data.get("annotations"), list), {"count": len(data.get("annotations", []))})
-        ok &= add("annotation_count_matches", data.get("annotation_count") == len(data.get("annotations", [])))
+        ok &= add(
+            "has_annotations_array",
+            isinstance(data.get("annotations"), list),
+            {"count": len(data.get("annotations", []))},
+        )
+        ok &= add(
+            "annotation_count_matches",
+            data.get("annotation_count") == len(data.get("annotations", [])),
+        )
     elif sid == "02":
-        ok &= add("has_blocks_array", isinstance(data.get("blocks"), list), {"count": len(data.get("blocks", []))})
+        ok &= add(
+            "has_blocks_array",
+            isinstance(data.get("blocks"), list),
+            {"count": len(data.get("blocks", []))},
+        )
         ok &= add("block_count_matches", data.get("block_count") == len(data.get("blocks", [])))
     elif sid == "03":
         blocks = data.get("blocks", [])
@@ -292,15 +378,30 @@ def stage(
         if isinstance(data, list):
             ok &= add("flattened_array_present", len(data) >= 0, {"count": len(data)})
         else:
-            ok &= add("has_confirmation_keys", any(k in data for k in ("documents_created", "export_success", "exported_collections")))
+            ok &= add(
+                "has_confirmation_keys",
+                any(
+                    k in data
+                    for k in ("documents_created", "export_success", "exported_collections")
+                ),
+            )
     elif sid == "11":
         # Accept either edges array or confirmation object
         if isinstance(data, list):
             ok &= add("edges_array_present", len(data) >= 0, {"count": len(data)})
         else:
-            ok &= add("has_confirmation_keys", any(k in data for k in ("edges_created", "graph_created", "node_counts")))
+            ok &= add(
+                "has_confirmation_keys",
+                any(k in data for k in ("edges_created", "graph_created", "node_counts")),
+            )
     elif sid == "14":
-        ok &= add("final_report_structure", all(k in data for k in ("overall_quality_score", "sections", "tables", "reflow", "arangodb")))
+        ok &= add(
+            "final_report_structure",
+            all(
+                k in data
+                for k in ("overall_quality_score", "sections", "tables", "reflow", "arangodb")
+            ),
+        )
     else:
         res["error"] = f"Unknown stage id: {sid}"
         res["pass"] = False
@@ -351,7 +452,9 @@ def _has_keys(d: Dict[str, Any], keys: List[str]) -> bool:
     return all(k in d for k in keys)
 
 
-def compare_against_gs_invariants(stage_id: str, run_data: Dict[str, Any], gs_data: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
+def compare_against_gs_invariants(
+    stage_id: str, run_data: Dict[str, Any], gs_data: Dict[str, Any]
+) -> Tuple[bool, Dict[str, Any]]:
     report: Dict[str, Any] = {"stage": stage_id, "checks": []}
     ok = True
 
@@ -374,8 +477,11 @@ def compare_against_gs_invariants(stage_id: str, run_data: Dict[str, Any], gs_da
     # Status value check (tolerant: only compare if present)
     status_value = invariants.get("status_value")
     if status_value is not None and isinstance(run_data, dict):
-        add("status_value_matches", run_data.get("status") == status_value, {"expected": status_value, "actual": run_data.get("status")})
-
+        add(
+            "status_value_matches",
+            run_data.get("status") == status_value,
+            {"expected": status_value, "actual": run_data.get("status")},
+        )
 
     # -------- Generalized numeric field checks (non-determinism-friendly) --------
     # numeric_fields_exact/min/max: { field_name: number }
@@ -384,11 +490,11 @@ def compare_against_gs_invariants(stage_id: str, run_data: Dict[str, Any], gs_da
         add(f"numeric_exact:{field}", actual == val, {"expected": val, "actual": actual})
     for field, val in (invariants.get("numeric_fields_min", {}) or {}).items():
         actual = run_data.get(field)
-        ok_field = (isinstance(actual, (int, float)) and actual >= val)
+        ok_field = isinstance(actual, (int, float)) and actual >= val
         add(f"numeric_min:{field}", ok_field, {"min": val, "actual": actual})
     for field, val in (invariants.get("numeric_fields_max", {}) or {}).items():
         actual = run_data.get(field)
-        ok_field = (isinstance(actual, (int, float)) and actual <= val)
+        ok_field = isinstance(actual, (int, float)) and actual <= val
         add(f"numeric_max:{field}", ok_field, {"max": val, "actual": actual})
 
     # -------- Array length checks (exact/min/max) --------
@@ -424,19 +530,23 @@ def compare_against_gs_invariants(stage_id: str, run_data: Dict[str, Any], gs_da
     #   ]
     # }
     try:
-        item_specs = invariants.get('item_expectations') or {}
-        for arr_key, specs in (item_specs.items() if isinstance(item_specs, dict) else []):
+        item_specs = invariants.get("item_expectations") or {}
+        for arr_key, specs in item_specs.items() if isinstance(item_specs, dict) else []:
             items = run_data.get(arr_key)
             if not isinstance(items, list):
-                add(f"item_expectations:{arr_key}_is_array", False, {"actual_type": type(items).__name__})
+                add(
+                    f"item_expectations:{arr_key}_is_array",
+                    False,
+                    {"actual_type": type(items).__name__},
+                )
                 continue
-            for spec in (specs or []):
-                sel = spec.get('select') or {}
-                req = (spec.get('require') or 'one').strip()
-                n_exact = int(spec.get('exactly_n') or 1)
-                assertion = spec.get('assert') or {}
-                expected = assertion.get('equals') or {}
-                exact = bool(assertion.get('exact', False))
+            for spec in specs or []:
+                sel = spec.get("select") or {}
+                req = (spec.get("require") or "one").strip()
+                n_exact = int(spec.get("exactly_n") or 1)
+                assertion = spec.get("assert") or {}
+                expected = assertion.get("equals") or {}
+                exact = bool(assertion.get("exact", False))
 
                 # filter by simple equality on top-level fields
                 def _match(it: dict) -> bool:
@@ -444,42 +554,147 @@ def compare_against_gs_invariants(stage_id: str, run_data: Dict[str, Any], gs_da
                         if it.get(k) != v:
                             return False
                     return True
+
                 matches = [it for it in items if isinstance(it, dict) and _match(it)]
 
                 # requirement check
                 ok_req = True
-                if req == 'one':
-                    ok_req = (len(matches) == 1)
-                elif req == 'at_least_one':
-                    ok_req = (len(matches) >= 1)
-                elif req == 'exactly_n':
-                    ok_req = (len(matches) == n_exact)
+                if req == "one":
+                    ok_req = len(matches) == 1
+                elif req == "at_least_one":
+                    ok_req = len(matches) >= 1
+                elif req == "exactly_n":
+                    ok_req = len(matches) == n_exact
                 else:
-                    ok_req = (len(matches) >= 1)
-                add(f"item_expectations:{arr_key}:select:{sel}", ok_req, {"found": len(matches), "require": req, "exactly_n": n_exact})
+                    ok_req = len(matches) >= 1
+                add(
+                    f"item_expectations:{arr_key}:select:{sel}",
+                    ok_req,
+                    {"found": len(matches), "require": req, "exactly_n": n_exact},
+                )
 
                 # assertion check against first match if present
                 if matches and isinstance(expected, dict) and expected:
                     actual = matches[0]
                     if exact:
-                        ok_assert = (actual == expected)
+                        ok_assert = actual == expected
                     else:
                         ok_assert = _dict_subset_equal(expected, actual)
                     add(f"item_assert:{arr_key}:select:{sel}", ok_assert, {"exact": exact})
     except Exception as _e:
         add("item_expectations_error", False, {"error": str(_e)})
 
+    # -------- Tolerant content similarity / range families --------
+    # token_similarity: [{ path, sample_path, threshold(0-1), method? }]
+    # list_similarity_coverage: [{ select, sample_select, threshold, coverage }]
+    # count_delta_max: [{ select, sample_select, max_delta }]
+    # word_count_pct_delta_max: [{ path, sample_path, max_pct }]
 
+    def _jp(values: Dict[str, Any], expr: str) -> List[Any]:
+        if not expr or _jp_parse is None:
+            return []
+        try:
+            return [m.value for m in _jp_parse(expr).find(values)]
+        except Exception:
+            return []
+
+    def _to_text(val: Any) -> str:
+        if isinstance(val, str):
+            return val
+        if isinstance(val, (list, tuple)):
+            parts: List[str] = []
+            for x in val:
+                t = _to_text(x)
+                if t:
+                    parts.append(t)
+            return " ".join(parts)
+        if isinstance(val, dict):
+            return " ".join(str(v) for v in val.values() if isinstance(v, str))
+        return ""
+
+    # token similarity checks
+    for spec in invariants.get("token_similarity", []) or []:
+        path = spec.get("path") or ""
+        spath = spec.get("sample_path") or ""
+        thr = float(spec.get("threshold") or 0.6)
+        run_vals = _jp(run_data, path)
+        gold_vals = _jp(sample, spath)
+        run_txt = _to_text(run_vals[0] if run_vals else "")
+        gold_txt = _to_text(gold_vals[0] if gold_vals else "")
+        sim = (_token_set_ratio(run_txt, gold_txt) or 0.0) / 100.0
+        add(
+            f"token_similarity:{path}",
+            sim >= thr,
+            {"similarity": round(sim, 3), "threshold": thr},
+        )
+
+    # list similarity coverage
+    for spec in invariants.get("list_similarity_coverage", []) or []:
+        path = spec.get("select") or ""
+        spath = spec.get("sample_select") or ""
+        thr = float(spec.get("threshold") or 0.6)
+        cov = float(spec.get("coverage") or 0.8)
+        run_list = _jp(run_data, path)
+        gold_list = _jp(sample, spath)
+        n = min(len(run_list), len(gold_list))
+        hits = 0
+        for i in range(n):
+            a = _to_text(run_list[i])
+            b = _to_text(gold_list[i])
+            sim = (_token_set_ratio(a, b) or 0.0) / 100.0
+            if sim >= thr:
+                hits += 1
+        cov_ok = (n > 0) and (hits / max(1, n) >= cov)
+        add(
+            f"list_similarity_coverage:{path}",
+            cov_ok,
+            {"hits": hits, "n": n, "threshold": thr, "coverage": cov},
+        )
+
+    # count delta max
+    for spec in invariants.get("count_delta_max", []) or []:
+        path = spec.get("select") or ""
+        spath = spec.get("sample_select") or ""
+        maxd = int(spec.get("max_delta") or 0)
+        run_list = _jp(run_data, path)
+        gold_list = _jp(sample, spath)
+        d = abs(len(run_list) - len(gold_list))
+        add(f"count_delta_max:{path}", d <= maxd, {"delta": d, "max": maxd})
+
+    # word count percentage delta
+    def _wc(s: str) -> int:
+        return len((s or "").split())
+    for spec in invariants.get("word_count_pct_delta_max", []) or []:
+        path = spec.get("path") or ""
+        spath = spec.get("sample_path") or ""
+        maxpct = float(spec.get("max_pct") or 0.25)
+        run_txt = _to_text(_jp(run_data, path))
+        gs_txt = _to_text(_jp(sample, spath))
+        wr, wg = max(1, _wc(run_txt)), max(1, _wc(gs_txt))
+        pct = abs(wr - wg) / float(wg)
+        add(
+            f"word_count_pct_delta_max:{path}",
+            pct <= maxpct,
+            {"pct": round(pct, 3), "max_pct": maxpct},
+        )
 
     # Stage-specific invariant families
     if stage_id == "01":
-        add("has_clean_pdf_path", isinstance(run_data.get("clean_pdf_path"), str) and len(run_data.get("clean_pdf_path")) > 0)
+        add(
+            "has_clean_pdf_path",
+            isinstance(run_data.get("clean_pdf_path"), str)
+            and len(run_data.get("clean_pdf_path")) > 0,
+        )
         anns = run_data.get("annotations", [])
         add("annotations_is_array", isinstance(anns, list), {"count": len(anns)})
         add("annotation_count_matches_len", run_data.get("annotation_count") == len(anns))
         item_keys = invariants.get("annotation_item_keys") or []
         if anns and item_keys:
-            add("annotation_item_keys_present", all(_has_keys(a, item_keys) for a in anns[: min(5, len(anns))]), {"checked_items": min(5, len(anns)), "required": item_keys})
+            add(
+                "annotation_item_keys_present",
+                all(_has_keys(a, item_keys) for a in anns[: min(5, len(anns))]),
+                {"checked_items": min(5, len(anns)), "required": item_keys},
+            )
 
     elif stage_id == "02":
         blocks = run_data.get("blocks", [])
@@ -487,7 +702,11 @@ def compare_against_gs_invariants(stage_id: str, run_data: Dict[str, Any], gs_da
         add("block_count_matches_len", run_data.get("block_count") == len(blocks))
         req = invariants.get("block_item_keys_min") or []
         if blocks and req:
-            add("block_item_keys_present", all(_has_keys(b, req) for b in blocks[: min(10, len(blocks))]), {"required": req})
+            add(
+                "block_item_keys_present",
+                all(_has_keys(b, req) for b in blocks[: min(10, len(blocks))]),
+                {"required": req},
+            )
 
     elif stage_id == "03":
         blocks = run_data.get("blocks", [])
@@ -501,7 +720,11 @@ def compare_against_gs_invariants(stage_id: str, run_data: Dict[str, Any], gs_da
         add("section_count_matches_len", run_data.get("section_count") == len(sections))
         req = invariants.get("section_item_keys_min") or []
         if sections and req:
-            add("section_item_keys_present", all(_has_keys(s, req) for s in sections[: min(5, len(sections))]), {"required": req})
+            add(
+                "section_item_keys_present",
+                all(_has_keys(s, req) for s in sections[: min(5, len(sections))]),
+                {"required": req},
+            )
         # Check enriched section metadata keys
         meta_keys = invariants.get("section_metadata_keys") or []
         if sections and meta_keys:
@@ -541,13 +764,25 @@ def compare_against_gs_invariants(stage_id: str, run_data: Dict[str, Any], gs_da
         req = invariants.get("reflowed_item_keys_min") or []
         allowed = set(invariants.get("reflow_status_values", ["success", "fallback"]))
         if sections:
-            add("reflow_item_keys_present", all(_has_keys(s, req) for s in sections[: min(5, len(sections))]), {"required": req})
-            add("reflow_status_valid_values", all(s.get("reflow_status") in allowed for s in sections), {"allowed": sorted(allowed)})
+            add(
+                "reflow_item_keys_present",
+                all(_has_keys(s, req) for s in sections[: min(5, len(sections))]),
+                {"required": req},
+            )
+            add(
+                "reflow_status_valid_values",
+                all(s.get("reflow_status") in allowed for s in sections),
+                {"allowed": sorted(allowed)},
+            )
             # Optional keys presence summary
             opt = invariants.get("reflow_optional_keys") or []
             if opt:
                 present = sum(1 for s in sections if all(k in s for k in opt))
-                add("optional_reflow_keys_presence", True, {"optional": opt, "present_in": present, "total": len(sections)})
+                add(
+                    "optional_reflow_keys_presence",
+                    True,
+                    {"optional": opt, "present_in": present, "total": len(sections)},
+                )
 
     elif stage_id == "08":
         stats = run_data.get("statistics", {})
@@ -562,13 +797,23 @@ def compare_against_gs_invariants(stage_id: str, run_data: Dict[str, Any], gs_da
         add("summaries_is_array", isinstance(sums, list), {"count": len(sums)})
         req = invariants.get("summary_item_keys_min") or []
         if sums and req:
-            add("summary_item_keys_present", all(_has_keys(s, req) for s in sums[: min(5, len(sums))]), {"required": req})
+            add(
+                "summary_item_keys_present",
+                all(_has_keys(s, req) for s in sums[: min(5, len(sums))]),
+                {"required": req},
+            )
 
     elif stage_id == "10":
         if isinstance(run_data, list):
             add("flattened_array_present", len(run_data) >= 0, {"count": len(run_data)})
         else:
-            add("has_confirmation_or_flattened", any(k in run_data for k in ("documents_created", "pdf_objects_to_load", "export_success")))
+            add(
+                "has_confirmation_or_flattened",
+                any(
+                    k in run_data
+                    for k in ("documents_created", "pdf_objects_to_load", "export_success")
+                ),
+            )
 
     elif stage_id == "11":
         if isinstance(run_data, list):
@@ -591,7 +836,9 @@ def compare_against_gs_invariants(stage_id: str, run_data: Dict[str, Any], gs_da
 def gold(
     stage_id: str = typer.Argument(..., help="Stage identifier, e.g., 01, 02, 03, ... 11, 14"),
     path: Path = typer.Argument(..., help="Path to the stage JSON to compare"),
-    gold_dir: Path = typer.Option(_gs_dir(), "--gold-dir", help="Directory containing *_gs.json files"),
+    gold_dir: Path = typer.Option(
+        _gs_dir(), "--gold-dir", help="Directory containing *_gs.json files"
+    ),
     json_out: bool = typer.Option(False, "--json", help="Output JSON summary"),
 ):
     """Auto-map stage -> *_gs.json and compare against expected invariants.

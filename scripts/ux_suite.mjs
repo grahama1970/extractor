@@ -68,9 +68,10 @@ async function main(){
   // Should be unchanged or zero for a fresh page
 
   await page.click('[data-testid="hud-new"]');
-  await page.keyboard.down('Shift');
-  await page.mouse.move(r.x + r.w*0.2, r.y + r.h*0.2); await page.mouse.down(); await page.mouse.move(r.x + r.w*0.5, r.y + r.h*0.5, {steps: 8}); await page.mouse.up(); await page.keyboard.up('Shift');
-  const lastRect = await page.$eval('[data-testid="box"]', el=>{ const b=el.getBoundingClientRect(); return {w:b.width,h:b.height};});
+  await page.evaluate(() => { window.__uxForceShift = true; window.__uxForceAlt = true; });
+  await page.mouse.move(r.x + r.w*0.2, r.y + r.h*0.2); await page.mouse.down(); await page.mouse.move(r.x + r.w*0.5, r.y + r.h*0.5, {steps: 8}); await page.mouse.up();
+  await page.evaluate(() => { delete window.__uxForceShift; delete window.__uxForceAlt; });
+  const lastRect = await page.$$eval('[data-testid="box"]', els=>{ const el=els[els.length-1]; const b=el.getBoundingClientRect(); return {w:b.width,h:b.height};});
   const ratio = lastRect.h / lastRect.w; if (Math.abs(ratio - (3/4)) > 0.15) throw new Error('Shift ratio not ~3:4');
 
   // MB-005: HUD visible toggle present

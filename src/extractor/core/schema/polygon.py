@@ -27,25 +27,35 @@ from pydantic import BaseModel, field_validator, computed_field
 class PolygonBox(BaseModel):
     polygon: List[List[float]]
 
-    @field_validator('polygon')
+    @field_validator("polygon")
     @classmethod
     def check_elements(cls, v: List[List[float]]) -> List[List[float]]:
         if len(v) != 4:
-            raise ValueError('corner must have 4 elements')
+            raise ValueError("corner must have 4 elements")
 
         for corner in v:
             if len(corner) != 2:
-                raise ValueError('corner must have 2 elements')
+                raise ValueError("corner must have 2 elements")
 
         min_x = min([corner[0] for corner in v])
         min_y = min([corner[1] for corner in v])
 
         # Ensure corners are clockwise from top left
         corner_error = f" .Corners are {v}"
-        assert v[2][1] >= min_y, f'bottom right corner should have a greater y value than top right corner' + corner_error
-        assert v[3][1] >= min_y, 'bottom left corner should have a greater y value than top left corner' + corner_error
-        assert v[1][0] >= min_x, 'top right corner should have a greater x value than top left corner' + corner_error
-        assert v[2][0] >= min_x, 'bottom right corner should have a greater x value than bottom left corner' + corner_error
+        assert v[2][1] >= min_y, (
+            f"bottom right corner should have a greater y value than top right corner"
+            + corner_error
+        )
+        assert v[3][1] >= min_y, (
+            "bottom left corner should have a greater y value than top left corner" + corner_error
+        )
+        assert v[1][0] >= min_x, (
+            "top right corner should have a greater x value than top left corner" + corner_error
+        )
+        assert v[2][0] >= min_x, (
+            "bottom right corner should have a greater x value than bottom left corner"
+            + corner_error
+        )
         return v
 
     @property
@@ -162,11 +172,19 @@ class PolygonBox(BaseModel):
         else:
             return 0
 
-    def center_distance(self, other: PolygonBox, x_weight: float = 1, y_weight: float = 1, absolute=False):
+    def center_distance(
+        self, other: PolygonBox, x_weight: float = 1, y_weight: float = 1, absolute=False
+    ):
         if not absolute:
-            return ((self.center[0] - other.center[0]) ** 2 * x_weight + (self.center[1] - other.center[1]) ** 2 * y_weight) ** 0.5
+            return (
+                (self.center[0] - other.center[0]) ** 2 * x_weight
+                + (self.center[1] - other.center[1]) ** 2 * y_weight
+            ) ** 0.5
         else:
-            return abs(self.center[0] - other.center[0]) * x_weight + abs(self.center[1] - other.center[1]) * y_weight
+            return (
+                abs(self.center[0] - other.center[0]) * x_weight
+                + abs(self.center[1] - other.center[1]) * y_weight
+            )
 
     def tl_distance(self, other: PolygonBox):
         return ((self.bbox[0] - other.bbox[0]) ** 2 + (self.bbox[1] - other.bbox[1]) ** 2) ** 0.5
@@ -234,4 +252,6 @@ class PolygonBox(BaseModel):
             bbox = list(bbox)
             bbox[2] = max(bbox[2], bbox[0] + 1)
             bbox[3] = max(bbox[3], bbox[1] + 1)
-        return cls(polygon=[[bbox[0], bbox[1]], [bbox[2], bbox[1]], [bbox[2], bbox[3]], [bbox[0], bbox[3]]])
+        return cls(
+            polygon=[[bbox[0], bbox[1]], [bbox[2], bbox[1]], [bbox[2], bbox[3]], [bbox[0], bbox[3]]]
+        )

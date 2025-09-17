@@ -47,21 +47,21 @@ def main(pdf_path, **kwargs):
         # Create config parser
         config_parser = ConfigParser(kwargs)
         config = config_parser.generate_config_dict()
-        
+
         # Disable LLM
-        config['use_llm'] = False
-        
+        config["use_llm"] = False
+
         # Set default output directory if not specified
-        if 'output_dir' not in kwargs or not kwargs['output_dir']:
-            kwargs['output_dir'] = '.'
-            
-        output_dir = kwargs['output_dir']
+        if "output_dir" not in kwargs or not kwargs["output_dir"]:
+            kwargs["output_dir"] = "."
+
+        output_dir = kwargs["output_dir"]
         os.makedirs(output_dir, exist_ok=True)
-        
+
         # Create models
         print(f"Loading ML models...")
         models = create_model_dict(device="cuda", dtype="float16")
-        
+
         # Create converter with non-LLM processors
         print(f"Creating PDF converter...")
         converter = PdfConverter(
@@ -69,31 +69,32 @@ def main(pdf_path, **kwargs):
             artifact_dict=models,
             processor_list=NON_LLM_PROCESSORS,
             renderer=config_parser.get_renderer(),
-            llm_service=None
+            llm_service=None,
         )
-        
+
         # Convert PDF
         print(f"Processing {pdf_path}...")
         result = converter(pdf_path)
-        
+
         # Save result
         pdf_name = Path(pdf_path).stem
-        output_format = kwargs.get('output_format', 'json')
-        
-        if output_format == 'json':
+        output_format = kwargs.get("output_format", "json")
+
+        if output_format == "json":
             output_file = os.path.join(output_dir, f"{pdf_name}.json")
-            with open(output_file, 'w') as f:
+            with open(output_file, "w") as f:
                 f.write(str(result))
         else:
             output_file = os.path.join(output_dir, f"{pdf_name}.{output_format}")
-            with open(output_file, 'w') as f:
+            with open(output_file, "w") as f:
                 f.write(str(result))
-                
+
         print(f"✓ Saved to {output_file}")
-        
+
     except Exception as e:
         print(f"Error: {e}")
         import traceback
+
         traceback.print_exc()
         sys.exit(1)
 

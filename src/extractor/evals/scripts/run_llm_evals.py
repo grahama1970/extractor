@@ -17,17 +17,34 @@ app = typer.Typer(help="Run LLM evals (lean Phase 1: reflow only)")
 @app.command()
 def run(
     task: str = typer.Option("reflow", help="Eval task", show_default=True),
-    models: Path = typer.Option(Path("src/extractor/evals/llm/models.yaml"), help="Path to models.yaml"),
-    ratecards: Path = typer.Option(Path("src/extractor/evals/providers/ratecards.yaml"), help="Path to ratecards.yaml"),
-    registry: Path = typer.Option(Path("src/extractor/evals/datasets/registry.json"), help="Dataset registry JSON"),
-    prompt_file: Path = typer.Option(Path("src/extractor/evals/llm/prompts/reflow_section_system.txt"), help="System prompt file"),
+    models: Path = typer.Option(
+        Path("src/extractor/evals/llm/models.yaml"), help="Path to models.yaml"
+    ),
+    ratecards: Path = typer.Option(
+        Path("src/extractor/evals/providers/ratecards.yaml"), help="Path to ratecards.yaml"
+    ),
+    registry: Path = typer.Option(
+        Path("src/extractor/evals/datasets/registry.json"), help="Dataset registry JSON"
+    ),
+    prompt_file: Path = typer.Option(
+        Path("src/extractor/evals/llm/prompts/reflow_section_system.txt"), help="System prompt file"
+    ),
     out: Path = typer.Option(Path("data/evals"), help="Output base directory"),
-    assert_pass: bool = typer.Option(False, help="Exit non-zero if no passing model found (all metrics ok)"),
+    assert_pass: bool = typer.Option(
+        False, help="Exit non-zero if no passing model found (all metrics ok)"
+    ),
     text_min_chars: int = typer.Option(150, help="Minimum contiguous text length to accept"),
     row_tol: float = typer.Option(0.10, help="Row count tolerance (fraction, e.g., 0.10 for 10%)"),
-    assert_has_keys: bool = typer.Option(True, help="Require top-level keys: reflowed_json, ocr_corrections, improvements_made, summary"),
-    require_vision: bool = typer.Option(True, help="Require the model to accept image inputs (Stage 07 multimodal profile)"),
-    max_cost: float = typer.Option(None, help="Soft cap: stop adding models once cumulative cost exceeds this USD amount"),
+    assert_has_keys: bool = typer.Option(
+        True,
+        help="Require top-level keys: reflowed_json, ocr_corrections, improvements_made, summary",
+    ),
+    require_vision: bool = typer.Option(
+        True, help="Require the model to accept image inputs (Stage 07 multimodal profile)"
+    ),
+    max_cost: float = typer.Option(
+        None, help="Soft cap: stop adding models once cumulative cost exceeds this USD amount"
+    ),
 ):
     out_base = out
     run_dir = out_base / "runs"
@@ -44,18 +61,22 @@ def run(
         raise typer.Exit(2)
 
     system_text = prompt_file.read_text(encoding="utf-8")
-    summary = __import__("asyncio").get_event_loop().run_until_complete(
-        run_reflow_eval(
-            models,
-            ratecards,
-            registry,
-            system_text,
-            this_run,
-            text_min_chars=text_min_chars,
-            row_tolerance=row_tol,
-            require_top_keys=assert_has_keys,
-            require_vision=require_vision,
-            max_cost=max_cost,
+    summary = (
+        __import__("asyncio")
+        .get_event_loop()
+        .run_until_complete(
+            run_reflow_eval(
+                models,
+                ratecards,
+                registry,
+                system_text,
+                this_run,
+                text_min_chars=text_min_chars,
+                row_tolerance=row_tol,
+                require_top_keys=assert_has_keys,
+                require_vision=require_vision,
+                max_cost=max_cost,
+            )
         )
     )
     write_json(this_run / "summary.json", summary)

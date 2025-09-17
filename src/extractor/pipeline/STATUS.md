@@ -89,16 +89,19 @@ Stage‑by‑Stage Status
   - Gold: 014_report_generator_gs.json present.
 
 Current Gaps / Work To Do
-1) Add deterministic “no-LLM” toggles for LLM-heavy stages
-   - 03_suspicious_headers: add --skip-llm (mark all SectionHeader candidates as “unverified_true” or pass through) to enable offline runs; still emit 03_verified_blocks.json and diagnostics.
-   - 06_figure_extractor: add --skip-descriptions to extract images and metadata without VLM calls.
-   - 09_section_summarizer: already has strict JSON and graceful fallback; OK.
-   - 07_reflow_section: --summary-only implemented; OK.
+1) Deterministic offline toggles (status)
+   - 03_suspicious_headers: --skip-llm implemented. Offline smoke added (scripts/smokes/smoke_stage03_skip_llm.py).
+   - 06_figure_extractor: --skip-descriptions implemented (extracts images; no VLM). Add/extend smoke if needed for specific PDFs.
+   - 07_reflow_section: --summary-only implemented.
+   - 08_lean4_theorem_prover: --skip-proving implemented. Smoke added (scripts/smokes/smoke_stage08_skip_proving.py).
+   - 09_section_summarizer: strict JSON + fallback already present.
+   - 10_arangodb_exporter: --skip-embeddings implemented and covered by smoke (scripts/smokes/smoke_stage10_skip_embeddings.py). --skip-export existed.
+   - 11_arango_create_graph: --skip-graph-creation existed; smoke added (scripts/smokes/smoke_stage11_skip_graph.py).
 2) validate_gold_standard.py gold subcommand path
    - Fix _gs_dir() to data/gold_standards/pipeline (current path points to a non‑existent src/extractor/pipeline/gold_standards).
 3) Run‑all debug/validation ergonomics
-   - Extend pipeline-run-all with flags to propagate common debug controls (e.g., --summary-only, --skip-proving, --skip-export, --skip-graph) and an optional --validate that chains compare_to_gold at each stage.
-   - Today, pipeline-run-and-validate covers validation; recommend it for CI and local checks.
+   - pipeline/run_all.py now exposes per‑stage skip flags: --skip-llm03, --skip-descriptions06, --summary-only07, --skip-proving08, --skip-export10, --skip-embeddings10, --skip-graph11. Consider a consolidated "--offline" preset alias.
+   - Optional: add a --validate switch to chain compare_to_gold.
 4) Embedding model download footprint (Stage 10)
    - Consider env to disable embeddings or use a lighter local model for CI. Option: add --skip-embeddings (store None) while retaining structure.
 5) Arango connectivity robustness (Stages 10–12)
@@ -114,10 +117,11 @@ What “Green” End‑to‑End Looks Like
   - Full run with external deps:
     - pipeline-run-all run --pdf data/input/pipeline/BHT_CV32A65X_marked.pdf -o data/results/pipeline --arango-db pdf_knowledge_base_test
     - Then: pipeline-validate-gold run --json
-  - CI‑style run with validations and minimal external actions:
-    - pipeline-run-and-validate --pdf data/input/pipeline/BHT_CV32A65X_marked.pdf --until 14 (defaults skip-heavy true)
-    - For a quick pass including structural outputs of 10/11 without DB:
-      - pipeline-quick-smoke --pdf data/input/pipeline/BHT_CV32A65X_marked.pdf
+  - CI‑style run with minimal external actions:
+    - python -m extractor.pipeline.run_all run \
+        --pdf data/input/pipeline/BHT_CV32A65X_marked.pdf \
+        --skip-llm03 --skip-descriptions06 --summary-only07 \
+        --skip-proving08 --skip-export10 --skip-embeddings10 --skip-graph11
 
 Debugging Aids
 - Shared: diagnostics arrays and logs per stage under data/results/pipeline/<stage>/
@@ -138,4 +142,3 @@ Next Actions (proposed order)
 4) Add --skip-embeddings to 10; document a small local SentenceTransformer for CI if embeddings are desired.
 5) Provide docker-compose for Arango test DB and .env.example hints for ARANGO_* and LITELLM_*.
 6) Optional: add pipeline CI job that runs pipeline-quick-smoke on the sample PDF and uploads final_report.md as artifact.
-

@@ -11,6 +11,7 @@ except Exception:  # pragma: no cover
 # NVML (GPU) support optional
 try:
     import pynvml  # type: ignore
+
     _nvml_ok = True
     try:
         pynvml.nvmlInit()
@@ -29,8 +30,14 @@ def iso_now() -> str:
     return datetime.now().isoformat()
 
 
-def make_event(stage: str, severity: str, code: str, message: str, context: Optional[Dict[str, Any]] = None,
-               ts: Optional[str] = None) -> Dict[str, Any]:
+def make_event(
+    stage: str,
+    severity: str,
+    code: str,
+    message: str,
+    context: Optional[Dict[str, Any]] = None,
+    ts: Optional[str] = None,
+) -> Dict[str, Any]:
     return {
         "stage": stage,
         "severity": severity,
@@ -48,7 +55,7 @@ def snapshot_resources(prefix: str) -> Dict[str, Any]:
             proc = psutil.Process()
             out[f"proc_rss_mb_{prefix}"] = int((proc.memory_info().rss or 0) / (1024 * 1024))
             vm = psutil.virtual_memory()
-            out[f"vmem_used_mb_{prefix}"] = int((getattr(vm, 'used', 0)) / (1024 * 1024))
+            out[f"vmem_used_mb_{prefix}"] = int((getattr(vm, "used", 0)) / (1024 * 1024))
         if _nvml_ok and pynvml is not None:
             try:
                 dev_count = pynvml.nvmlDeviceGetCount()
@@ -58,10 +65,10 @@ def snapshot_resources(prefix: str) -> Dict[str, Any]:
                     h = pynvml.nvmlDeviceGetHandleByIndex(i)
                     mem = pynvml.nvmlDeviceGetMemoryInfo(h)
                     u = pynvml.nvmlDeviceGetUtilizationRates(h)
-                    gpumem.append(int(mem.used / (1024*1024)))
-                    util.append(int(getattr(u, 'gpu', 0)))
-                out[f'gpu_mem_used_mb_{prefix}'] = gpumem
-                out[f'gpu_util_percent_{prefix}'] = util
+                    gpumem.append(int(mem.used / (1024 * 1024)))
+                    util.append(int(getattr(u, "gpu", 0)))
+                out[f"gpu_mem_used_mb_{prefix}"] = gpumem
+                out[f"gpu_util_percent_{prefix}"] = util
             except Exception:
                 pass
     except Exception:
@@ -69,8 +76,11 @@ def snapshot_resources(prefix: str) -> Dict[str, Any]:
     return out
 
 
-def build_stage_timings(stage_start_ts: str, t0_monotonic: float, extra: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+def build_stage_timings(
+    stage_start_ts: str, t0_monotonic: float, extra: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
     import time
+
     timings = {
         "stage_start_ts": stage_start_ts,
         "stage_end_ts": iso_now(),
@@ -84,6 +94,7 @@ def build_stage_timings(stage_start_ts: str, t0_monotonic: float, extra: Optiona
 # Optional background resource sampler (CPU/RSS/VMem)
 import threading, time as _time
 
+
 def start_resource_sampler(interval_sec: float = 2.0):
     """Start a background sampler that periodically records process/system metrics.
     Returns a sampler dict with 'thread' and 'samples'. If psutil not available, returns None.
@@ -91,9 +102,10 @@ def start_resource_sampler(interval_sec: float = 2.0):
     if psutil is None or interval_sec <= 0:
         return None
     samples = []
-    stop_flag = {'stop': False}
+    stop_flag = {"stop": False}
+
     def _run():
-        while not stop_flag['stop']:
+        while not stop_flag["stop"]:
             try:
                 proc = psutil.Process()
                 vm = psutil.virtual_memory()
@@ -104,35 +116,38 @@ def start_resource_sampler(interval_sec: float = 2.0):
                         h = pynvml.nvmlDeviceGetHandleByIndex(0)
                         mem = pynvml.nvmlDeviceGetMemoryInfo(h)
                         u = pynvml.nvmlDeviceGetUtilizationRates(h)
-                        gpu_mem = int(mem.used/(1024*1024))
-                        gpu_util = int(getattr(u,'gpu',0))
+                        gpu_mem = int(mem.used / (1024 * 1024))
+                        gpu_util = int(getattr(u, "gpu", 0))
                 except Exception:
                     pass
-                samples.append({
-                    'ts': iso_now(),
-                    'proc_rss_mb': int((proc.memory_info().rss or 0) / (1024*1024)),
-                    'cpu_percent': float(proc.cpu_percent(interval=None)),
-                    'vmem_used_mb': int((getattr(vm, 'used', 0)) / (1024*1024)),
-                    'gpu_mem_used_mb': gpu_mem,
-                    'gpu_util_percent': gpu_util,
-                })
+                samples.append(
+                    {
+                        "ts": iso_now(),
+                        "proc_rss_mb": int((proc.memory_info().rss or 0) / (1024 * 1024)),
+                        "cpu_percent": float(proc.cpu_percent(interval=None)),
+                        "vmem_used_mb": int((getattr(vm, "used", 0)) / (1024 * 1024)),
+                        "gpu_mem_used_mb": gpu_mem,
+                        "gpu_util_percent": gpu_util,
+                    }
+                )
             except Exception:
                 pass
             _time.sleep(interval_sec)
+
     th = threading.Thread(target=_run, daemon=True)
     th.start()
-    return {'thread': th, 'samples': samples, 'stop': stop_flag}
+    return {"thread": th, "samples": samples, "stop": stop_flag}
 
 
 def stop_resource_sampler(sampler):
     """Stop the background sampler and return collected samples."""
     try:
         if sampler and isinstance(sampler, dict):
-            sampler['stop']['stop'] = True
-            th = sampler.get('thread')
+            sampler["stop"]["stop"] = True
+            th = sampler.get("thread")
             if th:
                 th.join(timeout=1.0)
-            return sampler.get('samples', [])
+            return sampler.get("samples", [])
     except Exception:
         return []
     return []

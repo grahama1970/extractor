@@ -29,11 +29,19 @@ class EnhancedTableProcessor(BaseProcessor):
     logic from the archive is intentionally simplified to avoid tight coupling.
     """
 
-    def __init__(self, detection_model: Any, recognition_model: Any, table_rec_model: Any, config: Optional[Dict[str, Any]] = None):
+    def __init__(
+        self,
+        detection_model: Any,
+        recognition_model: Any,
+        table_rec_model: Any,
+        config: Optional[Dict[str, Any]] = None,
+    ):
         super().__init__(config)
         self.config = config or {}
 
-    def process_with_camelot_fallback(self, document: Document, pdf_path: str, fallback_table_info: List[Dict[str, Any]]) -> None:
+    def process_with_camelot_fallback(
+        self, document: Document, pdf_path: str, fallback_table_info: List[Dict[str, Any]]
+    ) -> None:
         """Attempt Camelot extraction for provided table regions and update document blocks in-place.
 
         Args:
@@ -50,7 +58,7 @@ class EnhancedTableProcessor(BaseProcessor):
             block = item.get("block")
             if not block:
                 continue
-            bbox = getattr(block.polygon, 'bbox', None)
+            bbox = getattr(block.polygon, "bbox", None)
             page_str = str(page_idx + 1)
             try:
                 # Prefer lattice with background processing
@@ -59,7 +67,9 @@ class EnhancedTableProcessor(BaseProcessor):
                     pages=page_str,
                     flavor="lattice",
                     process_background=True,
-                    line_scale=int(self.config.get('table', {}).get('camelot', {}).get('line_scale', 40)),
+                    line_scale=int(
+                        self.config.get("table", {}).get("camelot", {}).get("line_scale", 40)
+                    ),
                 )
             except Exception as e:
                 logger.debug(f"Camelot failed for page {page_str}: {e}")
@@ -73,13 +83,13 @@ class EnhancedTableProcessor(BaseProcessor):
                 if df is None or df.empty:
                     return 0.0
                 total = df.size
-                non_empty = df.astype(str).ne('').sum().sum()
+                non_empty = df.astype(str).ne("").sum().sum()
                 return float(non_empty) / float(total) if total else 0.0
 
             best = max(tables, key=lambda t: _score(t.df))
             df = best.df
             # Convert DataFrame rows to simple text lines
-            rows = df.to_dict('records') if df is not None else []
+            rows = df.to_dict("records") if df is not None else []
 
             # Attach minimal metadata onto the block
             try:
@@ -87,12 +97,11 @@ class EnhancedTableProcessor(BaseProcessor):
                     camelot_extracted=True,
                     pandas_df=rows,
                     pandas_shape=list(df.shape) if df is not None else [0, 0],
-                    camelot_accuracy=getattr(best, 'accuracy', None),
-                    camelot_whitespace=getattr(best, 'whitespace', None),
+                    camelot_accuracy=getattr(best, "accuracy", None),
+                    camelot_whitespace=getattr(best, "whitespace", None),
                 )
             except Exception:
                 # Metadata method might not exist on mock blocks; ignore
                 pass
 
         logger.info("EnhancedTableProcessor Camelot fallback completed")
-

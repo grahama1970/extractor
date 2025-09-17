@@ -105,7 +105,8 @@ def build_llm_context(
     abv_sig = _signals(above_block)
     bel_sig = _signals(below_block)
 
-    base = textwrap.dedent(f"""
+    base = textwrap.dedent(
+        f"""
     Please analyze the following content. The 'Block in Question' was identified as a SectionHeader but its characteristics are suspicious.
 
     === Text CONTEXT Directly Above ===
@@ -123,14 +124,19 @@ def build_llm_context(
     Signals: {bel_sig}
 
     Based on the image and this text, is the 'Block in Question' a true section header?
-    """).strip()
+    """
+    ).strip()
 
     if human_annotations_summary:
-        base += "\n\n" + textwrap.dedent(f"""
+        base += (
+            "\n\n"
+            + textwrap.dedent(
+                f"""
         === Human Annotations Near This Text ===
         {human_annotations_summary}
 
         Treat explicit negative cues (e.g., "NOT a section header") as high-confidence constraints unless clearly contradicted by layout and content.
-        """).strip()
+        """
+            ).strip()
+        )
     return base
-

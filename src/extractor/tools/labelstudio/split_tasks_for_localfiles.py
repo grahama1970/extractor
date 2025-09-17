@@ -25,9 +25,13 @@ from pathlib import Path
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Split tasks array into per-file JSON for LocalFiles import")
+    ap = argparse.ArgumentParser(
+        description="Split tasks array into per-file JSON for LocalFiles import"
+    )
     ap.add_argument("--in", dest="in_path", required=True, help="Input tasks JSON (array of tasks)")
-    ap.add_argument("--out", dest="out_dir", required=True, help="Output directory for per-task JSON files")
+    ap.add_argument(
+        "--out", dest="out_dir", required=True, help="Output directory for per-task JSON files"
+    )
     args = ap.parse_args()
 
     in_path = Path(args.in_path)
@@ -52,4 +56,3 @@ def main():
 
 if __name__ == "__main__":  # pragma: no cover
     main()
-

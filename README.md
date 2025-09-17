@@ -106,6 +106,25 @@ print(f"Confidence: {result.metadata['confidence']}")
 print(f"Fixes applied: {result.metadata['fixes_applied']}")
 ```
 
+### Stock Validators (API/CLI)
+
+- Easiest (one-liners):
+  - API: `bash scripts/validate_api_local.sh`
+  - CLI: `bash scripts/validate_cli_local.sh`
+
+- API validator (manual version):
+  - Start: `python -m uvicorn extractor.core.scripts.server:app --host 127.0.0.1 --port 8000`
+  - Run: `python scripts/validate_api.py run --target http://127.0.0.1:8000 --tasks-file data/api_tasks.json`
+
+- CLI validator (works standalone):
+  - Run: `python scripts/validate_cli.py run --tasks-file data/cli_tasks.json --cwd .`
+
+Notes:
+- Sample tasks live in `data/api_tasks.json` and `data/cli_tasks.json`.
+- The `run` subcommand is optional — both `... run --opts` and `--opts` forms work.
+ - VS Code: run via “Tasks: Run Task” → `Run: Validators (API+CLI)` (also bound as the default Build Task: “Tasks: Run Build Task”).
+ - Terminal: `make validate-all` (or run each: `make validate-api`, `make validate-cli`).
+
 ## 🏗️ Architecture: 10-Stage Self-Correcting Pipeline
 
 Note on I/O policy:
@@ -218,6 +237,71 @@ Convert technical specifications and mathematical documents to formal Lean4 code
 python -m extractor.pipeline.poc_simplified.lean4_converter technical_spec.pdf
 
 # Example output
+
+
+## 🤖 LLM Router CLI (litellm_call)
+
+Call any LiteLLM‑supported model (OpenAI/Anthropic/Gemini/Ollama, etc.) with automatic image handling and optional JSON wrapping.
+
+Quick install: the console script `litellm-call` is provided by this package (see `pyproject.toml`).
+
+Basic usage:
+```bash
+# Simple text
+litellm-call "What is 2+2?"
+
+# Enforce JSON + include usage/cost metadata when available
+litellm-call --json "Return only {\"ok\":true}"
+
+# Multiple prompts in one go
+litellm-call "Capital of France?" "Largest ocean?"
+
+# Fan-out across multiple models (prefixes results with model by default)
+litellm-call --models openai/gpt-4o-mini,gemini/gemini-2.5-flash "Say hi"
+
+# Read prompts from a file (one per line) or JSONL
+litellm-call @prompts.txt
+litellm-call --jsonl @prompts.jsonl
+
+# Stdin
+echo "What is 2+2?" | litellm-call --stdin
+
+# Images: local path or remote URL inside the text; images are auto-detected
+litellm-call "What’s in this image? data/samples/panda.png https://example.com/cat.jpg"
+
+# Session, progress, and output control
+litellm-call --session-id dev-123 --no-progress --output results.txt --quiet "Hello"
+```
+
+Key options:
+- `--json`: shorthand for `--response-format json_object` and `--wrap-json`. Non‑JSON output is wrapped like `{ content, metadata }`.
+- `--models`: Comma‑separated list for one‑prompt → many‑models fan‑out.
+- `--prefix-model/--no-prefix-model`: Prefix each line with `[model]` when using `--models` (defaults to on).
+- `--image-cache-dir`: Persist image compression/downloads between runs.
+- `--session-id`: Attaches a `user`/session identifier to provider calls when supported.
+- `--no-progress`: Disables the progress bar (auto‑disabled for single non‑stream calls).
+- `--output/-o` + `--quiet`: Append results to a file and suppress stdout.
+- `--stream`: Streams plain text for a single prompt (no JSON augmentation).
+
+### Python helper
+
+The quickest way to call a model from your code:
+
+```python
+import asyncio
+from extractor.pipeline.utils.litellm_call import llm
+
+async def main():
+    # JSON enforced
+    s = await llm('Return only {"ok":true}', model='openai/gpt-4o-mini', json=True)
+    print(s)
+
+    # With an image
+    t = await llm('Describe this image', image='data/samples/panda.png', model='gemini/gemini-2.5-flash')
+    print(t)
+
+asyncio.run(main())
+```
 /-- Branch History Table specification -/
 structure BHT where
   clk_i : Signal  -- Clock input
@@ -458,3 +542,64 @@ Built on top of excellent open-source projects:
 - [Security Guide](docs/SECURITY.md)
 - [Performance Tuning](docs/PERFORMANCE.md)
 - [Debuggable Typer CLI (VS Code friendly)](docs/03_guides/DEBUGGABLE_TYPER_CLI.md)
+# 🧾 Stage 14: Report Generator (Run, Debug, Debug-Bundle)
+
+Stage 14 aggregates all prior stage outputs into a final machine-readable JSON report (`final_report.json`) and a human-friendly Markdown report (`final_report.md`). It expects the standard pipeline results layout under `data/results/pipeline`.
+
+CLI usage:
+
+```bash
+# Run (reads stage outputs under data/results/pipeline)
+python -m extractor.pipeline.steps.14_report_generator run data/results/pipeline
+
+# Debug (sanity mode; creates a temp dir and exercises error paths)
+python -m extractor.pipeline.steps.14_report_generator debug
+
+# Debug-bundle (materialize a one-shot bundle of stage outputs)
+python -m extractor.pipeline.steps.14_report_generator debug-bundle bundle.json -o data/results/pipeline
+```
+
+Bundle format (minimal viable example):
+
+```json
+{
+  "07_reflow_section": {
+    "reflowed_sections": [
+      {"title": "Intro", "level": 1, "reflow_status": "success", "reflowed": true, "text_chunks": [], "merged_tables": [], "ocr_corrections": {}}
+    ]
+  },
+  "06_figure_extractor": {"figure_count": 0, "figures": []}
+}
+```
+
+Outputs written to the results root:
+
+- `final_report.json` (validated in CI using `schemas/final_report.schema.json`)
+- `final_report.md` (headings and totals lightly snapshotted in tests)
+
+Troubleshooting:
+
+- If `final_report.json` is missing, ensure at least Stage 07 output is present (or use `debug-bundle`).
+- If durations or metrics are `0`, some stages may not have emitted canonical JSON; see `14_report_generator/json_output/` for per-stage writes.
+- The CLI respects `.env` if present, but does not require it; run fully offline.
+
+## CI Quick Start (UX + Smokes)
+
+- Prereqs:
+  - Python venv + dev deps: `make setup`
+  - Frontend deps: `cd prototypes/tabbed/html && npm ci`
+- Start servers via VS Code Tasks:
+  - `Prototype: Preview (0.0.0.0:8080)` or `Prototype: Dev (vite on 8080)`
+  - `Backend: FastAPI (8000)` or the compound `Run: Backend + Preview`
+- Start Chrome with CDP (if no Browserless):
+  - Linux/macOS: `google-chrome --remote-debugging-port=9222`
+  - macOS app path: `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome --remote-debugging-port=9222`
+- One command local CI:
+  - `make ci`
+  - Defaults: `BASE_URL=http://127.0.0.1:8080`, `CDP_URL=http://127.0.0.1:3000/json/version`
+  - Override: `make ci BASE_URL=http://127.0.0.1:8080 CDP_URL=http://127.0.0.1:9222/json/version`
+- Health-only (CDP): `make ux-health`
+- Full smokes (requires live servers + CDP): `make smokes`
+- Single issue smoke: `make smoke-issue ISSUE=019` (or `020`)
+
+Artifacts (logs + screenshots) are saved to `scripts/artifacts/`.

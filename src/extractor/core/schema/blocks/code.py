@@ -30,7 +30,5 @@ class Code(Block):
 
     def assemble_html(self, document, child_blocks, parent_structure):
         code = self.code or ""
-        lang_attr = f" class=\"language-{self.language}\"" if self.language else ""
-        return (f"<pre>"
-                f"<code{lang_attr}>{html.escape(code)}</code>"
-                f"</pre>")
+        lang_attr = f' class="language-{self.language}"' if self.language else ""
+        return f"<pre>" f"<code{lang_attr}>{html.escape(code)}</code>" f"</pre>"

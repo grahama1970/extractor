@@ -1,0 +1,61 @@
+name: Gamified UI
+
+on:
+  push:
+    paths:
+      - 'prototypes/gamified/dashboard/**'
+      - 'prototypes/gamified/cli.py'
+      - '.github/workflows/gamified-ui.yml'
+  pull_request:
+    paths:
+      - 'prototypes/gamified/dashboard/**'
+      - 'prototypes/gamified/cli.py'
+
+jobs:
+  ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install deps
+        working-directory: prototypes/gamified/dashboard
+        run: npm install
+
+      - name: Run component tests (Vitest)
+        working-directory: prototypes/gamified/dashboard
+        run: npm test --silent
+
+      - name: UI smoke (Puppeteer)
+        working-directory: prototypes/gamified/dashboard
+        env:
+          PORT: 5199
+        run: node scripts/smoke_ui.mjs
+
+      - name: UI toast smoke (Puppeteer)
+        working-directory: prototypes/gamified/dashboard
+        env:
+          PORT: 5199
+        run: node scripts/smoke_toasts.mjs
+
+      - name: Upload smoke screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dashboard-smoke
+          path: prototypes/gamified/dashboard/scripts/artifacts/dashboard_smoke.png
+          if-no-files-found: ignore
+
+      - name: Upload toast smoke screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dashboard-smoke-toasts
+          path: prototypes/gamified/dashboard/scripts/artifacts/dashboard_smoke_toasts.png
+          if-no-files-found: ignore

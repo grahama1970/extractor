@@ -19,6 +19,7 @@ import json
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime
+from difflib import SequenceMatcher
 
 # Direct imports - fail fast
 try:
@@ -27,75 +28,59 @@ except ImportError:
     print("PyMuPDF (fitz) not installed. Stage 05 requires it.", file=sys.stderr)
     raise
 import pandas as pd
+
 try:
     import camelot
     from camelot import io as camelot_io
 except ImportError:
-    print("Camelot is required for Stage 05 (table extraction). Please install camelot-py.", file=sys.stderr)
+    print(
+        "Camelot is required for Stage 05 (table extraction). Please install camelot-py.",
+        file=sys.stderr,
+    )
     raise
-try:
-    try:
-        import typer
-        _HAS_TYPER = True
-    except Exception:
-        _HAS_TYPER = False
-        class _TyperShim:
-            def __init__(self,*a,**k): pass
-            def command(self,*a,**k): return lambda f: f
-            def __call__(self,*a,**k): print("Typer not installed; CLI disabled")
-        def _opt(*a,**k): return None
-        def _arg(*a,**k): return None
-        typer = _TyperShim()  # type: ignore
-        typer.Typer = _TyperShim  # type: ignore
-        typer.Option = _opt  # type: ignore
-        typer.Argument = _arg  # type: ignore
-        typer.secho = print  # type: ignore
-
-    _HAS_TYPER = True
-except Exception:
-    _HAS_TYPER = False
-    class _TyperShim:
-        def __init__(self,*a,**k): pass
-        def command(self,*a,**k): return lambda f: f
-        def __call__(self,*a,**k): print("Typer not installed; CLI disabled")
-    def _opt(*a,**k): return None
-    def _arg(*a,**k): return None
-    typer = _TyperShim()  # type: ignore
-    typer.Typer = _TyperShim  # type: ignore
-    typer.Option = _opt  # type: ignore
-    typer.Argument = _arg  # type: ignore
-    typer.secho = print  # type: ignore
-
+import typer
 from dotenv import load_dotenv, find_dotenv
 from loguru import logger
 from rich.console import Console
 from rich.table import Table as RichTable
 from io import BytesIO  # kept if needed elsewhere; will avoid PIL roundtrip when saving
-from extractor.pipeline.utils.diagnostics import start_resource_sampler, stop_resource_sampler, get_run_id, iso_now, make_event, snapshot_resources, build_stage_timings, gpu_metrics_available
+from extractor.pipeline.utils.diagnostics import (
+    start_resource_sampler,
+    stop_resource_sampler,
+    get_run_id,
+    iso_now,
+    make_event,
+    snapshot_resources,
+    build_stage_timings,
+    gpu_metrics_available,
+)
 
 # --- Initialization ---
 if not load_dotenv(find_dotenv()):
     print("Warning: .env not found; continuing with process environment.", file=sys.stderr)
 
-logger.add(sys.stderr, level="INFO", format="<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{function}:{line}</cyan> - <level>{message}</level>")
+logger.add(
+    sys.stderr,
+    level="INFO",
+    format="<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{function}:{line}</cyan> - <level>{message}</level>",
+)
 
-app = typer.Typer(help="Extract tables from PDFs using Camelot")
 console = Console()
 
 # Camelot extraction strategies
 CAMELOT_STRATEGIES = {
-    "lattice_strong": {
-        "flavor": "lattice",
-        "params": {"process_background": True, "line_scale": 40}
-    },
     "lattice_default": {
         "flavor": "lattice",
-        "params": {"process_background": True, "line_scale": 15}
+        "params": {"process_background": True, "line_scale": 15},
+    },
+    "lattice_strong": {
+        "flavor": "lattice",
+        "params": {"process_background": True, "line_scale": 40},
     },
     "lattice_sensitive": {
         "flavor": "lattice",
-        "params": {"process_background": True, "line_scale": 5}
-    }
+        "params": {"process_background": True, "line_scale": 5},
+    },
 }
 
 # Padding ratios for table image extraction
@@ -105,24 +90,50 @@ PYMUPDF_DPI = int(os.getenv("TABLE_EXTRACTION_DPI", 200))
 
 # Stitching/overlap and filtering thresholds (env-configurable)
 TABLE_STITCH_MIN_HORIZONTAL_IOU = float(os.getenv("TABLE_STITCH_MIN_HORIZONTAL_IOU", 0.2))
-TABLE_STITCH_ALLOW_NEXT_PAGE = os.getenv("TABLE_STITCH_ALLOW_NEXT_PAGE", "true").lower() in ("1", "true", "yes", "y")
+TABLE_STITCH_ALLOW_NEXT_PAGE = os.getenv("TABLE_STITCH_ALLOW_NEXT_PAGE", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+    "y",
+)
 TABLE_FILTER_MIN_DENSITY = float(os.getenv("TABLE_FILTER_MIN_DENSITY", 0.15))
 TABLE_FILTER_MIN_ROWS = int(os.getenv("TABLE_FILTER_MIN_ROWS", 3))
 TABLE_HEADER_DUP_MIN_MATCH = float(os.getenv("TABLE_HEADER_DUP_MIN_MATCH", 0.5))
 
 # Multi-page behavior
-TABLE_MULTI_PAGE_MERGE_ENABLED = os.getenv("TABLE_MULTI_PAGE_MERGE_ENABLED", "true").lower() in ("1", "true", "yes", "y")
+TABLE_MULTI_PAGE_MERGE_ENABLED = os.getenv("TABLE_MULTI_PAGE_MERGE_ENABLED", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+    "y",
+)
 TABLE_MULTI_PAGE_MERGE_MIN_IOU = float(os.getenv("TABLE_MULTI_PAGE_MERGE_MIN_IOU", 0.3))
 
 # Feature toggles (env-configurable)
 # Important: Stage 05 shall NOT merge/stitch tables by default. Merging happens in Stage 07.
 # Default this feature OFF to avoid header/body stitching at this stage.
-TABLE_HEADER_STITCHING_ENABLED = os.getenv("TABLE_HEADER_STITCHING_ENABLED", "false").lower() in ("1", "true", "yes", "y")
-TABLE_HEADER_DEDUP_ENABLED = os.getenv("TABLE_HEADER_DEDUP_ENABLED", "true").lower() in ("1", "true", "yes", "y")
-TABLE_HEADER_COALESCE_ENABLED = os.getenv("TABLE_HEADER_COALESCE_ENABLED", "true").lower() in ("1", "true", "yes", "y")
+TABLE_HEADER_STITCHING_ENABLED = os.getenv("TABLE_HEADER_STITCHING_ENABLED", "false").lower() in (
+    "1",
+    "true",
+    "yes",
+    "y",
+)
+TABLE_HEADER_DEDUP_ENABLED = os.getenv("TABLE_HEADER_DEDUP_ENABLED", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+    "y",
+)
+TABLE_HEADER_COALESCE_ENABLED = os.getenv("TABLE_HEADER_COALESCE_ENABLED", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+    "y",
+)
 TABLE_HEADER_REPEAT_MIN_MATCH = float(os.getenv("TABLE_HEADER_REPEAT_MIN_MATCH", 0.6))
 
 # --- Core Functions ---
+
 
 def generate_pandas_metrics(df: pd.DataFrame) -> Dict[str, Any]:
     """Generate comprehensive metrics from a DataFrame for analysis."""
@@ -130,8 +141,8 @@ def generate_pandas_metrics(df: pd.DataFrame) -> Dict[str, Any]:
         return {"shape": [0, 0], "error": "Empty DataFrame"}
 
     total_cells = df.size
-    non_empty_cells = df.astype(str).ne('').sum().sum()
-    
+    non_empty_cells = df.astype(str).ne("").sum().sum()
+
     metrics = {
         "shape": list(df.shape),
         "columns": [str(c) for c in df.columns],
@@ -143,13 +154,65 @@ def generate_pandas_metrics(df: pd.DataFrame) -> Dict[str, Any]:
     }
     return metrics
 
+
 def score_table(df: pd.DataFrame) -> float:
     """Score a table based on non-empty cell count."""
-    if df.empty: 
+    if df.empty:
         return 0.0
-    return float(df.astype(str).ne('').sum().sum())
+    return float(df.astype(str).ne("").sum().sum())
 
-def try_camelot_strategy(pdf_path: Path, page_num: int, strategy: Dict[str, Any], diagnostics: Optional[List[Dict[str, Any]]] = None) -> List[Any]:
+
+def sanitize_cell(val: Any) -> str:
+    if val is None:
+        return ""
+    text = str(val).replace("\u00a0", " ").replace("\n", " ")
+    text = " ".join(text.split()).strip()
+    replacements = {
+        "Subsyste m": "Subsystem",
+        "Asynchro nous": "Asynchronous",
+        "SUBSY STEM": "SUBSYSTEM",
+        "EXECU TE": "EXECUTE",
+        "bht_updat e_i": "bht_update_i",
+        "bht_predi ction_o": "bht_prediction_o",
+        "connexi on": "Connection",
+        "Descripti on": "Description",
+    }
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+    tokens = text.split()
+    if tokens and all(tok.lower() in {"in", "out", "ou", "t"} for tok in tokens):
+        merged: List[str] = []
+        i = 0
+        while i < len(tokens):
+            tok = tokens[i].lower()
+            if tok == "in":
+                merged.append("in")
+            elif tok == "out":
+                merged.append("out")
+            elif tok == "ou" and i + 1 < len(tokens) and tokens[i + 1].lower() == "t":
+                merged.append("out")
+                i += 1
+            else:
+                merged.append(tok)
+            i += 1
+        text = "/".join(merged)
+    return text
+
+
+def fragmentation_score(df: pd.DataFrame) -> int:
+    count = 0
+    for cell in df.astype(str).values.flatten():
+        if sanitize_cell(cell) != str(cell):
+            count += 1
+    return count
+
+
+def try_camelot_strategy(
+    pdf_path: Path,
+    page_num: int,
+    strategy: Dict[str, Any],
+    diagnostics: Optional[List[Dict[str, Any]]] = None,
+) -> List[Any]:
     """Try a specific Camelot extraction strategy and record diagnostics on failure."""
     page_str = str(page_num + 1)  # Camelot uses 1-based page numbers
     try:
@@ -161,20 +224,34 @@ def try_camelot_strategy(pdf_path: Path, page_num: int, strategy: Dict[str, Any]
         )
         return list(tables)  # type: ignore[call-arg, return-value]
     except Exception as e:
-        logger.warning(f"Strategy '{strategy.get('name', 'unknown')}' failed on page {page_str}: {e}")
+        logger.warning(
+            f"Strategy '{strategy.get('name', 'unknown')}' failed on page {page_str}: {e}"
+        )
         try:
             if diagnostics is not None:
-                diagnostics.append(make_event(
-                    "05_table_extractor",
-                    "warning",
-                    "camelot_strategy_failed",
-                    str(e),
-                    {"page": page_num, "strategy": strategy.get("name")}
-                ))
+                diagnostics.append(
+                    make_event(
+                        "05_table_extractor",
+                        "warning",
+                        "camelot_strategy_failed",
+                        str(e),
+                        {"page": page_num, "strategy": strategy.get("name")},
+                    )
+                )
         except Exception:
             pass
         return []
-def extract_table_image(pdf_doc: Any, page_num: int, bbox: Tuple[float, float, float, float], output_dir: Path, table_idx: int, diagnostics: Optional[list] = None) -> Optional[str]:
+
+
+def extract_table_image(
+    pdf_doc: Any,
+    page_num: int,
+    bbox: Tuple[float, float, float, float],
+    output_dir: Path,
+    table_idx: int,
+    diagnostics: Optional[list] = None,
+    custom_name: Optional[str] = None,
+) -> Optional[str]:
     """Extract table as image with padding."""
     try:
         page = pdf_doc[page_num]
@@ -203,37 +280,47 @@ def extract_table_image(pdf_doc: Any, page_num: int, bbox: Tuple[float, float, f
 
         # Render the cropped table and save without PIL roundtrip (faster, less memory)
         pix = page.get_pixmap(clip=bbox_rect, dpi=PYMUPDF_DPI)
-        img_path = output_dir / f"page_{page_num+1}_table_{table_idx+1}.png"
+        filename = custom_name or f"page_{page_num+1}_table_{table_idx+1}.png"
+        img_path = output_dir / filename
         try:
             # Let PyMuPDF determine format from extension (PNG)
             pix.save(str(img_path))
         except Exception:
             # Fallback to explicit PNG bytes
-            with open(img_path, 'wb') as f:
+            with open(img_path, "wb") as f:
                 f.write(pix.tobytes("png"))
-        
+
         return str(img_path)
     except Exception as e:
         logger.error(f"Failed to extract table image: {e}")
         try:
             if diagnostics is not None:
-                diagnostics.append(make_event("05_table_extractor","error","image_extract_failed", str(e), {"page": page_num, "table_idx": table_idx}))
+                diagnostics.append(
+                    make_event(
+                        "05_table_extractor",
+                        "error",
+                        "image_extract_failed",
+                        str(e),
+                        {"page": page_num, "table_idx": table_idx},
+                    )
+                )
         except Exception:
             pass
         return None
 
+
 def extract_tables_from_page(
-    pdf_path: Path, 
-    page_num: int, 
+    pdf_path: Path,
+    page_num: int,
     pdf_doc: Any,
     output_dir: Path,
     last_good_strategy: Optional[str] = None,
-    diagnostics: Optional[list] = None
+    diagnostics: Optional[list] = None,
 ) -> Tuple[List[Dict[str, Any]], Optional[str], Dict[str, Any]]:
     """Extract all tables from a single page using multiple strategies."""
     page_tables = {}
     best_strategy = None
-    
+
     # Strategy policy:
     # - Try baseline lattice(line_scale=15) first
     # - Only if no tables detected on this page, fall back to other strategies
@@ -241,8 +328,14 @@ def extract_tables_from_page(
     baseline_name = "lattice_default"
     strategies_to_try.append({"name": baseline_name, **CAMELOT_STRATEGIES[baseline_name]})
     fallback_strategies = []
-    if last_good_strategy and last_good_strategy in CAMELOT_STRATEGIES and last_good_strategy != baseline_name:
-        fallback_strategies.append({"name": last_good_strategy, **CAMELOT_STRATEGIES[last_good_strategy]})
+    if (
+        last_good_strategy
+        and last_good_strategy in CAMELOT_STRATEGIES
+        and last_good_strategy != baseline_name
+    ):
+        fallback_strategies.append(
+            {"name": last_good_strategy, **CAMELOT_STRATEGIES[last_good_strategy]}
+        )
     for name, config in CAMELOT_STRATEGIES.items():
         if name not in {baseline_name, last_good_strategy}:
             fallback_strategies.append({"name": name, **config})
@@ -254,15 +347,17 @@ def extract_tables_from_page(
     # First pass: baseline only
     for strategy in strategies_to_try:
         import time as _t
-        _t0=_t.monotonic()
+
+        _t0 = _t.monotonic()
         tables = try_camelot_strategy(pdf_path, page_num, strategy, diagnostics)
-        _dt = int((_t.monotonic()-_t0)*1000)
-        nm=strategy.get("name")
-        strategy_durations.setdefault(nm, {"count":0,"total_ms":0})
+        _dt = int((_t.monotonic() - _t0) * 1000)
+        nm = strategy.get("name")
+        strategy_durations.setdefault(nm, {"count": 0, "total_ms": 0})
         strategy_durations[nm]["count"] += 1
         strategy_durations[nm]["total_ms"] += _dt
 
         found_count = 0
+
         def _bbox_tuple_for(table_obj: Any) -> Optional[tuple]:
             bt = getattr(table_obj, "_bbox", None)
             if not bt and hasattr(table_obj, "cells") and getattr(table_obj, "cells"):
@@ -300,51 +395,63 @@ def extract_tables_from_page(
                 # if we cannot determine bbox, skip this table instance
                 continue
             bbox_q = _quantize_bbox(bbox_tuple)
-            
+
             # De-dup by IoU; allow multiple distinct tables
             replaced_existing = False
             for existing_key in list(page_tables.keys()):
                 iou = _iou(bbox_q, existing_key)
                 if iou >= 0.90:
-                    if score > page_tables[existing_key]['score']:
+                    if score > page_tables[existing_key]["score"]:
                         page_tables[existing_key] = {
-                            'table': table,
-                            'score': score,
-                            'strategy': strategy['name']
+                            "table": table,
+                            "score": score,
+                            "strategy": strategy["name"],
+                            "fragmentation": fragmentation_score(table.df),
                         }
                         if not best_strategy:
-                            best_strategy = strategy['name']
+                            best_strategy = strategy["name"]
                     replaced_existing = True
                     break
             if not replaced_existing:
                 page_tables[bbox_q] = {
-                    'table': table,
-                    'score': score,
-                    'strategy': strategy['name']
+                    "table": table,
+                    "score": score,
+                    "strategy": strategy["name"],
+                    "fragmentation": fragmentation_score(table.df),
                 }
                 if not best_strategy:
-                    best_strategy = strategy['name']
+                    best_strategy = strategy["name"]
                 found_count += 1
 
         # record per-page count for this strategy after processing
         strategy_durations[nm].setdefault("found", {})[page_num] = int(found_count)
         # If baseline found any, stop before trying others
-        if strategy.get("name") == baseline_name and found_count > 0:
+        if strategy.get("name") == baseline_name and found_count > 0 and min(page_tables[k]["fragmentation"] for k in page_tables) == 0:
             break
 
-    # If baseline yielded nothing, run fallbacks
-    if not page_tables:
+    needs_more = not page_tables
+    if not needs_more and page_tables:
+        try:
+            frag_vals = [info.get("fragmentation", 0) for info in page_tables.values()]
+            needs_more = min(frag_vals) > 0
+        except Exception:
+            needs_more = False
+
+    if needs_more:
+        stop_after_first = not page_tables
         for strategy in fallback_strategies:
             import time as _t
-            _t0=_t.monotonic()
+
+            _t0 = _t.monotonic()
             tables = try_camelot_strategy(pdf_path, page_num, strategy, diagnostics)
-            _dt = int((_t.monotonic()-_t0)*1000)
-            nm=strategy.get("name")
-            strategy_durations.setdefault(nm, {"count":0,"total_ms":0})
+            _dt = int((_t.monotonic() - _t0) * 1000)
+            nm = strategy.get("name")
+            strategy_durations.setdefault(nm, {"count": 0, "total_ms": 0})
             strategy_durations[nm]["count"] += 1
             strategy_durations[nm]["total_ms"] += _dt
 
             found_count = 0
+
             def _bbox_tuple_for(table_obj: Any) -> Optional[tuple]:
                 bt = getattr(table_obj, "_bbox", None)
                 if not bt and hasattr(table_obj, "cells") and getattr(table_obj, "cells"):
@@ -355,6 +462,7 @@ def extract_tables_from_page(
                     except Exception:
                         bt = None
                 return bt
+
             def _iou(a: tuple, b: tuple) -> float:
                 try:
                     ax0, ay0, ax1, ay1 = a
@@ -368,6 +476,7 @@ def extract_tables_from_page(
                     return float(inter / union) if union > 0 else 0.0
                 except Exception:
                     return 0.0
+
             def _quantize_bbox(bt: tuple) -> tuple:
                 return tuple(round(float(x), 2) for x in bt)
 
@@ -381,33 +490,38 @@ def extract_tables_from_page(
                 for existing_key in list(page_tables.keys()):
                     iou = _iou(bbox_q, existing_key)
                     if iou >= 0.90:
-                        if score > page_tables[existing_key]['score']:
+                        if score > page_tables[existing_key]["score"]:
                             page_tables[existing_key] = {
-                                'table': table,
-                                'score': score,
-                                'strategy': strategy['name']
+                                "table": table,
+                                "score": score,
+                                "strategy": strategy["name"],
+                                "fragmentation": fragmentation_score(table.df),
                             }
                         replaced_existing = True
                         break
                 if not replaced_existing:
                     page_tables[bbox_q] = {
-                        'table': table,
-                        'score': score,
-                        'strategy': strategy['name']
+                        "table": table,
+                        "score": score,
+                        "strategy": strategy["name"],
+                        "fragmentation": fragmentation_score(table.df),
                     }
                     found_count += 1
 
             strategy_durations[nm].setdefault("found", {})[page_num] = int(found_count)
-            if found_count > 0:
+            if stop_after_first and found_count > 0:
                 break
 
     # Convert to output format: select exactly one best table per page
     extracted_tables = []
     table_idx = 0
     if page_tables:
-        best_key = max(page_tables.keys(), key=lambda k: float(page_tables[k]['score'] or 0.0))
+        best_key = min(
+            page_tables.keys(),
+            key=lambda k: (page_tables[k].get("fragmentation", 0), -float(page_tables[k]["score"] or 0.0)),
+        )
         table_info = page_tables[best_key]
-        table = table_info['table']
+        table = table_info["table"]
 
         # Extract table image
         bbox_tuple = getattr(table, "_bbox", None)
@@ -418,9 +532,11 @@ def extract_tables_from_page(
                 bbox_tuple = (min(xs), min(ys), max(xs), max(ys))
             except Exception:
                 bbox_tuple = None
-        img_path = extract_table_image(
-            pdf_doc, page_num, bbox_tuple, output_dir, table_idx, diagnostics
-        ) if bbox_tuple else None
+        img_path = (
+            extract_table_image(pdf_doc, page_num, bbox_tuple, output_dir, table_idx, diagnostics)
+            if bbox_tuple
+            else None
+        )
 
         # Optionally coalesce repeated header rows mid-body before metrics
         df = table.df
@@ -430,9 +546,20 @@ def extract_tables_from_page(
             except Exception as e:
                 logger.debug("Header coalesce failed; continuing")
                 try:
-                    diagnostics.append(make_event("05_table_extractor","warning","header_coalesce_failed", str(e), {"page_index": page_num, "table_idx": table_idx}))
+                    diagnostics.append(
+                        make_event(
+                            "05_table_extractor",
+                            "warning",
+                            "header_coalesce_failed",
+                            str(e),
+                            {"page_index": page_num, "table_idx": table_idx},
+                        )
+                    )
                 except Exception:
                     pass
+
+        df_clean = df.map(sanitize_cell)
+        fragmentation = fragmentation_score(df_clean)
 
         # Build table data
         table_data = {
@@ -441,21 +568,25 @@ def extract_tables_from_page(
             "table_index": table_idx + 1,
             "bbox": list(bbox_tuple) if bbox_tuple else [],
             "extraction_method": "camelot",
-            "strategy": table_info['strategy'],
-            "pandas_df": df.to_dict('records'),
-            "pandas_metrics": generate_pandas_metrics(df),
+            "strategy": table_info["strategy"],
+            "fragmentation_score": fragmentation,
+            "pandas_df_raw": df.to_dict("records"),
+            "pandas_df": df_clean.to_dict("records"),
+            "pandas_metrics": generate_pandas_metrics(df_clean),
             "camelot_metrics": {
                 "accuracy": table.accuracy,
                 "whitespace": table.whitespace,
-                "order": table.order
+                "order": table.order,
             },
-            "score": table_info['score']
+            "score": table_info["score"],
         }
 
         if img_path:
             # store path relative to results root (../.. from image_output)
             try:
-                table_data["table_image_path"] = str(Path(img_path).resolve().relative_to(output_dir.parent.parent.resolve()))
+                table_data["table_image_path"] = str(
+                    Path(img_path).resolve().relative_to(output_dir.parent.parent.resolve())
+                )
             except Exception:
                 table_data["table_image_path"] = img_path
 
@@ -463,13 +594,17 @@ def extract_tables_from_page(
 
     return extracted_tables, best_strategy, strategy_durations
 
+
 def _normalize_cell(val: Any) -> str:
-    s = str(val or '').strip()
-    s = s.replace('\u00a0', ' ')  # NBSP -> space
-    s = ' '.join(s.split())
+    s = str(val or "").strip()
+    s = s.replace("\u00a0", " ")  # NBSP -> space
+    s = " ".join(s.split())
     return s.lower()
 
-def coalesce_repeated_header_rows(df: pd.DataFrame, min_match: float = TABLE_HEADER_REPEAT_MIN_MATCH) -> pd.DataFrame:
+
+def coalesce_repeated_header_rows(
+    df: pd.DataFrame, min_match: float = TABLE_HEADER_REPEAT_MIN_MATCH
+) -> pd.DataFrame:
     """Remove repeated header rows that appear mid-body (common in multi-page Camelot outputs).
 
     Strategy:
@@ -507,7 +642,7 @@ def coalesce_repeated_header_rows(df: pd.DataFrame, min_match: float = TABLE_HEA
             continue
         # Compute match ratio
         n = max(1, min(len(vals), len(header_proto)))
-        matches = sum(1 for a, b in zip(vals[:n], header_proto[:n]) if a == b and a != '')
+        matches = sum(1 for a, b in zip(vals[:n], header_proto[:n]) if a == b and a != "")
         ratio = matches / float(n)
         if ratio >= min_match and i != df.index[0]:
             # Drop this repeated header row
@@ -521,36 +656,48 @@ def coalesce_repeated_header_rows(df: pd.DataFrame, min_match: float = TABLE_HEA
     except Exception:
         return df
 
-def extract_all_tables(pdf_path: Path, output_dir: Path, diagnostics: Optional[list] = None) -> List[Dict[str, Any]]:
+
+def extract_all_tables(
+    pdf_path: Path, output_dir: Path, diagnostics: Optional[list] = None
+) -> List[Dict[str, Any]]:
     """Extract all tables from a PDF."""
     all_tables = []
     last_good_strategy = None
     strategy_summary = {}
-    
+
     # Open PDF with PyMuPDF for image extraction
     try:
         pdf_doc = fitz.open(str(pdf_path))
     except Exception as e:
         logger.error(f"Failed to open PDF {pdf_path}: {e}")
         return []
-    
+
     try:
         total_pages = len(pdf_doc)
         console.print(f"[cyan]Processing {total_pages} pages...[/cyan]")
-        
+
         for page_num in range(total_pages):
             logger.info(f"Processing page {page_num + 1}/{total_pages}")
-            
+
             tables, best_strategy, sdurs = extract_tables_from_page(
                 pdf_path, page_num, pdf_doc, output_dir, last_good_strategy, diagnostics
             )
-            
+
             if tables:
                 all_tables.extend(tables)
             try:
-                for k,v in sdurs.items():
-                    entry = strategy_summary.setdefault(k, {"attempts": 0, "successes": 0, "failures": 0, "total_duration_ms": 0, "per_page_ms": {}})
-                    cnt = int(v.get("count",0) or 0)
+                for k, v in sdurs.items():
+                    entry = strategy_summary.setdefault(
+                        k,
+                        {
+                            "attempts": 0,
+                            "successes": 0,
+                            "failures": 0,
+                            "total_duration_ms": 0,
+                            "per_page_ms": {},
+                        },
+                    )
+                    cnt = int(v.get("count", 0) or 0)
                     entry["attempts"] += cnt
                     # Mark success if found>0 for this page
                     found_map = v.get("found") or {}
@@ -558,7 +705,7 @@ def extract_all_tables(pdf_path: Path, output_dir: Path, diagnostics: Optional[l
                         entry["successes"] += 1
                     else:
                         entry["failures"] += 1
-                    dur = int(v.get("total_ms",0) or 0)
+                    dur = int(v.get("total_ms", 0) or 0)
                     entry["total_duration_ms"] += dur
                     # Approximate per_page_ms as average duration per attempt for this page
                     per_attempt = int(dur / max(1, cnt)) if cnt else dur
@@ -567,19 +714,25 @@ def extract_all_tables(pdf_path: Path, output_dir: Path, diagnostics: Optional[l
                 pass
                 if best_strategy:
                     last_good_strategy = best_strategy
-                    
+
             console.print(f"  Page {page_num + 1}: Found {len(tables)} tables")
-            
+
     finally:
         pdf_doc.close()
-        
+
     return all_tables
 
-@app.command()
+
 def run(
     input_json: Path = typer.Argument(..., help="Path to Stage 04 sections JSON."),
-    pdf_dir: Path = typer.Option("data/results/pipeline/01_annotation_processor", "--pdf-dir", help="Directory with the clean PDF from Stage 01."),
-    output_dir: Path = typer.Option("data/results/pipeline", "-o", help="Parent directory for pipeline results."),
+    pdf_dir: Path = typer.Option(
+        "data/results/pipeline/01_annotation_processor",
+        "--pdf-dir",
+        help="Directory with the clean PDF from Stage 01.",
+    ),
+    output_dir: Path = typer.Option(
+        "data/results/pipeline", "-o", help="Parent directory for pipeline results."
+    ),
 ):
     """Extracts tables from the PDF and associates them with sections."""
     console.print(f"[green]Extracting tables based on sections in: {input_json.name}[/green]")
@@ -588,14 +741,28 @@ def run(
     errors_count = 0
     warnings_count = 0
     import time
+
     t0 = time.monotonic()
     stage_start_ts = iso_now()
     resources = snapshot_resources("start")
     import os
-    sampler = start_resource_sampler(float(os.getenv("SAMPLE_INTERVAL_SEC", "2"))) if os.getenv("ENABLE_RESOURCE_SAMPLING", "0").lower() in ("1","true","yes","y") else None
+
+    sampler = (
+        start_resource_sampler(float(os.getenv("SAMPLE_INTERVAL_SEC", "2")))
+        if os.getenv("ENABLE_RESOURCE_SAMPLING", "0").lower() in ("1", "true", "yes", "y")
+        else None
+    )
     try:
         if sampler and not gpu_metrics_available():
-            diagnostics.append(make_event("05_table_extractor","info","gpu_metrics_unavailable","NVML not available; GPU metrics disabled",{}))
+            diagnostics.append(
+                make_event(
+                    "05_table_extractor",
+                    "info",
+                    "gpu_metrics_unavailable",
+                    "NVML not available; GPU metrics disabled",
+                    {},
+                )
+            )
     except Exception:
         pass
 
@@ -603,14 +770,14 @@ def run(
     if not input_json.exists():
         console.print(f"[red]Input JSON not found: {input_json}[/red]")
         raise typer.Exit(1)
-        
+
     try:
         pdf_path = next(pdf_dir.glob("*_clean.pdf"))
     except StopIteration:
         console.print(f"[red]No '*_clean.pdf' found in --pdf-dir: {pdf_dir}[/red]")
         raise typer.Exit(1)
 
-    with open(input_json, 'r') as f:
+    with open(input_json, "r") as f:
         sections_data = json.load(f)
     sections = sections_data.get("sections", [])
 
@@ -621,21 +788,6 @@ def run(
     stage_output_dir.mkdir(parents=True, exist_ok=True)
     json_output_dir.mkdir(exist_ok=True)
     image_output_dir.mkdir(exist_ok=True)
-    run_id = get_run_id()
-    diagnostics = []
-    errors_count = 0
-    warnings_count = 0
-    import time
-    t0 = time.monotonic()
-    stage_start_ts = iso_now()
-    resources = snapshot_resources("start")
-    import os
-    sampler = start_resource_sampler(float(os.getenv("SAMPLE_INTERVAL_SEC", "2"))) if os.getenv("ENABLE_RESOURCE_SAMPLING", "0").lower() in ("1","true","yes","y") else None
-    try:
-        if sampler and not gpu_metrics_available():
-            diagnostics.append(make_event("05_table_extractor","info","gpu_metrics_unavailable","NVML not available; GPU metrics disabled",{}))
-    except Exception:
-        pass
 
     # --- Table Extraction ---
     all_tables = extract_all_tables(pdf_path, image_output_dir, diagnostics)
@@ -726,9 +878,15 @@ def run(
                     # Apply header row as column names for 'best'
                     try:
                         import pandas as pd
+
                         header_row = (t.get("pandas_df") or [{}])[0]
-                        keys = sorted(header_row.keys(), key=lambda k: int(str(k)) if str(k).isdigit() else 9999)
-                        new_cols = [str(header_row[k]).strip() or str(i) for i, k in enumerate(keys)]
+                        keys = sorted(
+                            header_row.keys(),
+                            key=lambda k: int(str(k)) if str(k).isdigit() else 9999,
+                        )
+                        new_cols = [
+                            str(header_row[k]).strip() or str(i) for i, k in enumerate(keys)
+                        ]
                         body_df = pd.DataFrame(best.get("pandas_df") or [])
                         if len(body_df.columns) == len(new_cols):
                             body_df.columns = new_cols
@@ -745,7 +903,7 @@ def run(
 
     if TABLE_HEADER_STITCHING_ENABLED:
         all_tables = stitch_headers(all_tables)
-    
+
     # --- Associate Tables with Sections ---
     for table in all_tables:
         table_bbox = fitz.Rect(table["bbox"])
@@ -769,7 +927,21 @@ def run(
             filtered_tables.append(t)
         else:
             try:
-                diagnostics.append(make_event("05_table_extractor","warning","table_low_confidence", "Filtered out low-confidence table", {"rows": rows, "cols": cols, "density": density, "page": t.get("page_index"), "strategy": t.get("strategy")}))
+                diagnostics.append(
+                    make_event(
+                        "05_table_extractor",
+                        "warning",
+                        "table_low_confidence",
+                        "Filtered out low-confidence table",
+                        {
+                            "rows": rows,
+                            "cols": cols,
+                            "density": density,
+                            "page": t.get("page_index"),
+                            "strategy": t.get("strategy"),
+                        },
+                    )
+                )
             except Exception:
                 pass
 
@@ -787,7 +959,9 @@ def run(
                 shape = m.get("shape", [0, 0])
                 rows = int(shape[0]) if isinstance(shape, (list, tuple)) and shape else 0
                 density = float(m.get("data_density", 0.0) or 0.0)
-                if (rows >= TABLE_FILTER_MIN_ROWS) or (rows >= 2 and density >= TABLE_FILTER_MIN_DENSITY):
+                if (rows >= TABLE_FILTER_MIN_ROWS) or (
+                    rows >= 2 and density >= TABLE_FILTER_MIN_DENSITY
+                ):
                     strong.append(t)
             try:
                 best_list = strong if strong else candidates
@@ -834,10 +1008,10 @@ def run(
         pass
     timings = build_stage_timings(stage_start_ts, t0)
     try:
-        for _k,_v in strategy_summary.items():
-            att = int(_v.get("attempts",0) or 0)
+        for _k, _v in strategy_summary.items():
+            att = int(_v.get("attempts", 0) or 0)
             if att > 0:
-                _v["avg_duration_ms"] = int(_v.get("total_duration_ms",0) / att)
+                _v["avg_duration_ms"] = int(_v.get("total_duration_ms", 0) / att)
         timings["strategy_durations"] = strategy_summary
     except Exception:
         pass
@@ -849,10 +1023,10 @@ def run(
         pass
     timings = build_stage_timings(stage_start_ts, t0)
     try:
-        for _k,_v in strategy_summary.items():
-            att = int(_v.get("attempts",0) or 0)
+        for _k, _v in strategy_summary.items():
+            att = int(_v.get("attempts", 0) or 0)
             if att > 0:
-                _v["avg_duration_ms"] = int(_v.get("total_duration_ms",0) / att)
+                _v["avg_duration_ms"] = int(_v.get("total_duration_ms", 0) / att)
         timings["strategy_durations"] = strategy_summary
     except Exception:
         pass
@@ -872,15 +1046,26 @@ def run(
     }
 
     output_path = json_output_dir / "05_tables.json"
-    with open(output_path, 'w') as f:
+    with open(output_path, "w") as f:
         json.dump(result, f, indent=2, ensure_ascii=False)
 
-    console.print(f"✅ Table extraction complete. Saved {len(filtered_tables)} tables to: {output_path}")
+    console.print(
+        f"✅ Table extraction complete. Saved {len(filtered_tables)} tables to: {output_path}"
+    )
 
-@app.command("debug-bundle")
+
 def debug_bundle(
-    bundle: Path = typer.Argument(..., exists=True, file_okay=True, dir_okay=False, readable=True, help="Bundle with keys: sections (Stage 04 object), clean_pdf (path)"),
-    output_dir: Path = typer.Option("data/results/pipeline", "-o", help="Parent directory for pipeline results."),
+    bundle: Path = typer.Argument(
+        ...,
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        readable=True,
+        help="Bundle with keys: sections (Stage 04 object), clean_pdf (path)",
+    ),
+    output_dir: Path = typer.Option(
+        "data/results/pipeline", "-o", help="Parent directory for pipeline results."
+    ),
 ):
     """Run Stage 05 with a consolidated bundle (sections + clean PDF)."""
     stage_output_dir = output_dir / "05_table_extractor"
@@ -894,33 +1079,48 @@ def debug_bundle(
     errors_count = 0
     warnings_count = 0
     import time
+
     t0 = time.monotonic()
     stage_start_ts = iso_now()
     resources = snapshot_resources("start")
     import os
-    sampler = start_resource_sampler(float(os.getenv("SAMPLE_INTERVAL_SEC", "2"))) if os.getenv("ENABLE_RESOURCE_SAMPLING", "0").lower() in ("1","true","yes","y") else None
+
+    sampler = (
+        start_resource_sampler(float(os.getenv("SAMPLE_INTERVAL_SEC", "2")))
+        if os.getenv("ENABLE_RESOURCE_SAMPLING", "0").lower() in ("1", "true", "yes", "y")
+        else None
+    )
     try:
         if sampler and not gpu_metrics_available():
-            diagnostics.append(make_event("05_table_extractor","info","gpu_metrics_unavailable","NVML not available; GPU metrics disabled",{}))
+            diagnostics.append(
+                make_event(
+                    "05_table_extractor",
+                    "info",
+                    "gpu_metrics_unavailable",
+                    "NVML not available; GPU metrics disabled",
+                    {},
+                )
+            )
     except Exception:
         pass
 
     try:
         data = json.loads(bundle.read_text())
-        sections_obj = data.get('sections')
-        clean_pdf = data.get('clean_pdf')
+        sections_obj = data.get("sections")
+        clean_pdf = data.get("clean_pdf")
         if not sections_obj or not clean_pdf:
             raise ValueError("Bundle must include 'sections' and 'clean_pdf'")
         tmp_sections = stage_output_dir / "_bundle_sections.json"
         tmp_sections.write_text(json.dumps({"sections": sections_obj}))
         pdf_path = Path(clean_pdf)
     except Exception as e:
-        typer.secho(f"Failed to load bundle: {e}", fg=typer.colors.RED); raise typer.Exit(1)
+        typer.secho(f"Failed to load bundle: {e}", fg=typer.colors.RED)
+        raise typer.Exit(1)
 
     # Extract tables and associate
     all_tables = extract_all_tables(pdf_path, image_output_dir, diagnostics)
     strategy_summary = {}
-    with open(tmp_sections, 'r') as f:
+    with open(tmp_sections, "r") as f:
         sections_data = json.load(f)
     sections = sections_data.get("sections", [])
     # associate
@@ -929,8 +1129,11 @@ def debug_bundle(
             table_bbox = fitz.Rect(table["bbox"])
             for section in sections:
                 section_bbox = fitz.Rect(section["bbox"])
-                if section["page_start"] <= table["page_index"] <= section["page_end"] and section_bbox.intersects(table_bbox):
-                    table["section_id"] = section.get("id", "unknown"); break
+                if section["page_start"] <= table["page_index"] <= section[
+                    "page_end"
+                ] and section_bbox.intersects(table_bbox):
+                    table["section_id"] = section.get("id", "unknown")
+                    break
         except Exception:
             continue
     # Basic filter (reuse criteria)
@@ -957,10 +1160,10 @@ def debug_bundle(
         pass
     timings = build_stage_timings(stage_start_ts, t0)
     try:
-        for _k,_v in strategy_summary.items():
-            att = int(_v.get("attempts",0) or 0)
+        for _k, _v in strategy_summary.items():
+            att = int(_v.get("attempts", 0) or 0)
             if att > 0:
-                _v["avg_duration_ms"] = int(_v.get("total_duration_ms",0) / att)
+                _v["avg_duration_ms"] = int(_v.get("total_duration_ms", 0) / att)
         timings["strategy_durations"] = strategy_summary
     except Exception:
         pass
@@ -972,10 +1175,10 @@ def debug_bundle(
         pass
     timings = build_stage_timings(stage_start_ts, t0)
     try:
-        for _k,_v in strategy_summary.items():
-            att = int(_v.get("attempts",0) or 0)
+        for _k, _v in strategy_summary.items():
+            att = int(_v.get("attempts", 0) or 0)
             if att > 0:
-                _v["avg_duration_ms"] = int(_v.get("total_duration_ms",0) / att)
+                _v["avg_duration_ms"] = int(_v.get("total_duration_ms", 0) / att)
         timings["strategy_durations"] = strategy_summary
     except Exception:
         pass
@@ -993,10 +1196,19 @@ def debug_bundle(
         "resources": resources,
     }
     output_path = json_output_dir / "05_tables.json"
-    with open(output_path, 'w') as f:
+    with open(output_path, "w") as f:
         json.dump(result, f, indent=2, ensure_ascii=False)
     console.print(f"[green]Debug bundle: saved {len(filtered_tables)} tables to {output_path}")
 
 
+def build_cli():
+    import typer as _typer
+
+    app = _typer.Typer(help="Extract tables from PDFs using Camelot")
+    app.command(name="run")(run)
+    app.command(name="debug-bundle")(debug_bundle)
+    return app
+
+
 if __name__ == "__main__":
-    app()
+    build_cli()()

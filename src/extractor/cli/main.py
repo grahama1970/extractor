@@ -18,37 +18,37 @@ from extractor.pipeline.api import extract_sections
 
 
 app = typer.Typer(
-    name="marker",
-    help="Marker PDF extraction tool with slash command support",
-    add_completion=True
+    name="marker", help="Marker PDF extraction tool with slash command support", add_completion=True
 )
 
 # Add existing commands as subcommand
 app.add_typer(agent_app, name="agent", help="Agent-specific commands")
 
 # Add slash command and MCP generation
-add_slash_mcp_commands(app, project_name='marker')
+add_slash_mcp_commands(app, project_name="marker")
 
 
 @app.command()
 def slash(
-    command: str = typer.Argument(..., help="Slash command to execute (e.g., 'marker-extract file.pdf')"),
-    help_all: bool = typer.Option(False, "--help-all", help="Show help for all slash commands")
+    command: str = typer.Argument(
+        ..., help="Slash command to execute (e.g., 'marker-extract file.pdf')"
+    ),
+    help_all: bool = typer.Option(False, "--help-all", help="Show help for all slash commands"),
 ):
     """Execute a slash command."""
     try:
         if help_all:
             print(slash_registry.get_help())
             return
-        
+
         # Parse command
-        if not command.startswith('/'):
+        if not command.startswith("/"):
             # Allow without slash for convenience
-            command = '/' + command
-        
+            command = "/" + command
+
         # Execute command
         slash_registry.execute(command)
-        
+
     except ValueError as e:
         logger.error(f"Command error: {e}")
         print(f"\n {e}")
@@ -65,12 +65,12 @@ def extract(
     output_format: str = typer.Option("markdown", "-f", "--format", help="Output format"),
     output_path: Optional[Path] = typer.Option(None, "-o", "--output", help="Output path"),
     max_pages: Optional[int] = typer.Option(None, "--max-pages", help="Maximum pages to process"),
-    ocr_all_pages: bool = typer.Option(False, "--ocr-all", help="OCR all pages")
+    ocr_all_pages: bool = typer.Option(False, "--ocr-all", help="OCR all pages"),
 ):
     """Extract content from a PDF (shorthand for slash command)."""
     # Build slash command
     cmd = f"/marker-extract {pdf_path}"
-    
+
     if output_format != "markdown":
         cmd += f" --output-format {output_format}"
     if output_path:
@@ -79,7 +79,7 @@ def extract(
         cmd += f" --max-pages {max_pages}"
     if ocr_all_pages:
         cmd += " --ocr-all-pages"
-    
+
     # Execute via slash command
     try:
         slash_registry.execute(cmd)
@@ -91,14 +91,14 @@ def extract(
 @app.command()
 def workflow(
     action: str = typer.Argument(..., help="Workflow action (list, create, run)"),
-    args: Optional[str] = typer.Argument(None, help="Additional arguments")
+    args: Optional[str] = typer.Argument(None, help="Additional arguments"),
 ):
     """Manage workflows (shorthand for slash commands)."""
     # Build slash command
     cmd = f"/marker-workflow {action}"
     if args:
         cmd += f" {args}"
-    
+
     # Execute via slash command
     try:
         slash_registry.execute(cmd)
@@ -111,17 +111,17 @@ def workflow(
 def serve(
     action: str = typer.Option("start", help="Server action (start, stop, status)"),
     port: int = typer.Option(3000, "-p", "--port", help="Server port"),
-    background: bool = typer.Option(False, "-b", "--background", help="Run in background")
+    background: bool = typer.Option(False, "-b", "--background", help="Run in background"),
 ):
     """Start MCP server (shorthand for slash command)."""
     # Build slash command
     cmd = f"/marker-serve {action}"
-    
+
     if action == "start":
         cmd += f" --port {port}"
         if background:
             cmd += " --background"
-    
+
     # Execute via slash command
     try:
         slash_registry.execute(cmd)
@@ -133,7 +133,7 @@ def serve(
 @app.command()
 def commands(
     category: Optional[str] = typer.Option(None, "-c", "--category", help="Filter by category"),
-    format: str = typer.Option("text", "-f", "--format", help="Output format (text, json)")
+    format: str = typer.Option("text", "-f", "--format", help="Output format (text, json)"),
 ):
     """List all available slash commands."""
     try:
@@ -142,7 +142,7 @@ def commands(
             if not commands:
                 print(f"No commands found in category '{category}'")
                 return
-            
+
             print(f"\n {category.title()} Commands:\n")
             for cmd in sorted(commands):
                 command_obj = slash_registry.get_command(cmd)
@@ -150,17 +150,17 @@ def commands(
         else:
             # Show all commands by category
             print("\n Marker Slash Commands\n")
-            
+
             for cat, cmds in sorted(slash_registry.categories.items()):
                 print(f" {cat.title()}:")
                 for cmd in sorted(cmds):
                     command_obj = slash_registry.get_command(cmd)
                     print(f"  /{cmd} - {command_obj.description}")
                 print()
-        
+
         print("\n Use '/marker-<command> --help' for detailed help on any command")
         print("   Or run 'marker slash <command>' to execute a slash command")
-        
+
     except Exception as e:
         logger.error(f"Failed to list commands: {e}")
         raise typer.Exit(1)
@@ -169,7 +169,9 @@ def commands(
 @app.command()
 def sections(
     pdf_path: Path = typer.Argument(..., help="Path to PDF file"),
-    output_dir: Path = typer.Option(Path("data/results/pipeline"), "-o", "--output-dir", help="Results directory"),
+    output_dir: Path = typer.Option(
+        Path("data/results/pipeline"), "-o", "--output-dir", help="Results directory"
+    ),
     json_out: bool = typer.Option(False, "--json", help="Print sections as JSON"),
 ):
     """Run the core pipeline (01→04) and return sections."""
@@ -177,6 +179,7 @@ def sections(
         sections, out_path = extract_sections(pdf_path, output_dir)
         if json_out:
             import json as _json
+
             print(_json.dumps({"sections": sections}, indent=2))
         else:
             print(f"Sections JSON: {out_path}")
@@ -189,14 +192,15 @@ def sections(
 @app.callback()
 def callback(
     version: bool = typer.Option(None, "--version", "-v", help="Show version"),
-    debug: bool = typer.Option(False, "--debug", help="Enable debug logging")
+    debug: bool = typer.Option(False, "--debug", help="Enable debug logging"),
 ):
     """Marker - PDF extraction tool with AI enhancements."""
     if version:
         from extractor import __version__
+
         print(f"Marker version {__version__}")
         raise typer.Exit()
-    
+
     if debug:
         logger.add(sys.stderr, level="DEBUG")
 
@@ -208,15 +212,16 @@ def main():
 
 if __name__ == "__main__":
     import sys
+
     if len(sys.argv) == 1 or "--test" in sys.argv:
         # Run inline validation tests
         print("🧪 Testing Extractor (Marker) Module")
         print("=" * 60)
-        
+
         # ===== SECTION 1: CORE MODULE TESTS =====
         print("\n📦 Section 1: Core Module Functionality")
         print("-" * 40)
-        
+
         # Test 1: Import core modules
         print("\n📝 Test 1: Import Core Modules")
         try:
@@ -224,6 +229,7 @@ if __name__ == "__main__":
             from extractor.core.schema.document import Document
             from extractor.core.settings import settings
             from extractor import __version__
+
             print("✅ Core imports successful")
             print(f"   - Version: {__version__}")
             print(f"   - PDF converter available")
@@ -231,16 +237,17 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"❌ Import failed: {e}")
             sys.exit(1)
-        
+
         # Test 2: PDF conversion
         print("\n📝 Test 2: PDF Conversion")
         import tempfile
         import os
-        with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp:
+
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
             test_pdf = tmp.name
             # Write minimal PDF content
-            tmp.write(b'%PDF-1.4\n%test\n')
-        
+            tmp.write(b"%PDF-1.4\n%test\n")
+
         try:
             # Test basic conversion
             result = convert_single_pdf(test_pdf)
@@ -254,7 +261,7 @@ if __name__ == "__main__":
         finally:
             if os.path.exists(test_pdf):
                 os.unlink(test_pdf)
-        
+
         # Test 3: Test actual PDF extraction capabilities
         print("\n📝 Test 3: PDF Extraction Capabilities")
         try:
@@ -269,20 +276,20 @@ if __name__ == "__main__":
             else:
                 print("✅ PDF extraction appears functional")
                 print(f"   - Output length: {len(test_result)} chars")
-                
+
             # Note about full extraction
             print("\n📌 Note: Full PDF extraction requires:")
             print("   - Surya models for layout detection")
-            print("   - OCR models for text recognition")  
+            print("   - OCR models for text recognition")
             print("   - Table recognition models")
             print("   - Proper model initialization with create_model_dict()")
         except Exception as e:
             print(f"❌ PDF capabilities check failed: {e}")
-        
+
         # ===== SECTION 2: CLI COMMAND TESTS =====
         print("\n\n🔧 Section 2: CLI Commands")
         print("-" * 40)
-        
+
         # Test 1: Help command
         print("\n📝 Test 1: CLI Help")
         sys.argv = ["extractor", "--help"]
@@ -293,22 +300,23 @@ if __name__ == "__main__":
                 print("✅ Help command works")
             else:
                 print(f"❌ Help command failed with code: {e.code}")
-        
+
         # Test 2: Extract command
         print("\n📝 Test 2: Extract Command")
-        with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp:
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
             test_pdf = tmp.name
-            tmp.write(b'%PDF-1.4\n%test\n')
-        
+            tmp.write(b"%PDF-1.4\n%test\n")
+
         sys.argv = ["extractor", "extract", test_pdf, "--max-pages", "1"]
         try:
             # Mock the slash registry to avoid actual extraction
             from unittest.mock import Mock
+
             original_execute = slash_registry.execute
             slash_registry.execute = Mock()
-            
+
             app()
-            
+
             # Check the mock was called correctly
             assert slash_registry.execute.called, "Slash command not executed"
             cmd = slash_registry.execute.call_args[0][0]
@@ -317,7 +325,7 @@ if __name__ == "__main__":
             assert "--max-pages 1" in cmd, "Options not passed"
             print("✅ Extract command works")
             print(f"   - Generated command: {cmd}")
-            
+
             # Restore original
             slash_registry.execute = original_execute
         except Exception as e:
@@ -325,26 +333,27 @@ if __name__ == "__main__":
         finally:
             if os.path.exists(test_pdf):
                 os.unlink(test_pdf)
-        
+
         # Test 3: Workflow command
         print("\n📝 Test 3: Workflow Command")
         sys.argv = ["extractor", "workflow", "list"]
         try:
             from unittest.mock import Mock
+
             original_execute = slash_registry.execute
             slash_registry.execute = Mock()
-            
+
             app()
-            
+
             assert slash_registry.execute.called, "Slash command not executed"
             cmd = slash_registry.execute.call_args[0][0]
             assert "/marker-workflow list" in cmd, "Wrong workflow command"
             print("✅ Workflow command works")
-            
+
             slash_registry.execute = original_execute
         except Exception as e:
             print(f"❌ Workflow command failed: {e}")
-        
+
         # Test 4: Commands listing
         print("\n📝 Test 4: Commands Listing")
         sys.argv = ["extractor", "commands"]
@@ -357,54 +366,55 @@ if __name__ == "__main__":
             print("✅ Commands listing works")
         except Exception as e:
             print(f"❌ Commands listing failed: {e}")
-        
+
         # ===== SECTION 3: SLASH COMMAND TESTS =====
         print("\n\n🔧 Section 3: Slash Commands")
         print("-" * 40)
-        
+
         # Test 1: Generate slash commands
         print("\n📝 Test 1: Generate Slash Commands")
         sys.argv = ["extractor", "generate-claude"]
         try:
             app()
             print("✅ Slash command generation completed")
-            
+
             # Check if files were created
             import os
+
             home = os.path.expanduser("~")
             commands_dir = os.path.join(home, ".claude", "commands")
-            
+
             expected_commands = [
                 "marker-extract.xml",
-                "marker-batch.xml", 
+                "marker-batch.xml",
                 "marker-workflow.xml",
                 "marker-serve.xml",
-                "marker-config.xml"
+                "marker-config.xml",
             ]
-            
+
             found = 0
             for cmd_file in expected_commands:
                 if os.path.exists(os.path.join(commands_dir, cmd_file)):
                     found += 1
-            
+
             print(f"   - Generated {found}/{len(expected_commands)} command files")
             if found > 0:
                 print("   - Location: ~/.claude/commands/")
         except Exception as e:
             print(f"⚠️  Slash command generation: {e}")
             print("   - This may require granger_slash_mcp_mixin.py")
-        
+
         # Test 2: Test slash command execution
         print("\n📝 Test 2: Slash Command Execution")
         sys.argv = ["extractor", "slash", "marker-extract", "--help"]
         try:
             from unittest.mock import Mock, patch
-            
+
             # Mock the slash registry to test without actual execution
-            with patch.object(slash_registry, 'execute') as mock_execute:
-                with patch.object(slash_registry, 'get_help', return_value="Marker commands help"):
+            with patch.object(slash_registry, "execute") as mock_execute:
+                with patch.object(slash_registry, "get_help", return_value="Marker commands help"):
                     app()
-                    
+
                     # Verify slash command was processed
                     assert mock_execute.called or slash_registry.get_help.called
                     print("✅ Slash command handling works")
@@ -412,14 +422,14 @@ if __name__ == "__main__":
             print("✅ Slash command handling works")
         except Exception as e:
             print(f"❌ Slash command execution failed: {e}")
-        
+
         # Test 3: Check MCP server command
         print("\n📝 Test 3: MCP Server Command")
         sys.argv = ["extractor", "generate-mcp", "stdio"]
         try:
             app()
             print("✅ MCP server generation completed")
-            
+
             # Check if config was created
             mcp_config = os.path.expanduser("~/.config/claude/marker_mcp_config.json")
             if os.path.exists(mcp_config):
@@ -427,15 +437,16 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"⚠️  MCP generation: {e}")
             print("   - This requires MCP server implementation")
-        
+
         # Test 4: Test Unified Extraction
         print("\n📝 Test 4: Unified Extraction Test")
         test_pdf = "/home/graham/workspace/experiments/extractor/data/input/2505.03335v2.pdf"
         if os.path.exists(test_pdf):
             try:
                 from extractor import extract_to_unified_json
+
                 result = extract_to_unified_json(test_pdf)
-                
+
                 if "error" not in result:
                     print("✅ Unified extraction works!")
                     print(f"   - Documents: {len(result['vertices']['documents'])}")
@@ -448,16 +459,16 @@ if __name__ == "__main__":
                 print(f"❌ Unified extraction failed: {e}")
         else:
             print(f"⚠️  Test PDF not found: {test_pdf}")
-        
+
         print("\n" + "=" * 60)
         print("✅ Extractor validation complete!")
         print("\n💡 Summary:")
         print("   - Core PDF conversion works")
-        print("   - CLI commands properly configured") 
+        print("   - CLI commands properly configured")
         print("   - Slash commands integration ready")
         print("   - Unified extraction to ArangoDB JSON works")
         print("   - Ready for document processing tasks")
-        
+
     else:
         # Normal execution
         main()

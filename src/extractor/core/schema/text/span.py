@@ -24,8 +24,8 @@ from extractor.core.schema.blocks import Block
 
 
 def cleanup_text(full_text):
-    full_text = re.sub(r'(\n\s){3,}', '\n\n', full_text)
-    full_text = full_text.replace('\xa0', ' ')  # Replace non-breaking spaces
+    full_text = re.sub(r"(\n\s){3,}", "\n\n", full_text)
+    full_text = full_text.replace("\xa0", " ")  # Replace non-breaking spaces
     return full_text
 
 
@@ -39,22 +39,22 @@ class Span(Block):
     font_size: float
     minimum_position: int
     maximum_position: int
-    formats: List[Literal['plain', 'math', 'chemical', 'bold', 'italic']]
+    formats: List[Literal["plain", "math", "chemical", "bold", "italic"]]
     has_superscript: bool = False
     has_subscript: bool = False
     url: Optional[str] = None
 
     @property
     def bold(self):
-        return 'bold' in self.formats
+        return "bold" in self.formats
 
     @property
     def italic(self):
-        return 'italic' in self.formats
+        return "italic" in self.formats
 
     @property
     def math(self):
-        return 'math' in self.formats
+        return "math" in self.formats
 
     def assemble_html(self, document, child_blocks, parent_structure):
         if self.ignore_for_output:
@@ -72,7 +72,7 @@ class Span(Block):
         while len(text) > 0 and text[0] in ["\n", "\r"]:
             text = text[1:]
 
-        if replaced_newline and not text.endswith('-'):
+        if replaced_newline and not text.endswith("-"):
             text += " "
 
         text = text.replace("-\n", "")  # Remove hyphenated line breaks from the middle of the span

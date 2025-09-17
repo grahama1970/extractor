@@ -20,7 +20,9 @@ def image_file_to_data_url(path: Path) -> str:
     return f"data:{mime};base64,{b64}"
 
 
-def build_chat_messages(system_text: str, user_text: str, image_data_url: str | None) -> List[Dict[str, Any]]:
+def build_chat_messages(
+    system_text: str, user_text: str, image_data_url: str | None
+) -> List[Dict[str, Any]]:
     parts: List[Dict[str, Any]] = [{"type": "text", "text": user_text}]
     if image_data_url:
         parts.append({"type": "image_url", "image_url": {"url": image_data_url}})
@@ -40,6 +42,13 @@ def build_chat_extras(model_name: str) -> Dict[str, Any]:
     extras: Dict[str, Any] = {}
     if name.startswith("openai/"):
         extras["response_format"] = {"type": "json_object"}
+    # Gemini: prefer JSON-only responses using response_mime_type
+    if "gemini" in name:
+        # Provider-specific GenerationConfig for Google Gemini
+        extras["generation_config"] = {
+            "response_mime_type": "application/json",
+            # Allow generous output length for structured blocks
+            "max_output_tokens": 2048,
+        }
     # No temperature by default, avoid tiny max tokens
     return extras
-

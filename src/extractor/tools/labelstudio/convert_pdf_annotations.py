@@ -118,7 +118,9 @@ def dist(a: Tuple[float, float], b: Tuple[float, float]) -> float:
     return math.hypot(a[0] - b[0], a[1] - b[1])
 
 
-def extract_regions_from_pdf(pdf_path: Path) -> Tuple[List[List[Region]], List[Tuple[float, float]]]:
+def extract_regions_from_pdf(
+    pdf_path: Path,
+) -> Tuple[List[List[Region]], List[Tuple[float, float]]]:
     """Extract regions per page from a PDF with annotations.
 
     Returns (pages_regions, pages_sizes) where pages_regions is a list of lists of Region
@@ -161,7 +163,10 @@ def extract_regions_from_pdf(pdf_path: Path) -> Tuple[List[List[Region]], List[T
                 continue
             fx, fy = fbox.cx, fbox.cy
             # Pick nearest rect center
-            idx = min(range(len(regions)), key=lambda i: dist((fx, fy), (regions[i].box.cx, regions[i].box.cy)))
+            idx = min(
+                range(len(regions)),
+                key=lambda i: dist((fx, fy), (regions[i].box.cx, regions[i].box.cy)),
+            )
             # Merge, but don't overwrite existing keys unless empty
             for k, v in fmeta.items():
                 if v and (k not in regions[idx].meta or not regions[idx].meta[k]):
@@ -233,7 +238,7 @@ def build_ls_tasks(
             # try to strip the leading localdata prefix if present
             p = img_path.as_posix()
             if p.startswith("/label-studio/localdata/"):
-                rel = p[len("/label-studio/localdata/"):]
+                rel = p[len("/label-studio/localdata/") :]
                 container_image = f"/data/local-files/?d={rel}"
             else:
                 # Last resort: use as-is; may fail to render if not routable
@@ -244,34 +249,45 @@ def build_ls_tasks(
         for region in pages_regions[idx]:
             coords = to_ls_percent(region.box, W, H)
             # Rectangle labels
-            preds.append({
-                "from_name": "label",
-                "to_name": "image",
-                "type": "rectanglelabels",
-                "value": {**coords, "rectanglelabels": [label_from_type(region.meta.get("type"))]},
-            })
+            preds.append(
+                {
+                    "from_name": "label",
+                    "to_name": "image",
+                    "type": "rectanglelabels",
+                    "value": {
+                        **coords,
+                        "rectanglelabels": [label_from_type(region.meta.get("type"))],
+                    },
+                }
+            )
             # Per-region fields if present
             if region.meta.get("type"):
-                preds.append({
-                    "from_name": "type",
-                    "to_name": "image",
-                    "type": "choices",
-                    "value": {"choices": [region.meta.get("type")]},
-                })
+                preds.append(
+                    {
+                        "from_name": "type",
+                        "to_name": "image",
+                        "type": "choices",
+                        "value": {"choices": [region.meta.get("type")]},
+                    }
+                )
             if region.meta.get("id"):
-                preds.append({
-                    "from_name": "id",
-                    "to_name": "image",
-                    "type": "textarea",
-                    "value": {"text": [region.meta.get("id")]},
-                })
+                preds.append(
+                    {
+                        "from_name": "id",
+                        "to_name": "image",
+                        "type": "textarea",
+                        "value": {"text": [region.meta.get("id")]},
+                    }
+                )
             if region.meta.get("expected_json"):
-                preds.append({
-                    "from_name": "expected_json",
-                    "to_name": "image",
-                    "type": "textarea",
-                    "value": {"text": [region.meta.get("expected_json")]},
-                })
+                preds.append(
+                    {
+                        "from_name": "expected_json",
+                        "to_name": "image",
+                        "type": "textarea",
+                        "value": {"text": [region.meta.get("expected_json")]},
+                    }
+                )
 
         task = {
             "data": {
@@ -281,11 +297,13 @@ def build_ls_tasks(
                 "doc_id": doc_id,
             },
             # Add predictions so they show as pre-annotations for review
-            "predictions": [{
-                "model_version": "pdf-annotations-import",
-                "score": 1.0,
-                "result": preds,
-            }],
+            "predictions": [
+                {
+                    "model_version": "pdf-annotations-import",
+                    "score": 1.0,
+                    "result": preds,
+                }
+            ],
         }
         tasks.append(task)
 
@@ -293,10 +311,18 @@ def build_ls_tasks(
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Convert PDF annotations to Label Studio tasks with predictions.")
+    ap = argparse.ArgumentParser(
+        description="Convert PDF annotations to Label Studio tasks with predictions."
+    )
     ap.add_argument("--pdf", required=True, help="Path to a marked PDF with annotations.")
-    ap.add_argument("--out", default="data/labelstudio", help="Output root for images/tasks (default: data/labelstudio)")
-    ap.add_argument("--render-dpi", type=int, default=150, help="DPI for page rendering (default: 150)")
+    ap.add_argument(
+        "--out",
+        default="data/labelstudio",
+        help="Output root for images/tasks (default: data/labelstudio)",
+    )
+    ap.add_argument(
+        "--render-dpi", type=int, default=150, help="DPI for page rendering (default: 150)"
+    )
     ap.add_argument(
         "--localdata-prefix",
         default="/label-studio/localdata",

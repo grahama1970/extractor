@@ -42,11 +42,10 @@ Run the unified adapter check (LiteLLM):
 
 ```bash
 source .venv/bin/activate && set -a && [ -f .env ] && source .env && set +a
-python src/extractor/pipeline/utils/litellm_call.py sanity --wrap-json --model "${LITELLM_MODEL:-gpt-4o-mini}"
+python src/extractor/pipeline/utils/litellm_call.py sanity --wrap-json --model "${LITELLM_MODEL:-${LITELLM_DEFAULT_MODEL:-${DEFAULT_LITELLM_MODEL:-gpt-4o-mini}}}"
 ```
 
 ## Notes
 
 - Next.js proxies `/api/:path*` -> backend; Vite proxies `/api/*` -> backend. Call `/api/marker` from the browser.
 - To add frontend env vars, prefer `NEXT_PUBLIC_*` and `VITE_*` prefixes. Avoid leaking secrets to clients.
-

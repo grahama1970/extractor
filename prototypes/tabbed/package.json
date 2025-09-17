@@ -1,0 +1,8 @@
+{
+  "name": "tabbed-prototypes",
+  "private": true,
+  "workspaces": [
+    "html"
+  ]
+}
+

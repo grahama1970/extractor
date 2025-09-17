@@ -21,11 +21,7 @@ SYSTEM_PROMPT = (
 
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=2, max=10))
-async def verify_header_with_llm(
-    image_b64: str,
-    context_text: str,
-    model: str
-) -> Dict[str, Any]:
+async def verify_header_with_llm(image_b64: str, context_text: str, model: str) -> Dict[str, Any]:
     """Verify header using litellm_call (vision required) with strict JSON intent.
 
     Always sends an image; provider error will be raised to the caller.
@@ -42,7 +38,7 @@ async def verify_header_with_llm(
         prompts=[{"model": model, "messages": messages}],
         wrap_json=True,
         concurrency=1,
-        desc="verify header"
+        desc="verify header",
     )
     answer = results[0] if results else ""
     try:
@@ -57,4 +53,3 @@ async def verify_header_with_llm(
     payload.setdefault("is_header", True)
     payload.setdefault("reasoning", "")
     return payload
-

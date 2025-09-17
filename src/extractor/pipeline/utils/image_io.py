@@ -4,8 +4,10 @@ import base64
 from pathlib import Path
 from typing import Dict, Optional
 
+
 def _safe_read_image_b64(path_str: str, base_dir: Path) -> Optional[str]:
     try:
+
         def _candidates() -> list[Path]:
             raw = Path(path_str)
             c: list[Path] = [raw]
@@ -21,7 +23,7 @@ def _safe_read_image_b64(path_str: str, base_dir: Path) -> Optional[str]:
                 idxs = [i for i, p in enumerate(parts) if p == "results"]
                 if idxs:
                     last_idx = idxs[-1]
-                    rel_after = Path(*parts[last_idx+1:])
+                    rel_after = Path(*parts[last_idx + 1 :])
                     if str(rel_after):
                         c.append(base_dir / rel_after)
             # Dedup
@@ -34,6 +36,7 @@ def _safe_read_image_b64(path_str: str, base_dir: Path) -> Optional[str]:
             return out
 
         from io import BytesIO
+
         try:
             from PIL import Image  # type: ignore
         except Exception:

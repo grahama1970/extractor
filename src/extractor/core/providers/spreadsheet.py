@@ -29,8 +29,16 @@ from odf.opendocument import load as odf_load
 from loguru import logger
 
 from extractor.core.schema.unified_document import (
-    UnifiedDocument, BlockType, SourceType, BaseBlock, TableBlock,
-    ImageBlock, BlockMetadata, DocumentMetadata, HierarchyNode, TableCell
+    UnifiedDocument,
+    BlockType,
+    SourceType,
+    BaseBlock,
+    TableBlock,
+    ImageBlock,
+    BlockMetadata,
+    DocumentMetadata,
+    HierarchyNode,
+    TableCell,
 )
 
 

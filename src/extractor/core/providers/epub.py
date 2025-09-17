@@ -24,8 +24,16 @@ from bs4 import BeautifulSoup, Tag, NavigableString, Comment
 from loguru import logger
 
 from extractor.core.schema.unified_document import (
-    UnifiedDocument, BlockType, SourceType, BaseBlock, TableBlock,
-    ImageBlock, BlockMetadata, DocumentMetadata, HierarchyNode, TableCell
+    UnifiedDocument,
+    BlockType,
+    SourceType,
+    BaseBlock,
+    TableBlock,
+    ImageBlock,
+    BlockMetadata,
+    DocumentMetadata,
+    HierarchyNode,
+    TableCell,
 )
 
 
@@ -61,8 +69,10 @@ class EPUBProvider:
         image_blocks = self._extract_images(book)
         blocks.extend(image_blocks)
 
-        # 4. TOC-based hierarchy with null check
+        # 4. Build hierarchy: prefer TOC; fallback to headings in content
         hierarchy = self._build_toc_hierarchy(book.toc, blocks) if book.toc else None
+        if not hierarchy:
+            hierarchy = self._build_heading_hierarchy(blocks)
 
         doc = UnifiedDocument(
             id=self._generate_doc_id(filepath),
@@ -91,9 +101,13 @@ class EPUBProvider:
     def _extract_metadata(self, book: epub.EpubBook, filepath: Path) -> DocumentMetadata:
         meta = DocumentMetadata()
 
-        meta.title = book.get_metadata("DC", "title")[0][0] if book.get_metadata("DC", "title") else ""
+        meta.title = (
+            book.get_metadata("DC", "title")[0][0] if book.get_metadata("DC", "title") else ""
+        )
         meta.author = "; ".join([a[0] for a in book.get_metadata("DC", "creator")])
-        meta.language = book.get_metadata("DC", "language")[0][0] if book.get_metadata("DC", "language") else ""
+        meta.language = (
+            book.get_metadata("DC", "language")[0][0] if book.get_metadata("DC", "language") else ""
+        )
 
         # Store raw metadata dict for downstream use
         meta.format_metadata = {
@@ -135,7 +149,9 @@ class EPUBProvider:
                         type=BlockType.PARAGRAPH,
                         content=text,
                         parent_id=parent_id,
-                        metadata=BlockMetadata(attributes={"context": "nav-string"}, confidence=0.9),
+                        metadata=BlockMetadata(
+                            attributes={"context": "nav-string"}, confidence=0.9
+                        ),
                     )
                 )
             return
@@ -152,9 +168,7 @@ class EPUBProvider:
                     type=BlockType.HEADING,
                     content=text,
                     parent_id=parent_id,
-                    metadata=BlockMetadata(
-                        attributes={"level": level, "tag": tag}, confidence=1.0
-                    ),
+                    metadata=BlockMetadata(attributes={"level": level, "tag": tag}, confidence=1.0),
                 )
                 blocks.append(block)
                 parent_id = block.id  # children nest under heading
@@ -318,35 +332,79 @@ class EPUBProvider:
 
         root = HierarchyNode(id="root", title="Book", level=0, block_id="root", children=[])
 
+        def _iter_entries(obj):
+            # ebooklib toc can be a list, a Link, or nested tuples
+            try:
+                for item in obj:
+                    yield item
+            except TypeError:
+                yield obj
+
         def recurse(entries, parent_node, level):
-            for entry in entries:
+            for entry in _iter_entries(entries):
                 title = entry.title if entry.title else "Untitled"
                 href = entry.href
                 # simple heuristic: use the first heading on that page with null checks
                 block_id = next(
-                    (b.id for b in blocks if b.metadata and b.metadata.attributes and href in str(b.metadata.attributes.get("src", ""))),
+                    (
+                        b.id
+                        for b in blocks
+                        if b.metadata
+                        and b.metadata.attributes
+                        and href in str(b.metadata.attributes.get("src", ""))
+                    ),
                     None,
                 )
+                if block_id is None:
+                    anchor = href or title
+                    block_id = f"toc-{hashlib.md5(anchor.encode()).hexdigest()}"
                 node = HierarchyNode(
                     id=f"toc-{hashlib.md5(title.encode()).hexdigest()}",
                     title=title,
                     level=level,
                     block_id=block_id,
                     parent_id=parent_node.id,
-                    breadcrumb=[n.title for n in root.children] + [title],
+                    breadcrumb=[*parent_node.breadcrumb, title],
                 )
                 parent_node.children.append(node)
-                if entry.children:
-                    recurse(entry.children, node, level + 1)
+                child_entries = getattr(entry, "children", None)
+                if child_entries:
+                    recurse(child_entries, node, level + 1)
 
         recurse(toc, root, 1)
         return root if root.children else None
 
+    def _build_heading_hierarchy(self, blocks: List[BaseBlock]) -> Optional[HierarchyNode]:
+        heads = [b for b in blocks if b.type == BlockType.HEADING]
+        if not heads:
+            return None
+        root = HierarchyNode(id="root", title="Book", level=0, block_id="root", children=[])
+        stack: List[HierarchyNode] = [root]
+        for b in heads:
+            lvl = 1
+            if b.metadata and b.metadata.attributes:
+                lvl = int(b.metadata.attributes.get("level", 1))
+            while len(stack) > lvl:
+                stack.pop()
+            parent = stack[-1]
+            node = HierarchyNode(
+                id=f"h-{b.id}",
+                title=b.content,
+                level=lvl,
+                block_id=b.id,
+                parent_id=parent.id,
+                breadcrumb=[*parent.breadcrumb, b.content],
+            )
+            parent.children.append(node)
+            if len(stack) <= lvl:
+                stack.append(node)
+            else:
+                stack[lvl] = node
+        return root
+
     def _extract_full_text(self, blocks: List[BaseBlock]) -> str:
         return "\n".join(
-            b.content
-            for b in blocks
-            if hasattr(b, "content") and isinstance(b.content, str)
+            b.content for b in blocks if hasattr(b, "content") and isinstance(b.content, str)
         )
 
     def _extract_keywords(self, book: epub.EpubBook) -> List[str]:

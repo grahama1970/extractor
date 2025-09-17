@@ -13,6 +13,7 @@ from PIL import Image
 from urlextract import URLExtract
 
 from strip_tags import strip_tags
+from loguru import logger
 
 # Supported image extensions
 IMAGE_EXT = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tiff", ".webp"}
@@ -32,7 +33,9 @@ def _get_cache_dir(explicit_dir: Optional[str] = None) -> Optional[Path]:
 
 def safe_image(path: Path) -> bool:
     try:
-        return path.exists() and path.suffix.lower() in IMAGE_EXT and Image.open(path).verify() is None
+        return (
+            path.exists() and path.suffix.lower() in IMAGE_EXT and Image.open(path).verify() is None
+        )
     except Exception:
         return False
 
@@ -59,7 +62,7 @@ def extract_images(text: str) -> Tuple[List[str], str]:
     # Local files
     tokens = re.findall(r'(?:"[^"]*"|\'[^\']*\'|\S+)', plain)
     for tok in tokens:
-        t = tok.strip('"\'')
+        t = tok.strip("\"'")
         if not t:
             continue
         cand = Path(t).expanduser().resolve()
@@ -78,7 +81,9 @@ def _hash_key(s: str) -> str:
     return hashlib.sha1(s.encode("utf-8")).hexdigest()
 
 
-def compress_image_cached(path_str: str, max_kb: int = 1000, cache_dir: Optional[str] = None) -> str:
+def compress_image_cached(
+    path_str: str, max_kb: int = 1000, cache_dir: Optional[str] = None
+) -> str:
     """Return base64 data-URI for a local image, compressed if needed.
     If a cache directory is provided (via arg or env LITELLM_IMAGE_CACHE_DIR),
     persist results across runs keyed by file path + mtime + size + max_kb.
@@ -135,7 +140,9 @@ def compress_image_cached(path_str: str, max_kb: int = 1000, cache_dir: Optional
     return out
 
 
-def fetch_remote_image_cached(url: str, timeout: int = 10, cache_dir: Optional[str] = None) -> Optional[str]:
+def fetch_remote_image_cached(
+    url: str, timeout: int = 10, cache_dir: Optional[str] = None
+) -> Optional[str]:
     """Download remote image and return base64 data-URI. Cache by URL when enabled."""
     key = f"remote:{url}"
     cache_base = _get_cache_dir(cache_dir)
@@ -161,3 +168,22 @@ def fetch_remote_image_cached(url: str, timeout: int = 10, cache_dir: Optional[s
     except Exception:
         return None
 
+
+def compress_image(path_str: str, max_kb: int = 1000, *, cache_dir: Optional[str] = None) -> str:
+    """Public wrapper to compress a local image and return a data URL.
+
+    Allows explicit cache_dir override while honoring LITELLM_IMAGE_CACHE_DIR via _get_cache_dir.
+    """
+    return compress_image_cached(path_str, max_kb=max_kb, cache_dir=cache_dir)
+
+
+def fetch_remote_image(url: str, *, cache_dir: Optional[str] = None) -> Optional[str]:
+    """Public wrapper to fetch a remote image and return a data URL.
+
+    Allows explicit cache_dir override while honoring LITELLM_IMAGE_CACHE_DIR via _get_cache_dir.
+    Logs a warning when the fetch fails.
+    """
+    out = fetch_remote_image_cached(url, timeout=10, cache_dir=cache_dir)
+    if out is None:
+        logger.warning(f"Failed to fetch remote image: {url}")
+    return out

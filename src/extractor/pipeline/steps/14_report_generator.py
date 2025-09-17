@@ -73,61 +73,19 @@ import hashlib
 
 # Third-party
 from loguru import logger
-# pydantic not used; removed to reduce cold start
-try:
-    try:
-        import typer
-        _HAS_TYPER = True
-    except Exception:
-        _HAS_TYPER = False
-        class _TyperShim:
-            def __init__(self,*a,**k): pass
-            def command(self,*a,**k): return lambda f: f
-            def __call__(self,*a,**k): print("Typer not installed; CLI disabled")
-        def _opt(*a,**k): return None
-        def _arg(*a,**k): return None
-        typer = _TyperShim()  # type: ignore
-        typer.Typer = _TyperShim  # type: ignore
-        typer.Option = _opt  # type: ignore
-        typer.Argument = _arg  # type: ignore
-        typer.secho = print  # type: ignore
-
-    _HAS_TYPER = True
-except Exception:
-    _HAS_TYPER = False
-    class _TyperShim:
-        def __init__(self,*a,**k): pass
-        def command(self,*a,**k): return lambda f: f
-        def __call__(self,*a,**k): print("Typer not installed; CLI disabled")
-    def _opt(*a,**k): return None
-    def _arg(*a,**k): return None
-    typer = _TyperShim()  # type: ignore
-    typer.Typer = _TyperShim  # type: ignore
-    typer.Option = _opt  # type: ignore
-    typer.Argument = _arg  # type: ignore
-    typer.secho = print  # type: ignore
-
 from rich.console import Console
-from rich.table import Table
-from rich.panel import Panel
+
+# pydantic not used; removed to reduce cold start
+import typer
 from dotenv import load_dotenv, find_dotenv
 
-# Initialize
-app = typer.Typer(help="Generate comprehensive pipeline report")
-console = Console()
-
-# Fail fast on missing .env
-if not load_dotenv(find_dotenv()):
-    logger.error("No .env file found")
-    sys.exit(1)
-
-# Configure logging
-logger.remove()
-logger.add(sys.stderr, level="INFO", format="<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>")
+# Avoid import-time side effects; CLI will initialize env/logging.
+console = None  # type: ignore[assignment]
 
 # ============================================
 # CORE FUNCTIONS
 # ============================================
+
 
 def load_results(pipeline_dir: Path) -> Dict[str, Any]:
     """Load all stage results from the structured pipeline results directory."""
@@ -153,22 +111,29 @@ def load_results(pipeline_dir: Path) -> Dict[str, Any]:
                     "10_arangodb_exporter": "10_export_confirmation.json",
                     "11_arango_create_graph": "11_graph_confirmation.json",
                 }
-                json_file = json_output_dir / canonical.get(stage_name, "")
-                if not json_file.exists() or json_file.name == "":
-                    # Fallback to first JSON if canonical not found
-                    json_file = next(json_output_dir.glob("*.json"))
-                with open(json_file, 'r') as f:
+                json_file: Optional[Path] = None
+                canonical_name = canonical.get(stage_name)
+                if canonical_name:
+                    candidate = json_output_dir / canonical_name
+                    if candidate.exists() and candidate.is_file():
+                        json_file = candidate
+                if json_file is None:
+                    candidates = sorted(json_output_dir.glob("*.json"))
+                    json_file = candidates[0] if candidates else None
+                if not json_file:
+                    logger.warning(f"No JSON output found for stage {stage_name}")
+                    continue
+                with open(json_file, "r") as f:
                     results[stage_name] = json.load(f)
                 logger.info(f"Loaded results for {stage_name} from {json_file.name}")
-            except StopIteration:
-                logger.warning(f"No JSON output found for stage {stage_name}")
             except Exception as e:
                 logger.error(f"Failed to load results for {stage_name}: {e}")
-    
+
     return results
 
+
 def calculate_pipeline_statistics(results: Dict[str, Any]) -> Dict[str, Any]:
-    """Calculate overall pipeline statistics."""
+    """Calculate overall pipeline statistics and stage durations."""
     a01 = results.get("01_annotation_processor", {})
     a02 = results.get("02_marker_extractor", {})
     a04 = results.get("04_section_builder", {})
@@ -180,17 +145,20 @@ def calculate_pipeline_statistics(results: Dict[str, Any]) -> Dict[str, Any]:
         "total_stages_run": len(results),
         "annotations": {
             "total": a01.get("annotation_count", 0),
-            "with_interpretations": sum(1 for x in a01.get("annotations", []) if x.get("interpretation")),
-            "clean_pdf_created": bool(a01.get("clean_pdf_path"))
+            "with_interpretations": sum(
+                1 for x in a01.get("annotations", []) if x.get("interpretation")
+            ),
+            "clean_pdf_created": bool(a01.get("clean_pdf_path")),
         },
-        "extraction": {
-            "blocks_extracted": a02.get("block_count", 0),
-            "low_confidence_blocks": 0
-        },
+        "extraction": {"blocks_extracted": a02.get("block_count", 0), "low_confidence_blocks": 0},
         "sections": {
             "total": a04.get("section_count", 0),
             "hierarchy_depth": a04.get("hierarchy_depth", 0),
-            "suspicious_headers": len(a04.get("suspicious_header_analysis", {}).get("categories", {}).get("false_positives", []))
+            "suspicious_headers": len(
+                a04.get("suspicious_header_analysis", {})
+                .get("categories", {})
+                .get("false_positives", [])
+            ),
         },
         "tables": {
             "total_extracted": a05.get("table_count", 0),
@@ -200,69 +168,84 @@ def calculate_pipeline_statistics(results: Dict[str, Any]) -> Dict[str, Any]:
             "pandas_parseable": a05.get("table_count", 0),
             "extraction_methods": {},
             "average_quality": 0,
-            "camelot_success_rate": 1.0 if a05.get("table_count", 0) else 0.0
+            "camelot_success_rate": 1.0 if a05.get("table_count", 0) else 0.0,
         },
         "images": {
             "total": a06.get("figure_count", 0),
             "with_descriptions": sum(1 for f in a06.get("figures", []) if f.get("ai_description")),
-            "types": {"figure": a06.get("figure_count", 0)}
+            "types": {"figure": a06.get("figure_count", 0)},
         },
         "reflow": {
-            "sections_reflowed": sum(1 for s in a07.get("reflowed_sections", []) if s.get("reflow_status") == "success"),
+            "sections_reflowed": sum(
+                1 for s in a07.get("reflowed_sections", []) if s.get("reflow_status") == "success"
+            ),
             "tables_merged": 0,
-            "ocr_corrections": sum(len((s.get("ocr_corrections") or {})) for s in a07.get("reflowed_sections", []))
+            "ocr_corrections": sum(
+                len((s.get("ocr_corrections") or {})) for s in a07.get("reflowed_sections", [])
+            ),
         },
         "arangodb": {
             "export_successful": True if a10 else False,
             "sections_exported": 0,
             "embeddings_created": 0,
             "relationships_created": 0,
-            "faiss_index_size": 0
-        }
+            "faiss_index_size": 0,
+        },
     }
-    
+
     # Calculate quality score
     quality_factors = []
-    
+
     # Annotation quality
     if stats["annotations"]["total"] > 0:
-        annotation_quality = stats["annotations"]["with_interpretations"] / stats["annotations"]["total"]
+        annotation_quality = (
+            stats["annotations"]["with_interpretations"] / stats["annotations"]["total"]
+        )
         quality_factors.append(annotation_quality)
-    
+
     # Table quality
     if stats["tables"]["total_extracted"] > 0:
         table_quality = stats["tables"]["pandas_parseable"] / stats["tables"]["total_extracted"]
         quality_factors.append(table_quality)
         quality_factors.append(stats["tables"]["average_quality"])
-    
+
     # Image quality
     if stats["images"]["total"] > 0:
         image_quality = stats["images"]["with_descriptions"] / stats["images"]["total"]
         quality_factors.append(image_quality)
-    
+
     # Reflow quality
     if stats["sections"]["total"] > 0:
         reflow_quality = stats["reflow"]["sections_reflowed"] / stats["sections"]["total"]
         quality_factors.append(reflow_quality)
-    
-    stats["overall_quality_score"] = sum(quality_factors) / len(quality_factors) if quality_factors else 0
-    
+
+    stats["overall_quality_score"] = (
+        sum(quality_factors) / len(quality_factors) if quality_factors else 0
+    )
+
+    # Stage duration aggregation (ms) when available
+    durations = {}
+    for k, v in results.items():
+        try:
+            t = v.get("timings") or {}
+            if isinstance(t, dict) and "stage_duration_ms" in t:
+                durations[k] = int(t.get("stage_duration_ms") or 0)
+        except Exception:
+            pass
+    if durations:
+        stats["stage_durations_ms"] = durations
     return stats
+
 
 def generate_content_summary(results: Dict[str, Any]) -> Dict[str, Any]:
     """Generate summary of extracted content."""
-    
+
     # Get cleaned sections from Stage 07 (reflow)
     sections = results.get("07_reflow_section", {}).get("reflowed_sections", [])
-    
+
     # Build content hierarchy
-    content = {
-        "document_structure": [],
-        "tables": [],
-        "images": [],
-        "key_sections": []
-    }
-    
+    content = {"document_structure": [], "tables": [], "images": [], "key_sections": []}
+
     # Process sections
     for section in sections:
         section_info = {
@@ -271,15 +254,15 @@ def generate_content_summary(results: Dict[str, Any]) -> Dict[str, Any]:
             "reflowed": section.get("reflowed", False),
             "text_chunks": len(section.get("text_chunks", [])),
             "tables": len(section.get("merged_tables", [])),
-            "ocr_fixes": len(section.get("ocr_corrections", {}))
+            "ocr_fixes": len(section.get("ocr_corrections", {})),
         }
-        
+
         content["document_structure"].append(section_info)
-        
+
         # Extract key sections (level 1)
         if section.get("level") == 1:
             content["key_sections"].append(section.get("title"))
-        
+
         # Extract table info
         for i, table in enumerate(section.get("merged_tables", [])):
             table_titles = section.get("table_titles", [])
@@ -287,25 +270,38 @@ def generate_content_summary(results: Dict[str, Any]) -> Dict[str, Any]:
                 "section": section.get("title"),
                 "title": table_titles[i] if i < len(table_titles) else f"Table {i+1}",
                 "rows": table.get("rows", 0),
-                "columns": table.get("columns", 0)
+                "columns": table.get("columns", 0),
             }
             content["tables"].append(table_info)
-    
+
     # Add image summaries
     images = results.get("06_figure_extractor", {}).get("figures", [])
     for img in images:
         if img.get("ai_description"):
-            content["images"].append({
-                "section": img.get("section_title"),
-                "type": img.get("llm_description", "").split("Type:")[1].split("|")[0].strip() if "Type:" in img.get("llm_description", "") else "Unknown",
-                "caption": img.get("caption", "")[:50] + "..." if len(img.get("caption", "")) > 50 else img.get("caption", "")
-            })
-    
+            content["images"].append(
+                {
+                    "section": img.get("section_title"),
+                    "type": (
+                        img.get("llm_description", "").split("Type:")[1].split("|")[0].strip()
+                        if "Type:" in img.get("llm_description", "")
+                        else "Unknown"
+                    ),
+                    "caption": (
+                        img.get("caption", "")[:50] + "..."
+                        if len(img.get("caption", "")) > 50
+                        else img.get("caption", "")
+                    ),
+                }
+            )
+
     return content
 
-def generate_markdown_report(results: Dict[str, Any], stats: Dict[str, Any], content: Dict[str, Any]) -> str:
+
+def generate_markdown_report(
+    results: Dict[str, Any], stats: Dict[str, Any], content: Dict[str, Any]
+) -> str:
     """Generate human-readable markdown report."""
-    
+
     md = f"""# PDF Extraction Pipeline Report
 
 Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
@@ -316,6 +312,9 @@ Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 - **Overall Quality Score**: {stats['overall_quality_score']:.2%}
 
 ## Stage Results
+
+### Stage Durations
+- Listed when available in statistics.stage_durations_ms
 
 ### Stage 01: Annotation Processing
 - Annotations found: {stats['annotations']['total']}
@@ -360,29 +359,30 @@ Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 ## Document Structure
 
 """
-    
+
     # Add section hierarchy
-    for section in content['document_structure']:
-        indent = "  " * (section['level'] - 1)
-        status = "✅" if section['reflowed'] else "⚠️"
+    for section in content["document_structure"]:
+        indent = "  " * (section["level"] - 1)
+        status = "✅" if section["reflowed"] else "⚠️"
         md += f"{indent}- {status} **{section['title']}** (chunks: {section['text_chunks']}, tables: {section['tables']})\n"
-    
+
     # Add tables summary
-    if content['tables']:
+    if content["tables"]:
         md += "\n## Extracted Tables\n\n"
-        for table in content['tables']:
+        for table in content["tables"]:
             md += f"- **{table['title']}** in {table['section']} ({table['rows']}x{table['columns']})\n"
-    
+
     # Add images summary
-    if content['images']:
+    if content["images"]:
         md += "\n## Extracted Images\n\n"
-        for img in content['images']:
+        for img in content["images"]:
             md += f"- **{img['type']}** in {img['section']}"
-            if img['caption']:
+            if img["caption"]:
                 md += f" - {img['caption']}"
             md += "\n"
-    
+
     return md
+
 
 def generate_verification_report(
     request: Dict[str, Any],
@@ -390,13 +390,13 @@ def generate_verification_report(
     assertions: Dict[str, bool],
     gold_standard: Dict[str, Any],
     raw_responses: Dict[str, Any] = None,
-    function_name: str = "unknown"
+    function_name: str = "unknown",
 ) -> Path:
     """Generate verification report."""
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     report_path = Path(f"reports/07_report_{timestamp}.json")
     report_path.parent.mkdir(exist_ok=True)
-    
+
     report = {
         "timestamp": timestamp,
         "function": function_name,
@@ -407,45 +407,46 @@ def generate_verification_report(
         "assertions": assertions,
         "verification": {
             "all_passed": all(assertions.values()),
-            "failed": [k for k, v in assertions.items() if not v]
-        }
+            "failed": [k for k, v in assertions.items() if not v],
+        },
     }
-    
-    with open(report_path, 'w') as f:
+
+    with open(report_path, "w") as f:
         json.dump(report, f, indent=2)
-    
+
     logger.info(f"Report: {report_path}")
     return report_path
+
 
 # ============================================
 # MAIN PIPELINE FUNCTION
 # ============================================
 
+
 async def generate_comprehensive_report(
-    pipeline_dir: Path,
-    output_dir: Optional[Path] = None
+    pipeline_dir: Path, output_dir: Optional[Path] = None
 ) -> Tuple[Path, Dict[str, Any]]:
     """Generate final comprehensive report from all stages."""
-    
+
     if output_dir is None:
         output_dir = Path(".")
-    
+
     # Load all results
     results = load_results(pipeline_dir)
-    
+
     if not results:
         return None, {"success": False, "error": "No pipeline results found"}
-    
+
     # Calculate statistics
     stats = calculate_pipeline_statistics(results)
-    
+
     # Generate content summary
     content = generate_content_summary(results)
-    
+
     # Generate document hash for tracking
     doc_text = json.dumps(content, sort_keys=True)
     doc_hash = hashlib.sha256(doc_text.encode()).hexdigest()[:16]
-    
+
     # Prepare final report
     report = {
         "success": True,
@@ -455,98 +456,117 @@ async def generate_comprehensive_report(
         "content_summary": content,
         "quality_assessment": {
             "overall_score": stats["overall_quality_score"],
-            "extraction_quality": stats["tables"]["average_quality"] if stats["tables"]["total_extracted"] > 0 else 0,
-            "completeness": (stats["reflow"]["sections_reflowed"] / stats["sections"]["total"]) if stats["sections"]["total"] > 0 else 0,
+            "extraction_quality": (
+                stats["tables"]["average_quality"] if stats["tables"]["total_extracted"] > 0 else 0
+            ),
+            "completeness": (
+                (stats["reflow"]["sections_reflowed"] / stats["sections"]["total"])
+                if stats["sections"]["total"] > 0
+                else 0
+            ),
             "issues_found": {
                 "suspicious_headers": stats["sections"]["suspicious_headers"],
                 "low_confidence_blocks": stats["extraction"]["low_confidence_blocks"],
-                "failed_table_parsing": stats["tables"]["total_extracted"] - stats["tables"]["pandas_parseable"]
-            }
+                "failed_table_parsing": stats["tables"]["total_extracted"]
+                - stats["tables"]["pandas_parseable"],
+            },
         },
         "metadata": {
-            "stage": "08_report_generator", 
+            "stage": "08_report_generator",
             "version": "2.0.0",
-            "description": "Comprehensive pipeline report including ArangoDB export status"
-        }
+            "description": "Comprehensive pipeline report including ArangoDB export status",
+        },
     }
-    
+
     # Save JSON reports
     # 1) Stage-specific canonical location for gold validation
     stage_dir = output_dir / "14_report_generator" / "json_output"
     stage_dir.mkdir(parents=True, exist_ok=True)
     stage_json_path = stage_dir / "14_report.json"
-    with open(stage_json_path, 'w') as f:
-        json.dump(report, f, indent=2)
+    with open(stage_json_path, "w") as f:
+        json.dump(report, f, indent=2, sort_keys=True)
     # 2) Convenience copy at results root
     json_path = output_dir / "final_report.json"
-    with open(json_path, 'w') as f:
-        json.dump(report, f, indent=2)
-    
+    with open(json_path, "w") as f:
+        json.dump(report, f, indent=2, sort_keys=True)
+
     # Generate markdown report
     markdown_report = generate_markdown_report(results, stats, content)
     md_path = output_dir / "final_report.md"
-    with open(md_path, 'w') as f:
+    with open(md_path, "w") as f:
         f.write(markdown_report)
-    
+
     logger.info(f"Generated comprehensive report: {json_path}")
     logger.info(f"Generated markdown report: {md_path}")
-    
+
     return json_path, report
+
 
 # ============================================
 # TYPER CLI COMMANDS
 # ============================================
 
-@app.command()
-def run(
+
+def _cmd_run(
     results_dir: Path = typer.Argument(
         "data/results/pipeline",
-        help="Path to the parent directory containing all pipeline stage results."
+        help="Path to the parent directory containing all pipeline stage results.",
     ),
 ):
     """Generates a comprehensive final report from all pipeline stage outputs."""
     console.print(f"[green]Generating final report from results in: {results_dir}[/green]")
-    
+
     if not results_dir.exists():
         console.print(f"[red]Results directory not found: {results_dir}[/red]")
         raise typer.Exit(1)
-    
+
     # The report will be saved in the top-level of the results directory
     output_path, result = asyncio.run(generate_comprehensive_report(results_dir, results_dir))
-    
+
     if result.get("success"):
         console.print(f"✅ Report generation complete. Final reports saved in: {results_dir}")
     else:
         console.print(f"❌ Report generation failed.")
 
-@app.command()
-def debug():
+
+def _cmd_debug():
     """Debug mode for testing."""
     console.print("[yellow]Debug mode - testing report generation...[/yellow]")
-    
+
     # Test empty pipeline directory to see error handling
     test_pipeline_dir = Path("test_empty_pipeline")
     test_pipeline_dir.mkdir(parents=True, exist_ok=True)
-    
+
     console.print(f"Testing with empty pipeline dir: {test_pipeline_dir}")
-    
+
     try:
         # Run report generation with empty directory
         output_path, result = asyncio.run(generate_comprehensive_report(test_pipeline_dir))
-        
+
         console.print(f"✅ Report generated: {output_path}")
         console.print(f"📊 Quality score: {result.get('overall_quality_score', 0):.2%}")
-        
+
     except Exception as e:
         console.print(f"❌ Expected behavior - empty pipeline: {e}")
-    
+
     console.print("\n[cyan]Real usage requires pipeline data from stages 01-07:[/cyan]")
     console.print("  python 08_report_generator.py working pipeline_run/")
 
-@app.command("debug-bundle")
-def debug_bundle(
-    bundle: Path = typer.Argument(..., exists=True, file_okay=True, dir_okay=False, readable=True, help="Bundle containing stage results under keys named by stage directories or under 'results' map"),
-    output_dir: Path = typer.Option("data/results/pipeline", "-o", help="Results directory to materialize and generate the report from"),
+
+def _cmd_debug_bundle(
+    bundle: Path = typer.Argument(
+        ...,
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        readable=True,
+        help="Bundle containing stage results under keys named by stage directories or under 'results' map",
+    ),
+    output_dir: Path = typer.Option(
+        "data/results/pipeline",
+        "-o",
+        help="Results directory to materialize and generate the report from",
+    ),
 ):
     """Run Stage 14 from a single bundle by materializing stage outputs and generating the report."""
     stage_output_dir = Path(output_dir)
@@ -558,9 +578,12 @@ def debug_bundle(
             # Treat entire object as the results map
             results_map = data
         if not isinstance(results_map, dict) or not results_map:
-            raise ValueError("Bundle must be an object mapping stage names to their JSON results, or have 'results' key")
+            raise ValueError(
+                "Bundle must be an object mapping stage names to their JSON results, or have 'results' key"
+            )
     except Exception as e:
-        typer.secho(f"Failed to load bundle: {e}", fg=typer.colors.RED); raise typer.Exit(1)
+        typer.secho(f"Failed to load bundle: {e}", fg=typer.colors.RED)
+        raise typer.Exit(1)
 
     canonical = {
         "01_annotation_processor": "01_annotations.json",
@@ -584,11 +607,52 @@ def debug_bundle(
         (stage_dir / filename).write_text(json.dumps(obj, indent=2))
 
     # Generate report using the standard path-based flow
-    output_path, result = asyncio.run(generate_comprehensive_report(stage_output_dir, stage_output_dir))
+    output_path, result = asyncio.run(
+        generate_comprehensive_report(stage_output_dir, stage_output_dir)
+    )
     if result.get("success"):
         console.print(f"[green]Debug bundle: report generated at {output_path}")
     else:
-        typer.secho("Report generation failed in debug-bundle.", fg=typer.colors.RED); raise typer.Exit(1)
- 
+        typer.secho("Report generation failed in debug-bundle.", fg=typer.colors.RED)
+        raise typer.Exit(1)
+
+
+def build_cli() -> typer.Typer:
+    """Construct and return the Typer app for this step.
+
+    - Loads .env if present (warns if missing)
+    - Configures logging for CLI context
+    """
+    global console
+    console = Console()
+
+    try:
+        if not load_dotenv(find_dotenv()):
+            logger.warning("No .env file found — proceeding without it")
+    except Exception as _e:
+        logger.warning(f".env load failed: {_e}")
+
+    try:
+        logger.remove()
+    except Exception:
+        pass
+    logger.add(
+        sys.stderr,
+        level="INFO",
+        format="<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
+    )
+
+    app = typer.Typer(
+        name="stage14-report-generator",
+        help="Generate comprehensive pipeline report",
+        add_completion=False,
+        no_args_is_help=True,
+    )
+    app.command(name="run")(_cmd_run)
+    app.command(name="debug")(_cmd_debug)
+    app.command(name="debug-bundle")(_cmd_debug_bundle)
+    return app
+
+
 if __name__ == "__main__":
-    app()
+    build_cli()()

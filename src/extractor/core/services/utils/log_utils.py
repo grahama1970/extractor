@@ -67,9 +67,7 @@ def truncate_large_value(
             half_len = max_str_len // 2
             if half_len == 0 and max_str_len > 0:
                 half_len = 1
-            return (
-                f"{value[:half_len]}...{value[-half_len:]}" if half_len > 0 else "..."
-            )
+            return f"{value[:half_len]}...{value[-half_len:]}" if half_len > 0 else "..."
         else:
             return value
 
@@ -83,10 +81,20 @@ def truncate_large_value(
                 return "[<0 elements>]"
         else:
             # If list elements are dicts, truncate them recursively
-            return [truncate_large_value(item, max_str_len, max_list_elements_shown) if isinstance(item, dict) else item for item in value]
-    elif isinstance(value, dict): # Add explicit check for dict
-            # Recursively truncate values within dictionaries
-            return {k: truncate_large_value(v, max_str_len, max_list_elements_shown) for k, v in value.items()}
+            return [
+                (
+                    truncate_large_value(item, max_str_len, max_list_elements_shown)
+                    if isinstance(item, dict)
+                    else item
+                )
+                for item in value
+            ]
+    elif isinstance(value, dict):  # Add explicit check for dict
+        # Recursively truncate values within dictionaries
+        return {
+            k: truncate_large_value(v, max_str_len, max_list_elements_shown)
+            for k, v in value.items()
+        }
     else:
         # Handle other types (int, float, bool, None, etc.) - return as is
         return value
@@ -146,6 +154,7 @@ def log_api_request(service_name: str, request_data: Dict[str, Any], truncate: b
 
     logger.debug(f"{service_name} API Request: {request_data_to_log}")
 
+
 def log_api_response(service_name: str, response_data: Any, truncate: bool = True) -> None:
     """Log API response details.
 
@@ -162,7 +171,10 @@ def log_api_response(service_name: str, response_data: Any, truncate: bool = Tru
 
     logger.debug(f"{service_name} API Response: {response_data_to_log}")
 
-def log_api_error(service_name: str, error: Exception, request_data: Optional[Dict[str, Any]] = None) -> None:
+
+def log_api_error(
+    service_name: str, error: Exception, request_data: Optional[Dict[str, Any]] = None
+) -> None:
     """Log API error details.
 
     Args:

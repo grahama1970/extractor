@@ -50,6 +50,7 @@ def _run(cmd: List[str], cwd: Optional[Path] = None) -> int:
 
 def _now_ts() -> str:
     from datetime import datetime
+
     return datetime.utcnow().strftime("%Y%m%d_%H%M%S")
 
 
@@ -62,18 +63,22 @@ def _parse_human_note(note: Optional[str]) -> Dict[str, str]:
     if not note or not isinstance(note, str):
         return out
     for ln in [x.strip() for x in note.strip().splitlines() if x.strip()]:
-        if '=' in ln and not ln.startswith('#'):
-            k, v = ln.split('=', 1)
+        if "=" in ln and not ln.startswith("#"):
+            k, v = ln.split("=", 1)
             out[k.strip()] = v.strip()
     return out
 
 
 @app.command()
 def run(
-    registry: Path = typer.Option(Path("src/extractor/evals/datasets/docs_registry.json"), help="Docs registry JSON"),
+    registry: Path = typer.Option(
+        Path("src/extractor/evals/datasets/docs_registry.json"), help="Docs registry JSON"
+    ),
     out: Path = typer.Option(Path("data/evals"), help="Base output directory for eval artifacts"),
     row_tol: float = typer.Option(0.2, help="Row count tolerance fraction"),
-    retune_on_fail: bool = typer.Option(True, help="Try Stage 05 Camelot strategies per failing table and report best match"),
+    retune_on_fail: bool = typer.Option(
+        True, help="Try Stage 05 Camelot strategies per failing table and report best match"
+    ),
 ):
     data = json.loads(registry.read_text(encoding="utf-8"))
     strategies = _load_camelot_strategies()
@@ -97,11 +102,18 @@ def run(
 
         # Stage 01: Annotations → JSON
         typer.echo(f"[doc={slug}] Stage 01: annotations")
-        rc = _run([
-            sys.executable,
-            "src/extractor/pipeline/steps/01_annotation_processor.py",
-            "run", str(pdf), "-o", str(doc_root), "--images", "--include-freetext"
-        ])
+        rc = _run(
+            [
+                sys.executable,
+                "src/extractor/pipeline/steps/01_annotation_processor.py",
+                "run",
+                str(pdf),
+                "-o",
+                str(doc_root),
+                "--images",
+                "--include-freetext",
+            ]
+        )
         if rc != 0:
             typer.secho(f"Stage 01 failed for {slug}", fg=typer.colors.RED)
             continue
@@ -117,15 +129,32 @@ def run(
                 typer.secho(f"No clean PDF found in {ann_stage_dir}", fg=typer.colors.RED)
                 continue
             bundle_path = doc_root / "05_bundle.json"
-            bundle_path.write_text(json.dumps({
-                "sections": [{"id": "_all", "bbox": [0,0,0,0], "page_start": 0, "page_end": 100000}],
-                "clean_pdf": str(clean_pdf)
-            }, indent=2))
-            rc = _run([
-                sys.executable,
-                "src/extractor/pipeline/steps/05_table_extractor.py",
-                "debug-bundle", str(bundle_path), "-o", str(doc_root)
-            ])
+            bundle_path.write_text(
+                json.dumps(
+                    {
+                        "sections": [
+                            {
+                                "id": "_all",
+                                "bbox": [0, 0, 0, 0],
+                                "page_start": 0,
+                                "page_end": 100000,
+                            }
+                        ],
+                        "clean_pdf": str(clean_pdf),
+                    },
+                    indent=2,
+                )
+            )
+            rc = _run(
+                [
+                    sys.executable,
+                    "src/extractor/pipeline/steps/05_table_extractor.py",
+                    "debug-bundle",
+                    str(bundle_path),
+                    "-o",
+                    str(doc_root),
+                ]
+            )
             if rc != 0:
                 typer.secho(f"Stage 05 failed for {slug}", fg=typer.colors.RED)
                 continue
@@ -149,20 +178,31 @@ def run(
                         continue
                     note = a.get("human_note")
                     parsed = _parse_human_note(note)
-                    if not parsed.get("id") or parsed.get("type") != "table" or not parsed.get("expected_json"):
+                    if (
+                        not parsed.get("id")
+                        or parsed.get("type") != "table"
+                        or not parsed.get("expected_json")
+                    ):
                         continue
                     gold_path = Path(parsed["expected_json"]).resolve()
                     if not gold_path.exists():
-                        doc_results.append({"id": parsed.get("id"), "error": f"gold_json_missing: {gold_path}"})
+                        doc_results.append(
+                            {"id": parsed.get("id"), "error": f"gold_json_missing: {gold_path}"}
+                        )
                         continue
                     gold = load_json(gold_path)
                     page_index = int(a.get("page", 1)) - 1
-                    ann_rect = a.get("original_rect") or a.get("expanded_rect") or [0,0,0,0]
+                    ann_rect = a.get("original_rect") or a.get("expanded_rect") or [0, 0, 0, 0]
                     match = best_table_match_for_annotation(tables_list, page_index, ann_rect)
                     if not match:
-                        entry: Dict[str, Any] = {"id": parsed.get("id"), "error": "no_extracted_table_match"}
+                        entry: Dict[str, Any] = {
+                            "id": parsed.get("id"),
+                            "error": "no_extracted_table_match",
+                        }
                         if retune_on_fail:
-                            best = retune_strategies_for_page(pdf, page_index, ann_rect, strategies=strategies)
+                            best = retune_strategies_for_page(
+                                pdf, page_index, ann_rect, strategies=strategies
+                            )
                             entry["retune_best"] = best
                         doc_results.append(entry)
                         continue
@@ -175,14 +215,18 @@ def run(
                         "match": cmp,
                     }
                     if retune_on_fail and not cmp.get("ok"):
-                        best = retune_strategies_for_page(pdf, page_index, ann_rect, strategies=strategies)
+                        best = retune_strategies_for_page(
+                            pdf, page_index, ann_rect, strategies=strategies
+                        )
                         result_entry["retune_best"] = best
                     doc_results.append(result_entry)
                 except Exception as e:
                     doc_results.append({"id": a.get("id"), "error": f"exception: {e}"})
 
             # Save per-doc summary
-            (doc_root / "summary_tables.json").write_text(json.dumps(doc_results, indent=2, ensure_ascii=False))
+            (doc_root / "summary_tables.json").write_text(
+                json.dumps(doc_results, indent=2, ensure_ascii=False)
+            )
             overall.append({"doc": slug, "tables": doc_results})
 
     # Save overall summary

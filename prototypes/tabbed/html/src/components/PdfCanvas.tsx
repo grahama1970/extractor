@@ -7,16 +7,12 @@ export function PdfCanvas({ doc, page, zoom = 1 }: { doc: PdfDoc; page: number; 
   React.useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    let cancelled = false;
+    const ctrl = new AbortController();
     (async () => {
-      await renderPageCanvas(doc, page, canvas, zoom);
-      if (cancelled) return;
+      await renderPageCanvas(doc, page, canvas, zoom, ctrl.signal);
     })();
-    return () => {
-      cancelled = true;
-    };
+    return () => ctrl.abort();
   }, [doc, page, zoom]);
 
   return <canvas ref={canvasRef} className="bg-white rounded" />;
 }
-

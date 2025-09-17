@@ -24,6 +24,7 @@ Example Usage:
 """
 
 import os
+
 os.environ["TOKENIZERS_PARALLELISM"] = "false"  # disables a tokenizers warning
 
 from collections import defaultdict
@@ -68,8 +69,10 @@ from extractor.core.schema.registry import register_block_class
 from extractor.core.util import strings_to_classes
 from extractor.core.processors.llm.llm_handwriting import LLMHandwritingProcessor
 from extractor.core.processors.order import OrderProcessor
+
 # MARKER FORK ADDITION START - LiteLLM service
 from extractor.core.services.litellm import LiteLLMService
+
 # MARKER FORK ADDITION END
 from extractor.core.processors.line_merge import LineMergeProcessor
 from extractor.core.processors.llm.llm_mathblock import LLMMathBlockProcessor
@@ -80,17 +83,17 @@ from extractor.core.processors.suspicious_header_fixer import SuspiciousHeaderFi
 from extractor.core.processors.block_relabel import BlockRelabelProcessor
 
 
-
 class PdfConverter(BaseConverter):
     """
     A converter for processing and rendering PDF files into Markdown, JSON, HTML and other formats.
     """
+
     override_map: Annotated[
         Dict[BlockTypes, Type[Block]],
         "A mapping to override the default block classes for specific block types.",
         "The keys are `BlockTypes` enum values, representing the types of blocks,",
         "and the values are corresponding `Block` class implementations to use",
-        "instead of the defaults."
+        "instead of the defaults.",
     ] = defaultdict()
     use_llm: Annotated[
         bool,
@@ -117,10 +120,10 @@ class PdfConverter(BaseConverter):
         # FontCaptureProcessor deprecated: font metadata is gathered directly
         # via provider spans or PyMuPDF in downstream processors.
         ReferenceProcessor,
-        SuspiciousHeaderFixer,    # ← fix mis-classifications
+        SuspiciousHeaderFixer,  # ← fix mis-classifications
         DebugProcessor,
     )
-    
+
     # LLM processors to be added conditionally when use_llm=True
     llm_processors: Tuple[BaseProcessor, ...] = (
         LLMTableProcessor,
@@ -140,7 +143,7 @@ class PdfConverter(BaseConverter):
         processor_list: Optional[List[str]] = None,
         renderer: str | None = None,
         llm_service: str | None = None,
-        config=None
+        config=None,
     ):
         super().__init__(config)
 
@@ -159,11 +162,17 @@ class PdfConverter(BaseConverter):
                     # Use default processors and append the additional ones
                     additional_processors_str = processor_list.replace("default+", "")
                     # Support comma-separated list of additional processors
-                    additional_processors = [p.strip() for p in additional_processors_str.split(",") if p.strip()]
-                    processor_list = list(self.default_processors) + strings_to_classes(additional_processors)
+                    additional_processors = [
+                        p.strip() for p in additional_processors_str.split(",") if p.strip()
+                    ]
+                    processor_list = list(self.default_processors) + strings_to_classes(
+                        additional_processors
+                    )
                 else:
                     # Assume it's a comma-separated list of processor classes
-                    processor_list = strings_to_classes(processor_list if isinstance(processor_list, list) else [processor_list])
+                    processor_list = strings_to_classes(
+                        processor_list if isinstance(processor_list, list) else [processor_list]
+                    )
             else:
                 processor_list = strings_to_classes(processor_list)
         else:
@@ -192,7 +201,7 @@ class PdfConverter(BaseConverter):
         # Ensure processor_list is a list of classes, not strings
         if isinstance(processor_list, tuple):
             processor_list = list(processor_list)
-            
+
         # Add LLM processors if use_llm is enabled
         if self.use_llm and processor_list == list(self.default_processors):
             # Only add LLM processors if we're using default processors
@@ -228,7 +237,7 @@ class PdfConverter(BaseConverter):
 
 def convert_single_pdf(pdf_path: str, **kwargs) -> str:
     """Convert a single PDF to markdown
-    
+
     Args:
         pdf_path: Path to the PDF file
         **kwargs: Additional options:
@@ -236,51 +245,53 @@ def convert_single_pdf(pdf_path: str, **kwargs) -> str:
             - langs: List of languages in the document
             - use_llm: Enable LLM processing for better quality
             - batch_multiplier: Increase batch size for faster processing (more VRAM)
-    
+
     Returns:
         Markdown string representation of the PDF
     """
     # Try full Surya-based conversion first
     try:
         from extractor.core.models import create_model_dict
-        
+
         # Create model dictionary
         # Check environment variable to force CPU usage
         device = None
         if os.getenv("FORCE_CPU", "").lower() == "true":
             device = "cpu"
             print("📱 Forcing CPU usage for Marker models (FORCE_CPU=true)")
-        
+
         models = create_model_dict(device=device)
-        
+
         # Try to use ConfigParser if available
         try:
             from extractor.core.config.parser import ConfigParser
-            
+
             # Create CLI-like options dict
             cli_options = {
                 "max_pages": kwargs.get("max_pages"),
-                "languages": ",".join(kwargs.get("langs", ["English"])),  # ConfigParser expects comma-separated string
+                "languages": ",".join(
+                    kwargs.get("langs", ["English"])
+                ),  # ConfigParser expects comma-separated string
                 "disable_multiprocessing": True,
                 "disable_tqdm": True,
-                "output_format": "markdown"
+                "output_format": "markdown",
             }
-            
+
             # Remove None values
             cli_options = {k: v for k, v in cli_options.items() if v is not None}
-            
+
             # Use ConfigParser to generate config
             config_parser = ConfigParser(cli_options)
             config = config_parser.generate_config_dict()
-            
+
             # Create the PDF converter with proper config
             converter = PdfConverter(
                 artifact_dict=models,
                 config=config,
                 processor_list=config_parser.get_processors(),
-                renderer=config_parser.get_renderer()
+                renderer=config_parser.get_renderer(),
             )
-            
+
         except ImportError:
             # Fallback if ConfigParser not available
             config = {
@@ -289,22 +300,19 @@ def convert_single_pdf(pdf_path: str, **kwargs) -> str:
                 "use_llm": kwargs.get("use_llm", False),
                 "batch_multiplier": kwargs.get("batch_multiplier", 1),
                 "disable_multiprocessing": True,
-                "disable_tqdm": True
+                "disable_tqdm": True,
             }
-            
+
             # Remove None values
             config = {k: v for k, v in config.items() if v is not None}
-            
+
             # Create the PDF converter
-            converter = PdfConverter(
-                artifact_dict=models,
-                config=config
-            )
-        
+            converter = PdfConverter(artifact_dict=models, config=config)
+
         # Convert the PDF
         markdown_output = converter(pdf_path)
         return markdown_output
-        
+
     except Exception as e:
         # FAIL FAST - NO FALLBACK TO PYMUPDF EVER!
         print(f"❌ FATAL: Surya conversion failed: {e}")
@@ -316,108 +324,114 @@ if __name__ == "__main__":
     # Test PDF conversion functionality with REAL PDF files
     print("🧪 Testing PDF Converter with Real Data")
     print("=" * 50)
-    
+
     import os
     import time
     from pathlib import Path
-    
+
     # Test 1: Convert the actual research paper PDF
     print("\n📝 Test 1: Convert Real Research Paper (2505.03335v2.pdf)")
     test_pdf_path = "/home/graham/workspace/experiments/extractor/data/input/2505.03335v2.pdf"
-    
+
     if os.path.exists(test_pdf_path):
         try:
             start_time = time.time()
             result = convert_single_pdf(test_pdf_path, max_pages=5)
             elapsed_time = time.time() - start_time
-            
+
             # Check that we got real content, not placeholder
             assert isinstance(result, str), "Result should be string"
             assert len(result) > 1000, f"Result too short ({len(result)} chars), likely placeholder"
             assert "placeholder" not in result.lower(), "Result contains placeholder text"
             assert "Error Converting" not in result, "Result is error message"
-            
+
             print(f"✅ PDF conversion successful!")
             print(f"   - Processed in {elapsed_time:.2f} seconds")
             print(f"   - Output length: {len(result):,} characters")
             print(f"   - First 200 chars: {result[:200]}...")
-            
+
             # Save output for inspection
             output_path = Path(test_pdf_path).parent / f"{Path(test_pdf_path).stem}_extracted.md"
-            with open(output_path, 'w') as f:
+            with open(output_path, "w") as f:
                 f.write(result)
             print(f"   - Saved to: {output_path}")
-            
+
         except Exception as e:
             print(f"❌ PDF conversion failed: {e}")
             import traceback
+
             traceback.print_exc()
     else:
         print(f"⚠️  Test PDF not found: {test_pdf_path}")
-    
+
     # Test 2: Check if we can extract title from the PDF
     print("\n📝 Test 2: Verify Content Extraction Quality")
-    if 'result' in locals() and len(result) > 1000:
+    if "result" in locals() and len(result) > 1000:
         # Check for expected content in the research paper
         content_checks = {
             "title": "Absolute Zero" in result or "absolute zero" in result,
             "sections": "#" in result,  # Markdown headers
             "paragraphs": "\n\n" in result,  # Paragraph breaks
-            "length": len(result) > 10000  # Substantial content
+            "length": len(result) > 10000,  # Substantial content
         }
-        
+
         print("Content quality checks:")
         for check, passed in content_checks.items():
             status = "✅" if passed else "❌"
             print(f"   {status} {check}: {'PASS' if passed else 'FAIL'}")
-        
+
         # Try to find specific content
         if "Abstract" in result or "abstract" in result:
             print("   ✅ Found abstract section")
         if "Introduction" in result or "introduction" in result:
             print("   ✅ Found introduction section")
-    
+
     # Test 3: Compare with other format extractions
     print("\n📝 Test 3: Check Other Format Files")
     other_formats = [
         "/home/graham/workspace/experiments/extractor/data/input/2505.03335v2.docx",
         "/home/graham/workspace/experiments/extractor/data/input/2505.03335v2.md",
-        "/home/graham/workspace/experiments/extractor/data/input/2505.03335v2_extracted.txt"
+        "/home/graham/workspace/experiments/extractor/data/input/2505.03335v2_extracted.txt",
     ]
-    
+
     for file_path in other_formats:
         if os.path.exists(file_path):
             file_size = os.path.getsize(file_path)
             print(f"   ✓ Found {Path(file_path).name} ({file_size:,} bytes)")
         else:
             print(f"   ✗ Missing {Path(file_path).name}")
-    
+
     # Test 4: Check processor availability
     print("\n📝 Test 4: Available Processors")
     try:
         available_processors = []
         for processor in PdfConverter.default_processors:
             available_processors.append(processor.__name__)
-        
+
         print(f"✅ Found {len(available_processors)} processors")
-        key_processors = ["TableProcessor", "EquationProcessor", "TextProcessor", "SectionHeaderProcessor"]
+        key_processors = [
+            "TableProcessor",
+            "EquationProcessor",
+            "TextProcessor",
+            "SectionHeaderProcessor",
+        ]
         for proc in key_processors:
             if any(proc in p for p in available_processors):
                 print(f"   ✓ {proc} available")
             else:
                 print(f"   ✗ {proc} missing")
-            
+
     except Exception as e:
         print(f"❌ Processor check failed: {e}")
-    
+
     print("\n" + "=" * 50)
-    
+
     # Final verdict
-    if 'result' in locals() and len(result) > 10000 and "placeholder" not in result.lower():
+    if "result" in locals() and len(result) > 10000 and "placeholder" not in result.lower():
         print("✅ PDF extraction is working correctly!")
         print(f"   Successfully extracted {len(result):,} characters from PDF")
     else:
         print("❌ PDF extraction needs fixing - returning placeholder or error")
         print("   Next step: Implement proper Surya model initialization")
-    
+
     print("=" * 50)

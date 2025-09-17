@@ -25,6 +25,7 @@ class LineNumbersProcessor(BaseProcessor):
     """
     A processor for ignoring line numbers.
     """
+
     block_types = (BlockTypes.Text, BlockTypes.TextInlineMath)
     strip_numbers_threshold: Annotated[
         float,
@@ -43,7 +44,7 @@ class LineNumbersProcessor(BaseProcessor):
     min_line_number_span_ratio: Annotated[
         float,
         "The minimum ratio of detected line number spans to total lines required to treat them as line numbers.",
-    ] = .6
+    ] = 0.6
 
     def __init__(self, config):
         super().__init__(config)
@@ -64,13 +65,19 @@ class LineNumbersProcessor(BaseProcessor):
                 line_count += 1
                 leftmost_span = None
                 for span in block.contained_blocks(document, (BlockTypes.Span,)):
-                    if leftmost_span is None or span.polygon.x_start < leftmost_span.polygon.x_start:
+                    if (
+                        leftmost_span is None
+                        or span.polygon.x_start < leftmost_span.polygon.x_start
+                    ):
                         leftmost_span = span
 
                 if leftmost_span is not None and leftmost_span.text.strip().isnumeric():
                     line_number_spans.append(leftmost_span)
 
-            if line_count > 0 and len(line_number_spans) / line_count > self.min_line_number_span_ratio:
+            if (
+                line_count > 0
+                and len(line_number_spans) / line_count > self.min_line_number_span_ratio
+            ):
                 for span in line_number_spans:
                     span.ignore_for_output = True
 
@@ -83,10 +90,13 @@ class LineNumbersProcessor(BaseProcessor):
                     continue
 
                 tokens_are_numbers = [token.isdigit() for token in tokens]
-                if all([
-                    sum(tokens_are_numbers) / len(tokens) > self.strip_numbers_threshold,
-                    block.polygon.height > block.polygon.width  # Ensure block is taller than it is wide, like vertical page numbers
-                ]):
+                if all(
+                    [
+                        sum(tokens_are_numbers) / len(tokens) > self.strip_numbers_threshold,
+                        block.polygon.height
+                        > block.polygon.width,  # Ensure block is taller than it is wide, like vertical page numbers
+                    ]
+                ):
                     block.ignore_for_output = True
 
     def ignore_line_starts_ends(self, document: Document):
@@ -109,15 +119,19 @@ class LineNumbersProcessor(BaseProcessor):
                         continue
 
                     raw_text = line.raw_text(document)
-                    starts = all([
-                        spans[0].text.strip().isdigit(),
-                        len(raw_text) - len(spans[0].text.strip()) > self.min_line_length
-                    ])
+                    starts = all(
+                        [
+                            spans[0].text.strip().isdigit(),
+                            len(raw_text) - len(spans[0].text.strip()) > self.min_line_length,
+                        ]
+                    )
 
-                    ends = all([
-                        spans[-1].text.strip().isdigit(),
-                        len(raw_text) - len(spans[-1].text.strip()) > self.min_line_length
-                    ])
+                    ends = all(
+                        [
+                            spans[-1].text.strip().isdigit(),
+                            len(raw_text) - len(spans[-1].text.strip()) > self.min_line_length,
+                        ]
+                    )
 
                     starts_with_number.append(starts)
                     ends_with_number.append(ends)

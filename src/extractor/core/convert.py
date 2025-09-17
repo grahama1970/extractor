@@ -5,6 +5,7 @@ config machinery.  It wraps the heavy-duty `PdfConverter` but forces the
 `JSONRenderer`, then returns a plain Python `dict` (or prints JSON when used
 as CLI).
 """
+
 from __future__ import annotations
 
 import argparse
@@ -57,19 +58,20 @@ def convert_pdf_to_json(pdf_path: str, **config_overrides: Any) -> Dict[str, Any
 
     # Prepare converter with forced JSON renderer and FontStyleProcessor
     models = create_model_dict()
-    
+
     # Store PDF path globally so FontStyleProcessor can access it
     import extractor.core.processors.font_style
+
     extractor.core.processors.font_style._global_pdf_path = pdf_path
-    
+
     # Build processor list with font and suspicious header processors
     # Use comma-separated list for multiple additional processors
     additional_processors = [
         f"{FontStyleProcessor.__module__}.{FontStyleProcessor.__name__}",
-        f"{SuspiciousHeaderProcessor.__module__}.{SuspiciousHeaderProcessor.__name__}"
+        f"{SuspiciousHeaderProcessor.__module__}.{SuspiciousHeaderProcessor.__name__}",
     ]
     processor_list = f"default+{','.join(additional_processors)}"
-    
+
     converter = PdfConverter(
         artifact_dict=models,
         renderer="extractor.core.renderers.json.JSONRenderer",
@@ -94,9 +96,11 @@ _EXT_TO_FUNC = {
     ".xml": "convert_html_to_json",
 }
 
+
 def _import_converter(module_path: str, class_name: str):
     """Attempt dynamic import and return class or raise informative error."""
     from importlib import import_module
+
     try:
         mod = import_module(module_path)
         return getattr(mod, class_name)
@@ -144,6 +148,7 @@ def convert_file_to_json(file_path: str, **config_overrides):
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
+
 
 def _cli() -> None:
     parser = argparse.ArgumentParser(

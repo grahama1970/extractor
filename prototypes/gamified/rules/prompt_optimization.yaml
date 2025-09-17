@@ -1,0 +1,124 @@
+
+schema: prompt_optimization/v1
+id: prompt_optimization
+version: 1.0.0
+updated_at: "2025-09-15"
+updated_by: "assistant"
+notes: >
+  Rules for auto-validating and optimizing gamified run specs before launching
+  3 Codex instances. Stable v1 schema; backward-compatible extensions should bump minor.
+
+required_sections:
+  order: [codebase, approaches, runner, scoring, constraints, evidence, execution, references, tasks]
+  must_exist: [approaches, scoring, constraints, evidence, execution]
+
+approach:
+  name_pattern: '^[a-z][a-z0-9_]{2,40}$'
+  disallowed_words: [draft, test, tmp, foo, bar]
+  required_fields: [name, summary, verification, outputs]
+  min_count: 3
+  max_count: 5
+  canonical_prefix: ""
+  autofix:
+    canonicalize_names: true
+    enforce_snake_case: true
+    trim_length: true
+
+verification:
+  allowed_models:
+    - PDE
+    - MPC
+    - MIQP
+    - GradShafranov
+    - MHD
+    - RL
+    - HeatTransport
+    - ROM
+  require_constraints: true
+
+scoring:
+  defaults:
+    weights: { correctness: 35, robustness: 25, speed: 25, brevity: 15 }
+  bounds_per_axis:
+    correctness: [0, 60]
+    robustness: [0, 40]
+    speed: [0, 40]
+    brevity: [0, 20]
+  sum_must_equal: 100
+  normalize_if_needed: true
+  hard_gates:
+    - expr: "constraints_ok == false"
+      effect: "fail_correctness"  # judge should set correctness to 0
+
+constraints:
+  global_keys:
+    - edge_density_threshold
+    - q_min
+    - beta_max
+    - heat_flux_peak_max
+  require_all_global: true
+  allow_per_approach_overrides: true
+  defaults:
+    edge_density_threshold: "define"
+    q_min: "define"
+    beta_max: "define"
+    heat_flux_peak_max: "define"
+
+evidence_schema:
+  required:
+    - key: stability_margin
+      type: number
+      min: 0.0
+    - key: density_ok
+      type: boolean
+    - key: heat_flux_peak
+      type: number
+      max: "heat_flux_peak_max"
+    - key: constraints_ok
+      type: boolean
+  acceptance:
+    any_of:
+      - "constraints_ok == true"
+
+execution_defaults:
+  concurrency: 3
+  codex_exec: true
+  autostart_backend: true
+  autostart_dashboard: true
+  backend_url_policy:
+    allow_http_local: true
+    forbid_public_urls: true
+
+style:
+  forbid_words: [maybe, might, try, could]
+  enforce_active_voice: true
+  max_summary_chars: 350
+  reference_limits:
+    max_count: 10
+    require_url: false
+
+optimizer:
+  autofix:
+    inject_missing_sections: true
+    normalize_section_order: true
+    normalize_weights: true
+    build_evidence_checklist: true
+    add_pre_run_tasks: true
+  fail_on_missing: [constraints, evidence]
+  warn_on: [references_excess, long_summary, forbidden_words]
+  conflict_resolution:
+    - prefer_rules_defaults_when_undefined
+    - keep_user_values_when_in_bounds
+
+runner_policy:
+  default_runner: analysis_sim
+  bench_mapping:
+    analysis_sim:
+      requires:
+        - "bench/cli.py"
+        - "bench/scoring.py"
+        - "bench/harness.py"
+        - "bench/types.py"
+
+function_signatures:
+  required_exports: []

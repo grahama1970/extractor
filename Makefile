@@ -1,52 +1,482 @@
-.PHONY: healthcheck verify-env pipeline-health dev-backend dev-web dev-proto dev-all lint format test typecheck
+BASE_URL ?= http://127.0.0.1:8080
+CDP_URL  ?= http://127.0.0.1:3000/json/version
+PY       ?= .venv/bin/python
 
-# Verify full network access, no filesystem sandbox, and ArangoDB connectivity
-healthcheck: verify-env
 
-verify-env:
-	bash scripts/verify_environment.sh
+.PHONY: coco-export smoke-tabbed-api help setup setup-smokes smokes-python dev stop lint fmt type test api-smokes ux-health smokes ci scaffold smoke-issue \
+	gamified-e2e gamified-all gamified-all-fast gamified-codex gamified-cli \
+	smoke-litellm smoke-litellm-image smoke-litellm-all smoke-litellm-results \
+	smoke-07-reflow-min bundle-tabbed
 
-# Run full pipeline CLI verification (real network + Arango)
-pipeline-health:
-	bash scripts/verify_pipeline_cli.sh
+help:
+	@echo "Common targets:"
+	@echo "  make setup         # create venv + install dev deps (uv if available)"
+	@echo "  make dev           # start backend + vite (scripts/dev.sh)"
+	@echo "  make stop          # kill 8080/8001"
+	@echo "  make lint fmt type test  # fast gates"
+	@echo "  make api-smokes    # API-only smokes (no browser)"
+	@echo "  make ux-health     # basic UX health gate (CDP)"
+	@echo "  make smokes        # full UX smokes (requires live servers + CDP)"
+	@echo "  make ci            # local CI gate (server checks + full suite)"
+	@echo "  make scaffold ISSUE=007 TITLE=\"label button\"  # scaffold issue + smoke"
+	@echo "  make smoke-issue ISSUE=007                        # run that issue smoke"
+	@echo "  make gamified-e2e  # run gamified e2e smoke (Codex path, fast)"
+	@echo "  make gamified-all  # run all gamified smokes"
+	@echo "  make gamified-codex# run Codex exec smoke (requires codex)"
+	@echo "  make gamified-cli  # optional CLI-runner for gamified smokes"
+	@echo "  make gamified-weblog # Test FastAPI web log server (proto dashboard + ingest)"
+	@echo "  make gamified-e2e-web # Start backend on a free port, run Codex, assert /proto/dashboard"
+	@echo "  make gamified-ui-smoke # Run Puppeteer smoke against running dashboard (BASE_URL required)"
+	@echo "  make lessons-setup   # ensure ArangoDB collections/view for lessons (ARANGO_URL/DB/USER/PASS)"
+	@echo "  make lessons-add TITLE=... PROBLEM=... PLAYBOOK=... TAGS=cdp,proxy SCOPE=tabbed"
+	@echo "  make lessons-search Q=cdp TAGS=proxy,dev  # BM25 search"
+	@echo "  make lessons-recall Q='cdp puppeteer hang' TAGS=cdp SCOPE=tabbed  # agent recall"
+	@echo "  make lessons-recall-last  # derive query from latest scripts/artifacts/*.log"
+	@echo "  make lessons-seed-demo COUNT=50 SCOPE=tabbed  # seed demo lessons"
+	@echo "  make lessons-delete-demo [BATCH=...]          # delete demo lessons (optionally by batch)"
+	@echo "  make lessons-status-report                    # generate MD summary from pytest JSON"
+	@echo "  make lessons-http-smokes                      # run HTTP-only endpoint tests (server must be running)"
+	@echo "  make lessons-recall-diff Q='...' [SCOPE=...] # show BM25 vs Fused side-by-side"
+	@echo "  make lessons-delete KEY=...  # or TITLE=... SCOPE=..."
+	@echo "  make lessons-link FROM_KEY=... TO_KEY=... RATIONALE='...' WEIGHT=0.7  # or use FROM_TITLE/FROM_SCOPE and TO_TITLE/TO_SCOPE"
+	@echo "  make lessons-related KEY=... [DIR=both|out|in]  # list neighbors"
+	@echo "  make lessons-multihop KEY=... DEPTH=2 DIR=ANY K=5  # multi-hop traversal with weights"
+	@echo "  make setup-smokes   # create lean venv with only smoke/runtime deps"
+	@echo "  make smokes-python  # run Python-only smokes with PYTHONPATH=src"
+	@echo "  make quick-pipeline # run 01→09 & 14 with gold checks; skip heavy 10–11"
+	@echo "  make pipeline-full  # run all stages (01→14) end-to-end (requires keys/DB)"
+	@echo "  make smokes-pipeline-offline  # run offline pipeline smokes (no DB/LLM)"
+	@echo "  make run-all-offline         # run run_all offline on fixture PDF"
+	@echo "  make smokes-pipeline-db      # run DB-backed Stage 10→12 smokes (Arango required)"
+	@echo "  make arango-clean-db         # drop test DB (ARANGO_DATABASE)"
+	@echo "  make smokes-pipeline-happy   # single-command happy-path run + gold validation"
+	@echo "  make steps-happy             # run happy path on BHT and print report/summary paths"
+	@echo "  make smokes-pipeline-skip01  # happy-path with external annotations (skip Stage 01)"
+		@echo "  make smokes-pipeline-api-upsert  # run extract + upsert API smoke (Arango required)"
+		@echo "  make smokes-pipeline-api-chat    # run chat smoke (after upsert)"
+		@echo "  make smoke-ui-extract-load       # UI smoke (server must be running)"
+		@echo "  make smoke-ui-extract-load-cdp   # UI CDP smoke (Chrome --remote-debugging-port=9222)"
+		@echo "  make ux-autofix                   # Detect Vite overlay via CDP/Puppeteer and auto-fix JSX"
+		@echo "  make lint-ruff-extractor         # Run Ruff only on extractor src/ (focused)"
+	@echo "  make smokes-api-external     # API bridge: run-external with UI boxes"
+	@echo "  make bootstrap-smokes # Install minimal deps to run smokes (venv + PYTHONPATH)"
+	@echo "  make prompt-opt PROMPT=path.md        # Optimize a raw prompt"
+	@echo "  make prompt-compile RESEARCH=path.md  # Compile research to a prompt (LLM)"
+	@echo "  make prompt-run PROMPT=path.md        # Optimize then run Show & Tell (3 instances)"
+	@echo "  make smoke-07-reflow-min  # minimal Stage 07 reflow smoke (results mode)"
+	@echo "  make smoke-ui        # Playwright CDP console-error smoke"
+	@echo "  make smoke-ui-strict # Same, exits non-zero and prints artifacts"
 
-# ----------------------
-# Developer convenience
-# ----------------------
+setup:
+	@if command -v uv >/dev/null 2>&1; then \
+		uv venv; \
+		. .venv/bin/activate && uv pip install -e .[dev]; \
+	else \
+		python3 -m venv .venv && . .venv/bin/activate && pip install -U pip && pip install -e .[dev]; \
+	fi
 
-dev-backend:
-	. .venv/bin/activate && set -a && [ -f .env ] && . .env && set +a && \
-	python -m extractor.core.scripts.server --host 127.0.0.1 --port 8000
+# Lean environment for Python smokes only (no heavy dev extras)
+setup-smokes:
+	python3 -m venv .venv && \
+	. .venv/bin/activate && \
+	python -m ensurepip --upgrade && \
+	python -m pip install -U pip && \
+	python -m pip install "litellm>=1.74.7" python-dotenv typer httpx loguru pillow urlextract strip_tags tqdm json-repair PyMuPDF camelot-py opencv-python-headless pandas tenacity && \
+	python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
 
-dev-web:
-	cd tools/gold_annotator_web && npm install && \
-	NEXT_PUBLIC_API_PROXY=$${NEXT_PUBLIC_API_PROXY:-http://localhost:8000} npm run dev
+# Optional: use uv to install only the minimal smokes extra
+setup-smokes-uv:
+	uv venv; \
+	. .venv/bin/activate && uv pip install -e .[smokes]
 
-dev-proto:
-	cd prototypes/tabbed/html && npm install && \
-	VITE_API_PROXY=$${VITE_API_PROXY:-http://localhost:8000} npm run dev
+dev:
+	./scripts/dev.sh
 
-# Run backend + Next.js together (press Ctrl+C to stop)
-dev-all:
-	@echo "Starting backend (8000) and Next.js (app dev) ..."; \
-	( \
-	  (. .venv/bin/activate && set -a && [ -f .env ] && . .env && set +a && \
-	   python -m extractor.core.scripts.server --host 127.0.0.1 --port 8000) & \
-	); \
-	BACKEND_PID=$$!; \
-	( cd tools/gold_annotator_web && npm install && NEXT_PUBLIC_API_PROXY=$${NEXT_PUBLIC_API_PROXY:-http://localhost:8000} npm run dev ) & \
-	WEB_PID=$$!; \
-	trap 'kill $$BACKEND_PID $$WEB_PID 2>/dev/null || true' INT TERM; \
-	wait
+stop:
+	- fuser -k 8080/tcp 2>/dev/null || true
+	- fuser -k 8001/tcp 2>/dev/null || true
 
 lint:
-	. .venv/bin/activate && ruff check src/extractor tests
+	- ruff check .
 
-format:
-	. .venv/bin/activate && black src tests scripts
+fmt:
+	- black --check .
+
+type:
+	- mypy src
 
 test:
-	. .venv/bin/activate && pytest -q
+	- pytest -q
 
-typecheck:
-	. .venv/bin/activate && mypy src/extractor/core
+api-smokes:
+	BASE_URL=$(BASE_URL) node scripts/smokes/api_generate_model.mjs
+
+coco-export:
+	node scripts/smokes/api_coco_export.mjs
+
+
+smoke-tabbed-api:
+	@echo "[smoke-tabbed-api] Running Tabbed backend API smokes..."
+	node scripts/smokes/api_tabbed_basic.mjs && 	node scripts/smokes/api_coco_export.mjs && 	node scripts/smokes/api_suggest_tables.mjs && 	node scripts/smokes/api_pipeline_job.mjs
+
+
+ux-health:
+	BASE_URL=$(BASE_URL) BROWSERLESS_DISCOVERY_URL=$(CDP_URL) node scripts/ux_check_cdp_auto.mjs
+
+smokes:
+	BASE_URL=$(BASE_URL) BROWSERLESS_DISCOVERY_URL=$(CDP_URL) node scripts/smokes/all.mjs
+
+ci:
+	BASE_URL=$(BASE_URL) BROWSERLESS_DISCOVERY_URL=$(CDP_URL) bash scripts/ci_local.sh
+
+scaffold:
+	node scripts/tools/scaffold_tabbed_issue.mjs --dir prototypes/tabbed/issues --id "$(ISSUE)" --title "$(TITLE)"
+
+smoke-issue:
+	BASE_URL=$(BASE_URL) node scripts/smokes/issue_$(ISSUE).mjs
+
+# --- Gamified targets ---
+
+PYTEST ?= pytest
+
+gamified-e2e:
+	. .venv/bin/activate 2>/dev/null || true; PYTHONPATH=./src GAMIFIED_FAST_BENCH=1 $(PYTEST) -q tests/smoke/gamified/test_prompt_to_web_logging.py
+
+gamified-all:
+	. .venv/bin/activate 2>/dev/null || true; PYTHONPATH=./src $(PYTEST) -q tests/smoke/gamified
+
+gamified-all-fast:
+	. .venv/bin/activate 2>/dev/null || true; PYTHONPATH=./src GAMIFIED_FAST_BENCH=1 $(PYTEST) -q tests/smoke/gamified
+
+gamified-codex:
+	. .venv/bin/activate 2>/dev/null || true; PYTHONPATH=./src RUN_CODEX_SMOKE=1 GAMIFIED_FAST_BENCH=1 $(PYTEST) -q tests/smoke/gamified/test_codex_exec_path.py
+
+gamified-cli:
+	. .venv/bin/activate 2>/dev/null || true; PYTHONPATH=./src python scripts/smokes/gamified/run_all.py
+
+gamified-cli-uv:
+	./scripts/gamified_cli_uv.py --help || true
+
+gamified-status-uv:
+	./scripts/gamified_status_uv.py --help || true
+
+# Launch three Codex instances (mul_shift_add, mul_karatsuba, mul_chunked) and return results
+gamified-3x:
+	. .venv/bin/activate 2>/dev/null || true; PYTHONPATH=./src GAMIFIED_FAST_BENCH=1 $(PYTEST) -q tests/smoke/gamified/test_three_codex_instances.py
+
+gamified-weblog:
+	. .venv/bin/activate 2>/dev/null || true; PYTHONPATH=./src $(PYTEST) -q tests/smoke/gamified/test_web_log_server.py
+
+gamified-e2e-web:
+	. .venv/bin/activate 2>/dev/null || true; PYTHONPATH=./src GAMIFIED_FAST_BENCH=1 $(PYTEST) -q tests/smoke/gamified/test_weblog_e2e_codex.py
+
+gamified-ui-smoke:
+	cd prototypes/gamified/dashboard && npm run smoke:ui
+
+.PHONY: coco-export smoke-tabbed-api gamified-show
+gamified-show:
+	./scripts/gamified_show_and_tell.py --codebase .
+
+# --- Lessons (ArangoDB) ---
+LESSON_TITLE ?=
+LESSON_PROBLEM ?=
+LESSON_PLAYBOOK ?=
+LESSON_TAGS ?=
+LESSON_SCOPE ?= tabbed
+
+lessons-setup:
+	. .venv/bin/activate 2>/dev/null || true; \
+		.venv/bin/python -m pip install -q arango-python-driver typer >/dev/null 2>&1 || true; \
+		.venv/bin/python scripts/lessons/setup.py
+
+lessons-add:
+	. .venv/bin/activate 2>/dev/null || true; \
+		.venv/bin/python -m pip install -q arango-python-driver typer >/dev/null 2>&1 || true; \
+		.venv/bin/python scripts/lessons/add.py --title "$(LESSON_TITLE)" --problem "$(LESSON_PROBLEM)" --playbook "$(LESSON_PLAYBOOK)" --tags "$(LESSON_TAGS)" --scope "$(LESSON_SCOPE)"
+
+lessons-search:
+	. .venv/bin/activate 2>/dev/null || true; \
+		.venv/bin/python -m pip install -q arango-python-driver typer >/dev/null 2>&1 || true; \
+		.venv/bin/python scripts/lessons/search.py --q "$(Q)" --tags "$(TAGS)"
+
+lessons-recall:
+	PYTHONPATH=. ARANGO_URL=$${ARANGO_URL:-http://127.0.0.1:8529} ARANGO_DB=$${ARANGO_DB:-lessons} ARANGO_USER=$${ARANGO_USER:-root} ARANGO_PASS=$${ARANGO_PASS:-openSesame} \
+	uv run scripts/lessons/recall_agent.py --q "$(Q)" --tags "$(TAGS)" --scope "$(SCOPE)" --k $${K:-5}
+
+lessons-recall-last:
+	PYTHONPATH=. ARANGO_URL=$${ARANGO_URL:-http://127.0.0.1:8529} ARANGO_DB=$${ARANGO_DB:-lessons} ARANGO_USER=$${ARANGO_USER:-root} ARANGO_PASS=$${ARANGO_PASS:-openSesame} \
+	uv run scripts/lessons/recall_agent.py --from-latest-log --tags "$(TAGS)" --scope "$(SCOPE)" --k $${K:-5}
+
+lessons-seed-demo:
+	@if command -v lessons-seed >/dev/null 2>&1; then \
+		ARANGO_URL=$${ARANGO_URL:-http://127.0.0.1:8529} ARANGO_DB=$${ARANGO_DB:-lessons} ARANGO_USER=$${ARANGO_USER:-root} ARANGO_PASS=$${ARANGO_PASS:-openSesame} \
+		lessons-seed --count $${COUNT:-50} $$( [ -n "$(SCOPE)" ] && echo --scope "$(SCOPE)" || true ) $$( [ -n "$(BATCH)" ] && echo --batch "$(BATCH)" || true ); \
+	else \
+		PYTHONPATH=. ARANGO_URL=$${ARANGO_URL:-http://127.0.0.1:8529} ARANGO_DB=$${ARANGO_DB:-lessons} ARANGO_USER=$${ARANGO_USER:-root} ARANGO_PASS=$${ARANGO_PASS:-openSesame} \
+		uv run scripts/lessons/seed_demo.py --count $${COUNT:-50} $$( [ -n "$(SCOPE)" ] && echo --scope "$(SCOPE)" || true ) $$( [ -n "$(BATCH)" ] && echo --batch "$(BATCH)" || true ); \
+	fi
+
+lessons-delete-demo:
+	PYTHONPATH=. ARANGO_URL=$${ARANGO_URL:-http://127.0.0.1:8529} ARANGO_DB=$${ARANGO_DB:-lessons} ARANGO_USER=$${ARANGO_USER:-root} ARANGO_PASS=$${ARANGO_PASS:-openSesame} \
+	uv run scripts/lessons/delete_demo.py $$( [ -n "$(BATCH)" ] && echo --demo-batch "$(BATCH)" || true )
+
+lessons-delete:
+	PYTHONPATH=. ARANGO_URL=$${ARANGO_URL:-http://127.0.0.1:8529} ARANGO_DB=$${ARANGO_DB:-lessons} ARANGO_USER=$${ARANGO_USER:-root} ARANGO_PASS=$${ARANGO_PASS:-openSesame} \
+	uv run scripts/lessons/delete.py --key "$(KEY)" --title "$(TITLE)" --scope "$(SCOPE)"
+
+lessons-link:
+	PYTHONPATH=. ARANGO_URL=$${ARANGO_URL:-http://127.0.0.1:8529} ARANGO_DB=$${ARANGO_DB:-lessons} ARANGO_USER=$${ARANGO_USER:-root} ARANGO_PASS=$${ARANGO_PASS:-openSesame} \
+	uv run scripts/lessons/link.py --from-key "$(FROM_KEY)" --to-key "$(TO_KEY)" --from-title "$(FROM_TITLE)" --from-scope "$(FROM_SCOPE)" --to-title "$(TO_TITLE)" --to-scope "$(TO_SCOPE)" --rationale "$(RATIONALE)" --weight $${WEIGHT:-0.5}
+
+lessons-related:
+	PYTHONPATH=. ARANGO_URL=$${ARANGO_URL:-http://127.0.0.1:8529} ARANGO_DB=$${ARANGO_DB:-lessons} ARANGO_USER=$${ARANGO_USER:-root} ARANGO_PASS=$${ARANGO_PASS:-openSesame} \
+	uv run scripts/lessons/related.py --key "$(KEY)" --title "$(TITLE)" --scope "$(SCOPE)" --direction $${DIR:-both} --k $${K:-10}
+
+lessons-multihop:
+	PYTHONPATH=. ARANGO_URL=$${ARANGO_URL:-http://127.0.0.1:8529} ARANGO_DB=$${ARANGO_DB:-lessons} ARANGO_USER=$${ARANGO_USER:-root} ARANGO_PASS=$${ARANGO_PASS:-openSesame} \
+	uv run scripts/lessons/multihop.py --key "$(KEY)" --title "$(TITLE)" --scope "$(SCOPE)" --depth $${DEPTH:-2} --direction $${DIR:-ANY} --limit $${K:-5}
+
+bootstrap-smokes:
+	@echo "Ensuring venv and minimal smoke deps..."
+	@if [ ! -d .venv ]; then python3 -m venv .venv; fi
+	. .venv/bin/activate; \
+		.venv/bin/python -m ensurepip --upgrade >/dev/null 2>&1 || true; \
+		.venv/bin/pip3 install --break-system-packages -q \
+			pytest fastapi uvicorn httpx typer numpy requests python-dotenv pydantic-settings loguru tqdm starlette pydantic python-arango tenacity pyyaml litellm >/dev/null 2>&1 || true; \
+		echo "Done. Use: source .venv/bin/activate && export PYTHONPATH=./src"
+
+.PHONY: coco-export smoke-tabbed-api arango-up arango-down
+arango-up:
+	docker compose -f docker-compose.arango.yml up -d
+
+arango-down:
+	docker compose -f docker-compose.arango.yml down -v
+
+# --- litellm_call smokes (utility-level) ---
+smoke-litellm:
+	$(PY) scripts/smokes/litellm_call_smoke.py sanity
+
+smoke-litellm-image:
+	$(PY) scripts/smokes/litellm_call_smoke.py image-url
+
+smoke-litellm-all: smoke-litellm smoke-litellm-image
+
+# Save structured artifacts (sanitized request/messages)
+smoke-litellm-results:
+	$(PY) scripts/smokes/litelllm/call2_sanity.py sanity && \
+	$(PY) scripts/smokes/litelllm/call2_sanitize_modes.py all
+
+# Extended smokes: local file path, streaming, and batch
+smoke-litellm-local:
+	$(PY) scripts/smokes/litellm_call_smoke.py local-image
+
+smoke-litellm-stream:
+	$(PY) scripts/smokes/litellm_call_smoke.py stream
+
+# --- Pipeline offline smokes ---
+.PHONY: smokes-pipeline-offline run-all-offline
+smokes-pipeline-offline:
+	. .venv/bin/activate 2>/dev/null || true; \
+		python scripts/smokes/smoke_stage03_skip_llm.py -o data/results/pipeline_smoke_tmp03 && \
+		python scripts/smokes/smoke_stage06_skip_descriptions.py -o data/results/pipeline_smoke_tmp06 && \
+		python scripts/smokes/smoke_stage08_skip_proving.py -o data/results/pipeline_smoke_tmp08 && \
+		python scripts/smokes/smoke_stage10_skip_embeddings.py -o data/results/pipeline_smoke_tmp10 && \
+		python scripts/smokes/smoke_stage11_skip_graph.py -o data/results/pipeline_smoke_tmp11
+
+run-all-offline:
+	. .venv/bin/activate 2>/dev/null || true; \
+		PYTHONPATH=./src python scripts/smokes/smoke_run_all_offline.py -o data/results/pipeline_smoke_offline
+
+.PHONY: smokes-pipeline-db arango-clean-db
+smokes-pipeline-db:
+	. .venv/bin/activate 2>/dev/null || true; \
+		python scripts/smokes/pipeline/smoke_stage10_export_db.py -o data/results/pipeline_db_smoke && \
+		python scripts/smokes/pipeline/smoke_stage11_graph_db.py -o data/results/pipeline_db_smoke && \
+		python scripts/smokes/pipeline/smoke_stage12_annotations_db.py -o data/results/pipeline_db_smoke
+
+arango-clean-db:
+	. .venv/bin/activate 2>/dev/null || true; \
+		python -c "import os,sys; from arango import ArangoClient; host=os.getenv('ARANGO_HOST','localhost'); port=int(os.getenv('ARANGO_PORT',8529)); user=os.getenv('ARANGO_USER','root'); password=os.getenv('ARANGO_PASSWORD'); db=os.getenv('ARANGO_DATABASE','pdf_knowledge_base_test');\n\
+if not password: sys.exit('ARANGO_PASSWORD not set');\n\
+client=ArangoClient(hosts=f'http://{host}:{port}'); sys_db=client.db('_system', username=user, password=password);\n\
+import json;\n\
+print(f'Dropping DB if exists: {db}');\n\
+\nif sys_db.has_database(db): sys_db.delete_database(db); print(f'Dropped DB: {db}')" || true
+
+.PHONY: smokes-pipeline-happy
+smokes-pipeline-happy:
+	. .venv/bin/activate 2>/dev/null || true; \
+		PYTHONPATH=./src ARANGO_DATABASE=$${ARANGO_DATABASE:-pdf_knowledge_base_test} \
+		python scripts/smokes/pipeline/smoke_pipeline_happy.py -o data/results/pipeline_happy_smoke
+
+.PHONY: smokes-pipeline-skip01 smokes-api-external
+smokes-pipeline-skip01:
+	. .venv/bin/activate 2>/dev/null || true; \
+		PYTHONPATH=./src python scripts/smokes/pipeline/smoke_pipeline_happy_skip01.py -o data/results/pipeline_happy_skip01
+
+smokes-pipeline-api-external smokes-api-external:
+	. .venv/bin/activate 2>/dev/null || true; \
+		PYTHONPATH=./src python scripts/smokes/pipeline/smoke_api_external_annotations.py
+
+.PHONY: smokes-pipeline-api-upsert
+smokes-pipeline-api-upsert:
+	. .venv/bin/activate 2>/dev/null || true; \
+		PYTHONPATH=./src python scripts/smokes/pipeline/smoke_api_upsert.py
+
+.PHONY: smokes-pipeline-api-chat
+smokes-pipeline-api-chat:
+	. .venv/bin/activate 2>/dev/null || true; \
+		PYTHONPATH=./src python scripts/smokes/pipeline/smoke_api_chat.py
+
+.PHONY: smoke-ui-extract-load
+smoke-ui-extract-load:
+	@echo "Requires dev servers: Vite on 8080, Tabbed API running"; \
+	node scripts/smokes/ui_extract_load.mjs
+
+.PHONY: smoke-ui-extract-load-cdp
+smoke-ui-extract-load-cdp:
+	@echo "Requires Chrome with --remote-debugging-port=9222 and Vite on 8080"; \
+	BROWSERLESS_WS=$${BROWSERLESS_WS:-ws://127.0.0.1:9222/devtools/browser} \
+	node scripts/smokes/ui_extract_load_cdp.mjs
+
+.PHONY: ux-autofix
+ux-autofix:
+	@echo "Attempting CDP/Puppeteer overlay auto-fix (ClassicLayout.tsx SidebarContent)…"; \
+	BROWSERLESS_WS=$${BROWSERLESS_WS:-ws://127.0.0.1:9222/devtools/browser} \
+	BASE_URL=$${BASE_URL:-http://127.0.0.1:8080} \
+	node scripts/tools/ux_autofix_overlay.mjs || true
+
+.PHONY: steps-happy
+steps-happy:
+	@echo "[steps-happy] Running happy-path pipeline on BHT sample..."
+	@. .venv/bin/activate 2>/dev/null || true; \
+		set -a; [ -f .env ] && . .env; set +a; \
+		export PYTHONPATH=$$(pwd)/src; \
+		export ARANGO_DATABASE=$${ARANGO_DATABASE:-pdf_knowledge_base_test}; \
+		pipeline-happy \
+		  --pdf data/input/pipeline/BHT_CV32A65X_marked.pdf \
+		  --results data/results/pipeline_happy || exit $$?; \
+		echo "[steps-happy] Report (md): data/results/pipeline_happy/final_report.md"; \
+		echo "[steps-happy] Summary   : scripts/artifacts/run_summary_happy.json"; \
+		( command -v jq >/dev/null 2>&1 && jq -r '. | {ok,score,stages}' scripts/artifacts/run_summary_happy.json ) || true
+
+smoke-litellm-batch:
+	$(PY) scripts/smokes/litellm_call_smoke.py batch
+
+smoke-litellm-full: smoke-litellm-all smoke-litellm-results smoke-litellm-local smoke-litellm-stream smoke-litellm-batch
+
+# Minimal Stage 07 reflow smoke to prevent empty-results regressions
+smoke-07-reflow-min:
+	$(PY) scripts/smokes/pipeline/smoke_stage07_reflow_min.py
+
+# Python-only smokes (no servers). Ensures PYTHONPATH for in-repo imports.
+smokes-python:
+	. .venv/bin/activate 2>/dev/null || true; PYTHONPATH=src $(PY) scripts/smokes/run_all_smokes.py && \
+	$(MAKE) smoke-litellm-full && \
+	$(MAKE) smoke-07-reflow-min
+
+# Strict Stage 07 smokes only
+smokes-stage07-strict:
+	. .venv/bin/activate 2>/dev/null || true; \
+	PYTHONPATH=src LITELLM_HTTPX=1 LITELLM_DEBUG=1 LITELLM_DROP_PARAMS=0 STAGE07_SCHEMA_MODE=reflow_json $(PY) scripts/smokes/pipeline/smoke_stage07_stage_call_text.py && \
+	PYTHONPATH=src LITELLM_HTTPX=1 LITELLM_DEBUG=1 LITELLM_DROP_PARAMS=0 STAGE07_SCHEMA_MODE=reflow_json $(PY) scripts/smokes/pipeline/smoke_stage07_complex_full.py && \
+	PYTHONPATH=src LITELLM_HTTPX=1 LITELLM_DEBUG=1 LITELLM_DROP_PARAMS=0 STAGE07_SCHEMA_MODE=reflow_json $(PY) scripts/smokes/pipeline/smoke_stage07_table_integrity.py && \
+	PYTHONPATH=src LITELLM_HTTPX=1 LITELLM_DEBUG=1 LITELLM_DROP_PARAMS=0 STAGE07_SCHEMA_MODE=reflow_json $(PY) scripts/smokes/pipeline/smoke_stage07_figure_propagation.py
+
+smokes-stage07-strict-extended:
+	. .venv/bin/activate 2>/dev/null || true; \
+	PYTHONPATH=src LITELLM_HTTPX=1 LITELLM_DEBUG=1 LITELLM_DROP_PARAMS=0 STAGE07_SCHEMA_MODE=reflow_json $(PY) scripts/smokes/pipeline/smoke_stage07_stage_call_text.py && \
+	PYTHONPATH=src LITELLM_HTTPX=1 LITELLM_DEBUG=1 LITELLM_DROP_PARAMS=0 STAGE07_SCHEMA_MODE=reflow_json $(PY) scripts/smokes/pipeline/smoke_stage07_complex_full.py && \
+	PYTHONPATH=src LITELLM_HTTPX=1 LITELLM_DEBUG=1 LITELLM_DROP_PARAMS=0 STAGE07_SCHEMA_MODE=reflow_json $(PY) scripts/smokes/pipeline/smoke_stage07_table_block_strict.py
+
+# --- UI runtime error smoke (Playwright over CDP) ---
+SMOKE_URL ?= http://127.0.0.1:8080/classic
+CDP_ORIGIN ?= http://127.0.0.1:9222
+CDP_TOKEN ?=
+
+smoke-ui:
+	. .venv/bin/activate 2>/dev/null || true; \
+		.venv/bin/python -m pip install -q playwright typer requests >/dev/null 2>&1 || true; \
+		.venv/bin/python -m playwright install chromium >/dev/null 2>&1 || true; \
+		CDP_ORIGIN=$(CDP_ORIGIN) CDP_TOKEN=$(CDP_TOKEN) \
+		.venv/bin/python scripts/smokes/console_errors.py --url "$(SMOKE_URL)" --cdp-origin "$(CDP_ORIGIN)" --token "$(CDP_TOKEN)"
+
+smoke-ui-strict: smoke-ui
+
+# Quick end-to-end pipeline (gold checks), skips heavy DB/graph steps
+quick-pipeline:
+	. .venv/bin/activate 2>/dev/null || true; PYTHONPATH=src $(PY) src/extractor/pipeline/tools/quick_smoke.py --pdf data/input/pipeline/BHT_CV32A65X_marked.pdf
+
+# Full pipeline (requires provider API keys and ArangoDB configured in env)
+pipeline-full:
+	. .venv/bin/activate 2>/dev/null || true; \
+	PYTHONPATH=src LITELLM_HTTPX=1 $(PY) src/extractor/pipeline/run_all.py \
+		--pdf data/input/pipeline/BHT_CV32A65X_marked.pdf \
+		--results data/results/pipeline \
+		--arango-db "$${ARANGO_DATABASE:-pdf_knowledge_base_test}" \
+		$$( [ -n "$$LEAN4_CLI_CMD" ] && echo --lean4-cli "$$LEAN4_CLI_CMD" || true )
+
+# --- Bundles for LLM code reviews ---
+BUNDLE_ROOT ?= prototypes/tabbed
+BUNDLE_OUT ?= scripts/artifacts/tabbed_bundle.txt
+BUNDLE_HEADER ?= scripts/artifacts/tabbed_code_review_request.md
+BUNDLE_REVIEW_OUT ?= scripts/artifacts/tabbed_code_review_bundle.md
+
+.PHONY: coco-export smoke-tabbed-api bundle-tabbed
+bundle-tabbed:
+	@mkdir -p scripts/artifacts
+	@echo "[bundle-tabbed] Bundling $(BUNDLE_ROOT) → $(BUNDLE_OUT)"
+	@python3 scripts/tools/copy_selected_files.py --root $(BUNDLE_ROOT) --output $(BUNDLE_OUT)
+	@echo "[bundle-tabbed] Writing review header → $(BUNDLE_HEADER)"
+	@cp docs/templates/review_header_python.md $(BUNDLE_HEADER)
+	@echo "[bundle-tabbed] Creating final bundle with header → $(BUNDLE_REVIEW_OUT)"
+	@cat $(BUNDLE_HEADER) $(BUNDLE_OUT) > $(BUNDLE_REVIEW_OUT)
+	@wc -c $(BUNDLE_REVIEW_OUT) | awk '{print "[bundle-tabbed] Bytes:", $$1}'; echo "[bundle-tabbed] Done → $(BUNDLE_REVIEW_OUT)"
+
+lessons-propose:
+	@if command -v lessons-propose >/dev/null 2>&1; then \
+		ARANGO_URL=$${ARANGO_URL:-http://127.0.0.1:8529} ARANGO_DB=$${ARANGO_DB:-lessons} ARANGO_USER=$${ARANGO_USER:-root} ARANGO_PASS=$${ARANGO_PASS:-openSesame} \
+		lessons-propose --k $${K:-12} --sim-thresh $${SIM:-0.55} --min-top $${MIN_TOP:-3} $$( [ -n "$(SCOPE)" ] && echo --scope "$(SCOPE)" || true ); \
+	else \
+		PYTHONPATH=. ARANGO_URL=$${ARANGO_URL:-http://127.0.0.1:8529} ARANGO_DB=$${ARANGO_DB:-lessons} ARANGO_USER=$${ARANGO_USER:-root} ARANGO_PASS=$${ARANGO_PASS:-openSesame} \
+		./scripts/lessons/propose_faiss.py --k $${K:-12} --sim-thresh $${SIM:-0.55} --min-top $${MIN_TOP:-3} $$( [ -n "$(SCOPE)" ] && echo --scope "$(SCOPE)" || true ); \
+	fi
+
+lessons-prune:
+	@if command -v lessons-prune >/dev/null 2>&1; then \
+		ARANGO_URL=$${ARANGO_URL:-http://127.0.0.1:8529} ARANGO_DB=$${ARANGO_DB:-lessons} ARANGO_USER=$${ARANGO_USER:-root} ARANGO_PASS=$${ARANGO_PASS:-openSesame} lessons-prune; \
+	else \
+		PYTHONPATH=. ARANGO_URL=$${ARANGO_URL:-http://127.0.0.1:8529} ARANGO_DB=$${ARANGO_DB:-lessons} ARANGO_USER=$${ARANGO_USER:-root} ARANGO_PASS=$${ARANGO_PASS:-openSesame} \
+		uv run scripts/lessons/prune_pending.py; \
+	fi
+
+lessons-status-report:
+	pytest -q || true
+	uv run scripts/lessons/report_status.py --report test-results.json --out-md scripts/artifacts/lessons_status_report.md
+
+lessons-http-smokes:
+	pytest -q tests/lessons/test_http_endpoints.py
+
+lessons-recall-diff:
+	@if command -v lessons-recall-diff >/dev/null 2>&1; then \
+		ARANGO_URL=$${ARANGO_URL:-http://127.0.0.1:8529} ARANGO_DB=$${ARANGO_DB:-lessons} ARANGO_USER=$${ARANGO_USER:-root} ARANGO_PASS=$${ARANGO_PASS:-openSesame} \
+		lessons-recall-diff --q "$(Q)" --scope "$(SCOPE)" --k $${K:-5} --depth $${DEPTH:-2}; \
+	else \
+		PYTHONPATH=. ARANGO_URL=$${ARANGO_URL:-http://127.0.0.1:8529} ARANGO_DB=$${ARANGO_DB:-lessons} ARANGO_USER=$${ARANGO_USER:-root} ARANGO_PASS=$${ARANGO_PASS:-openSesame} \
+		uv run scripts/lessons/recall_diff.py diff --q "$(Q)" --scope "$(SCOPE)" --k $${K:-5} --depth $${DEPTH:-2}; \
+	fi
+
+
+.PHONY: coco-export smoke-tabbed-api prompt-opt prompt-compile prompt-run
+prompt-opt:
+	python -m prototypes.gamified.tools.prompt_opt optimize $(PROMPT) -o $(PROMPT) --show-diff
+
+prompt-compile:
+	python -m prototypes.gamified.tools.prompt_compile compile $(RESEARCH) -o prototypes/gamified/docs/02_tokamak_prompt.md --show-diff
+
+prompt-run:
+	./scripts/gamified_show_and_tell.py --codebase . --prompt "$(shell cat $(PROMPT))"
+.PHONY: lint-ruff-extractor
+lint-ruff-extractor:
+	. .venv/bin/activate 2>/dev/null || true; \
+	ruff check src/extractor || true

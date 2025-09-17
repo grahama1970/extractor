@@ -10,6 +10,7 @@ class FootnoteProcessor(BaseProcessor):
     """
     A processor for pushing footnotes to the bottom, and relabeling mislabeled text blocks.
     """
+
     block_types = (BlockTypes.Footnote,)
 
     def __call__(self, document: Document):

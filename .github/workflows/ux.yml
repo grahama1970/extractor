@@ -1,0 +1,57 @@
+name: UX Health and E2E
+
+on:
+  pull_request:
+  push:
+    branches: [ main, master ]
+
+jobs:
+  ux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+
+      - name: Install root deps (for health checks)
+        run: npm ci
+
+      - name: Install prototype deps
+        run: npm ci
+        working-directory: prototypes/tabbed/html
+
+      - name: Build prototype
+        run: npm run build
+        working-directory: prototypes/tabbed/html
+
+      - name: Start preview server
+        run: |
+          nohup npm run preview:8080 >/dev/null 2>&1 &
+        working-directory: prototypes/tabbed/html
+
+      - name: Wait for server
+        run: |
+          timeout 60s bash -lc 'until curl -sf http://127.0.0.1:8080/main >/dev/null; do sleep 1; done'
+
+      - name: E2E baseline
+        run: npm run e2e:base
+        working-directory: prototypes/tabbed/html
+
+      - name: Health gate (Puppeteer)
+        run: BASE_URL=http://127.0.0.1:8080/main npm run ux:check
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ux-artifacts
+          path: |
+            artifacts/**
+            scripts/artifacts/**
+          if-no-files-found: ignore
+

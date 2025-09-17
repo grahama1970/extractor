@@ -46,12 +46,15 @@ def main():
             for reg_index, reg in enumerate(page_regions, start=1):
                 rid = f"{pdf.stem}_page{page_index:02d}_r{reg_index:02d}"
                 x0, y0, x1, y1 = reg.box.x0, reg.box.y0, reg.box.x1, reg.box.y1
-                writer.writerow([rid, "", page_index, f"{x0:.2f}", f"{y0:.2f}", f"{x1:.2f}", f"{y1:.2f}", ""])
+                writer.writerow(
+                    [rid, "", page_index, f"{x0:.2f}", f"{y0:.2f}", f"{x1:.2f}", f"{y1:.2f}", ""]
+                )
 
     print(f"Wrote mapping CSV: {out_path}")
-    print("Edit 'type' (table|requirements|section) and 'expected_json' paths, then run pdf_apply_region_mapping.py")
+    print(
+        "Edit 'type' (table|requirements|section) and 'expected_json' paths, then run pdf_apply_region_mapping.py"
+    )
 
 
 if __name__ == "__main__":  # pragma: no cover
     main()
-

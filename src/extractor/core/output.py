@@ -39,9 +39,7 @@ def json_to_html(block: JSONBlockOutput | BlockOutput):
         for ref in content_refs:
             src_id = ref.attrs["src"]
             if src_id in child_ids:
-                child_soup = BeautifulSoup(
-                    child_html[child_ids.index(src_id)], "html.parser"
-                )
+                child_soup = BeautifulSoup(child_html[child_ids.index(src_id)], "html.parser")
                 ref.replace_with(child_soup)
         return str(soup)
 
@@ -107,9 +105,7 @@ def output_to_format(document, output_path: str, output_format: str):
 
     # Get text content
     text, _, images = text_from_rendered(rendered)
-    text = text.encode(settings.OUTPUT_ENCODING, errors="replace").decode(
-        settings.OUTPUT_ENCODING
-    )
+    text = text.encode(settings.OUTPUT_ENCODING, errors="replace").decode(settings.OUTPUT_ENCODING)
 
     # Write output file
     with open(output_path, "w+", encoding=settings.OUTPUT_ENCODING) as f:
@@ -118,6 +114,7 @@ def output_to_format(document, output_path: str, output_format: str):
     # Save images if any
     if images:
         import os
+
         output_dir = os.path.dirname(output_path)
         for img_name, img in images.items():
             img = convert_if_not_rgb(img)
@@ -128,9 +125,7 @@ def output_to_format(document, output_path: str, output_format: str):
 
 def save_output(rendered: BaseModel, output_dir: str, fname_base: str):
     text, ext, images = text_from_rendered(rendered)
-    text = text.encode(settings.OUTPUT_ENCODING, errors="replace").decode(
-        settings.OUTPUT_ENCODING
-    )
+    text = text.encode(settings.OUTPUT_ENCODING, errors="replace").decode(settings.OUTPUT_ENCODING)
 
     with open(
         os.path.join(output_dir, f"{fname_base}.{ext}"),
@@ -138,7 +133,7 @@ def save_output(rendered: BaseModel, output_dir: str, fname_base: str):
         encoding=settings.OUTPUT_ENCODING,
     ) as f:
         f.write(text)
-        
+
     with open(
         os.path.join(output_dir, f"{fname_base}_meta.json"),
         "w+",

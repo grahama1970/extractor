@@ -47,7 +47,9 @@ def main():
     ap = argparse.ArgumentParser(description="Create gold stubs from PDF annotations")
     ap.add_argument("--pdf", required=True, help="Annotated PDF path")
     ap.add_argument("--repo-root", default=".", help="Repository root for resolving expected_json")
-    ap.add_argument("--force", action="store_true", help="Overwrite existing files (writes .orig.json once)")
+    ap.add_argument(
+        "--force", action="store_true", help="Overwrite existing files (writes .orig.json once)"
+    )
     args = ap.parse_args()
 
     pdf = Path(args.pdf)
@@ -66,7 +68,11 @@ def main():
             rid = (meta.get("id") or "").strip()
             if not tgt:
                 # Fallback: autogenerate a sensible default inside repo
-                base = "tables" if rtype == "table" else ("sections" if rtype in {"requirements", "section"} else None)
+                base = (
+                    "tables"
+                    if rtype == "table"
+                    else ("sections" if rtype in {"requirements", "section"} else None)
+                )
                 if base is None:
                     print(f"[info] No expected_json for id={rid} type={rtype}; skipping stub")
                     continue

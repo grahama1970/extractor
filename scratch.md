@@ -1,16 +1,12 @@
-
-▌then should we be discussing the code instead of using figma for
-▌this pdf annotator? Should we be dicussing ShadCN components
-▌instead? Tell me how to best work with you?
-
-- why can we move the box labeler
-![alt text](image-38.png)
-
-- you refuse to remove the vertical thumbanails. 
-![alt text](image-39.png)
-Is this simply better design than a bottom scroll bar like
-![alt text](image-40.png)
-
-- why can't we delete boxes with a delete key press?
-
-All of this is obivious--but perhaps not obvious to codex version of gpt-5. No doubt the web-version of gpt-5 would see the gaps in your desig and code.  Tell me how to best work with you
+ - DOCX synthesized tables: beyond the classic Signal/IO/Description/
+  Connection/Type header, should I check any additional header sets
+  for detection (e.g., “Name/Type/Value/Description”), or keep it
+  strictly to that known pattern for now?
+   > docx synthesized tables (not in a table object) would be suspicious,, no? Like it was a mangled pdf? Give me your thought here. Any engineering/scientifc docx document is going to use 100% table objects. These are formal documents
+  - XML heuristics: okay to start with generic tags (section/title/
+  table/figure) and also common variants (sect1/sect2, caption), or
+  keep the initial pass minimal (strictly section/title/table/figure)
+  and add variants only if smokes reveal gaps?
+  >
+  keep the initial pass minimal (strictly section/title/table/figure)
+  and add variants only if smokes reveal gaps?

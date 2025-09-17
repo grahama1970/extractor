@@ -12,9 +12,10 @@ import textwrap
 from pathlib import Path
 import sys
 from dataclasses import dataclass, field
-from typing import List, Dict, Any, Optional, cast
+from typing import List, Dict, Any, Optional, cast, Annotated
 from datetime import datetime
 import time
+
 try:
     import psutil  # type: ignore
 except Exception:  # pragma: no cover
@@ -27,50 +28,27 @@ except ImportError:
     print("PyMuPDF (fitz) not installed. Stage 01 requires it.", file=sys.stderr)
     raise
 import litellm
-try:
-    try:
-        import typer
-        _HAS_TYPER = True
-    except Exception:
-        _HAS_TYPER = False
-        class _TyperShim:
-            def __init__(self,*a,**k): pass
-            def command(self,*a,**k): return lambda f: f
-            def __call__(self,*a,**k): print("Typer not installed; CLI disabled")
-        def _opt(*a,**k): return None
-        def _arg(*a,**k): return None
-        typer = _TyperShim()  # type: ignore
-        typer.Typer = _TyperShim  # type: ignore
-        typer.Option = _opt  # type: ignore
-        typer.Argument = _arg  # type: ignore
-        typer.secho = print  # type: ignore
-
-    _HAS_TYPER = True
-except Exception:
-    _HAS_TYPER = False
-    class _TyperShim:
-        def __init__(self,*a,**k): pass
-        def command(self,*a,**k): return lambda f: f
-        def __call__(self,*a,**k): print("Typer not installed; CLI disabled")
-    def _opt(*a,**k): return None
-    def _arg(*a,**k): return None
-    typer = _TyperShim()  # type: ignore
-    typer.Typer = _TyperShim  # type: ignore
-    typer.Option = _opt  # type: ignore
-    typer.Argument = _arg  # type: ignore
-    typer.secho = print  # type: ignore
-
-from typing_extensions import Annotated
+import typer
 from dotenv import load_dotenv, find_dotenv
 from tenacity import retry, stop_after_attempt, wait_exponential
 from tqdm.asyncio import tqdm_asyncio
 from loguru import logger
 from extractor.pipeline.utils.litellm_call import litellm_call
 
-from extractor.pipeline.utils.diagnostics import start_resource_sampler, stop_resource_sampler, get_run_id, iso_now, make_event, snapshot_resources, build_stage_timings, classify_llm_error
+from extractor.pipeline.utils.diagnostics import (
+    start_resource_sampler,
+    stop_resource_sampler,
+    get_run_id,
+    iso_now,
+    make_event,
+    snapshot_resources,
+    build_stage_timings,
+    classify_llm_error,
+)
 
-from extractor.core.services.utils.json_utils import clean_json_string
-from extractor.core.services.utils.litellm_cache import initialize_litellm_cache
+# Use pipeline-local JSON utilities to avoid heavy core service deps during this stage
+from extractor.pipeline.utils.json_utils import clean_json_string
+from extractor.pipeline.utils.litellm_cache import initialize_litellm_cache
 
 # ------------------------------------------------------------------
 # GLOBAL CONSTANTS
@@ -79,10 +57,22 @@ DEBUG = False
 RENDER_DPI = 200
 ANNOT_FREETEXT = "FreeText"
 
-load_dotenv(find_dotenv())
-app = typer.Typer(help="Annotate → LLM → Clean PDF → ArangoDB", add_completion=False)
+
+def build_cli():
+    import typer as _typer
+
+    app = _typer.Typer(help="Annotate → LLM → Clean PDF → ArangoDB", add_completion=False)
+
+    # Re-register commands inside the factory to avoid import-time side effects
+    # by referencing the existing callables.
+    app.command(name="run")(run)
+    app.command(name="debug-bundle")(debug_bundle)
+    return app
+
 
 """Relevant-to rules config (optional file-based)."""
+
+
 def _load_relevant_rules() -> Dict[str, Any]:
     """Load relevant rules from config/relevant_rules.json if present; otherwise use defaults."""
     try:
@@ -127,7 +117,9 @@ def _load_relevant_rules() -> Dict[str, Any]:
         ],
     }
 
+
 RELEVANT_RULES = _load_relevant_rules()
+
 
 def _compute_relevant_to_for_annotation(a: Dict[str, Any]) -> List[str]:
     stages: List[str] = []
@@ -173,7 +165,7 @@ def _compute_relevant_to_for_annotation(a: Dict[str, Any]) -> List[str]:
                     stages.append(s)
         # 4) computed features
         feats = a.get("computed_features") or {}
-        for rule in (RELEVANT_RULES.get("computed_feature_rules") or []):
+        for rule in RELEVANT_RULES.get("computed_feature_rules") or []:
             try:
                 feat = rule.get("feature")
                 if feat in feats and feats.get(feat) == rule.get("equals"):
@@ -185,6 +177,7 @@ def _compute_relevant_to_for_annotation(a: Dict[str, Any]) -> List[str]:
     except Exception:
         return stages
     return sorted(stages)
+
 
 # ------------------------------------------------------------------
 # CONFIG
@@ -199,7 +192,9 @@ class Config:
     use_images: bool = False
     render_dpi: int = 150
     llm_model: str = field(
-        default_factory=lambda: os.getenv("LITELLM_DEFAULT_MODEL", "openai/gpt-4o-mini")
+        default_factory=lambda: os.getenv(
+            "LITELLM_DEFAULT_MODEL", os.getenv("DEFAULT_LITELLM_MODEL", "openai/gpt-4o-mini")
+        )
     )
     llm_concurrency: int = 5
     context_blocks: int = 2
@@ -209,12 +204,14 @@ class Config:
     debug: bool = False
     cache: bool = True  # Enable LiteLLM cache by default
 
+
 # DB export handled by stage 10 (arangodb_exporter).
 
 # ------------------------------------------------------------------
 # PROMPT
 # ------------------------------------------------------------------
-SYSTEM_PROMPT = textwrap.dedent("""
+SYSTEM_PROMPT = textwrap.dedent(
+    """
 You are a PDF annotation interpreter. Given (a) a cropped image of the annotated region and
 (b) nearby text blocks (inside/above/below), infer what the human likely intended to label and explain why.
 Do not assume a specific category in advance; infer from visual and textual evidence. If a human note
@@ -252,7 +249,9 @@ Rules:
 - Be neutral; infer the object type from the image + text context. Do not hallucinate.
 - Ground rationale in observable cues (e.g., larger font, bold, numbering, extra spacing, centered alignment, gridlines).
 - If any field is unknown, use null (or [] for lists). Keep output compact.
-""")
+"""
+)
+
 
 # ------------------------------------------------------------------
 # EXPANSION & EXTRACTION LOGIC
@@ -262,7 +261,7 @@ def _get_expanded_rect(
     page: fitz.Page,
     config: Config,
     freetext_rects: List[fitz.Rect],
-    other_annots: List[fitz.Rect]
+    other_annots: List[fitz.Rect],
 ) -> fitz.Rect:
     MAX_RADIUS = 200  # points
     current = annot.rect
@@ -291,11 +290,12 @@ def _get_expanded_rect(
     x0, x1 = (0, page.rect.width) if config.full_page_width else (expanded.x0, expanded.x1)
     return fitz.Rect(x0, y0, x1, y1)
 
+
 def _get_context_blocks(
     original_rect: fitz.Rect,
     expanded_rect: fitz.Rect,
     page_text_dict: Dict[str, Any],
-    num_blocks: int
+    num_blocks: int,
 ) -> Dict[str, List[Dict[str, Any]]]:
     inside, above, below = [], [], []
     for blk in page_text_dict.get("blocks", []):
@@ -314,6 +314,7 @@ def _get_context_blocks(
     below.sort(key=lambda b: b["bbox"][1] - original_rect.y1)
     return {"inside": inside, "above": above[:num_blocks], "below": below[:num_blocks]}
 
+
 def _collect_font_sizes(blocks: List[Dict[str, Any]]) -> List[float]:
     sizes: List[float] = []
     for blk in blocks or []:
@@ -327,6 +328,7 @@ def _collect_font_sizes(blocks: List[Dict[str, Any]]) -> List[float]:
                     continue
     return sizes
 
+
 def _has_bold(blocks: List[Dict[str, Any]]) -> Optional[bool]:
     seen = False
     for blk in blocks or []:
@@ -337,6 +339,7 @@ def _has_bold(blocks: List[Dict[str, Any]]) -> Optional[bool]:
                     return True
                 seen = True
     return False if seen else None
+
 
 def _union_bbox(blocks: List[Dict[str, Any]]) -> Optional[fitz.Rect]:
     rect: Optional[fitz.Rect] = None
@@ -350,6 +353,7 @@ def _union_bbox(blocks: List[Dict[str, Any]]) -> Optional[fitz.Rect]:
         except Exception:
             continue
     return rect
+
 
 def _compute_alignment(page_rect: fitz.Rect, inner_rect: Optional[fitz.Rect]) -> Optional[str]:
     if inner_rect is None:
@@ -370,7 +374,10 @@ def _compute_alignment(page_rect: fitz.Rect, inner_rect: Optional[fitz.Rect]) ->
     except Exception:
         return None
 
-def _compute_spacing(original_rect: fitz.Rect, above_blocks: List[Dict[str, Any]], below_blocks: List[Dict[str, Any]]) -> Dict[str, Optional[float]]:
+
+def _compute_spacing(
+    original_rect: fitz.Rect, above_blocks: List[Dict[str, Any]], below_blocks: List[Dict[str, Any]]
+) -> Dict[str, Optional[float]]:
     spacing_above: Optional[float] = None
     spacing_below: Optional[float] = None
     try:
@@ -388,6 +395,7 @@ def _compute_spacing(original_rect: fitz.Rect, above_blocks: List[Dict[str, Any]
         spacing_below = None
     return {"spacing_above": spacing_above, "spacing_below": spacing_below}
 
+
 def _extract_plain_text(blocks: List[Dict[str, Any]]) -> str:
     parts: List[str] = []
     for blk in blocks or []:
@@ -398,9 +406,15 @@ def _extract_plain_text(blocks: List[Dict[str, Any]]) -> str:
                     parts.append(t)
     return " ".join(parts).strip()
 
+
 def _detect_numbering(text: str) -> Dict[str, Optional[Any]]:
     import re
-    res: Dict[str, Optional[Any]] = {"has_numbering": None, "numbering_text": None, "numbering_depth": None}
+
+    res: Dict[str, Optional[Any]] = {
+        "has_numbering": None,
+        "numbering_text": None,
+        "numbering_depth": None,
+    }
     if not text:
         return res
     # Try decimal multi-level like 1.2.3, then 1., then alpha/roman/case variants common in outlines
@@ -426,6 +440,7 @@ def _detect_numbering(text: str) -> Dict[str, Optional[Any]]:
     res["has_numbering"] = False
     return res
 
+
 def _gridline_features(image_path: str) -> Dict[str, Optional[float]]:
     """Very coarse gridline heuristic using OpenCV morphology; safe fallback on errors."""
     feats: Dict[str, Optional[float]] = {
@@ -436,12 +451,15 @@ def _gridline_features(image_path: str) -> Dict[str, Optional[float]]:
     try:
         import cv2  # type: ignore
         import numpy as np  # type: ignore
+
         img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
         if img is None:
             return feats
         h, w = img.shape[:2]
         # Adaptive threshold to isolate lines
-        bw = cv2.adaptiveThreshold(img, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY_INV, 15, 10)
+        bw = cv2.adaptiveThreshold(
+            img, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY_INV, 15, 10
+        )
         # Horizontal lines
         hk = max(10, w // 30)
         horizontal_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (hk, 1))
@@ -460,6 +478,7 @@ def _gridline_features(image_path: str) -> Dict[str, Optional[float]]:
         pass
     return feats
 
+
 def extract_annotations_data(pdf_path: Path, config: Config) -> List[Dict[str, Any]]:
     annots_out = []
     try:
@@ -467,7 +486,7 @@ def extract_annotations_data(pdf_path: Path, config: Config) -> List[Dict[str, A
     except Exception as e:
         logger.exception(f"Failed to open PDF {pdf_path}")
         raise RuntimeError(f"Stage 01 failed to open PDF: {pdf_path}") from e
-    
+
     with doc:
         for pno in range(len(doc)):
             page = doc.load_page(pno)
@@ -475,7 +494,8 @@ def extract_annotations_data(pdf_path: Path, config: Config) -> List[Dict[str, A
             if not all_annots:
                 continue
             freettext_list: List[fitz.Annot] = [
-                a for a in all_annots
+                a
+                for a in all_annots
                 if (isinstance(a.type, tuple) and len(a.type) > 1 and a.type[1] == ANNOT_FREETEXT)
             ]
             freetext_rects = [a.rect for a in freettext_list]
@@ -504,9 +524,7 @@ def extract_annotations_data(pdf_path: Path, config: Config) -> List[Dict[str, A
                     continue
                 original_rect = fitz.Rect(annot.rect)
                 other_rects = [a.rect for i, a in enumerate(all_annots) if i != idx]
-                expanded_rect = _get_expanded_rect(
-                    annot, page, config, freetext_rects, other_rects
-                )
+                expanded_rect = _get_expanded_rect(annot, page, config, freetext_rects, other_rects)
                 # Ensure we include the full extent of any non-empty text block that intersects
                 try:
                     new_rect = fitz.Rect(expanded_rect)
@@ -528,7 +546,7 @@ def extract_annotations_data(pdf_path: Path, config: Config) -> List[Dict[str, A
                         if blk_rect.intersects(new_rect):
                             new_rect = new_rect | blk_rect
                     # Clamp to page bounds
-                    expanded_rect = (new_rect & page.rect)
+                    expanded_rect = new_rect & page.rect
                 except Exception:
                     pass
                 context_blocks = _get_context_blocks(
@@ -541,25 +559,30 @@ def extract_annotations_data(pdf_path: Path, config: Config) -> List[Dict[str, A
                 sizes_inside = _collect_font_sizes(inside_blocks)
                 sizes_above = _collect_font_sizes(above_blocks)
                 sizes_below = _collect_font_sizes(below_blocks)
-                avg_size_inside = (sum(sizes_inside)/len(sizes_inside)) if sizes_inside else None
-                avg_size_above = (sum(sizes_above)/len(sizes_above)) if sizes_above else None
-                avg_size_below = (sum(sizes_below)/len(sizes_below)) if sizes_below else None
+                avg_size_inside = (sum(sizes_inside) / len(sizes_inside)) if sizes_inside else None
+                avg_size_above = (sum(sizes_above) / len(sizes_above)) if sizes_above else None
+                avg_size_below = (sum(sizes_below) / len(sizes_below)) if sizes_below else None
                 bold_inside = _has_bold(inside_blocks)
                 align = _compute_alignment(page.rect, _union_bbox(inside_blocks))
                 spacing = _compute_spacing(original_rect, above_blocks, below_blocks)
                 # Find nearest FreeText note for rationale (within expansion radius)
                 nearest_note = None
                 try:
-                    cx, cy = (original_rect.x0 + original_rect.x1) / 2, (original_rect.y0 + original_rect.y1) / 2
+                    cx, cy = (original_rect.x0 + original_rect.x1) / 2, (
+                        original_rect.y0 + original_rect.y1
+                    ) / 2
                     best_d = float("inf")
                     for ft in freetext_notes:
-                        fx, fy = (ft["rect"].x0 + ft["rect"].x1) / 2, (ft["rect"].y0 + ft["rect"].y1) / 2
+                        fx, fy = (ft["rect"].x0 + ft["rect"].x1) / 2, (
+                            ft["rect"].y0 + ft["rect"].y1
+                        ) / 2
                         d = ((cx - fx) ** 2 + (cy - fy) ** 2) ** 0.5
                         if d < best_d and d <= 200:
                             best_d = d
                             nearest_note = ft.get("note")
                 except Exception:
                     nearest_note = None
+
                 # Parse machine-readable keys from nearest_note if present
                 def _parse_note_keys(note: Any) -> Dict[str, str]:
                     out: Dict[str, str] = {}
@@ -570,6 +593,7 @@ def extract_annotations_data(pdf_path: Path, config: Config) -> List[Dict[str, A
                             k, v = ln.split("=", 1)
                             out[k.strip()] = v.strip()
                     return out
+
                 machine_note = _parse_note_keys(nearest_note)
                 matrix = fitz.Matrix(config.render_dpi / 72, config.render_dpi / 72)
                 # Render without drawing annotations to avoid annotation frames leaking into features
@@ -579,7 +603,7 @@ def extract_annotations_data(pdf_path: Path, config: Config) -> List[Dict[str, A
                     # Fallback for PyMuPDF versions without 'annots' kwarg
                     pix = page.get_pixmap(matrix=matrix, clip=expanded_rect)  # type: ignore[attr-defined]
                 # write image immediately to avoid holding pixmaps in RAM
-                img_dir = (config.output_dir / "image_output")
+                img_dir = config.output_dir / "image_output"
                 img_dir.mkdir(parents=True, exist_ok=True)
                 img_path = img_dir / f"annot_p{pno}_a{idx}.png"
                 pix.save(str(img_path))
@@ -587,30 +611,43 @@ def extract_annotations_data(pdf_path: Path, config: Config) -> List[Dict[str, A
                 inside_plain = _extract_plain_text(inside_blocks) or ""
                 numbering = _detect_numbering(inside_plain)
                 grid = _gridline_features(str(img_path))
-                annots_out.append({
-                    "id": f"p{pno}_a{idx}",
-                    "page": pno,
-                    "type": annot.type[1],
-                    "original_rect": [float(original_rect.x0), float(original_rect.y0), float(original_rect.x1), float(original_rect.y1)],
-                    "expanded_rect": [float(expanded_rect.x0), float(expanded_rect.y0), float(expanded_rect.x1), float(expanded_rect.y1)],
-                    "inside_blocks": inside_blocks,
-                    "above_blocks": above_blocks,
-                    "below_blocks": below_blocks,
-                    "image_path": str(img_path),
-                    "human_note": nearest_note,
-                    "machine_note": machine_note if machine_note else None,
-                    "computed_features": {
-                        "avg_font_size_inside": avg_size_inside,
-                        "avg_font_size_above": avg_size_above,
-                        "avg_font_size_below": avg_size_below,
-                        "bold_detected_inside": bold_inside,
-                        "alignment": align,
-                        **spacing,
-                        **numbering,
-                        **grid,
-                    },
-                })
+                annots_out.append(
+                    {
+                        "id": f"p{pno}_a{idx}",
+                        "page": pno,
+                        "type": annot.type[1],
+                        "original_rect": [
+                            float(original_rect.x0),
+                            float(original_rect.y0),
+                            float(original_rect.x1),
+                            float(original_rect.y1),
+                        ],
+                        "expanded_rect": [
+                            float(expanded_rect.x0),
+                            float(expanded_rect.y0),
+                            float(expanded_rect.x1),
+                            float(expanded_rect.y1),
+                        ],
+                        "inside_blocks": inside_blocks,
+                        "above_blocks": above_blocks,
+                        "below_blocks": below_blocks,
+                        "image_path": str(img_path),
+                        "human_note": nearest_note,
+                        "machine_note": machine_note if machine_note else None,
+                        "computed_features": {
+                            "avg_font_size_inside": avg_size_inside,
+                            "avg_font_size_above": avg_size_above,
+                            "avg_font_size_below": avg_size_below,
+                            "bold_detected_inside": bold_inside,
+                            "alignment": align,
+                            **spacing,
+                            **numbering,
+                            **grid,
+                        },
+                    }
+                )
     return annots_out
+
 
 # ------------------------------------------------------------------
 # CONTEXT & PROMPT BUILDING
@@ -625,13 +662,15 @@ def blocks_to_readable(blocks: List[Dict[str, Any]]) -> str:
                     lines.append(f"- {txt}  (Font: {sp.get('font')}, Size: {sp.get('size')})")
     return "\n".join(lines) if lines else "N/A"
 
+
 def build_context(annot: Dict[str, Any]) -> str:
     inside = blocks_to_readable(annot["inside_blocks"])
     above = blocks_to_readable(annot["above_blocks"])
     below = blocks_to_readable(annot["below_blocks"])
     human_note = annot.get("human_note") or "N/A"
     feats = annot.get("computed_features") or {}
-    return textwrap.dedent(f"""
+    return textwrap.dedent(
+        f"""
         Annotation ID: {annot['id']}
         Annotation Type: {annot['type']}
         Page Number: {annot['page']}
@@ -654,12 +693,14 @@ def build_context(annot: Dict[str, Any]) -> str:
         spacing_above: {feats.get('spacing_above')}
         spacing_below: {feats.get('spacing_below')}
         alignment: {feats.get('alignment')}
-        """).strip()
+        """
+    ).strip()
 
 
 # ------------------------------------------------------------------
 # LLM CALL
 # ------------------------------------------------------------------
+
 
 # ------------------------------------------------------------------
 # UTILITIES
@@ -672,7 +713,7 @@ def create_clean_pdf(input_path: Path, output_dir: Path) -> str:
     except Exception as e:
         logger.error(f"Failed to open PDF {input_path} for cleaning: {e}")
         raise
-    
+
     with doc:
         for page in doc:
             for annot in list(page.annots() or []):
@@ -680,6 +721,7 @@ def create_clean_pdf(input_path: Path, output_dir: Path) -> str:
         doc.save(str(clean_path))
     print(f"Cleaned PDF saved to: {clean_path}")
     return str(clean_path)
+
 
 # ------------------------------------------------------------------
 # PIPELINE
@@ -693,7 +735,11 @@ async def process_pdf_pipeline(config: Config):
     errors_count = 0
     warnings_count = 0
     resources: Dict[str, Any] = {}
-    sampler = start_resource_sampler(float(os.getenv("SAMPLE_INTERVAL_SEC", "2"))) if os.getenv("ENABLE_RESOURCE_SAMPLING", "0").lower() in ("1","true","yes","y") else None
+    sampler = (
+        start_resource_sampler(float(os.getenv("SAMPLE_INTERVAL_SEC", "2")))
+        if os.getenv("ENABLE_RESOURCE_SAMPLING", "0").lower() in ("1", "true", "yes", "y")
+        else None
+    )
     try:
         if psutil is not None:
             proc = psutil.Process()
@@ -710,7 +756,7 @@ async def process_pdf_pipeline(config: Config):
     except Exception as _e:
         logger.warning(f"LiteLLM cache init failed (continuing): {_e}")
     print(f"Processing '{config.input_pdf.name}'…")
-    
+
     # Define clear output paths for this stage
     stage_output_dir = config.output_dir
     json_output_dir = stage_output_dir / "json_output"
@@ -782,83 +828,155 @@ async def process_pdf_pipeline(config: Config):
             logger.exception(f"Failed to build messages for {d.get('id')}: {e}")
             d["interpretation"] = {"error": f"message_build_failed: {e}"}
             try:
-                diagnostics.append(make_event("01_annotation_processor","error","llm_message_build_failed", str(e), {"annotation_id": d.get("id"), "page": d.get("page")}))
+                diagnostics.append(
+                    make_event(
+                        "01_annotation_processor",
+                        "error",
+                        "llm_message_build_failed",
+                        str(e),
+                        {"annotation_id": d.get("id"), "page": d.get("page")},
+                    )
+                )
                 errors_count += 1
             except Exception:
                 pass
-            items.append({
-                "model": config.llm_model,
-                "messages": [{"role": "user", "content": "noop"}],
-            })
+            items.append(
+                {
+                    "model": config.llm_model,
+                    "messages": [{"role": "user", "content": "noop"}],
+                }
+            )
 
     try:
         if config.max_runtime_seconds and config.max_runtime_seconds > 0:
             t0 = time.monotonic()
             sid = os.getenv("LITELLM_SESSION_ID") or get_run_id()
-            results: List[str] = await asyncio.wait_for(
-                litellm_call(items, concurrency=config.llm_concurrency, desc="Interpreting Annotations", session_id=sid),
+            results = await asyncio.wait_for(
+                litellm_call(
+                    items,
+                    concurrency=config.llm_concurrency,
+                    desc="Interpreting Annotations",
+                    session_id=sid,
+                    export="results",
+                    sanitize_data_urls=os.getenv("STAGE01_SANITIZE_DATA_URLS", "redact"),
+                    sanitize_truncate_chars=int(os.getenv("STAGE01_SANITIZE_CHARS", "48")),
+                ),
                 timeout=config.max_runtime_seconds,
             )
             t_llm_ms = int((time.monotonic() - t0) * 1000)
         else:
             t0 = time.monotonic()
             sid = os.getenv("LITELLM_SESSION_ID") or get_run_id()
-            results = await litellm_call(items, concurrency=config.llm_concurrency, desc="Interpreting Annotations", session_id=sid)
+            results = await litellm_call(
+                items,
+                concurrency=config.llm_concurrency,
+                desc="Interpreting Annotations",
+                session_id=sid,
+                export="results",
+                sanitize_data_urls=os.getenv("STAGE01_SANITIZE_DATA_URLS", "redact"),
+                sanitize_truncate_chars=int(os.getenv("STAGE01_SANITIZE_CHARS", "48")),
+            )
             t_llm_ms = int((time.monotonic() - t0) * 1000)
     except asyncio.TimeoutError as e:
         msg_info = classify_llm_error(e)
         try:
-            diagnostics.append(make_event("01_annotation_processor","error", msg_info['code'], msg_info['message'], {"items": len(items)}))
+            diagnostics.append(
+                make_event(
+                    "01_annotation_processor",
+                    "error",
+                    msg_info["code"],
+                    msg_info["message"],
+                    {"items": len(items)},
+                )
+            )
         except Exception:
             pass
-        if os.getenv("PIPELINE_FAIL_FAST", "0").lower() in ("1","true","yes","y"):
+        if os.getenv("PIPELINE_FAIL_FAST", "0").lower() in ("1", "true", "yes", "y"):
             raise
-        results = [""] * len(items)
+        results = []
         t_llm_ms = 0
     except Exception as e:
         msg_info = classify_llm_error(e)
         try:
-            diagnostics.append(make_event("01_annotation_processor","error", msg_info['code'], msg_info['message'], {"items": len(items)}))
+            diagnostics.append(
+                make_event(
+                    "01_annotation_processor",
+                    "error",
+                    msg_info["code"],
+                    msg_info["message"],
+                    {"items": len(items)},
+                )
+            )
         except Exception:
             pass
-        if os.getenv("PIPELINE_FAIL_FAST", "0").lower() in ("1","true","yes","y"):
+        if os.getenv("PIPELINE_FAIL_FAST", "0").lower() in ("1", "true", "yes", "y"):
             raise
-        results = [""] * len(items)
+        results = []
         t_llm_ms = 0
 
     # Parse results back into annotations
-    for d, content_str in zip(data, results):
-        try:
-            if not content_str.strip():
-                d["interpretation"] = {"error": "Empty content from LLM"}
+    if not results:
+        # preserve shape when we timed out/failed: set empty interpretation
+        for d in data:
+            d["interpretation"] = {"error": "LLM call failed or timed out"}
+    else:
+        for r in results:
+            idx = r.index
+            if not (0 <= idx < len(data)):
                 continue
-            cleaned = clean_json_string(content_str)
-            if isinstance(cleaned, dict):
-                d["interpretation"] = cast(Dict[str, Any], cleaned)
-                continue
-            if isinstance(cleaned, list):
-                d["interpretation"] = {"data": cleaned}
-                continue
+            d = data[idx]
+            content_str = r.content or ""
             try:
-                loaded = json.loads(cleaned)
-                if isinstance(loaded, dict):
-                    d["interpretation"] = cast(Dict[str, Any], loaded)
-                else:
-                    d["interpretation"] = {"data": loaded}
-            except json.JSONDecodeError:
-                logger.error(f"Invalid JSON for {d.get('id')}: {cleaned[:200]}...")
                 try:
-                    diagnostics.append(make_event(
-                        "01_annotation_processor", "error", "llm_invalid_json",
-                        "Model returned invalid JSON", {"annotation_id": d.get("id")}
-                    ))
-                    errors_count += 1
+                    from loguru import logger as _logger
+                    _logger.info(
+                        f"stage01_interpret: model={getattr(getattr(r,'request',object()),'model',None)} ok={r.exception is None}"
+                    )
                 except Exception:
                     pass
-                d["interpretation"] = {"error": "Invalid JSON response from LLM", "raw_response": cleaned}
-        except Exception as e:
-            logger.exception(f"Failed to parse LLM response for {d.get('id')}: {e}")
-            d["interpretation"] = {"error": str(e)}
+                if not isinstance(content_str, str) or not content_str.strip():
+                    d["interpretation"] = {"error": "Empty content from LLM"}
+                    continue
+                cleaned = clean_json_string(content_str)
+                if isinstance(cleaned, dict):
+                    d["interpretation"] = cast(Dict[str, Any], cleaned)
+                    continue
+                if isinstance(cleaned, list):
+                    d["interpretation"] = {"data": cleaned}
+                    continue
+                try:
+                    loaded = json.loads(cleaned)
+                    if isinstance(loaded, dict):
+                        d["interpretation"] = cast(Dict[str, Any], loaded)
+                    else:
+                        d["interpretation"] = {"data": loaded}
+                except json.JSONDecodeError:
+                    logger.error(
+                        f"Invalid JSON for {d.get('id')}: {cleaned[:200]}..."
+                    )
+                    try:
+                        diagnostics.append(
+                            make_event(
+                                "01_annotation_processor",
+                                "error",
+                                "llm_invalid_json",
+                                "Model returned invalid JSON",
+                                {"annotation_id": d.get("id")},
+                            )
+                        )
+                        errors_count += 1
+                    except Exception:
+                        pass
+                    d["interpretation"] = {
+                        "error": "Invalid JSON response from LLM",
+                        "raw_response": cleaned,
+                    }
+            except Exception as e:
+                logger.exception(
+                    f"Failed to parse LLM response for {d.get('id')}: {e}"
+                )
+                d["interpretation"] = {"error": str(e)}
+        # legacy duplicate parsing block removed
 
     # Tiny validator: suggest header vs table based on computed features (does not override model)
     for d in data:
@@ -868,24 +986,31 @@ async def process_pdf_pipeline(config: Config):
         reasons: List[str] = []
         try:
             if feats.get("has_numbering") is True:
-                header_score += 0.3; reasons.append("numbering_present")
+                header_score += 0.3
+                reasons.append("numbering_present")
             avg_in = feats.get("avg_font_size_inside") or 0
             avg_ab = feats.get("avg_font_size_above") or 0
             avg_bl = feats.get("avg_font_size_below") or 0
             if avg_in and (avg_in > max(avg_ab, avg_bl) + 0.5):
-                header_score += 0.3; reasons.append("font_size_inside_larger")
+                header_score += 0.3
+                reasons.append("font_size_inside_larger")
             if feats.get("bold_detected_inside") is True:
-                header_score += 0.2; reasons.append("bold_detected")
+                header_score += 0.2
+                reasons.append("bold_detected")
             if (feats.get("spacing_above") or 0) > (2.0 * (feats.get("spacing_below") or 0) + 1.0):
-                header_score += 0.1; reasons.append("extra_spacing_above")
+                header_score += 0.1
+                reasons.append("extra_spacing_above")
             if feats.get("alignment") == "center":
-                header_score += 0.1; reasons.append("center_alignment")
+                header_score += 0.1
+                reasons.append("center_alignment")
             if feats.get("gridlines_detected") is True:
-                table_score += 0.5; reasons.append("gridlines_detected")
+                table_score += 0.5
+                reasons.append("gridlines_detected")
             gh = feats.get("gridlines_h_density") or 0
             gv = feats.get("gridlines_v_density") or 0
             if gh > 0.01 and gv > 0.01:
-                table_score += 0.2; reasons.append("high_gridline_density")
+                table_score += 0.2
+                reasons.append("high_gridline_density")
         except Exception:
             pass
         suggestion: Optional[Dict[str, Any]] = None
@@ -950,15 +1075,27 @@ async def process_pdf_pipeline(config: Config):
     # Optional: build and save a local FAISS index for annotations (for stages 03/07)
     try:
         from extractor.pipeline.utils.ann_index import build_ann_index, save_ann_index
+
         idx, meta = build_ann_index(data)
         if idx is not None:
             base = stage_output_dir / "annots_faiss"
             save_ann_index(idx, meta, base, data)
-            diagnostics.append(make_event("01_annotation_processor","info","ann_index_built",
-                                          "Built FAISS annotations index", {"count": len(data)}))
+            diagnostics.append(
+                make_event(
+                    "01_annotation_processor",
+                    "info",
+                    "ann_index_built",
+                    "Built FAISS annotations index",
+                    {"count": len(data)},
+                )
+            )
     except Exception as e:
         try:
-            diagnostics.append(make_event("01_annotation_processor","warning","ann_index_build_failed", str(e), {}))
+            diagnostics.append(
+                make_event(
+                    "01_annotation_processor", "warning", "ann_index_build_failed", str(e), {}
+                )
+            )
         except Exception:
             pass
 
@@ -978,28 +1115,42 @@ async def process_pdf_pipeline(config: Config):
 # ------------------------------------------------------------------
 # CLI
 # ------------------------------------------------------------------
-@app.command()
 def run(
     input_pdf: Annotated[Path, typer.Argument(..., help="PDF with annotations")],
-    output_dir: Annotated[Path, typer.Option("-o", help="Parent directory for pipeline results")] = Path("data/results/pipeline"),
+    output_dir: Annotated[
+        Path, typer.Option("-o", help="Parent directory for pipeline results")
+    ] = Path("data/results/pipeline"),
     llm_model: Annotated[Optional[str], typer.Option("--model")] = None,
     concurrency: int = 5,
     dpi: int = 150,
-    include_freetext: bool = typer.Option(False, "--include-freetext", help="Include FreeText annotations."),
-    images: bool = typer.Option(False, "--images/--no-images", help="Include annotation images in LLM prompts."),
-    debug: bool = typer.Option(False, "--debug", help="Enable verbose logging to a stage log file."),
-    limit: int = typer.Option(0, "--limit", help="Limit number of annotations to process (0 = all)."),
-    timeout: int = typer.Option(0, "--timeout", help="Overall stage timeout in seconds (0 = no limit)."),
-    cache: bool = typer.Option(True, "--cache/--no-cache", help="Enable LiteLLM cache (default: enabled)"),
+    include_freetext: bool = typer.Option(
+        False, "--include-freetext", help="Include FreeText annotations."
+    ),
+    images: bool = typer.Option(
+        False, "--images/--no-images", help="Include annotation images in LLM prompts."
+    ),
+    debug: bool = typer.Option(
+        False, "--debug", help="Enable verbose logging to a stage log file."
+    ),
+    limit: int = typer.Option(
+        0, "--limit", help="Limit number of annotations to process (0 = all)."
+    ),
+    timeout: int = typer.Option(
+        0, "--timeout", help="Overall stage timeout in seconds (0 = no limit)."
+    ),
+    cache: bool = typer.Option(
+        True, "--cache/--no-cache", help="Enable LiteLLM cache (default: enabled)"
+    ),
 ):
     """Processes a PDF to extract and interpret annotations, saving to a structured output directory."""
-    
+
     # Define the specific output directory for this stage
     stage_output_dir = output_dir / "01_annotation_processor"
     stage_output_dir.mkdir(parents=True, exist_ok=True)
     # Configure logging sink per stage
     try:
         from loguru import logger as _lg
+
         _lg.remove()
         _lg.add(
             str(stage_output_dir / "stage_01_annotations.log"),
@@ -1012,11 +1163,14 @@ def run(
         )
     except Exception:
         pass
-    
+
     cfg = Config(
         input_pdf=input_pdf,
         output_dir=stage_output_dir,
-        llm_model=llm_model or os.getenv("LITELLM_DEFAULT_MODEL", "openai/gpt-4o-mini"),
+        llm_model=llm_model
+        or os.getenv(
+            "LITELLM_DEFAULT_MODEL", os.getenv("DEFAULT_LITELLM_MODEL", "openai/gpt-4o-mini")
+        ),
         llm_concurrency=concurrency,
         render_dpi=dpi,
         include_freetext=include_freetext,
@@ -1035,13 +1189,22 @@ def run(
         typer.secho(f"Stage 01 failed: {e}", fg=typer.colors.RED)
         raise typer.Exit(code=1)
 
+
 # ------------------------------------------------------------------
 # DEBUG-BUNDLE COMMAND
 # ------------------------------------------------------------------
-@app.command("debug-bundle")
 def debug_bundle(
-    bundle: Path = typer.Argument(..., exists=True, file_okay=True, dir_okay=False, readable=True, help="Bundle JSON with key 'pdf' and optional 'options'"),
-    output_dir: Path = typer.Option("data/results/pipeline", "-o", help="Parent directory for pipeline results."),
+    bundle: Path = typer.Argument(
+        ...,
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        readable=True,
+        help="Bundle JSON with key 'pdf' and optional 'options'",
+    ),
+    output_dir: Path = typer.Option(
+        "data/results/pipeline", "-o", help="Parent directory for pipeline results."
+    ),
 ):
     """Run Stage 01 from a single JSON bundle.
 
@@ -1069,7 +1232,8 @@ def debug_bundle(
             raise ValueError("Bundle must include existing 'pdf' file path")
         opts = data.get("options") or {}
     except Exception as e:
-        typer.secho(f"Failed to load bundle: {e}", fg=typer.colors.RED); raise typer.Exit(1)
+        typer.secho(f"Failed to load bundle: {e}", fg=typer.colors.RED)
+        raise typer.Exit(1)
 
     cfg = Config(
         input_pdf=pdf_path,
@@ -1077,7 +1241,15 @@ def debug_bundle(
         include_freetext=bool(opts.get("include_freetext", True)),
         use_images=bool(opts.get("images", False)),
         render_dpi=int(opts.get("dpi", 150)),
-        llm_model=str(opts.get("model", os.getenv("LITELLM_DEFAULT_MODEL", "openai/gpt-4o-mini"))),
+        llm_model=str(
+            opts.get(
+                "model",
+                os.getenv(
+                    "LITELLM_DEFAULT_MODEL",
+                    os.getenv("DEFAULT_LITELLM_MODEL", "openai/gpt-4o-mini"),
+                ),
+            )
+        ),
         llm_concurrency=int(opts.get("concurrency", 5)),
         limit_annotations=int(opts.get("limit", 0)),
         max_runtime_seconds=int(opts.get("timeout", 0)),
@@ -1087,12 +1259,13 @@ def debug_bundle(
     try:
         asyncio.run(process_pdf_pipeline(cfg))
     except Exception as e:
-        typer.secho(f"Stage 01 debug-bundle failed: {e}", fg=typer.colors.RED); raise typer.Exit(1)
+        typer.secho(f"Stage 01 debug-bundle failed: {e}", fg=typer.colors.RED)
+        raise typer.Exit(1)
     typer.secho("Debug-bundle run completed for Stage 01", fg=typer.colors.GREEN)
+
 
 # ------------------------------------------------------------------
 # DEBUG ENTRY
 # ------------------------------------------------------------------
 if __name__ == "__main__":
-    # Run Typer CLI when executed directly
-    app()
+    build_cli()()

@@ -1,0 +1,26 @@
+version: 1
+codebase:
+  repo_root: .
+approaches:
+  - name: fueling_density_mpc
+  - name: edge_stability_mhd
+  - name: heat_extraction_adaptive
+runner:
+  type: analysis_sim
+scoring:
+  weights: { correctness: 35, robustness: 25, speed: 25, brevity: 15 }
+constraints:
+  edge_density_threshold: 1.0e19
+  q_min: 2.0
+  beta_max: 0.04
+  heat_flux_peak_max: 10.0
+optimizer:
+  rules: prototypes/gamified/rules/prompt_optimization.yaml
+execution:
+  concurrency: 3
+  codex_exec: true
+  autostart_backend: true
+  autostart_dashboard: true
+observability:
+  backend: arango
+  dashboard: true

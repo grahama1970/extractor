@@ -44,28 +44,40 @@ class BaseTable(Block):
             - table_data: processed 2D array of cell values
         """
         if child_cells is None:
-            child_cells: List[TableCell] = [document.get_block(c.id) for c in child_blocks if c.id.block_type == BlockTypes.TableCell]
+            child_cells: List[TableCell] = [
+                document.get_block(c.id)
+                for c in child_blocks
+                if c.id.block_type == BlockTypes.TableCell
+            ]
 
         unique_rows = sorted(list(set([c.row_id for c in child_cells])))
         rows = []
         is_header = []
 
         for row_id in unique_rows:
-            row_cells = sorted([c for c in child_cells if c.row_id == row_id], key=lambda x: x.col_id)
+            row_cells = sorted(
+                [c for c in child_cells if c.row_id == row_id], key=lambda x: x.col_id
+            )
             row_data = []
             row_is_header = any(cell.is_header for cell in row_cells)
 
             for cell in row_cells:
                 # Get the text content of the cell
-                cell_text = " ".join(cell.text_lines) if hasattr(cell, "text_lines") and cell.text_lines else ""
-                row_data.append({
-                    "text": cell_text,
-                    "colspan": cell.colspan,
-                    "rowspan": cell.rowspan,
-                    "is_header": cell.is_header,
-                    "col_id": cell.col_id,
-                    "row_id": cell.row_id
-                })
+                cell_text = (
+                    " ".join(cell.text_lines)
+                    if hasattr(cell, "text_lines") and cell.text_lines
+                    else ""
+                )
+                row_data.append(
+                    {
+                        "text": cell_text,
+                        "colspan": cell.colspan,
+                        "rowspan": cell.rowspan,
+                        "is_header": cell.is_header,
+                        "col_id": cell.col_id,
+                        "row_id": cell.row_id,
+                    }
+                )
 
             rows.append(row_data)
             is_header.append(row_is_header)
@@ -86,18 +98,24 @@ class BaseTable(Block):
             "rows": rows,
             "is_header": is_header,
             "header_row_idx": header_row_idx,
-            "table_data": table_data
+            "table_data": table_data,
         }
 
     @staticmethod
     def format_cells(document, child_blocks, child_cells: List[TableCell] | None = None):
         if child_cells is None:
-            child_cells: List[TableCell] = [document.get_block(c.id) for c in child_blocks if c.id.block_type == BlockTypes.TableCell]
+            child_cells: List[TableCell] = [
+                document.get_block(c.id)
+                for c in child_blocks
+                if c.id.block_type == BlockTypes.TableCell
+            ]
 
         unique_rows = sorted(list(set([c.row_id for c in child_cells])))
         html_repr = "<table><tbody>"
         for row_id in unique_rows:
-            row_cells = sorted([c for c in child_cells if c.row_id == row_id], key=lambda x: x.col_id)
+            row_cells = sorted(
+                [c for c in child_cells if c.row_id == row_id], key=lambda x: x.col_id
+            )
             html_repr += "<tr>"
             for cell in row_cells:
                 html_repr += cell.assemble_html(document, child_blocks, None)
@@ -125,10 +143,7 @@ class BaseTable(Block):
         table_data = self.build_table_data(document, child_blocks, child_cells)
 
         # Create a more structured JSON representation
-        json_data = {
-            "headers": [],
-            "rows": []
-        }
+        json_data = {"headers": [], "rows": []}
 
         # If we have headers, use them as column names
         if table_data["header_row_idx"] is not None:
@@ -155,7 +170,9 @@ class BaseTable(Block):
 
     def assemble_html(self, document, child_blocks: List[BlockOutput], parent_structure=None):
         # Filter out the table cells, so they don't render twice
-        child_ref_blocks = [block for block in child_blocks if block.id.block_type == BlockTypes.Reference]
+        child_ref_blocks = [
+            block for block in child_blocks if block.id.block_type == BlockTypes.Reference
+        ]
         template = super().assemble_html(document, child_ref_blocks, parent_structure)
 
         child_block_types = set([c.id.block_type for c in child_blocks])

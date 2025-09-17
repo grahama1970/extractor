@@ -1,0 +1,61 @@
+name: Gamified Show & Tell
+
+on:
+  workflow_dispatch:
+    inputs:
+      prompt:
+        description: "Inline prompt (approaches list)"
+        required: false
+        default: "approaches: mul_shift_add, mul_karatsuba, mul_chunked"
+      instances:
+        description: "Concurrent instances"
+        required: false
+        default: "3"
+      dashboard_port:
+        description: "Dashboard port"
+        required: false
+        default: "5199"
+
+jobs:
+  show:
+    # Requires a self-hosted runner that has Codex CLI and ArangoDB reachable
+    runs-on: self-hosted
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Ensure uv
+        run: |
+          python -m pip install -U uv
+
+      - name: Run Show & Tell
+        env:
+          ARANGO_HOST: ${{ secrets.ARANGO_HOST }}
+          ARANGO_PORT: ${{ secrets.ARANGO_PORT }}
+          ARANGO_USERNAME: ${{ secrets.ARANGO_USERNAME }}
+          ARANGO_PASSWORD: ${{ secrets.ARANGO_PASSWORD }}
+          ARANGO_DB: ${{ secrets.ARANGO_DB }}
+          CODEX_BINARY_PATH: ${{ secrets.CODEX_BINARY_PATH }}
+        run: |
+          ./scripts/gamified_show_and_tell.py \
+            --codebase . \
+            --prompt "${{ github.event.inputs.prompt }}" \
+            --instances "${{ github.event.inputs.instances }}" \
+            --dashboard-port "${{ github.event.inputs.dashboard_port }}"
+
+      - name: Collect artifacts
+        run: |
+          ls -la workspace/runs | tail -n 20 || true
+          echo "RUNS_DIR=$(pwd)/workspace/runs" >> $GITHUB_ENV
+
+      - name: Upload run artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: gamified-runs
+          path: ${{ env.RUNS_DIR }}
+

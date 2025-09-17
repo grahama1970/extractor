@@ -23,7 +23,9 @@ class InlineMath(Block):
     has_continuation: bool = False
     blockquote: bool = False
     blockquote_level: int = 0
-    block_description: str = "A text block that contains inline math.  This is not used for italic text or references - only for text that contains math."
+    block_description: str = (
+        "A text block that contains inline math.  This is not used for italic text or references - only for text that contains math."
+    )
     html: str | None = None
 
     def assemble_html(self, document, child_blocks, parent_structure):

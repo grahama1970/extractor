@@ -1,0 +1,187 @@
+System:
+Return ONLY a well-formed JSON object. No prose, no code fences, no extra keys.
+
+User:
+Image Path: /home/graham/workspace/experiments/extractor/data/results/pipeline/04_section_builder/image_output/section_section_0.png
+
+Task
+- Reflow this SECTION JSON into output JSON. Keep tables unchanged if present; otherwise produce a clean text reflow. Be concise.
+
+Expected JSON keys
+- reflowed_json: object
+- ocr_corrections: object
+- improvements_made: string
+- summary: string
+
+Section JSON
+```json
+{
+  "id": "section_0",
+  "title": "4.1.5.4. BHT (Branch History Table) submodule",
+  "level": 4,
+  "page_start": 0,
+  "page_end": 1,
+  "metadata": {
+    "section_number": "4.1.5.4",
+    "section_hash": "1402d30f1a7ebbc4e5645fc6234aedff"
+  },
+  "blocks": [
+    {
+      "text": "4.1.5.4. BHT (Branch History Table) submodule\n"
+    },
+    {
+      "text": "BHT is implemented as a memory which is composed of BHTDepth configuration parameter\nentries. The lower address bits of the virtual address point to the memory entry.\n"
+    },
+    {
+      "text": "When a branch instruction is resolved by the EX_STAGE module, the branch PC and the taken\n(or not taken) status information is stored in the Branch History Table.\n"
+    },
+    {
+      "text": "The Branch History Table is a table of two-bit saturating counters that takes the virtual address of\nthe current fetched instruction by the CACHE. It states whether the current branch request\nshould be taken or not. The two bit counter is updated by the successive execution of the\ninstructions as shown in the following figure.\n"
+    },
+    {
+      "text": "When a branch instruction is pre-decoded by instr_scan submodule, the BHT valids whether the\nPC address is in the BHT and provides the taken or not prediction.\n"
+    },
+    {
+      "text": "The BHT is never flushed."
+    },
+    {
+      "text": "SignalIODescripticonnexiTypeonon"
+    },
+    {
+      "text": "clk_iinSubsyste\nm ClockSUBSY\nSTEMlogicrst_niinAsynchro\nnous reset\nactive lowSUBSY\nSTEMlogicvpc_iinVirtual PCCACHElogic[CVA6Cfg.VLEN-1:0]bht_updat\ne_iinUpdate\nbht with\nresolved\naddressEXECU\nTEbht_update_tbht_predi\nction_oou\ntPrediction\nfrom bhtFRONT\nENDariane_pkg::bht_prediction_t[CVA6Cfg.IN\nSTR_PER_FETCH-1:0]"
+    },
+    {
+      "text": "Due to cv32a65x configuration, some ports are tied to a static value. These ports do not appear in\nthe above table, they are listed below\n"
+    },
+    {
+      "text": "For any HW configuration,\n"
+    },
+    {
+      "text": "● flush_bp_i input is tied to 0\n"
+    },
+    {
+      "text": "As DebugEn = False,\n"
+    },
+    {
+      "text": "● debug_mode_i input is tied to 0\n"
+    },
+    {
+      "text": "● flush_bp_i input is tied to 0\n"
+    },
+    {
+      "text": "● debug_mode_i input is tied to 0\n"
+    }
+  ]
+}
+```
+
+Tables JSON (subset)
+```json
+[
+  {
+    "page_index": 0,
+    "table_index": 1,
+    "pandas_metrics": {
+      "columns": [
+        "0",
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "shape": [
+        1,
+        5
+      ],
+      "data_density": 1.0
+    },
+    "pandas_df": [
+      {
+        "0": "Signal",
+        "1": "IO",
+        "2": "Descripti \non",
+        "3": "connexi \non",
+        "4": "Type"
+      }
+    ],
+    "table_image_path": "05_table_extractor/image_output/page_1_table_1.png"
+  },
+  {
+    "page_index": 1,
+    "table_index": 1,
+    "pandas_metrics": {
+      "columns": [
+        "0",
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "shape": [
+        5,
+        5
+      ],
+      "data_density": 0.72
+    },
+    "pandas_df": [
+      {
+        "0": "clk_i",
+        "1": "in \nin \nin \nou \nt",
+        "2": "Subsyste \nm Clock",
+        "3": "SUBSY \nSTEM",
+        "4": "logic"
+      },
+      {
+        "0": "rst_ni",
+        "1": "",
+        "2": "Asynchro \nnous reset \nactive low",
+        "3": "SUBSY \nSTEM",
+        "4": "logic"
+      },
+      {
+        "0": "vpc_i \nin \nVirtual PC \nCACHE \nlogic[CVA6Cfg.VLEN-1:0]",
+        "1": "",
+        "2": "",
+        "3": "",
+        "4": ""
+      }
+    ],
+    "table_image_path": "05_table_extractor/image_output/page_2_table_1.png"
+  }
+]
+```
+
+Figures JSON (subset)
+```json
+[
+  {
+    "figure_id": "figure_001",
+    "page": 0,
+    "image_path": "06_figure_extractor/image_output/figure_001.png",
+    "bbox": [
+      72.21784257888794,
+      342.1806650161743,
+      541.3334956169128,
+      491.3015298843384
+    ],
+    "ai_description": "This figure illustrates a 4-state branch predictor state machine, depicting four states: \"strongly not taken\", \"weakly not taken\", \"weakly taken\", and \"strongly taken\". Transitions between these states are governed by \"taken\" or \"not taken\" outcomes, moving towards \"taken\" states on a \"taken\" outcome and towards \"not taken\" states on a \"not taken\" outcome.",
+    "section_id": "section_0"
+  }
+]
+```
+
+Image
+- The client attaches a single image_url part built from the local path at runtime using the helper below.
+- Placeholder: /home/graham/workspace/experiments/extractor/data/results/pipeline/04_section_builder/image_output/section_section_0.png
+
+Helper (client-side; do not execute in model)
+Python:
+def to_data_url(path: str) -> str:
+    import base64, mimetypes
+    with open(path, 'rb') as f:
+        b64 = base64.b64encode(f.read()).decode('ascii')
+    mime = mimetypes.guess_type(path)[0] or 'application/octet-stream'
+    return f'data:{mime};base64,{b64}'
+
+
+Attach image: /home/graham/workspace/experiments/extractor/data/results/pipeline/04_section_builder/image_output/section_section_0.png

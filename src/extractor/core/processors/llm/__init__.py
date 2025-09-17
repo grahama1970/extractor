@@ -56,6 +56,7 @@ class BaseLLMProcessor(BaseProcessor):
     """
     A processor for using LLMs to convert blocks.
     """
+
     model_name: Annotated[
         str,
         "The model name to use in provider/model format (e.g., 'gemini/gemini-2.0-flash' or 'openai/gpt-4o-mini').",
@@ -87,12 +88,17 @@ class BaseLLMProcessor(BaseProcessor):
 
         self.llm_service = llm_service
 
-    def extract_image(self, document: Document, image_block: Block, remove_blocks: Sequence[BlockTypes] | None = None) -> Image.Image:
+    def extract_image(
+        self,
+        document: Document,
+        image_block: Block,
+        remove_blocks: Sequence[BlockTypes] | None = None,
+    ) -> Image.Image:
         return image_block.get_image(
             document,
             highres=True,
             expansion=(self.image_expansion_ratio, self.image_expansion_ratio),
-            remove_blocks=remove_blocks
+            remove_blocks=remove_blocks,
         )
 
 
@@ -100,6 +106,7 @@ class BaseLLMComplexBlockProcessor(BaseLLMProcessor):
     """
     A processor for using LLMs to convert blocks with more complex logic.
     """
+
     def __call__(self, document: Document):
         if not self.use_llm or self.llm_service is None:
             return
@@ -114,17 +121,21 @@ class BaseLLMComplexBlockProcessor(BaseLLMProcessor):
 
     def rewrite_blocks(self, document: Document):
         # Don't show progress if there are no blocks to process
-        total_blocks = sum(len(page.contained_blocks(document, self.block_types)) for page in document.pages)
+        total_blocks = sum(
+            len(page.contained_blocks(document, self.block_types)) for page in document.pages
+        )
         if total_blocks == 0:
             return
 
         pbar = tqdm(desc=f"{self.__class__.__name__} running", disable=self.disable_tqdm)
         with ThreadPoolExecutor(max_workers=self.max_concurrency) as executor:
-            for future in as_completed([
-                executor.submit(self.process_rewriting, document, page, block)
-                for page in document.pages
-                for block in page.contained_blocks(document, self.block_types)
-            ]):
+            for future in as_completed(
+                [
+                    executor.submit(self.process_rewriting, document, page, block)
+                    for page in document.pages
+                    for block in page.contained_blocks(document, self.block_types)
+                ]
+            ):
                 future.result()  # Raise exceptions if any occurred
                 pbar.update(1)
 
@@ -151,10 +162,7 @@ class BaseLLMSimpleBlockProcessor(BaseLLMProcessor):
         blocks = []
         for page in document.pages:
             for block in page.contained_blocks(document, self.block_types):
-                blocks.append({
-                    "page": page,
-                    "block": block
-                })
+                blocks.append({"page": page, "block": block})
         return blocks
 
     def block_prompts(self, document: Document) -> List[PromptData]:
@@ -162,5 +170,3 @@ class BaseLLMSimpleBlockProcessor(BaseLLMProcessor):
 
     def rewrite_block(self, response: dict, prompt_data: PromptData, document: Document):
         raise NotImplementedError()
-
-

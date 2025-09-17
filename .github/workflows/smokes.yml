@@ -1,0 +1,82 @@
+name: tabbed-smokes
+
+on:
+  push:
+    branches: [ main, master, dev, '**/tabbed**' ]
+  pull_request:
+    branches: [ '**' ]
+
+jobs:
+  api-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install backend (editable)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+      - name: Start FastAPI backend
+        env:
+          SERVER_PDFS_ROOT: ${{ github.workspace }}/prototypes/tabbed/pdfs
+        run: |
+          nohup python -m uvicorn extractor.core.scripts.server:app --host 127.0.0.1 --port 8000 >/dev/null 2>&1 &
+          for i in {1..60}; do curl -sf http://127.0.0.1:8000/api/health >/dev/null && break || sleep 1; done
+          curl -sf http://127.0.0.1:8000/api/health || (echo 'Backend failed to start' && exit 1)
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Run API smoke
+        run: node scripts/smokes/api_tabbed_basic.mjs
+
+  cdp-smokes:
+    if: ${{ vars.RUN_CDP_SMOKES == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install backend (editable)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+      - name: Start FastAPI backend
+        env:
+          SERVER_PDFS_ROOT: ${{ github.workspace }}/prototypes/tabbed/pdfs
+          UX_MOCK_GENERATE: "1"
+        run: |
+          nohup python -m uvicorn extractor.core.scripts.server:app --host 127.0.0.1 --port 8001 >/dev/null 2>&1 &
+          for i in {1..60}; do curl -sf http://127.0.0.1:8001/api/health >/dev/null && break || sleep 1; done
+          curl -sf http://127.0.0.1:8001/api/health || (echo 'Backend failed to start' && exit 1)
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install workspace deps (tabbed)
+        run: |
+          cd prototypes/tabbed
+          npm ci
+      - name: Build and preview frontend (8080)
+        run: |
+          cd prototypes/tabbed/html
+          npm run -s prepreview:8080 || true
+          nohup npm run -s preview:8080 >/dev/null 2>&1 &
+          for i in {1..60}; do curl -sf http://127.0.0.1:8080/main >/dev/null && break || sleep 1; done
+          curl -sf http://127.0.0.1:8080/main || (echo 'Frontend failed to start' && exit 1)
+      - name: Launch Chrome (CDP)
+        run: |
+          nohup google-chrome --headless=new --disable-gpu --remote-debugging-port=9222 >/dev/null 2>&1 &
+          for i in {1..30}; do curl -sf http://127.0.0.1:9222/json/version >/dev/null && break || sleep 1; done
+      - name: Run All smokes (CDP)
+        env:
+          BASE_URL: http://127.0.0.1:8080/main
+          BROWSERLESS_DISCOVERY_URL: http://127.0.0.1:9222/json/version
+        run: node scripts/smokes/all.mjs

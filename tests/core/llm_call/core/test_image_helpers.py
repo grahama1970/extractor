@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from extractor.pipeline.utils import image_helpers as ih
+from extractor.pipeline.utils import litellm_image_utils as ih
 
 
 def test_extract_images_local_and_remote(tmp_path: Path):
@@ -31,7 +31,7 @@ def test_fetch_remote_image_cached_failure(monkeypatch):
     def fake_get(url, timeout):
         raise RuntimeError("network fail")
 
-    import extractor.pipeline.utils.image_helpers as image_helpers
+    import extractor.pipeline.utils.litellm_image_utils as image_helpers
 
     monkeypatch.setattr(image_helpers.httpx, "get", fake_get)
     out = ih.fetch_remote_image_cached("http://does-not-exist.example/foo.jpg", timeout=1)

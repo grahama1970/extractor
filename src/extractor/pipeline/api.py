@@ -20,7 +20,6 @@ from typing import Any, Dict, List, Optional, Tuple
 import typer
 
 
-
 DEFAULT_RESULTS_DIR = Path("data/results/pipeline")
 
 
@@ -61,7 +60,9 @@ def _paths(base: Path) -> PipelinePaths:
     )
 
 
-def extract_sections(pdf_path: Path | str, output_dir: Path | str = DEFAULT_RESULTS_DIR, debug: bool = False) -> Tuple[List[Dict[str, Any]], Path]:
+def extract_sections(
+    pdf_path: Path | str, output_dir: Path | str = DEFAULT_RESULTS_DIR, debug: bool = False
+) -> Tuple[List[Dict[str, Any]], Path]:
     """Run key steps and return (sections, sections_json_path)."""
     pdf_path = Path(pdf_path)
     out = Path(output_dir)
@@ -70,44 +71,58 @@ def extract_sections(pdf_path: Path | str, output_dir: Path | str = DEFAULT_RESU
 
     # Stage 01: annotation/cleaner
     # Produces cleaned PDF in p.anno_dir
-    _run([
-        sys.executable,
-        os.fspath(Path("src/extractor/pipeline/steps/01_annotation_processor.py")),
-        "run",
-        os.fspath(pdf_path),
-        "-o", os.fspath(out),
-    ])
+    _run(
+        [
+            sys.executable,
+            os.fspath(Path("src/extractor/pipeline/steps/01_annotation_processor.py")),
+            "run",
+            os.fspath(pdf_path),
+            "-o",
+            os.fspath(out),
+        ]
+    )
 
     clean_pdf = _find_clean_pdf(p.anno_dir)
 
     # Stage 02: marker blocks
-    _run([
-        sys.executable,
-        os.fspath(Path("src/extractor/pipeline/steps/02_marker_extractor.py")),
-        "run",
-        os.fspath(clean_pdf),
-        "-o", os.fspath(out),
-    ])
+    _run(
+        [
+            sys.executable,
+            os.fspath(Path("src/extractor/pipeline/steps/02_marker_extractor.py")),
+            "run",
+            os.fspath(clean_pdf),
+            "-o",
+            os.fspath(out),
+        ]
+    )
 
     # Stage 03: suspicious header verify
-    _run([
-        sys.executable,
-        os.fspath(Path("src/extractor/pipeline/steps/03_suspicious_headers.py")),
-        "run",
-        os.fspath(p.blocks_json),
-        "--pdf-dir", os.fspath(p.anno_dir),
-        "-o", os.fspath(out),
-    ])
+    _run(
+        [
+            sys.executable,
+            os.fspath(Path("src/extractor/pipeline/steps/03_suspicious_headers.py")),
+            "run",
+            os.fspath(p.blocks_json),
+            "--pdf-dir",
+            os.fspath(p.anno_dir),
+            "-o",
+            os.fspath(out),
+        ]
+    )
 
     # Stage 04: section builder
-    _run([
-        sys.executable,
-        os.fspath(Path("src/extractor/pipeline/steps/04_section_builder.py")),
-        "run",
-        os.fspath(p.verified_json),
-        "--pdf-dir", os.fspath(p.anno_dir),
-        "-o", os.fspath(out),
-    ])
+    _run(
+        [
+            sys.executable,
+            os.fspath(Path("src/extractor/pipeline/steps/04_section_builder.py")),
+            "run",
+            os.fspath(p.verified_json),
+            "--pdf-dir",
+            os.fspath(p.anno_dir),
+            "-o",
+            os.fspath(out),
+        ]
+    )
 
     if not p.sections_json.exists():
         raise FileNotFoundError(f"Sections JSON not found: {p.sections_json}")
@@ -117,14 +132,22 @@ def extract_sections(pdf_path: Path | str, output_dir: Path | str = DEFAULT_RESU
     return sections, p.sections_json
 
 
-def cli_main() -> None:
-    """CLI wrapper for extract_sections."""
+def build_cli() -> typer.Typer:
+    """Return a Typer app for this module.
+
+    Exposed as a factory so tests can import and run the CLI with CliRunner
+    without side effects at import time.
+    """
     app = typer.Typer(add_completion=False, help="Run core pipeline (01→04) and return sections")
 
     @app.command()
     def run(
-        pdf: Path = typer.Argument(..., exists=True, file_okay=True, dir_okay=False, readable=True, help="Input PDF"),
-        out: Path = typer.Option(DEFAULT_RESULTS_DIR, "-o", "--output-dir", help="Results directory"),
+        pdf: Path = typer.Argument(
+            ..., exists=True, file_okay=True, dir_okay=False, readable=True, help="Input PDF"
+        ),
+        out: Path = typer.Option(
+            DEFAULT_RESULTS_DIR, "-o", "--output-dir", help="Results directory"
+        ),
         json_out: bool = typer.Option(False, "--json", help="Print sections JSON to stdout"),
     ) -> None:
         sections, path = extract_sections(pdf, out)
@@ -134,7 +157,15 @@ def cli_main() -> None:
             print(f"Sections JSON: {path}")
             print(f"Sections count: {len(sections)}")
 
-    app()
+    return app
 
 
-__all__ = ["extract_sections", "DEFAULT_RESULTS_DIR", "cli_main"]
+def cli_main() -> None:
+    """CLI entrypoint for running via console_scripts or `python -m`.
+
+    This builds the Typer app and runs it.
+    """
+    build_cli()()
+
+
+__all__ = ["extract_sections", "DEFAULT_RESULTS_DIR", "cli_main", "build_cli"]

@@ -18,7 +18,7 @@ def load_stage_module():
 
 def main():
     stage01 = load_stage_module()
-    model = os.getenv("LITELLM_DEFAULT_MODEL", "openai/gpt-4o-mini")
+    model = os.getenv("LITELLM_DEFAULT_MODEL", os.getenv("DEFAULT_LITELLM_MODEL", "openai/gpt-4o-mini"))
     cfg = stage01.Config(
         input_pdf=Path("data/input/pipeline/BHT_CV32A65X_marked.pdf"),
         # Align with CLI: write into the stage-specific directory
@@ -37,4 +37,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

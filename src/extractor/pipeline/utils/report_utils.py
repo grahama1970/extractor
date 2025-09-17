@@ -19,10 +19,10 @@ def generate_verification_report(
     gold_standard: Dict[str, Any],
     raw_responses: Dict[str, Any] = None,
     function_name: str = "unknown",
-    stage_name: str = "unknown"
+    stage_name: str = "unknown",
 ) -> Path:
     """Generate verification report for any pipeline stage.
-    
+
     Args:
         request: The input request data
         response: The output response data
@@ -31,7 +31,7 @@ def generate_verification_report(
         raw_responses: Optional raw responses for debugging
         function_name: Name of the function being tested
         stage_name: Name of the pipeline stage (01, 02, etc.)
-        
+
     Returns:
         Path to the generated report file
     """
@@ -39,7 +39,7 @@ def generate_verification_report(
     reports_dir = Path(os.getenv("REPORTS_DIR", "reports"))
     report_path = reports_dir / f"{stage_name}_report_{timestamp}.json"
     report_path.parent.mkdir(exist_ok=True)
-    
+
     report = {
         "timestamp": timestamp,
         "stage": stage_name,
@@ -51,12 +51,12 @@ def generate_verification_report(
         "assertions": assertions,
         "verification": {
             "all_passed": all(assertions.values()),
-            "failed": [k for k, v in assertions.items() if not v]
-        }
+            "failed": [k for k, v in assertions.items() if not v],
+        },
     }
-    
-    with open(report_path, 'w') as f:
+
+    with open(report_path, "w") as f:
         json.dump(report, f, indent=2)
-    
+
     logger.info(f"Report: {report_path}")
     return report_path

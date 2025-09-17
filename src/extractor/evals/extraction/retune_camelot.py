@@ -33,7 +33,7 @@ def iou_rect(a: Tuple[float, float, float, float], b: Tuple[float, float, float,
 
 def score_table_df(df) -> float:
     try:
-        return float(df.astype(str).ne('').sum().sum())
+        return float(df.astype(str).ne("").sum().sum())
     except Exception:
         return 0.0
 
@@ -61,7 +61,12 @@ def retune_strategies_for_page(
 
     for name, cfg in strategies.items():
         try:
-            tables = camelot_io.read_pdf(str(pdf_path), pages=page_str, flavor=cfg.get("flavor", "lattice"), **(cfg.get("params") or {}))
+            tables = camelot_io.read_pdf(
+                str(pdf_path),
+                pages=page_str,
+                flavor=cfg.get("flavor", "lattice"),
+                **(cfg.get("params") or {}),
+            )
         except Exception:
             continue
         for t in list(tables):
@@ -71,12 +76,13 @@ def retune_strategies_for_page(
             iou = iou_rect(tuple(float(x) for x in bt), ann_box)
             sc = score_table_df(t.df)
             if iou > best["iou"] or (abs(iou - best["iou"]) < 1e-6 and sc > best["score"]):
-                best.update({
-                    "strategy": name,
-                    "iou": iou,
-                    "score": sc,
-                    "columns": [str(c) for c in list(t.df.columns)],
-                    "rows": int(getattr(t.df, "shape", [0, 0])[0]),
-                })
+                best.update(
+                    {
+                        "strategy": name,
+                        "iou": iou,
+                        "score": sc,
+                        "columns": [str(c) for c in list(t.df.columns)],
+                        "rows": int(getattr(t.df, "shape", [0, 0])[0]),
+                    }
+                )
     return best
-

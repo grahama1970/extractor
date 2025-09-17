@@ -38,7 +38,9 @@ import subprocess
 import json
 
 # Direct ArangoDB connection - NO MORE DUMMY FUNCTIONS!
-ARANGO_WORKER_PATH = "/home/graham/workspace/experiments/cc_executor/.claude/agents/workers/arango_tools_worker.py"
+ARANGO_WORKER_PATH = (
+    "/home/graham/workspace/experiments/cc_executor/.claude/agents/workers/arango_tools_worker.py"
+)
 
 
 class LLMTableMergeProcessor(BaseLLMComplexBlockProcessor):
@@ -46,56 +48,51 @@ class LLMTableMergeProcessor(BaseLLMComplexBlockProcessor):
         Tuple[BlockTypes],
         "The block types to process.",
     ] = (BlockTypes.Table, BlockTypes.TableOfContents)
-    
+
     def __init__(self, llm_service=None, config=None):
         # Handle the complex initialization with multiple inheritance
         # We need to manually call the right initializers
-        
+
         # First, initialize BaseProcessor attributes via assign_config
         from extractor.core.util import assign_config
+
         assign_config(self, config)
-        
+
         # Set LLM-specific attributes from BaseLLMProcessor
         self.llm_service = None
-        if hasattr(self, 'use_llm') and not self.use_llm:
+        if hasattr(self, "use_llm") and not self.use_llm:
             self.llm_service = None
         else:
             self.llm_service = llm_service
-        
+
         # Initialize KnowledgeAwareProcessor attributes
         self._pattern_cache = {}
         self._batch_queries = []
-        
+
         # Test ArangoDB connection (from KnowledgeAwareProcessor)
         self._test_arango_connection()
+
     table_height_threshold: Annotated[
         float,
         "The minimum height ratio relative to the page for the first table in a pair to be considered for merging.",
     ] = 0.6
     table_start_threshold: Annotated[
         float,
-        "The maximum percentage down the page the second table can start to be considered for merging."
+        "The maximum percentage down the page the second table can start to be considered for merging.",
     ] = 0.2
     vertical_table_height_threshold: Annotated[
-        float,
-        "The height tolerance for 2 adjacent tables to be merged into one."
+        float, "The height tolerance for 2 adjacent tables to be merged into one."
     ] = 0.25
     vertical_table_distance_threshold: Annotated[
-        int,
-        "The maximum distance between table edges for adjacency."
+        int, "The maximum distance between table edges for adjacency."
     ] = 20
     horizontal_table_width_threshold: Annotated[
-        float,
-        "The width tolerance for 2 adjacent tables to be merged into one."
+        float, "The width tolerance for 2 adjacent tables to be merged into one."
     ] = 0.25
     horizontal_table_distance_threshold: Annotated[
-        int,
-        "The maximum distance between table edges for adjacency."
+        int, "The maximum distance between table edges for adjacency."
     ] = 10
-    column_gap_threshold: Annotated[
-        int,
-        "The maximum gap between columns to merge tables"
-    ] = 50
+    column_gap_threshold: Annotated[int, "The maximum gap between columns to merge tables"] = 50
     disable_tqdm: Annotated[
         bool,
         "Whether to disable the tqdm progress bar.",
@@ -103,7 +100,7 @@ class LLMTableMergeProcessor(BaseLLMComplexBlockProcessor):
     table_merge_prompt: Annotated[
         str,
         "The prompt to use for rewriting text.",
-        "Default is a string containing the Gemini rewriting prompt."
+        "Default is a string containing the Gemini rewriting prompt.",
     ] = """You're a table analysis expert specializing in identifying split tables in PDFs.
 
 You'll receive two images and HTML representations of tables from a PDF. Table 1 comes first, and Table 2 appears after it (possibly on the next page). Your job is to determine if these tables should be merged because they're actually parts of the same larger table that was split.
@@ -262,41 +259,78 @@ Table 2
                 if prev_block is not None:
                     prev_cells = prev_block.contained_blocks(document, (BlockTypes.TableCell,))
                     curr_cells = block.contained_blocks(document, (BlockTypes.TableCell,))
-                    row_match = abs(self.get_row_count(prev_cells) - self.get_row_count(curr_cells)) < 5, # Similar number of rows
-                    col_match = abs(self.get_column_count(prev_cells) - self.get_column_count(curr_cells)) < 2
+                    row_match = (
+                        abs(self.get_row_count(prev_cells) - self.get_row_count(curr_cells)) < 5,
+                    )  # Similar number of rows
+                    col_match = (
+                        abs(self.get_column_count(prev_cells) - self.get_column_count(curr_cells))
+                        < 2
+                    )
 
-                    subsequent_page_table = all([
-                        prev_block.page_id == block.page_id - 1, # Subsequent pages
-                        max(prev_block.polygon.height / page.polygon.height,
-                            block.polygon.height / page.polygon.height) > self.table_height_threshold, # Take up most of the page height
-                            (len(page_blocks) == 1 or prev_page_block_count == 1), # Only table on the page
-                            (row_match or col_match)
-                        ])
+                    subsequent_page_table = all(
+                        [
+                            prev_block.page_id == block.page_id - 1,  # Subsequent pages
+                            max(
+                                prev_block.polygon.height / page.polygon.height,
+                                block.polygon.height / page.polygon.height,
+                            )
+                            > self.table_height_threshold,  # Take up most of the page height
+                            (
+                                len(page_blocks) == 1 or prev_page_block_count == 1
+                            ),  # Only table on the page
+                            (row_match or col_match),
+                        ]
+                    )
 
-                    same_page_vertical_table = all([
-                        prev_block.page_id == block.page_id, # On the same page
-                        (1 - self.vertical_table_height_threshold) < prev_block.polygon.height / block.polygon.height < (1 + self.vertical_table_height_threshold), # Similar height
-                        abs(block.polygon.x_start - prev_block.polygon.x_end) < self.vertical_table_distance_threshold, # Close together in x
-                        abs(block.polygon.y_start - prev_block.polygon.y_start) < self.vertical_table_distance_threshold, # Close together in y
-                        row_match
-                    ])
+                    same_page_vertical_table = all(
+                        [
+                            prev_block.page_id == block.page_id,  # On the same page
+                            (1 - self.vertical_table_height_threshold)
+                            < prev_block.polygon.height / block.polygon.height
+                            < (1 + self.vertical_table_height_threshold),  # Similar height
+                            abs(block.polygon.x_start - prev_block.polygon.x_end)
+                            < self.vertical_table_distance_threshold,  # Close together in x
+                            abs(block.polygon.y_start - prev_block.polygon.y_start)
+                            < self.vertical_table_distance_threshold,  # Close together in y
+                            row_match,
+                        ]
+                    )
 
-                    same_page_horizontal_table = all([
-                        prev_block.page_id == block.page_id, # On the same page
-                        (1 - self.horizontal_table_width_threshold) < prev_block.polygon.width / block.polygon.width < (1 + self.horizontal_table_width_threshold), # Similar width
-                        abs(block.polygon.y_start - prev_block.polygon.y_end) < self.horizontal_table_distance_threshold, # Close together in y
-                        abs(block.polygon.x_start - prev_block.polygon.x_start) < self.horizontal_table_distance_threshold, # Close together in x
-                        col_match
-                    ])
+                    same_page_horizontal_table = all(
+                        [
+                            prev_block.page_id == block.page_id,  # On the same page
+                            (1 - self.horizontal_table_width_threshold)
+                            < prev_block.polygon.width / block.polygon.width
+                            < (1 + self.horizontal_table_width_threshold),  # Similar width
+                            abs(block.polygon.y_start - prev_block.polygon.y_end)
+                            < self.horizontal_table_distance_threshold,  # Close together in y
+                            abs(block.polygon.x_start - prev_block.polygon.x_start)
+                            < self.horizontal_table_distance_threshold,  # Close together in x
+                            col_match,
+                        ]
+                    )
 
-                    same_page_new_column = all([
-                        prev_block.page_id == block.page_id, # On the same page
-                        abs(block.polygon.x_start - prev_block.polygon.x_end) < self.column_gap_threshold,
-                        block.polygon.y_start < prev_block.polygon.y_end,
-                        block.polygon.width * (1 - self.vertical_table_height_threshold) < prev_block.polygon.width  < block.polygon.width * (1 + self.vertical_table_height_threshold), # Similar width
-                        col_match
-                    ])
-                    merge_condition = any([subsequent_page_table, same_page_vertical_table, same_page_new_column, same_page_horizontal_table])
+                    same_page_new_column = all(
+                        [
+                            prev_block.page_id == block.page_id,  # On the same page
+                            abs(block.polygon.x_start - prev_block.polygon.x_end)
+                            < self.column_gap_threshold,
+                            block.polygon.y_start < prev_block.polygon.y_end,
+                            block.polygon.width * (1 - self.vertical_table_height_threshold)
+                            < prev_block.polygon.width
+                            < block.polygon.width
+                            * (1 + self.vertical_table_height_threshold),  # Similar width
+                            col_match,
+                        ]
+                    )
+                    merge_condition = any(
+                        [
+                            subsequent_page_table,
+                            same_page_vertical_table,
+                            same_page_new_column,
+                            same_page_horizontal_table,
+                        ]
+                    )
 
                 if prev_block is not None and merge_condition:
                     if prev_block not in table_run:
@@ -332,24 +366,26 @@ Table 2
         start_block = blocks[0]
         for i in range(1, len(blocks)):
             curr_block = blocks[i]
-            
+
             # KNOWLEDGE-FIRST: Check historical merge patterns
-            merge_knowledge = asyncio.run(self._check_table_merge_knowledge(
-                start_block, curr_block, document
-            ))
-            
+            merge_knowledge = asyncio.run(
+                self._check_table_merge_knowledge(start_block, curr_block, document)
+            )
+
             # If we have high confidence knowledge, use it
-            if merge_knowledge and merge_knowledge.get('confidence_score', 0) > 0.85:
-                logger.info(f"🧠 Using knowledge-based merge decision: {merge_knowledge['recommended_action']}")
-                
-                if merge_knowledge['recommended_action'] == 'merge':
-                    direction = merge_knowledge.get('merge_direction', 'bottom')
+            if merge_knowledge and merge_knowledge.get("confidence_score", 0) > 0.85:
+                logger.info(
+                    f"🧠 Using knowledge-based merge decision: {merge_knowledge['recommended_action']}"
+                )
+
+                if merge_knowledge["recommended_action"] == "merge":
+                    direction = merge_knowledge.get("merge_direction", "bottom")
                     self._apply_knowledge_merge(start_block, curr_block, direction, document)
                     continue
-                elif merge_knowledge['recommended_action'] == 'skip':
+                elif merge_knowledge["recommended_action"] == "skip":
                     start_block = curr_block
                     continue
-            
+
             # Fall back to LLM analysis if no strong knowledge match
             children = start_block.contained_blocks(document, (BlockTypes.TableCell,))
             children_curr = curr_block.contained_blocks(document, (BlockTypes.TableCell,))
@@ -362,7 +398,9 @@ Table 2
             start_html = json_to_html(start_block.render(document))
             curr_html = json_to_html(curr_block.render(document))
 
-            prompt = self.table_merge_prompt.replace("{{table1}}", start_html).replace("{{table2}}", curr_html)
+            prompt = self.table_merge_prompt.replace("{{table1}}", start_html).replace(
+                "{{table2}}", curr_html
+            )
 
             response = self.llm_service(
                 prompt,
@@ -393,13 +431,16 @@ Table 2
             curr_block.structure = []
             start_block.structure = [b.id for b in merged_cells]
             start_block.lowres_image = merged_image
-            
-            # Record the merge decision for learning
-            asyncio.run(self._record_merge_decision(
-                start_block, curr_block, direction, document
-            ))
 
-    def validate_merge(self, cells1: List[TableCell], cells2: List[TableCell], direction: Literal['right', 'bottom'] = 'right'):
+            # Record the merge decision for learning
+            asyncio.run(self._record_merge_decision(start_block, curr_block, direction, document))
+
+    def validate_merge(
+        self,
+        cells1: List[TableCell],
+        cells2: List[TableCell],
+        direction: Literal["right", "bottom"] = "right",
+    ):
         if direction == "right":
             # Check if the number of rows is the same
             cells1_row_count = self.get_row_count(cells1)
@@ -411,9 +452,13 @@ Table 2
             cells2_col_count = self.get_column_count(cells2)
             return abs(cells1_col_count - cells2_col_count) < 2
 
-
-    def join_cells(self, cells1: List[TableCell], cells2: List[TableCell], direction: Literal['right', 'bottom'] = 'right') -> List[TableCell]:
-        if direction == 'right':
+    def join_cells(
+        self,
+        cells1: List[TableCell],
+        cells2: List[TableCell],
+        direction: Literal["right", "bottom"] = "right",
+    ) -> List[TableCell]:
+        if direction == "right":
             # Shift columns right
             col_count = self.get_column_count(cells1)
             for cell in cells2:
@@ -428,36 +473,38 @@ Table 2
         return new_cells
 
     @staticmethod
-    def join_images(image1: Image.Image, image2: Image.Image, direction: Literal['right', 'bottom'] = 'right') -> Image.Image:
+    def join_images(
+        image1: Image.Image, image2: Image.Image, direction: Literal["right", "bottom"] = "right"
+    ) -> Image.Image:
         # Get dimensions
         w1, h1 = image1.size
         w2, h2 = image2.size
 
-        if direction == 'right':
+        if direction == "right":
             new_height = max(h1, h2)
             new_width = w1 + w2
-            new_img = Image.new('RGB', (new_width, new_height), 'white')
+            new_img = Image.new("RGB", (new_width, new_height), "white")
             new_img.paste(image1, (0, 0))
             new_img.paste(image2, (w1, 0))
         else:
             new_width = max(w1, w2)
             new_height = h1 + h2
-            new_img = Image.new('RGB', (new_width, new_height), 'white')
+            new_img = Image.new("RGB", (new_width, new_height), "white")
             new_img.paste(image1, (0, 0))
             new_img.paste(image2, (0, h1))
         return new_img
-    
+
     # Knowledge-first methods required by KnowledgeAwareProcessor
     def process_with_knowledge(self, block, analysis, document):
         """Process block using knowledge analysis - not used in merge processor."""
         pass
-    
+
     async def _check_table_merge_knowledge(self, table1: Block, table2: Block, document: Document):
         """Check knowledge base for similar table merge patterns - REAL ArangoDB queries!"""
         # Extract features from both tables
         features1 = self._extract_features(table1, document)
         features2 = self._extract_features(table2, document)
-        
+
         # Search for similar table merge patterns
         merge_query = f"""
         FOR doc IN pdf_objects
@@ -477,99 +524,99 @@ Table 2
             match_type: 'bm25'
           }}
         """
-        
+
         result = self._call_arango(
             "query",
             aql=merge_query,
-            bind_vars=json.dumps({
-                "table1_text": features1.get('text', '')[:200],
-                "table2_text": features2.get('text', '')[:200]
-            })
+            bind_vars=json.dumps(
+                {
+                    "table1_text": features1.get("text", "")[:200],
+                    "table2_text": features2.get("text", "")[:200],
+                }
+            ),
         )
-        
+
         if result.get("success") and result.get("results"):
             # Find best match
             matches = result["results"]
-            best_match = max(matches, key=lambda m: m.get('confidence', 0))
-            
-            if best_match['confidence'] > 0.85:
+            best_match = max(matches, key=lambda m: m.get("confidence", 0))
+
+            if best_match["confidence"] > 0.85:
                 # Use the historical merge decision
-                merge_data = best_match.get('merge_data', {})
+                merge_data = best_match.get("merge_data", {})
                 return {
-                    'confidence_score': best_match['confidence'],
-                    'recommended_action': merge_data.get('action', 'llm_analysis'),
-                    'merge_direction': merge_data.get('direction', 'bottom'),
-                    'similarity_matches': matches,
-                    'source': best_match['match_type']
+                    "confidence_score": best_match["confidence"],
+                    "recommended_action": merge_data.get("action", "llm_analysis"),
+                    "merge_direction": merge_data.get("direction", "bottom"),
+                    "similarity_matches": matches,
+                    "source": best_match["match_type"],
                 }
-        
+
         # No high-confidence match, fall back to LLM
         return {
-            'confidence_score': 0.0,
-            'recommended_action': 'llm_analysis',
-            'similarity_matches': [],
-            'source': 'none'
+            "confidence_score": 0.0,
+            "recommended_action": "llm_analysis",
+            "similarity_matches": [],
+            "source": "none",
         }
-    
-    async def _record_merge_decision(self, table1: Block, table2: Block, direction: str, document: Document):
+
+    async def _record_merge_decision(
+        self, table1: Block, table2: Block, direction: str, document: Document
+    ):
         """Record merge decision for future learning - REAL ArangoDB insert!"""
         import numpy as np
-        
+
         # Extract full context
         features1 = self._extract_features(table1, document)
         features2 = self._extract_features(table2, document)
-        
+
         # Create the merge pattern document
         doc = {
-            'object_type': 'table_merge_pattern',
-            'table1_text': features1.get('text', '')[:500],
-            'table2_text': features2.get('text', '')[:500],
-            'table1_bbox': features1.get('bbox', []),
-            'table2_bbox': features2.get('bbox', []),
-            'merge_data': {
-                'action': 'merge',
-                'direction': direction
-            },
-            'timestamp': str(np.datetime64('now')),
-            'source': 'llm_decision',
-            'confidence': 0.9,  # LLM decisions have high confidence
-            'processor': 'LLMTableMergeProcessor',
-            'document_path': str(document.filepath) if hasattr(document, 'filepath') else 'unknown'
+            "object_type": "table_merge_pattern",
+            "table1_text": features1.get("text", "")[:500],
+            "table2_text": features2.get("text", "")[:500],
+            "table1_bbox": features1.get("bbox", []),
+            "table2_bbox": features2.get("bbox", []),
+            "merge_data": {"action": "merge", "direction": direction},
+            "timestamp": str(np.datetime64("now")),
+            "source": "llm_decision",
+            "confidence": 0.9,  # LLM decisions have high confidence
+            "processor": "LLMTableMergeProcessor",
+            "document_path": str(document.filepath) if hasattr(document, "filepath") else "unknown",
         }
-        
+
         # Insert into ArangoDB
         insert_result = self._call_arango(
-            "insert",
-            message=f"Table merge pattern: {direction}",
-            level="INFO",
-            **doc
+            "insert", message=f"Table merge pattern: {direction}", level="INFO", **doc
         )
-        
+
         if insert_result.get("success"):
             case_id = insert_result.get("_key")
             logger.info(f"📝 Recorded table merge decision to ArangoDB: {case_id}")
         else:
             logger.warning(f"Failed to record merge decision: {insert_result.get('error')}")
-        
-    def _apply_knowledge_merge(self, start_block: Block, curr_block: Block, direction: str, document: Document):
+
+    def _apply_knowledge_merge(
+        self, start_block: Block, curr_block: Block, direction: str, document: Document
+    ):
         """Apply merge based on knowledge recommendation."""
         children = start_block.contained_blocks(document, (BlockTypes.TableCell,))
         children_curr = curr_block.contained_blocks(document, (BlockTypes.TableCell,))
-        
+
         if not children or not children_curr:
             return
-            
+
         # Get images for merging
         start_image = start_block.get_image(document, highres=False)
         curr_image = curr_block.get_image(document, highres=False)
-        
+
         # Perform the merge
         merged_image = self.join_images(start_image, curr_image, direction)
         merged_cells = self.join_cells(children, children_curr, direction)
         curr_block.structure = []
         start_block.structure = [b.id for b in merged_cells]
         start_block.lowres_image = merged_image
-        
+
         logger.success(f"✅ Applied knowledge-based table merge (direction: {direction})")
 
 

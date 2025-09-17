@@ -16,7 +16,10 @@ Example Usage:
 """
 
 import os
-os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1" # Transformers uses .isin for an op, which is not supported on MPS
+
+os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = (
+    "1"  # Transformers uses .isin for an op, which is not supported on MPS
+)
 
 try:
     import cv2
@@ -41,10 +44,12 @@ def create_model_dict(device=None, dtype=None) -> dict:
         device = "cpu"
     return {
         "layout_model": LayoutPredictor(device=device, dtype=dtype),
-        "texify_model": RecognitionPredictor(device=device, dtype=dtype),  # Use RecognitionPredictor for texify
+        "texify_model": RecognitionPredictor(
+            device=device, dtype=dtype
+        ),  # Use RecognitionPredictor for texify
         "recognition_model": RecognitionPredictor(device=device, dtype=dtype),
         "table_rec_model": TableRecPredictor(device=device, dtype=dtype),
         "detection_model": DetectionPredictor(device=device, dtype=dtype),
         "ocr_error_model": OCRErrorPredictor(device=device, dtype=dtype),
-        "inline_detection_model": None  # Optional, can be None
+        "inline_detection_model": None,  # Optional, can be None
     }

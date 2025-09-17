@@ -46,11 +46,13 @@ def compare(output: Dict[str, Any], gold: Dict[str, Any]) -> CompareResult:
     top_level_keys = invariants.get("top_level_keys", [])
     if top_level_keys:
         has, missing = _has_keys(output, top_level_keys)
-        res["checks"].append({
-            "name": "top_level_keys",
-            "pass": has,
-            "missing": missing,
-        })
+        res["checks"].append(
+            {
+                "name": "top_level_keys",
+                "pass": has,
+                "missing": missing,
+            }
+        )
         ok &= has
 
     # Heuristic item-level checks for blocks/sections/etc.
@@ -66,11 +68,13 @@ def compare(output: Dict[str, Any], gold: Dict[str, Any]) -> CompareResult:
                 _, miss = _has_keys(item, need)
                 if miss:
                     missing_any.append({"idx": idx, "missing": miss})
-            res["checks"].append({
-                "name": "block_item_keys_min",
-                "pass": not missing_any,
-                "violations": missing_any,
-            })
+            res["checks"].append(
+                {
+                    "name": "block_item_keys_min",
+                    "pass": not missing_any,
+                    "violations": missing_any,
+                }
+            )
             ok &= not missing_any
 
     if "sections" in output and isinstance(output["sections"], list):
@@ -85,11 +89,13 @@ def compare(output: Dict[str, Any], gold: Dict[str, Any]) -> CompareResult:
                 _, miss = _has_keys(item, need)
                 if miss:
                     missing_any.append({"idx": idx, "missing": miss})
-            res["checks"].append({
-                "name": "section_item_keys_min",
-                "pass": not missing_any,
-                "violations": missing_any,
-            })
+            res["checks"].append(
+                {
+                    "name": "section_item_keys_min",
+                    "pass": not missing_any,
+                    "violations": missing_any,
+                }
+            )
             ok &= not missing_any
 
     res["pass"] = ok
@@ -98,8 +104,22 @@ def compare(output: Dict[str, Any], gold: Dict[str, Any]) -> CompareResult:
 
 @app.command()
 def run(
-    output: Path = typer.Option(..., "--output", help="Path to stage output JSON", exists=True, file_okay=True, dir_okay=False),
-    gold: Path = typer.Option(..., "--gold", help="Path to gold standard JSON", exists=True, file_okay=True, dir_okay=False),
+    output: Path = typer.Option(
+        ...,
+        "--output",
+        help="Path to stage output JSON",
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+    ),
+    gold: Path = typer.Option(
+        ...,
+        "--gold",
+        help="Path to gold standard JSON",
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+    ),
     json_out: bool = typer.Option(False, "--json", help="Emit JSON report"),
 ) -> None:
     try:
