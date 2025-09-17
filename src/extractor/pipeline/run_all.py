@@ -219,6 +219,12 @@ def run(
         readable=True,
     ),
 ):
+    # Deprecation notice: prefer the unified surface
+    try:
+        import typer as _ty
+        _ty.secho("[deprecated] Prefer 'pipeline-run --mode accurate' for the Happy Path.", fg=_ty.colors.YELLOW)
+    except Exception:
+        pass
     """Run all stages 01→14 on the provided PDF."""
     results.mkdir(parents=True, exist_ok=True)
     pipeline_start = time.monotonic()

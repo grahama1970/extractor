@@ -43,22 +43,15 @@ def run(
 
     results.mkdir(parents=True, exist_ok=True)
 
+    # Delegate to the unified surface to keep one code path
     cmd = [
-        sys.executable,
-        "-m",
-        "extractor.pipeline.run_all",
+        "pipeline-run",
         "--pdf",
         str(pdf),
         "--results",
         str(results),
-        # Deterministic, CI-friendly toggles
-        "--skip-llm03",
-        "--skip-descriptions06",
-        "--summary-only07",
-        "--skip-proving08",
-        "--fast-embeddings10",
-        # Validate each stage against gold invariants
-        "--validate",
+        "--mode",
+        "fast",
     ]
 
     if verbose:

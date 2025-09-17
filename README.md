@@ -603,3 +603,26 @@ Troubleshooting:
 - Single issue smoke: `make smoke-issue ISSUE=019` (or `020`)
 
 Artifacts (logs + screenshots) are saved to `scripts/artifacts/`.
+# Extractor
+## Happy Path (single surface)
+
+- Use `pipeline-run` for all operator runs. Choose a mode:
+  - Fast (default, deterministic):
+    ```
+    pipeline-run --pdf /abs/input.pdf --results /abs/out --mode fast --json
+    ```
+  - Accurate (heavy, install extras first):
+    ```
+    uv pip install -e ".[accurate]"
+    pipeline-run --pdf /abs/input.pdf --results /abs/out --mode accurate --json
+    ```
+
+- The CLI writes `final_report.json` in a stable envelope:
+  ```json
+  { "meta": {"pdf": "…", "results": "…", "mode": "fast|accurate", "took_ms": 1234}, "items": [], "errors": [] }
+  ```
+
+### Notes
+
+- `pipeline-happy` and `pipeline-run-all` remain available, but are considered aliases. Prefer `pipeline-run` to keep a single code path.
+- Heavy dependencies (torch/transformers/spaCy/FAISS/opencv/camelot/ocr) are optional in the `accurate` extra; the default install stays lean for CI and fast iteration.
