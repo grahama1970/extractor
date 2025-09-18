@@ -34,7 +34,7 @@ try {
 
   append(`BASE_URL=${BASE}`);
   await page.goto(URL, { waitUntil: 'domcontentloaded' });
-  await page.waitForTimeout(500);
+  await await new Promise(r=>setTimeout(r,));
 
   // Verify type toggles exist and respond to clicks.
   for (const type of TYPE_FILTERS) {
@@ -52,7 +52,7 @@ try {
       return aria ?? dataState ?? null;
     }, selector);
     await page.click(selector).catch(() => failures.push(`unable to click filter toggle ${type}`));
-    await page.waitForTimeout(150);
+    await await new Promise(r=>setTimeout(r,));
     const stateAfter = await page.evaluate((sel) => {
       const el = document.querySelector(sel);
       if (!el) return null;

@@ -28,7 +28,7 @@ try {
 
   append(`BASE_URL=${BASE}`);
   await page.goto(URL, { waitUntil: 'domcontentloaded' });
-  await page.waitForTimeout(500);
+  await await new Promise(r=>setTimeout(r,));
 
   const claimBtn = await page.$('[data-testid="btn-claim"]');
   const releaseBtn = await page.$('[data-testid="btn-release"]');
@@ -43,7 +43,7 @@ try {
     append(`statusBefore=${statusBefore}`);
 
     await claimBtn.click().catch(() => failures.push('unable to click claim button'));
-    await page.waitForTimeout(200);
+    await await new Promise(r=>setTimeout(r,));
     const statusAfterClaim = await statusBadge.evaluate((el) => el.textContent?.trim() || '');
     append(`statusAfterClaim=${statusAfterClaim}`);
     if (statusAfterClaim === statusBefore) failures.push('status badge did not update after claim');
@@ -58,7 +58,7 @@ try {
     append(`reviewerIdentity=${reviewerName}`);
 
     await releaseBtn.click().catch(() => failures.push('unable to click release button'));
-    await page.waitForTimeout(200);
+    await await new Promise(r=>setTimeout(r,));
     const statusAfterRelease = await statusBadge.evaluate((el) => el.textContent?.trim() || '');
     append(`statusAfterRelease=${statusAfterRelease}`);
     if (statusAfterRelease === statusAfterClaim) failures.push('status badge did not change after release');

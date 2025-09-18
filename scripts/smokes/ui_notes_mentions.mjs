@@ -28,7 +28,7 @@ try {
 
   append(`BASE_URL=${BASE}`);
   await page.goto(URL, { waitUntil: 'domcontentloaded' });
-  await page.waitForTimeout(500);
+  await await new Promise(r=>setTimeout(r,));
 
   const notesInput = await page.$('[data-testid="notes-input"]');
   if (!notesInput) {
@@ -51,7 +51,7 @@ try {
         const suggestion = await firstOption.evaluate((el) => el.textContent?.trim() || '');
         append(`firstSuggestion=${suggestion}`);
         await firstOption.click().catch(() => failures.push('unable to select mention suggestion'));
-        await page.waitForTimeout(200);
+        await await new Promise(r=>setTimeout(r,));
         const noteValue = await page.$eval('[data-testid="notes-input"]', (el) => el.value || el.textContent || '');
         if (!noteValue.includes('@')) failures.push('note input did not capture @mention');
       }

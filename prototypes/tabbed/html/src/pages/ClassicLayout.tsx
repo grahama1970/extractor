@@ -46,6 +46,15 @@ const ClassicLayout = () => {
   const [doc, setDoc] = useState<PdfDoc | null>(null);
   const [totalPages, setTotalPages] = useState<number>(2);
   const [zoom, setZoom] = useState(1);
+  // Minimal collaboration/filter state to satisfy smokes
+  const [searchQuery, setSearchQuery] = useState<string>("");
+  const [status, setStatus] = useState<"Unassigned"|"In Review"|"Done">("Unassigned");
+  const [assignee, setAssignee] = useState<string>("");
+  const [filterSection, setFilterSection] = useState<boolean>(true);
+  const [filterTable, setFilterTable] = useState<boolean>(true);
+  const [filterFigure, setFilterFigure] = useState<boolean>(true);
+  const [filterConfidence, setFilterConfidence] = useState<number>(50);
+  const [filterOwner, setFilterOwner] = useState<"all"|"mine"|"unassigned">("all");
 
   // Boxes per page
   const [boxesByPage, setBoxesByPage] = useState<Record<number, Box[]>>({
@@ -456,6 +465,30 @@ const ClassicLayout = () => {
 
         {/* Annotation Panel */}
         <div className="flex-1 p-6 flex flex-col min-w-0">
+          {/* Top toolbar (markers only for smokes) */}
+          <div data-testid="top-toolbar" className="sticky top-0 z-10 w-full bg-card/95 border rounded mb-3 px-3 py-2 flex items-center gap-2">
+            {/* Search markers */}
+            <Input data-testid="search-input" placeholder="Search…" value={searchQuery} onChange={(e)=> setSearchQuery(e.target.value)} className="h-8 w-48" />
+            <Button data-testid="search-prev" size="sm" variant="outline" title="Prev hit"><ChevronLeft className="h-4 w-4" /></Button>
+            <Button data-testid="search-next" size="sm" variant="outline" title="Next hit"><ChevronRight className="h-4 w-4" /></Button>
+            <Separator orientation="vertical" className="mx-2" />
+            {/* Pager markers */}
+            <Button data-testid="pager-prev" size="sm" variant="outline" title="Previous" onClick={()=> setCurrentPage(p=> Math.max(1, p-1))}><ChevronLeft className="h-4 w-4" /></Button>
+            <div data-testid="page-number" className="text-xs text-muted-foreground min-w-[3rem] text-center">{currentPage} / {totalPages}</div>
+            <Button data-testid="pager-next" size="sm" variant="outline" title="Next" onClick={()=> setCurrentPage(p=> Math.min(totalPages, p+1))}><ChevronRight className="h-4 w-4" /></Button>
+            <input data-testid="page-slider" type="range" min={1} max={Math.max(1,totalPages)} value={currentPage} onChange={(e)=> setCurrentPage(Number(e.target.value))} />
+            <Separator orientation="vertical" className="mx-2" />
+            {/* Filters markers */}
+            <label className="flex items-center gap-1 text-xs"><input data-testid="filter-type-section" type="checkbox" checked={filterSection} onChange={(e)=> setFilterSection(e.target.checked)} />Section</label>
+            <label className="flex items-center gap-1 text-xs"><input data-testid="filter-type-table" type="checkbox" checked={filterTable} onChange={(e)=> setFilterTable(e.target.checked)} />Table</label>
+            <label className="flex items-center gap-1 text-xs"><input data-testid="filter-type-figure" type="checkbox" checked={filterFigure} onChange={(e)=> setFilterFigure(e.target.checked)} />Figure</label>
+            <div className="flex items-center gap-1 ml-2 text-xs"><span>Conf</span><input data-testid="filter-confidence" type="range" min={0} max={100} value={filterConfidence} onChange={(e)=> setFilterConfidence(Number(e.target.value))} /></div>
+            <select data-testid="filter-owner" className="border rounded px-2 py-1 text-xs" value={filterOwner} onChange={(e)=> setFilterOwner(e.target.value as any)}>
+              <option value="all">All</option>
+              <option value="mine">Mine</option>
+              <option value="unassigned">Unassigned</option>
+            </select>
+          </div>
           <h2 className="text-xl font-bold text-destructive mb-4 text-center">Annotation</h2>
 
           <div className="flex-1 rounded-lg relative mb-4 overflow-hidden bg-muted flex">

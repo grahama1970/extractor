@@ -28,7 +28,7 @@ try {
 
   append(`BASE_URL=${BASE}`);
   await page.goto(URL, { waitUntil: 'domcontentloaded' });
-  await page.waitForTimeout(500);
+  await await new Promise(r=>setTimeout(r,));
 
   await page.keyboard.press('Shift+?').catch(() => page.keyboard.press('?'));
   const panel = await page

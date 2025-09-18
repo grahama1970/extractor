@@ -37,7 +37,7 @@ try {
 
   append(`BASE_URL=${BASE}`);
   await page.goto(URL, { waitUntil: 'domcontentloaded' });
-  await page.waitForTimeout(500);
+  await await new Promise(r=>setTimeout(r,));
 
   // Ensure core markers exist
   for (const [key, selector] of Object.entries(REQ_SELECTORS)) {

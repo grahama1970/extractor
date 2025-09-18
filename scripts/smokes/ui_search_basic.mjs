@@ -38,7 +38,7 @@ try {
   append(`BASE_URL=${BASE}`);
   append(`query=${QUERY}`);
   await page.goto(URL, { waitUntil: 'domcontentloaded' });
-  await page.waitForTimeout(500);
+  await await new Promise(r=>setTimeout(r,));
 
   for (const [label, selector] of Object.entries(SELECTORS)) {
     if (label === 'result') continue; // results appear after typing
@@ -103,7 +103,7 @@ try {
 
       // Exercise next/prev controls to ensure they respond
       await page.click(SELECTORS.next).catch(() => failures.push('unable to click search-next'));
-      await page.waitForTimeout(300);
+      await await new Promise(r=>setTimeout(r,));
       await page.click(SELECTORS.prev).catch(() => failures.push('unable to click search-prev'));
     }
   }

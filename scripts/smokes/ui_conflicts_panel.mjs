@@ -28,7 +28,7 @@ try {
 
   append(`BASE_URL=${BASE}`);
   await page.goto(URL, { waitUntil: 'domcontentloaded' });
-  await page.waitForTimeout(500);
+  await await new Promise(r=>setTimeout(r,));
 
   const conflictsTab = await page.$('[data-testid="conflicts-tab"]');
   if (!conflictsTab) {
@@ -56,7 +56,7 @@ try {
 
     // Clicking the conflict should navigate/highlight overlays.
     await firstConflict.click().catch(() => failures.push('unable to focus conflict item'));
-    await page.waitForTimeout(250);
+    await await new Promise(r=>setTimeout(r,));
     const highlight = await page.evaluate(() => {
       const highlighted = document.querySelector('[data-testid="conflict-active"]')
         || document.querySelector('[data-testid="overlay-conflict"]');
@@ -70,7 +70,7 @@ try {
     } else {
       const stateBefore = await adjudicateBtn.evaluate((el) => el.getAttribute('data-state') || el.getAttribute('aria-pressed') || '');
       await adjudicateBtn.click().catch(() => failures.push('unable to click adjudicate button'));
-      await page.waitForTimeout(200);
+      await await new Promise(r=>setTimeout(r,));
       const stateAfter = await adjudicateBtn.evaluate((el) => el.getAttribute('data-state') || el.getAttribute('aria-pressed') || '');
       if (stateBefore === stateAfter) failures.push('adjudicate button state did not change');
     }
