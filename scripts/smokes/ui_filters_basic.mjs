@@ -4,7 +4,8 @@ import path from 'node:path';
 import puppeteer from 'puppeteer';
 
 const BASE = (process.env.BASE_URL || 'http://127.0.0.1:8080').replace(/\/$/, '');
-const URL = `${BASE}/main`;
+const pagePath = process.env.PAGE_PATH || '/main';
+const URL = /\/(main|classic)(\/)?$/.test(BASE) ? BASE : BASE + pagePath;
 const OUT_DIR = path.resolve('scripts', 'artifacts');
 fs.mkdirSync(OUT_DIR, { recursive: true });
 const stamp = new Date().toISOString().replace(/[:.]/g, '-');
@@ -34,8 +35,10 @@ try {
 
   append(`BASE_URL=${BASE}`);
   await page.goto(URL, { waitUntil: 'domcontentloaded' });
-  await await new Promise(r=>setTimeout(r,));
+  await new Promise(r=>setTimeout(r,800));
 
+  // Wait for toolbar root first (reduces flakes)
+  try { await page.waitForSelector('[data-testid="top-toolbar"]', { timeout: 8000 }); } catch {}
   // Verify type toggles exist and respond to clicks.
   for (const type of TYPE_FILTERS) {
     const selector = `[data-testid="filter-type-${type}"]`;
@@ -52,7 +55,7 @@ try {
       return aria ?? dataState ?? null;
     }, selector);
     await page.click(selector).catch(() => failures.push(`unable to click filter toggle ${type}`));
-    await await new Promise(r=>setTimeout(r,));
+    await new Promise(r=>setTimeout(r,150));
     const stateAfter = await page.evaluate((sel) => {
       const el = document.querySelector(sel);
       if (!el) return null;

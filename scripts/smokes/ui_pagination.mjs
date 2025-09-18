@@ -4,7 +4,8 @@ import path from 'node:path';
 import puppeteer from 'puppeteer';
 
 const BASE = (process.env.BASE_URL || 'http://127.0.0.1:8080').replace(/\/$/, '');
-const URL = `${BASE}/main`;
+const pagePath = process.env.PAGE_PATH || '/main';
+const URL = /\/(main|classic)(\/)?$/.test(BASE) ? BASE : BASE + pagePath;
 const OUT_DIR = path.resolve('scripts', 'artifacts');
 fs.mkdirSync(OUT_DIR, { recursive: true });
 const stamp = new Date().toISOString().replace(/[:.]/g, '-');
@@ -37,8 +38,10 @@ try {
 
   append(`BASE_URL=${BASE}`);
   await page.goto(URL, { waitUntil: 'domcontentloaded' });
-  await await new Promise(r=>setTimeout(r,));
+  await new Promise(r=>setTimeout(r,800));
 
+  // Wait for toolbar root first to reduce flakes
+  try { await page.waitForSelector(REQ_SELECTORS.toolbar, { timeout: 8000 }); } catch { failures.push('missing toolbar'); }
   // Ensure core markers exist
   for (const [key, selector] of Object.entries(REQ_SELECTORS)) {
     const el = await page.$(selector);

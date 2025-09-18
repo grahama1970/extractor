@@ -4,7 +4,8 @@ import path from 'node:path';
 import puppeteer from 'puppeteer';
 
 const BASE = (process.env.BASE_URL || 'http://127.0.0.1:8080').replace(/\/$/, '');
-const URL = `${BASE}/main`;
+const pagePath = process.env.PAGE_PATH || '/main';
+const URL = /\/(main|classic)(\/)?$/.test(BASE) ? BASE : BASE + pagePath;
 const OUT_DIR = path.resolve('scripts', 'artifacts');
 fs.mkdirSync(OUT_DIR, { recursive: true });
 const stamp = new Date().toISOString().replace(/[:.]/g, '-');
@@ -28,7 +29,8 @@ try {
 
   append(`BASE_URL=${BASE}`);
   await page.goto(URL, { waitUntil: 'domcontentloaded' });
-  await await new Promise(r=>setTimeout(r,));
+  await new Promise(r=>setTimeout(r,300));
+  try { await page.waitForSelector('[data-testid="top-toolbar"]', { timeout: 8000 }); } catch {}
 
   await page.keyboard.press('Shift+?').catch(() => page.keyboard.press('?'));
   const panel = await page

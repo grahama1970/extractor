@@ -4,7 +4,8 @@ import path from 'node:path';
 import puppeteer from 'puppeteer';
 
 const BASE = (process.env.BASE_URL || 'http://127.0.0.1:8080').replace(/\/$/, '');
-const URL = `${BASE}/main`;
+const pagePath = process.env.PAGE_PATH || '/main';
+const URL = /\/(main|classic)(\/)?$/.test(BASE) ? BASE : BASE + pagePath;
 const OUT_DIR = path.resolve('scripts', 'artifacts');
 fs.mkdirSync(OUT_DIR, { recursive: true });
 const stamp = new Date().toISOString().replace(/[:.]/g, '-');
@@ -28,7 +29,8 @@ try {
 
   append(`BASE_URL=${BASE}`);
   await page.goto(URL, { waitUntil: 'domcontentloaded' });
-  await await new Promise(r=>setTimeout(r,));
+  await new Promise(r=>setTimeout(r,300));
+  try { await page.waitForSelector('[data-testid="top-toolbar"]', { timeout: 8000 }); } catch {}
 
   const conflictsTab = await page.$('[data-testid="conflicts-tab"]');
   if (!conflictsTab) {
@@ -56,7 +58,7 @@ try {
 
     // Clicking the conflict should navigate/highlight overlays.
     await firstConflict.click().catch(() => failures.push('unable to focus conflict item'));
-    await await new Promise(r=>setTimeout(r,));
+    await new Promise(r=>setTimeout(r,250));
     const highlight = await page.evaluate(() => {
       const highlighted = document.querySelector('[data-testid="conflict-active"]')
         || document.querySelector('[data-testid="overlay-conflict"]');
@@ -70,7 +72,7 @@ try {
     } else {
       const stateBefore = await adjudicateBtn.evaluate((el) => el.getAttribute('data-state') || el.getAttribute('aria-pressed') || '');
       await adjudicateBtn.click().catch(() => failures.push('unable to click adjudicate button'));
-      await await new Promise(r=>setTimeout(r,));
+      await new Promise(r=>setTimeout(r,250));
       const stateAfter = await adjudicateBtn.evaluate((el) => el.getAttribute('data-state') || el.getAttribute('aria-pressed') || '');
       if (stateBefore === stateAfter) failures.push('adjudicate button state did not change');
     }

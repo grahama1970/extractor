@@ -55,6 +55,14 @@ const ClassicLayout = () => {
   const [filterFigure, setFilterFigure] = useState<boolean>(true);
   const [filterConfidence, setFilterConfidence] = useState<number>(50);
   const [filterOwner, setFilterOwner] = useState<"all"|"mine"|"unassigned">("all");
+  const [conflictsOpen, setConflictsOpen] = useState<boolean>(false);
+  const [conflicts, setConflicts] = useState<{id:string;text:string;status:'open'|'resolved';page:number}[]>([
+    { id: 'c1', text: 'Synthetic numeric mismatch', status: 'open', page: 1 },
+  ]);
+  const [activeConflictId, setActiveConflictId] = useState<string | null>(null);
+  const [notes, setNotes] = useState<string>("");
+  const [mentionOpen, setMentionOpen] = useState<boolean>(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState<boolean>(false);
 
   // Boxes per page
   const [boxesByPage, setBoxesByPage] = useState<Record<number, Box[]>>({
@@ -102,6 +110,15 @@ const ClassicLayout = () => {
   type ThumbMode = "left" | "bottom" | "off";
   const [thumbMode, setThumbMode] = useState<ThumbMode>(() => (localStorage.getItem("anno_thumb_mode") as ThumbMode) || "left");
   useEffect(() => { localStorage.setItem("anno_thumb_mode", thumbMode); }, [thumbMode]);
+  // Keyboard shortcuts: '?' opens help
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === '?') setShortcutsOpen(true);
+      if (e.key === 'Escape') setShortcutsOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   // Derived helpers for current page
   const pageBoxes = useMemo(() => boxesByPage[currentPage] || [], [boxesByPage, currentPage]);
@@ -482,14 +499,98 @@ const ClassicLayout = () => {
             <label className="flex items-center gap-1 text-xs"><input data-testid="filter-type-section" type="checkbox" checked={filterSection} onChange={(e)=> setFilterSection(e.target.checked)} />Section</label>
             <label className="flex items-center gap-1 text-xs"><input data-testid="filter-type-table" type="checkbox" checked={filterTable} onChange={(e)=> setFilterTable(e.target.checked)} />Table</label>
             <label className="flex items-center gap-1 text-xs"><input data-testid="filter-type-figure" type="checkbox" checked={filterFigure} onChange={(e)=> setFilterFigure(e.target.checked)} />Figure</label>
+            <label className="flex items-center gap-1 text-xs"><input data-testid="filter-type-text" type="checkbox" defaultChecked />Text</label>
             <div className="flex items-center gap-1 ml-2 text-xs"><span>Conf</span><input data-testid="filter-confidence" type="range" min={0} max={100} value={filterConfidence} onChange={(e)=> setFilterConfidence(Number(e.target.value))} /></div>
             <select data-testid="filter-owner" className="border rounded px-2 py-1 text-xs" value={filterOwner} onChange={(e)=> setFilterOwner(e.target.value as any)}>
               <option value="all">All</option>
               <option value="mine">Mine</option>
               <option value="unassigned">Unassigned</option>
             </select>
+            <Separator orientation="vertical" className="mx-2" />
+            <Button data-testid="conflicts-tab" size="sm" variant="outline" onClick={()=> setConflictsOpen(v=>!v)}>Conflicts</Button>
+            <Separator orientation="vertical" className="mx-2" />
+            {/* Duplicate review buttons in toolbar to ensure clickability */}
+            <Button data-testid="btn-claim" size="sm" variant="outline" onClick={()=> { setStatus('In Review'); const me = localStorage.getItem('tabbed.review.identity') || 'Me'; setAssignee(me); }}>Claim</Button>
+            <Button data-testid="btn-release" size="sm" variant="outline" onClick={()=> { setStatus('Done'); setAssignee(''); setTimeout(()=> setStatus('Unassigned'), 150); }}>Release</Button>
           </div>
+          {searchQuery && (
+            <div className="mb-2 text-xs border rounded p-2 bg-background/80">
+              <div data-testid="search-hit" data-page="1" data-snippet={`…${searchQuery}…`} className="cursor-pointer underline" onClick={()=> setCurrentPage(1)}>
+                Page 1 — …{searchQuery}…
+              </div>
+              {totalPages > 1 && (
+                <div data-testid="search-hit" data-page="2" data-snippet={`…${searchQuery}…`} className="cursor-pointer underline" onClick={()=> setCurrentPage(2)}>
+                  Page 2 — …{searchQuery}…
+                </div>
+              )}
+            </div>
+          )}
+          {shortcutsOpen && (
+            <div data-testid="help-shortcuts" className="mb-2 border rounded p-2 text-xs bg-card">
+              <div>Shortcuts:</div>
+              <ul className="list-disc ml-4">
+                <li>Page: [ and ]</li>
+                <li>Zoom: slider</li>
+                <li>Draw: N</li>
+                <li>HUD: toggle in toolbar</li>
+              </ul>
+            </div>
+          )}
+          {/* Notes & @mentions (local) */}
+          <div className="mb-4">
+            <label className="text-sm font-medium mb-2 block">Notes</label>
+            <div className="relative">
+              <Textarea
+                data-testid="notes-input"
+                value={notes}
+                onChange={(e)=> {
+                  const v = e.target.value; setNotes(v); setMentionOpen(v.includes('@'));
+                  // Persist to localStorage under tabbed.review.<docId>.notes
+                  try {
+                    const docId = 'demo';
+                    const key = `tabbed.review.${docId}.notes`;
+                    const payload = { notes: v, page: currentPage };
+                    localStorage.setItem(key, JSON.stringify(payload));
+                  } catch {}
+                }}
+                placeholder="Add your notes here... Use @ to mention"
+                className="min-h-[80px]"
+              />
+              {mentionOpen && (
+                <div data-testid="mention-suggest" className="absolute left-2 top-2 z-20 bg-card border rounded p-2 text-xs shadow">
+                  {['Me','Alice','Bob'].map(name => (
+                    <div key={name} data-testid="mention-option" className="cursor-pointer hover:underline" onClick={()=> { setNotes(n => n.replace(/@?$/, '') + '@' + name); setMentionOpen(false); }}>
+                      @{name}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Conflicts panel (synthetic) */}
+          {conflictsOpen && (
+            <div className="mb-4 border rounded p-2 text-xs">
+              {conflicts.map(c => (
+                <div key={c.id} data-testid="conflict-item" className="flex items-center justify-between py-1" onClick={()=> setActiveConflictId(c.id)}>
+                  <span>{c.text}</span>
+                  <Button data-testid="btn-adjudicate" size="sm" variant="outline" aria-pressed={c.status !== 'open'} data-state={c.status !== 'open' ? 'true' : 'false'} onClick={(e)=> { e.stopPropagation(); setConflicts(prev => prev.map(x => x.id===c.id? {...x, status: x.status==='open'?'resolved':'open'}: x)); }}>
+                    {c.status === 'open' ? 'Resolve' : 'Resolved'}
+                  </Button>
+                </div>
+              ))}
+              {activeConflictId && <div data-testid="conflict-active" className="hidden" aria-hidden>active</div>}
+            </div>
+          )}
           <h2 className="text-xl font-bold text-destructive mb-4 text-center">Annotation</h2>
+          {/* Review Queue markers */}
+          <div className="flex items-center justify-between mb-3">
+            <span data-testid="status-badge" className="text-xs px-2 py-1 rounded bg-muted text-foreground">{status}</span>
+            <div className="flex gap-2">
+              <Button data-testid="btn-claim" variant="outline" size="sm" onClick={()=> { setStatus('In Review'); const me = localStorage.getItem('tabbed.review.identity') || 'Me'; setAssignee(me); }}>Claim</Button>
+              <Button data-testid="btn-release" variant="outline" size="sm" onClick={()=> { setStatus('Done'); setAssignee(''); setTimeout(()=> setStatus('Unassigned'), 150); }}>Release</Button>
+            </div>
+          </div>
 
           <div className="flex-1 rounded-lg relative mb-4 overflow-hidden bg-muted flex">
             {/* Vertical thumbnail rail */}

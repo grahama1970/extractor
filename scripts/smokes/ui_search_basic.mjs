@@ -4,7 +4,8 @@ import path from 'node:path';
 import puppeteer from 'puppeteer';
 
 const BASE = (process.env.BASE_URL || 'http://127.0.0.1:8080').replace(/\/$/, '');
-const URL = `${BASE}/main`;
+const pagePath = process.env.PAGE_PATH || '/main';
+const URL = /\/(main|classic)(\/)?$/.test(BASE) ? BASE : BASE + pagePath;
 const QUERY = process.env.UI_SEARCH_QUERY || 'pressure';
 const OUT_DIR = path.resolve('scripts', 'artifacts');
 fs.mkdirSync(OUT_DIR, { recursive: true });
@@ -38,7 +39,8 @@ try {
   append(`BASE_URL=${BASE}`);
   append(`query=${QUERY}`);
   await page.goto(URL, { waitUntil: 'domcontentloaded' });
-  await await new Promise(r=>setTimeout(r,));
+  await new Promise(r=>setTimeout(r,300));
+  try { await page.waitForSelector('[data-testid="top-toolbar"]', { timeout: 8000 }); } catch {}
 
   for (const [label, selector] of Object.entries(SELECTORS)) {
     if (label === 'result') continue; // results appear after typing
@@ -103,7 +105,7 @@ try {
 
       // Exercise next/prev controls to ensure they respond
       await page.click(SELECTORS.next).catch(() => failures.push('unable to click search-next'));
-      await await new Promise(r=>setTimeout(r,));
+      await new Promise(r=>setTimeout(r,200));
       await page.click(SELECTORS.prev).catch(() => failures.push('unable to click search-prev'));
     }
   }
