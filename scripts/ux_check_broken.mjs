@@ -41,6 +41,12 @@ const run = async () => {
     navOk = false;
   }
 
+  let appReady = false;
+  try {
+    await page.waitForSelector('[data-testid="app-ready"]', { timeout: 15000 });
+    appReady = true;
+  } catch {}
+
   // Check for dev error overlays (Vite + react-swc variants)
   const overlayPresent = await page.evaluate(() => {
     const selectors = [
@@ -149,7 +155,7 @@ const run = async () => {
 
   // Consider site broken only if functional center-pane checks fail
   const consoleErrorsHard = consoleErrors.filter((l) => !/Failed to load resource/i.test(l));
-  const broken = !navOk || overlayPresent || !rootMounted || !uiReady || !pointerDrawOk || !toolbarClear || consoleErrorsHard.length > 0 || pageErrors.length > 0;
+  const broken = !navOk || !appReady || overlayPresent || !rootMounted || !uiReady || !pointerDrawOk || !toolbarClear || consoleErrorsHard.length > 0 || pageErrors.length > 0;
 
   const stamp = ts();
   const shotPath = path.join(OUT_DIR, `ux_check_${stamp}.png`);
@@ -159,6 +165,7 @@ const run = async () => {
     `BASE_URL=${BASE}`,
     `navOk=${navOk}`,
     `overlayPresent=${overlayPresent}`,
+    `appReady=${appReady}`,
     `rootMounted=${rootMounted}`,
     `uiReady=${uiReady}`,
     `zoomChanged=${zoomChanged}`,
