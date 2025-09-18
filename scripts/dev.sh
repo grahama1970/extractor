@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
 # Robust port killer (IPv4/IPv6; fuser/lsof/ss fallback)
 kill_port() {
   local PORT="$1"
@@ -65,6 +67,130 @@ wait_for_listen() {
     i=$((i+1))
   done
   return 1
+}
+
+wait_for_http() {
+  local URL="$1"; local TRIES="${2:-20}"; local DELAY="${3:-0.5}"
+  local i=0
+  while [ "$i" -lt "$TRIES" ]; do
+    if curl -fsS --max-time 2 "$URL" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep "$DELAY" || true
+    i=$((i+1))
+  done
+  return 1
+}
+
+warm_url() {
+  local URL="$1"; local TRIES="${2:-30}"; local DELAY="${3:-0.5}"
+  local i=0
+  while [ "$i" -lt "$TRIES" ]; do
+    if curl -fsS --max-time 4 "$URL" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep "$DELAY" || true
+    i=$((i+1))
+  done
+  return 1
+}
+
+launch_console_sanity() {
+  local BASE_URL="$1"
+  local DEFAULT_DISC="$2"
+
+  (
+    DEV_CDP_AUTOLAUNCH_VAL="${DEV_CDP_AUTOLAUNCH:-0}"
+    DEV_CDP_FORCE_REMOTE_VAL="${DEV_CDP_FORCE_REMOTE:-0}"
+    DEV_CDP_PORT_VAL="${DEV_CDP_PORT:-9222}"
+    DISC_URL="$DEFAULT_DISC"
+    LOCAL_CHROME_PID=""
+    LOCAL_CHROME_PROFILE=""
+    CHROME_BIN="${DEV_CDP_CHROME_BIN:-}"
+
+    if [ -z "$CHROME_BIN" ]; then
+      if command -v google-chrome >/dev/null 2>&1; then
+        CHROME_BIN="google-chrome"
+      elif command -v chromium-browser >/dev/null 2>&1; then
+        CHROME_BIN="chromium-browser"
+      else
+        CHROME_BIN=""
+      fi
+    fi
+
+    cleanup_local_chrome() {
+      if [ -n "${LOCAL_CHROME_PID:-}" ]; then
+        kill "${LOCAL_CHROME_PID}" 2>/dev/null || true
+        wait "${LOCAL_CHROME_PID}" 2>/dev/null || true
+        LOCAL_CHROME_PID=""
+      fi
+      if [ -n "${LOCAL_CHROME_PROFILE:-}" ]; then
+        rm -rf "${LOCAL_CHROME_PROFILE}" 2>/dev/null || true
+        LOCAL_CHROME_PROFILE=""
+      fi
+    }
+
+    autolaunch_local_chrome() {
+      local PORT="$1"
+      if [ -z "$CHROME_BIN" ]; then
+        return 1
+      fi
+      local LOG_FILE
+      LOG_FILE=$(mktemp -t "chrome_cdp_${PORT}_XXXX.log")
+      LOCAL_CHROME_PROFILE=$(mktemp -d -t "chrome-cdp-profile-XXXXXX")
+      echo "[dev] Autolaunching headless Chrome on :${PORT} for CDP sanity (log: $LOG_FILE)"
+      "$CHROME_BIN" \
+        --headless=new \
+        --remote-debugging-address=127.0.0.1 \
+        --remote-debugging-port="$PORT" \
+        --disable-gpu \
+        --no-sandbox \
+        --no-first-run \
+        --no-default-browser-check \
+        --user-data-dir="$LOCAL_CHROME_PROFILE" \
+        about:blank >"$LOG_FILE" 2>&1 &
+      LOCAL_CHROME_PID=$!
+      if wait_for_http "http://127.0.0.1:${PORT}/json/version" 40 0.5; then
+        DISC_URL="http://127.0.0.1:${PORT}/json/version"
+        return 0
+      fi
+      echo "[dev] WARN: Local Chrome CDP not reachable on :${PORT}; check $LOG_FILE" >&2
+      cleanup_local_chrome
+      return 1
+    }
+
+    trap cleanup_local_chrome EXIT INT TERM
+
+    if [ "$DEV_CDP_AUTOLAUNCH_VAL" = "1" ] && [ "$DEV_CDP_FORCE_REMOTE_VAL" != "1" ] && [ -n "$CHROME_BIN" ]; then
+      autolaunch_local_chrome "$DEV_CDP_PORT_VAL" || DISC_URL="$DEFAULT_DISC"
+    fi
+
+    if [ -z "$LOCAL_CHROME_PID" ]; then
+      if [ "$DEV_CDP_AUTOLAUNCH_VAL" = "1" ] && [ -n "$CHROME_BIN" ] && ! curl -fsS --max-time 1 "$DEFAULT_DISC" >/dev/null 2>&1; then
+        echo "[dev] CDP discovery not responding ($DEFAULT_DISC). Autolaunching headless Chrome locally..."
+        autolaunch_local_chrome "$DEV_CDP_PORT_VAL" || DISC_URL="$DEFAULT_DISC"
+      else
+        DISC_URL="$DEFAULT_DISC"
+      fi
+    fi
+
+    echo "[dev] DEV_CDP_SANITY=1 — will run one-shot console error smoke in ~3s (DISCOVERY=$DISC_URL)"
+
+    sleep 3
+    if ! wait_for_http "$BASE_URL" 40 0.5; then
+      echo "[dev] WARN: Vite dev server not reachable at $BASE_URL before console error smoke" >&2
+    fi
+    if ! warm_url "$BASE_URL/@vite/client" 40 0.5; then
+      echo "[dev] WARN: Unable to warm Vite client script at $BASE_URL/@vite/client" >&2
+    fi
+    if ! warm_url "$BASE_URL/classic" 40 0.5; then
+      echo "[dev] WARN: Unable to warm classic route at $BASE_URL/classic" >&2
+    fi
+
+    BASE_URL="$BASE_URL" \
+    BROWSERLESS_DISCOVERY_URL="$DISC_URL" \
+    node "$ROOT_DIR/scripts/smokes/console_errors.mjs" || true
+  ) &
 }
 
 # Make stale dev/preview servers impossible by killing ports first
@@ -187,18 +313,8 @@ if [ -d "prototypes/tabbed/html" ]; then
       VITE_PID=$!
       # Optional: auto-launch CDP and run one-shot console error smoke
       if [ "${DEV_CDP_SANITY:-0}" = "1" ]; then
-        DISC_URL="${BROWSERLESS_DISCOVERY_URL:-http://127.0.0.1:3000/json/version}"
-        # If DEV_CDP_AUTOLAUNCH and discovery URL not reachable, try to start headless Chrome on :9222
-        if [ "${DEV_CDP_AUTOLAUNCH:-0}" = "1" ]; then
-          if ! curl -fsS --max-time 1 "$DISC_URL" >/dev/null 2>&1; then
-            echo "[dev] CDP discovery not responding ($DISC_URL). Autolaunching headless Chrome on :9222..."
-            google-chrome --headless=new --remote-debugging-address=0.0.0.0 --remote-debugging-port=9222 --disable-gpu --no-sandbox --user-data-dir=/tmp/chrome-cdp about:blank >/tmp/chrome_9222.log 2>&1 &
-            # prefer 9222 discovery for the smoke
-            DISC_URL="http://127.0.0.1:9222/json/version"
-          fi
-        fi
-        echo "[dev] DEV_CDP_SANITY=1 — will run one-shot console error smoke in ~3s (DISCOVERY=$DISC_URL)"
-        ( sleep 3; BASE_URL="http://127.0.0.1:8080" BROWSERLESS_DISCOVERY_URL="$DISC_URL" node ../scripts/smokes/console_errors.mjs || true ) &
+        DEFAULT_DISC="${BROWSERLESS_DISCOVERY_URL:-http://127.0.0.1:3000/json/version}"
+        launch_console_sanity "http://127.0.0.1:8080" "$DEFAULT_DISC"
       fi
       wait "$VITE_PID"
     )
@@ -208,16 +324,8 @@ if [ -d "prototypes/tabbed/html" ]; then
       VITE_API_PROXY="${VITE_API_PROXY:-http://127.0.0.1:$BACK_PORT}" npm run dev -- --force &
       VITE_PID=$!
       if [ "${DEV_CDP_SANITY:-0}" = "1" ]; then
-        DISC_URL="${BROWSERLESS_DISCOVERY_URL:-http://127.0.0.1:3000/json/version}"
-        if [ "${DEV_CDP_AUTOLAUNCH:-0}" = "1" ]; then
-          if ! curl -fsS --max-time 1 "$DISC_URL" >/dev/null 2>&1; then
-            echo "[dev] CDP discovery not responding ($DISC_URL). Autolaunching headless Chrome on :9222..."
-            google-chrome --headless=new --remote-debugging-address=0.0.0.0 --remote-debugging-port=9222 --disable-gpu --no-sandbox --user-data-dir=/tmp/chrome-cdp about:blank >/tmp/chrome_9222.log 2>&1 &
-            DISC_URL="http://127.0.0.1:9222/json/version"
-          fi
-        fi
-        echo "[dev] DEV_CDP_SANITY=1 — will run one-shot console error smoke in ~3s (DISCOVERY=$DISC_URL)"
-        ( sleep 3; BASE_URL="http://127.0.0.1:8080" BROWSERLESS_DISCOVERY_URL="$DISC_URL" node ../../scripts/smokes/console_errors.mjs || true ) &
+        DEFAULT_DISC="${BROWSERLESS_DISCOVERY_URL:-http://127.0.0.1:3000/json/version}"
+        launch_console_sanity "http://127.0.0.1:8080" "$DEFAULT_DISC"
       fi
       wait "$VITE_PID"
     )
