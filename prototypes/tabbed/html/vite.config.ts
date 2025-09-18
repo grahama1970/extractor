@@ -8,6 +8,7 @@ export default defineConfig(({ mode }) => ({
   server: {
     host: "::",
     port: 8080,
+    strictPort: true,
     proxy: {
       // Proxy API calls during dev to FastAPI backend (uvicorn on :8000)
       "/api": {

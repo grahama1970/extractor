@@ -23,6 +23,6 @@
   },
   "homepage": "https://github.com/grahama1970/extractor#readme",
   "devDependencies": {
-    "puppeteer": "^24.19.0"
+    "puppeteer": "^24.22.0"
   }
 }
