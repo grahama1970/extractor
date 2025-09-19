@@ -1,13 +1,75 @@
+# Prompt: Generate/Update This Report Reliably (Happy Path + Critical Lens)
+
+You are an operator agent asked to produce a fresh “State of the Extractor Project” report. Follow these exact steps and write your answer into this file (docs/STATE_OF_PROJECT.md):
+
+1) Validate repo + env
+   - Activate venv and env:
+     ```bash
+     source .venv/bin/activate && \
+     set -a && [ -f .env ] && source .env && set +a
+     ```
+   - Confirm CLI imports resolve:
+     ```bash
+     PYTHONPATH=$(pwd)/src \
+     .venv/bin/python - <<'PY'
+     import extractor, sys; print({"ok":True, "py":sys.version.split()[0]})
+     PY
+     ```
+
+2) Run UX health + core UI smokes
+   - Health gate (saves artifacts under scripts/artifacts/):
+     ```bash
+     BASE_URL=http://127.0.0.1:8080/main \
+     node scripts/ux_check_broken.mjs
+     ```
+   - Core UI smokes (subset is fine for quick status):
+     ```bash
+     BASE_URL=http://127.0.0.1:8080 \
+     node scripts/smokes/ui_keyboard_core.mjs && \
+     node scripts/smokes/ui_search_highlight_thumb.mjs
+     ```
+
+3) Run API smokes (offline‑friendly)
+   ```bash
+   BASE_URL=http://127.0.0.1:8000 \
+   uv run scripts/smokes/api_oslc_stub.py && \
+   uv run scripts/smokes/api_conflicts_save.py
+   ```
+
+4) Run pipeline smokes (deterministic)
+   ```bash
+   PYTHONPATH=$(pwd)/src \
+   .venv/bin/python scripts/smokes/pipeline/smoke_reqif_export_v0.py && \
+   PYTHONPATH=$(pwd)/src \
+   .venv/bin/python scripts/smokes/pipeline/smoke_stage14_rtm_v0.py && \
+   PYTHONPATH=$(pwd)/src \
+   .venv/bin/python scripts/smokes/pipeline/smoke_resume_manifest.py
+   ```
+
+5) Summarize current capabilities (PDF accurate stages 01→14; structured providers; unified CLI; Classic UI collab primitives; Lean4 proving) and map to USER_FLOW.md and docs/03_guides/HAPPYPATH_GUIDE.md.
+
+6) Competitive scan (primary sources; cite URLs inline)
+   - PDF annotation UX (search/shortcuts/handles/rails): Adobe Acrobat web, Xodo, PDF.js patterns, Label Studio, PSPDFKit.
+   - ReqIF/OSLC interop: ReqIF Studio, OSLC RM 2.1, DOORS Next.
+
+7) Write the report with sections:
+   - Executive Summary, Capabilities, Validation Status, Competitive Landscape, Blunt Assessment vs Market, Recommendations/Roadmap (Now/Next/Later), Metrics & SLIs, Risks & Mitigations, References.
+
+8) Keep it operator‑friendly
+   - Use terse bullets, copy‑paste commands (wrapped for ~400px width with line continuations), and avoid fluff.
+
+---
+
 # State of the Extractor Project
 
 Date: 2025-09-18  
 Owner: Engineering / Agents
 
 ## Executive Summary
-- Accurate PDF stages (01→14) remain healthy: each step emits gold-aligned JSON, records diagnostics, and supports deterministic toggles for happy-path runs.
-- Structured formats (HTML, DOCX, PPTX, Spreadsheet, EPUB, RST, XML, Markdown) flow through the lightweight `structured_pipeline`, yielding `UnifiedDocument` + Stage 10 artifacts without PDF conversion.
-- The unified CLI (`python -m src.cli extract`) covers PDFs (fast vs accurate) and all structured providers; `pipeline-run`/`pipeline-run-all` are still the paved-road wrappers for operators.
-- Smoke coverage spans every pipeline stage, provider parity/capability checks, and the CLI entry points. All runs write artifacts to `scripts/artifacts/` for triage.
+- Green health: Classic UI mounts cleanly (no overlays), keyboard‑only flow works, search highlights and thumbnail badges render; core UX smokes pass locally.
+- Pipeline OK: deterministic smokes pass (ReqIF v0 export, RTM v0 run summary, resume manifest). Artifacts written under `scripts/artifacts/`.
+- Accurate PDF stages (01→14) remain healthy and deterministic; structured providers route via the unified CLI; Classic UI collaboration primitives are now aligned with the Happy Path and USER_FLOW.md.
+- Single, paved surface preserved: `python -m src.cli extract` (fast|accurate) for operators; prototype UI acts as a client of the same pipeline (no new backend surfaces needed for MVP).
 
 ## Best‑in‑Class Research Question (Mil/Aero Engineering Docs)
 
@@ -206,3 +268,31 @@ Acceptance Signals
   ```bash
   uv run scripts/smokes/pipeline/smoke_stage05_strategy_quality.py
   ```
+
+---
+
+## Auto‑Run Validation — 2025‑09‑19
+
+- UX Health
+  - Command:
+    ```bash
+    BASE_URL=http://127.0.0.1:8080/main \
+    node scripts/ux_check_broken.mjs
+    ```
+  - Status: OK (no overlays; toolbarClear=true; pointer draw OK)
+  - Latest log: scripts/artifacts/ux_check_2025-09-19T22-06-06-361Z.log
+
+- UI Smokes (subset)
+  - Keyboard core: OK — scripts/smokes/ui_keyboard_core.mjs
+  - Search highlight + thumb: OK — scripts/smokes/ui_search_highlight_thumb.mjs
+
+- API Smokes
+  - OSLC stub: OK — service GET + link POST/GET (base=http://127.0.0.1:8000)
+  - Conflicts save: OK — conflicts_docdemo.json under scripts/artifacts/
+
+- Pipeline Smokes
+  - ReqIF v0 export: OK — scripts/artifacts/export.reqif
+  - RTM v0 report: OK — scripts/artifacts/rtm_smoke/final_report.md
+  - Resume manifest: OK — run_all skipped unchanged stages; final_report.md present
+
+Artifacts for this run are stored under scripts/artifacts/ with timestamps.
