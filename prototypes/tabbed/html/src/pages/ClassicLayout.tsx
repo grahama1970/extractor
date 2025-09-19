@@ -30,7 +30,7 @@ import { toast } from "@/components/ui/sonner";
 import { ThumbnailRail } from "@/components/ThumbnailRail";
 import { ThumbnailStrip } from "@/components/ThumbnailStrip";
 import { PdfCanvas } from "@/components/PdfCanvas";
-import { loadPdf, type PdfDoc } from "@/lib/pdf";
+import { loadPdf, type PdfDoc, getPageText } from "@/lib/pdf";
 import { DEFAULT_LABELS, loadLabels, saveLabel, type LabelDef } from "@/lib/labels";
 import { cn } from "@/lib/utils";
 import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
@@ -67,9 +67,13 @@ const ClassicLayout = () => {
   const [doc, setDoc] = useState<PdfDoc | null>(null);
   const [totalPages, setTotalPages] = useState<number>(2);
   const [zoom, setZoom] = useState(1);
+  const viewerRef = useRef<HTMLDivElement | null>(null);
+  const [panMode, setPanMode] = useState(false);
   // Collaboration & filters (lightweight defaults so smokes can run)
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [searchHits, setSearchHits] = useState<{ page: number; snippet: string }[]>([]);
+  const [indexing, setIndexing] = useState<{done:number; total:number}>({done:0,total:0});
+  const pageTextRef = useRef<Record<number,string>>({});
   const [hitIndex, setHitIndex] = useState<number>(-1);
   const hasHits = searchHits.length > 0;
   const [status, setStatus] = useState<"Unassigned"|"In Review"|"Done">("Unassigned");
@@ -295,7 +299,7 @@ const ClassicLayout = () => {
     return () => { mounted = false };
   }, []);
 
-  // Build a simple search index when query changes; fall back to synthetic hits
+  // Build a simple search index when query changes; incremental across pages
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -308,22 +312,28 @@ const ClassicLayout = () => {
       const hits: { page: number; snippet: string }[] = [];
       try {
         if (doc && (doc as any).getPage && totalPages) {
-          const maxPages = Math.min(totalPages, 10);
-          for (let i = 1; i <= maxPages; i++) {
-            try {
-              // @ts-ignore pdf.js loose type
-              const page: any = await doc.getPage(i);
-              if (!page?.getTextContent) continue;
-              const content: any = await page.getTextContent({ normalizeWhitespace: true });
-              const text = Array.isArray(content.items) ? content.items.map((it:any) => it.str || '').join(' ') : '';
-              const lower = text.toLowerCase();
-              const pos = lower.indexOf(q);
-              if (pos >= 0) {
-                const start = Math.max(0, pos - 20), end = Math.min(lower.length, pos + q.length + 20);
-                const snippet = text.slice(start, end).replace(/\s+/g, ' ').trim();
-                hits.push({ page: i, snippet });
-              }
-            } catch {}
+          // Ensure we have some text cached; index incrementally across all pages in the background
+          setIndexing({done:0,total: totalPages});
+          for (let i = 1; i <= totalPages; i++) {
+            if (cancelled) break;
+            if (!pageTextRef.current[i]) {
+              const txt = await getPageText(doc, i);
+              pageTextRef.current[i] = txt;
+            }
+            setIndexing({done:i,total: totalPages});
+          }
+          // Now compute hits using whatever is available
+          for (let i = 1; i <= totalPages; i++) {
+            const text = pageTextRef.current[i] || '';
+            if (!text) continue;
+            const lower = text.toLowerCase();
+            const pos = lower.indexOf(q);
+            if (pos >= 0) {
+              const start = Math.max(0, pos - 40), end = Math.min(lower.length, pos + q.length + 40);
+              const snippet = text.slice(start, end).replace(/\s+/g, ' ').trim();
+              hits.push({ page: i, snippet });
+            }
+            if (hits.length >= 25) break; // cap for dropdown
           }
         }
       } catch {}
@@ -337,6 +347,24 @@ const ClassicLayout = () => {
     })();
     return () => { cancelled = true; };
   }, [searchQuery, doc, totalPages, currentPage]);
+
+  // Keyboard shortcuts: [, ] paging; N arm draw; ? help; Space pan
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
+      if (tag === 'input' || tag === 'textarea') return;
+      if (e.key === '[') { setCurrentPage((p)=> Math.max(1, p-1)); e.preventDefault(); }
+      if (e.key === ']') { setCurrentPage((p)=> Math.min(totalPages, p+1)); e.preventDefault(); }
+      if (e.key === 'n' || e.key === 'N') { setDrawArmed(true); e.preventDefault(); }
+      if (e.key === '?') { setHelpOpen(true); e.preventDefault(); }
+      if (e.key === ' ') { setPanMode(true); }
+      if (e.key === 'Escape') { setDrawArmed(false); setDraftBox(null); }
+    };
+    const onKeyUp = (e: KeyboardEvent) => { if (e.key === ' ') setPanMode(false); };
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('keyup', onKeyUp);
+    return () => { window.removeEventListener('keydown', onKey); window.removeEventListener('keyup', onKeyUp); };
+  }, [totalPages]);
 
   // Thumbnails mode (left | bottom | off) with persistence
   type ThumbMode = "left" | "bottom" | "off";
@@ -1553,6 +1581,9 @@ Rules:
                     ) : (
                       <div className="px-3 py-2 text-sm text-muted-foreground">No results</div>
                     )}
+                    {indexing.total > 0 && indexing.done < indexing.total && (
+                      <div className="px-3 py-1 text-[11px] text-muted-foreground border-t">Indexing… {indexing.done}/{indexing.total}</div>
+                    )}
                   </div>
                 )}
               </div>
@@ -1575,6 +1606,30 @@ Rules:
                 <span>Zoom</span>
                 <input data-testid="zoom-top" type="range" min={0.5} max={2} step={0.1} value={zoom} onChange={(e) => setZoom(Number(e.target.value))} />
                 <span>{Math.round(zoom * 100)}%</span>
+                <Button size="sm" variant="outline" title="Fit to width" onClick={() => {
+                  try {
+                    const container = viewerRef.current;
+                    const canvas = container?.querySelector('canvas') as HTMLCanvasElement | null;
+                    if (!container || !canvas) return;
+                    const w = canvas.width / (Number(canvas.style.width.replace('px','')) || 1);
+                    const target = (container.clientWidth - 24) * w; // padding margin
+                    const fit = Math.max(0.5, Math.min(2, target / canvas.width));
+                    setZoom(fit);
+                  } catch {}
+                }}>Fit W</Button>
+                <Button size="sm" variant="outline" title="Fit to page" onClick={() => {
+                  try {
+                    const container = viewerRef.current;
+                    const canvas = container?.querySelector('canvas') as HTMLCanvasElement | null;
+                    if (!container || !canvas) return;
+                    const w = canvas.width / (Number(canvas.style.width.replace('px','')) || 1);
+                    const h = canvas.height / (Number(canvas.style.height.replace('px','')) || 1);
+                    const fitW = (container.clientWidth - 24) * w / canvas.width;
+                    const fitH = (container.clientHeight - 24) * h / canvas.height;
+                    const fit = Math.max(0.5, Math.min(2, Math.min(fitW, fitH)));
+                    setZoom(fit);
+                  } catch {}
+                }}>Fit P</Button>
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button data-testid="toggle-night" size="sm" variant={night ? "default" : "outline"} onClick={()=> setNight(v=>!v)} aria-pressed={night} aria-label="Night page">
@@ -1608,13 +1663,27 @@ Rules:
               )}
 
               {/* Canvas viewer */}
-              <div className="flex-1 p-4 overflow-auto flex items-start justify-center min-h-0">
+              <div ref={viewerRef} className="flex-1 p-4 overflow-auto flex items-start justify-center min-h-0">
               {doc ? (
                 <div
                   className={`relative inline-block ${drawArmed ? "cursor-crosshair" : ""}`}
                   ref={overlayRef}
                   onPointerDown={(e) => {
                     if (!overlayRef.current) return;
+                    // Spacebar pan: drag to scroll
+                    if (panMode && viewerRef.current) {
+                      const startX = e.clientX, startY = e.clientY;
+                      const sL = viewerRef.current.scrollLeft, sT = viewerRef.current.scrollTop;
+                      (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+                      const move = (ev: PointerEvent) => {
+                        const dx = ev.clientX - startX; const dy = ev.clientY - startY;
+                        viewerRef.current!.scrollLeft = sL - dx;
+                        viewerRef.current!.scrollTop = sT - dy;
+                      };
+                      const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
+                      window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
+                      return;
+                    }
                     if (!drawArmed) return;
                     const rect = overlayRef.current.getBoundingClientRect();
                     (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
