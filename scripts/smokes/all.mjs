@@ -39,6 +39,12 @@ const stepsBase = [
   { cmd: ['node', 'scripts/smokes/ui_keyboard_core.mjs'], name: 'ui_keyboard_core' },
   { cmd: ['node', 'scripts/smokes/ui_search_highlight_thumb.mjs'], name: 'ui_search_highlight_thumb' },
   { cmd: ['node', 'scripts/smokes/ui_conflicts_load_and_resolve.mjs'], name: 'ui_conflicts_load_and_resolve' },
+  // New UX slices (kept at end; safe to run; comments panel skips if missing)
+  { cmd: ['node', 'scripts/smokes/ui_zoom_fit_pan.mjs'], name: 'ui_zoom_fit_pan' },
+  { cmd: ['node', 'scripts/smokes/ui_selection_handles_resize.mjs'], name: 'ui_selection_handles_resize' },
+  { cmd: ['node', 'scripts/smokes/ui_thumbnails_virtualized.mjs'], name: 'ui_thumbnails_virtualized' },
+  { cmd: ['node', 'scripts/smokes/ui_a11y_focus_escape.mjs'], name: 'ui_a11y_focus_escape' },
+  { cmd: ['node', 'scripts/smokes/ui_comments_threads_panel.mjs'], name: 'ui_comments_threads_panel' },
   { cmd: ['node', 'scripts/smokes/issue_013.mjs'], name: 'issue_013' },
   { cmd: ['node', 'scripts/smokes/issue_014.mjs'], name: 'issue_014' },
   { cmd: ['node', 'scripts/smokes/issue_018.mjs'], name: 'issue_018' },

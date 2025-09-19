@@ -4,9 +4,9 @@ PY       ?= .venv/bin/python
 
 
 .PHONY: coco-export smoke-tabbed-api help setup setup-smokes smokes-python dev stop lint fmt type test api-smokes ux-health smokes ci scaffold smoke-issue \
-	gamified-e2e gamified-all gamified-all-fast gamified-codex gamified-cli \
-	smoke-litellm smoke-litellm-image smoke-litellm-all smoke-litellm-results \
-	smoke-07-reflow-min bundle-tabbed
+		gamified-e2e gamified-all gamified-all-fast gamified-codex gamified-cli \
+		smoke-litellm smoke-litellm-image smoke-litellm-all smoke-litellm-results \
+		smoke-07-reflow-min bundle-tabbed state-of-project
 
 	help:
 	@echo "Common targets:"
@@ -129,6 +129,13 @@ smokes:
 
 ci:
 	BASE_URL=$(BASE_URL) BROWSERLESS_DISCOVERY_URL=$(CDP_URL) bash scripts/ci_local.sh
+
+# --- Reports ---
+state-of-project:
+	@echo "Running State of Project auto-run…";
+	PYTHONPATH=$(PWD)/src \
+	uv run scripts/tools/state_of_project.py
+	@echo "Updated docs/STATE_OF_PROJECT.md"
 
 scaffold:
 	node scripts/tools/scaffold_tabbed_issue.mjs --dir prototypes/tabbed/issues --id "$(ISSUE)" --title "$(TITLE)"
