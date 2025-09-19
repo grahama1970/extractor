@@ -2373,10 +2373,27 @@ Rules:
                       did = await ensureDocId('BHT CV32A65X.pdf');
                     }
                     if (!did) { toast('No docId'); return; }
-                    const r = await fetch(`/api/conflicts/list?doc_id=${encodeURIComponent(did)}`);
-                    const j = await r.json();
-                    if (j?.ok && Array.isArray(j.items)) setConflicts(j.items);
-                    else toast('No conflicts');
+                    let items: any[] | null = null;
+                    try {
+                      const r = await fetch(`/api/conflicts/list?doc_id=${encodeURIComponent(did)}`);
+                      if (r.ok) {
+                        const j = await r.json();
+                        if (j?.ok && Array.isArray(j.items)) items = j.items;
+                      }
+                    } catch {}
+                    if (!items) {
+                      // Fallback: read artifact file directly
+                      const p = `scripts/artifacts/conflicts_${did}.json`;
+                      try {
+                        const rf = await fetch(`/api/artifacts/file?path=${encodeURIComponent(p)}`);
+                        if (rf.ok) {
+                          const raw = await rf.json();
+                          const arr = Array.isArray(raw) ? raw : (Array.isArray(raw?.items) ? raw.items : []);
+                          if (arr.length) items = arr;
+                        }
+                      } catch {}
+                    }
+                    if (items && items.length) setConflicts(items); else toast('No conflicts');
                   } catch { toast.error('Load conflicts failed'); }
                 }}>Load</Button>
               </div>

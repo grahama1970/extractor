@@ -29,10 +29,14 @@ async function get(url){ const r = await fetch(url); return r.json(); }
     await page.waitForSelector('[data-testid="app-ready"]', { timeout: 15000 }).catch(()=>{});
     await page.waitForSelector('[data-testid="page-label"]', { timeout: 15000 });
 
-    // Load conflicts (allow small delay for UI to compute docId)
-    await new Promise(r=>setTimeout(r,600));
+    // Load conflicts (allow time for UI to compute docId)
+    await new Promise(r=>setTimeout(r,900));
     await page.click('[data-testid="btn-load-conflicts"]');
-    const item = await page.waitForSelector('[data-testid="conflict-item"]', { timeout: 12000 }).catch(()=>null);
+    let item = await page.waitForSelector('[data-testid="conflict-item"]', { timeout: 4000 }).catch(()=>null);
+    if (!item) {
+      await new Promise(r=>setTimeout(r,1500));
+      item = await page.$('[data-testid="conflict-item"]');
+    }
     if (!item) throw new Error('no conflict item');
     await page.click('[data-testid="btn-adjudicate"]');
 
