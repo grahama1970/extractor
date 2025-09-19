@@ -9,7 +9,9 @@
     "test": "tests"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "ux:check": "node scripts/ux_check_broken.mjs",
+    "ux:handshake": "node scripts/smokes/ui_extract_load.mjs"
   },
   "repository": {
     "type": "git",

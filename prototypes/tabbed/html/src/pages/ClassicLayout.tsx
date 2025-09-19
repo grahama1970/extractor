@@ -120,6 +120,8 @@ const ClassicLayout = () => {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
+  // App ready once doc is loaded
+  const appReady = !!doc;
   // Derived helpers for current page
   const pageBoxes = useMemo(() => boxesByPage[currentPage] || [], [boxesByPage, currentPage]);
   const selectedBox = useMemo(() => pageBoxes.find((b) => b.id === selectedId) || null, [pageBoxes, selectedId]);
@@ -446,6 +448,7 @@ const ClassicLayout = () => {
       </header>
 
       <div className="flex h-[calc(100vh-4rem)]">
+        {appReady && <div data-testid="app-ready" className="hidden" aria-hidden />}
         {/* Explorer Panel */}
         <div className="w-80 border-r bg-card p-6 flex flex-col">
           <h2 className="text-xl font-bold text-destructive mb-6 text-center">Explorer</h2>
