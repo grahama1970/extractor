@@ -30,7 +30,7 @@ import { toast } from "@/components/ui/sonner";
 import { ThumbnailRail } from "@/components/ThumbnailRail";
 import { ThumbnailStrip } from "@/components/ThumbnailStrip";
 import { PdfCanvas } from "@/components/PdfCanvas";
-import { loadPdf, type PdfDoc, getPageText } from "@/lib/pdf";
+import { loadPdf, type PdfDoc, getPageText, getQueryBoxes } from "@/lib/pdf";
 import { DEFAULT_LABELS, loadLabels, saveLabel, type LabelDef } from "@/lib/labels";
 import { cn } from "@/lib/utils";
 import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
@@ -74,6 +74,7 @@ const ClassicLayout = () => {
   const [searchHits, setSearchHits] = useState<{ page: number; snippet: string }[]>([]);
   const [indexing, setIndexing] = useState<{done:number; total:number}>({done:0,total:0});
   const pageTextRef = useRef<Record<number,string>>({});
+  const [hitBoxesByPage, setHitBoxesByPage] = useState<Record<number,{x:number;y:number;w:number;h:number}[]>>({});
   const [hitIndex, setHitIndex] = useState<number>(-1);
   const hasHits = searchHits.length > 0;
   const [status, setStatus] = useState<"Unassigned"|"In Review"|"Done">("Unassigned");
@@ -347,6 +348,25 @@ const ClassicLayout = () => {
     })();
     return () => { cancelled = true; };
   }, [searchQuery, doc, totalPages, currentPage]);
+
+  // Compute highlight boxes for current page and neighbors when query/doc/page changes
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const q = searchQuery.trim();
+      if (!q || !doc || !totalPages) { if (!cancelled) setHitBoxesByPage({}); return; }
+      const pages = [currentPage-1, currentPage, currentPage+1].filter(p => p>=1 && p<=totalPages);
+      const res: Record<number,{x:number;y:number;w:number;h:number}[]> = {};
+      for (const p of pages) {
+        try {
+          const b = await getQueryBoxes(doc, p, q);
+          res[p] = b;
+        } catch { res[p] = []; }
+      }
+      if (!cancelled) setHitBoxesByPage(prev => ({ ...prev, ...res }));
+    })();
+    return () => { cancelled = true; };
+  }, [searchQuery, doc, currentPage, totalPages]);
 
   // Keyboard shortcuts: [, ] paging; N arm draw; ? help; Space pan
   useEffect(() => {
@@ -1659,6 +1679,7 @@ Rules:
                   currentPage={currentPage}
                   onJump={(n) => setCurrentPage(n)}
                   cacheKey={`${currentPdfName || 'doc'}#${thumbRev}`}
+                  hitCounts={(() => { const c: Record<number,number> = {}; for (const h of searchHits) c[h.page]=(c[h.page]||0)+1; return c; })()}
                 />
               )}
 
@@ -1701,13 +1722,20 @@ Rules:
                   </div>
                   {/* Annotation overlay */}
                   <div className="absolute inset-0" data-testid="overlay" onClick={() => setSelectedId(null)}>
-                    {/* Draft box rendered while drawing */}
-                    {draftBox && (
+                  {/* Draft box rendered while drawing */}
+                  {draftBox && (
                       <div
                         className="absolute border-2 border-dashed border-primary/60 bg-primary/10"
                         style={{ left: `${draftBox.x * 100}%`, top: `${draftBox.y * 100}%`, width: `${draftBox.w * 100}%`, height: `${draftBox.h * 100}%` }}
                       />
                     )}
+                    {/* Search highlights */}
+                    {(hitBoxesByPage[currentPage] || []).map((r, i) => (
+                      <div key={`hit-${i}`} data-testid="hit-box" aria-label="search-hit"
+                        className="absolute bg-amber-300/30 outline outline-1 outline-amber-400/50 pointer-events-none"
+                        style={{ left: `${r.x*100}%`, top: `${r.y*100}%`, width: `${r.w*100}%`, height: `${Math.max(r.h*100, 1.2)}%` }}
+                      />
+                    ))}
                     {visiblePageBoxes.map((b) => {
                       const isSelected = b.id === selectedId;
                       const borderClass = b.type === 'Section' ? 'border-annotation-section'
@@ -2050,6 +2078,7 @@ Rules:
                 height={96}
                 itemWidth={100}
                 cacheKey={`${currentPdfName || 'doc'}#${thumbRev}`}
+                hitCounts={(() => { const c: Record<number,number> = {}; for (const h of searchHits) c[h.page]=(c[h.page]||0)+1; return c; })()}
               />
             )}
             <div data-testid="page-controls" className="flex items-center justify-between gap-3 border-t pt-2">

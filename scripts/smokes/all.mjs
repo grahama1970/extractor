@@ -37,6 +37,7 @@ const stepsBase = [
   { cmd: ['node', 'scripts/smokes/ui_progress_pipeline_run.mjs'], name: 'ui_progress_pipeline_run' },
   { cmd: ['node', 'scripts/smokes/ui_load_pipeline_annos_from_latest.mjs'], name: 'ui_load_pipeline_annos_from_latest' },
   { cmd: ['node', 'scripts/smokes/ui_keyboard_core.mjs'], name: 'ui_keyboard_core' },
+  { cmd: ['node', 'scripts/smokes/ui_search_highlight_thumb.mjs'], name: 'ui_search_highlight_thumb' },
   { cmd: ['node', 'scripts/smokes/issue_013.mjs'], name: 'issue_013' },
   { cmd: ['node', 'scripts/smokes/issue_014.mjs'], name: 'issue_014' },
   { cmd: ['node', 'scripts/smokes/issue_018.mjs'], name: 'issue_018' },

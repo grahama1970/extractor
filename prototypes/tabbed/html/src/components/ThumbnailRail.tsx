@@ -23,6 +23,7 @@ export function ThumbnailRail({
   onJump,
   width = 144,
   cacheKey,
+  hitCounts,
 }: {
   doc: PdfDoc;
   pageCount: number;
@@ -30,6 +31,7 @@ export function ThumbnailRail({
   onJump: (n: number) => void;
   width?: number;
   cacheKey?: string;
+  hitCounts?: Record<number, number>;
 }) {
   const ref = React.useRef<VirtuosoHandle>(null);
 
@@ -52,6 +54,7 @@ export function ThumbnailRail({
             onJump={onJump}
             width={width}
             cacheKey={cacheKey}
+            hitCount={hitCounts?.[index+1] || 0}
           />
         )}
         computeItemKey={(i) => `p-${i + 1}`}
@@ -68,6 +71,7 @@ function ThumbItem({
   onJump,
   width,
   cacheKey,
+  hitCount,
 }: {
   doc: PdfDoc;
   n: number;
@@ -75,6 +79,7 @@ function ThumbItem({
   onJump: (n: number) => void;
   width: number;
   cacheKey?: string;
+  hitCount?: number;
 }) {
   const [src, setSrc] = React.useState<string | undefined>(undefined);
   React.useEffect(() => {
@@ -122,6 +127,11 @@ function ThumbItem({
           <img src={src} alt={`Page ${n}`} className="w-full h-full object-cover" />
         ) : (
           <div className="w-full h-full animate-pulse bg-muted" />
+        )}
+        {!!hitCount && (
+          <div data-testid="thumb-hit" className="absolute top-1 right-1 text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500 text-white shadow">
+            {hitCount > 9 ? '9+' : hitCount}
+          </div>
         )}
       </div>
       <div className="mt-2 text-xs text-muted-foreground flex items-center justify-between">
