@@ -16,7 +16,6 @@ Expected Output (existing format):
     Parsed response object matching response_schema
 """
 
-import asyncio
 import json
 from typing import Dict, Any, Optional, Type, List
 from pathlib import Path

@@ -341,7 +341,7 @@ class WorkflowCommands(CommandGroup):
                 completed = sum(1 for r in all_results if r["status"] == "completed")
                 failed = sum(1 for r in all_results if r["status"] == "failed")
 
-                print(f"\n Workflow complete")
+                print("\n Workflow complete")
                 print(f"  Processed: {len(all_results)} files")
                 print(f"  Successful: {completed}")
                 print(f"  Failed: {failed}")
@@ -376,7 +376,7 @@ class WorkflowCommands(CommandGroup):
                 with open(results_file, "r") as f:
                     results = json.load(f)
 
-                print(f"\n Workflow Status")
+                print("\n Workflow Status")
                 print(f"  Workflow: {results['workflow']}")
                 print(f"  Total files: {results['total_files']}")
                 print(f"  Completed: {results['completed']}")
@@ -385,7 +385,7 @@ class WorkflowCommands(CommandGroup):
                 # Show failed files
                 failed_files = [r for r in results["results"] if r["status"] == "failed"]
                 if failed_files:
-                    print(f"\n Failed files:")
+                    print("\n Failed files:")
                     for f in failed_files:
                         print(f"  - {f['file']}: {f.get('error', 'Unknown error')}")
 
@@ -405,7 +405,7 @@ class WorkflowCommands(CommandGroup):
                                     step_stats[step]["success"] += 1
 
                 if step_stats:
-                    print(f"\n Step Statistics:")
+                    print("\n Step Statistics:")
                     for step, stats in step_stats.items():
                         success_rate = (
                             stats["success"] / stats["total"] if stats["total"] > 0 else 0

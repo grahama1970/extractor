@@ -8,13 +8,12 @@ to an LLM, which then corrects structural issues and formatting.
 
 import asyncio
 import sys
-from pathlib import Path
+import os
 from typing import List, Dict, Any, Optional
 
 from pydantic import BaseModel
 from loguru import logger
-import markdown2
-from extractor.core.processors.llm import BaseLLMSimpleBlockProcessor, PromptData, BlockData
+from extractor.core.processors.llm import BaseLLMSimpleBlockProcessor
 from extractor.core.output import json_to_html
 from extractor.core.schema import BlockTypes
 from extractor.core.schema.document import Document

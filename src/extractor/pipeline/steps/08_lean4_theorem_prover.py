@@ -18,7 +18,6 @@ import os
 import sys
 import json
 import asyncio
-import re
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple, cast
 from datetime import datetime
@@ -33,7 +32,6 @@ from dotenv import load_dotenv, find_dotenv
 from loguru import logger
 from rich.console import Console
 from tqdm.asyncio import tqdm
-import litellm
 
 # Import JSON utilities
 from extractor.core.services.utils.json_utils import clean_json_string
@@ -936,7 +934,7 @@ def run(
     """
     Extracts and proves formal requirements from reflowed sections using Lean 4.
     """
-    console.print(f"[bold green]Starting Lean 4 Theorem Proving (Stage 08)[/bold green]")
+    console.print("[bold green]Starting Lean 4 Theorem Proving (Stage 08)[/bold green]")
 
     # --- Directory and Data Setup ---
     stage_output_dir = output_dir / "08_lean4_theorem_prover"
@@ -1028,7 +1026,7 @@ def run(
     with open(output_path, "w") as f:
         json.dump(final_output, f, indent=2, default=str, ensure_ascii=False)
 
-    console.print(f"\n[bold green]✅ Lean 4 Processing Complete[/bold green]")
+    console.print("\n[bold green]✅ Lean 4 Processing Complete[/bold green]")
     stats = result.get("statistics", {})
     console.print(f"   - Requirements Found: {stats.get('total_requirements_found', 0)}")
     console.print(f"   - Successful Proofs: {stats.get('successful_proofs', 0)}")

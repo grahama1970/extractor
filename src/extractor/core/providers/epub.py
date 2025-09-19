@@ -15,7 +15,6 @@ Example usage
 
 import hashlib
 import base64
-import re
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Union
 
@@ -123,7 +122,12 @@ class EPUBProvider:
     # XHTML parsing
     # ------------------------------------------------------------------
     def _parse_xhtml(self, item: epub.EpubItem, blocks: List[BaseBlock]) -> None:
-        soup = BeautifulSoup(item.get_content(), "lxml")
+        # Prefer XML parser for XHTML content to avoid XMLParsedAsHTMLWarning
+        parser = "lxml-xml" if item.media_type == "application/xhtml+xml" else "lxml"
+        try:
+            soup = BeautifulSoup(item.get_content(), parser)
+        except Exception:
+            soup = BeautifulSoup(item.get_content(), "lxml")
 
         # Remove script/style
         for tag in soup(["script", "style", "noscript"]):

@@ -20,21 +20,17 @@ from pathlib import Path
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional, cast, Tuple, Annotated
 from datetime import datetime
-import uuid
 
 import fitz  # PyMuPDF
 import typer
-from dotenv import load_dotenv
 from loguru import logger
 
-from extractor.pipeline.utils.litellm_cache import initialize_litellm_cache
 from extractor.pipeline.utils.prompt_builder import build_llm_context
-from extractor.pipeline.utils.ann_index import build_ann_index, query_ann_index
+from extractor.pipeline.utils.ann_index import query_ann_index
 from extractor.pipeline.utils.annotations import (
     rect_overlap_ratio as _rect_overlap_ratio,
     cue_from_annotation as _cue_from_annotation,
     summarize_cues as _summarize_cues,
-    annotation_text_snippet as _annotation_text_snippet,
     load_relevant_rules as _load_relevant_rules,
 )
 from extractor.pipeline.utils.litellm_call import litellm_call
@@ -43,7 +39,6 @@ from extractor.pipeline.utils.diagnostics import (
     stop_resource_sampler,
     make_event,
     snapshot_resources,
-    build_stage_timings,
     get_run_id,
     classify_llm_error,
     gpu_metrics_available,
@@ -575,6 +570,33 @@ async def process_pdf_pipeline(config: Config):
     for idx, task in enumerate(tasks):
         try:
             target_block, above_block, below_block = task.get_context_blocks()
+            # --- Heuristic guardrails BEFORE any LLM call ---
+            # Demote common false positives early to reduce noise and cost.
+            try:
+                import re as _re
+                raw_text = (target_block.get("text") or "").strip()
+                # Accept classic numbered headings like "1.1.1 Section Title"
+                is_numbered = bool(_re.match(r"^\s*\d+(?:[\.-]\d+){1,}\s+\S", raw_text))
+                # Short colon label (wrapper) — e.g., "Mergeable Tables:" — often not a true header
+                short_colon = len(raw_text) <= 40 and raw_text.endswith(":")
+                # Captions that look like Table/Figure labels
+                is_caption = bool(
+                    _re.match(r"^\s*(Table|Figure)\s+\d+(?:[-–]\d+)?[.:]", raw_text, _re.IGNORECASE)
+                )
+                # Sentence-like content rarely is a section header
+                has_terminal_punct = raw_text.endswith(".") or raw_text.endswith(";")
+                # If it is not numbered and matches one of the strong negative patterns, auto-reject
+                if (not is_numbered) and (short_colon or is_caption or has_terminal_punct):
+                    kind = 'not_header_colon' if short_colon else ('caption_pattern' if is_caption else 'not_header_sentence')
+                    auto_results[idx] = {
+                        "is_header": False,
+                        "reasoning": f"Auto-reject: {kind}",
+                        "debug_kind": kind,
+                        "auto": True,
+                    }
+                    continue
+            except Exception:
+                pass
             # Optional FAISS advisory cue: similar annotations
             try:
                 if ann_index is not None:
@@ -1002,21 +1024,48 @@ def run(
     json_output_dir.mkdir(exist_ok=True)
     image_output_dir.mkdir(exist_ok=True)
 
-    # Offline mode: pass-through with structural normalization
+    # Offline mode: apply lightweight heuristics to demote obvious non-headers,
+    # then pass through with structural normalization (no LLM calls).
     if skip_llm:
         try:
             data = json.loads(input_json.read_text())
         except Exception as e:
             raise typer.BadParameter(f"Failed to load input JSON: {e}")
         blocks = data.get("blocks", [])
+        # Heuristic demotion mirrors the pre-LLM guardrails used in the online path.
+        # This reduces false top-level sections in offline/CI runs.
+        import re as _re
         for b in blocks:
-            if isinstance(b, dict):
-                b["suspicious_header"] = False
+            if not isinstance(b, dict):
+                continue
+            b["suspicious_header"] = False
+            if (b.get("block_type") == "SectionHeader"):
+                raw_text = (b.get("text") or "").strip()
+                is_numbered = bool(_re.match(r"^\s*\d+(?:[\.-]\d+){1,}\s+\S", raw_text))
+                short_colon = len(raw_text) <= 40 and raw_text.endswith(":")
+                is_caption = bool(
+                    _re.match(r"^\s*(Table|Figure)\s+\d+(?:[-–]\d+)?[.:]", raw_text, _re.IGNORECASE)
+                )
+                has_terminal_punct = raw_text.endswith(".") or raw_text.endswith(";")
+                if (not is_numbered) and (short_colon or is_caption or has_terminal_punct):
+                    # Demote to plain text; annotate reasons for downstream debugging if desired
+                    b["block_type"] = "Text"
+                    reasons = list(b.get("suspicious_reasons") or [])
+                    tag = (
+                        "not_header_colon" if short_colon else (
+                            "caption_pattern" if is_caption else "not_header_sentence"
+                        )
+                    )
+                    if tag not in [str(r) for r in reasons]:
+                        reasons.append(tag)
+                    b["suspicious_reasons"] = reasons
+                    b["is_suspicious"] = True
+                    b["suspicion_confidence"] = float(b.get("suspicion_confidence") or 0.9)
         data["suspicious_block_count"] = 0
         data["status"] = "Completed"
         out = json_output_dir / "03_verified_blocks.json"
         out.write_text(json.dumps(data, indent=2))
-        typer.secho(f"[offline] LLM skipped; wrote {out}", fg=typer.colors.GREEN)
+        typer.secho(f"[offline] Heuristic demotion applied; wrote {out}", fg=typer.colors.GREEN)
         return
 
     # Configure logging sink per stage run
@@ -1068,7 +1117,6 @@ def run(
 
 def debug_test():
     """Debug function to test with simulated suspicious headers."""
-    import shutil
 
     # Load the stage 2 output
     input_json = Path("stage_02_results.json")
@@ -1123,7 +1171,7 @@ def debug_test():
         pages_data[page_idx].append(formatted_block)
 
     # Create the expected structure
-    marker_format = {"pages": [{"blocks": blocks} for _, blocks in sorted(pages_data.items())]}
+    _marker_format = {"pages": [{"blocks": blocks} for _, blocks in sorted(pages_data.items())]}
 
 
 def debug_bundle(

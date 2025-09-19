@@ -135,17 +135,16 @@ The new CLI:
 4. Maintains backward compatibility with existing Marker functionality
 5. Follows design patterns from the ArangoDB CLI project
 
-## Migration from Click CLI
+## Migration Note (2025-09-18)
 
-The existing Click-based CLI is still available through the original entry points:
+This document predates the unified CLI. Use the single surface:
 
 ```bash
-# Old CLI (Click-based)
-python convert.py input_file.pdf
-
-# New CLI (Typer-based)
-python cli.py convert single input_file.pdf
+python -m src.cli extract input_file.pdf out --mode accurate
 ```
+
+Legacy examples that mention `python cli.py` or `convert single` are archival.
+Prefer the Happy Path guide for current commands.
 
 ## Future Enhancements
 

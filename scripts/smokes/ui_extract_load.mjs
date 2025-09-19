@@ -31,7 +31,10 @@ function logLine(file, line){
     await page.goto(URL, { waitUntil: 'domcontentloaded' });
     await page.waitForSelector('[data-testid="page-label"]', { timeout: 15000 });
     // Verify top toolbar mounted (buttons can be conditionally rendered)
-    await page.waitForSelector('[data-testid="top-toolbar"]', { timeout: 10000 });
+    await page.waitForSelector('[data-testid="top-toolbar"]', { timeout: 15000 });
+    // Assert core buttons present
+    await page.waitForSelector('[data-testid="btn-extract-pipeline"]', { timeout: 15000 });
+    await page.waitForSelector('[data-testid="btn-load-pipeline-annos"]', { timeout: 15000 });
 
     // Try to arm draw and drag a small box (best-effort; ignore errors)
     try {

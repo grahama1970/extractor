@@ -11,7 +11,6 @@ Exit code: 0 on pass, 1 on fail (or missing required files).
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
@@ -19,8 +18,6 @@ import typer
 
 
 # ---- Helper utilities for item-level assertions ----
-from typing import Optional as _Optional
-from typing import Iterable as _Iterable
 
 # Optional similarity tools
 try:

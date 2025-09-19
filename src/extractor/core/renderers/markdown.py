@@ -22,17 +22,15 @@ import re
 import json
 import hashlib
 from collections import defaultdict
-from typing import Annotated, Dict, List, Tuple, Optional
+from typing import Annotated, Dict, List, Tuple
 
 import regex
-import uuid
-from bs4 import NavigableString, BeautifulSoup
+from bs4 import NavigableString
 from markdownify import MarkdownConverter
 from pydantic import BaseModel
 
 from extractor.core.renderers.html import HTMLRenderer
 from extractor.core.schema import BlockTypes
-from extractor.core.schema.blocks import BlockId
 from extractor.core.schema.document import Document
 
 

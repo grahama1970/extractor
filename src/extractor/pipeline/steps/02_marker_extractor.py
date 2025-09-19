@@ -22,7 +22,6 @@ from loguru import logger
 from rich.console import Console
 import uuid
 
-from extractor.pipeline.utils.litellm_cache import initialize_litellm_cache
 
 # Workaround: some versions of `surya` import QuantizedCacheConfig from transformers,
 # which is missing in transformers<4.58. To keep the pipeline runnable without
@@ -43,9 +42,6 @@ from extractor.pipeline.utils.diagnostics import (
     start_resource_sampler,
     stop_resource_sampler,
     make_event,
-    snapshot_resources,
-    build_stage_timings,
-    get_run_id,
     gpu_metrics_available,
 )
 

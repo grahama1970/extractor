@@ -7,9 +7,8 @@ This processor identifies blocks that appear to have issues like:
 - Table fragments
 """
 
-from typing import List, Dict, Any
 from extractor.core.schema.document import Document
-from extractor.core.schema.blocks import Block, BlockType
+from extractor.core.schema.blocks import BlockType
 from extractor.core.processors import BaseProcessor
 from loguru import logger
 

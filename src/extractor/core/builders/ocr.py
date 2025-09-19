@@ -116,10 +116,11 @@ class OcrBuilder(BaseBuilder):
             return
 
         self.recognition_model.disable_tqdm = self.disable_tqdm
+        # Newer surya.RecognitionPredictor does not accept `langs`.
+        # Keep call minimal and deterministic; language handling is internal to the model.
         recognition_results = self.recognition_model(
             images=images,
             bboxes=line_boxes,
-            langs=[self.languages] * len(pages),
             recognition_batch_size=int(self.get_recognition_batch_size()),
             sort_lines=False,
         )

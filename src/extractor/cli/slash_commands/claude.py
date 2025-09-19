@@ -6,13 +6,13 @@ Provides commands for Claude-based analysis and verification.
 """
 
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Optional, List
 import typer
 from loguru import logger
 import json
 import asyncio
 
-from .base import CommandGroup, validate_file_path, format_output
+from .base import CommandGroup, validate_file_path
 from extractor.core.processors.claude_table_merge_analyzer import (
     BackgroundTableAnalyzer as ClaudeTableMergeAnalyzer,
 )
@@ -144,7 +144,7 @@ class ClaudeCommands(CommandGroup):
                             result = loop.run_until_complete(verifier.get_result(task_id))
                             if result and result.get("status") == "completed":
                                 results["section_verification"] = result
-                                print(f"  ✅ Section verification complete")
+                                print("  ✅ Section verification complete")
                                 break
                             time.sleep(2)
                     finally:
@@ -169,7 +169,7 @@ class ClaudeCommands(CommandGroup):
                             result = loop.run_until_complete(validator.get_result(task_id))
                             if result and result.get("status") == "completed":
                                 results["content_validation"] = result
-                                print(f"  ✅ Content validation complete")
+                                print("  ✅ Content validation complete")
                                 break
                             time.sleep(2)
                     finally:
@@ -194,7 +194,7 @@ class ClaudeCommands(CommandGroup):
                             result = loop.run_until_complete(analyzer.get_result(task_id))
                             if result and result.get("status") == "completed":
                                 results["structure_analysis"] = result
-                                print(f"  ✅ Structure analysis complete")
+                                print("  ✅ Structure analysis complete")
                                 break
                             time.sleep(2)
                     finally:

@@ -16,12 +16,10 @@ except ImportError:
     print("PyMuPDF (fitz) not installed. Stage 06 requires it.", file=sys.stderr)
     raise
 import asyncio
-import re
 from pathlib import Path
 from loguru import logger
 import sys
 from typing import List, Dict, Any, Optional
-from io import BytesIO
 import base64
 from tqdm.asyncio import tqdm_asyncio
 import os

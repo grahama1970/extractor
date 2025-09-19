@@ -7,10 +7,8 @@ and semantically meaningful JSON output.
 """
 
 from typing import Annotated, Dict, List, Tuple
-from pydantic import BaseModel
 
-from extractor.core.renderers.json import JSONBlockOutput, JSONOutput, JSONRenderer
-from extractor.core.schema import BlockTypes
+from extractor.core.renderers.json import JSONRenderer
 from extractor.core.schema.document import Document
 from extractor.core.schema.blocks.base import BlockOutput
 

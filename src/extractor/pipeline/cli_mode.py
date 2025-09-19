@@ -138,7 +138,6 @@ def doctor():
     _probe("camelot", "camelot")
     _probe("pandas", "pandas")
     try:
-        import faiss  # type: ignore
         caps["faiss"] = True
     except Exception:
         caps["faiss"] = False

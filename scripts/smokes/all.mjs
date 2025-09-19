@@ -31,6 +31,11 @@ const stepsBase = [
   { cmd: ['node', 'scripts/smokes/resize_keyboard_right_persist.mjs'], name: 'resize_keyboard_right_persist' },
   { cmd: ['node', 'scripts/smokes/a11y_focus_basic.mjs'], name: 'a11y_focus_basic' },
   { cmd: ['node', 'scripts/smokes/anno_list_virtualized.mjs'], name: 'anno_list_virtualized' },
+  // New UI smokes (Happy-Path minimal)
+  { cmd: ['node', 'scripts/smokes/ui_grouping_export_json.mjs'], name: 'ui_grouping_export_json' },
+  { cmd: ['node', 'scripts/smokes/ui_export_json_fields.mjs'], name: 'ui_export_json_fields' },
+  { cmd: ['node', 'scripts/smokes/ui_progress_pipeline_run.mjs'], name: 'ui_progress_pipeline_run' },
+  { cmd: ['node', 'scripts/smokes/ui_load_pipeline_annos_from_latest.mjs'], name: 'ui_load_pipeline_annos_from_latest' },
   { cmd: ['node', 'scripts/smokes/issue_013.mjs'], name: 'issue_013' },
   { cmd: ['node', 'scripts/smokes/issue_014.mjs'], name: 'issue_014' },
   { cmd: ['node', 'scripts/smokes/issue_018.mjs'], name: 'issue_018' },

@@ -7,7 +7,7 @@ External Dependencies:
 """
 
 from enum import Enum
-from typing import List, Optional, Tuple, Dict, Any
+from typing import List, Tuple, Dict
 from pydantic import BaseModel, Field
 
 
@@ -221,7 +221,7 @@ if __name__ == "__main__":
     """Validation function for table configuration"""
     # Test configuration creation
     config = TableConfig()
-    print(f"✅ Default TableConfig created successfully")
+    print("✅ Default TableConfig created successfully")
 
     # Test preset loading
     for preset_name, preset_config in TABLE_CONFIG_PRESETS.items():
@@ -230,7 +230,7 @@ if __name__ == "__main__":
     # Test serialization
     config_dict = config.model_dump()
     config_json = config.model_dump_json(indent=2)
-    print(f"✅ Configuration serialization successful")
+    print("✅ Configuration serialization successful")
 
     # Test field access
     print(f"  - Extraction method: {config.extraction_method}")

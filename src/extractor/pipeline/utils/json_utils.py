@@ -21,7 +21,7 @@ import os
 import json
 from pathlib import Path
 import re
-from typing import Union, Callable, Any
+from typing import Union
 
 from json_repair import repair_json
 from loguru import logger
@@ -160,9 +160,9 @@ def clean_json_string(
     """
     if isinstance(content, (dict, list)):
         return content if return_dict else json.dumps(content)
-    elif isinstance(content, str) and return_dict == False:
+    elif isinstance(content, str) and return_dict is False:
         return content
-    elif isinstance(content, str) and return_dict == True:
+    elif isinstance(content, str) and return_dict is True:
         # Check if the string contains the word 'json' (a common feature of LLM responses)
         # and try to extract JSON content if it does
         if "json" in content.lower():
@@ -245,7 +245,7 @@ def usage_example():
     )
     example_nested_json = '{"person": {"name": "John", "details": {"age": 30, "city": "New York"}}}'
     example_escaped_characters = '{"text": "He said, \\"Hello, World!\\""}'
-    example_large_json = json.dumps([{"index": i, "value": i * 2} for i in range(1000)])
+    _example_large_json = json.dumps([{"index": i, "value": i * 2} for i in range(1000)])
     example_partial_json = '{"name": "John", "age": 30, "city":'
     print("Valid JSON String (return dict):")
     print(clean_json_string(example_json_str, return_dict=True))

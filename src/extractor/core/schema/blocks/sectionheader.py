@@ -14,13 +14,13 @@ Example Usage:
 >>> # Add usage examples
 """
 
-from typing import Dict, List, Optional, Any
+from typing import Dict, Optional
 import hashlib
 import json
 import logging
 
 from extractor.core.schema import BlockTypes
-from extractor.core.schema.blocks import Block, BlockId
+from extractor.core.schema.blocks import Block
 
 
 class SectionHeader(Block):

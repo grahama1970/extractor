@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { 
   Upload, Copy, Trash2, Plus, ArrowLeft, FileText, Tag, 
   ChevronLeft, ChevronRight, Play, Pause, RotateCcw, 
-  Check, X, Zap, Target
+  Check, X, Zap, Target, Archive, Download
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
@@ -45,10 +45,13 @@ const DashboardLayout = () => {
     }));
   };
 
+  const [appReady, setAppReady] = useState(false);
+  useEffect(() => { setAppReady(true); }, []);
+
   return (
     <div className="h-screen bg-background overflow-hidden">
       {/* Header */}
-      <header className="h-16 border-b bg-card flex items-center px-6">
+      <header className="h-16 border-b bg-card flex items-center px-6" data-testid="top-toolbar">
         <Link to="/" className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors">
           <ArrowLeft className="h-4 w-4" />
           Back to Prototypes
@@ -56,7 +59,7 @@ const DashboardLayout = () => {
         <div className="flex-1 text-center">
           <h1 className="text-lg font-semibold">Multi-Document Rapid Annotation</h1>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2" data-testid="pipeline-actions">
           <Button
             variant={rapidMode ? "default" : "outline"}
             size="sm"
@@ -73,10 +76,21 @@ const DashboardLayout = () => {
             <Target className="mr-2 h-4 w-4" />
             Batch Mode
           </Button>
+          {/* Unified selectors for Happy Path; no-ops here */}
+          <Button size="sm" variant="outline" title="Load pipeline annotations" data-testid="btn-load-pipeline-annos" disabled>
+            <Download className="h-4 w-4" />
+          </Button>
+          <Button size="sm" variant="outline" title="Save annotations" data-testid="btn-save-annotations" disabled>
+            <Archive className="h-4 w-4" />
+          </Button>
+          <Button size="sm" variant="outline" title="Upsert to Arango" data-testid="btn-upsert-pipeline" disabled>
+            <Upload className="h-4 w-4" />
+          </Button>
         </div>
       </header>
 
       <div className="flex h-[calc(100vh-4rem)]">
+        {appReady && <div data-testid="app-ready" className="hidden" aria-hidden />}
         {/* Quick Tools Sidebar */}
         <div className="w-64 border-r bg-card p-4 flex flex-col">
           <div className="mb-6">

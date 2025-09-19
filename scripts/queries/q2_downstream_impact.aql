@@ -1,0 +1,6 @@
+/* Multi-hop downstream impact over depends_on and refines edges */
+/* Bind vars: { "start_id": "sections/S1", "max_hops": 3, "graph": "lean4_g_smoke" } */
+FOR v,e,p IN 1..@max_hops OUTBOUND @start_id GRAPH @graph
+  FILTER IS_SAME_COLLECTION('sections', v) || IS_SAME_COLLECTION('theorems', v)
+  RETURN DISTINCT v
+

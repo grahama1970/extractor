@@ -19,11 +19,10 @@ stages.
 from __future__ import annotations
 
 import hashlib
-import math
 import re
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from extractor.core.schema.unified_document import (
     BaseBlock,

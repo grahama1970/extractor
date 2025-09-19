@@ -225,15 +225,13 @@ if __name__ == "__main__":
         # Test 1: Import core modules
         print("\n📝 Test 1: Import Core Modules")
         try:
-            from extractor.core.converters.pdf import PdfConverter, convert_single_pdf
-            from extractor.core.schema.document import Document
-            from extractor.core.settings import settings
+            from extractor.core.converters.pdf import convert_single_pdf
             from extractor import __version__
 
             print("✅ Core imports successful")
             print(f"   - Version: {__version__}")
-            print(f"   - PDF converter available")
-            print(f"   - Settings loaded")
+            print("   - PDF converter available")
+            print("   - Settings loaded")
         except Exception as e:
             print(f"❌ Import failed: {e}")
             sys.exit(1)

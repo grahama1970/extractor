@@ -16,7 +16,6 @@ Example Usage:
 >>> # Add usage examples
 """
 
-import re
 
 from bs4 import BeautifulSoup
 

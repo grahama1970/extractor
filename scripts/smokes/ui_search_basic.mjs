@@ -38,7 +38,8 @@ try {
   append(`BASE_URL=${BASE}`);
   append(`query=${QUERY}`);
   await page.goto(URL, { waitUntil: 'domcontentloaded' });
-  await page.waitForTimeout(500);
+  await page.waitForSelector('[data-testid="app-ready"]', { timeout: 15000 }).catch(()=>{});
+  await new Promise(r=>setTimeout(r,500));
 
   for (const [label, selector] of Object.entries(SELECTORS)) {
     if (label === 'result') continue; // results appear after typing

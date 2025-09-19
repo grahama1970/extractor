@@ -26,15 +26,10 @@ from itertools import chain, product
 from typing import Any, Dict, List, Optional, Tuple
 
 import camelot
-import pandas as pd
 from loguru import logger
 
 from extractor.core.utils.table_cache import cached
 from extractor.core.utils.table_quality_metrics import (
-    calculate_accuracy_score,
-    calculate_completeness_score,
-    calculate_consistency_score,
-    calculate_whitespace_score,
     calculate_table_confidence,
 )
 

@@ -151,14 +151,15 @@ async def _prepare_messages_image_urls(
 ) -> list[dict[str, object]]:
     out: list[dict[str, object]] = []
     import asyncio as _asyncio
-    from copy import deepcopy
     for msg in messages:
         if not isinstance(msg, dict):
-            out.append(msg); continue
+            out.append(msg)
+            continue
         role = msg.get("role")
         content = msg.get("content")
         if not isinstance(content, list):
-            out.append(msg); continue
+            out.append(msg)
+            continue
         new_parts: list[dict[str, object]] = []
         for part in content:
             if isinstance(part, dict) and part.get("type") == "image_url":

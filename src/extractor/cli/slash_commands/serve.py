@@ -84,7 +84,7 @@ class ServeCommand(SlashCommand):
                     if process.poll() is None:
                         print(f" Server started in background (PID: {process.pid})")
                         print(f"   Access at: http://{host}:{port}")
-                        print(f"   Stop with: /marker-serve stop")
+                        print("   Stop with: /marker-serve stop")
                     else:
                         print(" Server failed to start")
                         stderr = process.stderr.read().decode() if process.stderr else ""
@@ -178,7 +178,7 @@ class ServeCommand(SlashCommand):
 
                             response = requests.get(f"http://{host}:{port}/health", timeout=2)
                             if response.status_code == 200:
-                                print(f" Server is healthy")
+                                print(" Server is healthy")
                                 health_data = response.json()
                                 print(f"   Version: {health_data.get('version', 'unknown')}")
                                 print(f"   Uptime: {health_data.get('uptime', 'unknown')}")

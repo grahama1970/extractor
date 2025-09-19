@@ -18,13 +18,9 @@ Example Usage:
 >>> # Add usage examples
 """
 
-import json
-import shutil
-import datetime
 from pathlib import Path
 import boto3
 
-from huggingface_hub import snapshot_download
 
 import click
 

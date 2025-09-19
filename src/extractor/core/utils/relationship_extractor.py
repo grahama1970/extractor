@@ -24,7 +24,7 @@ Documentation:
 """
 
 import hashlib
-from typing import Dict, List, Any, Optional, Union
+from typing import Dict, List, Any
 
 
 def create_id_hash(text: str) -> str:
@@ -135,9 +135,9 @@ def extract_relationships_from_marker(marker_output: Dict[str, Any]) -> List[Dic
                     section_idx = sections.index(section)
 
                     # Find the next section at the same level (if any)
-                    next_section_idx = section_idx + 1
-                    next_section = (
-                        sections[next_section_idx] if next_section_idx < len(sections) else None
+                    _next_section_idx = section_idx + 1
+                    _next_section = (
+                        sections[_next_section_idx] if _next_section_idx < len(sections) else None
                     )
 
                     # Find sections at the next level that belong to this section

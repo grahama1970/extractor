@@ -24,11 +24,11 @@ Third-party Documentation:
 - Rich: https://rich.readthedocs.io/
 
 Example Usage:
-    # Basic extraction
-    python cli.py extract input.pdf output/
+    # Basic extraction (single CLI surface)
+    python -m src.cli extract input.pdf output/
 
     # With options
-    python cli.py extract input.pdf output/ --formats json,markdown --concurrency 4
+    python -m src.cli extract input.pdf output/ --formats json,markdown --concurrency 4
 
 Expected Output:
     {
@@ -44,7 +44,7 @@ import json
 import sys
 import time
 from pathlib import Path
-from typing import List, Optional, Dict, Any
+from typing import Optional, Dict, Any
 from datetime import datetime
 from enum import Enum
 
@@ -53,8 +53,9 @@ import typer
 from loguru import logger
 from dotenv import load_dotenv, find_dotenv
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeRemainingColumn
 from rich.table import Table
+import subprocess
+import os
 
 # Configure logging
 logger.remove()
@@ -70,9 +71,11 @@ load_dotenv(find_dotenv())
 # Initialize Rich console
 console = Console()
 
-# Create Typer app
+# Create Typer app (low surface area; paved road defaults)
 app = typer.Typer(
-    name="extractor", help="Universal document extractor with AI enhancements", add_completion=False
+    name="extractor",
+    help="Universal document extractor (fast vs accurate) with normalized outputs",
+    add_completion=False,
 )
 
 
@@ -108,61 +111,39 @@ def validate_input_file(file_path: Path) -> tuple[bool, Optional[str]]:
         return False, f"Empty file: {file_path}"
 
     # Check file extension
-    valid_extensions = {".pdf", ".docx", ".pptx", ".html", ".xml", ".epub", ".txt"}
+    valid_extensions = {".pdf", ".docx", ".pptx", ".html", ".xml", ".epub", ".txt", ".xlsx", ".xls", ".xlsm", ".ods", ".rst", ".md"}
     if file_path.suffix.lower() not in valid_extensions:
         return False, f"Unsupported file type: {file_path.suffix}"
 
     return True, None
 
 
-async def process_file(
-    input_file: Path, output_dir: Path, formats: List[str], config: Optional[Dict[str, Any]] = None
-) -> Dict[str, Any]:
-    """Process a single file through the extraction pipeline.
+def _structured_extract(input_path: Path, out_dir: Path) -> Dict[str, Any]:
+    """Route non‑PDF formats through the structured pipeline with normalized outputs.
 
-    Args:
-        input_file: Input file path
-        output_dir: Output directory
-        formats: List of output formats
-        config: Optional configuration
-
-    Returns:
-        Processing results
+    Produces:
+      out_dir/<stem>/<stage>/json_output/07_reflowed.json and 10_flattened_data.json
     """
-    start_time = time.time()
+    from extractor.core.providers.registry import provider_from_filepath
+    from extractor.pipeline.structured_pipeline import (
+        run_structured_pipeline,
+        STRUCTURED_PIPELINES,
+    )
 
-    # For now, simulate processing
-    # In real implementation, this would call the pipeline
-    await asyncio.sleep(0.5)  # Simulate work
-
-    # Create output files
-    output_files = []
-    for fmt in formats:
-        output_file = output_dir / f"{input_file.stem}.{fmt}"
-        output_files.append(output_file)
-
-        # Create dummy output for testing
-        if fmt == "json":
-            output_data = {
-                "source": str(input_file),
-                "extracted_at": datetime.now().isoformat(),
-                "pages": 10,
-                "blocks": 250,
-                "format": fmt,
-            }
-            with open(output_file, "w") as f:
-                json.dump(output_data, f, indent=2)
-
-    processing_time = time.time() - start_time
-
-    return {
-        "status": "success",
-        "input_file": str(input_file),
-        "output_files": [str(f) for f in output_files],
-        "processing_time": processing_time,
-        "pages_processed": 10,
-        "blocks_extracted": 250,
-    }
+    provider_cls = provider_from_filepath(str(input_path))
+    meta = STRUCTURED_PIPELINES.get(provider_cls)
+    if not meta:
+        raise RuntimeError(f"No structured pipeline registered for provider {provider_cls.__name__}")
+    artifacts = run_structured_pipeline(
+        provider_cls,
+        input_path,
+        out_dir,
+        stage_prefix=meta.stage_prefix,
+        skip_export10=True,
+        skip_embeddings10=True,
+        fast_embeddings10=True,
+    )
+    return {"ok": True, "artifacts": {k: str(v) for k, v in artifacts.items()}}
 
 
 def save_results(results: Dict[str, Any], output_dir: Optional[Path] = None) -> Path:
@@ -194,103 +175,99 @@ def save_results(results: Dict[str, Any], output_dir: Optional[Path] = None) -> 
 # CLI COMMANDS
 # ============================================
 
+# Fast vs Accurate extraction modes for PDF
+class Mode(str, Enum):
+    fast = "fast"       # PyMuPDF path (bypass pipeline stages)
+    accurate = "accurate"  # Full pipeline stages
+
 
 @app.command()
 def extract(
-    input_file: Path = typer.Argument(
-        ...,
-        help="Input file to extract (PDF, DOCX, PPTX, etc.)",
-        exists=True,
-        file_okay=True,
-        dir_okay=False,
-        readable=True,
-    ),
-    output_dir: Path = typer.Argument(..., help="Output directory for extracted content"),
-    formats: List[OutputFormat] = typer.Option(
-        [OutputFormat.json], "--format", "-f", help="Output formats (can specify multiple)"
-    ),
-    config: Optional[Path] = typer.Option(
-        None,
-        "--config",
-        "-c",
-        help="Configuration file path",
-        exists=True,
-        file_okay=True,
-        dir_okay=False,
-    ),
-    concurrency: int = typer.Option(
-        4, "--concurrency", help="Number of concurrent workers", min=1, max=16
-    ),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Show execution plan without processing"),
-    resume: Optional[str] = typer.Option(None, "--resume", help="Resume from checkpoint ID"),
-    verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging"),
+    input_file: Path = typer.Argument(..., exists=True, file_okay=True, dir_okay=False, readable=True, help="Input file (PDF or structured formats)"),
+    output_dir: Path = typer.Argument(..., help="Output directory for artifacts"),
+    mode: 'Mode' = typer.Option(Mode.accurate, "--mode", help="PDF only: fast (PyMuPDF) or accurate (pipeline)"),
+    prove: bool = typer.Option(False, "--prove", help="Enable Lean4 proving (Stage 08) for PDF accurate runs"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose logging"),
 ):
-    """Extract content from documents with AI enhancements."""
+    """Unified extraction command (low‑friction, auto‑dispatch).
 
-    # Set log level
+    Examples:
+      - PDF fast text:     `python -m src.cli extract --mode fast data.pdf out/`
+      - PDF accurate:      `python -m src.cli extract --mode accurate data.pdf out/`
+      - Structured (HTML): `python -m src.cli extract page.html out/`
+      - Structured (DOCX): `python -m src.cli extract doc.docx out/`
+    """
     if verbose:
         logger.remove()
         logger.add(sys.stderr, level="DEBUG")
-
-    # Validate input
-    is_valid, error_msg = validate_input_file(input_file)
-    if not is_valid:
-        console.print(f"[red]Error:[/red] {error_msg}")
+    ok, msg = validate_input_file(input_file)
+    if not ok:
+        console.print("[red]Error:[/red] {msg}".format(msg=msg))
         raise typer.Exit(1)
-
-    # Create output directory
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Show execution plan
-    console.print(f"\n[bold]Extraction Plan:[/bold]")
-    console.print(f"  Input: {input_file}")
-    console.print(f"  Output: {output_dir}")
-    console.print(f"  Formats: {', '.join(formats)}")
-    console.print(f"  Workers: {concurrency}")
-
-    if dry_run:
-        console.print("\n[yellow]Dry run mode - no files will be processed[/yellow]")
+    if input_file.suffix.lower() == ".pdf":
+        # Handle PDF inline to avoid ordering issues with function definitions
+        output_dir.mkdir(parents=True, exist_ok=True)
+        if mode == Mode.fast:
+            console.print("[cyan]Running fast extraction via PyMuPDF (no heavy deps)…[/cyan]")
+            try:
+                from extractor.fast_extract.pymupdf_fast import extract_fast_text
+                data = extract_fast_text(str(input_file))
+            except Exception as e:
+                console.print(f"[red]Fast extractor error:[/red] {e}")
+                raise typer.Exit(1)
+            out = output_dir / f"{input_file.stem}_fast.json"
+            out.write_text(json.dumps(data, indent=2))
+            console.print(f"[green]✓ Fast extraction complete:[/green] {out}")
+            return
+        console.print("[cyan]Running accurate extraction via pipeline…[/cyan]")
+        # Build pipeline command directly (run_all)
+        cmd = [
+            sys.executable,
+            "-m",
+            "extractor.pipeline.run_all",
+            "--pdf",
+            str(input_file),
+            "--results",
+            str(output_dir),
+            "--offline",
+            "--skip-llm03",
+            "--skip-descriptions06",
+            "--summary-only07",
+            "--skip-export10",
+            "--fast-embeddings10",
+        ]
+        # Proving toggle
+        if prove:
+            # If Lean4 CLI is missing, warn and keep proving disabled
+            default_lean = Path("/home/graham/workspace/experiments/lean4/src/lean4_prover/cli_mini.py")
+            if default_lean.exists():
+                cmd += ["--prove08"]  # inverse of --skip-proving08
+                cmd += ["--lean4-cli", str(default_lean)]
+            else:
+                console.print("[yellow]Lean4 CLI not found; continuing without proving (install lean4_prover to enable).[/yellow]")
+                cmd += ["--skip-proving08"]
+        else:
+            cmd += ["--skip-proving08"]
+        # Always create graph edges JSON offline (no DB) after Stage 10 via offline mode
+        env = os.environ.copy()
+        proc = subprocess.run(cmd, env=env)
+        if proc.returncode != 0:
+            console.print(f"[red]Pipeline failed with exit code {proc.returncode}[/red]")
+            raise typer.Exit(proc.returncode)
+        console.print(f"[green]✓ Accurate extraction complete:[/green] {output_dir}")
         return
 
-    # Process file
-    console.print(f"\n[bold]Processing:[/bold]")
-
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(),
-        TimeRemainingColumn(),
-        console=console,
-    ) as progress:
-        task = progress.add_task("Extracting content...", total=100)
-
-        # Run async processing
-        result = asyncio.run(process_file(input_file, output_dir, [f.value for f in formats]))
-
-        progress.update(task, completed=100)
-
-    # Show results
-    if result["status"] == "success":
-        console.print(f"\n[green]✓ Extraction completed successfully![/green]")
-
-        # Create results table
-        table = Table(title="Extraction Results")
-        table.add_column("Metric", style="cyan")
-        table.add_column("Value", style="green")
-
-        table.add_row("Processing Time", f"{result['processing_time']:.2f}s")
-        table.add_row("Pages Processed", str(result["pages_processed"]))
-        table.add_row("Blocks Extracted", str(result["blocks_extracted"]))
-        table.add_row("Output Files", str(len(result["output_files"])))
-
-        console.print(table)
-
-        # List output files
-        console.print("\n[bold]Output files:[/bold]")
-        for output_file in result["output_files"]:
-            console.print(f"  • {output_file}")
-    else:
-        console.print(f"\n[red]✗ Extraction failed![/red]")
+    # Structured formats (HTML/DOCX/PPTX/XLSX/EPUB/RST/XML/MD)
+    try:
+        result = _structured_extract(input_file, output_dir)
+        arts = result.get("artifacts", {})
+        console.print("[green]✓ Structured extraction complete[/green]")
+        for k, v in arts.items():
+            console.print(f"  • {k}: {v}")
+    except Exception as e:
+        console.print(f"[red]Extraction failed:[/red] {e}")
         raise typer.Exit(1)
 
 
@@ -304,12 +281,12 @@ def validate(input_file: Path = typer.Argument(..., help="Input file to validate
         # Get file info
         file_size = input_file.stat().st_size / (1024 * 1024)  # MB
 
-        console.print(f"\n[green]✓ File is valid![/green]")
+        console.print("\n[green]✓ File is valid![/green]")
         console.print(f"  Path: {input_file}")
         console.print(f"  Type: {input_file.suffix}")
         console.print(f"  Size: {file_size:.2f} MB")
     else:
-        console.print(f"\n[red]✗ Validation failed![/red]")
+        console.print("\n[red]✗ Validation failed![/red]")
         console.print(f"  Error: {error_msg}")
         raise typer.Exit(1)
 
@@ -501,10 +478,10 @@ if __name__ == "__main__":
     Script entry point with triple-mode execution.
 
     Usage:
-        python cli.py              # Runs working_usage() - stable tests
-        python cli.py debug        # Runs debug_function() - experimental
-        python cli.py stress       # Runs stress_test() - load tests
-        python cli.py [command]    # Run CLI commands
+        python -m src.cli              # Runs working_usage() - stable tests
+        python -m src.cli debug        # Runs debug_function() - experimental
+        python -m src.cli stress       # Runs stress_test() - load tests
+        python -m src.cli [command]    # Run CLI commands
     """
 
     if len(sys.argv) > 1:
@@ -525,3 +502,14 @@ if __name__ == "__main__":
     logger.info("Running in WORKING mode...")
     success = asyncio.run(working_usage())
     exit(0 if success else 1)
+@app.command("extract-pdf")
+def extract_pdf_deprecated(*_: str):
+    """Deprecated shim. Use: `python -m src.cli extract`.
+
+    This command intentionally exits non‑zero to steer users to the single CLI surface.
+    """
+    typer.secho(
+        "[deprecated] Use: python -m src.cli extract <input> <out_dir> [--mode fast|accurate]",
+        fg=typer.colors.YELLOW,
+    )
+    raise typer.Exit(2)

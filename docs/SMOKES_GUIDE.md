@@ -168,6 +168,97 @@ These checks are used by the parity smokes under `scripts/smokes/pipeline/smoke_
 - **Pipeline stage smokes**: `make smokes-stage07-strict`, `make smokes-python` (see `.github/workflows/python-pipeline-smokes.yml`).
 - **Quick pipeline check**: `python src/extractor/pipeline/tools/quick_smoke.py` (ensures CLI wiring).
 
+### New Lean4‑related smokes
+
+- Deterministic env wiring (no Lean4 dependency):
+  ```bash
+  uv run scripts/smokes/pipeline/smoke_stage08_deterministic_env.py
+  # Artifact: scripts/artifacts/lean4_deterministic_env.json
+  ```
+- Lean4 CLI help (skips if CLI not found):
+  ```bash
+  uv run scripts/smokes/pipeline/smoke_lean4_cli_deterministic_help.py
+  # Artifact: scripts/artifacts/lean4_cli_help_check.json
+
+#### Requirement extraction + proving (offline, deterministic)
+
+- Sentences with modal verbs → Lean4
+  ```bash
+  uv run scripts/smokes/pipeline/requirements/smoke_sentence_shall.py
+  # Artifact: scripts/artifacts/req_sentence_shall_summary.json
+  ```
+- Bullet list inheritance → Lean4
+  ```bash
+  uv run scripts/smokes/pipeline/requirements/smoke_bullets_inherit.py
+  # Artifact: scripts/artifacts/req_bullets_inherit_summary.json
+  ```
+- Table constraints → Lean4
+  ```bash
+  uv run scripts/smokes/pipeline/requirements/smoke_table_constraints.py
+  # Artifact: scripts/artifacts/req_table_constraints_summary.json
+  ```
+- Formal artifact (prove and save .lean)
+  ```bash
+  uv run scripts/smokes/pipeline/requirements/smoke_lean4_formal_artifact.py
+  # Artifacts: scripts/artifacts/lean4_formal_artifact_summary.json, scripts/artifacts/proved_00.lean
+  ```
+
+- Merged table → Lean4 requirements (offline)
+  ```bash
+  uv run scripts/smokes/pipeline/requirements/smoke_table_merge_to_lean4.py
+  # Artifacts: scripts/artifacts/merged_table_constraints.json, scripts/artifacts/merged_table_lean4_summary.json
+  ```
+
+  ```
+
+### New Graph smokes (Stage 11)
+
+- Proves‑only offline (no embeddings):
+  ```bash
+  uv run scripts/smokes/pipeline/smoke_stage11_proves_only_offline.py
+  # Artifact: scripts/artifacts/stage11_proves_only_offline.json
+  ```
+- Schema & invariants summary (debug-bundle):
+  ```bash
+  uv run scripts/smokes/pipeline/smoke_stage11_schema_invariants.py
+  # Artifact: scripts/artifacts/stage11_schema_summary.json
+  ```
+
+### New Exporter smokes
+
+- JSON‑LD export v0:
+  ```bash
+  uv run scripts/smokes/pipeline/smoke_jsonld_export.py
+  # Artifact: scripts/artifacts/jsonld_export_report.json
+  ```
+- ReqIF export v0 (with XML validation):
+  ```bash
+  uv run scripts/smokes/pipeline/smoke_reqif_export.py
+  # Artifact: scripts/artifacts/reqif_export_report.json
+  ```
+
+### Online Smokes (Opt‑In, Cached)
+
+These make 1 LLM call each and SKIP when no provider keys are set. Enable cache via `litellm_cache` (Redis recommended) to avoid duplicate spend.
+
+Env snippet:
+```bash
+export LITELLM_MODEL=${LITELLM_MODEL:-openai/gpt-4o-mini}
+# set exactly one provider key
+# export OPENAI_API_KEY=...
+# export ANTHROPIC_API_KEY=...
+# export GOOGLE_API_KEY=...
+# export AZURE_OPENAI_KEY=...
+# optional cache across smokes
+# export REDIS_URL=redis://127.0.0.1:6379/0
+```
+
+Run:
+- `uv run scripts/smokes/pipeline/online/smoke_litellm_sanity.py`
+- `uv run scripts/smokes/pipeline/online/smoke_stage07_reflow_llm_json_strict.py`
+- `uv run scripts/smokes/pipeline/online/smoke_stage09_summarizer_one.py`
+- `uv run scripts/smokes/pipeline/online/smoke_stage11_rationale_one.py`
+
 Use `scripts/artifacts/` as the canonical output directory for logs and screenshots; CI workflows archive this folder.
 
 ---

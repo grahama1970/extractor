@@ -62,12 +62,11 @@ Dependencies:
 - Rich for formatted console output
 """
 
-import os
 import sys
 import json
 import asyncio
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, Optional, Any, Tuple
 from datetime import datetime
 import hashlib
 
@@ -125,6 +124,34 @@ def load_results(pipeline_dir: Path) -> Dict[str, Any]:
                     continue
                 with open(json_file, "r") as f:
                     results[stage_name] = json.load(f)
+                # Attach known extras for Stage 11 (graph summary/edges count)
+                if stage_name == "10_arangodb_exporter":
+                    # Attach flattened data count if present
+                    try:
+                        flat = json_output_dir / "10_flattened_data.json"
+                        if flat.exists():
+                            arr = json.loads(flat.read_text())
+                            if isinstance(arr, list):
+                                results[stage_name]["_extras"] = results[stage_name].get("_extras", {})
+                                results[stage_name]["_extras"]["flattened_count"] = len(arr)
+                    except Exception:
+                        pass
+                if stage_name == "11_arango_create_graph":
+                    extras = {}
+                    summary_path = json_output_dir / "11_graph_summary.json"
+                    edges_path = json_output_dir / "11_graph_edges.json"
+                    try:
+                        if summary_path.exists():
+                            extras["graph_summary"] = json.loads(summary_path.read_text())
+                        if edges_path.exists():
+                            es = json.loads(edges_path.read_text())
+                            if isinstance(es, list):
+                                extras["graph_edges_count"] = len(es)
+                    except Exception:
+                        pass
+                    if extras:
+                        if isinstance(results[stage_name], dict):
+                            results[stage_name]["_extras"] = extras
                 logger.info(f"Loaded results for {stage_name} from {json_file.name}")
             except Exception as e:
                 logger.error(f"Failed to load results for {stage_name}: {e}")
@@ -191,6 +218,7 @@ def calculate_pipeline_statistics(results: Dict[str, Any]) -> Dict[str, Any]:
             "relationships_created": 0,
             "faiss_index_size": 0,
         },
+        "rtm": {"link_count": 0},
     }
 
     # Calculate quality score
@@ -234,6 +262,27 @@ def calculate_pipeline_statistics(results: Dict[str, Any]) -> Dict[str, Any]:
             pass
     if durations:
         stats["stage_durations_ms"] = durations
+    # Graph health (Stage 11 summary)
+    try:
+        g = results.get("11_arango_create_graph", {}) or {}
+        extras = g.get("_extras") or {}
+        gsum = extras.get("graph_summary") or {}
+        stats["graph"] = {
+            "edge_counts_by_type": gsum.get("counts_by_type", {}),
+            "violations_count": int(gsum.get("violations_count", 0) or 0),
+            "total_edges_json": int(extras.get("graph_edges_count", 0) or 0),
+        }
+    except Exception:
+        pass
+    # RTM counts (v0): use Stage 10 flattened count as a proxy and surface in stats
+    try:
+        a10x = results.get("10_arangodb_exporter", {}) or {}
+        extras = a10x.get("_extras") or {}
+        flat_count = int(extras.get("flattened_count", 0) or 0)
+        if flat_count:
+            stats["rtm"]["link_count"] = flat_count
+    except Exception:
+        pass
     return stats
 
 
@@ -356,6 +405,9 @@ Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 - Relationships created: {stats['arangodb']['relationships_created']}
 - FAISS index size: {stats['arangodb']['faiss_index_size']} vectors
 
+### RTM v0
+- Candidate links: {stats['rtm']['link_count']}
+
 ## Document Structure
 
 """
@@ -380,6 +432,18 @@ Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
             if img["caption"]:
                 md += f" - {img['caption']}"
             md += "\n"
+
+    # Add Graph health section (if present)
+    g = stats.get("graph") if isinstance(stats, dict) else None
+    if isinstance(g, dict):
+        md += "\n## Graph\n\n"
+        md += f"- Total JSON edges: {g.get('total_edges_json', 0)}\n"
+        md += f"- Violations: {g.get('violations_count', 0)}\n"
+        counts = g.get("edge_counts_by_type") or {}
+        if isinstance(counts, dict) and counts:
+            md += "- Edge counts by type:\n"
+            for k, v in counts.items():
+                md += f"  - {k}: {v}\n"
 
     return md
 
@@ -490,11 +554,78 @@ async def generate_comprehensive_report(
     with open(json_path, "w") as f:
         json.dump(report, f, indent=2, sort_keys=True)
 
+    # Write a concise run_summary.json at results root for quick ops checks
+    try:
+        # Edge counts by type from pipeline_statistics.graph if present
+        graph = stats.get("graph") if isinstance(stats, dict) else {}
+        edge_counts = (graph or {}).get("edge_counts_by_type", {})
+        violations = int((graph or {}).get("violations_count", 0) or 0)
+
+        # Scan for exporter outputs under output_dir
+        def _scan_one(pattern: str) -> bool:
+            try:
+                return any(output_dir.rglob(pattern))
+            except Exception:
+                return False
+
+        exporters = {
+            "reqif": _scan_one("*.reqif"),
+            "jsonld": _scan_one("*.jsonld"),
+            "oslc": _scan_one("oslc_links.json"),
+        }
+
+        # If Stage 11 edges JSON exists, derive quick counts-by-type
+        edges_counts_from_file = {}
+        try:
+            edges_path = output_dir / "11_arango_create_graph" / "json_output" / "11_graph_edges.json"
+            if edges_path.exists():
+                import json as _json
+
+                edges = _json.loads(edges_path.read_text())
+                if isinstance(edges, list):
+                    for e in edges:
+                        t = (e or {}).get("relationship_type")
+                        if t:
+                            edges_counts_from_file[t] = edges_counts_from_file.get(t, 0) + 1
+        except Exception:
+            pass
+
+        run_summary = {
+            "stage_durations_ms": stats.get("stage_durations_ms", {}),
+            "graph": {
+                "edge_counts_by_type": edge_counts or edges_counts_from_file,
+                "violations_count": violations,
+            },
+            "exporters": exporters,
+            "rtm": {"link_count": (stats.get("rtm") or {}).get("link_count", 0)},
+        }
+        (output_dir / "run_summary.json").write_text(json.dumps(run_summary, indent=2, sort_keys=True))
+    except Exception:
+        pass
+
     # Generate markdown report
     markdown_report = generate_markdown_report(results, stats, content)
     md_path = output_dir / "final_report.md"
     with open(md_path, "w") as f:
         f.write(markdown_report)
+
+    # Emit RTM v0 map if Stage 10 flattened exists (section_id -> [_key])
+    try:
+        flat = output_dir / "10_arangodb_exporter" / "json_output" / "10_flattened_data.json"
+        if flat.exists():
+            arr = json.loads(flat.read_text())
+            rtm_map: Dict[str, list[str]] = {}
+            if isinstance(arr, list):
+                for o in arr:
+                    if not isinstance(o, dict):
+                        continue
+                    sid = str(o.get("section_id") or "unknown")
+                    key = str(o.get("_key") or "")
+                    if key:
+                        rtm_map.setdefault(sid, []).append(key)
+            (output_dir / "rtm_v0.json").write_text(json.dumps({"rtm": rtm_map}, indent=2, sort_keys=True))
+    except Exception:
+        pass
 
     logger.info(f"Generated comprehensive report: {json_path}")
     logger.info(f"Generated markdown report: {md_path}")
@@ -526,7 +657,7 @@ def _cmd_run(
     if result.get("success"):
         console.print(f"✅ Report generation complete. Final reports saved in: {results_dir}")
     else:
-        console.print(f"❌ Report generation failed.")
+        console.print("❌ Report generation failed.")
 
 
 def _cmd_debug():

@@ -10,7 +10,6 @@ from PIL import Image
 from extractor.core.renderers.html import HTMLOutput
 from extractor.core.renderers.json import JSONOutput, JSONBlockOutput
 from extractor.core.renderers.markdown import MarkdownOutput
-from extractor.core.renderers.hierarchical_json import HierarchicalJSONRenderer
 from extractor.core.renderers.arangodb_json import ArangoDBOutput
 from extractor.core.schema.blocks import BlockOutput
 from extractor.core.settings import settings

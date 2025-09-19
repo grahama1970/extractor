@@ -19,7 +19,6 @@ Example Usage:
 
 from typing import Annotated, List, Tuple, Optional, Dict, Any
 import logging
-import json
 from pathlib import Path
 
 from bs4 import BeautifulSoup
@@ -27,6 +26,9 @@ from PIL import Image
 from pydantic import BaseModel
 import pandas as pd
 from io import StringIO
+import os
+import asyncio
+from loguru import logger
 
 from extractor.core.processors.llm import BaseLLMComplexBlockProcessor
 from extractor.core.schema import BlockTypes
@@ -587,7 +589,7 @@ Instructions:
         children: List[TableCell],
         image: Image.Image,
     ):
-        prompt = self.table_rewriting_prompt.replace("{block_html}", block_html)
+        _prompt = self.table_rewriting_prompt.replace("{block_html}", block_html)
 
         # TODO: Fix async call - for now skip LLM processing
         response = None  # await call_claude_subprocess(prompt)

@@ -17,7 +17,7 @@ Example Usage:
 import csv
 import json
 import io
-from typing import List, Dict, Any
+from typing import List
 
 from extractor.core.schema import BlockTypes
 from extractor.core.schema.blocks import Block, BlockOutput

@@ -34,8 +34,7 @@ Sample Input/Output:
 import os
 import sys
 import logging
-from typing import Dict, List, Tuple, Any, Optional, Union
-from pathlib import Path
+from typing import Dict, Tuple, Any, Optional
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -363,7 +362,7 @@ def ensure_vector_index(
             f"Creating vector index on field '{field_name}' with dimension {dimensions} and nLists {nlists}"
         )
         collection.add_index(index_config)
-        logger.info(f" Vector index created successfully")
+        logger.info(" Vector index created successfully")
         return True
 
     except Exception as e:
@@ -431,10 +430,10 @@ def ensure_arangosearch_view(
         view_props = {"links": links}
 
         # Check if view exists
-        view_exists = False
+        _view_exists = False
         existing_views = [v["name"] for v in db.views()]
         if view_name in existing_views:
-            view_exists = True
+            _view_exists = True
             current_view = db.view(view_name)
             current_links = current_view.get("links", {})
 

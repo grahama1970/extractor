@@ -10,7 +10,7 @@ This implements the standard design pattern for concurrent LLM processing:
 
 import asyncio
 import os
-from typing import List, Dict, Any, Callable, Optional
+from typing import List, Any, Callable
 from loguru import logger
 from tqdm.asyncio import tqdm
 from tenacity import (

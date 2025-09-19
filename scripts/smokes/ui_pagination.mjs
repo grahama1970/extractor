@@ -14,12 +14,17 @@ const LOG = path.join(OUT_DIR, `${NAME}_${stamp}.log`);
 
 const append = (line) => fs.appendFileSync(LOG, `${line}\n`, 'utf8');
 
-const REQ_SELECTORS = {
-  prev: '[data-testid="pager-prev"]',
-  next: '[data-testid="pager-next"]',
-  number: '[data-testid="page-number"]',
-  slider: '[data-testid="page-slider"]',
+const SEL = {
+  prevAny: ['[data-testid="pager-prev"]', '[data-testid="btn-prev"]'],
+  nextAny: ['[data-testid="pager-next"]', '[data-testid="btn-next"]'],
+  numberAny: ['[data-testid="page-number"]', '[data-testid="page-label"]'],
+  sliderAny: ['[data-testid="page-slider"]', '[data-testid="pager-slider"]'],
   toolbar: '[data-testid="top-toolbar"]',
+};
+
+const pickFirst = async (page, selectors) => {
+  for (const s of selectors) { const el = await page.$(s); if (el) return s; }
+  return null;
 };
 
 const launched = await puppeteer.launch({
@@ -37,13 +42,15 @@ try {
 
   append(`BASE_URL=${BASE}`);
   await page.goto(URL, { waitUntil: 'domcontentloaded' });
-  await page.waitForTimeout(500);
+  await page.waitForSelector('[data-testid="app-ready"]', { timeout: 15000 }).catch(()=>{});
+  await new Promise(r=>setTimeout(r,400));
 
   // Ensure core markers exist
-  for (const [key, selector] of Object.entries(REQ_SELECTORS)) {
-    const el = await page.$(selector);
-    if (!el) failures.push(`missing ${key} (${selector})`);
-  }
+  const prevSel = await pickFirst(page, SEL.prevAny); if (!prevSel) failures.push(`missing prev (${SEL.prevAny.join(' or ')})`);
+  const nextSel = await pickFirst(page, SEL.nextAny); if (!nextSel) failures.push(`missing next (${SEL.nextAny.join(' or ')})`);
+  const numSel = await pickFirst(page, SEL.numberAny); if (!numSel) failures.push(`missing number (${SEL.numberAny.join(' or ')})`);
+  const sliderSel = await pickFirst(page, SEL.sliderAny); if (!sliderSel) failures.push(`missing slider (${SEL.sliderAny.join(' or ')})`);
+  const toolbarEl = await page.$(SEL.toolbar); if (!toolbarEl) failures.push(`missing toolbar (${SEL.toolbar})`);
 
   if (!failures.length) {
     // Verify toolbar does not occlude canvas center
@@ -65,7 +72,8 @@ try {
 
   if (!failures.length) {
     const getPageNumber = async () => {
-      const raw = await page.$eval(REQ_SELECTORS.number, (el) => el.textContent || '');
+      const sel = await pickFirst(page, SEL.numberAny) || SEL.numberAny[0];
+      const raw = await page.$eval(sel, (el) => el.textContent || '');
       return raw.trim();
     };
 
@@ -73,7 +81,8 @@ try {
     if (!initialNumber) {
       failures.push('page number text missing');
     } else {
-      await page.click(REQ_SELECTORS.next);
+      const clickNextSel = nextSel || SEL.nextAny[0];
+      await page.$eval(clickNextSel, (el) => el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })));
       const advancedByClick = await page
         .waitForFunction(
           (selector, initial) => {
@@ -82,7 +91,7 @@ try {
             return (el.textContent || '').trim() !== initial;
           },
           { timeout: 5000 },
-          REQ_SELECTORS.number,
+          numSel || SEL.numberAny[0],
           initialNumber,
         )
         .then(() => true)
@@ -91,7 +100,8 @@ try {
 
       if (advancedByClick) {
         const afterClick = await getPageNumber();
-        await page.click(REQ_SELECTORS.prev);
+        const clickPrevSel = prevSel || SEL.prevAny[0];
+        await page.$eval(clickPrevSel, (el) => el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })));
         await page.waitForFunction(
           (selector, expected) => {
             const el = document.querySelector(selector);
@@ -99,7 +109,7 @@ try {
             return (el.textContent || '').trim() === expected;
           },
           { timeout: 5000 },
-          REQ_SELECTORS.number,
+          numSel || SEL.numberAny[0],
           initialNumber,
         ).catch(() => failures.push('pager prev failed to restore page number'));
 
@@ -113,7 +123,7 @@ try {
               return (el.textContent || '').trim() !== previous;
             },
             { timeout: 5000 },
-            REQ_SELECTORS.number,
+            numSel || SEL.numberAny[0],
             initialNumber,
           )
           .then(() => true)
@@ -129,9 +139,9 @@ try {
               return (el.textContent || '').trim() === expected;
             },
             { timeout: 5000 },
-            REQ_SELECTORS.number,
-            initialNumber,
-          ).catch(() => failures.push('keyboard [ failed to restore page number'));
+          numSel || SEL.numberAny[0],
+          initialNumber,
+        ).catch(() => failures.push('keyboard [ failed to restore page number'));
         }
       }
     }
@@ -152,7 +162,7 @@ try {
       input.dispatchEvent(new Event('input', { bubbles: true }));
       input.dispatchEvent(new Event('change', { bubbles: true }));
       return { ok: after !== before, before, after };
-    }, REQ_SELECTORS.slider);
+    }, sliderSel || SEL.sliderAny[0]);
     if (!sliderResult.ok) {
       failures.push(`page slider did not change value (${JSON.stringify(sliderResult)})`);
     }

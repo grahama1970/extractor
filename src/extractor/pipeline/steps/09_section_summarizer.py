@@ -14,7 +14,7 @@ import sys
 import json
 import asyncio
 from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any
 from datetime import datetime
 from textwrap import dedent
 
@@ -400,7 +400,7 @@ async def batch_summarize_sections_rolling(
         if checkpoint:
             all_summaries.append(
                 {
-                    "section_id": f"checkpoint_final",
+                    "section_id": "checkpoint_final",
                     "section_title": checkpoint["name"],
                     "section_level": -1,
                     "summary_data": checkpoint["data"],

@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """
-Marker conversion script for PDF extraction
-This is the script called by extract-pdf.md pipeline
+DEPRECATED: Legacy marker conversion entrypoint used by historical `extract-pdf.md` agent flows.
+
+Use instead:
+  python -m src.cli extract <input> <out_dir> [--mode fast|accurate]
+
+This file remains for archival reference only.
 """
 
 import os
@@ -42,7 +46,7 @@ def main(pdf_path, **kwargs):
         os.makedirs(output_dir, exist_ok=True)
 
         # Create models
-        print(f"Loading ML models...")
+        print("Loading ML models...")
         # Let models auto-detect device/dtype for better compatibility
         models = create_model_dict()
 
@@ -50,7 +54,7 @@ def main(pdf_path, **kwargs):
         processors = config_parser.get_processors()
 
         # Create converter
-        print(f"Creating PDF converter...")
+        print("Creating PDF converter...")
         converter = PdfConverter(
             config=config,
             artifact_dict=models,
@@ -66,10 +70,10 @@ def main(pdf_path, **kwargs):
         # Extract font metrics if requested (currently limited by marker's JSON output)
         if kwargs.get("extract_fonts", False):
             print(
-                f"Note: Font extraction requested but marker JSON output doesn't include font/span data"
+                "Note: Font extraction requested but marker JSON output doesn't include font/span data"
             )
             print(
-                f"Font data is only available in marker's internal Document object, not in JSON export"
+                "Font data is only available in marker's internal Document object, not in JSON export"
             )
 
             # Add metadata note about font extraction limitation
@@ -110,4 +114,5 @@ def main(pdf_path, **kwargs):
 
 
 if __name__ == "__main__":
-    main()
+    print('[deprecated] convert_single is no longer supported.\nUse: python -m src.cli extract <input> <out_dir> [--mode fast|accurate]', file=__import__('sys').stderr)
+    raise SystemExit(2)

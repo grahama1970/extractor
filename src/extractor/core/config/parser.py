@@ -17,7 +17,7 @@ Example Usage:
 
 import json
 import os
-from typing import Dict, Any, Optional
+from typing import Dict
 
 import click
 

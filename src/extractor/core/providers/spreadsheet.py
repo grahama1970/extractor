@@ -9,7 +9,7 @@ External Dependencies:
 Example usage
 -------------
 >>> from extractor.core.providers.spreadsheet import SpreadsheetProvider
->>> doc = NativeSpreadsheetProvider().extract_document("data.xlsx")
+>>> doc = SpreadsheetProvider().extract_document("data.xlsx")
 >>> print(doc.source_type)   # SourceType.SPREADSHEET
 >>> print(len(doc.blocks))   # all tables + images + metadata blocks
 """
@@ -23,7 +23,6 @@ from typing import List, Dict, Any, Optional, Union
 from openpyxl import load_workbook
 from openpyxl.cell import Cell as OpxCell
 from odf.table import Table as OdfTable, TableRow, TableCell as OdfCell
-from odf.namespaces import OFFICENS
 from odf.opendocument import load as odf_load
 
 from loguru import logger
@@ -106,7 +105,11 @@ class SpreadsheetProvider:
 
         # Images
         for ws in wb.worksheets:
-            for img in ws._images:
+            try:
+                images = getattr(ws, "_images", [])
+            except Exception:
+                images = []
+            for img in images:
                 img_bytes = img.ref
                 mime, _ = mimetypes.guess_type(img.path)
                 b64 = base64.b64encode(img_bytes).decode()

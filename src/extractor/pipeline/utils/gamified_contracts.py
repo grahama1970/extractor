@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import Dict, List, Optional
-from pydantic import BaseModel, Field, StrictBool, StrictFloat, StrictInt, StrictStr
+from pydantic import BaseModel, StrictBool, StrictFloat, StrictInt, StrictStr
 
 
 class IterMetrics(BaseModel):

@@ -37,7 +37,6 @@ from rich.console import Console
 try:
     from arango.client import ArangoClient
     from arango.database import StandardDatabase
-    from arango.exceptions import ArangoError
 except ImportError:
     print(
         "python-arango is required for Stage 12. Please install it to use DB features.",
@@ -212,7 +211,7 @@ def run(
                 aql_fetch = f"""
                 FOR a IN {ann_col}
                   FILTER @src == null OR a.source_pdf == @src
-                  RETURN { _key: a._key, page: a.page }
+                  RETURN {{ _key: a._key, page: a.page }}
                 """
                 rows = list(db.aql.execute(aql_fetch, bind_vars={"src": source_pdf}))
                 docs_for_bridge = [

@@ -12,10 +12,9 @@ This script prints a human-readable summary and exits non-zero on hard failures.
 from __future__ import annotations
 
 import json
-import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 import typer
 

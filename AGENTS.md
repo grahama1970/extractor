@@ -65,6 +65,20 @@ Based on [OpenAI Prompting Guide](https://cookbook.openai.com/examples/gpt-5/gpt
 
 ---
 
+## Terminal Command Output (Agent)
+
+- Always format multi-line terminal commands for a ~400px-wide terminal.
+- Use line continuations (`\`) at logical breakpoints so commands copy/paste cleanly.
+- Example style:
+
+  ```bash
+  BASE_URL=http://127.0.0.1:8080 \
+  BROWSERLESS_WS=ws://127.0.0.1:9222/devtools/browser \
+  make smoke-ui-extract-load-cdp
+  ```
+
+---
+
 ## Verification & Integrity Policy (Agent)
 
 The agent must not claim success without verifying the change in a browser context and saving artifacts. This policy applies to all UX work.

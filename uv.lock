@@ -2091,6 +2091,7 @@ dependencies = [
     { name = "nltk" },
     { name = "pymupdf" },
     { name = "python-arango" },
+    { name = "requests" },
     { name = "spacy" },
     { name = "typer" },
 ]
@@ -2102,6 +2103,7 @@ requires-dist = [
     { name = "nltk", specifier = ">=3.9.1" },
     { name = "pymupdf", specifier = ">=1.26.4" },
     { name = "python-arango", specifier = ">=8.2.0" },
+    { name = "requests", specifier = ">=2.32.0" },
     { name = "sentence-transformers", marker = "extra == 'faiss'", specifier = ">=3.0.0" },
     { name = "spacy", specifier = ">=3.8.7" },
     { name = "tree-sitter", marker = "extra == 'code'", specifier = ">=0.20,<0.22" },
@@ -3079,6 +3081,7 @@ dependencies = [
     { name = "jinja2" },
     { name = "jsonschema" },
     { name = "openai" },
+    { name = "pondpond" },
     { name = "pydantic" },
     { name = "python-dotenv" },
     { name = "tiktoken" },
@@ -3107,7 +3110,7 @@ requires-dist = [
     { name = "importlib-metadata", specifier = ">=6.8.0" },
     { name = "jinja2", specifier = ">=3.1.2,<4.0.0" },
     { name = "jsonschema", specifier = ">=4.22.0,<5.0.0" },
-    { name = "litellm-enterprise", marker = "extra == 'proxy'", specifier = "==0.1.19" },
+    { name = "litellm-enterprise", marker = "extra == 'proxy'", specifier = "==0.1.20" },
     { name = "litellm-proxy-extras", marker = "extra == 'proxy'", specifier = "==0.2.18" },
     { name = "mcp", marker = "python_full_version >= '3.10' and extra == 'proxy'", specifier = ">=1.10.0,<2.0.0" },
     { name = "mlflow", marker = "python_full_version >= '3.10' and extra == 'mlflow'", specifier = ">3.1.4" },
@@ -3115,6 +3118,7 @@ requires-dist = [
     { name = "openai", specifier = ">=1.99.5" },
     { name = "orjson", marker = "extra == 'proxy'", specifier = ">=3.9.7,<4.0.0" },
     { name = "polars", marker = "python_full_version >= '3.10' and extra == 'proxy'", specifier = ">=1.31.0,<2.0.0" },
+    { name = "pondpond", specifier = ">=1.4.1,<2.0.0" },
     { name = "prisma", marker = "extra == 'extra-proxy'", specifier = "==0.11.0" },
     { name = "pydantic", specifier = ">=2.5.0,<3.0.0" },
     { name = "pyjwt", marker = "extra == 'proxy'", specifier = ">=2.8.0,<3.0.0" },
@@ -3246,6 +3250,12 @@ sdist = { url = "https://files.pythonhosted.org/packages/79/b6/466e71db127950fb8
 wheels = [
     { url = "https://files.pythonhosted.org/packages/4e/0b/942cb7278d6caad79343ad2ddd636ed204a47909b969d19114a3097f5aa3/lxml_html_clean-0.4.2-py3-none-any.whl", hash = "sha256:74ccfba277adcfea87a1e9294f47dd86b05d65b4da7c5b07966e3d5f3be8a505", size = 14184, upload-time = "2025-04-09T11:33:57.988Z" },
 ]
+
+[[package]]
+name = "madoka"
+version = "0.7.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/da/eb/95288b1c4aa541eb296a6271e3f8c7ece03b78923ac47dbe95d2287d9f5e/madoka-0.7.1.tar.gz", hash = "sha256:e258baa84fc0a3764365993b8bf5e1b065383a6ca8c9f862fb3e3e709843fae7", size = 81413, upload-time = "2019-02-10T18:38:01.382Z" }
 
 [[package]]
 name = "mammoth"
@@ -4479,6 +4489,18 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/e5/69/882ee5c9d017149285cab114ebeab373308ef0f874fcdac9beb90e0ac4da/ply-3.11.tar.gz", hash = "sha256:00c7c1aaa88358b9c765b6d3000c6eec0ba42abca5351b095321aef446081da3", size = 159130, upload-time = "2018-02-15T19:01:31.097Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a3/58/35da89ee790598a0700ea49b2a66594140f44dec458c07e8e3d4979137fc/ply-3.11-py2.py3-none-any.whl", hash = "sha256:096f9b8350b65ebd2fd1346b12452efe5b9607f7482813ffca50c22722a807ce", size = 49567, upload-time = "2018-02-15T19:01:27.172Z" },
+]
+
+[[package]]
+name = "pondpond"
+version = "1.4.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "madoka" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/a6/9b/8411458ca8ce8b5b9b135e4a19823f1caf958ca9985883db104323492982/pondpond-1.4.1.tar.gz", hash = "sha256:8afa34b869d1434d21dd2ec12644abc3b1733fcda8fcf355300338a13a79bb7b", size = 15237, upload-time = "2024-03-01T07:08:06.756Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c4/d4/f18d6985157cc68f76469480182cbee2a03a45858456955acf57f9dcbb4c/pondpond-1.4.1-py3-none-any.whl", hash = "sha256:641028ead4e8018ca6de1220c660ddd6d6fbf62a60e72f410655dd0451d82880", size = 14498, upload-time = "2024-03-01T07:08:04.63Z" },
 ]
 
 [[package]]

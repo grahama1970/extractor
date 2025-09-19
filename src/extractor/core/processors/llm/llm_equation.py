@@ -9,7 +9,6 @@ corrected and well-formatted HTML/LaTeX representation of the equations.
 import asyncio
 import sys
 import os
-from pathlib import Path
 from typing import Annotated, List, Dict, Any, Optional
 
 from pydantic import BaseModel

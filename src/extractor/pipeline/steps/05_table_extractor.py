@@ -19,7 +19,6 @@ import json
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime
-from difflib import SequenceMatcher
 
 # Direct imports - fail fast
 try:
@@ -30,7 +29,6 @@ except ImportError:
 import pandas as pd
 
 try:
-    import camelot
     from camelot import io as camelot_io
 except ImportError:
     print(
@@ -42,8 +40,6 @@ import typer
 from dotenv import load_dotenv, find_dotenv
 from loguru import logger
 from rich.console import Console
-from rich.table import Table as RichTable
-from io import BytesIO  # kept if needed elsewhere; will avoid PIL roundtrip when saving
 from extractor.pipeline.utils.diagnostics import (
     start_resource_sampler,
     stop_resource_sampler,
@@ -80,6 +76,11 @@ CAMELOT_STRATEGIES = {
     "lattice_sensitive": {
         "flavor": "lattice",
         "params": {"process_background": True, "line_scale": 5},
+    },
+    # Fallback for text-lined tables without ruling lines
+    "stream_default": {
+        "flavor": "stream",
+        "params": {"edge_tol": 50},
     },
 }
 
@@ -342,7 +343,7 @@ def extract_tables_from_page(
 
     # Track per-strategy durations
     strategy_durations = {}
-    found_by_strategy = {}
+    _found_by_strategy = {}
     # Try each strategy
     # First pass: baseline only
     for strategy in strategies_to_try:
@@ -901,6 +902,52 @@ def run(
             stitched.append(t)
         return stitched
 
+    
+    # --- Caption detection: scan PDF text just above the table for captions like "Table 4-1. ..."
+    def detect_table_caption(pdf_path: Path, page_index: int, bbox: List[float]) -> str | None:
+        """Find a nearby caption/title for a table.
+
+        Strategy:
+        1) Scan a narrow band just above the table.
+        2) If not found, scan a wider band.
+        3) As a last resort, scan all text blocks above y0 on the page.
+        """
+        try:
+            doc = fitz.open(str(pdf_path))
+            page = doc[page_index]
+            rect = fitz.Rect(*bbox)
+            def _scan_band(top: float) -> str | None:
+                band = fitz.Rect(rect.x0, max(0, top), rect.x1, rect.y0)
+                blocks = page.get_text('blocks', clip=band)
+                blocks = sorted(blocks, key=lambda b: -b[1])  # y desc
+                for b in blocks:
+                    txt = (b[4] or '').strip()
+                    if not txt:
+                        continue
+                    if re.match(r"^\s*Table\s+\d+(?:[-–]\d+)?[.:]", txt, re.IGNORECASE):
+                        return txt
+                return None
+            # narrow (80pt) then wider (200pt)
+            cap = _scan_band(max(0, rect.y0 - 80))
+            if cap:
+                return cap
+            cap = _scan_band(max(0, rect.y0 - 200))
+            if cap:
+                return cap
+            # Fallback: any block above y0 on the page
+            blocks = page.get_text('blocks')
+            above = [b for b in blocks if b[3] <= rect.y0]  # block bottom is b[3]
+            above = sorted(above, key=lambda b: -b[1])
+            for b in above:
+                txt = (b[4] or '').strip()
+                if not txt:
+                    continue
+                if re.match(r"^\s*Table\s+\d+(?:[-–]\d+)?[.:]", txt, re.IGNORECASE):
+                    return txt
+            return None
+        except Exception:
+            return None
+
     if TABLE_HEADER_STITCHING_ENABLED:
         all_tables = stitch_headers(all_tables)
 
@@ -911,8 +958,44 @@ def run(
             section_bbox = fitz.Rect(section["bbox"])
             if section["page_start"] <= table["page_index"] <= section["page_end"]:
                 if section_bbox.intersects(table_bbox):
-                    table["section_id"] = section.get("id", "unknown")
+                    table["section_id"] = section.get("id", f"sec_{sections.index(section)}")
                     break
+
+    # Fallback association: if a table is still unassigned, link it to the nearest
+    # preceding section on the same page (by Y), else the most recent section on earlier pages.
+    unassigned = [t for t in all_tables if not t.get("section_id")]
+    if unassigned:
+        anchors = []
+        for idx, s in enumerate(sections):
+            try:
+                y0 = float((s.get("bbox") or [0, 0, 0, 0])[1])
+            except Exception:
+                y0 = 0.0
+            anchors.append({
+                "idx": idx,
+                "page": int(s.get("page_start", 0)),
+                "y0": y0,
+                "id": s.get("id", f"sec_{idx}"),
+                "title": s.get("title") or "",
+            })
+        for t in unassigned:
+            p = int(t.get("page_index", 0))
+            try:
+                ty = float((t.get("bbox") or [0, 0, 0, 0])[1])
+            except Exception:
+                ty = 0.0
+            # same-page candidates with header above the table
+            same = [a for a in anchors if a["page"] == p and a["y0"] <= ty]
+            pick = None
+            if same:
+                pick = sorted(same, key=lambda a: a["y0"])[-1]
+            else:
+                # pick the most recent section on earlier pages
+                prior = [a for a in anchors if a["page"] < p]
+                if prior:
+                    pick = sorted(prior, key=lambda a: (a["page"], a["y0"]))[-1]
+            if pick:
+                t["section_id"] = pick["id"]
 
     # Heuristic filtering: accept solid multi-row tables; drop header-only/sparse artifacts
     filtered_tables = []
@@ -971,6 +1054,18 @@ def run(
                 continue
         # Replace filtered_tables by page-best selection
         filtered_tables = selected
+
+    # --- Assign captions/titles from nearby text if missing ---
+    try:
+        import re as _re
+    except Exception:
+        _re = re
+    for t in filtered_tables:
+        if not t.get('caption') and not t.get('title'):
+            cap = detect_table_caption(pdf_path, int(t.get('page_index',0)), t.get('bbox', [0,0,0,0]))
+            if cap:
+                t['caption'] = cap
+                t['title'] = cap
 
     # --- De-duplicate header rows accidentally included in body ---
     try:

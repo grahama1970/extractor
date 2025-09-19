@@ -33,7 +33,6 @@ from extractor.core.schema.blocks import Block
 from extractor.core.schema.document import Document
 from extractor.core.schema.groups.page import PageGroup
 from extractor.core.schema.registry import get_block_class
-from extractor.core.settings import settings
 
 
 class LLMLayoutBuilder(LayoutBuilder):

@@ -19,7 +19,7 @@ Example Usage:
 import re
 import hashlib
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Union, Tuple
+from typing import List, Dict, Any, Optional, Union
 from datetime import datetime
 
 from docx2python import docx2python
@@ -792,7 +792,6 @@ class DOCXProvider:
 
 if __name__ == "__main__":
     # Test the DOCX extractor
-    import tempfile
 
     # For testing, we'll create a simple test
     # In real usage, we'd have an actual DOCX file

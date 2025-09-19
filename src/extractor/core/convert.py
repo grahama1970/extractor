@@ -15,7 +15,6 @@ from pathlib import Path
 from typing import Any, Dict
 
 from extractor.core.converters.pdf import PdfConverter
-from extractor.core.renderers.json import JSONRenderer
 from extractor.core.processors.font_style import FontStyleProcessor
 from extractor.core.processors.suspicious_header import SuspiciousHeaderProcessor
 

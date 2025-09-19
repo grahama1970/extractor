@@ -15,7 +15,6 @@ Example Usage:
 >>> # Add usage examples
 """
 
-import html
 
 from extractor.core.schema import BlockTypes
 from extractor.core.schema.blocks import Block

@@ -12,7 +12,7 @@ External Dependencies:
 
 Example Usage:
 >>> from extractor.core.providers.xml import XMLProvider
->>> provider = NativeXMLProvider()
+>>> provider = XMLProvider()
 >>> document = provider.extract_document("data.xml")
 >>> print(document.source_type)  # SourceType.XML
 """

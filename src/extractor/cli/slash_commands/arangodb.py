@@ -5,15 +5,13 @@ Provides commands for database operations, import/export, and search.
 """
 
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Optional, List
 import typer
 from loguru import logger
 import json
 
-from .base import CommandGroup, validate_file_path, validate_url, format_output
+from .base import CommandGroup, validate_file_path, format_output
 from extractor.core.arangodb.pipeline import ArangoDBPipeline as ArangoDBImporter
-from extractor.core.renderers.arangodb_json import ArangoDBRenderer
-from extractor.core.schema.document import Document
 
 
 class ArangoDBCommands(CommandGroup):
@@ -53,10 +51,10 @@ class ArangoDBCommands(CommandGroup):
                     create_if_not_exists=create_db,
                 )
 
-                print(f" ArangoDB setup complete")
+                print(" ArangoDB setup complete")
                 print(f"  Database: {database}")
-                print(f"  Collections: documents, blocks, entities, relationships")
-                print(f"  Indexes created for efficient search")
+                print("  Collections: documents, blocks, entities, relationships")
+                print("  Indexes created for efficient search")
 
             except Exception as e:
                 logger.error(f"Setup failed: {e}")
@@ -92,7 +90,7 @@ class ArangoDBCommands(CommandGroup):
                     json_path, batch_size=batch_size, skip_existing=skip_existing
                 )
 
-                print(f" Import complete")
+                print(" Import complete")
                 print(f"  Documents: {stats.get('documents', 0)}")
                 print(f"  Blocks: {stats.get('blocks', 0)}")
                 print(f"  Entities: {stats.get('entities', 0)}")
@@ -226,7 +224,6 @@ class ArangoDBCommands(CommandGroup):
                         json.dump(doc_data, f, indent=2, ensure_ascii=False)
                 elif format == "markdown":
                     # Convert to markdown
-                    from extractor.core.renderers.markdown import MarkdownRenderer
 
                     # Note: This would need proper document reconstruction
                     # For now, just save as JSON
@@ -282,7 +279,7 @@ class ArangoDBCommands(CommandGroup):
                 block_types = list(cursor)
 
                 if block_types:
-                    print(f"\n Block Type Distribution:")
+                    print("\n Block Type Distribution:")
                     for bt in block_types:
                         print(f"  {bt['type']}: {bt['count']:,}")
 
@@ -303,7 +300,7 @@ class ArangoDBCommands(CommandGroup):
 
                 if doc_stats and doc_stats[0]["total"] > 0:
                     stats = doc_stats[0]
-                    print(f"\n Document Statistics:")
+                    print("\n Document Statistics:")
                     print(f"  Total documents: {stats['total']:,}")
                     print(f"  Average pages: {stats['avg_pages']:.1f}")
                     print(f"  Min pages: {stats['min_pages']}")
@@ -537,7 +534,7 @@ class ArangoDBCommands(CommandGroup):
                 print(f" Visualization saved to: {output_file}")
                 print(f"  Nodes: {len(graph_data['nodes'])}")
                 print(f"  Edges: {len(graph_data['edges'])}")
-                print(f"\nOpen in browser to view interactive graph")
+                print("\nOpen in browser to view interactive graph")
 
             except Exception as e:
                 logger.error(f"Visualization failed: {e}")

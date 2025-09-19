@@ -262,3 +262,14 @@ exclude = [
   '^artifacts/',
   '^tmp/',
 ]
+
+
+[tool.ruff.lint.per-file-ignores]
+# Demo/utility script organizing imports after top-level constants and docstrings
+"src/extractor/unified_extractor.py" = ["E402"]
+
+"src/extractor/core/schema/blocks/__init__.py" = ["F401"]
+"src/extractor/core/schema/groups/__init__.py" = ["F401"]
+"src/extractor/core/schema/text/__init__.py" = ["F401"]
+"src/extractor/core/services/__init__.py" = ["F401"]
+"src/extractor/core/processors/llm/__init__.py" = ["F401"]

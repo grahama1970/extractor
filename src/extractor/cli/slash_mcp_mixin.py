@@ -15,11 +15,10 @@ Usage:
 
 import typer
 from pathlib import Path
-from typing import Optional, Set, Callable
+from typing import Optional, Set
 import json
 import sys
 import inspect
-from functools import wraps
 
 
 def add_slash_mcp_commands(
@@ -221,7 +220,7 @@ def add_slash_mcp_commands(
             from fastmcp import FastMCP
 
             server_name = app.info.name or "cli-server"
-            mcp = FastMCP(server_name)
+            _mcp = FastMCP(server_name)
 
             # Register commands
             registered = 0

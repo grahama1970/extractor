@@ -168,7 +168,7 @@ class DebugProcessor(BaseProcessor):
         return png_image
 
     def dump_block_debug_data(self, document: Document):
-        debug_file = os.path.join(self.debug_folder, f"blocks.json")
+        debug_file = os.path.join(self.debug_folder, "blocks.json")
         debug_data = []
         for page in document.pages:
             page_data = page.model_dump(

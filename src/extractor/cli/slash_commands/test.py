@@ -14,7 +14,7 @@ if src_path.exists() and str(src_path) not in sys.path:
 
 
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Optional, List
 import typer
 from loguru import logger
 import json
@@ -117,7 +117,7 @@ class TestCommands(CommandGroup):
 
                 # Parse results
                 if result.returncode == 0:
-                    print(f"\n All tests passed!")
+                    print("\n All tests passed!")
                 else:
                     print(f"\n Tests failed with exit code {result.returncode}")
 
@@ -128,7 +128,7 @@ class TestCommands(CommandGroup):
 
                 # Show coverage if generated
                 if coverage:
-                    print(f" Coverage report: docs/reports/coverage/index.html")
+                    print(" Coverage report: docs/reports/coverage/index.html")
 
                 # Exit with test result code
                 raise typer.Exit(result.returncode)
@@ -340,7 +340,7 @@ class TestCommands(CommandGroup):
                                     f"Block {i}: missing polygon field"
                                 )
 
-                    print(f"   Structure validation complete")
+                    print("   Structure validation complete")
 
                 # Content validation
                 if validation_type in ["all", "content"]:
@@ -374,7 +374,7 @@ class TestCommands(CommandGroup):
                         elif len(table["rows"]) == 0:
                             validation_results["warnings"].append(f"Table {i}: empty table")
 
-                    print(f"   Content validation complete")
+                    print("   Content validation complete")
 
                 # Format validation
                 if validation_type in ["all", "format"]:
@@ -394,27 +394,27 @@ class TestCommands(CommandGroup):
                                     f"Block {i}: invalid page range {page_range}"
                                 )
 
-                    print(f"   Format validation complete")
+                    print("   Format validation complete")
 
                 # Summary
-                total_issues = len(validation_results["errors"]) + len(
+                _total_issues = len(validation_results["errors"]) + len(
                     validation_results["warnings"]
                 )
 
-                print(f"\n Validation Summary:")
+                print("\n Validation Summary:")
                 print(f"  Errors: {len(validation_results['errors'])}")
                 print(f"  Warnings: {len(validation_results['warnings'])}")
                 print(f"  Info: {len(validation_results['info'])}")
 
                 if validation_results["errors"]:
-                    print(f"\n Errors found:")
+                    print("\n Errors found:")
                     for error in validation_results["errors"][:5]:
                         print(f"  - {error}")
                     if len(validation_results["errors"]) > 5:
                         print(f"  ... and {len(validation_results['errors']) - 5} more")
 
                 if validation_results["warnings"] and (strict or verbose):
-                    print(f"\n⚠️  Warnings:")
+                    print("\n⚠️  Warnings:")
                     for warning in validation_results["warnings"][:5]:
                         print(f"  - {warning}")
                     if len(validation_results["warnings"]) > 5:
@@ -517,7 +517,7 @@ class TestCommands(CommandGroup):
                     "pages_per_second": results["runs"][0]["pages"] / avg_duration,
                 }
 
-                print(f"\n Benchmark Results:")
+                print("\n Benchmark Results:")
                 print(f"  Average time: {avg_duration:.2f}s")
                 print(f"  Min/Max: {min_duration:.2f}s / {max_duration:.2f}s")
                 print(f"  Pages/second: {results['statistics']['pages_per_second']:.1f}")
@@ -531,7 +531,7 @@ class TestCommands(CommandGroup):
                     prev_avg = previous["statistics"]["avg_duration"]
                     improvement = (prev_avg - avg_duration) / prev_avg * 100
 
-                    print(f"\n Comparison with previous benchmark:")
+                    print("\n Comparison with previous benchmark:")
                     print(f"  Previous: {prev_avg:.2f}s")
                     print(f"  Current: {avg_duration:.2f}s")
                     print(

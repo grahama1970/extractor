@@ -1,6 +1,15 @@
 # PDF Extraction Pipeline CLI Usage Guide
 
-This guide shows how to use the Typer-based CLI tools for the PDF extraction pipeline.
+Note: Prefer the single minimal CLI surface for all extractions:
+
+```bash
+python -m src.cli extract <input> <out_dir> [--mode fast|accurate]
+```
+
+- PDF: use `--mode fast` (PyMuPDF text) or `--mode accurate` (full pipeline).
+- Structured formats (HTML/DOCX/PPTX/XLSX/EPUB/RST/XML/MD) do not need `--mode`.
+
+The legacy command groups below are retained for reference and operator/advanced workflows.
 
 ## Available CLIs
 
@@ -102,15 +111,10 @@ extract-pipeline validate-extraction /tmp/enhanced.json --gold /tmp/gold_standar
 4. **JSON formats** - Many commands accept either JSON strings or file paths
 5. **Verbose mode** - Add `-v` or `--verbose` for detailed output
 
-## Integration with Sub-Agents
+## Integration Notes
 
-The `extract-pdf.md` agent orchestrates these tools along with worker files:
-- Stage 1-3: Use `extract-pipeline` commands
-- Stage 4: Use knowledge architect (separate CLI)
-- Stage 5: External marker-pdf command
-- Stage 5.5: Use `extract-pipeline` batch commands
-- Stage 6-9: Use `extract-pipeline` and `pdf-tools` 
-- Stage 10: Use knowledge architect for storage
+- Historical docs and transcripts may reference an `extract-pdf` agent/orchestrator. That flow is deprecated in favor of the unified `python -m src.cli extract` command.
+- Operator utilities (`pipeline-run`, `pipeline-run-all`) remain available; prefer the unified CLI for day‑to‑day usage.
 
 ## Installation
 

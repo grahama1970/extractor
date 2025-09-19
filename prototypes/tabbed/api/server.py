@@ -1204,7 +1204,7 @@ async def api_pipeline_run(payload: Dict[str, Any]):
         try:
             # Placeholder for real pipeline integration
             import asyncio as _asyncio
-            await _asyncio.sleep(1.0)
+            await _asyncio.sleep(2.5)
             JOBS[jid]["result"] = {"out_dir": os.path.abspath(os.path.join("scripts", "artifacts", f"pipeline_{jid}"))}
             JOBS[jid]["status"] = "done"
         except Exception as e:
@@ -1429,10 +1429,25 @@ def api_pipeline_pdf_status(pdf_rel: Optional[str] = None, pdf_path: Optional[st
 
 @app.get("/api/pipeline/doc-id")
 def api_pipeline_doc_id(pdf_rel: Optional[str] = None, pdf_path: Optional[str] = None):
+    """Return a stable per-document identifier based on file bytes.
+
+    Rationale: hashing the file path can collide for duplicate content in
+    different locations. Hashing bytes (SHA-256) avoids this and matches the
+    project’s requirement to prevent working on duplicates.
+    """
     try:
         pdf = _resolve_pdf_for_ui(pdf_path, pdf_rel)
         import hashlib
-        doc_id = hashlib.md5(str(pdf).encode()).hexdigest()
+        h = hashlib.sha256()
+        try:
+            with open(pdf, "rb") as f:
+                # Stream in chunks to avoid large memory spikes
+                for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                    h.update(chunk)
+            doc_id = h.hexdigest()
+        except Exception:
+            # Fallback to hashing the absolute path string if file is unreadable
+            doc_id = hashlib.md5(str(pdf).encode()).hexdigest()
         return {"ok": True, "doc_id": doc_id}
     except HTTPException as e:
         return JSONResponse({"ok": False, "error": e.detail}, status_code=e.status_code)
@@ -1470,6 +1485,119 @@ class _SaveAnnotationsReq(BaseModel):
 class _UpsertReq(BaseModel):
     results_dir: str
     fast_embeddings: bool = True
+
+
+# -----------------------------
+# Conflicts artifact (MVP persistence)
+# -----------------------------
+
+class _ConflictItem(BaseModel):
+    id: str
+    type: str  # 'duplicate' | 'numeric_mismatch' | custom
+    groupId: Optional[str] = None
+    resolved: bool = False
+    notes: Optional[str] = None
+
+
+class _SaveConflictsReq(BaseModel):
+    doc_id: str
+    items: List[_ConflictItem] = Field(default_factory=list)
+
+
+@app.post("/api/conflicts/save")
+def api_conflicts_save(req: _SaveConflictsReq):
+    try:
+        out_dir = Path(ARTIFACTS_ROOT)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        # Use full doc_id string as provided; UI may pass first 12 chars for display only
+        fname = f"conflicts_{req.doc_id}.json"
+        path = out_dir / fname
+        payload = {
+            "docId": req.doc_id,
+            "items": [i.model_dump(by_alias=True) for i in req.items],
+            "saved_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        }
+        path.write_text(json.dumps(payload, indent=2))
+        return {"ok": True, "path": str(path)}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/conflicts/list")
+def api_conflicts_list(doc_id: str):
+    try:
+        p = Path(ARTIFACTS_ROOT) / f"conflicts_{doc_id}.json"
+        if not p.exists():
+            return {"ok": True, "items": []}
+        raw = json.loads(p.read_text())
+        items = raw.get("items") if isinstance(raw, dict) else raw
+        if not isinstance(items, list):
+            items = []
+        return {"ok": True, "items": items}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+# -----------------------------
+# OSLC (very small offline stubs)
+# -----------------------------
+
+@app.get("/api/oslc/service")
+def api_oslc_service():
+    try:
+        return {
+            "ok": True,
+            "resources": [
+                {"@type": "oslc:ServiceProvider", "title": "Extractor OSLC Stub", "links": {"links": "/api/oslc/links"}},
+            ],
+        }
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/oslc/links")
+def api_oslc_links():
+    try:
+        p = Path(ARTIFACTS_ROOT) / "oslc_links.json"
+        if not p.exists():
+            return {"ok": True, "links": []}
+        raw = json.loads(p.read_text())
+        if isinstance(raw, list):
+            return {"ok": True, "links": raw}
+        if isinstance(raw, dict):
+            # Normalize potential legacy shapes
+            for k in ("links", "oslc:links"):
+                if k in raw and isinstance(raw[k], list):
+                    return {"ok": True, "links": raw[k]}
+        return {"ok": True, "links": []}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+class _OslcLink(BaseModel):
+    source: str
+    target: str
+    type: str = Field(default="oslc_rm:elaborates")
+
+
+@app.post("/api/oslc/link")
+def api_oslc_link(link: _OslcLink):
+    try:
+        out = Path(ARTIFACTS_ROOT) / "oslc_links.json"
+        existing: list = []
+        if out.exists():
+            try:
+                raw = json.loads(out.read_text())
+                if isinstance(raw, list):
+                    existing = raw
+                elif isinstance(raw, dict):
+                    existing = raw.get("links") or raw.get("oslc:links") or []
+            except Exception:
+                existing = []
+        existing.append({"source": link.source, "target": link.target, "type": link.type, "saved_at": datetime.datetime.now(datetime.timezone.utc).isoformat()})
+        out.write_text(json.dumps(existing, indent=2))
+        return {"ok": True, "count": len(existing), "path": str(out)}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
 def _resolve_pdf_for_ui(pdf_path: Optional[str], pdf_rel: Optional[str]) -> Path:
@@ -1558,6 +1686,12 @@ def api_pipeline_run_external(req: _RunExternalReq):
     ok = proc.returncode == 0
     summary = Path("scripts/artifacts/run_summary_happy.json")
     final_json = results / "final_report.json"; final_md = results / "final_report.md"
+    # Write latest pointer for the UI (for quick load without passing dirs)
+    try:
+        pointer = Path(ARTIFACTS_ROOT) / "latest_results.json"
+        pointer.write_text(json.dumps({"results_dir": str(results)}, indent=2))
+    except Exception:
+        pass
     return { 'ok': ok, 'results_dir': str(results),
              'summary_path': str(summary) if summary.exists() else None,
              'final_report_json': str(final_json) if final_json.exists() else None,
@@ -1673,5 +1807,34 @@ def api_pipeline_upsert(req: _UpsertReq):
             "export_confirmation": str(confirm10) if confirm10.exists() else None,
             "graph_confirmation": str(confirm11) if confirm11.exists() else None,
         }
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+# -----------------------------
+# Latest results pointer (UI convenience)
+# -----------------------------
+
+@app.get("/api/pipeline/latest")
+def api_pipeline_latest():
+    try:
+        p = Path(ARTIFACTS_ROOT) / "latest_results.json"
+        if not p.exists():
+            return {"ok": True, "results_dir": ""}
+        j = json.loads(p.read_text())
+        return {"ok": True, "results_dir": j.get("results_dir", "")}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+class _LatestSet(BaseModel):
+    results_dir: str
+
+
+@app.post("/api/pipeline/latest-set")
+def api_pipeline_latest_set(body: _LatestSet):
+    try:
+        p = Path(ARTIFACTS_ROOT) / "latest_results.json"
+        p.write_text(json.dumps({"results_dir": body.results_dir}, indent=2))
+        return {"ok": True, "path": str(p)}
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)

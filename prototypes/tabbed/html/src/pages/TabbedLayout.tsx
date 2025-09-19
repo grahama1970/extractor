@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { 
   Upload, Search, Archive, Copy, Trash2, Plus, Minus,
   ChevronLeft, ChevronRight, Edit, Sparkles, ArrowLeft,
-  File, Tag, MessageSquare, Settings
+  File, Tag, MessageSquare, Settings, Download
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const TabbedLayout = () => {
   const [currentPage, setCurrentPage] = useState(345);
+  const [appReady, setAppReady] = useState(false);
   const [leftSidebarOpen, setLeftSidebarOpen] = useState(true);
   const [rightSidebarOpen, setRightSidebarOpen] = useState(true);
   const [selectedAnnotation, setSelectedAnnotation] = useState("section");
@@ -23,10 +24,12 @@ const TabbedLayout = () => {
     { name: "User Manual Draft", pages: 120, status: "complete" }
   ];
 
+  useEffect(() => { setAppReady(true); }, []);
+
   return (
     <div className="h-screen bg-background overflow-hidden">
       {/* Header */}
-      <header className="h-16 border-b bg-card flex items-center px-6">
+      <header className="h-16 border-b bg-card flex items-center px-6" data-testid="top-toolbar">
         <Link to="/" className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors">
           <ArrowLeft className="h-4 w-4" />
           Back to Prototypes
@@ -34,7 +37,7 @@ const TabbedLayout = () => {
         <div className="flex-1 text-center">
           <h1 className="text-lg font-semibold">Tabbed Interface with Floating Tools</h1>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2" data-testid="pipeline-actions">
           <Button
             variant="outline"
             size="sm"
@@ -51,10 +54,21 @@ const TabbedLayout = () => {
             Properties
             {rightSidebarOpen ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
           </Button>
+          {/* Unified selectors for Happy Path; no-ops here */}
+          <Button size="sm" variant="outline" title="Load pipeline annotations" data-testid="btn-load-pipeline-annos" disabled>
+            <Download className="h-4 w-4" />
+          </Button>
+          <Button size="sm" variant="outline" title="Save annotations" data-testid="btn-save-annotations" disabled>
+            <Archive className="h-4 w-4" />
+          </Button>
+          <Button size="sm" variant="outline" title="Upsert to Arango" data-testid="btn-upsert-pipeline" disabled>
+            <Upload className="h-4 w-4" />
+          </Button>
         </div>
       </header>
 
       <div className="flex h-[calc(100vh-4rem)]">
+        {appReady && <div data-testid="app-ready" className="hidden" aria-hidden />}
         {/* Left Sidebar */}
         {leftSidebarOpen && (
           <div className="w-72 border-r bg-card">

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import math
 import unicodedata
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple

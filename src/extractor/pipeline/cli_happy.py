@@ -2,10 +2,8 @@
 from __future__ import annotations
 
 import os
-import sys
 import subprocess
 from pathlib import Path
-from typing import Optional
 
 import typer
 from dotenv import load_dotenv, find_dotenv
@@ -46,6 +44,7 @@ def run(
     # Delegate to the unified surface to keep one code path
     cmd = [
         "pipeline-run",
+        "run",
         "--pdf",
         str(pdf),
         "--results",
@@ -61,7 +60,6 @@ def run(
     # Build a simple run summary from validation artifacts
     try:
         import json
-        import time
 
         summary = {
             "ok": proc.returncode == 0,

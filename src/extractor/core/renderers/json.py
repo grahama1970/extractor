@@ -12,7 +12,7 @@ External Dependencies:
 
 from typing import Annotated, Any, Dict, List, Tuple
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel
 
 from extractor.core.renderers import BaseRenderer
 from extractor.core.schema import BlockTypes
