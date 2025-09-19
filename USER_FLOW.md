@@ -1,92 +1,89 @@
-## User Flow (Aligned with Pipeline, CLI, and UX)
+## User Flow — UX ↔ Pipeline (Happy Path, End-to-End)
 
-This amends the original high‑level flow with concrete references to:
-- Pipeline steps under `src/extractor/pipeline/steps`
-- The unified CLI (`python -m src.cli extract`)
-- Stable UX selectors used by our smokes (data‑testids)
+This is the canonical, testable flow connecting the Classic/Tabbed UI to the extractor pipeline. It uses:
+- Single CLI surface: `python -m src.cli extract` (fast|accurate), per docs/03_guides/HAPPYPATH_GUIDE.md
+- Deterministic UI selectors (data-testid) verified by smokes
+- Backend endpoints in prototypes/tabbed/api/server.py
 
-For the Happy Path philosophy and acceptance signals, see also: `docs/03_guides/HAPPYPATH_GUIDE.md`.
+For acceptance, every step references at least one health marker or smoke.
 
-### Pre‑flight (dev loop)
-- Start backend + Vite: `./scripts/dev.sh` (backs FastAPI on :8000, Vite on :8080).
+**Pre‑flight**
+- Start dev: `./scripts/dev.sh` (FastAPI :8000, Vite :8080)
 - Open `http://127.0.0.1:8080/main` and confirm:
-  - `data-testid="app-ready"` present
-  - `data-testid="top-toolbar"` rendered
-  - `data-testid="page-label"` shows pagination
+  - `[data-testid="app-ready"]` present, `[data-testid="top-toolbar"]` rendered, `[data-testid="page-label"]` shows N / M
+- Health gate: `BASE_URL=http://127.0.0.1:8080/main node scripts/ux_check_broken.mjs` (saves `scripts/artifacts/ux_check_*.{log,png}`)
 
-### 1) Load a PDF in the Classic UI
-- Route: `/main` (Classic layout)
-- UX markers: `app-ready`, `top-toolbar`, `page-label`
-- Optional thumbnails: left/bottom rails via toolbar toggles
+**1) Open a PDF (UI)**
+- Route: `/main` (Classic)
+- Default autoload: BHT CV32A65X.pdf (dev sample)
+- Markers: `app-ready`, `top-toolbar`, `page-label`
+- Optional rails: vertical `[left]` or bottom thumbnails via toolbar toggles
 
-### 2) Annotate key regions (teaching signal)
-- Arm pointer or use toolbar button:
-  - Keyboard: press `N` to arm drawing
-  - Toolbar: `data-testid="btn-add-annotation-top"`
-- Label types via the inspector; selectors used by smokes include:
-  - `filter-type-section`, `filter-type-table`, `filter-type-figure`
-  - Notes: `notes-input`
+**2) Annotate regions (UI → teaching signal)**
+- Draw: press `N` (or HUD “New Box”) and drag on the canvas overlay `[data-testid="overlay"]`
+- Label: inspector palette (Sec/Tbl/Fig). Filters echo the same types.
+- Notes & mentions: `[data-testid="notes-input"]` supports `@name` autocomplete (local recent reviewers)
+- Acceptance (smokes): `ui_grouping_export_json.mjs`, `ui_export_json_fields.mjs`, `ui_mentions_basic.mjs`
 
-Relevant pipeline context (what these labels map to):
-- `01_annotation_processor.py` — normalizes annotation boxes/types
-- `05_table_extractor.py`, `06_figure_extractor.py` — table/figure evidence
-- `03_suspicious_headers.py`, `04_section_builder.py` — section structure
+Pipeline mapping
+- Stage 01: Annotation Processor ingests UI boxes/types
+- Stage 05/06: Tables/Figures evidence
+- Stage 03/04: Suspicious headers/Section builder structure
 
-### 3) Generate extraction artifacts
-Preferred Happy Path (single surface):
-- CLI (accurate PDF):
-  - `python -m src.cli extract --mode accurate <input.pdf> <outdir>`
-- CLI (fast PDF text only):
-  - `python -m src.cli extract --mode fast <input.pdf> <outdir>`
-- Optional formalization:
-  - `python -m src.cli extract --mode accurate --prove <input.pdf> <outdir>` (Stage 08 Lean4)
+**3) Generate extraction artifacts**
+- CLI (paved road):
+  - Accurate (normalized outputs):
+    `python -m src.cli extract input.pdf out/ --mode accurate`
+  - Fast (text-only):
+    `python -m src.cli extract input.pdf out/ --mode fast`
+  - Optional proving:
+    `python -m src.cli extract input.pdf out/ --mode accurate --prove`
 
-After the CLI run completes, load artifacts into the UI:
-- Load pipeline annos: `data-testid="btn-load-pipeline-annos"`
-- Save/merge edits back: `data-testid="btn-save-annotations"`
+- UI bridge (dev convenience):
+  - Save annotations: `[data-testid="btn-save-annotations"]` → POST `/api/annotations/save`
+    - Writes UI-normalized JSON and Stage‑01 canonical JSON
+  - Run pipeline: `[data-testid="btn-extract-pipeline"]` → POST `/api/pipeline/run-external`
+    - Calls run_all with UI annotations; writes `scripts/artifacts/latest_results.json` pointer
+  - Progress banner: `[data-testid="pipeline-progress"]` while running
+  - Acceptance (smokes): `ui_progress_pipeline_run.mjs`
 
-Downstream stages touched by “accurate” runs:
-- `07_reflow_section.py` — text reflow; `09_section_summarizer.py`
-- `10_arangodb_exporter.py` — per‑doc objects exported
-- `12_insert_annotations.py` — insert/bridge annotations to DB
-- `14_report_generator.py` — summary report
+Downstream stages for “accurate”
+- 07 Reflow, 09 Summarizer, 10 Export (flattened), 11 Graph (optional), 14 Report (final)
 
-Step‑specific CLIs (Typer apps available):
-- `11_arango_create_graph.py` — similarity/graph edges in ArangoDB
-- `12_insert_annotations.py` — insert/bridge annotations
+**4) Load pipeline annotations into the UI**
+- Action: `[data-testid="btn-load-pipeline-annos"]`
+- Server: GET `/api/pipeline/latest` → results_dir → read 04/05/06 JSON via `/api/artifacts/file?path=…`
+- UI: convert stage bboxes to normalized overlay boxes (uses pdf.js page sizes) and render on current page
+- Acceptance (smokes): `ui_load_pipeline_annos_from_latest.mjs` (offline-friendly: verifies overlays or request trail)
 
-### 4) Review and iterate annotations
-- Paging: `btn-first`, `btn-prev`, `pager-slider`, `btn-next`, `btn-last`
-- Review state: `btn-claim`, `btn-release` (status badge updates)
-- Notes & mentions: `notes-input` (persisted per‑doc)
-- Conflicts panel: `conflicts-tab`, `conflict-item-*` (adjudication controls TBD)
-
-### 5) Export artifacts from the UI
-- JSON export (current page): `btn-export-json`
-- COCO (selection): `btn-export-coco-selection`
-
-### 6) Build cross‑document relationships (optional)
-- After exporting to Arango (Stage 10), create edges:
-  - Run graph builder (Typer app in `11_arango_create_graph.py`)
-  - Inspect via project dashboards or API as available
-
-### Quick CLI Cheatsheet
-- Extract (single surface):
-  - `python -m src.cli extract --mode accurate input.pdf out/`
-  - `python -m src.cli extract --mode fast input.pdf out/`
-- Step CLIs (advanced):
-  - `python -m src.extractor.pipeline.steps.12_insert_annotations --help`
-  - `python -m src.extractor.pipeline.steps.11_arango_create_graph --help`
-
-### Smoke Alignment (what the UI must expose)
-- Health markers: `app-ready`, absence of dev overlays
-- Toolbar paging: `btn-prev`, `btn-next`, `page-label`
+**5) Review, filter, claim/assign**
+- Paging: `btn-first/prev/next/last`, `page-slider`, `page-number`
 - Filters: `filter-type-*`, `filter-confidence`, `filter-owner`
-- Review/notes/conflicts: `btn-claim`, `btn-release`, `notes-input`, `conflicts-tab`
-- Export: `btn-export-json`, `btn-export-coco-selection`
-- CLI→UX handshake: run `python -m src.cli extract …` then verify UI markers and ability to `btn-load-pipeline-annos`
+- Review: `btn-claim`, `btn-release` updates `[data-testid="status-badge"]`
+- Conflicts: `conflicts-tab`, synthetic `conflict-item` list with adjudication toggle (localStorage)
+- Acceptance (smokes): `ui_pagination.mjs`, `ui_filters_basic.mjs`, `ui_conflicts_panel.mjs`, `ui_review_queue.mjs`
 
-### Why this alignment helps
-- Keeps UX, CLI, and pipeline stages in lock‑step using explicit selectors and commands the smokes verify.
-- Reduces ambiguity: every user step maps to concrete artifacts (Stage 01→14) and a single, paved‑road CLI.
-- Matches the Happy Path Guide so operators and contributors have one canonical flow.
+**6) Upsert graph/exports (optional, offline‑friendly)**
+- Action: `[data-testid="btn-upsert-pipeline"]` → POST `/api/pipeline/upsert`
+- Artifacts: Stage‑10 flattened JSON, Stage‑11 graph confirmation; status dot aria-label: `'db-ready'|'db-missing'`
+- Report: Stage‑14 (`final_report.md`) linked in toasts when available
+- Acceptance (smokes): pipeline reqif/rtm/graph smokes under `scripts/smokes/pipeline/…`
+
+**CLI Cheatsheet (single surface)**
+- Accurate: `python -m src.cli extract --mode accurate input.pdf out/`
+- Fast: `python -m src.cli extract --mode fast input.pdf out/`
+- Prove: `python -m src.cli extract --mode accurate --prove input.pdf out/`
+
+**Selectors the UI must keep stable**
+- Mount/health: `app-ready`, `top-toolbar`, `page-label`
+- Paging: `btn-first`, `btn-prev`, `btn-next`, `btn-last`, `page-slider`, `page-number`, `pager-prev`, `pager-next`
+- Search: `search-input`, `search-prev`, `search-next`, `search-hit`
+- Filters: `filter-type-section/table/figure`, `filter-owner`, `filter-confidence`
+- Pipeline: `btn-extract-pipeline`, `btn-load-pipeline-annos`, `btn-save-annotations`, `btn-upsert-pipeline`, `pipeline-progress`
+- Overlays: `overlay`, `box`, `box-chip`
+- Review/collab: `btn-claim`, `btn-release`, `status-badge`, `notes-input`, `mention-suggest`, `conflicts-tab`, `conflict-item`, `btn-adjudicate`
+
+**Why this alignment matters**
+- One paved road from UI → pipeline → artifacts, with objective gates and artifacts.
+- Reduces ambiguity by binding every UI action to a pipeline stage and server endpoint.
+- Matches Happy Path so operators and contributors share one canonical, smoke‑verified flow.

@@ -18,6 +18,7 @@ State persistence (local-only)
 ## 0) Preconditions
 - [ ] Dev servers running via VS Code Task `Prototype: Dev (vite on 8080)` or `npm run preview:8080`.
 - [ ] Health: `npm run ux:check` passes (no overlays, no console errors).
+- [ ] Pipeline pointer endpoint available: `/api/pipeline/latest` and `/api/pipeline/latest-set` (UI can load stage artifacts).
 
 ## 1) Pagination & Navigation (Keyboard‑first)
 - Outcome: Consistent paging in all layouts; toolbar never occludes canvas.
@@ -43,6 +44,7 @@ State persistence (local-only)
   - Collection mode filters the Files list by query.
 - Smokes:
   - `scripts/smokes/ui_search_basic.mjs` (artifact `scripts/artifacts/ui_search_basic.png`)
+  - [planned] `scripts/smokes/ui_search_hits_indexing.mjs` (asserts hit count and highlight)
 - [ ] Implement
 
 ## 3) Filters (Type, Confidence, Owner)
@@ -72,6 +74,7 @@ State persistence (local-only)
   - Adjudicate toggles status to Resolved; persists in localStorage.
 - Smokes:
   - `scripts/smokes/ui_conflicts_panel.mjs` (artifact `scripts/artifacts/ui_conflicts_panel.png`)
+  - [planned] `scripts/smokes/ui_conflicts_load_and_resolve.mjs` (artifact saved under `scripts/artifacts/`)
 - [ ] Implement
 
 ## 5) Review Queue (Claim/Assign)
@@ -108,6 +111,7 @@ State persistence (local-only)
   - `npm run ux:check` waits for app‑ready and passes with no overlays or console errors.
 - Smokes:
   - Use existing `npm run ux:check` and save artifacts `scripts/artifacts/ux_check_*.{log,png}`.
+  - CDP attach option: `node scripts/ux_check_cdp_auto.mjs` (saves artifacts under `scripts/artifacts/`).
 - [ ] Implement
 
 ## 8) Shortcuts & Help
@@ -124,7 +128,20 @@ State persistence (local-only)
 - [ ] Pagination/search/filters/conflicts/review/notes implemented with markers above.
 - [ ] Health gate passes; artifacts saved.
 - [ ] All new smokes pass locally; artifacts attached under `scripts/artifacts/`.
-- [ ] No prototype code paths require new backend endpoints for MVP.
+- [ ] No prototype code paths require new backend endpoints for MVP (pipeline bridge endpoints under `/api/pipeline/*` already exist for dev convenience).
+
+## 10) Pipeline Integration Checks (Happy Path glue)
+- Outcome: UI actions reflect pipeline artifacts and vice‑versa.
+- Actions & endpoints:
+  - Save annotations → POST `/api/annotations/save` (writes UI‑normalized + Stage‑01 JSON)
+  - Run pipeline (UI) → POST `/api/pipeline/run-external` (writes `latest_results.json` pointer)
+  - Load pipeline annos → GET `/api/pipeline/latest` → read 04/05/06 via `/api/artifacts/file?path=...`
+  - Upsert graph → POST `/api/pipeline/upsert` (Stage‑10/11)
+- UI markers:
+  - `btn-save-annotations`, `btn-extract-pipeline`, `pipeline-progress`, `btn-load-pipeline-annos`, `btn-upsert-pipeline`
+- Smokes:
+  - `scripts/smokes/ui_progress_pipeline_run.mjs` (progress banner visible)
+  - `scripts/smokes/ui_load_pipeline_annos_from_latest.mjs` (overlays or request‑trail acceptance)
 
 ## 10) Stretch (deferred; do not implement yet)
 - Cross‑doc compare view (diff pane).
