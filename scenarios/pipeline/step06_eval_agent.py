@@ -2,6 +2,7 @@
 from __future__ import annotations
 import json, os, sys, time
 from pathlib import Path
+from ._eval_utils import summarize, structure_diff, shorten, load_json
 
 ROOT = Path(__file__).resolve().parents[2]
 ART_ROOT = Path(os.getenv("SCENARIOS_ARTIFACT_ROOT", ROOT / "scripts" / "artifacts"))
@@ -13,12 +14,7 @@ def _find_latest() -> Path | None:
     c += list(ROOT.glob("out_fast/**/06_figure_extractor/json_output/06_figures.json"))
     return max(c, key=lambda p: p.stat().st_mtime) if c else None
 
-def _load_json(p: Path): return json.loads(p.read_text(encoding='utf-8'))
-def _shorten(s: str, n: int=2000)->str: return s if len(s)<=n else s[:n-3]+"..."
-def _summ(x):
-    if isinstance(x, dict): return {"type":"dict","size":len(x),"keys":list(x)[:50]}
-    if isinstance(x, list): return {"type":"list","size":len(x)}
-    return {"type":type(x).__name__}
+def _load_json(p: Path): return load_json(p)
 def _prompt(cand,gold): return ("Return ONLY JSON with the rubric fields.\n" f"GOLD:\n{gold}\n\nCANDIDATE:\n{cand}\n")
 
 def _call(model: str, prompt: str):
@@ -46,7 +42,11 @@ def main():
     try: cand=_load_json(Path(cand_path)); gold=_load_json(gp)
     except Exception as e: print('Scenario pipeline/step06_eval_agent: FAIL (load)', e); sys.exit(1)
 
-    prompt = _prompt(_shorten(json.dumps(_summ(cand), indent=2)), _shorten(json.dumps(_summ(gold), indent=2)))
+    prompt = _prompt(
+        shorten(json.dumps(summarize(cand), indent=2)),
+        shorten(json.dumps(summarize(gold), indent=2)),
+        shorten(json.dumps(structure_diff(cand, gold), indent=2))
+    )
     model = os.getenv('EVAL_MODEL') or os.getenv('LITELLM_DEFAULT_MODEL') or 'openai/gpt-4o-mini'
     res = _call(model, prompt)
     if res is None: print('SKIP: agent evaluation unavailable'); sys.exit(0)
@@ -60,4 +60,3 @@ def main():
     if enforce and not passed: sys.exit(1)
 
 if __name__=='__main__': main()
-

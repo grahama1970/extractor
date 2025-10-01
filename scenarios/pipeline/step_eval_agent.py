@@ -20,6 +20,7 @@ import os
 import sys
 import time
 from pathlib import Path
+from ._eval_utils import summarize, structure_diff, shorten
 
 ROOT = Path(__file__).resolve().parents[2]
 ART_ROOT = Path(os.getenv("SCENARIOS_ARTIFACT_ROOT", ROOT / "scripts" / "artifacts"))
@@ -41,24 +42,7 @@ def _load_json(path: Path) -> dict | list:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _summarize(obj) -> dict:
-    if isinstance(obj, dict):
-        keys = list(obj.keys())[:50]
-        size = len(obj)
-    elif isinstance(obj, list):
-        keys = []
-        size = len(obj)
-    else:
-        keys = []
-        size = 0
-    return {"type": type(obj).__name__, "size": size, "keys": keys}
-
-
-def _shorten(s: str, max_len: int = 2000) -> str:
-    return s if len(s) <= max_len else s[: max_len - 3] + "..."
-
-
-def _prompt(candidate_snip: str, gold_snip: str) -> str:
+def _prompt(candidate_snip: str, gold_snip: str, diff_snip: str) -> str:
     return (
         "You are a rigorous evaluator. Compare the CANDIDATE JSON to the GOLD JSON and return ONLY a compact JSON object "
         "that follows this schema (no extra text):\n"
@@ -70,7 +54,7 @@ def _prompt(candidate_snip: str, gold_snip: str) -> str:
         "- critical_issues: blockers that make outputs unusable.\n"
         "- non_critical_notes: acceptable differences or minor drifts.\n"
         "- Return a valid JSON object ONLY.\n\n"
-        f"GOLD (snippet):\n{gold_snip}\n\nCANDIDATE (snippet):\n{candidate_snip}\n"
+        f"GOLD (snippet):\n{gold_snip}\n\nCANDIDATE (snippet):\n{candidate_snip}\n\nDIFF (structural hints):\n{diff_snip}\n"
     )
 
 
@@ -131,9 +115,10 @@ def main() -> None:
         sys.exit(1)
 
     # Build compact snippets
-    cand_snip = _shorten(json.dumps(_summarize(cand_json), indent=2))
-    gold_snip = _shorten(json.dumps(_summarize(gold_json), indent=2))
-    prompt = _prompt(cand_snip, gold_snip)
+    cand_snip = shorten(json.dumps(summarize(cand_json), indent=2))
+    gold_snip = shorten(json.dumps(summarize(gold_json), indent=2))
+    diff_snip = shorten(json.dumps(structure_diff(cand_json, gold_json), indent=2))
+    prompt = _prompt(cand_snip, gold_snip, diff_snip)
 
     model = os.getenv("EVAL_MODEL") or os.getenv("LITELLM_DEFAULT_MODEL") or "openai/gpt-4o-mini"
     result = _call_router(model, prompt)
@@ -187,4 +172,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
