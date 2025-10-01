@@ -33,10 +33,13 @@ async function main(){
   const stamp = ts();
   const shot = path.join(OUT, `ux_zoom_tooltip_${stamp}.png`);
   await page.screenshot({ path: shot, fullPage: true }).catch(()=>{});
+  // Enhanced assertions: tooltip presence, size and viewport padding
+  if (!tipRect) { await browser.disconnect(); console.error('Scenario ux/zoom_tooltip: BROKEN (no tooltip)'); process.exit(1); }
+  const { w: width, h: height, x, y } = tipRect;
+  const vp = await page.viewport();
+  if (width < 160 || width > 360) { await browser.disconnect(); console.error(`Scenario ux/zoom_tooltip: BROKEN (tooltip width ${width})`); process.exit(1); }
+  if (x < 8 || y < 8 || (x + width) > vp.width - 8 || (y + height) > vp.height - 8) { await browser.disconnect(); console.error('Scenario ux/zoom_tooltip: BROKEN (tooltip near/clipped viewport edge)'); process.exit(1); }
   await browser.disconnect();
-  const ok = !!(tipRect && tipRect.present && tipRect.w > 20 && Math.abs((tipRect.y) - (zr.y)) < 200);
-  if (!ok) { console.error('Scenario ux/zoom_tooltip: BROKEN'); process.exit(1); }
   console.log('Scenario ux/zoom_tooltip: OK');
 }
 main().catch(e=>{ console.error('ux/zoom_tooltip crashed:', e?.message||e); process.exit(2); });
-

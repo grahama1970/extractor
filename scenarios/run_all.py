@@ -11,6 +11,7 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import List, Tuple
+import json, time, pathlib
 
 ROOT = Path(__file__).resolve().parents[1]
 SCEN_DIR = ROOT / "scenarios"
@@ -61,6 +62,9 @@ def _filtered_scenarios(all_scenarios: List[Tuple[str, list[str]]]) -> List[Tupl
 
 def main() -> None:
     env = os.environ.copy()
+    artifact_root = env.get("SCENARIOS_ARTIFACT_ROOT", "scripts/artifacts")
+    artifact_dir = pathlib.Path(artifact_root)
+    artifact_dir.mkdir(parents=True, exist_ok=True)
     base = env.get("BASE_URL", "").strip()
     if not base:
         print(
@@ -78,12 +82,19 @@ def main() -> None:
     stop_on_fail = (env.get("SCENARIOS_STOP_ON_FIRST_FAILURE", "").lower() in {"1","true","yes"})
     plan = _filtered_scenarios(SCENARIOS)
     results: list[tuple[str, bool, int]] = []
+    json_results: list[dict] = []
     print(f"{YELLOW}Running {len(plan)} scenario(s)...{RESET}")
+    t0 = time.time()
     for name, cmd in plan:
         print(f"{BLUE}▶ {name}{RESET}")
         proc = subprocess.run(cmd, env=env)
         ok = proc.returncode == 0
         results.append((name, ok, proc.returncode))
+        json_results.append({
+            "name": name,
+            "status": "pass" if ok else ("skip" if proc.returncode == 0 and 'SKIP' in name.upper() else "fail"),
+            "exit_code": proc.returncode,
+        })
         if ok:
             print(f"{GREEN}✓ {name} succeeded{RESET}\n")
         else:
@@ -101,6 +112,16 @@ def main() -> None:
         print(f"{GREEN}  ✓ {n}{RESET}")
     for n, rc in failed:
         print(f"{RED}  ✗ {n} (code {rc}){RESET}")
+
+    # Write JSON summary
+    summary = {
+        "elapsed_sec": round(time.time() - t0, 3),
+        "results": [{"name": n, "status": ("pass" if ok else "fail"), "exit_code": rc} for n, ok, rc in results],
+    }
+    try:
+        (artifact_dir / "scenarios_summary.json").write_text(json.dumps(summary, indent=2))
+    except Exception:
+        pass
 
     if not failed:
         print(f"\n{GREEN}All scenarios succeeded!{RESET}")

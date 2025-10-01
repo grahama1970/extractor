@@ -17,7 +17,7 @@ from urllib.request import urlopen
 from urllib.error import URLError, HTTPError
 
 BASE = os.getenv("BACKEND_BASE", "http://127.0.0.1:8000").rstrip("/")
-URL = f"{BASE}/api/health/llm"
+URL = os.getenv("API_HEALTH_URL") or f"{BASE}/api/health/llm"
 
 
 def main() -> None:
@@ -47,4 +47,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

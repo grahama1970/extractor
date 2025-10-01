@@ -56,6 +56,15 @@ async function main(){
   // Simple visual assertions for assessment
   const okLeft = left.present && left.width > 40 && left.thumbs >= 1;
   const okBottom = bottom.present && bottom.height > 40 && bottom.thumbs >= 1;
+  // Additional thumbnail size/aspect heuristics
+  const firstThumbRect = await page.evaluate(()=>{
+    const el = document.querySelector('[data-testid^="thumb-"]');
+    if (!el) return null; const b=el.getBoundingClientRect(); return {w:b.width,h:b.height};
+  });
+  if (firstThumbRect){
+    const w = firstThumbRect.w, h = firstThumbRect.h; const aspect = w/(h||1);
+    if (w < 80 || w > 220 || aspect < 0.6 || aspect > 1.0) { console.error('Scenario ux/thumbnails_modes: BROKEN (thumb size/aspect)'); process.exit(1); }
+  }
   const broken = !(okLeft && okBottom);
   console.log('Scenario ux/thumbnails_modes metrics:', JSON.stringify(metrics));
   await browser.disconnect();
@@ -63,4 +72,3 @@ async function main(){
   console.log('Scenario ux/thumbnails_modes: OK');
 }
 main().catch(e=>{ console.error('ux/thumbnails_modes crashed:', e?.message||e); process.exit(2); });
-

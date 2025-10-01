@@ -15,17 +15,19 @@ async function main(){
   const toolbar = await page.$('[data-testid="top-toolbar"]');
   const overlay = await page.$('[data-testid="overlay"]');
   const present = !!toolbar;
-  let overlaps=false;
-  if (toolbar && overlay){
+  let overlaps=false; let heightOk=true;
+  if (toolbar){
     const tb = await toolbar.evaluate(el=>{ const b=el.getBoundingClientRect(); return {y:b.top,h:b.height}; });
-    const ov = await overlay.evaluate(el=>{ const b=el.getBoundingClientRect(); return {y:b.top}; });
-    overlaps = !(tb.y + tb.h <= ov.y - 2);
+    heightOk = tb.h >= 36 && tb.h <= 64;
+    if (overlay){
+      const ov = await overlay.evaluate(el=>{ const b=el.getBoundingClientRect(); return {y:b.top}; });
+      overlaps = !(tb.y + tb.h <= ov.y - 2);
+    }
   }
   await page.screenshot({ path: path.join(OUT_DIR, `ux_toolbar_hierarchy_${ts()}.png`), fullPage: true }).catch(()=>{});
   await browser.disconnect();
-  const ok = present && !overlaps;
-  if (!ok) { console.error('Scenario ux/toolbar_hierarchy: BROKEN', {present, overlaps}); process.exit(1); }
+  const ok = present && !overlaps && heightOk;
+  if (!ok) { console.error('Scenario ux/toolbar_hierarchy: BROKEN', {present, overlaps, heightOk}); process.exit(1); }
   console.log('Scenario ux/toolbar_hierarchy: OK');
 }
 main().catch(e=>{ console.error('ux/toolbar_hierarchy crashed:', e?.message||e); process.exit(2); });
-

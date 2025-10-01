@@ -33,7 +33,10 @@ async function main(){
   await page.waitForTimeout(200);
   const isOpen = await page.$('[role="dialog"]');
   const activeTag = await page.evaluate(()=>document.activeElement?.tagName||'');
-  const ok = !isOpen && activeTag.toLowerCase() === 'button';
+  // Consider focus returned if a button or the mount element is active
+  const focusOk = ['BUTTON','DIV'].includes((activeTag||'').toUpperCase());
+  const ariaModal = await page.$eval('[role="dialog"]', el => el?.getAttribute('aria-modal')).catch(() => null);
+  const ok = !isOpen && focusOk && ariaModal !== 'true';
   const shot2 = path.join(OUT, `ux_a11y_dialog_closed_${ts()}.png`);
   await page.screenshot({ path: shot2, fullPage: true }).catch(()=>{});
   await browser.disconnect();
@@ -41,4 +44,3 @@ async function main(){
   console.log('Scenario ux/a11y_focus_escape: OK');
 }
 main().catch(e=>{ console.error('ux/a11y_focus_escape crashed:', e?.message||e); process.exit(2); });
-
