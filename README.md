@@ -163,6 +163,18 @@ Extras
 - Metrics JSON:
   - `make graph-metrics DB=lean4_prod`
 
+## ✅ Live Scenarios (UX + Pipeline)
+
+We use a LiteLLM-style scenarios system for live gates. It runs Chrome DevTools checks for the UI and health/presence + agent evaluations for the pipeline. Scenarios capture screenshots/logs and SKIP cleanly when prerequisites are missing.
+
+- All scenarios: `python scenarios/run_all.py`
+- UX gates only: `make run-scenarios-ux`
+- Pipeline quick gates: `make pipeline:smoke`
+- Full pipeline feature: `make pipeline`
+- Filters/fail-fast: `SCENARIOS_FILTER=ux_,thumbnails SCENARIOS_STOP_ON_FIRST_FAILURE=1 python scenarios/run_all.py`
+
+Artifacts are written to `scripts/artifacts/YYYY-MM-DD/<sha-or-local>/{screenshots,logs,json}` with a JSON summary per run. See `scenarios/README.md` for environment details (Chrome 120+ recommended).
+
 ## 🏗️ Architecture: 10-Stage Self-Correcting Pipeline
 
 Note on I/O policy:
