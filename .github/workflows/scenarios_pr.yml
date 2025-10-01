@@ -3,6 +3,8 @@ name: Scenarios PR Gates
 on:
   pull_request:
     branches: [ master ]
+  push:
+    branches: [ master ]
 
 jobs:
   scenarios-pr:
