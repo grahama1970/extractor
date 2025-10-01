@@ -19,7 +19,7 @@ Key features:
 import os
 import json
 import logging
-from typing import Optional, Dict, List, Any, Tuple, Union
+from typing import Optional, Dict, List, Any, Tuple
 
 # Try to use loguru if available, otherwise use standard logging
 try:
@@ -28,7 +28,7 @@ except ImportError:
     # Set up standard logging as fallback
     logger = logging.getLogger(__name__)
 
-from tree_sitter import Parser, Node
+from tree_sitter import Node
 import tree_sitter_language_pack as tlp
 
 

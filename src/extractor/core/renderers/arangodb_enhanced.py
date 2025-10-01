@@ -31,9 +31,8 @@ Expected Output:
 import json
 import re
 import hashlib
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional
 from datetime import datetime
-from pathlib import Path
 
 from loguru import logger
 
@@ -456,13 +455,13 @@ if __name__ == "__main__":
 
     # Parse and validate
     data = json.loads(result)
-    print(f"\nExtracted:")
+    print("\nExtracted:")
     print(f"- Documents: {len(data['vertices']['documents'])}")
     print(f"- Sections: {len(data['vertices']['sections'])}")
     print(f"- Blocks: {len(data['vertices']['blocks'])}")
     print(f"- Entities: {len(data['vertices']['entities'])}")
     print(f"- Tables: {len(data['vertices']['tables'])}")
-    print(f"\nRelationships:")
+    print("\nRelationships:")
     for edge_type, edges in data["edges"].items():
         print(f"- {edge_type}: {len(edges)} edges")
 

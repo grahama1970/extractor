@@ -17,7 +17,6 @@ from extractor.evals.extraction.compare_tables import (
 )
 from extractor.evals.extraction.retune_camelot import retune_strategies_for_page
 import importlib.util
-import os
 
 
 def _load_camelot_strategies() -> Dict[str, Dict[str, Any]]:

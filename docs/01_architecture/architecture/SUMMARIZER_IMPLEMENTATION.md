@@ -1,5 +1,12 @@
 # Section Summarizer Implementation
 
+> Note (2025-09-18): This document references historical CLI examples like `python cli.py ...`.
+> The unified entrypoint is now:
+>
+>   `python -m src.cli extract <input> <out_dir> [--mode fast|accurate]`
+>
+> Keep this file as archival context; prefer the Happy Path guide for current usage.
+
 ## Summary
 
 Successfully implemented an LLM-based section summarizer for the Marker PDF processing library that:
@@ -48,7 +55,8 @@ Updated `marker/converters/pdf.py` to handle the "default+" syntax
 ## Usage
 
 ```bash
-python cli.py convert single document.pdf --output-format json --add-summaries
+python -m src.cli extract document.pdf out --mode accurate
+# (Summaries now attach during Stage 07 reflow when enabled via config.)
 ```
 
 ## Technical Challenges Resolved

@@ -2,13 +2,34 @@ BASE_URL ?= http://127.0.0.1:8080
 CDP_URL  ?= http://127.0.0.1:3000/json/version
 PY       ?= .venv/bin/python
 
+# Live scenario runner (mirrors LiteLLM/CodeWorld)
+.PHONY: run-scenarios
+run-scenarios:
+	python scenarios/run_all.py
+
+.PHONY: run-scenarios-ux
+run-scenarios-ux:
+	SCENARIOS_FILTER=ux_ python scenarios/run_all.py
+
+.PHONY: run-scenarios-pipeline
+run-scenarios-pipeline:
+	SCENARIOS_FILTER=pipeline_ python scenarios/run_all.py
+
+.PHONY: pipeline
+pipeline:
+	python scenarios/pipeline/run_pipeline_all.py
+
+.PHONY: pipeline:smoke
+pipeline:smoke:
+	SCENARIOS_FILTER=pipeline_api_health,pipeline_step_10_export_flattened,pipeline_step_11_graph_db python scenarios/run_all.py
+
 
 .PHONY: coco-export smoke-tabbed-api help setup setup-smokes smokes-python dev stop lint fmt type test api-smokes ux-health smokes ci scaffold smoke-issue \
-	gamified-e2e gamified-all gamified-all-fast gamified-codex gamified-cli \
-	smoke-litellm smoke-litellm-image smoke-litellm-all smoke-litellm-results \
-	smoke-07-reflow-min bundle-tabbed
+		gamified-e2e gamified-all gamified-all-fast gamified-codex gamified-cli \
+		smoke-litellm smoke-litellm-image smoke-litellm-all smoke-litellm-results \
+		smoke-07-reflow-min bundle-tabbed state-of-project
 
-help:
+	help:
 	@echo "Common targets:"
 	@echo "  make setup         # create venv + install dev deps (uv if available)"
 	@echo "  make dev           # start backend + vite (scripts/dev.sh)"
@@ -50,7 +71,7 @@ help:
 	@echo "  make smokes-pipeline-db      # run DB-backed Stage 10→12 smokes (Arango required)"
 	@echo "  make arango-clean-db         # drop test DB (ARANGO_DATABASE)"
 	@echo "  make smokes-pipeline-happy   # single-command happy-path run + gold validation"
-	@echo "  make steps-happy             # run happy path on BHT and print report/summary paths"
+		@echo "  make steps-happy             # run happy path on BHT and print report/summary paths"
 	@echo "  make smokes-pipeline-skip01  # happy-path with external annotations (skip Stage 01)"
 		@echo "  make smokes-pipeline-api-upsert  # run extract + upsert API smoke (Arango required)"
 		@echo "  make smokes-pipeline-api-chat    # run chat smoke (after upsert)"
@@ -58,7 +79,8 @@ help:
 		@echo "  make smoke-ui-extract-load-cdp   # UI CDP smoke (Chrome --remote-debugging-port=9222)"
 		@echo "  make ux-autofix                   # Detect Vite overlay via CDP/Puppeteer and auto-fix JSX"
 		@echo "  make lint-ruff-extractor         # Run Ruff only on extractor src/ (focused)"
-	@echo "  make smokes-api-external     # API bridge: run-external with UI boxes"
+		@echo "  make smokes-api-external     # API bridge: run-external with UI boxes"
+		@echo "  make extract-fast PDF=... OUT=... # quick text-only PDF dump (PyMuPDF)"
 	@echo "  make bootstrap-smokes # Install minimal deps to run smokes (venv + PYTHONPATH)"
 	@echo "  make prompt-opt PROMPT=path.md        # Optimize a raw prompt"
 	@echo "  make prompt-compile RESEARCH=path.md  # Compile research to a prompt (LLM)"
@@ -128,6 +150,13 @@ smokes:
 
 ci:
 	BASE_URL=$(BASE_URL) BROWSERLESS_DISCOVERY_URL=$(CDP_URL) bash scripts/ci_local.sh
+
+# --- Reports ---
+state-of-project:
+	@echo "Running State of Project auto-run…";
+	PYTHONPATH=$(PWD)/src \
+	uv run scripts/tools/state_of_project.py
+	@echo "Updated docs/STATE_OF_PROJECT.md"
 
 scaffold:
 	node scripts/tools/scaffold_tabbed_issue.mjs --dir prototypes/tabbed/issues --id "$(ISSUE)" --title "$(TITLE)"
@@ -205,7 +234,13 @@ lessons-recall:
 
 lessons-recall-last:
 	PYTHONPATH=. ARANGO_URL=$${ARANGO_URL:-http://127.0.0.1:8529} ARANGO_DB=$${ARANGO_DB:-lessons} ARANGO_USER=$${ARANGO_USER:-root} ARANGO_PASS=$${ARANGO_PASS:-openSesame} \
-	uv run scripts/lessons/recall_agent.py --from-latest-log --tags "$(TAGS)" --scope "$(SCOPE)" --k $${K:-5}
+		uv run scripts/lessons/recall_agent.py --from-latest-log --tags "$(TAGS)" --scope "$(SCOPE)" --k $${K:-5}
+
+# --- Quick fast extract (PyMuPDF text-only) ---
+.PHONY: extract-fast
+extract-fast:
+	. .venv/bin/activate 2>/dev/null || true; \
+		$(PY) -m src.cli extract --mode fast $(PDF) $(OUT)
 
 lessons-seed-demo:
 	@if command -v lessons-seed >/dev/null 2>&1; then \
@@ -480,3 +515,121 @@ prompt-run:
 lint-ruff-extractor:
 	. .venv/bin/activate 2>/dev/null || true; \
 	ruff check src/extractor || true
+
+# --- Pipeline fast gates (offline/online smokes) ---
+.PHONY: smokes-fast smokes-online
+
+smokes-fast:
+	./scripts/ci_fast_gate.sh
+
+smokes-online:
+	SMOKES_ONLINE=1 ./scripts/ci_fast_gate.sh
+
+ARANGODB_URL?=http://localhost:8529
+ARANGODB_USERNAME?=root
+
+.PHONY: arango-bootstrap
+arango-bootstrap:
+	uv run scripts/db/arangodb_bootstrap.py $(DB)
+
+.PHONY: graph-edges-from-hints
+graph-edges-from-hints:
+	@[ -n "$(HINTS)" ] || (echo "Set HINTS=path/to/edge_hints.json" && exit 2)
+	@[ -n "$(DB)" ] || (echo "Set DB=name (e.g., lean4_prod)" && exit 2)
+	uv run scripts/pipeline/stage11_build_edges.py $(HINTS) edges.json --arangodb $(DB)
+
+.PHONY: graph-knn
+graph-knn:
+	@[ -n "$(FLAT10)" ] || (echo "Set FLAT10=path/to/flat10.json" && exit 2)
+	@[ -n "$(DB)" ] || (echo "Set DB=name (e.g., lean4_prod)" && exit 2)
+	uv run scripts/pipeline/compute_embeddings_knn.py $(FLAT10) knn_edges.json --arangodb $(DB) --knn-k 5
+
+.PHONY: graph-oneclick
+graph-oneclick:
+	@[ -n "$(DB)" ] || (echo "Set DB=name (e.g., lean4_prod)" && exit 2)
+	@[ -n "$(HINTS)$(FLAT10)" ] || (echo "Provide HINTS=edge_hints.json or FLAT10=flat10.json" && exit 2)
+	uv run scripts/db/arangodb_bootstrap.py $(DB)
+	@if [ -n "$(HINTS)" ]; then \
+	  uv run scripts/pipeline/stage11_build_edges.py $(HINTS) edges.json --arangodb $(DB); \
+	else \
+	  uv run scripts/pipeline/stage11_build_edges.py $(FLAT10) edges.json --arangodb $(DB) --fallback-lemma-candidates; \
+	fi
+	@if [ -n "$(FLAT10)" ]; then \
+	  uv run scripts/pipeline/compute_embeddings_knn.py $(FLAT10) knn_edges.json --arangodb $(DB) --knn-k 5; \
+	fi
+	@mkdir -p aql_out
+	uv run scripts/queries/run_aql.py --db $(DB) scripts/queries/q1_find_contradictions.aql > aql_out/contradictions.json || true
+	uv run scripts/queries/run_aql.py --db $(DB) scripts/queries/q2_downstream_impact.aql --params '{"start_id":"sections/S1","max_hops":3,"graph":"lean4_g"}' > aql_out/downstream_S1.json || true
+
+.PHONY: graph-metrics
+graph-metrics:
+	@[ -n "$(DB)" ] || (echo "Set DB=name (e.g., lean4_prod)" && exit 2)
+	uv run scripts/reports/graph_metrics.py --db $(DB)
+
+.PHONY: graph-emit-db-edges
+graph-emit-db-edges:
+	@[ -n "$(OUT)" ] || (echo "Set OUT=db_edges.json" && exit 2)
+	@if [ -n "$(HINTS)" ]; then \
+	  uv run scripts/pipeline/stage11_build_edges.py $(HINTS) edges.json --emit-db-edges $(OUT); \
+	elif [ -n "$(FLAT10)" ]; then \
+	  uv run scripts/pipeline/stage11_build_edges.py $(FLAT10) edges.json --emit-db-edges $(OUT) --fallback-lemma-candidates; \
+	else \
+	  echo "Provide HINTS=edge_hints.json or FLAT10=flat10.json" && exit 2; \
+	fi
+.PHONY: graph-viewer-prepare
+graph-viewer-prepare:
+	@[ -n "$(SRC)" ] || (echo "Set SRC=edge_hints.json or edges.json (portable) or docgen4.json (DB-native)" && exit 2)
+	@if echo "$(SRC)" | grep -q docgen4; then \
+	  uv run scripts/viewers/adapter_docgen4_to_graph.py $(SRC) graph.json; \
+	else \
+	  uv run scripts/viewers/prepare_graph_json.py $(SRC) graph.json; \
+	fi
+	@echo "Wrote graph.json (viewer input)"
+
+.PHONY: graph-viewer-render
+graph-viewer-render:
+	@[ -n "$(JSON)" ] || (echo "Set JSON=graph.json" && exit 2)
+	uv run scripts/viewers/render_vis_html.py $(JSON) viewer.html
+	@echo "Open viewer.html in a browser"
+# Rinse/Repeat UX gate with timeouts and optional bundle
+.PHONY: rinse rinse-cdp
+rinse:
+	ATTEMPTS?=3
+	@echo "[make rinse] attempts=$(ATTEMPTS)"
+	ATTEMPTS=$(ATTEMPTS) bash scripts/ci_rinse_repeat.sh
+
+	rinse-cdp:
+	ATTEMPTS?=3
+	@echo "[make rinse-cdp] attempts=$(ATTEMPTS)"
+	ATTEMPTS=$(ATTEMPTS) BROWSERLESS_WS?=ws://127.0.0.1:9222/devtools/browser \
+	  bash scripts/ci_rinse_repeat.sh
+
+# Run UI/API smokes with timeouts (fast and full variants)
+.PHONY: smokes-rinse smokes-rinse-full
+smokes-rinse:
+	@echo "[make smokes-rinse] FAST=1"
+	SMOKES_FAST=1 timeout 900s node scripts/smokes/all.mjs
+
+smokes-rinse-full:
+	@echo "[make smokes-rinse-full]"
+	timeout 1800s node scripts/smokes/all.mjs
+
+
+# --- CI helpers ---
+PDF_DIR ?= prototypes/tabbed/pdfs
+TARGET_URL ?= http://127.0.0.1:4173/main
+
+.PHONY: ensure-pdfs
+ensure-pdfs:
+	@if ! ls -1 "$(PDF_DIR)"/*.pdf >/dev/null 2>&1; then 	  echo "[ensure-pdfs] No PDFs found in $(PDF_DIR). Add at least one .pdf or set PDF_DIR=..."; 	  exit 1; 	fi
+
+.PHONY: lint-api-gates
+lint-api-gates:
+	@echo "[lint-api-gates] checking that /api calls are gated in preview/dev..."
+	@! rg -n --hidden "/api/" prototypes/tabbed/html/src 	  | rg -v "isPreview\(|isDev\(" 	  || (echo "[lint-api-gates] Found ungated /api references. Gate them behind isPreview()/isDev()." && exit 1)
+
+.PHONY: ci-rinse
+ci-rinse:
+	@echo "[ci-rinse] preview gate"; 	VITE_PREVIEW=1 CONSOLE_ERRORS_TIMEOUT_MS=90000 TARGET_URL=$(TARGET_URL) node scenarios/ux/console_errors.mjs
+	@echo "[ci-rinse] no-preview-api check"; 	VITE_PREVIEW=1 TARGET_URL=$(TARGET_URL) node scenarios/ux/no_preview_api_requests.mjs
+	@echo "[ci-rinse] backend smokes"; 	$(MAKE) ensure-pdfs && $(MAKE) smokes-rinse

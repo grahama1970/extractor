@@ -24,8 +24,8 @@ def extract_pdf_basic(pdf_path: Path) -> dict:
 
         for page_num, page in enumerate(doc):
             # Get page dimensions
-            page_height = page.rect.height
-            page_width = page.rect.width
+            _page_height = page.rect.height
+            _page_width = page.rect.width
 
             # Extract text blocks
             text_dict = page.get_text("dict")

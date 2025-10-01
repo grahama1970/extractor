@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import importlib.util
 import json
-from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -267,6 +266,7 @@ def run_structured_pipeline(
     skip_embeddings10: bool = True,
     fast_embeddings10: bool = True,
     auto_convert_mangled_docx: bool = True,
+    fast_fallback_pdf: bool = True,
 ) -> Dict[str, Path]:
     provider = provider_cls()
     logger.info("Running {} pipeline for {}", provider_cls.__name__, input_path)
@@ -298,6 +298,10 @@ def run_structured_pipeline(
                     skip_embeddings10=True,
                     fast_embeddings10=True,
                     skip_graph11=True,
+                    **({
+                        'skip_tables05': True,
+                        'skip_figures06': True,
+                    } if fast_fallback_pdf else {}),
                     validate=False,
                     annotations_json=None,
                 )
@@ -360,12 +364,36 @@ def run_structured_pipeline(
     stage10_path.write_text(json.dumps(flattened, indent=2))
     logger.info("Flattened document to {} (objects={})", stage10_path, len(flattened))
 
+    # Stage 11 (offline JSON edges) — always emit graph edges JSON for structured runs
+    try:
+        stage11_dir = run_dir / "11_arango_create_graph" / "json_output"
+        _ensure_dir(stage11_dir)
+        bundle = stage11_dir / "_bundle.json"
+        bundle.write_text(json.dumps({"documents": flattened}, indent=2))
+        # Import and call debug_bundle to produce 11_graph_edges.json
+        mod_path = Path(__file__).resolve().parent / "steps" / "11_arango_create_graph.py"
+        spec = importlib.util.spec_from_file_location("pipeline_stage11", mod_path)
+        if spec and spec.loader:
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)  # type: ignore
+            # stage11 debug_bundle signature: (bundle: Path, output_dir: Path, k_neighbors: int, similarity_threshold: float)
+            try:
+                module.debug_bundle(bundle=bundle, output_dir=run_dir, k_neighbors=10, similarity_threshold=0.55)  # type: ignore[attr-defined]
+            except TypeError:
+                # Backward‑compat for different signature
+                module.debug_bundle(bundle=bundle, output_dir=run_dir)  # type: ignore[attr-defined]
+        else:
+            logger.warning("Stage 11 module not loadable; skipping graph edges for structured run")
+    except Exception as e:
+        logger.warning("Stage 11 (offline edges) failed for structured run: {}", e)
+
     if not skip_export10:
         logger.warning("Structured pipelines do not yet export directly to ArangoDB; skipping.")
 
     return {
         "stage07": stage07_path,
         "stage10_flattened": stage10_path,
+        "stage11_edges": (run_dir / "11_arango_create_graph" / "json_output" / "11_graph_edges.json"),
     }
 
 

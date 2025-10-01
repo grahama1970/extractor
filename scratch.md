@@ -1,12 +1,11 @@
- - DOCX synthesized tables: beyond the classic Signal/IO/Description/
-  Connection/Type header, should I check any additional header sets
-  for detection (e.g., “Name/Type/Value/Description”), or keep it
-  strictly to that known pattern for now?
-   > docx synthesized tables (not in a table object) would be suspicious,, no? Like it was a mangled pdf? Give me your thought here. Any engineering/scientifc docx document is going to use 100% table objects. These are formal documents
-  - XML heuristics: okay to start with generic tags (section/title/
-  table/figure) and also common variants (sect1/sect2, caption), or
-  keep the initial pass minimal (strictly section/title/table/figure)
-  and add variants only if smokes reveal gaps?
-  >
-  keep the initial pass minimal (strictly section/title/table/figure)
-  and add variants only if smokes reveal gaps?
+prototypes/tabbed/html/src/pages/ClassicLayout.tsx (your current copy after you patch)
+
+prototypes/tabbed/html/src/index.css (full file)
+
+prototypes/tabbed/html/src/App.css (if it still exists; confirm whether it’s imported anywhere)
+
+prototypes/tabbed/html/src/components/ui/sidebar.tsx (we rely on its layout helpers; want to confirm no extra overflow or width rules)
+
+prototypes/tabbed/html/index.html (to confirm no external stylesheet is pulled)
+
+Any project-level CSS that might affect layout (e.g., a global :root or .container wrapper)

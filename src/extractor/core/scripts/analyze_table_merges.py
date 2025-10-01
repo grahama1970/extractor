@@ -33,7 +33,6 @@ from typing import Optional
 from extractor.core.converters.pdf import PdfConverter
 from extractor.core.models import create_model_dict
 from extractor.core.processors.table_merge_analyzer import TableMergeAnalyzer
-from extractor.core.schema import BlockTypes
 
 
 def load_processed_document(json_path: Path):
@@ -51,7 +50,7 @@ def apply_merge_decisions(document_json: dict, merge_analyses: list) -> dict:
     merged_doc = json.loads(json.dumps(document_json))
 
     # Track which tables have been merged
-    merged_table_ids = set()
+    _merged_table_ids = set()
 
     for analysis in merge_analyses:
         if not analysis.should_merge:

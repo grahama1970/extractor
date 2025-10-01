@@ -8,7 +8,7 @@ External Dependencies:
 Example Usage
 -------------
 >>> from extractor.core.providers.rst import RSTProvider
->>> provider = NativeRSTProvider()
+>>> provider = RSTProvider()
 >>> doc = provider.extract_document("readme.rst")
 >>> print(doc.source_type)  # SourceType.RST
 """

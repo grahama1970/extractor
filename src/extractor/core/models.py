@@ -22,7 +22,7 @@ os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = (
 )
 
 try:
-    import cv2
+    __import__("cv2")  # availability check
 except ImportError:
     print("⚠️  OpenCV (cv2) not installed. Surya models require OpenCV.")
     print("   To fix this, run from the extractor directory:")

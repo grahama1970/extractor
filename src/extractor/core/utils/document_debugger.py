@@ -14,7 +14,7 @@ from pprint import pformat
 from typing import Callable, Optional
 
 from extractor.core.schema import BlockTypes
-from extractor.core.schema.blocks import Block, BlockId
+from extractor.core.schema.blocks import Block
 
 
 class SectionBreakpoint(Exception):

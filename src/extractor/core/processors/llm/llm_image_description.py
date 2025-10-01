@@ -22,7 +22,6 @@ Example Usage:
 import asyncio
 from pydantic import BaseModel
 from tqdm import tqdm
-import litellm
 
 from extractor.core.processors.llm import PromptData, BaseLLMSimpleBlockProcessor, BlockData
 from extractor.core.schema import BlockTypes
@@ -31,6 +30,8 @@ from extractor.core.services.litellm import LiteLLMService
 from extractor.core.services.utils.log_utils import log_api_request, log_api_response, log_api_error
 
 from typing import Annotated, List, Dict, Any, Optional
+from loguru import logger
+import os
 
 
 async def call_claude_subprocess(
@@ -247,7 +248,7 @@ In this figure, a bar chart titled "Fruit Preference Survey" is showing the numb
         ) as pbar:
             for block_data in blocks:
                 block = block_data["block"]
-                page = block_data["page"]
+                _page = block_data["page"]
 
                 prompt = self.image_description_prompt.replace(
                     "{raw_text}", block.raw_text(document)
@@ -304,7 +305,7 @@ In this figure, a bar chart titled "Fruit Preference Survey" is showing the numb
 
         # Process in batches
         batch_size = min(self.max_batch_size, total_blocks)
-        results = {}
+        _results = {}
 
         with tqdm(
             total=total_blocks,
@@ -374,7 +375,7 @@ In this figure, a bar chart titled "Fruit Preference Survey" is showing the numb
     async def _async_completion(self, completion_kwargs: dict, block) -> Dict[str, Any]:
         """Execute an async completion and return both the response and the block."""
         try:
-            response = await call_claude_subprocess(prompt)
+            response = None
             log_api_response("LiteLLM Batch", response)
             return {"block": block, "response": response}
         except Exception as e:

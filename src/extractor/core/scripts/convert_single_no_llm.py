@@ -5,7 +5,6 @@ Marker conversion script for PDF extraction (without LLM processors)
 
 import os
 import sys
-import json
 import click
 from pathlib import Path
 
@@ -59,11 +58,11 @@ def main(pdf_path, **kwargs):
         os.makedirs(output_dir, exist_ok=True)
 
         # Create models
-        print(f"Loading ML models...")
+        print("Loading ML models...")
         models = create_model_dict(device="cuda", dtype="float16")
 
         # Create converter with non-LLM processors
-        print(f"Creating PDF converter...")
+        print("Creating PDF converter...")
         converter = PdfConverter(
             config=config,
             artifact_dict=models,

@@ -1,0 +1,8 @@
+/* Find pairs of sections that have the same normalized_prop but opposite polarity */
+FOR s1 IN sections
+  FOR s2 IN sections
+    FILTER s1._key < s2._key
+    FILTER s1.normalized_prop == s2.normalized_prop
+    FILTER s1.polarity != s2.polarity
+    RETURN {a: s1, b: s2}
+

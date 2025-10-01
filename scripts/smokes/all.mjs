@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 
 const stepsBase = [
   { cmd: ['node', 'scripts/smokes/llm_health.mjs'], name: 'llm_health' },
-  { cmd: ['node', 'scripts/smokes/console_errors.mjs'], name: 'console_errors' },
+  { cmd: ['node', 'scenarios/ux/console_errors.mjs'], name: 'console_errors' },
     { cmd: ['node', 'scripts/smokes/api_tabbed_basic.mjs'], name: 'api_tabbed_basic' },
   { cmd: ['node', 'scripts/smokes/api_coco_export.mjs'], name: 'api_coco_export' },
   { cmd: ['node', 'scripts/smokes/api_suggest_tables.mjs'], name: 'api_suggest_tables' },
@@ -31,6 +31,20 @@ const stepsBase = [
   { cmd: ['node', 'scripts/smokes/resize_keyboard_right_persist.mjs'], name: 'resize_keyboard_right_persist' },
   { cmd: ['node', 'scripts/smokes/a11y_focus_basic.mjs'], name: 'a11y_focus_basic' },
   { cmd: ['node', 'scripts/smokes/anno_list_virtualized.mjs'], name: 'anno_list_virtualized' },
+  // New UI smokes (Happy-Path minimal)
+  { cmd: ['node', 'scripts/smokes/ui_grouping_export_json.mjs'], name: 'ui_grouping_export_json' },
+  { cmd: ['node', 'scripts/smokes/ui_export_json_fields.mjs'], name: 'ui_export_json_fields' },
+  { cmd: ['node', 'scripts/smokes/ui_progress_pipeline_run.mjs'], name: 'ui_progress_pipeline_run' },
+  { cmd: ['node', 'scripts/smokes/ui_load_pipeline_annos_from_latest.mjs'], name: 'ui_load_pipeline_annos_from_latest' },
+  { cmd: ['node', 'scripts/smokes/ui_keyboard_core.mjs'], name: 'ui_keyboard_core' },
+  { cmd: ['node', 'scripts/smokes/ui_search_highlight_thumb.mjs'], name: 'ui_search_highlight_thumb' },
+  { cmd: ['node', 'scripts/smokes/ui_conflicts_load_and_resolve.mjs'], name: 'ui_conflicts_load_and_resolve' },
+  // New UX slices (kept at end; safe to run; comments panel skips if missing)
+  { cmd: ['node', 'scripts/smokes/ui_zoom_fit_pan.mjs'], name: 'ui_zoom_fit_pan' },
+  { cmd: ['node', 'scripts/smokes/ui_selection_handles_resize.mjs'], name: 'ui_selection_handles_resize' },
+  { cmd: ['node', 'scripts/smokes/ui_thumbnails_virtualized.mjs'], name: 'ui_thumbnails_virtualized' },
+  { cmd: ['node', 'scripts/smokes/ui_a11y_focus_escape.mjs'], name: 'ui_a11y_focus_escape' },
+  { cmd: ['node', 'scripts/smokes/ui_comments_threads_panel.mjs'], name: 'ui_comments_threads_panel' },
   { cmd: ['node', 'scripts/smokes/issue_013.mjs'], name: 'issue_013' },
   { cmd: ['node', 'scripts/smokes/issue_014.mjs'], name: 'issue_014' },
   { cmd: ['node', 'scripts/smokes/issue_018.mjs'], name: 'issue_018' },

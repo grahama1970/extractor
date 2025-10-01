@@ -46,6 +46,7 @@ Based on [OpenAI Prompting Guide](https://cookbook.openai.com/examples/gpt-5/gpt
   - Artifacts (for issues/PRs): logs and screenshots in `scripts/artifacts/`.
   - Recommendation: add a small “app ready” marker on mount and wait for it in checks to reduce flakes.
 
+
   
   **Prototype Baseline E2E (Tabbed/Classic/Dashboard)**
   - Dev server required (prefer VS Code Task `Prototype: Dev (vite on 8080)` or `npm run preview:8080`).
@@ -63,6 +64,47 @@ Based on [OpenAI Prompting Guide](https://cookbook.openai.com/examples/gpt-5/gpt
 * **Hot Reloading**: All UX must hot-reload for near real-time feedback.
 * **User Collaboration**: Implement user requests unless they add brittleness or reduce usability. Recommend against with justification if so.
 
+—
+
+Always-On CDP/MCP Rule (must follow)
+- Always use the Chrome DevTools MCP (CDP) for any UX debugging/verification:
+  - Prefer `npm run ux:check:cdp` or `node scripts/ux_check_cdp_auto.mjs` while a live server is running.
+  - Attach to an existing Chrome/Browserless via `BROWSERLESS_WS=ws://127.0.0.1:9222/devtools/browser` when available.
+  - From MCP: capture a full-page screenshot and list console messages for each route under test.
+  - Treat the CDP artifacts as the source of truth for pass/fail.
+  - If a non‑CDP gate is used first (e.g., `npm run ux:check`), follow it immediately with a CDP/MCP attach to validate and save artifacts.
+
+---
+
+## Project Readiness (quick pass/fail)
+
+- Dev (deterministic; no network):
+  - make project-ready
+  - Outputs: `PROJECT_READY.md` (with ✅/❌ summary) and `local/artifacts/mvp/mvp_report.json`.
+- Deploy (live‑gated; fail on skips):
+  - READINESS_LIVE=1 READINESS_E2E=1 STRICT_READY=1 make project-ready-live
+  - Uses built‑in YouTube timedtext E2E; Ollama probe; fails on any skipped/stubbed checks.
+
+Readiness Rule (no skips/triage)
+- All smokes must pass before a project is ready to deploy. No triage, no skipping.
+- Required gates (run locally or in CI):
+  - Preview gate: `console_errors` with post‑ready scoring (hard=0), `no_preview_api_requests` (no `/api/*` after readiness), and `a11y_smoke` (logs only in preview).
+  - Backend smokes: fast UI/API suite with the Tabbed backend running.
+- One‑shot command for CI and pre‑merge: `make ci-rinse` (starts/stops preview, runs the three preview smokes, then backend fast smokes, and sanitizes artifacts). Any hard failure blocks deploy.
+
+
+## Terminal Command Output (Agent)
+
+- Always format multi-line terminal commands for a ~400px-wide terminal.
+- Use line continuations (`\`) at logical breakpoints so commands copy/paste cleanly.
+- Example style:
+
+  ```bash
+  BASE_URL=http://127.0.0.1:8080 \
+  BROWSERLESS_WS=ws://127.0.0.1:9222/devtools/browser \
+  make smoke-ui-extract-load-cdp
+  ```
+
 ---
 
 ## Verification & Integrity Policy (Agent)
@@ -78,7 +120,18 @@ The agent must not claim success without verifying the change in a browser conte
     - Top toolbar is above the canvas and does not occlude it.
     - Pointer draw works (press `N`, drag → a box appears).
     - Thumbnails render in left‑rail and bottom filmstrip modes.
-  - Include artifact paths (screenshot + log) in the status update.
+- Include artifact paths (screenshot + log) in the status update.
+
+### Hard Rule: Screenshot + CDP per UI change
+
+- After every change to anything under `prototypes/` (HTML/TSX/TS/Server):
+  - Capture a full‑page screenshot and console log using the CDP/puppeteer gate.
+  - Use one of:
+    - `BASE_URL=http://127.0.0.1:<vite-port>/main node scripts/smokes/console_errors.mjs`.
+    - `node scripts/ux_check_cdp_auto.mjs` (auto‑discovers CDP; saves artifacts under `scripts/artifacts/`).
+  - Treat any Vite overlay, `console.error`, `pageerror`, or failed document/script/stylesheet request as a blocker.
+  - Paste the two artifact paths (`*.png`, `*.log`) into the issue/PR update before claiming success.
+- VS Code: see `docs/VSCODE_TASK_GUIDE.md` for the “Requirements: Dev (auto‑port)” launcher, which runs these checks automatically and fails fast with artifact links.
 
 Artifacts (mandatory)
 - For each route touched, attach at minimum:
@@ -108,6 +161,8 @@ Definition of Done (UX slice)
 
 
 ## Long‑Running Processes (VS Code)
+
+For a concise playbook (auto‑port servers, robust binds, and URL printing), see `docs/VSCODE_TASK_GUIDE.md`. Keep AGENTS.md short; the guide contains the reusable task patterns and examples.
 
 When the agent needs to run backend/front‑end servers for thorough E2E (CDP/Puppeteer) debugging, do not spawn long‑running processes inside the Codex CLI. Instead, use VS Code Tasks to manage servers that persist independently of the CLI session:
 
@@ -198,8 +253,8 @@ Use this system as follows for every UI/API change in the `prototypes/tabbed` ap
    - Fast gate: `ruff`, `black --check`, `mypy`, `pytest -q`.
    - API smoke(s): `node scripts/smokes/api_generate_model.mjs`.
    - UX health: `node scripts/ux_check_cdp_auto.mjs`.
-   - Full suite: `node scripts/smokes/all.mjs`.
-   - One command local CI: `scripts/ci_local.sh` or `make ci` (verifies dev servers/CDP, runs gates + suite, prints artifacts).
+   - Live scenarios (preferred): `python scenarios/run_all.py` or `make run-scenarios`.
+   - One command local CI: `scripts/ci_local.sh` or `make ci` (verifies dev servers/CDP, runs gates + scenarios, prints artifacts).
 
 6) Record artifacts
    - Paste log + screenshot paths into the issue file under “Artifacts”.
@@ -423,3 +478,16 @@ curl -sS \
         "max_tokens": 20
       }'
 ```
+
+
+### Tabbed UI Change Gate (must follow for every UI patch)
+
+- Micro-iterations only: make one UI change at a time. After each change:
+  - `npm run typecheck` (prototypes/tabbed/html)
+  - `BASE_URL=http://127.0.0.1:8080/main npm run ux:check`
+  - If the change touched a specific pane or control, run its DOM smoke:
+    - Inspector pane: `node scripts/smokes/ui_inspector_pane_present.mjs`
+    - Requirements pane: `node scripts/smokes/ui_requirements_pane_dom.mjs`
+- Never batch unrelated JSX edits before a green gate.
+- If a Vite overlay appears, immediately revert the last file to last-known-good and re-apply incrementally.
+- Smokes must accept a full `BASE_URL` and must not append route suffixes.

@@ -13,9 +13,8 @@ import sys
 import json
 import asyncio
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Tuple, cast
+from typing import Dict, List, Optional, Any
 from datetime import datetime
-import base64
 import numpy as np
 from textwrap import dedent
 import pandas as pd
@@ -27,7 +26,6 @@ from dotenv import load_dotenv, find_dotenv
 from extractor.pipeline.utils.litellm_cache import initialize_litellm_cache
 from loguru import logger
 from rich.console import Console
-import litellm
 from tqdm.asyncio import tqdm_asyncio
 
 from extractor.pipeline.utils.json_utils import clean_json_string
@@ -52,9 +50,7 @@ from extractor.pipeline.utils.diagnostics import (
 from extractor.pipeline.utils.metrics_logger import log_metric
 from extractor.pipeline.utils.litellm_call import litellm_call
 from extractor.pipeline.utils.model_params import (
-    build_chat_messages,
     build_chat_extras,
-    image_file_to_data_url,
 )
 from extractor.pipeline.utils.vision import preflight_vision_support
 from extractor.pipeline.utils.text_utils import sanitize_text
@@ -62,6 +58,25 @@ from extractor.pipeline.utils.unified_conversion import build_unified_document_f
 from extractor.core.schema.unified_document import SourceType
 from extractor.pipeline.utils.ann_index import build_ann_index, query_ann_index, load_ann_index
 from extractor.pipeline.utils.log_utils import sanitize_messages_for_return
+
+# Shared helper: table confidence heuristic (0.0–1.0)
+def _table_confidence(t: Dict[str, Any]) -> float:
+    try:
+        pm = t.get("pandas_metrics") or {}
+        shape = pm.get("shape") or [0, 0]
+        rows = int(shape[0] or 0)
+        density = float(pm.get("data_density") or 0.0)
+        camel = t.get("camelot_metrics") or {}
+        acc = float(camel.get("accuracy") or 0.0)
+        white = float(camel.get("whitespace") or 0.0)
+        score = 0.0
+        score += 0.2 if rows >= 3 else 0.0
+        score += min(max(density, 0.0), 1.0) * 0.4
+        score += min(max(acc / 100.0, 0.0), 1.0) * 0.4
+        score -= min(max(white / 100.0, 0.0), 1.0) * 0.1
+        return max(0.0, min(1.0, score))
+    except Exception:
+        return 0.0
 
 # --- Initialization & Configuration ---
 
@@ -80,7 +95,6 @@ logger.add(
     format="<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{function}:{line}</cyan> - <level>{message}</level>",
 )
 
-app = typer.Typer(help="Reflows document sections using a VLM (offline)")
 STAGE07_DEBUG = os.getenv("STAGE07_DEBUG", "").lower() in ("1", "true", "yes", "y")
 console = Console()
 
@@ -135,7 +149,7 @@ STAGE07_MAX_TOKENS = int(os.getenv("STAGE07_MAX_TOKENS", "2048"))
 PROMPT_STRICT_REQUIREMENTS = (
     "Strict requirements for the JSON you return:\n"
     "- Merge Stage 05 table fragments that share the same logical columns into a SINGLE table block."
-    " Use the Stage 05 column order exactly, trim newline/zero-width characters inside headers,"
+    " Use the Stage 05 column _order exactly, trim newline/zero-width characters inside headers,"
     " and keep every cell value character-for-character (apart from collapsing whitespace)."
     " Do not invent rows or columns."
     "\n- When you merge or infer a table title from nearby context, prefix it with 'INFERRED:'; otherwise leave title null."
@@ -483,23 +497,7 @@ async def reflow_section_with_llm(
     try:
         sec_diags = []
 
-        def _tconf(t):
-            try:
-                pm = t.get("pandas_metrics") or {}
-                shape = pm.get("shape") or [0, 0]
-                rows = int(shape[0] or 0)
-                density = float(pm.get("data_density") or 0.0)
-                camel = t.get("camelot_metrics") or {}
-                acc = float(camel.get("accuracy") or 0.0)
-                white = float(camel.get("whitespace") or 0.0)
-                score = 0.0
-                score += 0.2 if rows >= 3 else 0.0
-                score += min(max(density, 0.0), 1.0) * 0.4
-                score += min(max(acc / 100.0, 0.0), 1.0) * 0.4
-                score -= min(max(white / 100.0, 0.0), 1.0) * 0.1
-                return max(0.0, min(1.0, score))
-            except Exception:
-                return 0.0
+        # use shared helper
 
         # Decide if the model supports multimodal inputs
         supports_vision = any(
@@ -567,26 +565,8 @@ async def reflow_section_with_llm(
                     pass
 
             # Table images: include only low-confidence tables
-            def _tconf(t):
-                try:
-                    pm = t.get("pandas_metrics") or {}
-                    shape = pm.get("shape") or [0, 0]
-                    rows = int(shape[0] or 0)
-                    density = float(pm.get("data_density") or 0.0)
-                    camel = t.get("camelot_metrics") or {}
-                    acc = float(camel.get("accuracy") or 0.0)
-                    white = float(camel.get("whitespace") or 0.0)
-                    score = 0.0
-                    score += 0.2 if rows >= 3 else 0.0
-                    score += min(max(density, 0.0), 1.0) * 0.4
-                    score += min(max(acc / 100.0, 0.0), 1.0) * 0.4
-                    score -= min(max(white / 100.0, 0.0), 1.0) * 0.1
-                    return max(0.0, min(1.0, score))
-                except Exception:
-                    return 0.0
-
             for t in section_data.get("tables", []) or []:
-                conf = _tconf(t)
+                conf = _table_confidence(t)
                 if conf < TABLE_CONF_THRESHOLD:
                     tb64 = get_table_image_b64(t, results_base_dir)
                     if tb64:
@@ -692,12 +672,12 @@ async def reflow_section_with_llm(
             Core requirements
             - Merge contiguous text into coherent paragraphs (fix hyphenation, broken words, OCR joins). Remove duplicated headers/footers and page artifacts.
             - Merge contiguous tables, including those that span pages, into one logical table positioned at the first fragment. Perform header normalization (remove intra-cell newlines/zero-width chars; trim/condense whitespace) and flatten multi-row headers by safe concatenation.
-            - Preserve reading order: top→bottom, left→right, across pages.
+            - Preserve reading _order: top→bottom, left→right, across pages.
             - Prefer provided tables/pandas content; use images only for context or disambiguation.
 
             Data Integrity (strict)
             - Tables: DO NOT change cell content. No spelling “corrections”, translations, unit changes, rounding, normalization, inference, or reformatting. Keep numeric formats as-is.
-            - Allowed in tables only: remove intra-cell newlines/excess spaces (join without changing character order); flatten multi-row headers by concatenation delimiters.
+            - Allowed in tables only: remove intra-cell newlines/excess spaces (join without changing character _order); flatten multi-row headers by concatenation delimiters.
             - Forbidden in tables: reordering rows/columns, filling blanks, deduping, computing totals.
             - Text/Headings/Lists: Fix OCR splits/hyphenation and obvious typos only outside tables. Record fixes in ocr_corrections.
 
@@ -785,7 +765,7 @@ async def reflow_section_with_llm(
             if sec_b64:
                 _attach_blocks(sec_b64, "section", {"section_id": section_data.get("id")})
             for t in section_data.get("tables", []) or []:
-                conf = _tconf(t)
+                conf = _table_confidence(t)
                 if conf < TABLE_CONF_THRESHOLD:
                     _attach_blocks(
                         get_table_image_b64(t, results_base_dir),
@@ -954,13 +934,13 @@ async def reflow_section_with_llm(
         # Attempt 1: Chat Completions with standardized messages (system + user text + image_url data URL)
         try:
             # Build image data URL for section image if present and attach to messages
-            image_data_url = None
+            _image_data_url = None
             try:
                 # prefer section image
                 if sec_b64:
-                    image_data_url = f"data:image/png;base64,{sec_b64}"
+                    _image_data_url = f"data:image/png;base64,{sec_b64}"
             except Exception:
-                image_data_url = None
+                _image_data_url = None
             # Prompt: compact vs full. Compact can help providers that stall on overly prescriptive prompts.
             _compact = os.getenv("STAGE07_COMPACT_PROMPT", "").lower() in ("1", "true", "yes", "y")
             if _compact:
@@ -988,11 +968,11 @@ async def reflow_section_with_llm(
             # Include a JSON schema hint inline for Gemini-like providers
             schema_hint = ""
             if _is_gemini(LLM_MODEL):
-                try:
-                    import json as _json
-                    schema_hint = "\nJSON Schema (validate strictly):\n" + _json.dumps(_json_schema, ensure_ascii=False)
-                except Exception:
-                    schema_hint = "\nKeys: reflowed_json(object), ocr_corrections(object), improvements_made(string), summary(string)."
+                # Avoid referencing _json_schema before it is defined; provide a compact keys hint instead.
+                schema_hint = (
+                    "\nKeys: reflowed_json(object), ocr_corrections(object), "
+                    "improvements_made(string), summary(string)."
+                )
             user_text = (
                 f"Return ONLY valid JSON.{schema_hint}\n\n{context_text}" if _is_gemini(LLM_MODEL) else f"Return ONLY valid JSON.\n\n{context_text}"
             )
@@ -1231,7 +1211,7 @@ async def reflow_section_with_llm(
                 )
             except Exception:
                 pass
-        except Exception as e:
+        except Exception:
             resp = ""
 
         # Normalize response to get content (use shared extractor for broad compatibility)
@@ -1246,7 +1226,7 @@ async def reflow_section_with_llm(
                 # Build compact instruction
                 compact_guard = (
                     "Return ONLY a JSON object with keys: reflowed_json, ocr_corrections, improvements_made, summary. "
-                    "No code fences. reflowed_json.blocks must be valid and ordered."
+                    "No code fences. reflowed_json.blocks must be valid and _ordered."
                 )
                 compact_user = f"{compact_guard}\n\n{context_text[:1500]}"
                 user_parts2 = [{"type": "text", "text": compact_user}]
@@ -1868,7 +1848,7 @@ def consolidate_data(
         return "\n\n".join(parts)
 
     for section in sections_data:
-        # Source text (raw order) and minimal merged fallback from blocks
+        # Source text (raw _order) and minimal merged fallback from blocks
         blocks = section.get("blocks", [])
         section["source_text"] = "\n".join(
             [(b.get("text") or "").strip() for b in blocks if (b.get("text") or "").strip()]
@@ -1959,7 +1939,7 @@ def consolidate_data(
                                     )
                                 # Apply header row as column names if shape aligns
                                 if len(body.columns) == len(hdr.columns):
-                                    hdr_clean = _collapse_ws_df(hdr)
+                                    _hdr_clean = _collapse_ws_df(hdr)
                                     body = _collapse_ws_df(body)
                                     new_cols = [
                                         (_sanitize_table_cell(x) or str(j))
@@ -2051,7 +2031,7 @@ def consolidate_data(
 
                 a_vecs = embedder.encode(annot_texts, normalize_embeddings=True)
                 sims = np.dot(a_vecs, q_vec)
-                order = np.argsort(-sims)
+                _order = np.argsort(-sims)
                 # Annotate similarity on all on-page candidates
                 for i in range(len(candidates)):
                     candidates[i]["similarity"] = float(sims[i])
@@ -2207,7 +2187,7 @@ def run(
     """
     Reflows document sections using multimodal context from previous stages.
     """
-    console.print(f"[bold green]Starting Section Reflow (Stage 07)[/bold green]")
+    console.print("[bold green]Starting Section Reflow (Stage 07)[/bold green]")
     run_id = get_run_id()
     diagnostics = []
     errors_count = 0
@@ -2430,7 +2410,7 @@ def run(
     with open(output_path, "w") as f:
         json.dump(final_output, f, indent=2, ensure_ascii=False)
 
-    console.print(f"\n[bold green]✅ Section reflow complete.[/bold green]")
+    console.print("\n[bold green]✅ Section reflow complete.[/bold green]")
     console.print(f"   - Results saved to: [cyan]{output_path}[/cyan]")
 
 
@@ -2446,6 +2426,7 @@ def debug_bundle(
     output_dir: Path = typer.Option("data/results/pipeline", "-o", help="Results directory"),
     include_images: bool = typer.Option(True, "--include-images/--no-include-images"),
     allow_fallback: bool = typer.Option(False, "--allow-fallback"),
+    request_timeout: int = typer.Option(120, "--timeout", help="Per-request LLM timeout (seconds)"),
 ):
     """Run Stage 07 directly from a consolidated JSON bundle (debug only)."""
     stage_output_dir = output_dir / "07_reflow_section"
@@ -2504,7 +2485,11 @@ def debug_bundle(
     async def run_tasks():
         tasks = [
             reflow_section_with_llm(
-                s, output_dir, include_images=include_images, allow_fallback=allow_fallback
+                s,
+                output_dir,
+                include_images=include_images,
+                allow_fallback=allow_fallback,
+                llm_timeout=request_timeout,
             )
             for s in sections_to_process
         ]
@@ -2578,26 +2563,8 @@ def build_reflow_request_messages(
             )
 
         # Low-confidence table image
-        def _tconf(t: Dict[str, Any]) -> float:
-            try:
-                pm = t.get("pandas_metrics") or {}
-                shape = pm.get("shape") or [0, 0]
-                rows = int(shape[0] or 0)
-                density = float(pm.get("data_density") or 0.0)
-                camel = t.get("camelot_metrics") or {}
-                acc = float(camel.get("accuracy") or 0.0)
-                white = float(camel.get("whitespace") or 0.0)
-                score = 0.0
-                score += 0.2 if rows >= 3 else 0.0
-                score += min(max(density, 0.0), 1.0) * 0.4
-                score += min(max(acc / 100.0, 0.0), 1.0) * 0.4
-                score -= min(max(white / 100.0, 0.0), 1.0) * 0.1
-                return max(0.0, min(1.0, score))
-            except Exception:
-                return 0.0
-
         for t in section_data.get("tables", []) or []:
-            if _tconf(t) < TABLE_CONF_THRESHOLD:
+            if _table_confidence(t) < TABLE_CONF_THRESHOLD:
                 tb64 = get_table_image_b64(t, results_base_dir)
                 if tb64:
                     image_blocks.append(
@@ -2625,8 +2592,8 @@ def build_reflow_request_messages(
     system_text = (
         "You are a strict JSON reflow engine. Return ONLY a JSON object with keys: "
         "reflowed_json, ocr_corrections, improvements_made, summary. No code fences. "
-        "Requirements: reflowed_json.blocks must preserve reading order and include: "
-        "(a) a single merged table block when tables are fragmented/continued. The table title MUST start with 'INFERRED:' (e.g., INFERRED: …). Use the nearby text to form a concise title but always prefix with INFERRED:. The table must include 'columns' and 'rows' consistent with provided context. When column hints are provided in context, use those exact column names verbatim and in order; do NOT rename or substitute synonyms. Do not alter cell values; "
+        "Requirements: reflowed_json.blocks must preserve reading _order and include: "
+        "(a) a single merged table block when tables are fragmented/continued. The table title MUST start with 'INFERRED:' (e.g., INFERRED: …). Use the nearby text to form a concise title but always prefix with INFERRED:. The table must include 'columns' and 'rows' consistent with provided context. When column hints are provided in context, use those exact column names verbatim and in _order; do NOT rename or substitute synonyms. Do not alter cell values; "
         "(b) a figure block with a non-empty title (literal or INFERRED), short caption, and image_ref when applicable. "
         "Always provide ocr_corrections and improvements_made; include summary."
     )

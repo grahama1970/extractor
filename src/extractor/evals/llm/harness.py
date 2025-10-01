@@ -1,15 +1,13 @@
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional
 
 from dotenv import load_dotenv, find_dotenv
-from litellm import acompletion
 import litellm as _litellm
 from extractor.pipeline.utils.litellm_call import litellm_call
 
@@ -17,7 +15,6 @@ from extractor.core.services.utils.json_utils import clean_json_string
 from extractor.pipeline.utils.model_params import (
     build_chat_messages,
     build_chat_extras,
-    image_file_to_data_url,
 )
 
 

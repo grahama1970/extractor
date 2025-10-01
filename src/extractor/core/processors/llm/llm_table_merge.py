@@ -32,9 +32,6 @@ from extractor.core.schema.blocks import Block, TableCell
 from extractor.core.schema.document import Document
 from loguru import logger
 import asyncio
-import sys
-from pathlib import Path
-import subprocess
 import json
 
 # Direct ArangoDB connection - NO MORE DUMMY FUNCTIONS!
@@ -506,7 +503,7 @@ Table 2
         features2 = self._extract_features(table2, document)
 
         # Search for similar table merge patterns
-        merge_query = f"""
+        merge_query = """
         FOR doc IN pdf_objects
           FILTER doc.object_type == 'table_merge_pattern'
           LET table1_similarity = BM25(doc.table1_text, @table1_text)
@@ -515,14 +512,14 @@ Table 2
           FILTER combined_score > 0.3
           SORT combined_score DESC
           LIMIT 5
-          RETURN {{
+          RETURN {
             case_id: doc._key,
             confidence: combined_score,
             merge_data: doc.merge_data,
             table1_text: doc.table1_text,
             table2_text: doc.table2_text,
             match_type: 'bm25'
-          }}
+          }
         """
 
         result = self._call_arango(

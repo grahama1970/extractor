@@ -11,7 +11,7 @@ External Dependencies:
 
 Example Usage:
 >>> from extractor.core.providers.pptx import PPTXProvider
->>> provider = NativePPTXProvider()
+>>> provider = PPTXProvider()
 >>> document = provider.extract_document("presentation.pptx")
 >>> print(document.source_type)  # SourceType.PPTX
 """
@@ -20,14 +20,11 @@ import hashlib
 import base64
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Union
-from datetime import datetime
 
 from pptx import Presentation
 from pptx.slide import Slide
-from pptx.shapes.base import BaseShape
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 from pptx.enum.shapes import PP_PLACEHOLDER
-from pptx.enum.dml import MSO_THEME_COLOR
 from loguru import logger
 
 from extractor.core.schema.unified_document import (

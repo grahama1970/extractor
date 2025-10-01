@@ -16,15 +16,9 @@ Version: 1.0.0
 
 import typer
 from pathlib import Path
-from typing import Optional, Set, Callable, Any, Dict, List
+from typing import Optional, Set
 import json
-import sys
 import inspect
-from functools import wraps
-import asyncio
-from contextlib import contextmanager, redirect_stdout
-from io import StringIO
-import traceback
 
 # Import prompt infrastructure - this should be in every project
 try:
@@ -300,7 +294,7 @@ def add_slash_mcp_commands(
         typer.echo(f" Includes {len(tools)} tools")
         if prompts:
             typer.echo(f" Includes {len(prompts)} prompts")
-        typer.echo(f"\n Config follows Granger MCP standard v1.0.0")
+        typer.echo("\n Config follows Granger MCP standard v1.0.0")
 
     if enable_fastmcp_server:
 

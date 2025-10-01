@@ -5,8 +5,7 @@ Module: table_simple.py
 Provides simple presets for table extraction with sensible defaults.
 """
 
-from pydantic import BaseModel, Field
-from typing import Optional, List
+from pydantic import BaseModel
 
 
 class SimpleTableConfig(BaseModel):

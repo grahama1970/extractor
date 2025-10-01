@@ -4,7 +4,7 @@ Simple bbox utility functions for expanding bounding boxes
 No complex classes, just simple functions that work!
 """
 
-from typing import List, Tuple
+from typing import List
 
 
 def expand_bbox(

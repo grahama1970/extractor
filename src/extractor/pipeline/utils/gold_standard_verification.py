@@ -194,7 +194,7 @@ def verify_pipeline():
     with open("gold_standard_verification_results.json", "w") as f:
         json.dump(verification_results, f, indent=2)
 
-    print(f"\nDetailed results saved to: gold_standard_verification_results.json")
+    print("\nDetailed results saved to: gold_standard_verification_results.json")
 
     return results["failed"] == 0
 

@@ -18,7 +18,6 @@ Example Usage:
 import argparse
 import os
 import subprocess
-import pkg_resources
 
 
 def chunk_convert_cli():

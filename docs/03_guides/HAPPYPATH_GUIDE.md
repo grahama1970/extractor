@@ -1,138 +1,226 @@
-# Gamified — Happy Path Guide
+# Happy Path Guide — Single CLI Surface
 
 Purpose
-- Keep surface area minimal. Avoid option sprawl. Deliver a predictable, collaborative flow that works the first time and every time.
-- This guide is for agents and engineers to stay on the paved road. If a step isn’t here, it’s likely out of scope for MVP.
+- Provide one minimal CLI for all extractions (PDF fast/accurate and all structured formats) with predictable outputs and artifacts.
+- Keep option surface small; defaults should work end-to-end without extra flags.
 
 Principles
-- One spec. One command. One dashboard.
-- Progressive disclosure: defaults always work; overrides are rare.
-- Collaboration-by-default: runs are shareable, replayable, and annotated.
-- Deterministic where possible: store seeds/spec snapshots for replay.
-- Arango-only for MVP: no alternative backends, no graph authoring.
-- Canonical document shape: every ingestion path (PDF, HTML, DOCX, PPTX, …)
-  now normalizes to the `UnifiedDocument` schema before Arango export so the
-  downstream happy path sees identical structures regardless of source format.
-- Structured formats (HTML, DOCX, PPTX, Spreadsheet, EPUB, RST, XML) skip PDF
-  reflow entirely; the dispatcher routes them through a lightweight pipeline in
-  `extractor.pipeline.structured_pipeline` that emits `UnifiedDocument` and
-  Stage 10 artifacts directly.
+- One command: `python -m src.cli extract` for everything.
+- Deterministic where possible: offline/fast-embedding defaults for accurate PDF runs from the CLI.
+- Canonical shape: normalize to `UnifiedDocument` and Stage 10 for accurate and structured paths.
 
-Golden Path Overview
-- CLI verbs (only 4):
-  - `init` — create a spec via a tiny TUI wizard
-  - `run` — execute from a spec; auto-start backend; print URLs
-  - `open` — open the dashboard filtered to a run
-  - `replay` — re-run using the stored spec snapshot
-- Single spec file: `gamified.yaml` (v1), Pydantic-validated.
-- Backend: FastAPI + Arango (auto-starts on a free port).
-- Dashboard: React/Tailwind/Shadcn (Status, Episodes, Logs, Run Notes).
+**Single Command Surface**
+- `python -m src.cli extract <input> <out_dir> [--mode fast|accurate]`
+- Works for:
+  - PDF: choose `--mode fast` (PyMuPDF text-only) or `--mode accurate` (full pipeline with deterministic skips).
+  - Structured formats: HTML, DOCX, PPTX, XLSX, EPUB, RST, XML, MD (no `--mode` needed).
 
-Prerequisites
-- ArangoDB running and reachable:
-  - `ARANGO_HOST=127.0.0.1 ARANGO_PORT=8529 ARANGO_USERNAME=root ARANGO_PASSWORD=openSesame ARANGO_DB=marker`
-- Codex CLI available:
-  - `export CODEX_BINARY_PATH=/absolute/path/to/codex` (optional if `codex` is on PATH)
-- uv (recommended) and Node (for dashboard dev only). The CLI auto-starts the backend; dashboard dev server is started by the orchestrator; you don’t need to run it manually.
+**Quick Start**
+- PDF (fast text-only):
+  ```bash
+  python -m src.cli extract \
+    data/input/pipeline/BHT_CV32A65X_marked.pdf \
+    data/results/fast_pdf \
+    --mode fast
+  ```
+- PDF (accurate, normalized outputs):
+  ```bash
+  python -m src.cli extract \
+    data/input/pipeline/BHT_CV32A65X_marked.pdf \
+    data/results/pipeline \
+    --mode accurate
+  ```
+  - Prove on demand (Lean4):
+    ```bash
+    python -m src.cli extract \
+      data/input/pipeline/BHT_CV32A65X_marked.pdf \
+      data/results/pipeline_prove \
+      --mode accurate --prove
+    ```
+- Structured (HTML example):
+  ```bash
+  python -m src.cli extract \
+    data/results/pipeline/01_annotation_processor/BHT_CV32A65X_marked_clean.html \
+    data/results/structured_html
+  ```
 
-Spec v1 (canonical example)
-```yaml
-version: 1
-codebase:
-  repo_root: .
-approaches:
-  - name: fueling_density_mpc
-  - name: edge_stability_mhd
-  - name: heat_extraction_adaptive
-runner:
-  type: analysis_sim
-scoring:
-  weights: { correctness: 35, robustness: 25, speed: 25, brevity: 15 }
-constraints:
-  edge_density_threshold: 1.0e19  # m^-3
-  q_min: 2.0                      # safety factor lower bound
-  beta_max: 0.04                  # fraction
-  heat_flux_peak_max: 10.0        # MW/m^2
-optimizer:
-  rules: prototypes/gamified/rules/prompt_optimization.yaml
-execution:
-  concurrency: 3
-  codex_exec: true
-  autostart_backend: true
-  autostart_dashboard: true
-observability:
-  backend: arango
-  dashboard: true
+**Outputs**
+- PDF fast:
+  - `<out_dir>/<stem>_fast.json` (text-only; no normalized stages)
+- PDF accurate:
+  - `<out_dir>/07_reflow_section/json_output/07_reflowed.json`
+  - `<out_dir>/10_arangodb_exporter/json_output/10_flattened_data.json`
+  - Additional stage artifacts under `<out_dir>/<stage>/...`
+- Structured formats:
+  - `<out_dir>/<stem>/07_reflow_section/json_output/07_reflowed.json`
+  - `<out_dir>/<stem>/10_arangodb_exporter/json_output/10_flattened_data.json`
+
+**Verification**
+- CLI smokes:
+  - `uv run scripts/smokes/pipeline/smoke_cli_fast_pdf.py`
+  - `uv run scripts/smokes/pipeline/smoke_cli_structured.py`
+  - `uv run scripts/smokes/pipeline/smoke_cli_structured_all.py`
+- Requirement extraction + proving (offline, deterministic Lean4):
+  - Sentences with modal verbs → Lean4: `uv run scripts/smokes/pipeline/requirements/smoke_sentence_shall.py`
+  - Bullet list inheritance → Lean4: `uv run scripts/smokes/pipeline/requirements/smoke_bullets_inherit.py`
+  - Table constraints → Lean4: `uv run scripts/smokes/pipeline/requirements/smoke_table_constraints.py`
+  - Formal artifact (prove and save .lean): `uv run scripts/smokes/pipeline/requirements/smoke_lean4_formal_artifact.py`
+  - Merged table → Lean4 (deterministic): `uv run scripts/smokes/pipeline/requirements/smoke_table_merge_to_lean4.py`
+- Stage checks (spotlight):
+  - Stage 05 quality: `uv run scripts/smokes/pipeline/smoke_stage05_strategy_quality.py`
+  - Meta parity across formats: `uv run scripts/smokes/pipeline/smoke_meta_parity_all_formats.py`
+
+**Troubleshooting**
+- Accurate mode requires optional deps (camelot, pandas, etc.). If it fails, ensure `pip install -e .[dev]` or install via `make setup`.
+- For Arango-backed stages (10–12) in operator runs, set `ARANGO_*` env vars; CLI defaults skip DB/embeddings unless configured.
+- Use `pipeline-run --json --mode fast|accurate` for operator-friendly envelopes; preferred surface for most users remains `python -m src.cli extract`.
+
+**Agent Memory (Lessons)**
+- Local memory: `memory/README.md`; shared workspace: `/home/graham/workspace/experiments/memory/README.md`.
+- Use memory recall to speed pipeline/UX debugging and reuse prior fixes.
+- Quick recall:
+  ```bash
+  make lessons-recall-last TAGS=cdp SCOPE=tabbed
+  ```
+- Direct query (BM25 + graph; JSON output):
+  ```bash
+  uv run scripts/lessons/recall_agent.py \
+    --q "puppeteer connect hang" \
+    --scope tabbed --depth 2 --k 5 --json
+  ```
+- Add a lesson after a fix:
+  ```bash
+  uv run scripts/lessons/add.py \
+    --title "Fix: Vite overlay crash" \
+    --problem "Dev overlay appears after annotation draw" \
+    --playbook "Restart vite; clear .vite; check console" \
+    --tags ui,overlay --scope tabbed
+  ```
+
+**Notes**
+- Fast mode is for iteration only; it does not produce normalized outputs used by downstream consumers.
+- Accurate mode invoked from this CLI uses deterministic toggles by default (offline-friendly) and is suitable for parity checks.
+
+## Requirement Tuning (Stage 07½/08)
+
+After Stage 07 (reflow), the pipeline automatically runs a deterministic Requirements Miner (Stage 07½) that writes:
+
+- `<out_dir>/07_requirements_miner/json_output/07_requirements.json`
+
+When you opt into proving (`--prove`), Stage 08 will also emit per‑requirement enrichment:
+
+- `<out_dir>/08_lean4_theorem_prover/json_output/08_requirements_enriched.json`
+
+The Classic UI exposes a minimal right‑pane workbench to fix and retry requirements without leaving `/main`:
+
+- Refresh list: `/api/requirements/list?results_dir=…`
+- Edit canonical text: POST `/api/requirements/save`
+- Re‑run formalization: POST `/api/requirements/rerun`
+- Jump to PDF evidence: `req-jump` (scrolls to `page_num`)
+
+CI/Smokes (selected):
+- Miner (sentences): `uv run scripts/smokes/pipeline/requirements/smoke_07_miner_sentences.py`
+- Enriched statuses: `uv run scripts/smokes/pipeline/requirements/smoke_08_compile_statuses.py`
+
+**Appendix — Useful Commands**
+- PDF accurate (explicit run_all):
+  ```bash
+  python -m extractor.pipeline.run_all run \
+    --pdf data/input/pipeline/BHT_CV32A65X_marked.pdf \
+    --results data/results/pipeline \
+    --offline --skip-llm03 --skip-descriptions06 \
+    --summary-only07 --skip-proving08 \
+    --skip-export10 --fast-embeddings10 --skip-graph11
+  ```
+- Meta parity across all providers:
+  ```bash
+  uv run scripts/smokes/pipeline/smoke_meta_parity_all_formats.py
+  ```
+- Graph & Exporter Smokes (offline)
+  - JSON‑LD export: `uv run scripts/smokes/pipeline/smoke_jsonld_export.py`
+  - ReqIF export: `uv run scripts/smokes/pipeline/smoke_reqif_export.py`
+  - Graph schema/health: `uv run scripts/smokes/pipeline/smoke_stage11_schema_invariants.py`
+  - Proves‑only (no embeddings): `uv run scripts/smokes/pipeline/smoke_stage11_proves_only_offline.py`
+  - Units conflicts: `uv run scripts/smokes/pipeline/smoke_stage11_units_conflicts.py`
+  - Supersedes/Duplicates: `uv run scripts/smokes/pipeline/smoke_stage11_supersedes_min.py` / `..._duplicates_min.py`
+
+Proving remains opt‑in (`--prove`); in offline contexts the CLI wires the live Lean4 batch CLI with `--deterministic --no-llm` for reproducible, zero‑network behavior. A formal artifact smoke confirms compiled Lean code is produced.
+
+## Lean4 Graph — One‑Click Build (Optional, Offline‑Friendly)
+
+Use this when you want contradictions + dependency hops + KNN neighborhoods in ArangoDB from Lean4 outputs.
+
+Prereqs (once):
+```bash
+export ARANGODB_URL=http://localhost:8529
+export ARANGODB_USERNAME=root
+export ARANGODB_PASSWORD=…
 ```
 
-SOPs (Step-by-Step)
-1) Initialize a spec
-- `python -m prototypes.gamified.cli init`
-- Answer 3–4 prompts; writes `gamified.yaml`.
+Produce Lean4 artifacts (from the Lean4 repo) and copy the sidecar locally:
+```bash
+python -m lean4_prover.cli_mini batch \
+  --input-file in.json \
+  --output-file out.json \
+  --deterministic --no-llm \
+  --emit-edge-hints edge_hints.json
+```
 
-2) Run from the spec
-- `python -m prototypes.gamified.cli run --spec gamified.yaml`
-- What happens:
-  - Backend autostarts on a free port.
-  - Prompt is rendered from the spec and optimized (POP). Any hard errors are printed and the run exits.
-  - A spec snapshot is saved to `workspace/runs/<run_id>/manifests/spec.yaml`.
-  - The CLI prints the API scoreboard URL and the Dashboard URL.
+One‑click graph build in this repo (Extractor):
+```bash
+# Using edge_hints.json
+make graph-oneclick DB=lean4_prod HINTS=edge_hints.json
 
-3) Open the last run
-- `python -m prototypes.gamified.cli open`
-- Prints all URLs and attempts to open the backend dashboard proto. Use `--run-id` to pick a specific run.
+# Or using flattened Stage 10 JSON (with lemma pass-through)
+uv run scripts/pipeline/stage10_pass_through_lemmas.py out.json flat10.json
+make graph-oneclick DB=lean4_prod FLAT10=flat10.json
+```
 
-4) Replay a run (deterministic)
-- `python -m prototypes.gamified.cli replay <run_id>`
-- Uses the stored spec snapshot for the run.
+What it does:
+- Bootstraps DB (collections + lean4_g graph + ArangoSearch view for BM25).
+- Upserts nodes/edges (with offline densification flag for lemma candidates when needed).
+- Computes KNN edges from embeddings (if FLAT10 provided).
+- Runs AQL recipes and writes aql_out/*.json.
 
-5) Annotate and share
-- Dashboard → Status tab → Run Notes block
-- Enter short context for teammates; click Save Notes. Copy/share the URL with filters.
+Graph metrics:
+```bash
+make graph-metrics DB=lean4_prod
+```
 
-Programmatic API (MVP)
-- `GET /spec?path=gamified.yaml` → `{ ok, path, content }`
-- `PUT /spec` with `{ path, content }` to persist changes
-- `POST /runs` with `{ spec_path | spec_content, run_id?, fast? }` → `{ ok, run_id }`
-- `GET /runs/{id}/notes` → `{ ok, notes }`
-- `POST /runs/{id}/notes` with `{ notes }`
-- `GET /stream` (SSE), `GET /scoreboard?run_id=...`, `GET /episodes?run_id=...`, `GET /logs?run_id=...`
+Dev‑rich (optional): improve lemma precision locally
+```bash
+export LEAN4_ANALYSIS_MODE=lsp
+export LEAN4_LSP_IMPL=lake_serve
+export LEAN4_ANALYSIS_TIMEOUT_S=5
+# Re‑run Lean4 batch; Stage 11 will prefer used_lemmas over candidates automatically
+```
 
-CI Smokes (already wired)
-- Prompt/spec validation (POP strict): `.github/workflows/gamified-prompts.yml`
-- Fast run smoke (emit-only; artifacts): `.github/workflows/gamified-smoke.yml`
+Audit/Bulk import (DB-native edges JSON):
+```bash
+# Emit Arango-ready edge docs with _from/_to (no upsert)
+make graph-emit-db-edges HINTS=edge_hints.json OUT=db_edges.json
+# or
+make graph-emit-db-edges FLAT10=flat10.json OUT=db_edges.json
+```
 
-Do / Don’t (to avoid bloat)
-- Do:
-  - Use `--spec` for runs; prefer `gamified.yaml` at repo root.
-  - Define all constraints as concrete numbers; keep 3–5 approaches.
-  - Let POP normalize scoring to 100; keep runner = `analysis_sim` for MVP.
-  - Use Run Notes instead of adding comment systems.
-- Don’t:
-  - Don’t add new flags or optional knobs unless they are absolutely necessary.
-  - Don’t leave placeholders (e.g., "define") or ambiguous sections.
-  - Don’t introduce new backends or graph flows in MVP.
+CI/offline notes:
+- Keep deterministic/no‑LLM for batch runs.
+- Use `--fallback-lemma-candidates` (enabled by one‑click with FLAT10) to densify graphs without LSP.
+- LSP/Pantograph jobs are opt‑in; do not enable in CI unless needed.
+### Pre‑Feature Gate (UI)
 
-Troubleshooting (fast)
-- Backend failed to start: ensure Arango env vars set; the CLI prints `[backend] not reachable; starting…` and exits on failure.
-- `codex` not found: set `CODEX_BINARY_PATH` or ensure `codex` on PATH.
-- Ports busy: the CLI picks a free port; if conflicting, re-run.
-- Artifacts: see `workspace/runs/<run_id>/manifests` and `api_base.txt`, `scorecard.json`.
+- `cd prototypes/tabbed/html && npm run typecheck`
+- `BASE_URL=http://127.0.0.1:8080/main npm run ux:check`
+- DOM checks (as needed):
+  - `node scripts/smokes/ui_inspector_pane_present.mjs`
+  - `node scripts/smokes/ui_requirements_pane_dom.mjs`
+- Artifacts: attach `scripts/artifacts/ux_check_*.{log,png}` to issues/PRs.
 
-Playbooks
-- Fresh run for a teammate:
-  - `git pull` → `python -m prototypes.gamified.cli run --spec gamified.yaml` → share the printed URLs.
-- Quick iteration:
-  - Edit `gamified.yaml` → re-run → annotate notes → share link.
-- CI verification for PR:
-  - Let the two workflows run; ensure POP strict passes and smoke artifacts upload.
+### Pre‑Feature Gate (Backend/CLI)
 
-Roadmap (v2, explicitly out-of-scope for MVP)
-- “Optimize + Run” with diff + Accept in the dashboard (Write /spec then spawn /runs).
-- A/B compare view and threaded comments.
-- Graph workflows and alternative observability backends (Langfuse/OTLP) behind feature flags.
-
-FAQ
-- Why spec-first? Predictability, collaboration, and replayability with one source of truth.
-- Why Arango only? Fewer moving parts; adapters can come later without changing the spec.
-- Why only 4 CLI verbs? Reduces the cognitive footprint; everything maps to spec.
+- Single CLI surface: `PYTHONPATH=src python -m src.cli extract <input> <out_dir> --mode fast|accurate`
+- Pipeline smokes:
+  - `python scripts/smokes/pipeline/smoke_stage10_flatten.py`
+  - `python scripts/smokes/pipeline/smoke_stage11_graph.py`
+  - `python scripts/smokes/pipeline/smoke_stage14_report.py`
+  - `python scripts/smokes/pipeline/acceptance/smoke_requirements_summary.py`

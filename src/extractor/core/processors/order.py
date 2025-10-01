@@ -15,7 +15,6 @@ Example Usage:
 >>> # Add usage examples
 """
 
-from statistics import mean
 from collections import defaultdict
 
 from extractor.core.processors import BaseProcessor

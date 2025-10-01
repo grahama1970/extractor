@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-import json
 import unicodedata
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 
 def _norm_str(s: Any) -> str:

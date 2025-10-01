@@ -22,7 +22,7 @@ Example Usage:
 import textwrap
 
 from PIL import Image
-from typing import Annotated, Literal, Tuple
+from typing import Annotated, Tuple
 
 from bs4 import BeautifulSoup, MarkupResemblesLocatorWarning
 from pydantic import BaseModel

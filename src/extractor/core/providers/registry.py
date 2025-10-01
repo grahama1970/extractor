@@ -14,7 +14,6 @@ Example usage
 """
 
 import filetype
-import filetype.match as file_match
 from pathlib import Path
 from typing import Type
 
@@ -28,6 +27,7 @@ from extractor.core.providers.pptx import PPTXProvider
 from extractor.core.providers.rst import RSTProvider
 from extractor.core.providers.spreadsheet import SpreadsheetProvider
 from extractor.core.providers.markdown import MarkdownProvider
+from extractor.core.providers.xml import XMLProvider
 
 # ------------------------------------------------------------------
 # Provider factory
@@ -54,6 +54,7 @@ _PROVIDER_MAP: dict[str, Type] = {
     "ppt": PPTXProvider,
     "odp": PPTXProvider,
     "epub": EPUBProvider,
+    "xml": XMLProvider,
     "html": HTMLProvider,
     "htm": HTMLProvider,
     "rst": RSTProvider,

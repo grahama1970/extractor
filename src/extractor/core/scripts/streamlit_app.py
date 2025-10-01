@@ -25,7 +25,7 @@ import streamlit.components.v1 as components
 from PIL import Image
 
 from extractor.core.converters.pdf import PdfConverter
-from extractor.core.models import create_model_dict
+from extractor.core.models import create__model_dict
 from extractor.core.config.parser import ConfigParser
 from extractor.core.output import text_from_rendered
 from extractor.core.schema import BlockTypes
@@ -73,7 +73,7 @@ with open(
 
                     @st.cache_resource()
                     def load_models():
-                        return create_model_dict()
+                        return create__model_dict()
 
                         def convert_pdf(
                             fname: str, config_parser: ConfigParser
@@ -83,7 +83,7 @@ with open(
                             converter_cls = PdfConverter
                             converter = converter_cls(
                                 config=config_dict,
-                                artifact_dict=model_dict,
+                                artifact_dict=_model_dict,
                                 processor_list=config_parser.get_processors(),
                                 renderer=config_parser.get_renderer(),
                                 llm_service=config_parser.get_llm_service(),
@@ -202,7 +202,7 @@ with open(
                                                                                 [0.5, 0.5]
                                                                             )
 
-                                                                            model_dict = (
+                                                                            _model_dict = (
                                                                                 load_models()
                                                                             )
                                                                             cli_options = (
@@ -240,7 +240,7 @@ with open(
                                                                             if in_file is None:
                                                                                 st.stop()
 
-                                                                                filetype = (
+                                                                                _filetype = (
                                                                                     in_file.type
                                                                                 )
 

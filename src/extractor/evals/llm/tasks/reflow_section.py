@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from extractor.evals.llm.harness import chat_call, calc_cost, write_json, load_yaml
 from extractor.evals.llm.metrics.reflow_metrics import eval_reflow

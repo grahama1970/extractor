@@ -19,14 +19,11 @@ Expected output:
 """
 
 import sys
-from copy import deepcopy
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
-from loguru import logger
 
 from extractor.core.schema import BlockTypes
-from extractor.core.schema.blocks.table import Table
 from extractor.core.schema.blocks.tablecell import TableCell
 from extractor.core.schema.document import Document
 from extractor.core.schema.polygon import PolygonBox

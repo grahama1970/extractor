@@ -14,7 +14,7 @@ import sys
 import json
 import asyncio
 from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any
 from datetime import datetime
 from textwrap import dedent
 
@@ -26,7 +26,7 @@ from dotenv import load_dotenv, find_dotenv
 from extractor.pipeline.utils.litellm_cache import initialize_litellm_cache
 from extractor.pipeline.utils.diagnostics import get_run_id
 from extractor.pipeline.utils.litellm_call import litellm_call
-from extractor.core.services.utils.json_utils import clean_json_string
+from extractor.pipeline.utils.json_utils import clean_json_string
 from extractor.pipeline.utils.json_mode import JSON_SYSTEM_GUARD
 from tqdm import tqdm
 
@@ -400,7 +400,7 @@ async def batch_summarize_sections_rolling(
         if checkpoint:
             all_summaries.append(
                 {
-                    "section_id": f"checkpoint_final",
+                    "section_id": "checkpoint_final",
                     "section_title": checkpoint["name"],
                     "section_level": -1,
                     "summary_data": checkpoint["data"],

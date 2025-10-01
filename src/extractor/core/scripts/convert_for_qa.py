@@ -8,7 +8,6 @@ corpus extraction for downstream Q&A generation.
 
 import json
 from pathlib import Path
-from typing import Optional
 from enum import Enum
 
 import typer
@@ -112,7 +111,7 @@ def display_validation_results(metadata: dict):
     # Table validation
     if "table_validation" in metadata:
         table_val = metadata["table_validation"]
-        table.add_row("Table Validation", f" Performed")
+        table.add_row("Table Validation", " Performed")
         table.add_row("PyMuPDF Tables", str(table_val.get("pymupdf_tables", 0)))
         table.add_row("Marker Tables", str(table_val.get("marker_tables", 0)))
         table.add_row("Enhanced Tables", str(table_val.get("enhanced_tables", 0)))
@@ -216,7 +215,7 @@ def batch(
             failed += 1
 
     # Summary
-    console.print(f"\n[bold]Summary:[/bold]")
+    console.print("\n[bold]Summary:[/bold]")
     console.print(f"  Successful: {successful}")
     console.print(f"  Failed: {failed}")
 
@@ -265,9 +264,9 @@ def validate(
 
         # Check raw corpus
         if "raw_corpus" in data and data["raw_corpus"]:
-            console.print(f"\n[green][/green] Raw corpus included")
+            console.print("\n[green][/green] Raw corpus included")
         else:
-            console.print(f"\n[red][/red] Raw corpus missing")
+            console.print("\n[red][/red] Raw corpus missing")
 
     except Exception as e:
         console.print(f"[red]Error reading file:[/red] {e}")

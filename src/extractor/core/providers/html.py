@@ -14,15 +14,14 @@ External Dependencies:
 
 Example Usage:
 >>> from extractor.core.providers.html import HTMLProvider
->>> provider = NativeHTMLProvider()
+>>> provider = HTMLProvider()
 >>> document = provider.extract_document("example.html")
 >>> print(document.source_type)  # SourceType.HTML
 """
 
 import re
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Union, Tuple
-from urllib.parse import urljoin, urlparse
+from typing import List, Dict, Any, Optional, Union
 import hashlib
 
 from bs4 import BeautifulSoup, Tag, NavigableString, Comment
@@ -751,7 +750,7 @@ class HTMLProvider:
                 )
                 if match:
                     number_str = match.group(1)
-                    unit = match.group(2)
+                    _unit = match.group(2)
 
                     # Convert to int, ignoring units for now
                     # In the future, could convert units to pixels
@@ -812,7 +811,7 @@ def hello():
         temp_path = f.name
 
     # Test extraction
-    provider = NativeHTMLProvider()
+    provider = HTMLProvider()
     doc = provider.extract_document(temp_path)
 
     # Validate

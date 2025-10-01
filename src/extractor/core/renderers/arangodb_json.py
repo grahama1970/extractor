@@ -54,13 +54,12 @@ import json
 import os
 import time
 import uuid
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel
 
 from extractor.core.renderers import BaseRenderer
 from extractor.core.schema import BlockTypes
-from extractor.core.schema.blocks import Block
 from extractor.core.schema.document import Document
 
 
@@ -148,7 +147,7 @@ class ArangoDBRenderer(BaseRenderer):
             ArangoDBOutput containing document structure, metadata, validation, and raw corpus
         """
         # Get document output
-        document_output = document.render()
+        _document_output = document.render()
 
         # Extract document ID or generate one if not available
         doc_id = (

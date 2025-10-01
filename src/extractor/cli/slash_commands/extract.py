@@ -81,7 +81,7 @@ class ExtractCommand(SlashCommand):
                 print(f" Extracted to: {output_path}")
 
                 if debug:
-                    print(f"\nExtraction stats:")
+                    print("\nExtraction stats:")
                     print(f"  Pages: {len(result.pages)}")
                     print(f"  Blocks: {len(result.blocks)}")
                     print(f"  Tables: {sum(1 for b in result.blocks if b.block_type == 'Table')}")

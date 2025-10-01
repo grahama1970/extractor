@@ -20,7 +20,6 @@ from __future__ import annotations
 import copy
 from typing import List
 
-import numpy as np
 from pydantic import BaseModel, field_validator, computed_field
 
 
@@ -43,7 +42,7 @@ class PolygonBox(BaseModel):
         # Ensure corners are clockwise from top left
         corner_error = f" .Corners are {v}"
         assert v[2][1] >= min_y, (
-            f"bottom right corner should have a greater y value than top right corner"
+            "bottom right corner should have a greater y value than top right corner"
             + corner_error
         )
         assert v[3][1] >= min_y, (

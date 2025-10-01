@@ -13,10 +13,9 @@ Usage:
 
 import json
 from pathlib import Path
-from typing import List, Optional
+from typing import Optional
 import typer
 from PIL import Image
-from loguru import logger
 import sys
 
 # Add parent directories to path

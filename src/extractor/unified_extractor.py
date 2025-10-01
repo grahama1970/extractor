@@ -81,12 +81,10 @@ else:
 from marker.converters.pdf import PdfConverter
 from marker.models import create_model_dict
 from marker.config.parser import ConfigParser
-from marker.renderers.json import JSONRenderer
 
 # Import our LiteLLM adapter
 sys.path.insert(0, str(project_root / "src"))
-from extractor.core.services.marker_litellm_adapter import create_marker_compatible_litellm_service
-from extractor.core.stage_validator import StageValidator, validate_extraction_stage
+from extractor.core.stage_validator import StageValidator
 
 # Import PyMuPDF for alternative extraction
 try:
@@ -387,7 +385,7 @@ async def extract_to_unified_json(
         logger.debug(f"Rendered type: {type(rendered)}")
         logger.debug(f"Has model_dump: {hasattr(rendered, 'model_dump')}")
         logger.debug(f"Has children: {hasattr(rendered, 'children')}")
-        logger.info(f"PDF has been converted by marker")
+        logger.info("PDF has been converted by marker")
 
         # Create validator instance once that will be used across all stages
         validator = None
@@ -978,10 +976,9 @@ async def extract_to_unified_json(
 
             # Check if Camelot is available
             try:
-                import camelot
-
+                __import__("camelot")
                 CAMELOT_AVAILABLE = True
-            except ImportError:
+            except Exception:
                 CAMELOT_AVAILABLE = False
                 logger.warning("Camelot not available for table fallback")
 
@@ -1598,12 +1595,11 @@ def calculate_gold_standard_match(result: Dict[str, Any], gold_standard: Dict[st
         score += 1
         logger.info("✓ Block types match perfectly")
     else:
-        logger.warning(f"✗ Block type mismatch")
+        logger.warning("✗ Block type mismatch")
 
     # Check 3: Section header text
     total_checks += 1
     our_headers = [b["text"] for b in our_blocks if b["block_type"] == "SectionHeader"]
-    gold_headers = [b["text"] for b in gold_blocks if b["block_type"] == "SectionHeader"]
 
     # Look for the BHT header specifically - be flexible about exact wording
     bht_found = False
@@ -1614,9 +1610,9 @@ def calculate_gold_standard_match(result: Dict[str, Any], gold_standard: Dict[st
 
     if bht_found:
         score += 1
-        logger.info(f"✓ Found BHT section header")
+        logger.info("✓ Found BHT section header")
     else:
-        logger.warning(f"✗ Missing BHT section header")
+        logger.warning("✗ Missing BHT section header")
 
     # Check 4: Key text phrases
     key_phrases = [
@@ -1673,7 +1669,7 @@ async def working_usage() -> bool:
 
         # Test that function handles missing file gracefully
         result = extract_to_unified_json("nonexistent.pdf", use_llm=False)
-        assert result["success"] == False, "Should fail for missing file"
+        assert not result["success"], "Should fail for missing file"
         assert "error" in result, "Should have error message"
         logger.success("✓ Missing file handling works")
 
@@ -1697,7 +1693,7 @@ async def working_usage() -> bool:
             fail_on_validation_error=False,  # Let's see all validations
         )
 
-        assert result["success"] == True, f"Extraction failed: {result.get('error')}"
+        assert result["success"], f"Extraction failed: {result.get('error')}"
         assert "data" in result, "Missing data in result"
         assert "all_blocks" in result["data"], "Missing all_blocks"
         assert len(result["data"]["all_blocks"]) > 0, "No blocks extracted"
@@ -1859,7 +1855,7 @@ async def working_usage() -> bool:
 
             # Calculate overall match rate
             overall_match_rate = (content_matches / total_checks * 100) if total_checks > 0 else 0
-            logger.info(f"\n=== Gold Standard Validation Results ===")
+            logger.info("\n=== Gold Standard Validation Results ===")
             logger.info(
                 f"Content match rate: {overall_match_rate:.1f}% ({content_matches}/{total_checks})"
             )
@@ -1987,12 +1983,8 @@ async def debug_function() -> bool:
 
     # Test block filtering
     logger.debug("Testing header processing...")
-    test_headers = [
-        "Valid Section Header",
-        "Header ending with comma,",
-        "As mentioned earlier",
-        "For example purposes",
-    ]
+    # Example suspicious headers handled by SectionHeaderProcessor:
+    # ["Header ending with comma,", "As mentioned earlier", "For example purposes"]
 
     logger.debug("Note: SectionHeaderProcessor handles filtering of suspicious headers")
 

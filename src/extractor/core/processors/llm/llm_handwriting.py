@@ -9,8 +9,7 @@ and returns the text as Markdown. It flags very short results as suspicious.
 import asyncio
 import sys
 import os
-from pathlib import Path
-from typing import Annotated, List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional
 
 from pydantic import BaseModel
 from loguru import logger

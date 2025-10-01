@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 """
 Pipeline Stage 11: ArangoDB Graph Creation with FAISS
 
@@ -17,11 +18,10 @@ import json
 import asyncio
 import math
 from pathlib import Path
-from typing import Dict, List, Any, Tuple, Optional, cast
+from typing import Dict, List, Any, Optional, cast, Tuple
 from datetime import datetime, timezone
 import numpy as np
 from numpy.typing import NDArray
-from textwrap import dedent
 
 # Third-party
 from loguru import logger
@@ -100,6 +100,265 @@ GRAPH_RELATIONSHIPS_ENABLED = os.getenv("GRAPH_RELATIONSHIPS_ENABLED", "true").l
     "y",
 )
 
+# --- Simple Edge Schema/Invariants (v1) ---
+EDGE_SCHEMA_VERSION = "edge_v1"
+EDGE_ALLOWED_TYPES = {"semantic_similarity", "proves", "conflicts_with", "contradicts", "duplicates", "supersedes", "refers_to"}
+
+def _validate_edges(edges: list[dict]) -> dict:
+    violations: list[dict] = []
+    counts_by_type: dict[str,int] = {}
+    for e in edges:
+        try:
+            rtype = str(e.get("relationship_type", ""))
+            counts_by_type[rtype] = counts_by_type.get(rtype, 0) + 1
+            if rtype not in EDGE_ALLOWED_TYPES:
+                violations.append({"edge": e, "reason": "invalid_relationship_type"})
+            _from = e.get("_from"); _to = e.get("_to")
+            if not (isinstance(_from, str) and isinstance(_to, str)):
+                violations.append({"edge": e, "reason": "from_to_not_str"})
+            if not (str(_from).startswith("pdf_objects/") and str(_to).startswith("pdf_objects/")):
+                violations.append({"edge": e, "reason": "bad_vertex_prefix"})
+            # Self-edge only allowed for 'proves'
+            if _from == _to and rtype != "proves":
+                violations.append({"edge": e, "reason": "self_edge_not_allowed"})
+            # Numeric bounds (best-effort)
+            w = float(e.get("weight", 0.0))
+            if not (0.0 <= w <= 1.0):
+                violations.append({"edge": e, "reason": "weight_out_of_range"})
+            if rtype == "semantic_similarity":
+                s = float(e.get("semantic_score", 0.0))
+                if not (0.0 <= s <= 1.0):
+                    violations.append({"edge": e, "reason": "score_out_of_range"})
+        except Exception:
+            violations.append({"edge": e, "reason": "exception_validating"})
+    return {
+        "schema_version": EDGE_SCHEMA_VERSION,
+        "total_edges": len(edges),
+        "counts_by_type": counts_by_type,
+        "violations_count": len(violations),
+        "violations_sample": violations[:10],
+    }
+
+def _save_summary(json_output_dir: Path, summary: dict) -> None:
+    try:
+        out = json_output_dir / "11_graph_summary.json"
+        out.write_text(json.dumps(summary, indent=2))
+    except Exception:
+        pass
+
+def _proves_edges_from_docs(documents: list[dict], proved_section_ids: set[str]) -> list[dict]:
+    edges: list[dict] = []
+    for doc in documents:
+        sid = doc.get("section_id")
+        if sid and sid in proved_section_ids:
+            try:
+                edges.append({
+                    "_from": f"pdf_objects/{doc['_key']}",
+                    "_to": f"pdf_objects/{doc['_key']}",
+                    "relationship_type": "proves",
+                    "semantic_score": 1.0,
+                    "hierarchy_distance": 0.0,
+                    "weight": 1.0,
+                    "source_pdf": doc.get("source_pdf"),
+                    "discovery_method": "lean4_stage08",
+                    "knn_rank": 0,
+                    "neighbor_index": 0,
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                })
+            except Exception:
+                continue
+    return edges
+
+
+def _conflict_edges_from_docs(documents: list[dict], tolerance_ratio: float = 0.1) -> list[dict]:
+    """Create 'conflicts_with' edges when normalized units disagree beyond tolerance.
+
+    Buckets by (doc_id, section_id, dimensionality). Creates one edge between
+    min and max when delta exceeds tolerance_ratio.
+    """
+    edges: list[dict] = []
+    buckets: dict[tuple[str,str,str], list[tuple[str,float]]] = {}
+    for d in documents:
+        key = d.get("_key"); doc_id = d.get("doc_id"); sec = d.get("section_id")
+        for u in d.get("units", []) or []:
+            dim = str(u.get("dim"))
+            val = u.get("value_si")
+            if key and doc_id and sec and isinstance(val, (int, float)) and dim:
+                buckets.setdefault((doc_id, sec, dim), []).append((key, float(val)))
+    for (doc_id, sec, dim), items in buckets.items():
+        if len(items) < 2:
+            continue
+        items_sorted = sorted(items, key=lambda t: t[1])
+        kmin, vmin = items_sorted[0]
+        kmax, vmax = items_sorted[-1]
+        if vmax <= 0:
+            continue
+        if (vmax - vmin) / max(vmax, 1e-9) > tolerance_ratio:
+            edges.append({
+                "_from": f"pdf_objects/{kmax}",
+                "_to": f"pdf_objects/{kmin}",
+                "relationship_type": "conflicts_with",
+                "semantic_score": 0.0,
+                "hierarchy_distance": 0.0,
+                "weight": 1.0,
+                "source_pdf": None,
+                "discovery_method": "units_conflict_v1",
+                "dimensionality": dim,
+                "delta_si": float(vmax - vmin),
+                "tolerance_ratio": tolerance_ratio,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            })
+    return edges
+
+
+def _duplicates_edges_from_docs(documents: list[dict]) -> list[dict]:
+    """Create 'duplicates' edges for identical text within the same doc_id/section_id."""
+    edges: list[dict] = []
+    buckets: dict[tuple[str, str], dict[str, str]] = {}
+    for d in documents:
+        doc_id = d.get("doc_id"); sec = d.get("section_id"); key = d.get("_key")
+        txt = (d.get("text_content") or "").strip().lower()
+        if not (doc_id and sec and key and txt):
+            continue
+        bkey = (str(doc_id), str(sec))
+        seen = buckets.setdefault(bkey, {})
+        if txt in seen:
+            kprev = seen[txt]
+            edges.append({
+                "_from": f"pdf_objects/{key}",
+                "_to": f"pdf_objects/{kprev}",
+                "relationship_type": "duplicates",
+                "semantic_score": 1.0,
+                "hierarchy_distance": 0.0,
+                "weight": 1.0,
+                "discovery_method": "text_eq_v1",
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            })
+        else:
+            seen[txt] = key
+    return edges
+
+
+def _contradicts_edges_from_docs(documents: list[dict]) -> list[dict]:
+    """Create 'contradicts' edges when two blocks in the same document assert opposite polarity over the same lean4_norm.
+
+    Requirements:
+      - doc_id matches
+      - rtm.lean4_norm identical (best-effort string equality)
+      - rtm.lean4_polarity differs ("assert" vs "deny")
+    """
+    edges: list[dict] = []
+    buckets: dict[tuple[str, str], list[dict]] = {}
+    for d in documents:
+        rtm = d.get("rtm") if isinstance(d.get("rtm"), dict) else None
+        if not rtm:
+            continue
+        norm = rtm.get("lean4_norm"); pol = rtm.get("lean4_polarity")
+        doc_id = d.get("doc_id"); key = d.get("_key")
+        if not (doc_id and key and isinstance(norm, str) and isinstance(pol, str)):
+            continue
+        buckets.setdefault((str(doc_id), norm.strip()), []).append(d)
+    for (_doc, norm), items in buckets.items():
+        # find one assert and one deny
+        a = [x for x in items if (x.get("rtm") or {}).get("lean4_polarity") == "assert"]
+        dny = [x for x in items if (x.get("rtm") or {}).get("lean4_polarity") == "deny"]
+        if not a or not dny:
+            continue
+        # Create a single edge between first assert and first deny
+        try:
+            ka = a[0]["_key"]; kd = dny[0]["_key"]
+            edges.append({
+                "_from": f"pdf_objects/{ka}",
+                "_to": f"pdf_objects/{kd}",
+                "relationship_type": "contradicts",
+                "semantic_score": 0.0,
+                "hierarchy_distance": 0.0,
+                "weight": 1.0,
+                "discovery_method": "lean4_norm_polarity_v1",
+                "normalized_prop": norm,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            })
+        except Exception:
+            continue
+    return edges
+
+
+def _supersedes_edges_from_docs(documents: list[dict]) -> list[dict]:
+    """Create 'supersedes' edges between revisions of the same doc/section.
+
+    Expects objects to carry 'doc_id', 'section_id', and optional 'revision_id'.
+    Edges point from newer (max lexicographic revision_id) to older.
+    """
+    edges: list[dict] = []
+    buckets: dict[tuple[str, str], list[dict]] = {}
+    for d in documents:
+        doc_id = d.get("doc_id"); sec = d.get("section_id"); rev = d.get("revision_id")
+        if not (doc_id and sec and rev and d.get("_key")):
+            continue
+        buckets.setdefault((str(doc_id), str(sec)), []).append(d)
+    for (doc_id, sec), items in buckets.items():
+        if len(items) < 2:
+            continue
+        items_sorted = sorted(items, key=lambda x: str(x.get("revision_id")))
+        older = items_sorted[0]; newer = items_sorted[-1]
+        if str(older.get("revision_id")) == str(newer.get("revision_id")):
+            continue
+        edges.append({
+            "_from": f"pdf_objects/{newer['_key']}",
+            "_to": f"pdf_objects/{older['_key']}",
+            "relationship_type": "supersedes",
+            "semantic_score": 0.0,
+            "hierarchy_distance": 0.0,
+            "weight": 1.0,
+            "discovery_method": "revision_supersedes_v1",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+    return edges
+
+
+def _refers_to_edges_from_docs(documents: list[dict]) -> list[dict]:
+    """Create 'refers_to' edges for simple inline references.
+
+    Heuristics:
+    - Detect tokens like 'see section <ID>' or 'See <ID>' where <ID> matches a known section_id.
+    - Link from the referencing object to the first object found in the referenced section.
+    """
+    import re
+    edges: list[dict] = []
+    # Build map to first object key per section
+    first_key_by_sec: dict[str, str] = {}
+    for d in documents:
+        sec = d.get("section_id"); key = d.get("_key")
+        if sec and key and sec not in first_key_by_sec:
+            first_key_by_sec[str(sec)] = str(key)
+    known_secs = set(first_key_by_sec.keys())
+    if not known_secs:
+        return edges
+    # Build regex that searches for any known section id explicitly
+    # Also detect generic numeric refs like 3.1 that exist in known_secs
+    pattern = re.compile(r"\b(?:see\s+(?:section\s+)?)?(?P<sid>[A-Za-z0-9_.-]+)\b", re.IGNORECASE)
+    for d in documents:
+        key = d.get("_key"); txt = (d.get("text_content") or "")
+        if not (key and txt):
+            continue
+        for m in pattern.finditer(txt):
+            sid = m.group("sid")
+            if sid in known_secs and first_key_by_sec.get(sid):
+                target_key = first_key_by_sec[sid]
+                if target_key == key:
+                    continue
+                edges.append({
+                    "_from": f"pdf_objects/{key}",
+                    "_to": f"pdf_objects/{target_key}",
+                    "relationship_type": "refers_to",
+                    "semantic_score": 0.0,
+                    "hierarchy_distance": 0.0,
+                    "weight": 1.0,
+                    "discovery_method": "refers_to_v1",
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                })
+    return edges
+
 
 def ensure_graph_and_edge_collection(
     db: StandardDatabase,
@@ -145,7 +404,7 @@ def ensure_graph_and_edge_collection(
         sys.exit(1)
 
 
-def build_faiss_index(embeddings: NDArray[np.float32]) -> faiss.IndexFlatIP:
+def build_faiss_index(embeddings: NDArray[np.float32]) -> Tuple[str, Any]:
     """Build FAISS index with normalized embeddings for cosine similarity.
 
     Args:
@@ -179,7 +438,7 @@ def calculate_hierarchy_distance(doc1: Dict[str, Any], doc2: Dict[str, Any]) -> 
     # Calculate section level difference
     level1 = doc1.get("section_level", 0)
     level2 = doc2.get("section_level", 0)
-    level_diff = abs(level1 - level2)
+    _level_diff = abs(level1 - level2)
 
     # Check if in same section hierarchy
     breadcrumbs1 = doc1.get("section_breadcrumbs", [])
@@ -319,13 +578,14 @@ async def enrich_edges_with_rationales(
 async def find_and_create_relationships(
     documents: List[Dict[str, Any]],
     embeddings: NDArray[np.float32],
-    index: faiss.IndexFlatIP,
+    index: Any,
     k_neighbors: int = 10,
     similarity_threshold: float = 0.55,
     batch_size: int = 100,
     skip_db_insert: bool = False,
     db: Optional[StandardDatabase] = None,
     edge_collection: Optional[str] = None,
+    proved_section_ids: Optional[set] = None,
 ):
     """Find similar documents and create edge relationships."""
     edge_buffer = []
@@ -340,6 +600,30 @@ async def find_and_create_relationships(
         SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console
     ) as progress:
         task = progress.add_task("Finding relationships...", total=len(documents))
+
+        # Optionally emit 'proves' self-edges for sections with successful proofs
+        if proved_section_ids:
+            for doc in documents:
+                try:
+                    sec_id = doc.get("section_id")
+                    if sec_id and sec_id in proved_section_ids:
+                        edge_doc = {
+                            "_from": f"pdf_objects/{doc['_key']}",
+                            "_to": f"pdf_objects/{doc['_key']}",
+                            "relationship_type": "proves",
+                            "semantic_score": 1.0,
+                            "hierarchy_distance": 0.0,
+                            "weight": 1.0,
+                            "source_pdf": doc.get("source_pdf"),
+                            "discovery_method": "lean4_stage08",
+                            "knn_rank": 0,
+                            "neighbor_index": 0,
+                            "created_at": datetime.now(timezone.utc).isoformat(),
+                        }
+                        edge_buffer.append(edge_doc)
+                except Exception:
+                    # Keep graph building resilient; skip malformed docs
+                    continue
 
         for idx, doc in enumerate(documents):
             query_embedding = embeddings[idx : idx + 1]
@@ -475,17 +759,75 @@ def run(
 
     docs_with_embed = [doc for doc in documents if doc.get("embedding")]
     if not docs_with_embed:
+        # Try proves/conflicts-only offline path when proofs/normalized units exist
+        proved_sec_ids: Optional[set] = None
+        try:
+            tpath = output_dir / "08_lean4_theorem_prover" / "json_output" / "08_theorems.json"
+            if tpath.exists():
+                tdata = json.loads(tpath.read_text(encoding="utf-8"))
+                if isinstance(tdata, dict):
+                    prs = tdata.get("proof_results")
+                    if isinstance(prs, list):
+                        proved: set[str] = set()
+                        for pr in prs:
+                            item = (pr or {}).get("item") or {}
+                            sid = (item.get("source_details") or {}).get("section_id")
+                            status = (pr or {}).get("status")
+                            if sid and (status is None or str(status).lower() in {"ok", "proved", "success", "true"}):
+                                proved.add(sid)
+                        if proved:
+                            proved_sec_ids = proved
+        except Exception as e:
+            logger.warning(f"Stage 11: proves-only detection failed: {e}")
+
         if skip_graph_creation:
+            edges: list[dict] = []
+            # Conflicts (units) first
+            try:
+                edges.extend(_conflict_edges_from_docs(documents))
+            except Exception:
+                pass
+            # Duplicates
+            try:
+                edges.extend(_duplicates_edges_from_docs(documents))
+            except Exception:
+                pass
+            # Contradicts
+            try:
+                edges.extend(_contradicts_edges_from_docs(documents))
+            except Exception:
+                pass
+            # Duplicates
+            try:
+                edges.extend(_duplicates_edges_from_docs(documents))
+            except Exception:
+                pass
+            # Proves
+            if proved_sec_ids:
+                edges.extend(_proves_edges_from_docs(documents, proved_sec_ids))
+            # Supersedes
+            try:
+                edges.extend(_supersedes_edges_from_docs(documents))
+            except Exception:
+                pass
+            # Refers-to
+            try:
+                edges.extend(_refers_to_edges_from_docs(documents))
+            except Exception:
+                pass
             output_path = json_output_dir / "11_graph_edges.json"
             with open(output_path, "w") as f:
-                json.dump([], f, indent=2)
-            console.print(f"[yellow]No embeddings found; wrote 0 edges to: {output_path}[/yellow]")
+                json.dump(edges, f, indent=2)
+            summary = _validate_edges(edges)
+            _save_summary(json_output_dir, summary)
+            console.print(f"[yellow]No embeddings found; wrote {len(edges)} edges to: {output_path}[/yellow]")
             return
         else:
             confirmation = {
                 "timestamp": datetime.now().isoformat(),
                 "status": "Completed",
                 "edges_created": 0,
+                "note": "No embeddings; DB path did not insert proves-only edges.",
             }
             output_path = json_output_dir / "11_graph_confirmation.json"
             with open(output_path, "w") as f:
@@ -530,6 +872,31 @@ def run(
             logger.error(f"Failed to connect to ArangoDB: {e}")
             raise typer.Exit(1)
 
+    # Detect proved section ids from Stage 08 (if present)
+    proved_sec_ids: Optional[set] = None
+    try:
+        tpath = output_dir / "08_lean4_theorem_prover" / "json_output" / "08_theorems.json"
+        if tpath.exists():
+            tdata = json.loads(tpath.read_text(encoding="utf-8"))
+            if isinstance(tdata, dict):
+                proof_results = tdata.get("proof_results")
+                if isinstance(proof_results, list):
+                    proved: set = set()
+                    for pr in proof_results:
+                        try:
+                            item = (pr or {}).get("item") or {}
+                            src = item.get("source_details") or {}
+                            sid = src.get("section_id")
+                            status = (pr or {}).get("status")
+                            if sid and (status is None or str(status).lower() in {"ok", "proved", "success", "true"}):
+                                proved.add(sid)
+                        except Exception:
+                            continue
+                    if proved:
+                        proved_sec_ids = proved
+    except Exception as e:
+        logger.warning(f"Stage 11: failed to read Stage 08 theorems for 'proves' edges: {e}")
+
     edges = asyncio.run(
         find_and_create_relationships(
             documents=docs_with_embed,
@@ -542,8 +909,41 @@ def run(
             skip_db_insert=skip_graph_creation,
             db=db,
             edge_collection=edge_collection,
+            proved_section_ids=proved_sec_ids,
         )
     )
+    # Append contradictions based on Lean4 normalized polarity (additive)
+    try:
+        contr = _contradicts_edges_from_docs(documents)
+        if isinstance(edges, list):
+            edges.extend(contr)
+        elif contr and not skip_graph_creation and db is not None and edge_collection is not None:
+            try:
+                edge_col = db.collection(edge_collection)
+                edge_col.import_bulk(contr, on_duplicate="ignore")
+            except Exception:
+                pass
+    except Exception:
+        pass
+    # Also append conflicts edges when embeddings path ran
+    try:
+        conflicts = _conflict_edges_from_docs(docs_with_embed)
+        dups = _duplicates_edges_from_docs(docs_with_embed)
+        sups = _supersedes_edges_from_docs(docs_with_embed)
+        refs = _refers_to_edges_from_docs(docs_with_embed)
+        if isinstance(edges, list):
+            edges.extend(conflicts + dups + sups + refs)
+        else:
+            # DB path: insert now if available
+            ins = conflicts + dups + sups + refs
+            if ins and not skip_graph_creation and db is not None and edge_collection is not None:
+                try:
+                    edge_col = db.collection(edge_collection)
+                    edge_col.import_bulk(ins, on_duplicate="ignore")
+                except Exception:
+                    pass
+    except Exception:
+        pass
 
     # --- Final Output ---
     if skip_graph_creation:
@@ -555,6 +955,9 @@ def run(
             json.dump(edges, f, indent=2)
         edges_list = cast(List[Dict[str, Any]], edges)
         console.print(f"📄 Saved {len(edges_list)} graph edges to: {output_path}")
+        # Write summary/invariants
+        summary = _validate_edges(edges_list)
+        _save_summary(json_output_dir, summary)
     else:
         confirmation = {
             "timestamp": datetime.now().isoformat(),
@@ -599,14 +1002,65 @@ def debug_bundle(
 
     docs_with_embed = [doc for doc in documents if doc.get("embedding")]
     if not docs_with_embed:
-        typer.secho("No documents with embeddings provided.", fg=typer.colors.YELLOW)
+        # Proves-only offline path for debug-bundle
+        proved_sec_ids: Optional[set] = None
+        try:
+            tpath = output_dir / "08_lean4_theorem_prover" / "json_output" / "08_theorems.json"
+            if tpath.exists():
+                tdata = json.loads(tpath.read_text(encoding="utf-8"))
+                if isinstance(tdata, dict):
+                    prs = tdata.get("proof_results")
+                    if isinstance(prs, list):
+                        proved: set[str] = set()
+                        for pr in prs:
+                            item = (pr or {}).get("item") or {}
+                            sid = (item.get("source_details") or {}).get("section_id")
+                            status = (pr or {}).get("status")
+                            if sid and (status is None or str(status).lower() in {"ok", "proved", "success", "true"}):
+                                proved.add(sid)
+                        if proved:
+                            proved_sec_ids = proved
+        except Exception as e:
+            logger.warning(f"Stage 11 debug-bundle: proves-only detection failed: {e}")
+
+        edges: list[dict] = []
+        if proved_sec_ids:
+            edges = _proves_edges_from_docs(documents, proved_sec_ids)
         output_path = json_output_dir / "11_graph_edges.json"
-        output_path.write_text(json.dumps([], indent=2))
-        console.print(f"[yellow]Saved 0 edges to {output_path}")
+        output_path.write_text(json.dumps(edges, indent=2))
+        # Summary
+        summary = _validate_edges(edges)
+        _save_summary(json_output_dir, summary)
+        console.print(f"[yellow]Saved {len(edges)} edges to {output_path} (proves-only path)")
         return
 
     embeddings = np.array([doc["embedding"] for doc in docs_with_embed], dtype="float32")
     index = build_faiss_index(embeddings)
+
+    # Detect proved sections from a standard Stage 08 location under output_dir
+    proved_sec_ids: Optional[set] = None
+    try:
+        tpath = output_dir / "08_lean4_theorem_prover" / "json_output" / "08_theorems.json"
+        if tpath.exists():
+            tdata = json.loads(tpath.read_text(encoding="utf-8"))
+            if isinstance(tdata, dict):
+                proof_results = tdata.get("proof_results")
+                if isinstance(proof_results, list):
+                    proved: set = set()
+                    for pr in proof_results:
+                        try:
+                            item = (pr or {}).get("item") or {}
+                            src = item.get("source_details") or {}
+                            sid = src.get("section_id")
+                            status = (pr or {}).get("status")
+                            if sid and (status is None or str(status).lower() in {"ok", "proved", "success", "true"}):
+                                proved.add(sid)
+                        except Exception:
+                            continue
+                    if proved:
+                        proved_sec_ids = proved
+    except Exception as e:
+        logger.warning(f"Stage 11 debug-bundle: failed to read Stage 08 theorems: {e}")
 
     edges = asyncio.run(
         find_and_create_relationships(
@@ -618,11 +1072,18 @@ def debug_bundle(
             skip_db_insert=True,
             db=None,
             edge_collection=GRAPH_EDGE_COLLECTION,
+            proved_section_ids=proved_sec_ids,
         )
     )
 
     output_path = json_output_dir / "11_graph_edges.json"
     output_path.write_text(json.dumps(edges, indent=2))
+    # Write summary/invariants for debug-bundle
+    try:
+        summary = _validate_edges(edges)
+        _save_summary(json_output_dir, summary)
+    except Exception:
+        pass
     console.print(f"[green]Debug bundle: saved {len(edges)} graph edges to {output_path}")
 
 

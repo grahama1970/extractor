@@ -132,3 +132,13 @@ All colors MUST be HSL.
     @apply bg-background text-foreground;
   }
 }
+
+/* Full-viewport app; make sure nothing constrains #root */
+html, body, #root { height: 100%; width: 100%; }
+
+#root {
+  max-width: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  text-align: initial !important;
+}

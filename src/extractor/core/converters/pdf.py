@@ -345,7 +345,7 @@ if __name__ == "__main__":
             assert "placeholder" not in result.lower(), "Result contains placeholder text"
             assert "Error Converting" not in result, "Result is error message"
 
-            print(f"✅ PDF conversion successful!")
+            print("✅ PDF conversion successful!")
             print(f"   - Processed in {elapsed_time:.2f} seconds")
             print(f"   - Output length: {len(result):,} characters")
             print(f"   - First 200 chars: {result[:200]}...")

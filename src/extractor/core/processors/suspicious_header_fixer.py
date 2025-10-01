@@ -21,7 +21,6 @@ from extractor.core.schema.document import Document
 from extractor.core.schema.blocks.base import Block
 from extractor.core.schema import BlockTypes
 from loguru import logger
-from dotenv import find_dotenv, load_dotenv
 
 
 class SuspiciousHeaderFixer(BaseProcessor):
@@ -409,7 +408,7 @@ class SuspiciousHeaderFixer(BaseProcessor):
 # =================================================================
 if __name__ == "__main__":
     from dataclasses import dataclass
-    from typing import Optional, Any
+    from typing import Optional
 
     # --- Mocks for required data structures ---
     # These lightweight mocks simulate the real schema objects for isolated testing.

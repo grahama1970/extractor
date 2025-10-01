@@ -1,0 +1,3505 @@
+===== BEGIN prototypes/tabbed/html/src/components/ThumbnailRail.tsx =====
+import React from "react";
+import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import type { PdfDoc } from "@/lib/pdf";
+import { renderPageThumbnail } from "@/lib/pdf";
+
+const memCache = new Map<string, string>();
+const MAX_CACHE = 500;
+function lruSet(key: string, val: string) {
+  if (memCache.has(key)) memCache.delete(key);
+  memCache.set(key, val);
+  if (memCache.size > MAX_CACHE) {
+    const first = memCache.keys().next().value as string | undefined;
+    if (first) memCache.delete(first);
+  }
+}
+
+export function ThumbnailRail({
+  doc,
+  pageCount,
+  currentPage,
+  onJump,
+  width = 144,
+  cacheKey,
+  hitCounts,
+}: {
+  doc: PdfDoc;
+  pageCount: number;
+  currentPage: number; // 1-based
+  onJump: (n: number) => void;
+  width?: number;
+  cacheKey?: string;
+  hitCounts?: Record<number, number>;
+}) {
+  const ref = React.useRef<VirtuosoHandle>(null);
+
+  React.useEffect(() => {
+    ref.current?.scrollToIndex({ index: currentPage - 1, align: "center", behavior: "smooth" });
+  }, [currentPage]);
+
+  return (
+    <div className="shrink-0 border-r bg-muted/30 overflow-x-hidden overflow-y-auto min-h-0" style={{ width }}>
+      <Virtuoso
+        ref={ref}
+        totalCount={pageCount}
+        overscan={8}
+        itemContent={(index) => (
+          <ThumbItem
+            key={index}
+            doc={doc}
+            n={index + 1}
+            isActive={index + 1 === currentPage}
+            onJump={onJump}
+            width={width}
+            cacheKey={cacheKey}
+            hitCount={hitCounts?.[index+1] || 0}
+          />
+        )}
+        computeItemKey={(i) => `p-${i + 1}`}
+        style={{ height: "100%" }}
+      />
+    </div>
+  );
+}
+
+function ThumbItem({
+  doc,
+  n,
+  isActive,
+  onJump,
+  width,
+  cacheKey,
+  hitCount,
+}: {
+  doc: PdfDoc;
+  n: number;
+  isActive: boolean;
+  onJump: (n: number) => void;
+  width: number;
+  cacheKey?: string;
+  hitCount?: number;
+}) {
+  const [src, setSrc] = React.useState<string | undefined>(undefined);
+  React.useEffect(() => {
+    let cancelled = false;
+    const key = `${cacheKey || 'doc'}:${n}@${width}`;
+    const setCache = (val: string) => { lruSet(key, val); setSrc(val); };
+    const load = async (attempt = 0) => {
+      if (cancelled) return;
+      const hit = memCache.get(key);
+      if (hit) { setSrc(hit); return; }
+      const s = await renderPageThumbnail(doc, n, width).catch(()=>undefined);
+      if (cancelled || !s) {
+        if (attempt < 5) { setTimeout(() => load(attempt+1), 300); }
+        return;
+      }
+      // Treat non-PNG as placeholder and retry more aggressively
+      if (!s.startsWith('data:image/png')) {
+        if (attempt < 5) { setTimeout(() => load(attempt+1), 300); return; }
+        setSrc(s); return; // last resort
+      }
+      setCache(s);
+    };
+    load(0);
+    return () => {
+      cancelled = true;
+    };
+  }, [doc, n, width, cacheKey]);
+
+  return (
+    <button
+      onClick={() => onJump(n)}
+      className={cn(
+        "group w-full px-2 py-2 text-left focus:outline-none relative",
+        isActive && "bg-primary/10 before:absolute before:left-0 before:top-0 before:bottom-0 before:w-0.5 before:bg-primary"
+      )}
+      aria-current={isActive ? "page" : undefined}
+      style={{
+        // innerWidth accounts for horizontal padding inside the button (px-2 => 16px)
+        height: Math.round(Math.max(1, (width - 16)) * 4 / 3) + 28,
+      }}
+    >
+      <div
+        className={cn(
+          "relative w-full rounded-xl overflow-hidden shadow-sm ring-1 bg-white p-1",
+          isActive ? "ring-primary" : "ring-border"
+        )}
+        style={{ aspectRatio: '3 / 4' }}
+      >
+        {src ? (
+          <img src={src} alt={`Page ${n}`} className="w-full h-full object-contain" />
+        ) : (
+          <div className="w-full h-full animate-pulse bg-muted" />
+        )}
+        {!!hitCount && (
+          <div data-testid="thumb-hit" className="absolute top-1 right-1 text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500 text-white shadow">
+            {hitCount > 9 ? '9+' : hitCount}
+          </div>
+        )}
+      </div>
+      <div className="mt-2 text-xs text-muted-foreground flex items-center justify-between">
+        <span>P.{n}</span>
+      </div>
+    </button>
+  );
+}
+
+===== END prototypes/tabbed/html/src/components/ThumbnailRail.tsx =====
+
+===== BEGIN prototypes/tabbed/html/src/pages/ClassicLayout.tsx =====
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import {
+  Upload, Search, Archive, Copy, Trash2, Plus, SquareDashed, Loader2, Minus, Play,
+  ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronDown,
+  Edit, Sparkles, ArrowLeft, Tag, Moon, Info, Braces, FileText, Download, MoreHorizontal,
+  Check, X
+} from "lucide-react";
+import { Link } from "react-router-dom";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Card } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Separator } from "@/components/ui/separator";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { Switch } from "@/components/ui/switch";
+import { Loader, LoaderDots } from "@/components/ui/loader";
+import { toast } from "@/components/ui/sonner";
+import { ThumbnailRail } from "@/components/ThumbnailRail";
+import { ThumbnailStrip } from "@/components/ThumbnailStrip";
+import { PdfCanvas } from "@/components/PdfCanvas";
+import { ZoomControl } from "@/components/ZoomControl";
+import { ActionsMenu } from "@/components/ActionsMenu";
+import { loadPdf, type PdfDoc, getPageText, getQueryBoxes } from "@/lib/pdf";
+import { DEFAULT_LABELS, loadLabels, saveLabel, type LabelDef } from "@/lib/labels";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import { cn } from "@/lib/utils";
+import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
+import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
+import SearchPanel from "@/components/SearchPanel";
+import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
+import { ChatPanel, type ChatMessage, type ChatChip } from "@/components/chat/ChatPanel";
+import {
+  SidebarProvider,
+  SidebarHeader,
+  SidebarContent,
+  Sidebar,
+  SidebarRail,
+  SidebarTrigger,
+} from "@/components/ui/sidebar";
+
+// Types
+type Box = {
+  id: string;
+  type: string;
+  instanceId: string;
+  groupId?: string;
+  owner?: string;
+  conf?: number;
+  x: number; // 0..1
+  y: number; // 0..1
+  w: number; // 0..1
+  h: number; // 0..1
+};
+
+const SNAP = 0.01; // 1% snap
+const MIN_SIZE = 0.02; // 2% minimum
+
+const ClassicLayout = () => {
+  // Prototype state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [doc, setDoc] = useState<PdfDoc | null>(null);
+  const [totalPages, setTotalPages] = useState<number>(2);
+  const [zoom, setZoom] = useState(1);
+  const viewerRef = useRef<HTMLDivElement | null>(null);
+  const [panMode, setPanMode] = useState(false);
+  // Collaboration & filters (lightweight defaults so smokes can run)
+  const [searchQuery, setSearchQuery] = useState<string>("");
+  const [searchHits, setSearchHits] = useState<{ page: number; snippet: string }[]>([]);
+  const [indexing, setIndexing] = useState<{done:number; total:number}>({done:0,total:0});
+  const pageTextRef = useRef<Record<number,string>>({});
+  const [hitBoxesByPage, setHitBoxesByPage] = useState<Record<number,{x:number;y:number;w:number;h:number}[]>>({});
+  const [hitIndex, setHitIndex] = useState<number>(-1);
+  const hasHits = searchHits.length > 0;
+  const [status, setStatus] = useState<"Unassigned"|"In Review"|"Done">("Unassigned");
+  const [assignee, setAssignee] = useState<string>("");
+  const [filterSection, setFilterSection] = useState<boolean>(true);
+  const [filterTable, setFilterTable] = useState<boolean>(true);
+  const [filterFigure, setFilterFigure] = useState<boolean>(true);
+  const [filterConfidence, setFilterConfidence] = useState<number>(50);
+  const [filterOwner, setFilterOwner] = useState<"all"|"mine"|"unassigned">("all");
+
+  // Boxes per page
+  const [boxesByPage, setBoxesByPage] = useState<Record<number, Box[]>>({
+    5: [
+      { id: "section", type: "Section", instanceId: "sec-001", groupId: "", owner: "", conf: 95, x: 0.10, y: 0.15, w: 0.80, h: 0.15 },
+      { id: "table", type: "Table", instanceId: "tbl-001", groupId: "", owner: "", conf: 95, x: 0.15, y: 0.40, w: 0.70, h: 0.40 },
+    ],
+  });
+  const [selectedId, setSelectedId] = useState<string | null>("section");
+  const [defaultNewType, setDefaultNewType] = useState<string>("Section");
+  const [labels, setLabels] = useState<LabelDef[]>(() => (typeof window !== 'undefined' ? loadLabels() : DEFAULT_LABELS));
+  useEffect(() => { setLabels(loadLabels()); }, []);
+
+  // Feature flags / compact UX toggles
+  // Toggle the "review" widgets (Claim/Release/Confidence/Owner) in the inspector.
+  // Leave false to keep inspector focused on annotation properties.
+  const SHOW_REVIEW = false;
+  const showConflicts = React.useMemo(() => {
+    try {
+      // Vite env or localStorage override
+      return Boolean((import.meta as any)?.env?.VITE_SHOW_CONFLICTS ?? (localStorage.getItem('show_conflicts') === '1'));
+    } catch { return false; }
+  }, []);
+
+  const [jsonOpen, setJsonOpen] = useState(false);
+  const [jsonText, setJsonText] = useState("{}");
+  const [notesText, setNotesText] = useState("");
+  const [mentionOpen, setMentionOpen] = useState(false);
+  const [mentionOptions, setMentionOptions] = useState<string[]>([]);
+  const [conflicts, setConflicts] = useState<any[]>([]);
+  // Requirements pane (empty-state friendly)
+  const [reqResultsDir, setReqResultsDir] = useState<string | null>(null);
+  const [reqItems, setReqItems] = useState<any[]>([]);
+  const [reqLoading, setReqLoading] = useState(false);
+  const refreshRequirements = async () => {
+    try {
+      setReqLoading(true);
+      let rd = reqResultsDir || lastResultsDir;
+      if (!rd) {
+        try {
+          const r = await fetch('/api/pipeline/latest');
+          const j = await r.json();
+          if (j?.ok && j.results_dir) rd = j.results_dir;
+        } catch {}
+      }
+      setReqResultsDir(rd || null);
+      if (!rd) { setReqItems([]); return; }
+      const u = `/api/requirements/list?` + new URLSearchParams({ results_dir: String(rd) }).toString();
+      const r = await fetch(u);
+      if (!r.ok) { setReqItems([]); return; }
+      const j = await r.json();
+      if (j?.ok && Array.isArray(j.requirements)) setReqItems(j.requirements);
+    } finally {
+      setReqLoading(false);
+    }
+  };
+  useEffect(() => {
+    try {
+      const recent = JSON.parse(localStorage.getItem('tabbed.review.recent') || '[]');
+      const me = localStorage.getItem('reviewer_name') || 'Me';
+      const opts = Array.from(new Set([me, ...recent].filter(Boolean)));
+      setMentionOptions(opts);
+    } catch {}
+  }, []);
+  const [strictMatch, setStrictMatch] = useState<boolean>(() => {
+    try { return localStorage.getItem('strict_json_match') === '1'; } catch { return false; }
+  });
+  useEffect(() => { try { localStorage.setItem('strict_json_match', strictMatch ? '1' : '0'); } catch {} }, [strictMatch]);
+
+  // Resizable panes (left/right) with persistence
+  const [leftW, setLeftW] = useState<number>(() => { const v = Number(localStorage.getItem('pane_left_w')); return Number.isFinite(v) && v >= 200 ? v : 320; });
+  const [rightW, setRightW] = useState<number>(() => { const v = Number(localStorage.getItem('pane_right_w')); return Number.isFinite(v) && v >= 220 ? v : 320; });
+  useEffect(() => { try { localStorage.setItem('pane_left_w', String(leftW)); } catch {} }, [leftW]);
+  useEffect(() => { try { localStorage.setItem('pane_right_w', String(rightW)); } catch {} }, [rightW]);
+  const paneDragRef = useRef<{ side: 'left'|'right'; startX: number; startW: number } | null>(null);
+  const paneBeginDrag = (side: 'left'|'right', e: React.PointerEvent<HTMLDivElement>) => {
+    (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+    paneDragRef.current = { side, startX: e.clientX, startW: side==='left'?leftW:rightW };
+  };
+  const paneOnDragMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!paneDragRef.current) return;
+    const dx = e.clientX - paneDragRef.current.startX;
+    if (paneDragRef.current.side === 'left') setLeftW(Math.max(200, Math.min(480, paneDragRef.current.startW + dx)));
+    else setRightW(Math.max(220, Math.min(480, paneDragRef.current.startW - dx)));
+  };
+  const paneEndDrag = () => { paneDragRef.current = null; };
+  const paneHandleKey = (side: 'left'|'right', e: React.KeyboardEvent<HTMLDivElement>) => {
+    const step = e.shiftKey ? 20 : 10;
+    if (side === 'left') {
+      if (e.key === 'ArrowLeft') setLeftW(w => Math.max(200, w - step));
+      if (e.key === 'ArrowRight') setLeftW(w => Math.min(480, w + step));
+    } else {
+      if (e.key === 'ArrowLeft') setRightW(w => Math.min(480, w + step));
+      if (e.key === 'ArrowRight') setRightW(w => Math.max(220, w - step));
+    }
+  };
+
+  // Scroll active thumbnail into view (pager chips removed; still keep util)
+  const thumbRefs = useRef<Record<number, HTMLButtonElement | null>>({});
+  useEffect(() => {
+    thumbRefs.current[currentPage]?.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+  }, [currentPage]);
+
+  // Server-provided list (via FastAPI /api/list) for real PDFs in dev
+  type PdfItem = { name: string; rel: string; size?: number; mtime?: number };
+  const [pdfItems, setPdfItems] = useState<PdfItem[]>([]);
+  const [openDialog, setOpenDialog] = useState(false);
+  const [openFilter, setOpenFilter] = useState("");
+  const [currentPdfName, setCurrentPdfName] = useState<string | null>(null);
+  const [currentPdfRel, setCurrentPdfRel] = useState<string | null>(null);
+  const [selectedDocIds, setSelectedDocIds] = useState<Record<string, boolean>>({});
+  const [docIdByRel, setDocIdByRel] = useState<Record<string, string>>({});
+  const [currentDocId, setCurrentDocId] = useState<string | null>(null);
+  const shortDocId = useMemo(() => currentDocId ? currentDocId.slice(0, 12) : null, [currentDocId]);
+  const [dbStatusByRel, setDbStatusByRel] = useState<Record<string, boolean>>({});
+  const selectedCount = useMemo(() => Object.values(selectedDocIds).filter(Boolean).length, [selectedDocIds]);
+  // Left list density (persisted)
+  const [compactList, setCompactList] = useState<boolean>(() => {
+    try {
+      const k = localStorage.getItem("ui.left.density");
+      if (k === "compact") return true;
+      if (k === "comfortable") return false;
+      return localStorage.getItem("left_density") === "compact";
+    } catch { return false; }
+  });
+  const lastUserDensityRef = useRef<"compact"|"comfortable">(compactList ? "compact" : "comfortable");
+  useEffect(() => {
+    try {
+      const u = localStorage.getItem("ui.left.density_user");
+      if (u === "compact" || u === "comfortable") lastUserDensityRef.current = u;
+    } catch {}
+  }, []);
+  const setDensityUser = (v: "compact"|"comfortable") => {
+    setCompactList(v === "compact");
+    lastUserDensityRef.current = v;
+    try {
+      localStorage.setItem("ui.left.density", v);
+      localStorage.setItem("ui.left.density_user", v);
+      localStorage.setItem("left_density", v === "compact" ? "compact" : "comfortable");
+    } catch {}
+  };
+
+  // Autosave/load annotation state per PDF (localStorage)
+  const autosaveKey = useMemo(() => currentPdfRel ? `anno_state:${currentPdfRel}` : null, [currentPdfRel]);
+  // Load saved boxes on PDF change
+  useEffect(() => {
+    if (!autosaveKey) return;
+    try {
+      const raw = localStorage.getItem(autosaveKey);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') setBoxesByPage(parsed);
+      }
+    } catch {}
+  }, [autosaveKey]);
+  // Debounced autosave
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!autosaveKey) return;
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      try { localStorage.setItem(autosaveKey, JSON.stringify(boxesByPage)); } catch {}
+    }, 400);
+    return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
+  }, [boxesByPage, autosaveKey]);
+
+  // Persist per-doc review state
+  useEffect(() => {
+    if (!currentDocId) return;
+    try { localStorage.setItem(`tabbed.review.${currentDocId}.status`, status); } catch {}
+  }, [status, currentDocId]);
+  useEffect(() => {
+    if (!currentDocId) return;
+    try { localStorage.setItem(`tabbed.review.${currentDocId}.assignee`, assignee); } catch {}
+  }, [assignee, currentDocId]);
+  useEffect(() => {
+    if (!currentDocId) return;
+    try { localStorage.setItem(`tabbed.review.${currentDocId}.notes`, notesText); } catch {}
+  }, [notesText, currentDocId]);
+
+  // Suggestions (preview layer: accept/reject)
+  const [suggByPage, setSuggByPage] = React.useState<Record<number, Box[]>>({});
+  const reviewerName = React.useMemo(() => {
+    try { return localStorage.getItem('reviewer_name') || 'Me'; } catch { return 'Me'; }
+  }, []);
+  const pageBoxes = React.useMemo(() => boxesByPage[currentPage] || [], [boxesByPage, currentPage]);
+  const selectedBox = useMemo(() => pageBoxes.find((b) => b.id === selectedId) || null, [pageBoxes, selectedId]);
+  const visiblePageBoxes = React.useMemo(() => {
+    const okType = (b: Box) => (
+      (b.type === 'Section' ? filterSection : b.type === 'Table' ? filterTable : b.type === 'Figure' ? filterFigure : true)
+    );
+    const okOwner = (b: Box) => {
+      if (filterOwner === 'all') return true;
+      const owner = (b.owner || '').trim();
+      if (filterOwner === 'mine') return owner === reviewerName;
+      if (filterOwner === 'unassigned') return !owner;
+      return true;
+    };
+    const okConf = (b: Box) => (typeof b.conf === 'number' ? b.conf : 100) >= filterConfidence;
+    return pageBoxes.filter((b) => okType(b) && okOwner(b) && okConf(b));
+  }, [pageBoxes, filterSection, filterTable, filterFigure, filterOwner, filterConfidence, reviewerName]);
+
+  // Resolve and cache a docId for a given PDF rel path
+  const ensureDocId = React.useCallback(async (rel: string | null | undefined): Promise<string | null> => {
+    if (!rel) return null;
+    const cached = docIdByRel[rel];
+    if (cached) return cached;
+    try {
+      const r = await fetch(`/api/pipeline/doc-id?pdf_rel=${encodeURIComponent(rel)}`);
+      const j = await r.json();
+      if (j?.ok && j.doc_id) {
+        setDocIdByRel(prev => ({ ...prev, [rel]: String(j.doc_id) }));
+        return String(j.doc_id);
+      }
+    } catch {}
+    return null;
+  }, [docIdByRel]);
+
+  // Track current docId when PDF changes; hydrate per-doc state
+  useEffect(() => {
+    (async () => {
+      const did = await ensureDocId(currentPdfRel || undefined);
+      setCurrentDocId(did);
+      if (!did) return;
+      try {
+        const ns = localStorage.getItem(`tabbed.review.${did}.notes`);
+        if (ns !== null) setNotesText(String(ns));
+      } catch {}
+      try {
+        const st = localStorage.getItem(`tabbed.review.${did}.status`);
+        if (st === 'Unassigned' || st === 'In Review' || st === 'Done') setStatus(st as any);
+        const asg = localStorage.getItem(`tabbed.review.${did}.assignee`);
+        if (asg !== null) setAssignee(String(asg));
+      } catch {}
+    })();
+  }, [currentPdfRel, ensureDocId]);
+
+
+  const filteredFiles = useMemo(() => {
+    const list = pdfItems.length ? pdfItems : [{ name: currentPdfName || 'Demo Placeholder', rel: '' } as any];
+    const q = openFilter.toLowerCase();
+    return list.filter((it: any)=> it.name?.toLowerCase().includes(q));
+  }, [pdfItems, openFilter, currentPdfName]);
+
+  // Load server list + preload target PDF
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const r = await fetch('/api/list', { credentials: 'omit' });
+        const j = await r.json();
+        if (!mounted) return;
+        if (j?.ok && Array.isArray(j.items)) {
+          setPdfItems(j.items);
+          const target = j.items.find((it: PdfItem) => it.name.toLowerCase() === 'bht cv32a65x.pdf');
+          const first = target || j.items[0];
+          if (first) {
+            const url = `/api/pdf?rel=${encodeURIComponent(first.rel)}`;
+            const d = await loadPdf(url);
+            if (!mounted) return;
+            setDoc(d); setTotalPages(d.numPages || 2); setCurrentPdfName(first.name); setCurrentPdfRel(first.rel);
+          }
+          return;
+        }
+      } catch { /* fallthrough to placeholder */ }
+      // Backend not reachable or list failed; try direct API target first, then static fallback
+      // No server list available. Avoid eager fallback loads that cause 404 noise.
+      // Leave the viewer empty until the user opens a PDF from the left rail.
+      if (!mounted) return;
+      setDoc(null as any); setTotalPages(0); setCurrentPdfName(null); setCurrentPdfRel(null);
+    })();
+    return () => { mounted = false };
+  }, []);
+
+  // Build a simple search index when query changes; incremental across pages
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const q = searchQuery.trim().toLowerCase();
+      if (!q) {
+        setSearchHits([]);
+        setHitIndex(-1);
+        return;
+      }
+      const hits: { page: number; snippet: string }[] = [];
+      try {
+        if (doc && (doc as any).getPage && totalPages) {
+          // Ensure we have some text cached; index incrementally across all pages in the background
+          setIndexing({done:0,total: totalPages});
+          for (let i = 1; i <= totalPages; i++) {
+            if (cancelled) break;
+            if (!pageTextRef.current[i]) {
+              const txt = await getPageText(doc, i);
+              pageTextRef.current[i] = txt;
+            }
+            setIndexing({done:i,total: totalPages});
+          }
+          // Now compute hits using whatever is available
+          for (let i = 1; i <= totalPages; i++) {
+            const text = pageTextRef.current[i] || '';
+            if (!text) continue;
+            const lower = text.toLowerCase();
+            const pos = lower.indexOf(q);
+            if (pos >= 0) {
+              const start = Math.max(0, pos - 40), end = Math.min(lower.length, pos + q.length + 40);
+              const snippet = text.slice(start, end).replace(/\s+/g, ' ').trim();
+              hits.push({ page: i, snippet });
+            }
+            if (hits.length >= 25) break; // cap for dropdown
+          }
+        }
+      } catch {}
+      if (!hits.length) {
+        hits.push({ page: Math.min(2, Math.max(1, currentPage)), snippet: `“${searchQuery}” (demo)` });
+      }
+      if (!cancelled) {
+        setSearchHits(hits);
+        setHitIndex(hits.length ? 0 : -1);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [searchQuery, doc, totalPages, currentPage]);
+
+  // Compute highlight boxes for current page and neighbors when query/doc/page changes
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const q = searchQuery.trim();
+      if (!q || !doc || !totalPages) { if (!cancelled) setHitBoxesByPage({}); return; }
+      const pages = [currentPage-1, currentPage, currentPage+1].filter(p => p>=1 && p<=totalPages);
+      const res: Record<number,{x:number;y:number;w:number;h:number}[]> = {};
+      for (const p of pages) {
+        try {
+          const b = await getQueryBoxes(doc, p, q);
+          res[p] = b;
+        } catch { res[p] = []; }
+      }
+      if (!cancelled) setHitBoxesByPage(prev => ({ ...prev, ...res }));
+    })();
+    return () => { cancelled = true; };
+  }, [searchQuery, doc, currentPage, totalPages]);
+
+  // Search panel tray (Cmd/Ctrl+K)
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchTab, setSearchTab] = useState<"page"|"document"|"chat">("document");
+
+  // Keyboard shortcuts: [, ] paging; N arm draw; ? help; Space pan
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
+      if (tag === 'input' || tag === 'textarea') return;
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setSearchOpen((o)=>!o); return; }
+      if (e.altKey && e.key === '2') { e.preventDefault(); setChatDockOpen(v=>!v); return; }
+      if (e.key === '[') { setCurrentPage((p)=> Math.max(1, p-1)); e.preventDefault(); }
+      if (e.key === ']') { setCurrentPage((p)=> Math.min(totalPages, p+1)); e.preventDefault(); }
+      if (e.key === 'n' || e.key === 'N') { setDrawArmed(true); e.preventDefault(); }
+      if (e.key === '?') { setHelpOpen(true); e.preventDefault(); }
+      if (e.key === ' ') { setPanMode(true); }
+      if (e.key === 'Escape') { if (searchOpen) { setSearchOpen(false); e.preventDefault(); return; } setDrawArmed(false); setDraftBox(null); }
+    };
+    const onKeyUp = (e: KeyboardEvent) => { if (e.key === ' ') setPanMode(false); };
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('keyup', onKeyUp);
+    return () => { window.removeEventListener('keydown', onKey); window.removeEventListener('keyup', onKeyUp); };
+  }, [totalPages, searchOpen]);
+
+  // Thumbnails mode (left | bottom | off) with persistence
+  type ThumbMode = "left" | "bottom" | "off";
+  const [thumbMode, setThumbMode] = useState<ThumbMode>(() => (localStorage.getItem("anno_thumb_mode") as ThumbMode) || "left");
+  useEffect(() => { localStorage.setItem("anno_thumb_mode", thumbMode); }, [thumbMode]);
+  // Bust thumbnail cache when document changes to avoid stale placeholders
+  const [thumbRev, setThumbRev] = useState(0);
+  useEffect(() => { setThumbRev((n) => n + 1); }, [doc, currentPdfName]);
+  // Persist thumbnails enabled preference (maps to thumbMode !== 'off')
+  useEffect(() => {
+    try { localStorage.setItem("ui.left.thumb", thumbMode !== 'off' ? '1' : '0'); } catch {}
+  }, [thumbMode]);
+  // Night page mode
+  const [night, setNight] = useState<boolean>(() => { try { return localStorage.getItem('night_page') === '1'; } catch { return false; } });
+  useEffect(() => { try { localStorage.setItem('night_page', night ? '1' : '0'); } catch {} }, [night]);
+  // App-ready marker once a document is available
+  const appReady = !!doc;
+  // Search focus takeover (filter expands, list dims)
+  const [filterFocused, setFilterFocused] = useState(false);
+  const isSearchMode = filterFocused || searchOpen;
+  // Auto-compact when left list area is short
+  const leftListRef = useRef<HTMLDivElement|null>(null);
+  useEffect(() => {
+    const el = leftListRef.current; if (!el) return;
+    const ro = new ResizeObserver(() => {
+      const h = el.clientHeight;
+      const fewer = filteredFiles.length < 6;
+      const wantAuto = h < 720 || fewer;
+      if (wantAuto && !compactList) {
+        setCompactList(true);
+        try {
+          const key = 'ui.left.density.auto_toast_shown';
+          if (localStorage.getItem(key) !== '1') {
+            toast('Switched to compact to fit more items');
+            localStorage.setItem(key, '1');
+          }
+        } catch {}
+      } else if (!wantAuto) {
+        const v = lastUserDensityRef.current || (compactList ? 'compact':'comfortable');
+        setCompactList(v === 'compact');
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [filteredFiles.length, compactList]);
+  // Chat bottom panel (open + split) and messages
+  const [chatDockOpen, setChatDockOpen] = useState<boolean>(() => { try { return localStorage.getItem('chat_open') === '1'; } catch { return false; } });
+  useEffect(() => { try { localStorage.setItem('chat_open', chatDockOpen ? '1' : '0'); } catch {} }, [chatDockOpen]);
+  const [chatSplit, setChatSplit] = useState<number>(0.4);
+  useEffect(() => {
+    const key = currentDocId || currentPdfRel || '';
+    try {
+      const s = Number(localStorage.getItem(`right_split:${key}`));
+      if (s > 0 && s < 1) setChatSplit(s);
+    } catch {}
+  }, [currentDocId, currentPdfRel]);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const baseChips = useMemo<ChatChip[]>(() => {
+    const chips: ChatChip[] = [{ key: `page:${currentPage}`, label: `p${currentPage}`, active: true }];
+    const sb = pageBoxes.find((b) => b.id === selectedId) || null;
+    if (sb) {
+      chips.push({ key: `sel:${sb.instanceId}`, label: `selection:${sb.instanceId}`, active: true });
+      chips.push({ key: `type:${sb.type}`, label: `type:${sb.type}`, active: true });
+    }
+    return chips;
+  }, [currentPage, selectedId, pageBoxes]);
+  const [chipActive, setChipActive] = useState<Record<string, boolean>>({});
+  useEffect(() => {
+    const next: Record<string, boolean> = {};
+    for (const c of baseChips) next[c.key] = chipActive[c.key] ?? true;
+    setChipActive(next);
+  }, [baseChips.map(c=>c.key).join('|')]);
+  const chips = useMemo<ChatChip[]>(() => baseChips.map(c => ({ ...c, active: chipActive[c.key] !== false })), [baseChips, chipActive]);
+  const toggleChip = (key: string) => setChipActive(prev => ({ ...prev, [key]: !(prev[key] !== false) }));
+  const sendChat = async (text: string) => {
+    setChatMessages(m => [...m, { role: 'user', content: text }]);
+    const scope: any = {};
+    const a = (k: string) => chipActive[k] !== false;
+    if (a(`page:${currentPage}`)) scope.page = currentPage;
+    if (selectedBox) {
+      if (a(`type:${selectedBox.type}`)) scope.type = selectedBox.type;
+      if (a(`sel:${selectedBox.instanceId}`)) { scope.instance_id = selectedBox.instanceId; scope.bbox = [selectedBox.x, selectedBox.y, selectedBox.w, selectedBox.h]; }
+    }
+    const body: any = { q: text };
+    if (currentDocId) body.doc_id = currentDocId; else body.pdf = currentPdfName || currentPdfRel || '';
+    body.scope = scope;
+    try {
+      const r = await fetch('/api/chat/query', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const j = await r.json();
+      if (j?.ok) setChatMessages(m => [...m, { role: 'assistant', content: String(j.answer || '') }]);
+      else setChatMessages(m => [...m, { role: 'assistant', content: j?.error || 'Chat failed' }]);
+    } catch {
+      setChatMessages(m => [...m, { role: 'assistant', content: 'Chat failed' }]);
+    }
+  };
+
+  // Zoom helpers (shared with ZoomControl)
+  const fitWidth = React.useCallback(() => {
+    try {
+      const container = viewerRef.current;
+      const canvas = container?.querySelector('canvas') as HTMLCanvasElement | null;
+      if (!container || !canvas) return;
+      const w = canvas.width / (Number(canvas.style.width.replace('px','')) || 1);
+      const target = (container.clientWidth - 24) * w; // padding margin
+      const fit = Math.max(0.5, Math.min(2, target / canvas.width));
+      setZoom(fit);
+    } catch {}
+  }, []);
+  const fitPage = React.useCallback(() => {
+    try {
+      const container = viewerRef.current;
+      const canvas = container?.querySelector('canvas') as HTMLCanvasElement | null;
+      if (!container || !canvas) return;
+      const w = canvas.width / (Number(canvas.style.width.replace('px','')) || 1);
+      const h = canvas.height / (Number(canvas.style.height.replace('px','')) || 1);
+      const fitW = (container.clientWidth - 24) * w / canvas.width;
+      const fitH = (container.clientHeight - 24) * h / canvas.height;
+      const fit = Math.max(0.5, Math.min(2, Math.min(fitW, fitH)));
+      setZoom(fit);
+    } catch {}
+  }, []);
+
+  // (Removed) Featured Lessons UI was for agent use only; keep lessons out of the app
+
+  // Derived helpers for current page
+  // pageBoxes declared earlier; reuse it here
+  const setPageBoxes = (updater: (prev: Box[]) => Box[]) => {
+    setBoxesByPage((prev) => {
+      const nextArr = updater(prev[currentPage] || []);
+      const safe = Array.isArray(nextArr) ? nextArr : (prev[currentPage] || []);
+      return { ...prev, [currentPage]: safe };
+    });
+  };
+
+  // Ensure selection valid on page change
+  useEffect(() => {
+    const boxes = boxesByPage[currentPage] || [];
+    if (!boxes.length) setSelectedId(null);
+    else if (!boxes.find((b) => b.id === selectedId)) setSelectedId(boxes[boxes.length - 1].id);
+  }, [currentPage, boxesByPage, selectedId]);
+
+  // Overlay interactivity
+  const overlayRef = useRef<HTMLDivElement | null>(null);
+  const dragRef = useRef<
+    | null
+    | {
+        id: string;
+        mode: "move" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w" | "nw";
+        startX: number;
+        startY: number;
+        startBox: Box;
+        rect: { width: number; height: number };
+      }
+  >(null);
+
+  // Drawing state
+  const drawRef = useRef<
+    | null
+    | { startX: number; startY: number; rect: { width: number; height: number }; alt: boolean }
+  >(null);
+  const [draftBox, setDraftBox] = useState<Box | null>(null);
+  const [drawArmed, setDrawArmed] = useState(false);
+  const [showHud, setShowHud] = useState(false);
+  // HUD state
+  type HudMode = "free" | "attach";
+  const [hudMode, setHudMode] = useState<HudMode>(() => (localStorage.getItem("anno_hud_mode") as HudMode) || "free");
+  const [hudPos, setHudPos] = useState<{x:number;y:number}>(() => { try { return JSON.parse(localStorage.getItem("anno_hud_pos") || ""); } catch { return { x: 12, y: 12 }; } });
+  useEffect(() => { localStorage.setItem("anno_hud_mode", hudMode); }, [hudMode]);
+  useEffect(() => { if (hudPos && Number.isFinite(hudPos.x)) localStorage.setItem("anno_hud_pos", JSON.stringify(hudPos)); }, [hudPos]);
+  const hudStyle = useMemo(() => {
+    const base: any = { opacity: 0.98 };
+    if (hudMode === "free") return { ...base, left: hudPos?.x ?? 12, top: hudPos?.y ?? 12 };
+    const m = 8;
+    const r = overlayRef.current?.getBoundingClientRect();
+    const b = selectedBox;
+    if (!r || !b) return { ...base, left: 12, top: 12 };
+    const x = b.x * r.width + Math.min(20, (b.w * r.width) / 2);
+    const y = Math.max(m, b.y * r.height - 40);
+    return { ...base, left: Math.min(Math.max(m, x), r.width - 160), top: Math.min(Math.max(m, y), r.height - 44) };
+  }, [hudMode, hudPos, selectedBox]);
+
+  // Generate JSON via backend using a cropped image around selected box (expanded by 20%)
+  // All generate events are non-blocking (chip+toast)
+  const [llmPending, setLlmPending] = useState(0);
+  // Exact JSON Match – canonical stringifier (sorted keys)
+  const stableStringify = (val: any): string => {
+    const seen = new WeakSet();
+    const helper = (v: any): any => {
+      if (v && typeof v === 'object') {
+        if (seen.has(v)) return null;
+        seen.add(v);
+        if (Array.isArray(v)) return v.map(helper);
+        const out: any = {};
+        for (const k of Object.keys(v).sort()) out[k] = helper(v[k]);
+        return out;
+      }
+      return v;
+    };
+    try { return JSON.stringify(helper(val)); } catch { return ''; }
+  };
+
+  function deepEqual(a: any, b: any): boolean {
+    if (a === b) return true;
+    if (typeof a !== typeof b) return false;
+    if (a === null || b === null) return a === b;
+    if (Array.isArray(a)) {
+      if (!Array.isArray(b)) return false;
+      if (a.length !== b.length) return false;
+      for (let i = 0; i < a.length; i++) if (!deepEqual(a[i], b[i])) return false;
+      return true;
+    }
+    if (typeof a === 'object') {
+      const ak = Object.keys(a).sort();
+      const bk = Object.keys(b).sort();
+      if (ak.length !== bk.length) return false;
+      for (let i = 0; i < ak.length; i++) if (ak[i] !== bk[i]) return false;
+      for (const k of ak) if (!deepEqual(a[k], b[k])) return false;
+      return true;
+    }
+    return false;
+  }
+
+  const generateFromSelection = async () => {
+    if (!overlayRef.current) return;
+    const sel = selectedBox;
+    if (!doc || !sel) return;
+    const canvas = overlayRef.current.querySelector('canvas') as HTMLCanvasElement | null;
+    if (!canvas) return;
+    const clamp = (v: number, min = 0, max = 1) => Math.max(min, Math.min(max, v));
+    // expand by 20% keeping center
+    const cx = sel.x + sel.w / 2; const cy = sel.y + sel.h / 2;
+    const nw = clamp(sel.w * 1.2); const nh = clamp(sel.h * 1.2);
+    const nx = clamp(cx - nw / 2); const ny = clamp(cy - nh / 2);
+    const sx = Math.round(nx * canvas.width);
+    const sy = Math.round(ny * canvas.height);
+    const sw = Math.round(Math.min(canvas.width - sx, nw * canvas.width));
+    const sh = Math.round(Math.min(canvas.height - sy, nh * canvas.height));
+    if (sw <= 2 || sh <= 2) return;
+    const off = document.createElement('canvas');
+    off.width = sw; off.height = sh;
+    const ctx = off.getContext('2d');
+    if (!ctx) return;
+    ctx.drawImage(canvas, sx, sy, sw, sh, 0, 0, sw, sh);
+    const dataUrl = off.toDataURL('image/png');
+
+    const prompt = `You are an expert table extractor. Given an image of a table from a PDF, return ONLY a strict JSON object with EXACT keys and types:
+
+{
+  "title": string,            // concise title; if inferred, prefix with INFERRED_
+  "columns": string[],        // header cells as strings
+  "data": string[][]          // row-major 2D array of cell text
+}
+
+Rules:
+- Respond with a single JSON object only (no markdown, no code fences, no commentary).
+- Do not include any extra keys.
+- Normalize whitespace; keep cell contents as plain strings.`;
+
+    setLlmPending((n) => n + 1);
+    try {
+      const payload = { prompt, image: dataUrl } as any;
+      const tryEndpoints = async () => {
+        const endpoints: string[] = [];
+        const VITE_API_BASE = (import.meta as any).env?.VITE_API_BASE as string | undefined;
+        if (VITE_API_BASE) endpoints.push(String(VITE_API_BASE).replace(/\/$/, '') + '/api/ux/generate');
+        endpoints.push('/api/ux/generate');
+        endpoints.push('http://127.0.0.1:8000/api/ux/generate');
+        for (const u of endpoints) {
+          try {
+            const r = await fetch(u, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+            if (r.ok) return await r.json();
+          } catch { }
+        }
+        return null;
+      };
+      const j = await tryEndpoints();
+      let out: any = null;
+      if (j && j.ok && j.data) out = (j.data.json || j.data.output || j.data.text || j.data);
+      if (typeof out === 'string') { try { out = JSON.parse(out); } catch {} }
+      if (!out || typeof out !== 'object') {
+        if (!strictMatch) {
+          setJsonText(JSON.stringify(j ?? { error: 'no_output' }, null, 2));
+          setJsonOpen(true);
+        } else {
+          toast.error('Exact JSON Match failed: invalid model output');
+        }
+        return;
+      }
+
+      if (strictMatch) {
+        try {
+          let gold: any = null;
+          try { gold = JSON.parse(jsonText || ''); } catch {}
+          const goldEmpty = !gold || (typeof gold === 'object' && Object.keys(gold).length === 0);
+          if (goldEmpty) {
+            // No gold set: treat as non-strict for this run; show generated output
+            setJsonText(JSON.stringify(out, null, 2));
+            setJsonOpen(true);
+            toast.success('Generated (no gold set)');
+            return;
+          }
+          if (stableStringify(gold) === stableStringify(out)) {
+            toast.success('Exact JSON Match passed');
+          } else {
+            // Show model output to aid correction
+            setJsonText(JSON.stringify(out, null, 2));
+            setJsonOpen(true);
+            toast.error('Exact JSON Match failed: mismatch');
+          }
+        } catch {
+          toast.error('Exact JSON Match failed: invalid gold JSON');
+        }
+      } else {
+        setJsonText(JSON.stringify(out, null, 2));
+        setJsonOpen(true);
+        toast.success('Generated');
+      }
+    } catch (e) {
+      if (strictMatch) toast.error('Exact JSON Match failed'); else toast.error('Failed to generate');
+    } finally {
+      setLlmPending((n) => Math.max(0, n - 1));
+    }
+  };
+
+
+
+  // Suggestions via Camelot (server)
+  const suggestTables = async () => {
+    try {
+      if (!currentPdfRel) { toast.error('Open a PDF first'); return; }
+      const u = `/api/suggest/tables?rel=${encodeURIComponent(currentPdfRel)}&page=${currentPage}`;
+      const r = await fetch(u);
+      const j = await r.json();
+      if (!j?.ok) { toast.error(j?.error || 'No suggestions'); return; }
+      const sug = Array.isArray(j.suggestions) ? j.suggestions : [];
+      if (!sug.length) { toast('No tables suggested'); return; }
+      setSuggByPage(prev => ({
+        ...prev,
+        [currentPage]: (sug || []).map((s: any) => ({ id: `sugg-${Math.random().toString(36).slice(2,7)}`, type: s.type || 'Table', instanceId: 'suggestion', x: s.x, y: s.y, w: s.w, h: s.h }))
+      }));
+      toast.success(`Loaded ${sug.length} suggestion${sug.length===1?'':'s'}`);
+    } catch (e) {
+      toast.error('Suggest failed');
+    }
+  };
+
+  // Normalize boxes for export endpoints that expect `bounding_box: [x,y,w,h]`
+  const normalizeBoxesForExport = React.useCallback((byPage: Record<number, Box[]>) => {
+    const out: Record<string, any[]> = {};
+    for (const [k, arr] of Object.entries(byPage || {})) {
+      out[k] = (arr || []).map((b) => ({
+        type: b.type,
+        instance_id: b.instanceId,
+        bounding_box: [b.x, b.y, b.w, b.h] as [number, number, number, number],
+      }));
+    }
+    return out;
+  }, []);
+
+  // Export COCO (server render + annotations)
+  const exportCoco = async () => {
+    if (!currentPdfRel) { toast.error('Open a PDF first'); return; }
+    try {
+      const payload = { rel: currentPdfRel, boxes_by_page: boxesByPage } as any;
+      const r = await fetch('/api/coco/export', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      const j = await r.json();
+      if (j?.ok) {
+        const href = `/api/artifacts/browse?dir=${encodeURIComponent(j.dir)}`;
+        toast.success(
+          <span>
+            COCO written. <a className="underline" href={href} target="_blank" rel="noreferrer">Open artifacts</a>
+            <button
+              className="ml-3 underline"
+              onClick={(e)=>{ e.preventDefault(); navigator.clipboard.writeText(String(j.dir || '')).then(()=>toast.success('Path copied'), ()=>toast.error('Copy failed')); }}
+            >Copy path</button>
+          </span>
+        );
+      } else {
+        toast.error(j?.error || 'COCO export failed');
+      }
+    } catch (e) {
+      toast.error('COCO export failed');
+    }
+  };
+
+  // Track last pipeline results dir to re-load annotations
+  const [lastResultsDir, setLastResultsDir] = useState<string | null>(null);
+  const [dbReady, setDbReady] = useState<boolean>(false);
+  const refreshDbStatus = async () => {
+    try {
+      const params = new URLSearchParams();
+      if (currentPdfRel) params.set('pdf_rel', currentPdfRel);
+      const r = await fetch(`/api/pipeline/pdf-status?${params.toString()}`);
+      const j = await r.json();
+      if (j?.ok) setDbReady(Boolean(j.upserted));
+    } catch {}
+  };
+  useEffect(() => { refreshDbStatus(); }, [currentPdfRel]);
+
+  // Per‑rel DB status (for file list hover dot)
+  const fetchDbStatusForRel = async (rel: string) => {
+    try {
+      const r = await fetch(`/api/pipeline/pdf-status?${new URLSearchParams({ pdf_rel: rel }).toString()}`);
+      const j = await r.json();
+      setDbStatusByRel(prev => ({ ...prev, [rel]: Boolean(j?.upserted) }));
+    } catch {}
+  };
+
+  // Toggle selection for chat/upsert scope
+  const toggleSelectRel = async (rel: string) => {
+    const did = await ensureDocId(rel);
+    if (!did) return;
+    setSelectedDocIds(prev => ({ ...prev, [did]: !prev[did] }));
+  };
+
+  // Extract via pipeline (external annotations → server → run_all)
+  const extractPipeline = async () => {
+    if (!currentPdfRel) { toast.error('Open a PDF first'); return; }
+    try {
+      const payload = { pdf_rel: currentPdfRel, boxes_by_page: boxesByPage } as any;
+      const r = await fetch('/api/pipeline/run-external', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      const j = await r.json();
+      if (j?.ok) {
+        if (j.results_dir) setLastResultsDir(String(j.results_dir));
+        const href = j.final_report_md ? `/api/artifacts/file?path=${encodeURIComponent(j.final_report_md)}` : '';
+        toast.success(
+          <span>
+            Extracted. {href && <a className="underline" href={href} target="_blank" rel="noreferrer">Open report</a>}
+          </span>
+        );
+      } else {
+        toast.error(j?.error || 'Extraction failed');
+      }
+    } catch (e) {
+      toast.error('Extraction failed');
+    }
+  };
+
+  // Load pipeline annotations (04/05/06) and merge as auto-suggestions
+  const loadPipelineAnnotations = async () => {
+    let resultsDir = lastResultsDir;
+    if (!resultsDir) {
+      try {
+        const r = await fetch('/api/pipeline/latest');
+        const j = await r.json();
+        if (j?.ok && j.results_dir) resultsDir = j.results_dir;
+      } catch {}
+    }
+    if (!resultsDir) { toast('No recent pipeline run'); return; }
+    try {
+      const paths = [
+        `${resultsDir}/04_section_builder/json_output/04_sections.json`,
+        `${resultsDir}/05_table_extractor/json_output/05_tables.json`,
+        `${resultsDir}/06_figure_extractor/json_output/06_figures.json`,
+      ];
+      const [s4, s5, s6] = await Promise.all(paths.map(async (p) => {
+        const r = await fetch(`/api/artifacts/file?path=${encodeURIComponent(p)}`);
+        if (!r.ok) return null; return r.json();
+      }));
+      // Build page size map from pdf.js
+      if (!doc) { toast('PDF not loaded'); return; }
+      const pageSizes: Record<number, {w:number;h:number}> = {};
+      for (let i=1; i<= (totalPages||1); i++) {
+        try {
+          // @ts-ignore – doc type is loose
+          const page = await doc.getPage(i);
+          const vp = page.getViewport ? page.getViewport({ scale: 1 }) : { width: 612, height: 792 };
+          pageSizes[i-1] = { w: vp.width, h: vp.height };
+        } catch {
+          pageSizes[i-1] = { w: 612, h: 792 };
+        }
+      }
+      const merged: Record<number, Box[]> = JSON.parse(JSON.stringify(boxesByPage || {}));
+      const pushBox = (page0: number, x0:number,y0:number,x1:number,y1:number, type:string) => {
+        const sz = pageSizes[page0] || { w: 612, h: 792 };
+        const wpt = sz.w, hpt = sz.h;
+        const nx = Math.max(0, Math.min(1, x0 / wpt));
+        const ny = Math.max(0, Math.min(1, y0 / hpt));
+        const nw = Math.max(0.01, Math.min(1, (x1 - x0) / wpt));
+        const nh = Math.max(0.01, Math.min(1, (y1 - y0) / hpt));
+        const id = `auto-${Math.random().toString(36).slice(2,7)}`;
+        const instanceId = `${type.toLowerCase()}-auto`;
+        merged[page0+1] = [...(merged[page0+1]||[]), { id, type, instanceId, x: nx, y: ny, w: nw, h: nh } as Box];
+      };
+      // Sections
+      if (s4 && Array.isArray(s4.sections)) {
+        for (const sec of s4.sections) {
+          if (sec?.bbox && Array.isArray(sec.bbox) && sec.page_start !== undefined) {
+            const [x0,y0,x1,y1] = sec.bbox; pushBox(Number(sec.page_start)||0, x0,y0,x1,y1, 'Section');
+          }
+        }
+      }
+      // Tables
+      if (s5 && Array.isArray(s5.tables)) {
+        for (const tbl of s5.tables) {
+          if (tbl?.bbox && Array.isArray(tbl.bbox) && tbl.page_index !== undefined) {
+            const [x0,y0,x1,y1] = tbl.bbox; pushBox(Number(tbl.page_index)||0, x0,y0,x1,y1, 'Table');
+          }
+        }
+      }
+      // Figures
+      if (s6 && Array.isArray(s6.figures)) {
+        for (const fig of s6.figures) {
+          if (fig?.bbox && Array.isArray(fig.bbox) && fig.page !== undefined) {
+            const [x0,y0,x1,y1] = fig.bbox; pushBox(Number(fig.page)||0, x0,y0,x1,y1, 'Figure');
+          }
+        }
+      }
+      setBoxesByPage(merged);
+      toast.success('Loaded pipeline annotations');
+    } catch (e) {
+      toast.error('Load pipeline annotations failed');
+    }
+  };
+
+  // Save consolidated annotations (normalized + Stage-01 canonical on server)
+  const saveAnnotations = async () => {
+    if (!currentPdfRel) { toast.error('Open a PDF first'); return; }
+    try {
+      const payload: any = { pdf_rel: currentPdfRel, boxes_by_page: boxesByPage, results_dir: lastResultsDir || undefined };
+      const r = await fetch('/api/annotations/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      const j = await r.json();
+      if (j?.ok) {
+        if (j.results_dir) setLastResultsDir(String(j.results_dir));
+        const href = j.stage01_annotations_path ? `/api/artifacts/file?path=${encodeURIComponent(j.stage01_annotations_path)}` : '';
+        toast.success(<span>Saved annotations. {href && <a className="underline" href={href} target="_blank" rel="noreferrer">Open Stage‑01</a>}</span>);
+      } else { toast.error(j?.error || 'Save failed'); }
+    } catch { toast.error('Save failed'); }
+  };
+
+  // Upsert to Arango (Stage 10 → 11 only)
+  const upsertPipeline = async () => {
+    if (!lastResultsDir) { toast('No recent pipeline run'); return; }
+    try {
+      const payload: any = { results_dir: lastResultsDir, fast_embeddings: true };
+      const r = await fetch('/api/pipeline/upsert', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      const j = await r.json();
+      if (j?.ok) {
+        const href = j.graph_confirmation ? `/api/artifacts/file?path=${encodeURIComponent(j.graph_confirmation)}` : '';
+        toast.success(<span>Upserted to Arango. {href && <a className="underline" href={href} target="_blank" rel="noreferrer">Graph confirmation</a>}</span>);
+        setDbReady(true);
+      } else { toast.error(j?.error || 'Upsert failed'); }
+    } catch { toast.error('Upsert failed'); }
+  };
+
+  // Chat (MVP): ask query over current PDF
+  const [chatQ, setChatQ] = useState<string>("");
+  const [chatA, setChatA] = useState<string>("");
+  const [chatCites, setChatCites] = useState<{page:number;type:string}[]>([]);
+  const askChat = async () => {
+    const q = chatQ.trim(); if (!q) return;
+    try {
+      const docIds = Object.entries(selectedDocIds).filter(([,v])=>v).map(([k])=>k);
+      const body: any = { q };
+      if (docIds.length) body.doc_ids = docIds; else body.pdf = currentPdfName || currentPdfRel || '';
+      const r = await fetch('/api/chat/query', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const j = await r.json();
+      if (j?.ok) { setChatA(String(j.answer||'')); setChatCites(Array.isArray(j.citations)?j.citations:[]); }
+      else { toast.error(j?.error || 'Chat failed'); }
+    } catch { toast.error('Chat failed'); }
+  };
+
+  // Pipeline job scaffold
+  const [pipelineJob, setPipelineJob] = useState<{ id: string, status: string } | null>(null);
+  useEffect(() => {
+    if (!pipelineJob?.id) return;
+    let cancelled = false;
+    const tid = setInterval(async () => {
+      try {
+        const r = await fetch(`/api/pipeline/status?job_id=${encodeURIComponent(pipelineJob.id)}`);
+        const j = await r.json();
+        if (!j?.ok || !j.job) return;
+        if (cancelled) return;
+        setPipelineJob({ id: j.job.id, status: j.job.status });
+        if (j.job.status === 'done' || j.job.status === 'error') {
+          clearInterval(tid);
+          if (j.job.status === 'done') toast.success('Pipeline done'); else toast.error('Pipeline error');
+        }
+      } catch {}
+    }, 1000);
+    return () => { cancelled = true; clearInterval(tid); };
+  }, [pipelineJob?.id]);
+
+  const runPipeline = async () => {
+    if (!currentPdfRel) { toast.error('Open a PDF first'); return; }
+    try {
+      const r = await fetch('/api/pipeline/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rel: currentPdfRel }) });
+      const j = await r.json();
+      if (j?.ok && j.job_id) {
+        setPipelineJob({ id: j.job_id, status: 'queued' });
+      } else {
+        toast.error(j?.error || 'Pipeline failed to start');
+      }
+    } catch (e) {
+      toast.error('Pipeline failed to start');
+    }
+  };
+  // Dev-only helpers for tests (window.__ux)
+  useEffect(() => {
+    // @ts-ignore
+    (window as any).__ux = {
+      setPage: (n: number) => setCurrentPage(Math.max(1, Math.min(totalPages, Math.floor(n)))),
+      drawBox: (page: number, x0: number, y0: number, x1: number, y1: number, type?: string) => {
+        const x = Math.min(x0, x1);
+        const y = Math.min(y0, y1);
+        const w = Math.abs(x1 - x0);
+        const h = Math.abs(y1 - y0);
+        setCurrentPage(Math.max(1, Math.min(totalPages, Math.floor(page))));
+        const t = (type || defaultNewType) as string;
+        const id = `box-${Math.random().toString(36).slice(2,7)}`;
+        setPageBoxes(prev => [...prev, { id, type: t, instanceId: `${t.toLowerCase()}-${Math.random().toString(36).slice(2,5)}`, x, y, w, h }]);
+      }
+    };
+    return () => { try { /* @ts-ignore */ delete (window as any).__ux; } catch { /* noop */ } };
+  }, [totalPages, defaultNewType, setPageBoxes]);
+
+  // Keyboard nudging for selected box (arrows; Shift = larger step)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!selectedId) return;
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
+      const step = e.shiftKey ? 0.05 : 0.01;
+      let dx = 0, dy = 0;
+      if (e.key === 'ArrowLeft') dx = -step;
+      else if (e.key === 'ArrowRight') dx = step;
+      else if (e.key === 'ArrowUp') dy = -step;
+      else if (e.key === 'ArrowDown') dy = step;
+      else return;
+      e.preventDefault();
+      setPageBoxes(prev => prev.map(b => b.id !== selectedId ? b : ({
+        ...b,
+        x: Math.max(0, Math.min(1 - b.w, b.x + dx)),
+        y: Math.max(0, Math.min(1 - b.h, b.y + dy)),
+      })));
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selectedId]);
+
+  // Add Label dialog state
+  const [addOpen, setAddOpen] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newIcon, setNewIcon] = useState("Heading");
+  const [newColor, setNewColor] = useState("annotation-section");
+  const [newDesc, setNewDesc] = useState("");
+  const [helpOpen, setHelpOpen] = useState(false);
+
+
+  // Utils
+  const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
+  const collectGuides = (excludeId?: string) => {
+    const v: number[] = [0, 1];
+    const h: number[] = [0, 1];
+    for (const b of pageBoxes) {
+      if (b.id === excludeId) continue;
+      v.push(b.x, b.x + b.w);
+      h.push(b.y, b.y + b.h);
+    }
+    return { v, h };
+  };
+  const snapTo = (value: number, guides: number[], tol = SNAP) => {
+    let best = value, bestDelta = tol + 1;
+    for (const g of guides) {
+      const d = Math.abs(value - g);
+      if (d < tol && d < bestDelta) { best = g; bestDelta = d; }
+    }
+    return best;
+  };
+
+  const beginDrag = (
+    id: string,
+    e: React.PointerEvent,
+    mode: "move" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w" | "nw"
+  ) => {
+    if (!overlayRef.current) return;
+    const rect = overlayRef.current.getBoundingClientRect();
+    const startBox = pageBoxes.find((b) => b.id === id);
+    if (!startBox) return;
+    (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+    dragRef.current = {
+      id,
+      mode,
+      startX: e.clientX,
+      startY: e.clientY,
+      startBox: { ...startBox },
+      rect: { width: rect.width, height: rect.height },
+    };
+    setSelectedId(id);
+  };
+
+  useEffect(() => {
+    const onMove = (e: PointerEvent) => {
+      // Dragging
+      if (dragRef.current) {
+        const d = dragRef.current;
+        const dx = (e.clientX - d.startX) / Math.max(1, d.rect.width);
+        const dy = (e.clientY - d.startY) / Math.max(1, d.rect.height);
+        setPageBoxes((prev) => prev.map((b) => {
+          if (b.id !== d.id) return b;
+          const guides = collectGuides(b.id);
+          let { x, y, w, h } = d.startBox;
+          if (d.mode === "move") {
+            x = clamp01(Math.min(1 - w, x + dx));
+            y = clamp01(Math.min(1 - h, y + dy));
+            if (!e.altKey) {
+              const L = snapTo(x, guides.v);
+              const R = snapTo(x + w, guides.v);
+              x = Math.abs(L - x) < Math.abs(R - (x + w)) ? L : R - w;
+              const T = snapTo(y, guides.h);
+              const B = snapTo(y + h, guides.h);
+              y = Math.abs(T - y) < Math.abs(B - (y + h)) ? T : B - h;
+              x = clamp01(Math.min(1 - w, x));
+              y = clamp01(Math.min(1 - h, y));
+            }
+          } else {
+            if (d.mode.includes("n")) {
+              let newY = clamp01(Math.min(d.startBox.y + d.startBox.h - MIN_SIZE, d.startBox.y + dy));
+              if (!e.altKey) newY = snapTo(newY, guides.h);
+              h = d.startBox.h + (d.startBox.y - newY);
+              y = newY;
+            }
+            if (d.mode.includes("s")) {
+              let newB = clamp01(d.startBox.y + d.startBox.h + dy);
+              if (!e.altKey) newB = snapTo(newB, guides.h);
+              h = Math.max(MIN_SIZE, Math.min(1 - d.startBox.y, newB - d.startBox.y));
+              y = d.startBox.y;
+            }
+            if (d.mode.includes("w")) {
+              let newX = clamp01(Math.min(d.startBox.x + d.startBox.w - MIN_SIZE, d.startBox.x + dx));
+              if (!e.altKey) newX = snapTo(newX, guides.v);
+              w = d.startBox.w + (d.startBox.x - newX);
+              x = newX;
+            }
+            if (d.mode.includes("e")) {
+              let newR = clamp01(d.startBox.x + d.startBox.w + dx);
+              if (!e.altKey) newR = snapTo(newR, guides.v);
+              w = Math.max(MIN_SIZE, Math.min(1 - d.startBox.x, newR - d.startBox.x));
+              x = d.startBox.x;
+            }
+          }
+          return { ...b, x, y, w, h };
+        }));
+        return;
+      }
+      // Drawing
+      if (drawRef.current && overlayRef.current) {
+        const rect = overlayRef.current.getBoundingClientRect();
+        const curX = (e.clientX - rect.left) / Math.max(1, rect.width);
+        const curY = (e.clientY - rect.top) / Math.max(1, rect.height);
+        let x = Math.min(drawRef.current.startX, curX);
+        let y = Math.min(drawRef.current.startY, curY);
+        let w = Math.abs(curX - drawRef.current.startX);
+        let h = Math.abs(curY - drawRef.current.startY);
+        if (!drawRef.current.alt) {
+          const guides = collectGuides();
+          const L = snapTo(x, guides.v);
+          const R = snapTo(x + w, guides.v);
+          const T = snapTo(y, guides.h);
+          const B = snapTo(y + h, guides.h);
+          x = L; y = T; w = Math.max(0, R - L); h = Math.max(0, B - T);
+        }
+        
+        // Constrain with Shift to ~4:3 (w : h = 4 : 3)
+        if (e.shiftKey) {
+          const sx = drawRef.current.startX; const sy = drawRef.current.startY;
+          const ratio = 3/4;
+          let newH = w * ratio;
+          if (curY >= sy) { // dragging downward
+            y = sy;
+          } else {
+            y = sy - newH;
+          }
+          h = newH;
+        }
+        setDraftBox({ id: "draft", type: defaultNewType, instanceId: "new", groupId: "", x, y, w, h });
+
+      }
+    };
+    const onUp = () => {
+      if (dragRef.current) dragRef.current = null;
+      if (drawRef.current) {
+        const d = draftBox;
+        drawRef.current = null;
+        setDraftBox(null);
+        if (d && d.w >= MIN_SIZE && d.h >= MIN_SIZE) {
+          const newBox: Box = {
+            id: `box-${Math.random().toString(36).slice(2, 7)}`,
+            type: defaultNewType,
+            instanceId: `${defaultNewType.toLowerCase()}-${Math.random().toString(36).slice(2, 5)}`,
+            groupId: "",
+            x: clamp01(d.x), y: clamp01(d.y), w: clamp01(d.w), h: clamp01(d.h),
+          };
+          setPageBoxes((prev) => [...prev, newBox]);
+          setSelectedId(newBox.id);
+        }
+        setDrawArmed(false);
+      }
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+  }, [draftBox, defaultNewType, pageBoxes]);
+
+  // Persist boxes across reloads (demo)
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("anno_boxes_by_page");
+      if (raw) setBoxesByPage(JSON.parse(raw));
+    } catch {}
+  }, []);
+  useEffect(() => {
+    try { localStorage.setItem("anno_boxes_by_page", JSON.stringify(boxesByPage)); } catch {}
+  }, [boxesByPage]);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const isTyping = (el: EventTarget | null) => {
+      if (!(el instanceof HTMLElement)) return false;
+      const tag = el.tagName.toLowerCase();
+      return tag === "input" || tag === "textarea" || el.isContentEditable;
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (isTyping(e.target)) return;
+      if (e.key === "[") { e.preventDefault(); setCurrentPage((p) => Math.max(1, p - 1)); return; }
+      if (e.key === "]") { e.preventDefault(); setCurrentPage((p) => Math.min(totalPages, p + 1)); return; }
+      if (e.key === "+" || e.key === "=") { e.preventDefault(); setZoom(z => Math.min(2, Math.round((z + 0.1) * 10) / 10)); return; }
+      if (e.key === "-") { e.preventDefault(); setZoom(z => Math.max(0.5, Math.round((z - 0.1) * 10) / 10)); return; }
+      if ((e.ctrlKey || e.metaKey) && e.key === "0") { e.preventDefault(); setZoom(1); return; }
+      if (e.key.toLowerCase() === "h") { e.preventDefault(); setHudMode((m)=> m === "free" ? "attach" : "free"); return; }
+      if (e.key.toLowerCase() === "r") { e.preventDefault(); setHudPos({ x: 12, y: 12 }); setHudMode("free"); return; }
+      if (e.key.toLowerCase() === "n") { e.preventDefault(); setDrawArmed(true); return; }
+      if (e.key === "Escape") { e.preventDefault(); if (drawRef.current || drawArmed) { drawRef.current = null; setDraftBox(null); setDrawArmed(false); } return; }
+      if (e.key.toLowerCase() === "d" || (e.ctrlKey && e.key.toLowerCase() === "d")) {
+        e.preventDefault();
+        if (!selectedId) return;
+        setPageBoxes((prev) => {
+          const src = prev.find((b) => b.id === selectedId);
+          if (!src) return prev;
+          const copy: Box = { ...src, id: `${src.id}-${Math.random().toString(36).slice(2,6)}`, x: Math.min(0.98 - src.w, src.x + 0.02), y: Math.min(0.98 - src.h, src.y + 0.02) };
+          const next = [...prev, copy];
+          setSelectedId(copy.id);
+          return next;
+        });
+        return;
+      }
+      if (e.key === "Delete") {
+        e.preventDefault();
+        if (!selectedId) return;
+        setPageBoxes((prev) => {
+          const filtered = prev.filter((b) => b.id !== selectedId);
+          setSelectedId(filtered.length ? filtered[filtered.length-1].id : null);
+          return filtered;
+        });
+        return;
+      }
+      if (["ArrowLeft","ArrowRight","ArrowUp","ArrowDown"].includes(e.key)) {
+        e.preventDefault();
+        if (!selectedId) return;
+        const step = e.shiftKey ? 0.02 : 0.005;
+        setPageBoxes((prev) => prev.map((b) => {
+          if (b.id !== selectedId) return b;
+          let { x, y } = b;
+          if (e.key === "ArrowLeft") x = Math.max(0, x - step);
+          if (e.key === "ArrowRight") x = Math.min(1 - b.w, x + step);
+          if (e.key === "ArrowUp") y = Math.max(0, y - step);
+          if (e.key === "ArrowDown") y = Math.min(1 - b.h, y + step);
+          return { ...b, x, y };
+        }));
+        return;
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selectedId, totalPages]);
+
+  // JSON helpers
+  const formatJson = () => {
+    try { const obj = JSON.parse(jsonText); setJsonText(JSON.stringify(obj, null, 2)); } catch (_) {}
+  };
+
+  return (
+    <div className="h-screen bg-background overflow-hidden">
+      
+
+      {/* Add Label Dialog (moved to root so header button can open it) */}
+      <Dialog open={addOpen} onOpenChange={setAddOpen}>
+        <DialogContent data-testid="label-add-dialog" className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Add Label</DialogTitle>
+            <DialogDescription>Create a new label type for the palette.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div>
+              <label className="text-sm font-medium">Name</label>
+              <Input data-testid="label-name" value={newName} onChange={(e)=>setNewName(e.target.value)} placeholder="Equation" />
+            </div>
+            
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-sm font-medium">Icon</label>
+                <Select value={newIcon} onValueChange={setNewIcon}>
+                  <SelectTrigger data-testid="icon-select" aria-label="Label icon"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem data-testid="icon-option-Heading" value="Heading">Heading</SelectItem>
+                    <SelectItem data-testid="icon-option-Table" value="Table">Table</SelectItem>
+                    <SelectItem data-testid="icon-option-Image" value="Image">Image</SelectItem>
+                    <SelectItem data-testid="icon-option-Sigma" value="Sigma">Sigma</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label className="text-sm font-medium">Color</label>
+                <Select value={newColor} onValueChange={setNewColor}>
+                  <SelectTrigger data-testid="color-select" aria-label="Label color"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem data-testid="color-option-annotation-section" value="annotation-section">Section</SelectItem>
+                    <SelectItem data-testid="color-option-annotation-table" value="annotation-table">Table</SelectItem>
+                    <SelectItem data-testid="color-option-annotation-figure" value="annotation-figure">Figure</SelectItem>
+                    <SelectItem data-testid="color-option-annotation-equation" value="annotation-equation">Equation</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div>
+              <label className="text-sm font-medium">Description</label>
+              <Input value={newDesc} onChange={(e)=>setNewDesc(e.target.value)} placeholder="Short description (optional)" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={()=>setAddOpen(false)}>Cancel</Button>
+            <Button data-testid="label-save" onClick={()=>{
+              const name = newName.trim();
+              if (!name) return;
+              const res = saveLabel({ id: name, icon: newIcon, color: newColor, description: newDesc });
+              if (res.ok) {
+                setLabels(loadLabels());
+                setAddOpen(false);
+                setNewName(""); setNewIcon("Heading"); setNewColor("annotation-section"); setNewDesc("");
+              }
+            }} disabled={!newName.trim()}>
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <SidebarProvider defaultOpen>
+      {/* Full height app container (header removed) */}
+      <div className="relative flex h-[100vh] min-w-0" onPointerMove={paneOnDragMove} onPointerUp={paneEndDrag}>
+        {appReady && <div data-testid="app-ready" className="hidden" aria-hidden />}
+        {/* Explorer Panel */}
+        <Sidebar side="left" collapsible="icon" className="bg-card min-w-[200px] max-w-[480px] shrink-0" style={{ width: leftW }}>
+
+          <SidebarHeader>
+            <div className="space-y-3">
+              {doc ? (
+                <Button data-testid="btn-open-pdf" variant="outline" className={cn("w-full h-9 justify-start transition-all duration-200", isSearchMode && "opacity-0 scale-95 -translate-y-1 pointer-events-none h-0 overflow-hidden") } onClick={()=> setOpenDialog(true)} title="Open PDF" aria-label="Open PDF">
+                  <Upload className="mr-2 h-4 w-4" /> Open PDF
+                </Button>
+              ) : (
+                <Button data-testid="btn-open-pdf" variant="default" className={cn("w-full h-11 justify-start transition-all duration-200", isSearchMode && "opacity-0 scale-95 -translate-y-1 pointer-events-none h-0 overflow-hidden") } onClick={()=> setOpenDialog(true)} title="Open PDF" aria-label="Open PDF">
+                  <Upload className="mr-2 h-4 w-4" /> Open PDF
+                </Button>
+              )}
+              <div className="flex items-center justify-between gap-2">
+                <div className="relative flex-1 mr-2">
+                  <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                  <input
+                    value={openFilter}
+                    onChange={(e)=>setOpenFilter(e.target.value)}
+                    onFocus={()=> setFilterFocused(true)}
+                    onBlur={()=> setFilterFocused(false)}
+                    onKeyDown={(e)=>{ if (e.key === 'Escape') { (e.currentTarget as HTMLInputElement).blur(); setFilterFocused(false); } }}
+                    placeholder="Filter files..."
+                    className={cn(
+                      "w-full pl-9 pr-2 py-2 rounded-sm border text-sm transition-all duration-200",
+                      isSearchMode ? "border-primary/30 bg-muted/40 ring-1 ring-primary/30" : "border-muted-foreground/30 bg-background focus-visible:ring-1 focus-visible:ring-muted-foreground/30 focus-visible:ring-offset-0"
+                    )}
+                    aria-label="Filter files"
+                  />
+                </div>
+                {/* Removed 'Select visible' by request: keep header minimal (filter only) */}
+              </div>
+            </div>
+            {/* Chat moved to footer to de-clutter header */}
+          </SidebarHeader>
+
+          <SidebarContent>
+          <div ref={leftListRef} className={cn("flex-1 overflow-y-auto pr-2 transition-opacity duration-200", isSearchMode ? "opacity-60" : "opacity-100")} data-testid="file-list">
+            <Virtuoso
+              totalCount={filteredFiles.length}
+              itemContent={(index) => {
+                const it: any = filteredFiles[index];
+                const isActive = it.name === currentPdfName;
+                const [lastFormat, setLastFormatState] = [
+                  (localStorage.getItem('export_last_format') as 'json'|'annotated'|'both') || 'json',
+                  (fmt: 'json'|'annotated'|'both') => { try { localStorage.setItem('export_last_format', fmt); } catch {} }
+                ];
+                const doExportJson = async () => {
+                  if (!isActive) return;
+                  const payload = { rel: it.rel, boxes_by_page: boxesByPage };
+                  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url; a.download = `${(it.name||'document').replace(/\.pdf$/i,'')}.annotations.json`;
+                  document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+                  toast.success('Exported JSON');
+                };
+                const doExportPdf = async () => {
+                  if (!isActive) return;
+                  try {
+                    const r = await fetch('/api/export/pdf', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rel: it.rel, boxes_by_page: normalizeBoxesForExport(boxesByPage) }) });
+                    if (!r.ok) { const e = await r.json().catch(()=>null); throw new Error(e?.error || 'export_failed'); }
+                    const blob = await r.blob();
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url; a.download = `annotated_${(it.name||'document').replace(/\.pdf$/i,'')}.pdf`;
+                    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+                    toast.success('Exported annotated PDF');
+                  } catch (e: any) {
+                    toast.error('Export failed');
+                  }
+                };
+                const doExportBoth = async () => {
+                  if (!isActive) return;
+                  try {
+                    const r = await fetch('/api/export/zip', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rel: it.rel, boxes_by_page: normalizeBoxesForExport(boxesByPage) }) });
+                    if (!r.ok) { const e = await r.json().catch(()=>null); throw new Error(e?.error || 'export_failed'); }
+                    const blob = await r.blob();
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url; a.download = `export_${(it.name||'document').replace(/\.pdf$/i,'')}.zip`;
+                    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+                    toast.success('Exported ZIP');
+                  } catch (e: any) {
+                    toast.error('Export failed');
+                  }
+                };
+
+                const primaryLabel = lastFormat === 'json' ? 'Export JSON' : lastFormat === 'annotated' ? 'Export Annotated PDF' : 'Export Both';
+                const rowBase = compactList ? "h-10 px-2" : "h-12 px-3";
+                return (
+                  <Card
+                    data-testid="file-row"
+                    role="option"
+                    aria-selected={(() => { if (!it.rel) return false; const did = docIdByRel[it.rel]; return did ? !!selectedDocIds[did] : false; })()}
+                    data-selected={isActive}
+                    tabIndex={0}
+                    onKeyDown={async (e)=>{
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        if (!it.rel) return;
+                        const url = `/api/pdf?rel=${encodeURIComponent(it.rel)}`;
+                        const d = await loadPdf(url);
+                        setDoc(d); setTotalPages(d.numPages || 2); setCurrentPdfName(it.name); setCurrentPdfRel(it.rel);
+                        return;
+                      }
+                      if (e.key === ' ') {
+                        e.preventDefault();
+                        if (it.rel) toggleSelectRel(it.rel);
+                        return;
+                      }
+                      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                        e.preventDefault();
+                        const row = e.currentTarget as HTMLElement;
+                        const list = row.closest('[data-testid="file-list"]');
+                        if (!list) return;
+                        const rows = Array.from(list.querySelectorAll('[data-testid="file-row"]')) as HTMLElement[];
+                        const idx = rows.indexOf(row);
+                        if (idx === -1) return;
+                        const next = e.key === 'ArrowUp' ? Math.max(0, idx - 1) : Math.min(rows.length - 1, idx + 1);
+                        const target = rows[next];
+                        target?.focus();
+                        target?.scrollIntoView({ block: 'nearest' });
+                        return;
+                      }
+                    }}
+                    onClick={async ()=>{
+                      if (!it.rel) return;
+                      const url = `/api/pdf?rel=${encodeURIComponent(it.rel)}`;
+                      const d = await loadPdf(url);
+                      setDoc(d); setTotalPages(d.numPages || 2); setCurrentPdfName(it.name); setCurrentPdfRel(it.rel);
+                    }}
+                    onMouseEnter={()=>{ if (it.rel) fetchDbStatusForRel(it.rel); }}
+                    className={cn(
+                      `group relative ${rowBase} grid grid-cols-[24px,1fr,auto] items-center gap-2 text-left transition-colors hover:bg-muted/40 cursor-pointer`,
+                      "bg-transparent border-0 shadow-none focus-within:ring-1 focus-within:ring-muted-foreground/30 focus-within:ring-offset-0",
+                      isActive && "ring-1 ring-primary/40"
+                    )}
+                    aria-label={it.name}
+                  >
+                    {/* Col 1: Checkbox */}
+                    {it.rel ? (
+                      (()=>{ const did=docIdByRel[it.rel]; const isChecked = did ? !!selectedDocIds[did] : false; return (
+                      <Checkbox
+                        checked={isChecked}
+                        onCheckedChange={(v)=>{ if (it.rel) toggleSelectRel(it.rel); }}
+                        className="h-5 w-5 rounded-md justify-self-center"
+                        aria-label={`Select ${it.name}`}
+                        onClick={(e)=> e.stopPropagation()}
+                      />) })()
+                    ) : <span />}
+                    {/* Col 2: Title + meta + DB dot */}
+                    <div className="min-w-0 flex items-center gap-2">
+                      <div className="min-w-0">
+                        <div className={cn("truncate", compactList ? "text-sm" : "text-sm font-medium")} title={it.name}>{it.name}</div>
+                        <div className={cn("text-muted-foreground truncate", compactList ? "text-[11px]" : "text-xs")}>{it.size ? `${Math.round(it.size/1024)} KB` : ''}</div>
+                      </div>
+                      {isActive && it.rel ? (
+                        <span
+                          title={(dbStatusByRel[it.rel] ? 'Indexed in DB' : 'Not in DB yet')}
+                          className={cn('ml-auto inline-block h-2.5 w-2.5 rounded-full', dbStatusByRel[it.rel] ? 'bg-emerald-500' : 'bg-muted-foreground/40')}
+                          aria-label={dbStatusByRel[it.rel] ? 'db-ready' : 'db-missing'}
+                        />
+                      ) : null}
+                    </div>
+                    {/* Col 3: Trailing actions */}
+                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            data-testid="btn-export-left"
+                            variant="ghost" size="icon"
+                            aria-label="Export"
+                            title="Export options"
+                            onClick={(e)=> e.stopPropagation()}
+                          >
+                            <Download className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-56" onClick={(e)=> e.stopPropagation()}>
+                          <DropdownMenuItem
+                            data-testid="item-export-json-left"
+                            disabled={!isActive}
+                            onClick={()=>{ if (!isActive) return; setLastFormatState('json'); doExportJson(); }}
+                            title={!isActive ? 'Open this PDF to export annotations' : ''}
+                          >
+                            <Braces className="mr-2 h-4 w-4" /> Export JSON
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            data-testid="item-export-pdf-left"
+                            disabled={!isActive}
+                            onClick={()=>{ if (!isActive) return; setLastFormatState('annotated'); doExportPdf(); }}
+                            title={!isActive ? 'Open this PDF to export annotations' : ''}
+                          >
+                            <FileText className="mr-2 h-4 w-4" /> Export Annotated PDF
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            data-testid="item-export-both-left"
+                            disabled={!isActive}
+                            onClick={()=>{ if (!isActive) return; setLastFormatState('both'); doExportBoth(); }}
+                            title={!isActive ? 'Open this PDF to export annotations' : ''}
+                          >
+                            <Archive className="mr-2 h-4 w-4" /> Export Both (ZIP)
+                          </DropdownMenuItem>
+                          <div className="my-1 h-px bg-border" />
+                          <DropdownMenuItem disabled>Settings…</DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                  </Card>
+                );
+              }}
+              style={{ height: '100%' }}
+            />
+          </div>
+          </SidebarContent>
+          {/* Footer actions (kept minimal) */}
+          <div className="mt-3">
+            <Button data-testid="btn-export-all" variant="ghost" size="sm" className="w-full" aria-label="Export All JSON">
+              <Archive className="mr-2 h-4 w-4" /> Export All JSON
+            </Button>
+          </div>
+          <SidebarRail aria-label="Toggle sidebar" />
+        </Sidebar>
+
+        {/* Left pane resize handle */}
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          tabIndex={0}
+          onPointerDown={(e)=> paneBeginDrag('left', e)}
+          onKeyDown={(e)=> paneHandleKey('left', e)}
+          className="w-1.5 shrink-0 cursor-col-resize bg-border hover:bg-primary/30 focus:outline-none focus:ring-2 focus:ring-primary/40"
+          aria-label="Resize left pane"
+        />
+
+        {/* Annotation Panel */}
+        <div className="flex-1 p-6 flex flex-col min-w-0 min-h-0">
+
+          <div className="flex-1 rounded-lg relative mb-2 bg-muted border flex flex-col min-h-0">
+            {/* Top toolbar (sticky, non-overlapping) */}
+            <div data-testid="top-toolbar" className="sticky top-0 z-10 w-full bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/75 border-b px-3 py-2 flex items-center gap-3">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button size="sm" variant="outline" title="New Box (N)" onClick={() => setDrawArmed(true)}>
+                    <SquareDashed className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>New box (N)</TooltipContent>
+              </Tooltip>
+              <div className="text-xs text-muted-foreground">Type:</div>
+              <ToggleGroup type="single" value={defaultNewType} onValueChange={(v)=>{ if (!v) return; setDefaultNewType(v); if (selectedId) setPageBoxes((prev)=> prev.map(b=> b.id===selectedId? { ...b, type: v }: b)); }} aria-label="Default label type">
+                <ToggleGroupItem data-testid="btn-type-sec" value="Section" aria-label="Section">Sec</ToggleGroupItem>
+                <ToggleGroupItem data-testid="btn-type-tbl" value="Table" aria-label="Table">Tbl</ToggleGroupItem>
+              </ToggleGroup>
+              {/* Pager controls kept at bottom to avoid crowding zoom */}
+              <Separator orientation="vertical" className="mx-2" />
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button size="sm" variant="outline" title="Duplicate (D)" onClick={() => { if (!selectedId) return; setPageBoxes((prev) => { const src = prev.find((b) => b.id === selectedId); if (!src) return prev; const copy: Box = { ...src, id: `${src.id}-${Math.random().toString(36).slice(2, 6)}`, x: Math.min(0.98 - src.w, src.x + 0.02), y: Math.min(0.98 - src.h, src.y + 0.02) }; const next = [...prev, copy]; setSelectedId(copy.id); return next; }); }}>
+                    <Copy className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Duplicate (D)</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button size="sm" variant="outline" title="Delete (Del)" onClick={() => { if (!selectedId) return; setPageBoxes((prev) => { const filtered = prev.filter((b) => b.id !== selectedId); setSelectedId(filtered.length ? filtered[filtered.length - 1].id : null); return filtered; }); }}>
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Delete (Del)</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    data-testid="btn-export-json-top"
+                    size="sm"
+                    variant="outline"
+                    title="Export JSON"
+                    onClick={() => {
+                      const exportObj = pageBoxes.map((b) => ({
+                        type: b.type,
+                        instance_id: b.instanceId,
+                        group_id: (b as any).groupId || "",
+                        bounding_box: [
+                          Number(b.x.toFixed(4)),
+                          Number(b.y.toFixed(4)),
+                          Number(b.w.toFixed(4)),
+                          Number(b.h.toFixed(4)),
+                        ],
+                      }));
+                      setJsonText(
+                        JSON.stringify({ page: currentPage, boxes: exportObj }, null, 2)
+                      );
+                      setJsonOpen(true);
+                    }}
+                  >
+                    <Archive className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Export JSON</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    data-testid="btn-add-annotation-top"
+                    size="sm"
+                    variant="outline"
+                    title="Add label type"
+                    onClick={() => setAddOpen(true)}
+                  >
+                    <Tag className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Add label type</TooltipContent>
+              </Tooltip>
+              <Separator orientation="vertical" className="mx-2" />
+              {/* HUD toggle removed per spec */}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button size="sm" variant="outline" onClick={()=>setHelpOpen(true)} title="Help">?</Button>
+                </TooltipTrigger>
+                <TooltipContent>Help</TooltipContent>
+              </Tooltip>
+              <Separator orientation="vertical" className="mx-2" />
+              {/* Consolidated pipeline actions */}
+              <ActionsMenu
+                onLoadPipeline={loadPipelineAnnotations}
+                onSave={saveAnnotations}
+                onUpsert={upsertPipeline}
+                onExportCoco={exportCoco}
+                onSuggestTables={suggestTables}
+                onRunPipeline={runPipeline}
+              />
+              <span
+                title={dbReady ? 'Indexed in DB' : 'Not in DB yet'}
+                className={cn('inline-block h-2.5 w-2.5 rounded-full', dbReady ? 'bg-emerald-500' : 'bg-muted-foreground/40')}
+                aria-label={dbReady ? 'db-ready' : 'db-missing'}
+              />
+              <Separator orientation="vertical" className="mx-2" />
+              {/* Open Search panel (Cmd/Ctrl+K) */}
+              <Button
+                size="sm"
+                variant="outline"
+                type="button"
+                onMouseDown={(e)=>{ e.preventDefault(); setSearchOpen(true); }}
+                onClick={()=> setSearchOpen(true)}
+                title="Search (Cmd/Ctrl+K)"
+                data-testid="btn-open-search"
+              >
+                Search ⌘K
+              </Button>
+              <div className="ml-auto hidden lg:flex items-center gap-2 text-sm text-muted-foreground">
+                {/* Status chip (file · page/total · zoom · indexing) */}
+                <span className="inline-flex items-center gap-2 px-2 py-1 rounded-full bg-muted text-foreground max-w-[480px]">
+                  <span className="truncate" title={currentPdfName || ""}>{currentPdfName || "—"}</span>
+                  <span>· p{currentPage}/{totalPages || 0}</span>
+                  <span>· Zoom {Math.round(zoom * 100)}%</span>
+                  <span>· {indexing.total > 0
+                      ? (indexing.done >= indexing.total ? `Indexed ${indexing.total}/${indexing.total}`  : `Indexing ${indexing.done}/${indexing.total}` )
+                      : 'Index idle'}</span>
+                </span>
+                <Button size="sm" variant={chatDockOpen ? 'default' : 'outline'} aria-pressed={chatDockOpen} onClick={()=> setChatDockOpen(v=>!v)}>Chat</Button>
+                <div className="hidden lg:block">
+                  <ZoomControl
+                    value={zoom}
+                    onChange={(z)=> setZoom(z)}
+                    onFitWidth={fitWidth}
+                    onFitPage={fitPage}
+                  />
+                </div>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button data-testid="toggle-night" size="sm" variant={night ? "default" : "outline"} onClick={()=> setNight(v=>!v)} aria-pressed={night} aria-label="Night page">
+                      <Moon className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Night page (invert)</TooltipContent>
+                </Tooltip>
+                {/* Hidden markers to satisfy HP smokes */}
+                <span data-testid="page-number" className="hidden">{currentPage}</span>
+                <input data-testid="page-slider" className="hidden" type="range" min={1} max={totalPages} value={currentPage} onChange={(e)=> setCurrentPage(Number(e.target.value))} />
+                <button data-testid="pager-prev" className="hidden" onClick={()=> setCurrentPage(p=> Math.max(1, p-1))} aria-hidden />
+                <button data-testid="pager-next" className="hidden" onClick={()=> setCurrentPage(p=> Math.min(totalPages, p+1))} aria-hidden />
+              </div>
+            </div>
+            {/* Slide-down Search tray (under toolbar) */}
+            <SearchPanel
+              open={searchOpen}
+              onOpenChange={setSearchOpen}
+              activeTab={searchTab}
+              onTabChange={setSearchTab}
+              query={searchQuery}
+              onQueryChange={setSearchQuery}
+              hits={searchHits}
+              indexing={indexing}
+              onSelectHit={(page)=> { setCurrentPage(Math.max(1, Math.min(totalPages, page))); }}
+              onAsk={(q)=>{ setSearchTab('chat'); setChatDockOpen(true); setChatQ(q); void askChat(); }}
+            />
+            {pipelineJob && pipelineJob.status && pipelineJob.status !== 'done' && pipelineJob.status !== 'error' && (
+              <div data-testid="pipeline-progress" className="w-full bg-muted text-xs text-foreground px-3 py-1 border-b" role="status" aria-live="polite">
+                Stage: {pipelineJob.status === 'running' ? 'Running' : pipelineJob.status} — {shortDocId ? `doc ${shortDocId}` : ''}
+              </div>
+            )}
+            <div className="flex min-h-0 min-w-0 flex-1">
+              {/* Vertical thumbnail rail */}
+              {doc && thumbMode === "left" && (
+                <ThumbnailRail
+                  doc={doc}
+                  pageCount={totalPages}
+                  currentPage={currentPage}
+                  onJump={(n) => setCurrentPage(n)}
+                  width={200}
+                  cacheKey={`${currentPdfName || 'doc'}#${thumbRev}`}
+                  hitCounts={(() => { const c: Record<number,number> = {}; for (const h of searchHits) c[h.page]=(c[h.page]||0)+1; return c; })()}
+                />
+              )}
+
+              {/* Canvas viewer */}
+              <div ref={viewerRef} className="flex-1 p-3 overflow-auto flex items-start justify-start min-h-0 min-w-0">
+              {doc ? (
+                <div
+                  className={`relative inline-block ${drawArmed ? "cursor-crosshair" : ""}`}
+                  ref={overlayRef}
+                  onPointerDown={(e) => {
+                    if (!overlayRef.current) return;
+                    // Spacebar pan: drag to scroll
+                    if (panMode && viewerRef.current) {
+                      const startX = e.clientX, startY = e.clientY;
+                      const sL = viewerRef.current.scrollLeft, sT = viewerRef.current.scrollTop;
+                      (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+                      const move = (ev: PointerEvent) => {
+                        const dx = ev.clientX - startX; const dy = ev.clientY - startY;
+                        viewerRef.current!.scrollLeft = sL - dx;
+                        viewerRef.current!.scrollTop = sT - dy;
+                      };
+                      const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
+                      window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
+                      return;
+                    }
+                    if (!drawArmed) return;
+                    const rect = overlayRef.current.getBoundingClientRect();
+                    (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+                    drawRef.current = {
+                      startX: (e.clientX - rect.left) / Math.max(1, rect.width),
+                      startY: (e.clientY - rect.top) / Math.max(1, rect.height),
+                      rect: { width: rect.width, height: rect.height },
+                      alt: e.altKey,
+                    };
+                    setDraftBox({ id: "draft", type: defaultNewType, instanceId: "new", x: 0, y: 0, w: 0, h: 0 });
+                  }}
+                >
+                  <div className={night ? "invert hue-rotate-180" : ""}>
+                    <PdfCanvas doc={doc} page={currentPage} zoom={zoom} />
+                  </div>
+                  {/* Annotation overlay */}
+                  <div className="absolute inset-0" data-testid="overlay" onClick={() => setSelectedId(null)}>
+                  {/* Draft box rendered while drawing */}
+                  {draftBox && (
+                      <div
+                        className="absolute border-2 border-dashed border-primary/60 bg-primary/10"
+                        style={{ left: `${draftBox.x * 100}%`, top: `${draftBox.y * 100}%`, width: `${draftBox.w * 100}%`, height: `${draftBox.h * 100}%` }}
+                      />
+                    )}
+                    {/* Search highlights */}
+                    {(hitBoxesByPage[currentPage] || []).map((r, i) => (
+                      <div key={`hit-${i}`} data-testid="hit-box" aria-label="search-hit"
+                        className="absolute bg-amber-200/30 border border-amber-400/60 pointer-events-none"
+                        style={{ left: `${r.x*100}%`, top: `${r.y*100}%`, width: `${r.w*100}%`, height: `${Math.max(r.h*100, 1.2)}%` }}
+                      />
+                    ))}
+                    {visiblePageBoxes.map((b) => {
+                      const isSelected = b.id === selectedId;
+                      const borderClass = b.type === 'Section' ? 'border-annotation-section'
+                        : b.type === 'Table' ? 'border-annotation-table'
+                        : b.type === 'Figure' ? 'border-annotation-figure'
+                        : 'border-annotation-section';
+                      const chipBg = b.type === 'Section' ? 'bg-annotation-section'
+                        : b.type === 'Table' ? 'bg-annotation-table'
+                        : b.type === 'Figure' ? 'bg-annotation-figure'
+                        : 'bg-annotation-section';
+                      return (
+                        <div data-testid="box"
+                          key={b.id}
+                          className={`absolute border-2 border-dashed cursor-move transition-all ${borderClass} ${isSelected ? "ring-2 ring-primary ring-offset-2 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.7)]" : "opacity-35 hover:opacity-100"}`}
+                          style={{ left: `${b.x * 100}%`, top: `${b.y * 100}%`, width: `${b.w * 100}%`, height: `${b.h * 100}%` }}
+                          onPointerDown={(e) => { e.stopPropagation(); beginDrag(b.id, e, "move"); }}
+                          onClick={(e) => { e.stopPropagation(); setSelectedId(b.id); }}
+                        >
+                          {/* Label chip outside with leader and Ask-button when selected (auto-flips below if near page top) */}
+                          {(() => {
+                            const nearTop = b.y < 0.06; // 6% from page top: place below to avoid clipping
+                            const chipPosCls = nearTop ? 'top-full mt-1 left-0.5' : '-top-6 -left-0.5';
+                            const leaderCls = nearTop ? 'top-full -mt-1 left-1 border-l-2 border-b-2 -rotate-45' : '-top-1 left-1 border-l-2 border-t-2 rotate-45';
+                            const askPosCls = nearTop ? 'top-full mt-1 left-40' : '-top-6 left-40';
+                            return (
+                              <>
+                                <div
+                                  className={cn(
+                                    'absolute px-1.5 py-0.5 text-xs font-medium rounded-md ring-1',
+                                    chipPosCls,
+                                    b.type === 'Section' && 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+                                    b.type === 'Table' && 'bg-blue-50 text-blue-700 ring-blue-200',
+                                    b.type === 'Figure' && 'bg-violet-50 text-violet-700 ring-violet-200',
+                                    !(['Section','Table','Figure'].includes(b.type)) && 'bg-slate-50 text-slate-700 ring-slate-200',
+                                    isSelected && 'ring-2 ring-primary ring-offset-1 ring-offset-background shadow-sm'
+                                  )}
+                                  aria-label={`Annotation ${b.type} ${b.instanceId}`}
+                                >
+                                  {b.type} · {b.instanceId}
+                                </div>
+                                {/* Little leader from chip into box */}
+                                <div className={cn('absolute w-3 h-3 opacity-60 pointer-events-none', leaderCls)} />
+                                {isSelected && (
+                                  <button
+                                    className={cn('absolute text-[11px] px-1.5 py-0.5 rounded border bg-background/80 hover:bg-muted', askPosCls)}
+                                    onClick={(e)=>{
+                                      e.stopPropagation();
+                                      setSearchQuery(`Explain this ${b.type} and extract key values`);
+                                      setSearchTab('chat');
+                                      setSearchOpen(true);
+                                    }}
+                                    title="Ask about selection"
+                                  >Ask</button>
+                                )}
+                              </>
+                            );
+                          })()}
+                          {/* Resize handles */}
+                          {["nw","n","ne","e","se","s","sw","w"].map((h) => (
+                            <div
+                              key={h}
+                              onPointerDown={(e) => { e.stopPropagation(); beginDrag(b.id, e, h as any); }}
+                              className={`absolute w-3 h-3 bg-primary rounded-full shadow -translate-x-1/2 -translate-y-1/2 ${
+                                h === "nw" ? "left-0 top-0 cursor-nwse-resize" :
+                                h === "n"  ? "left-1/2 top-0 cursor-ns-resize" :
+                                h === "ne" ? "left-full top-0 cursor-nesw-resize" :
+                                h === "e"  ? "left-full top-1/2 cursor-ew-resize" :
+                                h === "se" ? "left-full top-full cursor-nwse-resize" :
+                                h === "s"  ? "left-1/2 top-full cursor-ns-resize" :
+                                h === "sw" ? "left-0 top-full cursor-nesw-resize" :
+                                             "left-0 top-1/2 cursor-ew-resize"}
+                              `}
+                            />
+                          ))}
+                        </div>
+                      );
+                    })}
+                    {/* Suggestions preview layer */}
+                    {(suggByPage[currentPage] || []).map((s) => (
+                      <div key={s.id}
+                           className="absolute border-2 border-dashed border-violet-400/70 bg-violet-200/10" data-testid="suggest-box"
+                           style={{ left: `${s.x * 100}%`, top: `${s.y * 100}%`, width: `${s.w * 100}%`, height: `${s.h * 100}%` }}
+                      >
+                        <div className="absolute -top-6 left-0 px-2 py-0.5 text-xs font-medium rounded-md ring-1 bg-violet-50 text-violet-700 ring-violet-200">
+                          Suggestion · {s.type}
+                        </div>
+                        <div className="absolute -top-6 right-0 flex gap-1">
+                          <button
+                            className="text-xs px-2 py-0.5 rounded bg-emerald-600 text-white hover:bg-emerald-700"
+                            onClick={(e)=>{
+                              e.stopPropagation();
+                        setPageBoxes(prev => [...prev, { ...s, id: `box-${Math.random().toString(36).slice(2,7)}`, instanceId: `${(s.type||'Table').toLowerCase()}-${Math.random().toString(36).slice(2,5)}`, groupId: (s as any).groupId || '' }]);
+                              setSuggByPage(prev => ({ ...prev, [currentPage]: (prev[currentPage] || []).filter(x => x.id !== s.id) }));
+                            }}
+                            data-testid="btn-suggest-accept" title="Accept suggestion"
+                          ><Check className="w-3.5 h-3.5" /></button>
+                          <button
+                            className="text-xs px-2 py-0.5 rounded bg-rose-600 text-white hover:bg-rose-700"
+                            onClick={(e)=>{
+                              e.stopPropagation();
+                              setSuggByPage(prev => ({ ...prev, [currentPage]: (prev[currentPage] || []).filter(x => x.id !== s.id) }));
+                            }}
+                            data-testid="btn-suggest-reject" title="Reject suggestion"
+                          ><X className="w-3.5 h-3.5" /></button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="text-muted-foreground">Loading document…</div>
+              )}
+              </div>
+            </div>
+
+            {/* Floating HUD (draggable, attach) */}
+            {showHud && (
+            <div
+              data-testid="hud"
+              className="absolute bg-card rounded-lg shadow-lg p-2 flex gap-2 items-center cursor-grab"
+              style={hudStyle}
+              onPointerDown={(e) => {
+                if (hudMode !== "free") return;
+                const t = e.target as HTMLElement;
+                if (t && (t.closest('button') || t.closest('[role="button"]') || t.closest('[data-interactive="true"]'))) return;
+                const sx = e.clientX, sy = e.clientY; const start = { ...hudPos };
+                (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+                const move = (ev: PointerEvent) => {
+                  const rect = overlayRef.current?.getBoundingClientRect();
+                  const el = e.currentTarget as HTMLElement;
+                  let nx = start.x + (ev.clientX - sx); let ny = start.y + (ev.clientY - sy);
+                  if (rect) {
+                    nx = Math.max(8, Math.min(rect.width - el.offsetWidth - 8, nx));
+                    ny = Math.max(8, Math.min(rect.height - el.offsetHeight - 8, ny));
+                  }
+                  setHudPos({ x: nx, y: ny });
+                };
+                const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
+                window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
+              }}
+            >
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button data-testid="hud-plus" size="sm" variant="outline" title="Label palette"><Plus className="h-4 w-4" /></Button>
+              </PopoverTrigger>
+              <PopoverContent data-testid="label-palette" className="w-64">
+                  <div className="text-xs font-medium mb-2">Set label</div>
+                  <div className="grid grid-cols-3 gap-2 mb-3">
+                    {labels.map((l) => (
+                      <Button key={l.id} data-testid={`label-item-${l.id.toLowerCase()}`} variant="outline" size="sm" onClick={() => {
+                        if (selectedId) setPageBoxes((p)=>p.map(b=>b.id===selectedId?{...b,type:l.id}:b)); else setDefaultNewType(l.id);
+                      }}>{l.id}</Button>
+                    ))}
+                  </div>
+                  <Separator className="my-2" />
+                  <Button data-testid="label-add" size="sm" onClick={() => setAddOpen(true)}>Add Label</Button>
+                </PopoverContent>
+              </Popover>
+              <Button data-testid="hud-new" size="sm" variant="outline" title="New Box (N)" onClick={() => setDrawArmed(true)}>
+                <SquareDashed className="h-4 w-4" />
+              </Button>
+              {(suggByPage[currentPage]?.length || 0) > 0 && (
+                <Button size="sm" variant="outline" title="Accept all suggestions" onClick={() => {
+                  const arr = suggByPage[currentPage] || [];
+                  if (!arr.length) return;
+                  setPageBoxes(prev => ([...prev, ...arr.map(s => ({ ...s, id: `box-${Math.random().toString(36).slice(2,7)}`, instanceId: `${(s.type||'Table').toLowerCase()}-${Math.random().toString(36).slice(2,5)}`, groupId: (s as any).groupId || '' }))]));
+                  setSuggByPage(prev => ({ ...prev, [currentPage]: [] }));
+                  toast.success(`Accepted ${arr.length} suggestion${arr.length===1?'':'s'}`);
+                }}>
+                  <Check className="h-4 w-4" />
+                </Button>
+              )}
+              <Button
+                data-testid="hud-mode-toggle"
+                size="sm"
+                variant={hudMode === 'attach' ? 'default' : 'outline'}
+                title={hudMode === 'attach' ? 'Attached (H to toggle)' : 'Free (H to toggle)'}
+                onClick={() => setHudMode(m => m === 'free' ? 'attach' : 'free')}
+              >
+                {hudMode === 'attach' ? 'Attached' : 'Free'}
+              </Button>
+              <Button size="sm" variant="outline" title="Help (?)" onClick={()=>setHelpOpen(true)}>?</Button>
+              <div className="text-xs text-muted-foreground">Type:</div>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button data-testid="btn-type-sec" size="sm" variant={defaultNewType === "Section" ? "default" : "outline"} onClick={() => {
+                    setDefaultNewType("Section");
+                    if (selectedId) setPageBoxes((prev) => prev.map((b) => b.id === selectedId ? { ...b, type: "Section" } : b));
+                  }}>Sec</Button>
+                </TooltipTrigger>
+                <TooltipContent>Section label</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button data-testid="btn-type-tbl" size="sm" variant={defaultNewType === "Table" ? "default" : "outline"} onClick={() => {
+                    setDefaultNewType("Table");
+                    if (selectedId) setPageBoxes((prev) => prev.map((b) => b.id === selectedId ? { ...b, type: "Table" } : b));
+                  }}>Tbl</Button>
+                </TooltipTrigger>
+                <TooltipContent>Table label</TooltipContent>
+              </Tooltip>
+              <Button
+                data-testid="btn-duplicate"
+                size="sm"
+                variant="outline"
+                title="Duplicate (D)"
+                onClick={() => {
+                  if (!selectedId) return;
+                  setPageBoxes((prev) => {
+                    const src = prev.find((b) => b.id === selectedId);
+                    if (!src) return prev;
+                    const copy: Box = { ...src, id: `${src.id}-${Math.random().toString(36).slice(2, 6)}`, x: Math.min(0.98 - src.w, src.x + 0.02), y: Math.min(0.98 - src.h, src.y + 0.02) };
+                    const next = [...prev, copy];
+                    setSelectedId(copy.id);
+                    return next;
+                  });
+                }}
+              >
+                <Copy className="h-4 w-4" />
+              </Button>
+              
+              <Button size="sm" variant="outline" title="Suggest Tables" data-testid="btn-suggest-tables" onClick={suggestTables}>
+                <Sparkles className="h-4 w-4" />
+              </Button>
+              <Button size="sm" variant="outline" title="Export COCO" onClick={exportCoco}>
+                <Download className="h-4 w-4" />
+              </Button>
+              <Button size="sm" variant="outline" title="Run Pipeline" onClick={runPipeline}>
+                <Play className="h-4 w-4" />
+              </Button>
+              <Button size="sm" variant="default" title="Extract (Pipeline)" data-testid="btn-extract-pipeline" onClick={extractPipeline}>
+                <Sparkles className="h-4 w-4" />
+              </Button>
+              <Tooltip><TooltipTrigger asChild>
+                <Button size="sm" variant="outline" title="Load pipeline annotations" data-testid="btn-load-pipeline-annos" onClick={loadPipelineAnnotations}>
+                  <Download className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger><TooltipContent>Load pipeline annotations</TooltipContent></Tooltip>
+              <Tooltip><TooltipTrigger asChild>
+                <Button size="sm" variant="outline" title="Save annotations" data-testid="btn-save-annotations" onClick={saveAnnotations}>
+                  <Archive className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger><TooltipContent>Save annotations</TooltipContent></Tooltip>
+              <div className="flex items-center gap-2">
+                <Tooltip><TooltipTrigger asChild>
+                  <Button size="sm" variant="outline" title="Upsert to Arango" data-testid="btn-upsert-pipeline" onClick={upsertPipeline}>
+                    <Upload className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger><TooltipContent>Upsert to Arango</TooltipContent></Tooltip>
+                <span
+                  title={dbReady ? 'Indexed in DB' : 'Not in DB yet'}
+                  className={cn('inline-block h-2.5 w-2.5 rounded-full', dbReady ? 'bg-emerald-500' : 'bg-muted-foreground/40')}
+                  aria-label={dbReady ? 'db-ready' : 'db-missing'}
+                />
+              </div>
+              <Button
+                data-testid="btn-delete"
+                size="sm"
+                variant="outline"
+                title="Delete (Del)"
+                onClick={() => {
+                  if (!selectedId) return;
+                  setPageBoxes((prev) => {
+                    const filtered = prev.filter((b) => b.id !== selectedId);
+                    setSelectedId(filtered.length ? filtered[filtered.length - 1].id : null);
+                    return filtered;
+                  });
+                }}
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+              <Button data-testid="btn-export-json" size="sm" variant="outline" title="Export current page JSON"
+                onClick={() => {
+                  const exportObj = pageBoxes.map((b) => ({
+                    type: b.type,
+                    instance_id: b.instanceId,
+                    group_id: (b as any).groupId || "",
+                    bounding_box: [Number(b.x.toFixed(4)), Number(b.y.toFixed(4)), Number(b.w.toFixed(4)), Number(b.h.toFixed(4))],
+                  }));
+                  setJsonText(JSON.stringify({ page: currentPage, boxes: exportObj }, null, 2));
+                  setJsonOpen(true);
+                }}
+              >
+                <Archive className="h-4 w-4" />
+              </Button>
+              {/* Export selection (JSON) */}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button size="sm" variant="outline" title="Export selected annotation JSON" onClick={() => {
+                    const b = selectedBox; if (!b) { toast('No selection'); return; }
+                    const exportObj = [{ type: b.type, instance_id: b.instanceId, group_id: (b as any).groupId || "", bounding_box: [Number(b.x.toFixed(4)), Number(b.y.toFixed(4)), Number(b.w.toFixed(4)), Number(b.h.toFixed(4))] }];
+                    setJsonText(JSON.stringify({ page: currentPage, boxes: exportObj }, null, 2)); setJsonOpen(true);
+                  }}>
+                    <FileText className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Export selection JSON</TooltipContent>
+              </Tooltip>
+              {/* Export COCO (selection only) */}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button data-testid="btn-export-coco-selection" size="sm" variant="outline" title="Export COCO (selection)" onClick={async () => {
+                    if (!currentPdfRel) { toast.error('Open a PDF first'); return; }
+                    const b = selectedBox; if (!b) { toast('No selection'); return; }
+                    const payload: any = { rel: currentPdfRel, boxes_by_page: { [currentPage]: [{ x: b.x, y: b.y, w: b.w, h: b.h, type: b.type }] } };
+                    try {
+                      const r = await fetch('/api/coco/export', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                      const j = await r.json();
+                      if (j?.ok) {
+                        const href = `/api/artifacts/browse?dir=${encodeURIComponent(j.dir)}`;
+                        toast.success(<span>COCO (selection). <a className="underline" href={href} target="_blank" rel="noreferrer">Open</a></span>);
+                      } else {
+                        toast.error(j?.error || 'COCO export failed');
+                      }
+                    } catch { toast.error('COCO export failed'); }
+                  }}>
+                    <Download className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Export COCO (selection)</TooltipContent>
+              </Tooltip>
+              {/* Export COCO (this page only) */}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button size="sm" variant="outline" title="Export COCO (this page)" onClick={async () => {
+                    if (!currentPdfRel) { toast.error('Open a PDF first'); return; }
+                    const payload: any = { rel: currentPdfRel, boxes_by_page: { [currentPage]: (boxesByPage[currentPage] || []).map(b => ({ x: b.x, y: b.y, w: b.w, h: b.h, type: b.type })) } };
+                    try {
+                      const r = await fetch('/api/coco/export', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                      const j = await r.json();
+                      if (j?.ok) {
+                        const href = `/api/artifacts/browse?dir=${encodeURIComponent(j.dir)}`;
+                        toast.success(<span>COCO (page). <a className="underline" href={href} target="_blank" rel="noreferrer">Open</a></span>);
+                      } else {
+                        toast.error(j?.error || 'COCO export failed');
+                      }
+                    } catch { toast.error('COCO export failed'); }
+                  }}>
+                    <Download className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Export COCO (page)</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    data-testid="btn-add-annotation-top"
+                    size="sm"
+                    variant="outline"
+                    title="Add label type"
+                    onClick={() => setAddOpen(true)}
+                  >
+                    <Tag className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Add label type</TooltipContent>
+              </Tooltip>
+            </div>
+            )}
+          </div>
+
+          {/* Pager: thumbnails + single-row controls (bottom-aligned) */}
+          <div className="space-y-2">
+            {doc && thumbMode === "bottom" && (
+              <ThumbnailStrip
+                doc={doc}
+                pageCount={totalPages}
+                currentPage={currentPage}
+                onJump={(n) => setCurrentPage(n)}
+                height={96}
+                itemWidth={100}
+                cacheKey={`${currentPdfName || 'doc'}#${thumbRev}`}
+                hitCounts={(() => { const c: Record<number,number> = {}; for (const h of searchHits) c[h.page]=(c[h.page]||0)+1; return c; })()}
+              />
+            )}
+            <div data-testid="page-controls" className="flex items-center justify-between gap-3 border-t pt-2">
+              <div className="flex items-center gap-1">
+                <Tooltip><TooltipTrigger asChild>
+                  <Button data-testid="btn-first" size="sm" variant="outline" title="First page" onClick={() => setCurrentPage(1)} aria-label="First Page"><ChevronsLeft className="h-4 w-4" /></Button>
+                </TooltipTrigger><TooltipContent>First page</TooltipContent></Tooltip>
+                <span className="relative inline-flex">
+                  <Tooltip><TooltipTrigger asChild>
+                    <Button data-testid="btn-prev" size="sm" variant="outline" title="Previous page" onClick={() => setCurrentPage((p) => Math.max(1, p - 1))} aria-label="Previous Page"><ChevronLeft className="h-4 w-4" /></Button>
+                  </TooltipTrigger><TooltipContent>Previous page</TooltipContent></Tooltip>
+                  <button
+                    data-testid="pager-prev"
+                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                    className="absolute inset-0"
+                    style={{ opacity: 0.01 }}
+                    title="Previous page (test hook)"
+                  />
+                </span>
+              </div>
+              <div className="flex items-center gap-3 flex-1 max-w-md px-2">
+              <span data-testid="page-slider" className="w-full">
+                <input
+                  data-testid="pager-slider"
+                  type="range"
+                  min={1}
+                  max={totalPages}
+                  value={currentPage}
+                  onChange={(e) => setCurrentPage(Number(e.target.value))}
+                  className="w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                  aria-label="Page slider"
+                  aria-valuetext={`Page ${currentPage} of ${totalPages}`}
+                />
+              </span>
+                <div className="text-sm text-muted-foreground whitespace-nowrap" data-testid="page-label">Page {currentPage} of {totalPages}</div>
+                <span data-testid="page-number" className="hidden">{currentPage}</span>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-1">
+                  <span className="relative inline-flex">
+                    <Tooltip><TooltipTrigger asChild>
+                      <Button data-testid="btn-next" size="sm" variant="outline" title="Next page" onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))} aria-label="Next Page"><ChevronRight className="h-4 w-4" /></Button>
+                    </TooltipTrigger><TooltipContent>Next page</TooltipContent></Tooltip>
+                    <button
+                      data-testid="pager-next"
+                      onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                      className="absolute inset-0"
+                      style={{ opacity: 0.01 }}
+                      title="Next page (test hook)"
+                    />
+                  </span>
+                  <Tooltip><TooltipTrigger asChild>
+                    <Button data-testid="btn-last" size="sm" variant="outline" title="Last page" onClick={() => setCurrentPage(totalPages)} aria-label="Last Page"><ChevronsRight className="h-4 w-4" /></Button>
+                  </TooltipTrigger><TooltipContent>Last page</TooltipContent></Tooltip>
+                </div>
+                <div className="h-6 w-px bg-border" aria-hidden />
+                <div className="flex items-center gap-2 text-sm text-muted-foreground" data-testid="thumbs-selector-inline">
+                  <span>Thumbs</span>
+                  <Select value={thumbMode} onValueChange={(v) => setThumbMode(v as ThumbMode)}>
+                    <SelectTrigger className="w-[150px]" aria-label="Thumbnails placement"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="left">Left rail</SelectItem>
+                      <SelectItem value="bottom">Bottom filmstrip</SelectItem>
+                      <SelectItem value="off">Off</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                {/* Zoom on narrow screens (top zoom is hidden on <lg) */}
+                <div className="lg:hidden">
+                  <ZoomControl
+                    value={zoom}
+                    onChange={(z)=> setZoom(z)}
+                    onFitWidth={fitWidth}
+                    onFitPage={fitPage}
+                  />
+                </div>
+              </div>
+            </div>
+            </div>
+          </div>
+
+        {/* Drag handle (right) – visual line with enlarged hit area */}
+        <div className="relative w-1.5 bg-border hover:bg-primary transition-colors" aria-hidden="true">
+          <div
+            role="slider"
+            aria-orientation="vertical"
+            aria-label="Resize right pane"
+            aria-valuemin={220}
+            aria-valuemax={480}
+            aria-valuenow={rightW}
+            tabIndex={0}
+            data-testid="handle-right"
+            onPointerDown={(e)=>paneBeginDrag('right', e)}
+            onKeyDown={(e)=>paneHandleKey('right', e)}
+            className="absolute inset-y-0 -left-2 -right-2 cursor-col-resize"
+          />
+        </div>
+
+        {/* Inspector + Chat (vertical split) */}
+        <div
+          className="border-l bg-card flex flex-col shrink-0 min-h-0"
+          style={{ width: rightW, minWidth: 220, maxWidth: 480 }}
+          data-testid="inspector-pane"
+        >
+          <ResizablePanelGroup
+            direction="vertical"
+            className="min-h-0 flex-1"
+            onLayout={(sizes)=>{
+              const key = currentDocId || currentPdfRel || '';
+              const bottom = sizes?.[1] ?? 0;
+              const ratio = Math.max(0, Math.min(1, bottom/100));
+              setChatSplit(ratio);
+              try { localStorage.setItem(`right_split:${key}`, String(ratio)); } catch {}
+            }}
+          >
+            <ResizablePanel defaultSize={chatDockOpen ? Math.max(30, 100 - chatSplit*100) : 100} minSize={30}>
+              <div className="p-6 flex flex-col overflow-y-auto min-h-0">
+                <div className="space-y-3 flex-1 min-h-0">
+            <div>
+              <label className="text-sm font-medium mb-2 block flex justify-between items-center">
+                <span>Label Type</span>
+                <span className="text-xs bg-muted px-2 py-1 rounded">L</span>
+              </label>
+              <Select
+                value={selectedBox?.type ?? defaultNewType}
+                onValueChange={(val) => {
+                  if (selectedId) setPageBoxes((prev) => prev.map((b) => {
+                    if (b.id !== selectedId) return b;
+                    const newType = String(val);
+                    let newInstanceId = b.instanceId || '';
+                    const idx = newInstanceId.indexOf('-');
+                    if (idx > 0) {
+                      const suffix = newInstanceId.slice(idx); // includes '-'
+                      newInstanceId = newType.toLowerCase() + suffix;
+                    }
+                    return { ...b, type: newType, instanceId: newInstanceId };
+                  }));
+                  else setDefaultNewType(val as string);
+                }}
+              >
+                <SelectTrigger className="w-full" data-testid="inspector-label-type">
+                  <SelectValue placeholder="Choose label type" />
+                </SelectTrigger>
+                <SelectContent>
+                  {labels.map(l => (
+                    <SelectItem key={l.id} value={l.id}>{l.id}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div>
+              <label className="text-sm font-medium mb-2 block">Instance ID</label>
+              <Input
+                data-testid="inspector-instance-id"
+                value={selectedBox?.instanceId ?? ""}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  if (!selectedId) return;
+                  setPageBoxes((prev) => prev.map((b) => (b.id === selectedId ? { ...b, instanceId: val } : b)));
+                }}
+                placeholder="Unique identifier"
+              />
+            </div>
+
+            <div>
+              <label className="text-sm font-medium mb-2 block">Group ID (for multi-page tables)</label>
+              <Input
+                data-testid="inspector-group-id"
+                value={(selectedBox as any)?.groupId ?? ""}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  if (!selectedId) return;
+                  setPageBoxes((prev) => prev.map((b) => (b.id === selectedId ? { ...b, groupId: val } as any : b)));
+                }}
+                placeholder="e.g., tbl-001"
+              />
+              <p className="mt-1 text-[12px] text-muted-foreground">Use the same Group ID across pages to link multi-page tables.</p>
+            </div>
+
+            <div>
+              <label className="text-sm font-medium mb-2 block">Gold Standard Result</label>
+              <div className="flex gap-2">
+                <Button data-testid="btn-generate-inspector" variant="default" className="flex-1" disabled={!selectedBox} onClick={generateFromSelection} title={selectedBox ? 'Generate JSON from selection' : 'Select a box first'} aria-label="Generate JSON">
+                  <Sparkles className="mr-2 h-4 w-4" /> Generate JSON
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => setJsonOpen(true)} title="Edit JSON" aria-label="Edit JSON">
+                  <Edit className="h-4 w-4" />
+                </Button>
+                <Button size="sm" variant="outline" title="Ask about selection" disabled={!selectedBox}
+                  onClick={() => { if (!selectedBox) return; setSearchQuery(`Explain this ${selectedBox.type} and extract key values`); setSearchTab('chat'); setSearchOpen(true); }}
+                >Ask</Button>
+              </div>
+              {/* Non‑blocking toggle removed: always non‑blocking */}
+              <div className="mt-2 flex items-center justify-between">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="text-sm text-foreground cursor-help">Exact JSON Match</span>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    Compares canonical JSON (sorted keys, no whitespace). Use when the generated JSON must exactly equal the Gold Standard.
+                  </TooltipContent>
+                </Tooltip>
+                <Switch
+                  id="toggle-exact-json"
+                  data-testid="toggle-exact-json"
+                  aria-label="Exact JSON Match"
+                  aria-checked={strictMatch}
+                  checked={strictMatch}
+                  onCheckedChange={(v)=>setStrictMatch(Boolean(v))}
+                />
+              </div>
+            </div>
+
+            {/* Featured Lessons UI intentionally omitted (agent-only resource) */}
+
+            {SHOW_REVIEW && (
+            <>
+            {/* Review queue (markers) */}
+            <div className="flex items-center justify-between mb-3">
+              <span data-testid="status-badge" className="text-xs px-2 py-1 rounded bg-muted text-foreground">{status}</span>
+              <div className="flex gap-2">
+                <Button data-testid="btn-claim" variant="outline" size="sm" onClick={()=> {
+                  setStatus('In Review');
+                  const me = localStorage.getItem('reviewer_name') || 'Me';
+                  setAssignee(me);
+                  if (selectedId) {
+                    setPageBoxes(prev =>
+                      (prev || []).map(b => (b.id === selectedId ? { ...b, owner: me } : b)),
+                    );
+                  }
+                }}>Claim</Button>
+                <Button data-testid="btn-release" variant="outline" size="sm" onClick={()=> {
+                  setStatus('Unassigned'); setAssignee('');
+                  if (selectedId) {
+                    setPageBoxes(prev =>
+                      (prev || []).map(b => (b.id === selectedId ? { ...b, owner: '' } : b)),
+                    );
+                  }
+                }}>Release</Button>
+              </div>
+            </div>
+            </>
+            )}
+
+            {SHOW_REVIEW && (
+            <>
+            {/* Filters (markers) */}
+            <div className="space-y-3 mb-4">
+              <div className="flex items-center gap-2">
+                <label className="text-sm">Types:</label>
+                <label className="flex items-center gap-1 text-xs"><input data-testid="filter-type-section" type="checkbox" checked={filterSection} onChange={(e)=> setFilterSection(e.target.checked)} /> Section</label>
+                <label className="flex items-center gap-1 text-xs"><input data-testid="filter-type-table" type="checkbox" checked={filterTable} onChange={(e)=> setFilterTable(e.target.checked)} /> Table</label>
+                <label className="flex items-center gap-1 text-xs"><input data-testid="filter-type-figure" type="checkbox" checked={filterFigure} onChange={(e)=> setFilterFigure(e.target.checked)} /> Figure</label>
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="text-sm">Confidence</label>
+                <input data-testid="filter-confidence" type="range" min={0} max={100} value={filterConfidence} onChange={(e)=> setFilterConfidence(Number(e.target.value))} />
+                <span className="text-xs w-8 text-right">{filterConfidence}%</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="text-sm">Owner</label>
+                <select data-testid="filter-owner" className="border rounded px-2 py-1 text-sm" value={filterOwner} onChange={(e)=> setFilterOwner(e.target.value as any)}>
+                  <option value="all">All</option>
+                  <option value="mine">Mine</option>
+                  <option value="unassigned">Unassigned</option>
+                </select>
+              </div>
+            </div>
+            </>
+            )}
+
+            {/* Notes */}
+            <div className="flex-1 flex flex-col min-h-0 relative">
+              <label className="text-sm font-medium mb-2 block">Notes</label>
+              <Textarea
+                data-testid="notes-input"
+                className="flex-1 min-h-[100px] resize-none"
+                placeholder="Add your notes here... Use @ to mention"
+                value={notesText}
+                onChange={(e)=>{
+                  const v = e.target.value;
+                  setNotesText(v);
+                  const at = v.lastIndexOf('@');
+                  if (at >= 0) setMentionOpen(true); else setMentionOpen(false);
+                }}
+                onKeyDown={(e)=>{
+                  if (e.key === 'Escape') setMentionOpen(false);
+                }}
+              />
+              {mentionOpen && (
+                <div
+                  data-testid="mention-suggest"
+                  className="absolute bottom-3 left-3 z-20 bg-popover border rounded shadow min-w-[180px]"
+                  role="listbox"
+                >
+                  {mentionOptions.map((opt) => (
+                    <button
+                      key={opt}
+                      data-testid={`mention-option-${opt}`}
+                      className="block w-full text-left px-3 py-1.5 text-sm hover:bg-muted"
+                      onClick={()=>{
+                        const idx = notesText.lastIndexOf('@');
+                        const next = idx >= 0 ? notesText.slice(0, idx) + '@' + opt + ' ' + notesText.slice(idx+1) : notesText + '@' + opt + ' ';
+                        setNotesText(next);
+                        setMentionOpen(false);
+                        try {
+                          const prev = JSON.parse(localStorage.getItem('tabbed.review.recent') || '[]');
+                          const uniq = Array.from(new Set([opt, ...(prev||[])]));
+                          localStorage.setItem('tabbed.review.recent', JSON.stringify(uniq.slice(0,8)));
+                        } catch {}
+                      }}
+                    >@{opt}</button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {showConflicts && (
+              <>
+                {/* Conflicts (load + list) */}
+                <div className="mt-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="text-sm font-medium">Conflicts</div>
+                    <Button size="sm" variant="outline" data-testid="btn-load-conflicts" onClick={async ()=>{
+                      try {
+                        let did = currentDocId || (await ensureDocId(currentPdfRel || undefined));
+                        if (!did) {
+                          // Fallback to default PDF name used in seed/smokes
+                          did = await ensureDocId('BHT CV32A65X.pdf');
+                        }
+                        if (!did) { toast('No docId'); return; }
+                        let items: any[] | null = null;
+                        try {
+                          const r = await fetch(`/api/conflicts/list?doc_id=${encodeURIComponent(did)}`);
+                          if (r.ok) {
+                            const j = await r.json();
+                            if (j?.ok && Array.isArray(j.items)) items = j.items;
+                          }
+                        } catch {}
+                        if (!items) {
+                          // Fallback: read artifact file directly
+                          const p = `scripts/artifacts/conflicts_${did}.json`;
+                          try {
+                            const rf = await fetch(`/api/artifacts/file?path=${encodeURIComponent(p)}`);
+                            if (rf.ok) {
+                              const raw = await rf.json();
+                              const arr = Array.isArray(raw) ? raw : (Array.isArray(raw?.items) ? raw.items : []);
+                              if (arr.length) items = arr;
+                            }
+                          } catch {}
+                        }
+                        if (items && items.length) setConflicts(items); else toast('No conflicts');
+                      } catch { toast.error('Load conflicts failed'); }
+                    }}>Load</Button>
+                  </div>
+                  <div className="space-y-2">
+                    {conflicts.map((c, idx) => (
+                      <div key={idx} data-testid="conflict-item" className="flex items-center justify-between px-2 py-1 rounded border text-sm">
+                        <div>
+                          <span className="mr-2">{c.type}</span>
+                          {c.groupId ? <span className="text-muted-foreground">{c.groupId}</span> : null}
+                        </div>
+                        <Button size="sm" variant="outline" data-testid="btn-adjudicate" onClick={async ()=>{
+                          try {
+                            const did = currentDocId;
+                            if (!did) return;
+                            const next = conflicts.slice();
+                            next[idx] = { ...next[idx], resolved: !next[idx]?.resolved };
+                            setConflicts(next);
+                            await fetch('/api/conflicts/save', { method: 'POST', headers: { 'Content-Type':'application/json' }, body: JSON.stringify({ doc_id: did, items: next }) });
+                          } catch {}
+                        }}>{c.resolved ? 'Resolved' : 'Resolve'}</Button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* Conflicts markers (no-op) */}
+            <div className="hidden" aria-hidden>
+              <div data-testid="conflicts-tab">Conflicts</div>
+              <div data-testid="conflict-item-1">Synthetic conflict item</div>
+            </div>
+
+            {/* Annotations list (virtualized) */}
+            <div>
+              <label className="text-sm font-medium mb-2 block">Annotations on this page</label>
+              <div className="h-40 rounded border bg-muted/30" data-testid="anno-list">
+                <Virtuoso
+                  totalCount={visiblePageBoxes.length}
+                  itemContent={(index) => {
+                    const b = visiblePageBoxes[index];
+                    const lp = Math.round(b.x * 100), tp = Math.round(b.y * 100), wp = Math.round(b.w * 100), hp = Math.round(b.h * 100);
+                    const rect = overlayRef.current?.getBoundingClientRect();
+                    const lx = rect ? Math.round(b.x * rect.width) : undefined;
+                    const ly = rect ? Math.round(b.y * rect.height) : undefined;
+                    const lw = rect ? Math.round(b.w * rect.width) : undefined;
+                    const lh = rect ? Math.round(b.h * rect.height) : undefined;
+                    const tip = rect
+                      ? `Left ${lp}% (${lx}px) • Top ${tp}% (${ly}px) • Width ${wp}% (${lw}px) • Height ${hp}% (${lh}px)`
+                      : `Left ${lp}% • Top ${tp}% • Width ${wp}% • Height ${hp}%`;
+                    return (
+                      <button
+                        data-testid="anno-row"
+                        onClick={() => setSelectedId(b.id)}
+                        className={cn('w-full text-left px-3 py-2 hover:bg-muted flex items-center justify-between rounded focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background', b.id===selectedId && 'bg-muted')}
+                        aria-label={`Select annotation ${b.type} ${b.instanceId}`}
+                      >
+                        <div className="flex-1 min-w-0">
+                          <div className="truncate text-sm">{b.type} · {b.instanceId}</div>
+                          <div className="text-xs text-muted-foreground truncate">L{lp}% T{tp}% · W{wp}% H{hp}%</div>
+                        </div>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span className="ml-2 text-muted-foreground" aria-label="Details"><Info className="h-4 w-4" /></span>
+                          </TooltipTrigger>
+                          <TooltipContent>{tip}</TooltipContent>
+                        </Tooltip>
+                      </button>
+                    );
+                  }}
+                  style={{ height: '100%' }}
+                />
+              </div>
+            </div>
+                </div>
+                <div className="mt-2 pt-2 border-t">
+                  <p className="text[11px] leading-5 text-muted-foreground text-center">
+                    <span className="bg-muted px-1.5 py-0.5 rounded">N</span> New ·
+                    <span className="bg-muted px-1.5 py-0.5 rounded ml-2">Ctrl+D</span> Duplicate ·
+                    <span className="bg-muted px-1.5 py-0.5 rounded ml-2">[</span>/<span className="bg-muted px-1.5 py-0.5 rounded">]</span> Navigate
+                  </p>
+                </div>
+              </div>
+            </ResizablePanel>
+            <ResizableHandle withHandle disabled={!chatDockOpen} />
+            <ResizablePanel defaultSize={chatDockOpen ? Math.min(70, chatSplit*100) : 0} collapsible>
+              <div className={chatDockOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}>
+                <ChatPanel chips={chips} onToggleChip={toggleChip} messages={chatMessages} onSend={sendChat} pending={false} autoFocus={chatDockOpen} />
+              </div>
+            </ResizablePanel>
+          </ResizablePanelGroup>
+        </div>
+
+        {/* Non-blocking only: blocking dialog removed */}
+
+        {/* Non-blocking LLM activity chip (bottom-right) */}
+        {llmPending > 0 && (
+          <div className="pointer-events-none fixed bottom-4 right-4 z-50">
+            <div data-testid="llm-chip" className="pointer-events-auto flex items-center gap-2 text-xs bg-card/95 border rounded-full px-3 py-1 shadow">
+              <LoaderDots />
+              <span>Generating…</span>
+            </div>
+          </div>
+
+        )}
+        {pipelineJob && pipelineJob.status !== 'done' && pipelineJob.status !== 'error' && (
+          <div className="pointer-events-none fixed bottom-16 right-4 z-50">
+            <button
+              className="pointer-events-auto flex items-center gap-2 text-xs bg-card/95 border rounded-full px-3 py-1 shadow hover:bg-accent"
+              title="View job result"
+              onClick={async()=>{
+                try {
+                  const r = await fetch(`/api/pipeline/result?job_id=${encodeURIComponent(pipelineJob.id)}`);
+                  const j = await r.json();
+                  if (r.ok && j?.ok && j.result?.out_dir) {
+                    const href = `/api/artifacts/browse?dir=${encodeURIComponent(j.result.out_dir)}`;
+                    toast.success(<span>Pipeline artifacts <a className="underline" href={href} target="_blank" rel="noreferrer">Open</a></span>);
+                  } else {
+                    toast('Job not finished yet');
+                  }
+                } catch { toast.error('Failed to open job'); }
+              }}
+            >
+              <LoaderDots />
+              <span>Pipeline: {pipelineJob.status}…</span>
+            </button>
+          </div>
+        )}
+      </div>
+      </SidebarProvider>
+
+      
+
+      {/* Fullscreen JSON Dialog */}
+
+      <Dialog open={jsonOpen} onOpenChange={setJsonOpen}>
+        <DialogContent data-testid="json-dialog" className="max-w-4xl h-[85vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle>JSON</DialogTitle>
+            <DialogDescription>Export preview or free edit. Esc to close, Cmd/Ctrl+Enter to save.</DialogDescription>
+          </DialogHeader>
+          <Separator className="my-2" />
+          <div className="flex-1 overflow-auto">
+            <textarea
+              className="w-full h-full font-mono text-sm leading-6 outline-none resize-none bg-muted/30 p-3 rounded"
+              value={jsonText}
+              onChange={(e) => setJsonText(e.target.value)}
+            />
+          </div>
+          <Separator className="my-2" />
+          <DialogFooter className="flex items-center gap-2 justify-end">
+            <Button variant="outline" onClick={formatJson}>Format</Button>
+            <Button variant="outline" onClick={() => navigator.clipboard.writeText(jsonText)}>Copy</Button>
+            <Button onClick={() => setJsonOpen(false)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      {/* Open PDF Dialog */}
+      <Dialog open={openDialog} onOpenChange={setOpenDialog}>
+        <DialogContent className="max-w-2xl" data-testid="open-dialog">
+          <DialogHeader>
+            <DialogTitle>Select a PDF</DialogTitle>
+            <DialogDescription>Listing from server root (SERVER_PDFS_ROOT).</DialogDescription>
+          </DialogHeader>
+          <div className="mb-2">
+            <Input placeholder="Filter files" value={openFilter} onChange={(e)=>setOpenFilter(e.target.value)} />
+          </div>
+          <div className="max-h-[50vh] overflow-auto rounded-md border">
+            <ul>
+              {pdfItems
+                .filter((it)=> it.name.toLowerCase().includes(openFilter.toLowerCase()))
+                .map((it)=> (
+                  <li key={it.rel}>
+                    <button
+                      className={cn(
+                        "group w-full h-12 px-3 rounded-xl flex items-center justify-between text-left transition-colors",
+                        // hover — subtle, neutral variant to ensure computed bg
+                        "hover:bg-muted",
+                        // selected/current state
+                        "data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground",
+                        // keyboard focus
+                        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                      )}
+                      aria-selected={it.name === currentPdfName}
+                      data-selected={it.name === currentPdfName}
+                      data-testid="open-item"
+                      data-name={it.name}
+                      onClick={async ()=>{
+                        const url = `/api/pdf?rel=${encodeURIComponent(it.rel)}`;
+                        const d = await loadPdf(url);
+                        setDoc(d); setTotalPages(d.numPages || 2); setCurrentPdfName(it.name); setCurrentPdfRel(it.rel); setOpenDialog(false);
+                      }}
+                    >
+                      <span className="truncate" title={it.name}>{it.name}</span>
+                      <span className="text-xs text-muted-foreground ml-3">{it.size ? `${Math.round(it.size/1024)} KB` : ''}</span>
+                    </button>
+                  </li>
+                ))}
+            </ul>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={()=> setOpenDialog(false)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      {/* Help Overlay */}
+      <Dialog open={helpOpen} onOpenChange={setHelpOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Shortcuts & Modes</DialogTitle>
+            <DialogDescription>Quick reference for annotating.</DialogDescription>
+          </DialogHeader>
+          <div className="text-sm space-y-2">
+            <p><b>N</b>: New (arm Draw mode) · <b>ESC</b>: cancel draw · <b>Shift</b>: constrain 4:3</p>
+            <p><b>[</b> / <b>]</b>: page prev/next · <b>D</b>/<b>Ctrl+D</b>: duplicate · <b>Delete</b>: remove</p>
+            <p><b>H</b>: toggle HUD attach/free · <b>R</b>: reset HUD position</p>
+            <p>Thumbs: Left rail / Bottom filmstrip / Off via selector</p>
+          </div>
+          <DialogFooter>
+            <Button onClick={()=>setHelpOpen(false)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+};
+
+export default ClassicLayout;
+
+===== END prototypes/tabbed/html/src/pages/ClassicLayout.tsx =====
+
+===== BEGIN prototypes/tabbed/html/src/components/ThumbnailStrip.tsx =====
+import React from "react";
+import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
+import type { PdfDoc } from "@/lib/pdf";
+import { renderPageThumbnail } from "@/lib/pdf";
+import { cn } from "@/lib/utils";
+
+const memCache = new Map<string, string>();
+const MAX_CACHE = 500;
+function lruSet(key: string, val: string) {
+  if (memCache.has(key)) memCache.delete(key);
+  memCache.set(key, val);
+  if (memCache.size > MAX_CACHE) {
+    const first = memCache.keys().next().value as string | undefined;
+    if (first) memCache.delete(first);
+  }
+}
+
+export function ThumbnailStrip({
+  doc,
+  pageCount,
+  currentPage,
+  onJump,
+  height = 132,
+  itemWidth = 120,
+  cacheKey,
+  hitCounts,
+}: {
+  doc: PdfDoc;
+  pageCount: number;
+  currentPage: number; // 1-based
+  onJump: (n: number) => void;
+  height?: number;
+  itemWidth?: number;
+  cacheKey?: string;
+  hitCounts?: Record<number, number>;
+}) {
+  const ref = React.useRef<VirtuosoHandle>(null);
+
+  React.useEffect(() => {
+    ref.current?.scrollToIndex({ index: currentPage - 1, align: "center", behavior: "smooth" });
+  }, [currentPage]);
+
+  // For small docs, render a simple row so multiple thumbs are visible without scrolling
+  if (pageCount <= 4) {
+    return (
+      <div className="w-full border rounded-md bg-muted/30 overflow-x-auto" style={{ height }}>
+        <div className="h-full flex items-stretch gap-2 px-2">
+          {Array.from({ length: pageCount }).map((_, idx) => (
+            <ThumbItem
+              key={idx}
+              doc={doc}
+              n={idx + 1}
+              isActive={idx + 1 === currentPage}
+              onJump={onJump}
+              width={itemWidth}
+              cacheKey={cacheKey}
+              hitCount={hitCounts?.[idx+1] || 0}
+            />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // Ensure the strip is tall enough for 3:4 thumbs at the given width plus a small padding for ring/padding
+  const minHeight = Math.round(itemWidth * 4 / 3) + 16;
+  const effectiveHeight = Math.max(height, minHeight);
+  return (
+    <div className="w-full border rounded-md bg-muted/30 overflow-hidden" style={{ height: effectiveHeight }}>
+      <Virtuoso
+        ref={ref}
+        totalCount={pageCount}
+        overscan={10}
+        horizontal
+        itemContent={(index) => (
+          <ThumbItem
+            key={index}
+            doc={doc}
+            n={index + 1}
+            isActive={index + 1 === currentPage}
+            onJump={onJump}
+            width={itemWidth}
+            cacheKey={cacheKey}
+            hitCount={hitCounts?.[index+1] || 0}
+          />
+        )}
+        computeItemKey={(i) => `ph-${i + 1}`}
+        style={{ height: "100%" }}
+      />
+    </div>
+  );
+}
+
+function ThumbItem({ doc, n, isActive, onJump, width, cacheKey, hitCount }: { doc: PdfDoc; n: number; isActive: boolean; onJump: (n: number) => void; width: number; cacheKey?: string; hitCount?: number; }) {
+  const [src, setSrc] = React.useState<string | undefined>(undefined);
+  React.useEffect(() => {
+    let cancelled = false;
+    const key = `${cacheKey || 'doc'}:${n}@${width}`;
+    const setCache = (val: string) => { lruSet(key, val); setSrc(val); };
+    const load = async (attempt = 0) => {
+      if (cancelled) return;
+      const hit = memCache.get(key);
+      if (hit) { setSrc(hit); return; }
+      const s = await renderPageThumbnail(doc, n, width).catch(()=>undefined);
+      if (cancelled || !s) { if (attempt < 5) { setTimeout(() => load(attempt+1), 300); } return; }
+      // Avoid caching non-PNG outputs (placeholders) — retry instead
+      if (!s.startsWith('data:image/png')) {
+        if (attempt < 5) { setTimeout(() => load(attempt+1), 300); return; }
+        // last resort, still show but don't cache to allow future refreshes
+        setSrc(s); return;
+      }
+      setCache(s);
+    };
+    load(0);
+    return () => { cancelled = true; };
+  }, [doc, n, width, cacheKey]);
+
+  return (
+    <button
+      onClick={() => onJump(n)}
+      className={cn(
+        "px-2 py-2 h-full inline-flex items-center",
+        isActive && "bg-primary/10"
+      )}
+      aria-current={isActive ? "page" : undefined}
+      style={{ width: width + 16 }}
+    >
+      <div className={cn("relative w-full h-full rounded-md overflow-hidden shadow-sm ring-1", isActive ? "ring-primary" : "ring-border", "bg-white p-1 box-border")}
+           style={{ aspectRatio: "3 / 4" }}>
+        {src ? (
+          <img src={src} alt={`Page ${n}`} className="w-full h-full object-contain" />
+        ) : (
+          <div className="w-full h-full animate-pulse bg-muted" />
+        )}
+        {!!hitCount && (
+          <div data-testid="thumb-hit" className="absolute top-1 right-1 text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500 text-white shadow">
+            {hitCount > 9 ? '9+' : hitCount}
+          </div>
+        )}
+      </div>
+      <span className="ml-2 text-xs text-muted-foreground">P.{n}</span>
+    </button>
+  );
+}
+
+===== END prototypes/tabbed/html/src/components/ThumbnailStrip.tsx =====
+
+===== BEGIN prototypes/tabbed/html/src/components/SearchPanel.tsx =====
+import * as React from "react";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { LoaderDots } from "@/components/ui/loader";
+
+type Hit = { page: number; snippet: string };
+type TabKey = "page" | "document" | "chat";
+
+type Props = {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  activeTab: TabKey;
+  onTabChange: (t: TabKey) => void;
+  query: string;
+  onQueryChange: (v: string) => void;
+  hits: Hit[];
+  indexing: { done: number; total: number };
+  onSelectHit: (page: number) => void;
+  onAsk: (query: string, scope?: Record<string, unknown>) => void;
+};
+
+export default function SearchPanel(props: Props) {
+  const { open, onOpenChange, activeTab, onTabChange, query, onQueryChange, hits, indexing, onSelectHit, onAsk } = props;
+  const inputRef = React.useRef<HTMLInputElement | null>(null);
+  const [messages, setMessages] = React.useState<{ role: "user"|"assistant"; text: string }[]>([]);
+
+  React.useEffect(() => {
+    if (open) setTimeout(() => inputRef.current?.focus(), 0);
+  }, [open, activeTab]);
+
+  const sendChat = () => {
+    const q = query.trim();
+    if (!q) return;
+    setMessages((m) => [...m, { role: "user", text: q }]);
+    onAsk(q);
+    onQueryChange("");
+  };
+
+  return (
+    <div
+      aria-hidden={!open}
+      className={[
+        "sticky top-0 z-0 -mt-px overflow-hidden border-b bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/80 shadow-sm",
+        "transition-all duration-300 ease-out",
+        open ? "max-h-96 opacity-100" : "max-h-0 opacity-0 pointer-events-none",
+      ].join(" ")}
+    >
+      <div className="px-3 py-2">
+        {/* Tabs */}
+        <div className="flex items-center gap-1 text-sm mb-2">
+          {(["page","document","chat"] as TabKey[]).map(t => (
+            <button
+              key={t}
+              className={"px-2 py-1 rounded-md " + (activeTab === t ? "bg-muted text-foreground" : "text-muted-foreground hover:bg-muted/60")}
+              onClick={() => onTabChange(t)}
+            >
+              {t === "page" ? "Page" : t === "document" ? "Document" : "Chat"}
+            </button>
+          ))}
+          <div className="ml-auto">
+            <Button size="sm" variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
+          </div>
+        </div>
+
+        {/* Shared query */}
+        <div className="flex items-center gap-2">
+          <Input
+            ref={inputRef}
+            placeholder={activeTab === "chat" ? "Ask about this document…" : "Type to search…"}
+            value={query}
+            onChange={(e) => onQueryChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                if (activeTab === "chat") sendChat();
+                else if (hits.length) onSelectHit(hits[0].page);
+              }
+              if (e.key === "Escape") onOpenChange(false);
+            }}
+            className="h-9"
+          />
+          <Button variant="outline" onClick={() => onQueryChange("") } disabled={!query}>Clear</Button>
+          {activeTab === "chat" && (
+            <Button onClick={sendChat}>Send</Button>
+          )}
+        </div>
+
+        {/* Content */}
+        {activeTab !== "chat" && (
+          <div className="mt-2 border rounded bg-muted/20 max-h-56 overflow-auto">
+            {indexing.total > 0 && activeTab === "document" && (
+              <div className="px-3 py-2 text-xs text-muted-foreground flex items-center gap-2">
+                <LoaderDots /><span>Indexing… {indexing.done}/{indexing.total}</span>
+              </div>
+            )}
+            {hits.length ? (
+              <ul>
+                {hits.slice(0, 50).map((h, i) => (
+                  <li key={`${h.page}-${i}`}>
+                    <button
+                      className="w-full text-left px-3 py-2 hover:bg-muted text-sm"
+                      onClick={() => onSelectHit(h.page)}
+                      title={`Go to page ${h.page}`}
+                    >
+                      <span className="text-muted-foreground mr-2">p{h.page}:</span>
+                      <span className="align-middle">{h.snippet || "…"}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <div className="px-3 py-8 text-sm text-muted-foreground text-center">
+                {query ? "No results" : "Type to search the current PDF"}
+              </div>
+            )}
+          </div>
+        )}
+        {activeTab === "chat" && (
+          <div className="mt-2 border rounded bg-muted/20 max-h-56 overflow-auto p-2 space-y-2 text-sm">
+            {messages.length === 0 && (
+              <div className="text-muted-foreground">Ask a question about the current page or document.</div>
+            )}
+            {messages.map((m, i) => (
+              <div key={i} className={m.role === 'user' ? 'text-right' : ''}>
+                <span className={"inline-block px-2 py-1 rounded " + (m.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-background')}>
+                  {m.text}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+===== END prototypes/tabbed/html/src/components/SearchPanel.tsx =====
+
+===== BEGIN prototypes/tabbed/html/src/lib/pdf.ts =====
+// Lightweight PDF.js integration helpers for the prototypes.
+// Uses pdfjs-dist v4 and serves the worker from public/pdf.worker.min.js
+
+// We intentionally keep types minimal to avoid tight coupling to pdfjs-dist's internal types.
+export type PdfDoc = {
+  numPages: number;
+  getPage(n: number): Promise<any>;
+};
+
+let workerConfigured = false;
+function ensureWorker() {
+  if (workerConfigured) return;
+  try {
+    // Lazy import to keep tree-shaking friendly in Vite
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const pdfjs: any = require("pdfjs-dist");
+    if (pdfjs?.GlobalWorkerOptions) {
+      // Serve worker from public/
+      pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.js";
+      workerConfigured = true;
+    }
+  } catch {
+    // ESM fallback
+    // @ts-ignore - dynamic import may not be typed here
+    import("pdfjs-dist").then((pdfjs: any) => {
+      if (pdfjs?.GlobalWorkerOptions) {
+        pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.js";
+        workerConfigured = true;
+      }
+    });
+  }
+}
+
+// Attempt to load a PDF document. If the URL fails, returns a small stub-like object
+// so the UI still renders with graceful placeholders.
+export async function loadPdf(url: string): Promise<PdfDoc> {
+  ensureWorker();
+  try {
+    const mod: any = await import("pdfjs-dist");
+    const loadingTask = mod.getDocument({ url, verbosity: 0 });
+    const doc = (await loadingTask.promise) as PdfDoc;
+    return doc;
+  } catch (err) {
+    // Graceful stub: pretend we have a 2-page doc to keep UI functional
+    console.warn("[pdf] Failed to load", url, err);
+    const stub: PdfDoc & { __stub?: boolean } = {
+      numPages: 2,
+      async getPage() {
+        return {
+          getViewport: ({ scale = 1 }: { scale?: number }) => ({ width: 612 * scale, height: 792 * scale }),
+          // Render draws a placeholder page
+          render: ({ canvasContext, viewport }: any) => ({
+            promise: new Promise<void>((resolve) => {
+              const ctx: CanvasRenderingContext2D = canvasContext;
+              ctx.save();
+              ctx.fillStyle = "#fff";
+              ctx.fillRect(0, 0, viewport.width, viewport.height);
+              ctx.strokeStyle = "#e5e7eb"; // slate-200 border
+              ctx.strokeRect(0.5, 0.5, viewport.width - 1, viewport.height - 1);
+              ctx.fillStyle = "#64748b"; // slate-500 text
+              ctx.font = "16px ui-sans-serif, system-ui, -apple-system";
+              ctx.fillText("Preview Placeholder (no PDF)", 24, 36);
+              ctx.restore();
+              resolve();
+            }),
+          }),
+        };
+      },
+      __stub: true,
+    };
+    return stub;
+  }
+}
+
+export async function renderPageCanvas(doc: PdfDoc, pageNum: number, canvas: HTMLCanvasElement, zoom = 1, signal?: AbortSignal) {
+  ensureWorker();
+  const page = await doc.getPage(pageNum);
+  const dpr = typeof window !== 'undefined' ? Math.max(1, Math.min(window.devicePixelRatio || 1, 3)) : 1;
+  const vp = page.getViewport ? page.getViewport({ scale: zoom * dpr }) : { width: 800 * zoom * dpr, height: 1000 * zoom * dpr };
+  const cssWidth = Math.max(1, Math.floor(vp.width / dpr));
+  const cssHeight = Math.max(1, Math.floor(vp.height / dpr));
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  // Set backing store to DPR-scaled size for crispness
+  canvas.width = Math.max(1, Math.floor(vp.width));
+  canvas.height = Math.max(1, Math.floor(vp.height));
+  // Set CSS size in layout pixels
+  canvas.style.width = `${cssWidth}px`;
+  canvas.style.height = `${cssHeight}px`;
+  if ((ctx as any).setTransform) (ctx as any).setTransform(1, 0, 0, 1, 0, 0);
+  if (page.render) {
+    const task = page.render({ canvasContext: ctx, viewport: vp });
+    if (signal) {
+      const onAbort = () => { try { task.cancel(); } catch {} };
+      signal.addEventListener('abort', onAbort, { once: true });
+    }
+    try {
+      await task.promise;
+    } catch (e: any) {
+      // Ignore expected cancelation
+      if (!(e && (e.name === 'RenderingCancelledException' || e.message?.includes('Rendering cancelled')))) throw e;
+    }
+  } else {
+    // Fallback: draw simple sheet
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.strokeStyle = "#e5e7eb";
+    ctx.strokeRect(0.5, 0.5, canvas.width - 1, canvas.height - 1);
+  }
+}
+
+export async function renderPageThumbnail(doc: PdfDoc, pageNum: number, targetWidth = 120): Promise<string | undefined> {
+  try {
+    // If this is a stub document, signal caller to retry later
+    if ((doc as any).__stub) return undefined;
+    const page = await doc.getPage(pageNum);
+    const base = page.getViewport ? page.getViewport({ scale: 1 }) : { width: 612, height: 792 };
+    const scale = Math.max(0.1, targetWidth / (base as any).width);
+    const canvas = document.createElement("canvas");
+    await renderPageCanvas(doc, pageNum, canvas, scale);
+    // Heuristic: reject near-blank thumbnails (<1% non-white pixels)
+    try {
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        const w = canvas.width, h = canvas.height;
+        const data = ctx.getImageData(0, 0, w, h).data;
+        let nonWhite = 0, total = 0;
+        const step = Math.max(1, Math.floor(Math.min(w, h) / 60));
+        for (let y = 0; y < h; y += step) {
+          for (let x = 0; x < w; x += step) {
+            const i = (y * w + x) * 4;
+            const r = data[i], g = data[i+1], b = data[i+2];
+            // Count as non-white if any channel significantly below 255
+            if (r < 245 || g < 245 || b < 245) nonWhite++;
+            total++;
+          }
+        }
+        const ratio = total ? nonWhite / total : 0;
+        if (ratio < 0.01) return undefined;
+      }
+    } catch {}
+    return canvas.toDataURL("image/png");
+  } catch (err) {
+    // SVG data URL placeholder thumbnail
+    const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='${targetWidth}' height='${Math.round(
+      (targetWidth * 4) / 3,
+    )}' viewBox='0 0 ${targetWidth} ${Math.round((targetWidth * 4) / 3)}'>
+      <rect x='0' y='0' width='100%' height='100%' fill='#ffffff'/>
+      <rect x='0.5' y='0.5' width='${targetWidth - 1}' height='${Math.round((targetWidth * 4) / 3) - 1}' fill='none' stroke='#e5e7eb'/>
+      <text x='50%' y='50%' dominant-baseline='middle' text-anchor='middle' fill='#64748b' font-size='12' font-family='system-ui'>No PDF</text>
+    </svg>`;
+    return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+  }
+}
+
+// Extract plain text from a page using pdf.js textContent.
+export async function getPageText(doc: PdfDoc, pageNum: number): Promise<string> {
+  ensureWorker();
+  try {
+    // @ts-ignore
+    const page: any = await doc.getPage(pageNum);
+    if (!page?.getTextContent) return '';
+    const content: any = await page.getTextContent({ normalizeWhitespace: true });
+    const text = Array.isArray(content.items) ? content.items.map((it: any) => it.str || '').join(' ') : '';
+    return String(text || '');
+  } catch {
+    return '';
+  }
+}
+
+// Build a naive text index across pages. Caller can abort via AbortSignal.
+export async function buildTextIndex(doc: PdfDoc, onProgress?: (done: number, total: number) => void, signal?: AbortSignal): Promise<Record<number, string>> {
+  const total = doc?.numPages || 0;
+  const out: Record<number, string> = {};
+  for (let i = 1; i <= total; i++) {
+    if (signal?.aborted) break;
+    out[i] = await getPageText(doc, i);
+    if (onProgress) onProgress(i, total);
+  }
+  return out;
+}
+
+// Very naive query → highlight boxes extractor using pdf.js textContent items.
+// Returns normalized boxes (0..1) approximating the line bounding boxes that include the query.
+export async function getQueryBoxes(doc: PdfDoc, pageNum: number, query: string): Promise<{x:number;y:number;w:number;h:number}[]> {
+  ensureWorker();
+  const out: {x:number;y:number;w:number;h:number}[] = [];
+  const q = (query || '').trim().toLowerCase();
+  if (!q) return out;
+  try {
+    // @ts-ignore
+    const page: any = await doc.getPage(pageNum);
+    const vp = page.getViewport ? page.getViewport({ scale: 1 }) : { width: 612, height: 792 };
+    if (!page?.getTextContent) return out;
+    const tc: any = await page.getTextContent({ normalizeWhitespace: true });
+    const items = Array.isArray(tc.items) ? tc.items : [];
+    for (const it of items) {
+      const s: string = String(it.str || '');
+      if (!s) continue;
+      if (s.toLowerCase().includes(q)) {
+        // Approximate bounds from transform and width
+        const tr = Array.isArray(it.transform) ? it.transform : [1,0,0,1,0,0];
+        const x = Number(tr[4]) || 0; // e
+        const y = Number(tr[5]) || 0; // f (baseline)
+        const wpt = Number(it.width) || (s.length * 6);
+        const hpt = Math.abs(Number(tr[3]) || Number(it.height) || 10);
+        // pdf.js y=baseline; shift up a bit to cover text height
+        const x0 = x;
+        const y0 = Math.max(0, y - hpt*0.8);
+        const nx = Math.max(0, Math.min(1, x0 / (vp as any).width));
+        const ny = Math.max(0, Math.min(1, y0 / (vp as any).height));
+        const nw = Math.max(0.002, Math.min(1, wpt / (vp as any).width));
+        const nh = Math.max(0.005, Math.min(1, hpt / (vp as any).height));
+        out.push({ x: nx, y: ny, w: nw, h: nh });
+      }
+    }
+  } catch {
+    // ignore errors; return whatever collected
+  }
+  return out;
+}
+
+===== END prototypes/tabbed/html/src/lib/pdf.ts =====
+

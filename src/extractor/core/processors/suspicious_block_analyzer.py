@@ -14,8 +14,7 @@ Uses the simple claude_p_with_timeout function from extract_pdf_pipeline.py
 
 import json
 import subprocess
-from typing import Dict, List, Any, Optional
-from pathlib import Path
+from typing import Dict, List, Any
 from loguru import logger
 import sys
 

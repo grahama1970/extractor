@@ -20,18 +20,13 @@ try:
     import psutil  # type: ignore
 except Exception:  # pragma: no cover
     psutil = None  # type: ignore
-import uuid
 
 try:
     import fitz  # PyMuPDF
 except ImportError:
     print("PyMuPDF (fitz) not installed. Stage 01 requires it.", file=sys.stderr)
     raise
-import litellm
 import typer
-from dotenv import load_dotenv, find_dotenv
-from tenacity import retry, stop_after_attempt, wait_exponential
-from tqdm.asyncio import tqdm_asyncio
 from loguru import logger
 from extractor.pipeline.utils.litellm_call import litellm_call
 
@@ -39,10 +34,7 @@ from extractor.pipeline.utils.diagnostics import (
     start_resource_sampler,
     stop_resource_sampler,
     get_run_id,
-    iso_now,
     make_event,
-    snapshot_resources,
-    build_stage_timings,
     classify_llm_error,
 )
 

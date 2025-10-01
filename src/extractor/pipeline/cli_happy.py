@@ -2,34 +2,32 @@
 from __future__ import annotations
 
 import os
-import sys
 import subprocess
 from pathlib import Path
-from typing import Optional
 
 import typer
 from dotenv import load_dotenv, find_dotenv
 
 
-app = typer.Typer(add_completion=False, help="Happy-path PDF extraction: one command, validated output.")
+def build_cli() -> typer.Typer:
+    app = typer.Typer(add_completion=False, help="Happy-path PDF extraction: one command, validated output.")
 
-
-@app.command()
-def run(
-    pdf: Path = typer.Option(
-        Path("data/input/pipeline/BHT_CV32A65X_marked.pdf"),
-        exists=True,
-        help="Input PDF (defaults to canonical BHT sample)",
-    ),
-    results: Path = typer.Option(
-        Path("data/results/pipeline_happy"), help="Results directory"
-    ),
-    arango_db: str = typer.Option(
-        os.getenv("ARANGO_DATABASE", "pdf_knowledge_base_test"),
-        help="ArangoDB database name for this run",
-    ),
-    verbose: bool = typer.Option(False, "--verbose", help="Echo the full command"),
-):
+    @app.command()
+    def run(
+        pdf: Path = typer.Option(
+            Path("data/input/pipeline/BHT_CV32A65X_marked.pdf"),
+            exists=True,
+            help="Input PDF (defaults to canonical BHT sample)",
+        ),
+        results: Path = typer.Option(
+            Path("data/results/pipeline_happy"), help="Results directory"
+        ),
+        arango_db: str = typer.Option(
+            os.getenv("ARANGO_DATABASE", "pdf_knowledge_base_test"),
+            help="ArangoDB database name for this run",
+        ),
+        verbose: bool = typer.Option(False, "--verbose", help="Echo the full command"),
+    ):
     """Run the pipeline with deterministic toggles and gold validation.
 
     - Uses fast/deterministic paths for LLM/embeddings to avoid flaky results.
@@ -46,6 +44,7 @@ def run(
     # Delegate to the unified surface to keep one code path
     cmd = [
         "pipeline-run",
+        "run",
         "--pdf",
         str(pdf),
         "--results",
@@ -61,7 +60,6 @@ def run(
     # Build a simple run summary from validation artifacts
     try:
         import json
-        import time
 
         summary = {
             "ok": proc.returncode == 0,
@@ -132,8 +130,11 @@ def run(
     raise typer.Exit(proc.returncode)
 
 
+    return app
+
+
 def main() -> None:
-    app()
+    build_cli()()
 
 
 if __name__ == "__main__":

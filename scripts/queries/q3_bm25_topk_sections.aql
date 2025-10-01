@@ -1,0 +1,8 @@
+/* Top-k sections by BM25 for a simple query using ArangoSearch view v_sections */
+/* Requires a view named v_sections linking sections.text with analyzer text_en */
+FOR d IN v_sections
+  SEARCH ANALYZER(d.text IN TOKENS(@q, 'text_en'), 'text_en')
+  SORT BM25(d) DESC
+  LIMIT @k
+  RETURN {id: d._id, score: BM25(d), text: d.text}
+

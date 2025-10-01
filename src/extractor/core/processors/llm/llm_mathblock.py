@@ -259,7 +259,7 @@ Adversarial training <i>(AT)</i> <a href='#page-9-1'>[23]</a>, which aims to min
         block_text = self.get_block_text(block, document)
         prompt = self.text_math_rewriting_prompt.replace("{extracted_html}", block_text)
 
-        image = self.extract_image(document, block)
+        _image = self.extract_image(document, block)
         response = call_claude_subprocess_sync(prompt)
 
         if not response or "corrected_html" not in response:

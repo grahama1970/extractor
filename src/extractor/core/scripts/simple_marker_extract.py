@@ -10,7 +10,7 @@ from pathlib import Path
 # Try marker imports with fallback
 try:
     from marker.converters.pdf import PdfConverter
-    from marker.config.parser import ConfigParser
+    from marker.config.parser import ConfigParser  # noqa: F401 - retained for compatibility
     from marker.models import create_model_dict
 
     MARKER_AVAILABLE = True
@@ -18,7 +18,7 @@ except ImportError:
     # Fallback to extractor imports
     try:
         from extractor.core.converters.pdf import PdfConverter
-        from extractor.core.config.parser import ConfigParser
+        
         from extractor.core.models import create_model_dict
 
         MARKER_AVAILABLE = False

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { isDev } from '@/lib/env';
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
@@ -11,6 +12,8 @@ export default function ExtractPage() {
   const [items, setItems] = useState<PdfItem[]>([]);
   const [job, setJob] = useState<{ id: string; status: string } | null>(null);
   useEffect(() => {
+    // Guard mount-time list fetch to dev only (preview has no proxy)
+    if (!isDev()) return;
     (async () => {
       try { const r = await fetch('/api/list'); const j = await r.json(); if (j?.ok) setItems(j.items || []); } catch {}
     })();

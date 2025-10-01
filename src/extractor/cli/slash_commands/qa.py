@@ -5,17 +5,16 @@ Provides commands for generating and validating question-answer pairs.
 """
 
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Optional, List
 import typer
 from loguru import logger
 import json
 
-from .base import CommandGroup, validate_file_path, format_output
+from .base import CommandGroup, validate_file_path
 from extractor.core.arangodb.qa_generator import generate_qa_pairs
 from extractor.core.arangodb.validators.qa_validator import (
     validate_qa_pairs as validate_qa_pairs_func,
 )
-from extractor.core.schema.document import Document
 
 
 class QACommands(CommandGroup):
@@ -156,11 +155,11 @@ class QACommands(CommandGroup):
                     print(f"Validating all {len(qa_pairs)} QA pairs")
 
                 # Load source document if provided
-                source_doc = None
+                _source_doc = None
                 if document_path:
                     document_path = validate_file_path(document_path)
                     with open(document_path, "r", encoding="utf-8") as f:
-                        source_doc = json.load(f)
+                        _source_doc = json.load(f)
 
                 # Validate QA pairs
                 # Need to save qa_pairs to a temp file for validation
@@ -198,8 +197,8 @@ class QACommands(CommandGroup):
                 )
 
                 # Display results
-                print(f"\n Validation Complete")
-                print(f"\n Validation Results:")
+                print("\n Validation Complete")
+                print("\n Validation Results:")
                 print(f"  Total validated: {total_validated}")
                 print(f"  Valid QA pairs: {valid_count} ({valid_count/total_validated*100:.1f}%)")
                 print(f"  Average accuracy: {avg_accuracy:.2f}/10")
@@ -257,7 +256,7 @@ class QACommands(CommandGroup):
                 document_path = validate_file_path(document_path)
                 qa_path = validate_file_path(qa_path)
 
-                logger.info(f"Testing document with QA pairs")
+                logger.info("Testing document with QA pairs")
 
                 # Load document and QA pairs
                 with open(document_path, "r", encoding="utf-8") as f:
@@ -330,7 +329,7 @@ Are these answers essentially the same? Respond with YES or NO and a brief expla
                 # Calculate accuracy
                 accuracy = correct_count / len(qa_pairs) if qa_pairs else 0
 
-                print(f"\n Test Results:")
+                print("\n Test Results:")
                 print(f"  Total questions: {len(qa_pairs)}")
                 print(f"  Correct answers: {correct_count}")
                 print(f"  Accuracy: {accuracy:.1%}")
@@ -345,7 +344,7 @@ Are these answers essentially the same? Respond with YES or NO and a brief expla
                     if result["is_correct"]:
                         by_type_results[qa_type]["correct"] += 1
 
-                print(f"\n Accuracy by Question Type:")
+                print("\n Accuracy by Question Type:")
                 for qa_type, stats in by_type_results.items():
                     type_accuracy = stats["correct"] / stats["total"] if stats["total"] > 0 else 0
                     print(f"  {qa_type}: {type_accuracy:.1%} ({stats['correct']}/{stats['total']})")
@@ -615,7 +614,7 @@ Are these answers essentially the same? Respond with YES or NO and a brief expla
                     f.write(html_content)
 
                 print(f" Report generated: {output_file}")
-                print(f"\nOpen in browser to view the interactive report")
+                print("\nOpen in browser to view the interactive report")
 
             except Exception as e:
                 logger.error(f"Report generation failed: {e}")

@@ -22,7 +22,6 @@ Example Usage:
 '| Column 1 | Column 2 |\\n|----------|----------|\\n| Data 1   | Data 2   |'
 """
 
-from functools import cache
 from typing import Tuple, List
 
 from extractor.core.builders.document import DocumentBuilder

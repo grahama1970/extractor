@@ -31,7 +31,7 @@ import argparse
 import json
 from collections import defaultdict
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 try:
     import fitz  # PyMuPDF

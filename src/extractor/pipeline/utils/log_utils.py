@@ -357,7 +357,7 @@ if __name__ == "__main__":
     try:
         result = log_safe_results(valid_input_empty)
         if result == []:
-            print(f" Successfully processed empty list.")
+            print(" Successfully processed empty list.")
         else:
             print(f" Processing empty list resulted in unexpected output: {result}")
     except Exception as e:

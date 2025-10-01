@@ -9,6 +9,8 @@ to enhance document extraction. It handles common LLM interaction patterns.
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional, List
 from loguru import logger
+import os
+import asyncio
 
 
 async def call_claude_subprocess(

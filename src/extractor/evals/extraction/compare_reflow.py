@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 
 def load_json(p: Path) -> Any:
@@ -18,7 +18,7 @@ def find_first_table_block(reflowed_json: Dict[str, Any]) -> Optional[Dict[str, 
 
 
 def compare_reflow_to_gold(reflow_path: Path, gold_path: Path) -> Dict[str, Any]:
-    out: Dict[str, Any] = {}
+    _out: Dict[str, Any] = {}
     data = load_json(reflow_path)
     gold = load_json(gold_path)
     sections = data.get("reflowed_sections") or []

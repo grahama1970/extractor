@@ -7,7 +7,7 @@ corrected and well-formatted Markdown representation. It is particularly
 useful for blocks with mixed content like text, lists, and tables.
 """
 
-from typing import List, Dict, Any, Optional
+from typing import List, Optional
 
 import markdown2
 from pydantic import BaseModel
@@ -16,6 +16,9 @@ from pydantic import BaseModel
 from extractor.core.processors.llm import BaseLLMSimpleBlockProcessor, PromptData
 from extractor.core.schema import BlockTypes
 from extractor.core.schema.document import Document
+import os
+import asyncio
+from loguru import logger
 
 
 async def call_claude_subprocess(

@@ -27,9 +27,6 @@ This provides the main 'marker' command as shown in the README.
 import click
 from pathlib import Path
 from extractor import convert_pdf
-from extractor.core.config.parser import ConfigParser
-from extractor.core.config.claude_config import get_recommended_config_for_use_case
-from extractor.core.settings import settings
 import json
 from loguru import logger
 import sys
@@ -150,7 +147,7 @@ def main(
         click.echo(f"✅ Conversion complete: {output_path}")
 
         if debug or claude_config != "disabled":
-            click.echo(f"\nMetadata:")
+            click.echo("\nMetadata:")
             click.echo(json.dumps(result.metadata, indent=2))
 
     except Exception as e:

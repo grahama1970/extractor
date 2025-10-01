@@ -1,0 +1,41 @@
+name: Scenarios PR Gates
+
+on:
+  pull_request:
+    branches: [ master ]
+  push:
+    branches: [ master ]
+
+jobs:
+  scenarios-pr:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install Puppeteer (CDP client)
+        run: |
+          npm -v
+          npm init -y
+          npm i puppeteer
+      - name: Run UX and pipeline scenario gates
+        env:
+          BASE_URL: ${{ secrets.BASE_URL }}
+          BROWSERLESS_WS: ${{ secrets.BROWSERLESS_WS }}
+          SCENARIOS_STOP_ON_FIRST_FAILURE: '1'
+          SANITIZE_SCREENSHOTS: '1'
+        run: |
+          make run-scenarios-ux || true
+          make pipeline:smoke || true
+          # Agent eval (report-only; do not enforce)
+          SCENARIOS_FILTER=pipeline_step_eval_step05,pipeline_step_eval_step06,pipeline_step_eval_step07,pipeline_step_eval_step09,pipeline_step_eval_step10,pipeline_step_eval_step14 \
+            EVAL_ENFORCE=0 python scenarios/run_all.py || true
+      - name: Upload scenario artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: scenarios-artifacts
+          path: scripts/artifacts

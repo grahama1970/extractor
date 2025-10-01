@@ -6,11 +6,9 @@ or missing, with pandas-based quality metrics and merge heuristics.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-import camelot
 from camelot import io as camelot_io
 import pandas as pd
 
@@ -58,7 +56,7 @@ class EnhancedTableProcessor(BaseProcessor):
             block = item.get("block")
             if not block:
                 continue
-            bbox = getattr(block.polygon, "bbox", None)
+            _bbox = getattr(block.polygon, "bbox", None)
             page_str = str(page_idx + 1)
             try:
                 # Prefer lattice with background processing

@@ -23,14 +23,14 @@ Example Usage:
 """
 
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Optional, List
 import typer
 from loguru import logger
 import json
 import sys
 from datetime import datetime
 
-from .base import CommandGroup, format_output
+from .base import CommandGroup
 
 
 class GrangerCommands(CommandGroup):
@@ -150,7 +150,7 @@ class GrangerCommands(CommandGroup):
                     if component in components:
                         print(f" {component}: {components[component]}")
                         # TODO: Add actual status checks
-                        print(f"   Status: Active")
+                        print("   Status: Active")
                     else:
                         print(f" Unknown component: {component}")
                 else:

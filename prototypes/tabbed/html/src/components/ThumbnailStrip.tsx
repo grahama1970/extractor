@@ -23,6 +23,7 @@ export function ThumbnailStrip({
   height = 132,
   itemWidth = 120,
   cacheKey,
+  hitCounts,
 }: {
   doc: PdfDoc;
   pageCount: number;
@@ -31,6 +32,7 @@ export function ThumbnailStrip({
   height?: number;
   itemWidth?: number;
   cacheKey?: string;
+  hitCounts?: Record<number, number>;
 }) {
   const ref = React.useRef<VirtuosoHandle>(null);
 
@@ -52,6 +54,7 @@ export function ThumbnailStrip({
               onJump={onJump}
               width={itemWidth}
               cacheKey={cacheKey}
+              hitCount={hitCounts?.[idx+1] || 0}
             />
           ))}
         </div>
@@ -59,8 +62,11 @@ export function ThumbnailStrip({
     );
   }
 
+  // Ensure the strip is tall enough for 3:4 thumbs at the given width plus a small padding for ring/padding
+  const minHeight = Math.round(itemWidth * 4 / 3) + 16;
+  const effectiveHeight = Math.max(height, minHeight);
   return (
-    <div className="w-full border rounded-md bg-muted/30 overflow-hidden" style={{ height }}>
+    <div className="w-full border rounded-md bg-muted/30 overflow-hidden" style={{ height: effectiveHeight }}>
       <Virtuoso
         ref={ref}
         totalCount={pageCount}
@@ -75,6 +81,7 @@ export function ThumbnailStrip({
             onJump={onJump}
             width={itemWidth}
             cacheKey={cacheKey}
+            hitCount={hitCounts?.[index+1] || 0}
           />
         )}
         computeItemKey={(i) => `ph-${i + 1}`}
@@ -84,7 +91,7 @@ export function ThumbnailStrip({
   );
 }
 
-function ThumbItem({ doc, n, isActive, onJump, width, cacheKey }: { doc: PdfDoc; n: number; isActive: boolean; onJump: (n: number) => void; width: number; cacheKey?: string; }) {
+function ThumbItem({ doc, n, isActive, onJump, width, cacheKey, hitCount }: { doc: PdfDoc; n: number; isActive: boolean; onJump: (n: number) => void; width: number; cacheKey?: string; hitCount?: number; }) {
   const [src, setSrc] = React.useState<string | undefined>(undefined);
   React.useEffect(() => {
     let cancelled = false;
@@ -118,12 +125,17 @@ function ThumbItem({ doc, n, isActive, onJump, width, cacheKey }: { doc: PdfDoc;
       aria-current={isActive ? "page" : undefined}
       style={{ width: width + 16 }}
     >
-      <div className={cn("w-full h-full rounded-md overflow-hidden shadow-sm ring-1 ring-border")}
+      <div className={cn("relative w-full h-full rounded-md overflow-hidden shadow-sm ring-1", isActive ? "ring-primary" : "ring-border", "bg-white p-1 box-border")}
            style={{ aspectRatio: "3 / 4" }}>
         {src ? (
-          <img src={src} alt={`Page ${n}`} className="w-full h-full object-cover" />
+          <img src={src} alt={`Page ${n}`} className="w-full h-full object-contain" />
         ) : (
           <div className="w-full h-full animate-pulse bg-muted" />
+        )}
+        {!!hitCount && (
+          <div data-testid="thumb-hit" className="absolute top-1 right-1 text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500 text-white shadow">
+            {hitCount > 9 ? '9+' : hitCount}
+          </div>
         )}
       </div>
       <span className="ml-2 text-xs text-muted-foreground">P.{n}</span>

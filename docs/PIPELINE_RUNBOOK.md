@@ -112,7 +112,13 @@ python src/extractor/pipeline/steps/14_report_generator.py run data/results/pipe
 Notes:
 - Provider: use the configured default model from `.env` (`DEFAULT_LITELLM_MODEL` or `LITELLM_DEFAULT_MODEL`).
 - Concurrency: start with `--max-concurrent 8` for LLM-heavy steps.
-- Timeouts: Stage 06/09 `--timeout 45`, Stage 07 `--timeout 240` (more complex prompt).
+- Timeouts: Stage 06/09 `--timeout 45`, Stage 07 `--timeout 240` (more complex prompt). You can also set `STAGE07_LLM_TIMEOUT` (seconds) to control Stage 07 strictly in CI.
+ - Stage 07 knobs (when providers are finicky):
+   - `STAGE07_MINIMAL_JSON=1` forces compact JSON mode
+   - `STAGE07_TRIM_CHARS=1500` trims initial context
+   - `STAGE07_MAX_TOKENS=2048` (non-Gemini) caps response size
+   - `MAX_CONCURRENT_LLM_CALLS=3` bounds concurrency
+   - `STAGE07_FIGURE_FALLBACK=1` allows a safety figure block if missing
 - DB: use a non-system DB (e.g., `ARANGO_DATABASE=pdf_knowledge_base_test`).
 
 Prepare DB (ensure it exists) by inserting annotations first:

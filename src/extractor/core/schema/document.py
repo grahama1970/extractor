@@ -21,8 +21,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from typing import Dict, List, Sequence, Any, Optional
-from concurrent.futures import ThreadPoolExecutor
+from typing import Dict, List, Sequence, Any
 
 from pydantic import BaseModel
 
@@ -147,11 +146,11 @@ class Document(BaseModel):
         Returns:
             Dictionary mapping heading level to section metadata.
         """
-        # We'll use render with a dummy block to extract the current section hierarchy
+        # We'll use render with a _dummy block to extract the current section hierarchy
         from extractor.core.schema.blocks import Block
         from extractor.core.schema.polygon import PolygonBox
 
-        dummy = Block(
+        _dummy = Block(
             polygon=PolygonBox(polygon=[[0, 0], [1, 0], [1, 1], [0, 1]]),
             block_description="Dummy block for extracting section hierarchy",
             page_id=0,
@@ -162,7 +161,7 @@ class Document(BaseModel):
         try:
             # Extract section headers directly
             for page in self.pages:
-                page_sections = []
+                _page_sections = []
                 for block in page.children or []:
                     if (
                         hasattr(block, "block_type")

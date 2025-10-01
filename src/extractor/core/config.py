@@ -8,7 +8,6 @@ Centralizes all configuration settings with environment variable support.
 from pydantic import BaseSettings, Field, validator
 from pathlib import Path
 from typing import List, Optional
-import os
 
 
 class ExtractionConfig(BaseSettings):

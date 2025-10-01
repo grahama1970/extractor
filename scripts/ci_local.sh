@@ -29,11 +29,14 @@ if command -v pytest >/dev/null 2>&1; then pytest -q || true; else echo "[ci] py
 echo "[ci] API smokes..."
 node "$ROOT_DIR/scripts/smokes/api_generate_model.mjs" || true
 
-echo "[ci] UX health + full smokes..."
+echo "[ci] UX health + scenarios..."
 node "$ROOT_DIR/scripts/ux_check_cdp_auto.mjs"
-# Explicit console error scan
-node "$ROOT_DIR/scripts/smokes/console_errors.mjs"
-node "$ROOT_DIR/scripts/smokes/all.mjs"
+SCENARIOS_FILTER="ux_cdp_health,ux_console_errors,ux_no_preview_api" \
+  python "$ROOT_DIR/scenarios/run_all.py"
+
+echo "[ci] Pipeline quick gates (scenarios)..."
+SCENARIOS_FILTER="pipeline_api_health,pipeline_step_10_export_flattened,pipeline_step_11_graph_db" \
+  python "$ROOT_DIR/scenarios/run_all.py" || true
 
 echo "[ci] Done. Artifacts in $ART_DIR"
 ls -1t "$ART_DIR" | head -n 20 || true

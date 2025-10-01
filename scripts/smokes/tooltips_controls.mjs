@@ -14,7 +14,7 @@ const ts = () => new Date().toISOString().replace(/[:.]/g, '-');
   const ws = await getWS(); if (!ws) { console.error('No CDP endpoint'); process.exit(3); }
   const browser = await puppeteer.connect({ browserWSEndpoint: ws, defaultViewport: null });
   const page = await browser.newPage();
-  await page.goto(BASE.replace(/\/$/, '') + '/classic', { waitUntil: 'domcontentloaded' });
+  await page.goto(BASE.replace(/\/$/, '') + '/main', { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('[data-testid="page-label"]', { timeout: 10000 });
   // Hover first/next and check tooltips
   const firstHasTitle = await page.$eval('[data-testid="btn-first"]', el => !!el.getAttribute('title')).catch(()=>false);

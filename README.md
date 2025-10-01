@@ -1,6 +1,6 @@
 # Extractor - Self-Correcting Agentic Document Processing System
 
-Advanced multi-format document extraction system with self-correcting AI agents, annotation-guided learning, and continuous improvement through metadata accumulation. Handles PDFs, DOCX, PPTX, XML, HTML, and more with enterprise-grade accuracy.
+Advanced multi-format document extraction system with self-correcting AI agents, annotation-guided learning, and continuous improvement through metadata accumulation. Handles PDFs, DOCX, PPTX, XML, HTML, and more with enterprise-grade accuracy. Includes a Lean4 integration path for deterministic proving and graph building (contradictions, dependencies, KNN neighborhoods) with an offline-friendly viewer.
 
 ## 🚀 Key Innovation: Self-Correcting Multi-Stage Pipeline
 
@@ -124,6 +124,56 @@ Notes:
 - The `run` subcommand is optional — both `... run --opts` and `--opts` forms work.
  - VS Code: run via “Tasks: Run Task” → `Run: Validators (API+CLI)` (also bound as the default Build Task: “Tasks: Run Build Task”).
  - Terminal: `make validate-all` (or run each: `make validate-api`, `make validate-cli`).
+
+## Lean4 Graph (Contradictions, Dependencies, KNN)
+
+To build the graph from Lean4 outputs and visualize it offline:
+
+1) Produce Lean4 artifacts (from Lean4 repo):
+```bash
+python -m lean4_prover.cli_mini batch \
+  --input-file in.json --output-file out.json \
+  --deterministic --no-llm \
+  --emit-edge-hints edge_hints.json
+```
+
+2) One‑click graph build (this repo):
+```bash
+export ARANGODB_URL=http://localhost:8529
+export ARANGODB_USERNAME=root
+export ARANGODB_PASSWORD=…
+make graph-oneclick DB=lean4_prod HINTS=edge_hints.json
+# Or, using Stage 10 flattened JSON with lemma pass-through:
+uv run scripts/pipeline/stage10_pass_through_lemmas.py out.json flat10.json
+make graph-oneclick DB=lean4_prod FLAT10=flat10.json
+```
+
+3) Viewer (self-contained):
+```bash
+# Prepare viewer JSON
+make graph-viewer-prepare SRC=edge_hints.json   # or SRC=edges.json or SRC=docgen4.json
+# Render static HTML
+make graph-viewer-render JSON=graph.json
+# Open viewer.html in a browser
+```
+
+Extras
+- Emit DB-native edges (audit/bulk import):
+  - `make graph-emit-db-edges HINTS=edge_hints.json OUT=db_edges.json`
+- Metrics JSON:
+  - `make graph-metrics DB=lean4_prod`
+
+## ✅ Live Scenarios (UX + Pipeline)
+
+We use a LiteLLM-style scenarios system for live gates. It runs Chrome DevTools checks for the UI and health/presence + agent evaluations for the pipeline. Scenarios capture screenshots/logs and SKIP cleanly when prerequisites are missing.
+
+- All scenarios: `python scenarios/run_all.py`
+- UX gates only: `make run-scenarios-ux`
+- Pipeline quick gates: `make pipeline:smoke`
+- Full pipeline feature: `make pipeline`
+- Filters/fail-fast: `SCENARIOS_FILTER=ux_,thumbnails SCENARIOS_STOP_ON_FIRST_FAILURE=1 python scenarios/run_all.py`
+
+Artifacts are written to `scripts/artifacts/YYYY-MM-DD/<sha-or-local>/{screenshots,logs,json}` with a JSON summary per run. See `scenarios/README.md` for environment details (Chrome 120+ recommended).
 
 ## 🏗️ Architecture: 10-Stage Self-Correcting Pipeline
 
@@ -598,31 +648,49 @@ Troubleshooting:
   - `make ci`
   - Defaults: `BASE_URL=http://127.0.0.1:8080`, `CDP_URL=http://127.0.0.1:3000/json/version`
   - Override: `make ci BASE_URL=http://127.0.0.1:8080 CDP_URL=http://127.0.0.1:9222/json/version`
+  - Stage 07 timeout (optional, CI): `export STAGE07_LLM_TIMEOUT=30`
 - Health-only (CDP): `make ux-health`
 - Full smokes (requires live servers + CDP): `make smokes`
 - Single issue smoke: `make smoke-issue ISSUE=019` (or `020`)
 
 Artifacts (logs + screenshots) are saved to `scripts/artifacts/`.
 # Extractor
-## Happy Path (single surface)
+## Happy Path (single CLI)
 
-- Use `pipeline-run` for all operator runs. Choose a mode:
-  - Fast (default, deterministic):
+- Primary command (all formats, minimal surface):
+  - PDF (fast text-only):
+    ```bash
+    python -m src.cli extract /abs/input.pdf /abs/out --mode fast
     ```
-    pipeline-run --pdf /abs/input.pdf --results /abs/out --mode fast --json
-    ```
-  - Accurate (heavy, install extras first):
-    ```
+  - PDF (accurate, normalized artifacts):
+    ```bash
     uv pip install -e ".[accurate]"
-    pipeline-run --pdf /abs/input.pdf --results /abs/out --mode accurate --json
+    python -m src.cli extract /abs/input.pdf /abs/out --mode accurate
+    ```
+  - Structured (HTML/DOCX/PPTX/XLSX/EPUB/RST/XML/MD):
+    ```bash
+    python -m src.cli extract /abs/input.html /abs/out
     ```
 
-- The CLI writes `final_report.json` in a stable envelope:
+- The unified CLI writes a stable envelope when the pipeline emits a `final_report.json`:
   ```json
   { "meta": {"pdf": "…", "results": "…", "mode": "fast|accurate", "took_ms": 1234}, "items": [], "errors": [] }
   ```
 
+### Operator wrapper (optional)
+
+- `pipeline-run` remains available for operator workflows and JSON envelopes:
+  - Fast (deterministic):
+    ```bash
+    pipeline-run --pdf /abs/input.pdf --results /abs/out --mode fast --json
+    ```
+  - Accurate (install extras first):
+    ```bash
+    uv pip install -e ".[accurate]"
+    pipeline-run --pdf /abs/input.pdf --results /abs/out --mode accurate --json
+    ```
+
 ### Notes
 
-- `pipeline-happy` and `pipeline-run-all` remain available, but are considered aliases. Prefer `pipeline-run` to keep a single code path.
+- `pipeline-happy` and `pipeline-run-all` remain available but are considered aliases. Prefer the unified `python -m src.cli extract` surface.
 - Heavy dependencies (torch/transformers/spaCy/FAISS/opencv/camelot/ocr) are optional in the `accurate` extra; the default install stays lean for CI and fast iteration.

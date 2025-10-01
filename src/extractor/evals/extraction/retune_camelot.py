@@ -3,7 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-import camelot
 from camelot import io as camelot_io  # type: ignore
 
 

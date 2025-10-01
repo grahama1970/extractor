@@ -58,6 +58,10 @@ export default defineConfig(async ({ mode }) => ({
     },
   },
   plugins: [react(), mode === "development" && componentTagger()].filter(Boolean),
+  build: {
+    // Acceptable: we monitor perf separately; do not fail builds due to large chunks
+    chunkSizeWarningLimit: 1500,
+  },
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),

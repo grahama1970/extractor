@@ -4,14 +4,13 @@ Description: Enhanced hierarchical document model for Marker
 """
 
 from __future__ import annotations
-from typing import Dict, List, Optional, Any, Union
+from typing import Dict, List, Optional, Any
 from datetime import datetime
 from pathlib import Path
 from pydantic import BaseModel, Field
 from extractor.core.schema import BlockTypes
 from extractor.core.schema.blocks import Block
 from extractor.core.schema.blocks.sectionheader import SectionHeader
-from extractor.core.schema.polygon import PolygonBox
 import hashlib
 
 

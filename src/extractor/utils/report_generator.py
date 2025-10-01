@@ -7,10 +7,9 @@ providing concrete execution data and analysis.
 """
 
 import json
-import os
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 
 
 def generate_pipeline_report(summary_path: Path, output_dir: Path) -> Path:
@@ -50,9 +49,9 @@ def generate_pipeline_report(summary_path: Path, output_dir: Path) -> Path:
         latest_link.unlink()
     latest_link.symlink_to(report_name)
 
-    print(f"✅ Pipeline analysis report generated: {report_path}")
-    print(f"📊 Report contains actual execution data to prevent hallucinations")
-    print(f"🔗 Latest report available at: {latest_link}")
+    print("✅ Pipeline analysis report generated: {report_path}".format(report_path=report_path))
+    print("📊 Report contains actual execution data to prevent hallucinations")
+    print("🔗 Latest report available at: {latest_link}".format(latest_link=latest_link))
 
     return report_path
 
@@ -64,7 +63,7 @@ def _generate_report_content(pipeline_data: Dict[str, Any], output_dir: Path) ->
     # Extract key metrics
     total_processors = pipeline_data["processors"]["total"]
     successful = pipeline_data["processors"]["successful"]
-    failed = pipeline_data["processors"]["failed"]
+    _ = pipeline_data["processors"].get("failed")
     duration = pipeline_data["total_duration"]
 
     # Start report

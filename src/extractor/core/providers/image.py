@@ -16,12 +16,11 @@ Example Usage:
 >>> # Add usage examples
 """
 
-from typing import List, Annotated, Optional, Any, Dict
+from typing import List, Optional, Any, Dict
 from PIL import Image
 
 from extractor.core.providers import ProviderPageLines, BaseProvider, ProviderOutput
 from extractor.core.schema.polygon import PolygonBox
-from extractor.core.schema.text import Line
 from pdftext.schema import Reference
 
 

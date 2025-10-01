@@ -26,14 +26,12 @@ Example Usage:
 """
 
 from typing import Annotated, Dict, List, Optional, Set, Tuple
-import numpy as np
 from loguru import logger
 
 from extractor.core.processors import BaseProcessor
 from extractor.core.schema import BlockTypes
 from extractor.core.schema.document import Document
 from extractor.core.schema.blocks import Block
-from extractor.core.providers.pdf import PdfProvider
 
 
 class FontHeaderProcessor(BaseProcessor):

@@ -31,7 +31,6 @@ import litellm as _litellm
 from dotenv import find_dotenv, load_dotenv
 from dataclasses import dataclass
 from loguru import logger
-from tqdm.asyncio import tqdm
 from litellm import Router
 try:
     import extractor.pipeline.utils.litelllm_call2 as _engine_mod  # type: ignore
@@ -49,7 +48,6 @@ from extractor.pipeline.utils.litellm_image_utils import (
     fetch_remote_image,
 )
 from extractor.pipeline.utils.litellm_response_utils import (
-    assemble_stream_text,
     format_answer_with_logging,
 )
 from extractor.pipeline.utils.log_utils import (

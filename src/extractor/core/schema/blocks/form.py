@@ -1,6 +1,5 @@
 """Module docstring"""
 
-from typing import List
 
 from extractor.core.schema import BlockTypes
 from extractor.core.schema.blocks.basetable import BaseTable

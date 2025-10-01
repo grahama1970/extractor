@@ -22,7 +22,6 @@ import typer
 import subprocess
 from pathlib import Path
 from datetime import datetime
-from typing import Optional
 
 # Set up application
 app = typer.Typer(name="agent", help="Inter-module communication commands", add_completion=False)

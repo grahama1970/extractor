@@ -6,7 +6,6 @@ allowing dynamic loading and configuration of processors based on pipeline confi
 """
 
 from typing import Dict, Type, Optional, List, Any
-from pathlib import Path
 import logging
 
 from extractor.core.schema import ProcessorType

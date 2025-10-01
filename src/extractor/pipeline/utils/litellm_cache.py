@@ -49,7 +49,6 @@ from litellm.caching.caching import (
     Cache as LiteLLMCache,
     LiteLLMCacheType,
 )  # Import Cache and Type
-from typing import Any  # Import Any for type hint
 
 # Import the utility function from our utils
 try:
@@ -230,7 +229,7 @@ if __name__ == "__main__":
             tests_failed_count += 1
             logger.error(" Test 'cache_hit_miss': FAILED")
             logger.error(
-                f"   Expected first call cache_hit=False/None, second call cache_hit=True."
+                "   Expected first call cache_hit=False/None, second call cache_hit=True."
             )
             logger.error(
                 f"   Got: cache_hit1={details.get('cache_hit1')}, cache_hit2={details.get('cache_hit2')}"
@@ -238,11 +237,11 @@ if __name__ == "__main__":
 
     except Exception as e:
         tests_failed_count += 1  # Count exception as failure
-        logger.error(f" Test 'cache_hit_miss': FAILED due to exception during test execution.")
+        logger.error(" Test 'cache_hit_miss': FAILED due to exception during test execution.")
         logger.error(f"   Exception: {e}", exc_info=True)
 
     # --- Report validation status ---
-    print(f"\n--- Test Summary ---")
+    print("\n--- Test Summary ---")
     print(f"Total Tests: {total_tests}")
     print(f"Passed: {tests_passed_count}")
     print(f"Failed: {tests_failed_count}")

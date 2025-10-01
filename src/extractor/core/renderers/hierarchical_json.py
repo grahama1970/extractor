@@ -4,7 +4,7 @@ Description: Hierarchical JSON renderer that outputs the enhanced document struc
 """
 
 import json
-from typing import Dict, Any, List
+from typing import Dict, Any
 
 from extractor.core.renderers import BaseRenderer
 from extractor.core.schema.document import Document
