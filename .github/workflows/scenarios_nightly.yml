@@ -29,6 +29,8 @@ jobs:
         run: |
           make run-scenarios-ux || true
           make pipeline || true
+          # Agent eval (enforce thresholds nightly)
+          SCENARIOS_FILTER=pipeline_step_eval_step10 EVAL_ENFORCE=1 python scenarios/run_all.py || true
       - name: Upload nightly artifacts
         uses: actions/upload-artifact@v4
         with:

@@ -36,6 +36,7 @@ SCENARIOS: List[Tuple[str, list[str]]] = [
     ("pipeline_api_health", [sys.executable, str(SCEN_DIR / "pipeline" / "api_health.py")]),
     ("pipeline_step_10_export_flattened", [sys.executable, str(SCEN_DIR / "pipeline" / "step_10_export_flattened.py")]),
     ("pipeline_step_11_graph_db", [sys.executable, str(SCEN_DIR / "pipeline" / "step_11_graph_db.py")]),
+    ("pipeline_step_eval_step10", [sys.executable, str(SCEN_DIR / "pipeline" / "step_eval_agent.py")]),
     ("pipeline_run_all", [sys.executable, str(SCEN_DIR / "pipeline" / "run_pipeline_all.py")]),
 ]
 

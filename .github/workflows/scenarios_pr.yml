@@ -29,6 +29,8 @@ jobs:
         run: |
           make run-scenarios-ux || true
           make pipeline:smoke || true
+          # Agent eval (report-only; do not enforce)
+          SCENARIOS_FILTER=pipeline_step_eval_step10 EVAL_ENFORCE=0 python scenarios/run_all.py || true
       - name: Upload scenario artifacts
         uses: actions/upload-artifact@v4
         with:
