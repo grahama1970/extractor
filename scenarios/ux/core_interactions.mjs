@@ -4,7 +4,7 @@
 */
 import fs from 'node:fs';
 import path from 'node:path';
-import { connectOrSkip } from '../lib/cdp.mjs';
+import { connectOrSkip, getRoutes, navigate, applyViewportFromEnv, screenshot } from '../lib/cdp.mjs';
 
 const DISCOVERY = process.env.BROWSERLESS_DISCOVERY_URL || '';
 let WS = (process.env.BROWSERLESS_WS || '').trim();
@@ -18,13 +18,16 @@ async function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
 async function main(){
   const browser = await connectOrSkip();
   const page = await browser.newPage();
+  await applyViewportFromEnv(page);
   page.setDefaultTimeout(25000);
 
   const stamp = ts();
   const shot = (name) => path.join(OUT, `ux_core_${stamp}_${name}.png`);
   const report = [];
 
-  await page.goto(BASE, { waitUntil:'domcontentloaded' });
+  const routes = getRoutes();
+  for (const route of routes){
+  await navigate(page, BASE.replace(/\/+$/,'') + route);
   await page.evaluate(()=>{ localStorage.setItem('anno_thumb_mode','left'); });
   await page.reload({ waitUntil:'domcontentloaded' });
   await page.waitForSelector('[data-testid="page-label"]');
@@ -37,7 +40,7 @@ async function main(){
     const overlaps = !(tbR.y + tbR.h <= ovR.y - 2);
     if (overlaps) { console.error('Scenario ux/core_interactions: BROKEN (toolbar overlays canvas)'); await browser.disconnect(); process.exit(1); }
   }
-  await page.screenshot({ path: shot('page_loaded'), fullPage:true }).catch(()=>{});
+  await screenshot(page, `ux_core_page_loaded_${route.replace(/\//g,'_')}`);
 
   const newBtn = await page.$('[data-testid="toolbar-new"]');
   const overlay = await page.$('[data-testid="overlay"]');
@@ -49,7 +52,7 @@ async function main(){
   let boxes = await page.$$eval('[data-testid="box"]', els=>els.length).catch(()=>0);
   if (boxes === 0) { await page.evaluate(()=>{ try{ window.__ux && window.__ux.drawBox(1,0.25,0.25,0.55,0.40,'Section'); }catch{} }); await sleep(150); boxes = await page.$$eval('[data-testid="box"]', els=>els.length).catch(()=>0); }
   report.push(`boxes_after_draw=${boxes}`);
-  await page.screenshot({ path: shot('after_draw'), fullPage:true }).catch(()=>{});
+  await screenshot(page, `ux_core_after_draw_${route.replace(/\//g,'_')}`);
 
   const firstBox = await page.$('[data-testid="box"]'); if (firstBox) { await firstBox.click(); await sleep(120); }
   const dupBtn = await page.$('[data-testid="toolbar-dup"]'); const delBtn = await page.$('[data-testid="toolbar-del"]');
@@ -57,11 +60,12 @@ async function main(){
   let afterDup = await page.$$eval('[data-testid="box"]', els=>els.length).catch(()=>0); report.push(`boxes_after_dup=${afterDup}`);
   if (delBtn) { await delBtn.click(); await sleep(100); }
   let afterDel = await page.$$eval('[data-testid="box"]', els=>els.length).catch(()=>0); report.push(`boxes_after_del=${afterDel}`);
-  await page.screenshot({ path: shot('after_dup_del'), fullPage:true }).catch(()=>{});
+  await screenshot(page, `ux_core_after_dup_del_${route.replace(/\//g,'_')}`);
 
   const labelBtn = await page.$('[data-testid="toolbar-label"]'); if (labelBtn) { await labelBtn.click(); await page.waitForSelector('[data-testid^="label-item-"]', { timeout: 3000 }).catch(()=>{}); }
   const figBtn = await page.$('[data-testid="label-item-figure"]'); if (figBtn) { await figBtn.click(); await sleep(120); report.push('label_changed=figure'); }
-  await page.screenshot({ path: shot('after_label'), fullPage:true }).catch(()=>{});
+  await screenshot(page, `ux_core_after_label_${route.replace(/\//g,'_')}`);
+  }
 
   await browser.disconnect();
   console.log('Scenario ux/core_interactions: OK');

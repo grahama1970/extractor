@@ -21,8 +21,12 @@ def env(name: str) -> str | None:
 
 
 def main() -> None:
-    host = env("ARANGO_HOST") or "http://127.0.0.1"
-    port = env("ARANGO_PORT") or "8529"
+    # Prefer ARANGO_URL if provided, else compose from parts
+    arango_url = env("ARANGO_URL")
+    if not arango_url:
+        host = env("ARANGO_HOST") or "http://127.0.0.1"
+        port = env("ARANGO_PORT") or "8529"
+        arango_url = f"{host}:{port}"
     user = env("ARANGO_USER") or env("ARANGO_USERNAME")
     password = env("ARANGO_PASSWORD")
     dbname = env("ARANGO_DB") or env("ARANGO_DATABASE")
@@ -33,13 +37,12 @@ def main() -> None:
         print("SKIP: python-arango not installed in this env")
         sys.exit(0)
 
-    client = ArangoClient(hosts=f"{host}:{port}")
+    client = ArangoClient(hosts=arango_url)
     sys_db = client.db("_system", username=user, password=password)
     if not sys_db.has_database(dbname):
         print(f"SKIP: database '{dbname}' not found")
         sys.exit(0)
     db = client.db(dbname, username=user, password=password)
-    # Try light checks
     collections = db.collections()
     names = [c["name"] for c in collections if not c.get("system")]
     has_nodes = any(n.lower().startswith("nodes") for n in names) or any(n.lower().startswith("v_") for n in names)
@@ -49,4 +52,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

@@ -5,6 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import puppeteer from 'puppeteer';
+import { getRoutes, navigate, applyViewportFromEnv } from '../lib/cdp.mjs';
 
 const DISCOVERY = process.env.BROWSERLESS_DISCOVERY_URL || '';
 let WS = (process.env.BROWSERLESS_WS || '').trim();
@@ -20,12 +21,15 @@ async function main(){
   if (!WS) { console.log('SKIP: No CDP endpoint (set BROWSERLESS_WS or discovery).'); process.exit(0); }
   let browser; try{ browser = await puppeteer.connect({ browserWSEndpoint: WS, defaultViewport: null }); }catch(e){ if(/ECONNREFUSED/.test(String(e?.message||e||''))){ console.log('SKIP: CDP unreachable at', WS); process.exit(0);} throw e; }
   const page = await browser.newPage();
+  await applyViewportFromEnv(page);
   page.setDefaultTimeout(25000);
   const stamp = ts();
   const shot = (name) => path.join(OUT, `ux_thumbs_${stamp}_${name}.png`);
-
+  
   const metrics = [];
-  await page.goto(BASE, { waitUntil:'domcontentloaded' });
+  const routes = getRoutes();
+  for (const route of routes){
+  await navigate(page, BASE.replace(/\/+$/,'') + route);
 
   // Mode: left
   await page.evaluate(()=>{ localStorage.setItem('anno_thumb_mode','left'); });
@@ -38,7 +42,7 @@ async function main(){
     return { present: !!rail, width: rect?.width||0, height: rect?.height||0, thumbs };
   });
   metrics.push({ mode:'left', ...left });
-  await page.screenshot({ path: shot('left'), fullPage: true }).catch(()=>{});
+  await page.screenshot({ path: shot(`left_${route.replace(/\//g,'_')}`), fullPage: true }).catch(()=>{});
 
   // Mode: bottom
   await page.evaluate(()=>{ localStorage.setItem('anno_thumb_mode','bottom'); });
@@ -51,7 +55,7 @@ async function main(){
     return { present: !!strip, width: rect?.width||0, height: rect?.height||0, thumbs };
   });
   metrics.push({ mode:'bottom', ...bottom });
-  await page.screenshot({ path: shot('bottom'), fullPage: true }).catch(()=>{});
+  await page.screenshot({ path: shot(`bottom_${route.replace(/\//g,'_')}`), fullPage: true }).catch(()=>{});
 
   // Simple visual assertions for assessment
   const okLeft = left.present && left.width > 40 && left.thumbs >= 1;
@@ -67,6 +71,7 @@ async function main(){
   }
   const broken = !(okLeft && okBottom);
   console.log('Scenario ux/thumbnails_modes metrics:', JSON.stringify(metrics));
+  }
   await browser.disconnect();
   if (broken) { console.error('Scenario ux/thumbnails_modes: BROKEN'); process.exit(1); }
   console.log('Scenario ux/thumbnails_modes: OK');

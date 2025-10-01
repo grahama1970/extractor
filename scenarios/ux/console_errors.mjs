@@ -5,7 +5,7 @@
 */
 import fs from 'node:fs';
 import path from 'node:path';
-import { connectOrSkip, OUT_DIR, ts, navigate, gateNoConsoleErrors } from '../lib/cdp.mjs';
+import { connectOrSkip, OUT_DIR, OUT_LOGS, ts, navigate, gateNoConsoleErrors, applyViewportFromEnv } from '../lib/cdp.mjs';
 
 const DISCOVERY = process.env.BROWSERLESS_DISCOVERY_URL || '';
 let WS = (process.env.BROWSERLESS_WS || '').trim();
@@ -18,6 +18,7 @@ function isFavicon(u=''){ return /favicon\.ico(\?|$)/.test(u) || u.includes('fav
 async function main(){
   const browser = await connectOrSkip();
   const page = await browser.newPage();
+  await applyViewportFromEnv(page);
 
   const consoleErrors=[], pageErrors=[], failed=[]; const allLogs=[];
   page.on('console', m=>{ const s=`[console:${m.type()}] ${m.text()}`; allLogs.push(s); if(m.type()==='error') consoleErrors.push(s); });
@@ -30,7 +31,7 @@ async function main(){
   let ready=false; try{ await page.waitForSelector('[data-testid="page-label"]',{timeout:3000}); ready=true; }catch{}
 
   const broken = !navOk || overlay || !rootMounted || !ready || consoleErrors.length>0 || pageErrors.length>0;
-  const stamp=ts(); const shot=path.join(OUT_DIR,`ux_console_errors_${stamp}.png`); const logp=path.join(OUT_DIR,`ux_console_errors_${stamp}.log`);
+  const stamp=ts(); const shot=path.join(OUT_DIR,`ux_console_errors_${stamp}.png`); const logp=path.join(OUT_LOGS,`ux_console_errors_${stamp}.log`);
   try{ await page.screenshot({path:shot, fullPage:true}); }catch{}
   const report=[`BASE_URL=${BASE}`,`WS=${WS}`,`navOk=${navOk}`,`overlayPresent=${overlay}`,`rootMounted=${rootMounted}`,`uiReady=${ready}`,`consoleErrors=${consoleErrors.length}`,`pageErrors=${pageErrors.length}`,`failedRequests=${failed.length}`,'','--- console (all) ---',...allLogs,'','--- pageErrors ---',...pageErrors,'','--- failedRequests ---',...failed.filter(u=>!isFavicon(u)),'',`screenshot: ${shot}`].join('\n');
   fs.writeFileSync(logp, report, 'utf-8');

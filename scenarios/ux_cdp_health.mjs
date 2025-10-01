@@ -14,7 +14,7 @@
 */
 import fs from 'node:fs';
 import path from 'node:path';
-import { connectOrSkip, OUT_DIR, ts } from './lib/cdp.mjs';
+import { connectOrSkip, OUT_DIR, OUT_LOGS, ts, navigate, applyViewportFromEnv } from './lib/cdp.mjs';
 
 const DISCOVERY = process.env.BROWSERLESS_DISCOVERY_URL || '';
 let WS = (process.env.BROWSERLESS_WS || '').trim();
@@ -45,6 +45,7 @@ async function main() {
   const BASE = withClassicFallback(BASE0);
   const browser = await connectOrSkip();
   const page = await browser.newPage();
+  await applyViewportFromEnv(page);
   page.setDefaultTimeout(20000);
 
   const consoleErrors = [];
@@ -66,7 +67,7 @@ async function main() {
   });
 
   let navOk = true;
-  try { await page.goto(BASE, { waitUntil: 'domcontentloaded' }); } catch { navOk = false; }
+  try { await navigate(page, BASE); } catch { navOk = false; }
   const overlayPresent = await page.evaluate(() => !!document.querySelector('vite-error-overlay')).catch(() => false);
   const rootMounted = await page.evaluate(() => { const r = document.getElementById('root'); return !!r && r.childElementCount > 0; }).catch(() => false);
 
@@ -76,7 +77,7 @@ async function main() {
   const broken = !navOk || overlayPresent || !rootMounted || !uiReady || consoleErrors.length > 0 || pageErrors.length > 0;
   const stamp = ts();
   const shotPath = path.join(OUT_DIR, `ux_scn_cdp_${stamp}.png`);
-  const logPath = path.join(OUT_DIR, `ux_scn_cdp_${stamp}.log`);
+  const logPath = path.join(OUT_LOGS, `ux_scn_cdp_${stamp}.log`);
   try { await page.screenshot({ path: shotPath, fullPage: true }); } catch {}
 
   const report = [
