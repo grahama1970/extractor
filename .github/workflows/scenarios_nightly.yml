@@ -1,0 +1,36 @@
+name: Scenarios Nightly
+
+on:
+  schedule:
+    - cron: '0 3 * * *'
+
+jobs:
+  scenarios-nightly:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install Puppeteer (CDP client)
+        run: |
+          npm init -y
+          npm i puppeteer
+      - name: Run full pipeline and UX scenarios
+        env:
+          BASE_URL: ${{ secrets.BASE_URL }}
+          BROWSERLESS_WS: ${{ secrets.BROWSERLESS_WS }}
+          SANITIZE_SCREENSHOTS: '1'
+          # Optional nightly viewport matrix (first viewport applied)
+          SCENARIO_VIEWPORTS: '1280x800,1366x900,1920x1080'
+        run: |
+          make run-scenarios-ux || true
+          make pipeline || true
+      - name: Upload nightly artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: scenarios-nightly-artifacts
+          path: scripts/artifacts
