@@ -11,7 +11,7 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import List, Tuple
-import json, time, pathlib
+import json, time, pathlib, shutil
 
 ROOT = Path(__file__).resolve().parents[1]
 SCEN_DIR = ROOT / "scenarios"
@@ -62,9 +62,32 @@ def _filtered_scenarios(all_scenarios: List[Tuple[str, list[str]]]) -> List[Tupl
 
 def main() -> None:
     env = os.environ.copy()
-    artifact_root = env.get("SCENARIOS_ARTIFACT_ROOT", "scripts/artifacts")
-    artifact_dir = pathlib.Path(artifact_root)
+    artifact_root = pathlib.Path(env.get("SCENARIOS_ARTIFACT_ROOT", "scripts/artifacts"))
+    date_dir = time.strftime("%Y-%m-%d")
+    artifact_dir = artifact_root / date_dir / env.get("GITHUB_SHA", "local") / "json"
     artifact_dir.mkdir(parents=True, exist_ok=True)
+    # Optional pruning knobs
+    try:
+        max_age_days = int(env.get("SCENARIOS_MAX_AGE_DAYS", "0") or "0")
+        max_entries = int(env.get("SCENARIOS_MAX_ARTIFACTS", "0") or "0")
+        root_for_prune = artifact_root / date_dir
+        if root_for_prune.parent.exists():
+            # prune by count
+            if max_entries > 0:
+                entries = sorted((p for p in root_for_prune.parent.iterdir() if p.is_dir()), key=lambda p: p.stat().st_mtime, reverse=True)
+                for p in entries[max_entries:]:
+                    shutil.rmtree(p, ignore_errors=True)
+            # prune by age
+            if max_age_days > 0:
+                cutoff = time.time() - max_age_days * 86400
+                for p in root_for_prune.parent.iterdir():
+                    try:
+                        if p.stat().st_mtime < cutoff:
+                            shutil.rmtree(p, ignore_errors=True)
+                    except Exception:
+                        pass
+    except Exception:
+        pass
     base = env.get("BASE_URL", "").strip()
     if not base:
         print(

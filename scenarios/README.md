@@ -26,7 +26,10 @@ to run Vite preview/dev and the backend.
 - Filter subset: `SCENARIOS_FILTER=ux_ console pipeline python scenarios/run_all.py`
 - Stop on first failure: `SCENARIOS_STOP_ON_FIRST_FAILURE=1 python scenarios/run_all.py`
 
-Artifacts live in `scripts/artifacts/` with timestamped names (logs + PNGs).
+Artifacts live under `scripts/artifacts/YYYY-MM-DD/<sha-or-local>/` with subfolders:
+- `screenshots/` — per-scenario PNGs
+- `logs/` — scenario logs
+- `json/` — summaries like `scenarios_summary.json` and `pipeline_all_*.json`
 
 ## Scenario Index
 
@@ -56,3 +59,16 @@ Pipeline (Live, non-deterministic)
 - Scenarios must SKIP rather than hang if a service/endpoint is missing.
 - Always capture at least one screenshot for UX scenarios and a small log.
 - Prefer small JSON snippets in logs; avoid dumping huge payloads.
+ 
+### Environment
+- `BASE_URL` — application base (default http://localhost:5173)
+- `BROWSERLESS_WS` — explicit WS endpoint (preferred); else `BROWSERLESS_DISCOVERY_URL`
+- `SCENARIOS_FILTER` — comma-separated includes; prefix with `!` to exclude
+- `SCENARIOS_STOP_ON_FIRST_FAILURE` — `1` to fail fast
+- `SCENARIOS_ARTIFACT_ROOT` — artifacts root (default `scripts/artifacts`)
+- `SCENARIOS_MAX_AGE_DAYS`, `SCENARIOS_MAX_ARTIFACTS` — optional pruning (default off)
+- `SCENARIO_ROUTES` — comma-separated (default `/main,/classic`)
+- `SCENARIO_VIEWPORTS` — optional `WxH` list (default `1366x900`)
+- `SANITIZE_SCREENSHOTS` — `1` to obfuscate text/images in screenshots (opt-in)
+
+Chrome: recommend Chrome 120+ (or Browserless at equivalent level) for stable headless/CDP behavior.

@@ -1,0 +1,7 @@
+# Default owners for scenarios and infrastructure
+scenarios/                 @grahama1970
+scenarios/lib/             @grahama1970
+scenarios/ux/              @grahama1970
+scenarios/pipeline/        @grahama1970
+scripts/                   @grahama1970
+.github/workflows/         @grahama1970
