@@ -9,16 +9,7 @@
     "test": "tests"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "ux:check": "node scripts/ux_check_broken.mjs",
-    "ux:check:cdp": "node scripts/ux_check_cdp.mjs",
-    "ux:center": "node scripts/ux_check_center_pane.mjs",
-    "ux:center:pointer": "POINTER_ONLY=1 node scripts/ux_check_center_pane.mjs",
-    "ux:left-rail": "node scripts/ux_check_left_rail.mjs",
-    "ux:snapshots": "node scripts/ux_snapshots.mjs",
-    "ux:ingest": "node scripts/ux_ingest.mjs",
-    "ux:normalize": "node scripts/ux_normalize.mjs",
-    "backend:dev": "python -m extractor.core.scripts.server --host 0.0.0.0 --port 8000"
+    "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
     "type": "git",
@@ -32,6 +23,6 @@
   },
   "homepage": "https://github.com/grahama1970/extractor#readme",
   "devDependencies": {
-    "puppeteer": "^24.20.0"
+    "puppeteer": "^24.22.0"
   }
 }

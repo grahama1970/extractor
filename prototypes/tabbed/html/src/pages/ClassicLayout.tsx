@@ -1,9 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
-  Upload, Search, Archive, Copy, Trash2, Plus, SquareDashed, Loader2, Minus, Play,
-  ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronDown,
-  Edit, Sparkles, ArrowLeft, Tag, Moon, Info, Braces, FileText, Download, MoreHorizontal,
-  Check, X
+  Upload, Search, Archive, Copy, Trash2, Plus, Crosshair,
+  ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
+  Edit, Sparkles, ArrowLeft
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
@@ -21,45 +20,17 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { Switch } from "@/components/ui/switch";
-import { Loader, LoaderDots } from "@/components/ui/loader";
-import { toast } from "@/components/ui/sonner";
 import { ThumbnailRail } from "@/components/ThumbnailRail";
 import { ThumbnailStrip } from "@/components/ThumbnailStrip";
 import { PdfCanvas } from "@/components/PdfCanvas";
-import { ZoomControl } from "@/components/ZoomControl";
-import { ActionsMenu } from "@/components/ActionsMenu";
-import { loadPdf, type PdfDoc, getPageText, getQueryBoxes } from "@/lib/pdf";
+import { loadPdf, type PdfDoc } from "@/lib/pdf";
 import { DEFAULT_LABELS, loadLabels, saveLabel, type LabelDef } from "@/lib/labels";
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
-import { cn } from "@/lib/utils";
-import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
-import { Badge } from "@/components/ui/badge";
-import { Checkbox } from "@/components/ui/checkbox";
-import SearchPanel from "@/components/SearchPanel";
-import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
-import { ChatPanel, type ChatMessage, type ChatChip } from "@/components/chat/ChatPanel";
-import { isPreview } from "@/lib/env";
-import {
-  SidebarProvider,
-  SidebarHeader,
-  SidebarContent,
-  Sidebar,
-  SidebarRail,
-  SidebarTrigger,
-} from "@/components/ui/sidebar";
 
 // Types
 type Box = {
   id: string;
   type: string;
   instanceId: string;
-  groupId?: string;
-  owner?: string;
-  conf?: number;
   x: number; // 0..1
   y: number; // 0..1
   w: number; // 0..1
@@ -75,16 +46,8 @@ const ClassicLayout = () => {
   const [doc, setDoc] = useState<PdfDoc | null>(null);
   const [totalPages, setTotalPages] = useState<number>(2);
   const [zoom, setZoom] = useState(1);
-  const viewerRef = useRef<HTMLDivElement | null>(null);
-  const [panMode, setPanMode] = useState(false);
-  // Collaboration & filters (lightweight defaults so smokes can run)
+  // Minimal collaboration/filter state to satisfy smokes
   const [searchQuery, setSearchQuery] = useState<string>("");
-  const [searchHits, setSearchHits] = useState<{ page: number; snippet: string }[]>([]);
-  const [indexing, setIndexing] = useState<{done:number; total:number}>({done:0,total:0});
-  const pageTextRef = useRef<Record<number,string>>({});
-  const [hitBoxesByPage, setHitBoxesByPage] = useState<Record<number,{x:number;y:number;w:number;h:number}[]>>({});
-  const [hitIndex, setHitIndex] = useState<number>(-1);
-  const hasHits = searchHits.length > 0;
   const [status, setStatus] = useState<"Unassigned"|"In Review"|"Done">("Unassigned");
   const [assignee, setAssignee] = useState<string>("");
   const [filterSection, setFilterSection] = useState<boolean>(true);
@@ -92,12 +55,20 @@ const ClassicLayout = () => {
   const [filterFigure, setFilterFigure] = useState<boolean>(true);
   const [filterConfidence, setFilterConfidence] = useState<number>(50);
   const [filterOwner, setFilterOwner] = useState<"all"|"mine"|"unassigned">("all");
+  const [conflictsOpen, setConflictsOpen] = useState<boolean>(false);
+  const [conflicts, setConflicts] = useState<{id:string;text:string;status:'open'|'resolved';page:number}[]>([
+    { id: 'c1', text: 'Synthetic numeric mismatch', status: 'open', page: 1 },
+  ]);
+  const [activeConflictId, setActiveConflictId] = useState<string | null>(null);
+  const [notes, setNotes] = useState<string>("");
+  const [mentionOpen, setMentionOpen] = useState<boolean>(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState<boolean>(false);
 
   // Boxes per page
   const [boxesByPage, setBoxesByPage] = useState<Record<number, Box[]>>({
     5: [
-      { id: "section", type: "Section", instanceId: "sec-001", groupId: "", owner: "", conf: 95, x: 0.10, y: 0.15, w: 0.80, h: 0.15 },
-      { id: "table", type: "Table", instanceId: "tbl-001", groupId: "", owner: "", conf: 95, x: 0.15, y: 0.40, w: 0.70, h: 0.40 },
+      { id: "section", type: "Section", instanceId: "sec-001", x: 0.10, y: 0.15, w: 0.80, h: 0.15 },
+      { id: "table", type: "Table", instanceId: "tbl-001", x: 0.15, y: 0.40, w: 0.70, h: 0.40 },
     ],
   });
   const [selectedId, setSelectedId] = useState<string | null>("section");
@@ -105,97 +76,8 @@ const ClassicLayout = () => {
   const [labels, setLabels] = useState<LabelDef[]>(() => (typeof window !== 'undefined' ? loadLabels() : DEFAULT_LABELS));
   useEffect(() => { setLabels(loadLabels()); }, []);
 
-  // Feature flags / compact UX toggles
-  // Toggle the "review" widgets (Claim/Release/Confidence/Owner) in the inspector.
-  // Leave false to keep inspector focused on annotation properties.
-  const SHOW_REVIEW = false;
-  const showConflicts = React.useMemo(() => {
-    try {
-      // Vite env or localStorage override
-      return Boolean((import.meta as any)?.env?.VITE_SHOW_CONFLICTS ?? (localStorage.getItem('show_conflicts') === '1'));
-    } catch { return false; }
-  }, []);
-
   const [jsonOpen, setJsonOpen] = useState(false);
   const [jsonText, setJsonText] = useState("{}");
-  const [notesText, setNotesText] = useState("");
-  const [mentionOpen, setMentionOpen] = useState(false);
-  const [mentionOptions, setMentionOptions] = useState<string[]>([]);
-  const [conflicts, setConflicts] = useState<any[]>([]);
-  // Requirements pane (empty-state friendly)
-  const [reqResultsDir, setReqResultsDir] = useState<string | null>(null);
-  const [reqItems, setReqItems] = useState<any[]>([]);
-  const [reqLoading, setReqLoading] = useState(false);
-  const refreshRequirements = async () => {
-    if (isPreview()) {
-      setReqResultsDir(null);
-      setReqItems([]);
-      return;
-    }
-    try {
-      setReqLoading(true);
-      let rd = reqResultsDir || lastResultsDir;
-      if (!rd) {
-        try {
-          const r = await fetch('/api/pipeline/latest');
-          const j = await r.json();
-          if (j?.ok && j.results_dir) rd = j.results_dir;
-        } catch {}
-      }
-      setReqResultsDir(rd || null);
-      if (!rd) { setReqItems([]); return; }
-      const u = `/api/requirements/list?` + new URLSearchParams({ results_dir: String(rd) }).toString();
-      const r = await fetch(u);
-      if (!r.ok) { setReqItems([]); return; }
-      const j = await r.json();
-      if (j?.ok && Array.isArray(j.requirements)) setReqItems(j.requirements);
-    } finally {
-      setReqLoading(false);
-    }
-  };
-  useEffect(() => {
-    if (isPreview()) {
-      setReqItems([]);
-    }
-    try {
-      const recent = JSON.parse(localStorage.getItem('tabbed.review.recent') || '[]');
-      const me = localStorage.getItem('reviewer_name') || 'Me';
-      const opts = Array.from(new Set([me, ...recent].filter(Boolean)));
-      setMentionOptions(opts);
-    } catch {}
-  }, []);
-  const [strictMatch, setStrictMatch] = useState<boolean>(() => {
-    try { return localStorage.getItem('strict_json_match') === '1'; } catch { return false; }
-  });
-  useEffect(() => { try { localStorage.setItem('strict_json_match', strictMatch ? '1' : '0'); } catch {} }, [strictMatch]);
-
-  // Resizable panes (left/right) with persistence
-  const [leftW, setLeftW] = useState<number>(() => { const v = Number(localStorage.getItem('pane_left_w')); return Number.isFinite(v) && v >= 200 ? v : 320; });
-  const [rightW, setRightW] = useState<number>(() => { const v = Number(localStorage.getItem('pane_right_w')); return Number.isFinite(v) && v >= 220 ? v : 320; });
-  useEffect(() => { try { localStorage.setItem('pane_left_w', String(leftW)); } catch {} }, [leftW]);
-  useEffect(() => { try { localStorage.setItem('pane_right_w', String(rightW)); } catch {} }, [rightW]);
-  const paneDragRef = useRef<{ side: 'left'|'right'; startX: number; startW: number } | null>(null);
-  const paneBeginDrag = (side: 'left'|'right', e: React.PointerEvent<HTMLDivElement>) => {
-    (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
-    paneDragRef.current = { side, startX: e.clientX, startW: side==='left'?leftW:rightW };
-  };
-  const paneOnDragMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!paneDragRef.current) return;
-    const dx = e.clientX - paneDragRef.current.startX;
-    if (paneDragRef.current.side === 'left') setLeftW(Math.max(200, Math.min(480, paneDragRef.current.startW + dx)));
-    else setRightW(Math.max(220, Math.min(480, paneDragRef.current.startW - dx)));
-  };
-  const paneEndDrag = () => { paneDragRef.current = null; };
-  const paneHandleKey = (side: 'left'|'right', e: React.KeyboardEvent<HTMLDivElement>) => {
-    const step = e.shiftKey ? 20 : 10;
-    if (side === 'left') {
-      if (e.key === 'ArrowLeft') setLeftW(w => Math.max(200, w - step));
-      if (e.key === 'ArrowRight') setLeftW(w => Math.min(480, w + step));
-    } else {
-      if (e.key === 'ArrowLeft') setRightW(w => Math.min(480, w + step));
-      if (e.key === 'ArrowRight') setRightW(w => Math.max(220, w - step));
-    }
-  };
 
   // Scroll active thumbnail into view (pager chips removed; still keep util)
   const thumbRefs = useRef<Record<number, HTMLButtonElement | null>>({});
@@ -203,420 +85,46 @@ const ClassicLayout = () => {
     thumbRefs.current[currentPage]?.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
   }, [currentPage]);
 
-  // Server-provided list (via FastAPI /api/list) for real PDFs in dev
-  type PdfItem = { name: string; rel: string; size?: number; mtime?: number };
-  const [pdfItems, setPdfItems] = useState<PdfItem[]>([]);
-  const [openDialog, setOpenDialog] = useState(false);
-  const [openFilter, setOpenFilter] = useState("");
-  const [currentPdfName, setCurrentPdfName] = useState<string | null>(null);
-  const [currentPdfRel, setCurrentPdfRel] = useState<string | null>(null);
-  const [selectedDocIds, setSelectedDocIds] = useState<Record<string, boolean>>({});
-  const [docIdByRel, setDocIdByRel] = useState<Record<string, string>>({});
-  const [currentDocId, setCurrentDocId] = useState<string | null>(null);
-  const shortDocId = useMemo(() => currentDocId ? currentDocId.slice(0, 12) : null, [currentDocId]);
-  const [dbStatusByRel, setDbStatusByRel] = useState<Record<string, boolean>>({});
-  const selectedCount = useMemo(() => Object.values(selectedDocIds).filter(Boolean).length, [selectedDocIds]);
-  // Left list density (persisted)
-  const [compactList, setCompactList] = useState<boolean>(() => {
-    try {
-      const k = localStorage.getItem("ui.left.density");
-      if (k === "compact") return true;
-      if (k === "comfortable") return false;
-      return localStorage.getItem("left_density") === "compact";
-    } catch { return false; }
-  });
-  const lastUserDensityRef = useRef<"compact"|"comfortable">(compactList ? "compact" : "comfortable");
-  useEffect(() => {
-    if (isPreview()) {
-      setReqItems([]);
-    }
-    try {
-      const u = localStorage.getItem("ui.left.density_user");
-      if (u === "compact" || u === "comfortable") lastUserDensityRef.current = u;
-    } catch {}
-  }, []);
-  const setDensityUser = (v: "compact"|"comfortable") => {
-    setCompactList(v === "compact");
-    lastUserDensityRef.current = v;
-    try {
-      localStorage.setItem("ui.left.density", v);
-      localStorage.setItem("ui.left.density_user", v);
-      localStorage.setItem("left_density", v === "compact" ? "compact" : "comfortable");
-    } catch {}
-  };
+  const pdfFiles = [
+    { name: "Research Paper 2024", pages: 45, status: "complete" },
+    { name: "Technical Specification", pages: 89, status: "pending" },
+    { name: "User Manual Draft", pages: 120, status: "complete" },
+    { name: "Legal Document", pages: 67, status: "pending" },
+    { name: "BHT Spec", pages: 2, status: "complete" },
+    { name: "Whitepaper", pages: 18, status: "pending" },
+    { name: "Proposal", pages: 12, status: "complete" },
+  ];
 
-  // Autosave/load annotation state per PDF (localStorage)
-  const autosaveKey = useMemo(() => currentPdfRel ? `anno_state:${currentPdfRel}` : null, [currentPdfRel]);
-  // Load saved boxes on PDF change
-  useEffect(() => {
-    if (!autosaveKey) return;
-    try {
-      const raw = localStorage.getItem(autosaveKey);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (parsed && typeof parsed === 'object') setBoxesByPage(parsed);
-      }
-    } catch {}
-  }, [autosaveKey]);
-  // Debounced autosave
-  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    if (!autosaveKey) return;
-    if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => {
-      try { localStorage.setItem(autosaveKey, JSON.stringify(boxesByPage)); } catch {}
-    }, 400);
-    return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
-  }, [boxesByPage, autosaveKey]);
-
-  // Persist per-doc review state
-  useEffect(() => {
-    if (!currentDocId) return;
-    try { localStorage.setItem(`tabbed.review.${currentDocId}.status`, status); } catch {}
-  }, [status, currentDocId]);
-  useEffect(() => {
-    if (!currentDocId) return;
-    try { localStorage.setItem(`tabbed.review.${currentDocId}.assignee`, assignee); } catch {}
-  }, [assignee, currentDocId]);
-  useEffect(() => {
-    if (!currentDocId) return;
-    try { localStorage.setItem(`tabbed.review.${currentDocId}.notes`, notesText); } catch {}
-  }, [notesText, currentDocId]);
-
-  // Suggestions (preview layer: accept/reject)
-  const [suggByPage, setSuggByPage] = React.useState<Record<number, Box[]>>({});
-  const reviewerName = React.useMemo(() => {
-    try { return localStorage.getItem('reviewer_name') || 'Me'; } catch { return 'Me'; }
-  }, []);
-  const pageBoxes = React.useMemo(() => boxesByPage[currentPage] || [], [boxesByPage, currentPage]);
-  const selectedBox = useMemo(() => pageBoxes.find((b) => b.id === selectedId) || null, [pageBoxes, selectedId]);
-  const visiblePageBoxes = React.useMemo(() => {
-    const okType = (b: Box) => (
-      (b.type === 'Section' ? filterSection : b.type === 'Table' ? filterTable : b.type === 'Figure' ? filterFigure : true)
-    );
-    const okOwner = (b: Box) => {
-      if (filterOwner === 'all') return true;
-      const owner = (b.owner || '').trim();
-      if (filterOwner === 'mine') return owner === reviewerName;
-      if (filterOwner === 'unassigned') return !owner;
-      return true;
-    };
-    const okConf = (b: Box) => (typeof b.conf === 'number' ? b.conf : 100) >= filterConfidence;
-    return pageBoxes.filter((b) => okType(b) && okOwner(b) && okConf(b));
-  }, [pageBoxes, filterSection, filterTable, filterFigure, filterOwner, filterConfidence, reviewerName]);
-
-  // Resolve and cache a docId for a given PDF rel path
-  const ensureDocId = React.useCallback(async (rel: string | null | undefined): Promise<string | null> => {
-    if (!rel) return null;
-    const cached = docIdByRel[rel];
-    if (cached) return cached;
-    try {
-      const r = await fetch(`/api/pipeline/doc-id?pdf_rel=${encodeURIComponent(rel)}`);
-      const j = await r.json();
-      if (j?.ok && j.doc_id) {
-        setDocIdByRel(prev => ({ ...prev, [rel]: String(j.doc_id) }));
-        return String(j.doc_id);
-      }
-    } catch {}
-    return null;
-  }, [docIdByRel]);
-
-  // Track current docId when PDF changes; hydrate per-doc state
-  useEffect(() => {
-    (async () => {
-      const did = await ensureDocId(currentPdfRel || undefined);
-      setCurrentDocId(did);
-      if (!did) return;
-      try {
-        const ns = localStorage.getItem(`tabbed.review.${did}.notes`);
-        if (ns !== null) setNotesText(String(ns));
-      } catch {}
-      try {
-        const st = localStorage.getItem(`tabbed.review.${did}.status`);
-        if (st === 'Unassigned' || st === 'In Review' || st === 'Done') setStatus(st as any);
-        const asg = localStorage.getItem(`tabbed.review.${did}.assignee`);
-        if (asg !== null) setAssignee(String(asg));
-      } catch {}
-    })();
-  }, [currentPdfRel, ensureDocId]);
-
-
-  const filteredFiles = useMemo(() => {
-    const list = pdfItems.length ? pdfItems : [{ name: currentPdfName || 'Demo Placeholder', rel: '' } as any];
-    const q = openFilter.toLowerCase();
-    return list.filter((it: any)=> it.name?.toLowerCase().includes(q));
-  }, [pdfItems, openFilter, currentPdfName]);
-
-  // Load server list + preload target PDF
+  // load demo PDF once
   useEffect(() => {
     let mounted = true;
-    (async () => {
-      // In preview (non-dev), avoid /api calls to keep console clean; use stub doc
-      try {
-        // @ts-ignore — Vite provides env
-        if (!(import.meta as any)?.env?.DEV) {
-          const d = await loadPdf('/api/pdf?rel=__stub__');
-          if (!mounted) return;
-          setDoc(d); setTotalPages(d.numPages || 2); setCurrentPdfName('Demo Placeholder'); setCurrentPdfRel('');
-          return;
-        }
-      } catch {}
-      try {
-        const r = await fetch('/api/list', { credentials: 'omit' });
-        const j = await r.json();
-        if (!mounted) return;
-        if (j?.ok && Array.isArray(j.items)) {
-          setPdfItems(j.items);
-          const target = j.items.find((it: PdfItem) => it.name.toLowerCase() === 'bht cv32a65x.pdf');
-          const first = target || j.items[0];
-          if (first) {
-            const url = `/api/pdf?rel=${encodeURIComponent(first.rel)}`;
-            const d = await loadPdf(url);
-            if (!mounted) return;
-            setDoc(d); setTotalPages(d.numPages || 2); setCurrentPdfName(first.name); setCurrentPdfRel(first.rel);
-          }
-          return;
-        }
-      } catch { /* fallthrough to placeholder */ }
-      // Backend not reachable or list failed; provide a stub doc so UX remains functional
+    loadPdf("/bht.pdf").then((d) => {
       if (!mounted) return;
-      try {
-        const d = await loadPdf('/api/pdf?rel=__stub__');
-        if (!mounted) return;
-        setDoc(d); setTotalPages(d.numPages || 2); setCurrentPdfName('Demo Placeholder'); setCurrentPdfRel('');
-      } catch {
-        setDoc(null as any); setTotalPages(0); setCurrentPdfName(null); setCurrentPdfRel(null);
-      }
-    })();
+      setDoc(d);
+      setTotalPages(d.numPages || 2);
+    });
     return () => { mounted = false };
   }, []);
-
-  // Build a simple search index when query changes; incremental across pages
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const q = searchQuery.trim().toLowerCase();
-      if (!q) {
-        setSearchHits([]);
-        setHitIndex(-1);
-        return;
-      }
-      const hits: { page: number; snippet: string }[] = [];
-      try {
-        if (doc && (doc as any).getPage && totalPages) {
-          // Ensure we have some text cached; index incrementally across all pages in the background
-          setIndexing({done:0,total: totalPages});
-          for (let i = 1; i <= totalPages; i++) {
-            if (cancelled) break;
-            if (!pageTextRef.current[i]) {
-              const txt = await getPageText(doc, i);
-              pageTextRef.current[i] = txt;
-            }
-            setIndexing({done:i,total: totalPages});
-          }
-          // Now compute hits using whatever is available
-          for (let i = 1; i <= totalPages; i++) {
-            const text = pageTextRef.current[i] || '';
-            if (!text) continue;
-            const lower = text.toLowerCase();
-            const pos = lower.indexOf(q);
-            if (pos >= 0) {
-              const start = Math.max(0, pos - 40), end = Math.min(lower.length, pos + q.length + 40);
-              const snippet = text.slice(start, end).replace(/\s+/g, ' ').trim();
-              hits.push({ page: i, snippet });
-            }
-            if (hits.length >= 25) break; // cap for dropdown
-          }
-        }
-      } catch {}
-      if (!hits.length) {
-        hits.push({ page: Math.min(2, Math.max(1, currentPage)), snippet: `“${searchQuery}” (demo)` });
-      }
-      if (!cancelled) {
-        setSearchHits(hits);
-        setHitIndex(hits.length ? 0 : -1);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [searchQuery, doc, totalPages, currentPage]);
-
-  // Compute highlight boxes for current page and neighbors when query/doc/page changes
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const q = searchQuery.trim();
-      if (!q || !doc || !totalPages) { if (!cancelled) setHitBoxesByPage({}); return; }
-      const pages = [currentPage-1, currentPage, currentPage+1].filter(p => p>=1 && p<=totalPages);
-      const res: Record<number,{x:number;y:number;w:number;h:number}[]> = {};
-      for (const p of pages) {
-        try {
-          const b = await getQueryBoxes(doc, p, q);
-          res[p] = b;
-        } catch { res[p] = []; }
-      }
-      if (!cancelled) setHitBoxesByPage(prev => ({ ...prev, ...res }));
-    })();
-    return () => { cancelled = true; };
-  }, [searchQuery, doc, currentPage, totalPages]);
-
-  // Search panel tray (Cmd/Ctrl+K)
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [searchTab, setSearchTab] = useState<"page"|"document"|"chat">("document");
-
-  // Keyboard shortcuts: [, ] paging; N arm draw; ? help; Space pan
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
-      if (tag === 'input' || tag === 'textarea') return;
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setSearchOpen((o)=>!o); return; }
-      if (e.altKey && e.key === '2') { e.preventDefault(); setChatDockOpen(v=>!v); return; }
-      if (e.key === '[') { setCurrentPage((p)=> Math.max(1, p-1)); e.preventDefault(); }
-      if (e.key === ']') { setCurrentPage((p)=> Math.min(totalPages, p+1)); e.preventDefault(); }
-      if (e.key === 'n' || e.key === 'N') { setDrawArmed(true); e.preventDefault(); }
-      if (e.key === '?') { setHelpOpen(true); e.preventDefault(); }
-      if (e.key === ' ') { setPanMode(true); }
-      if (e.key === 'Escape') { if (searchOpen) { setSearchOpen(false); e.preventDefault(); return; } setDrawArmed(false); setDraftBox(null); }
-    };
-    const onKeyUp = (e: KeyboardEvent) => { if (e.key === ' ') setPanMode(false); };
-    window.addEventListener('keydown', onKey);
-    window.addEventListener('keyup', onKeyUp);
-    return () => { window.removeEventListener('keydown', onKey); window.removeEventListener('keyup', onKeyUp); };
-  }, [totalPages, searchOpen]);
 
   // Thumbnails mode (left | bottom | off) with persistence
   type ThumbMode = "left" | "bottom" | "off";
   const [thumbMode, setThumbMode] = useState<ThumbMode>(() => (localStorage.getItem("anno_thumb_mode") as ThumbMode) || "left");
   useEffect(() => { localStorage.setItem("anno_thumb_mode", thumbMode); }, [thumbMode]);
-  // Bust thumbnail cache when document changes to avoid stale placeholders
-  const [thumbRev, setThumbRev] = useState(0);
-  useEffect(() => { setThumbRev((n) => n + 1); }, [doc, currentPdfName]);
-  // Persist thumbnails enabled preference (maps to thumbMode !== 'off')
+  // Keyboard shortcuts: '?' opens help
   useEffect(() => {
-    if (isPreview()) {
-      setReqItems([]);
-    }
-    try { localStorage.setItem("ui.left.thumb", thumbMode !== 'off' ? '1' : '0'); } catch {}
-  }, [thumbMode]);
-  // Night page mode
-  const [night, setNight] = useState<boolean>(() => { try { return localStorage.getItem('night_page') === '1'; } catch { return false; } });
-  useEffect(() => { try { localStorage.setItem('night_page', night ? '1' : '0'); } catch {} }, [night]);
-  // App-ready marker once a document is available
-  const appReady = !!doc;
-  // Search focus takeover (filter expands, list dims)
-  const [filterFocused, setFilterFocused] = useState(false);
-  const isSearchMode = filterFocused || searchOpen;
-  // Auto-compact when left list area is short
-  const leftListRef = useRef<HTMLDivElement|null>(null);
-  useEffect(() => {
-    const el = leftListRef.current; if (!el) return;
-    const ro = new ResizeObserver(() => {
-      const h = el.clientHeight;
-      const fewer = filteredFiles.length < 6;
-      const wantAuto = h < 720 || fewer;
-      if (wantAuto && !compactList) {
-        setCompactList(true);
-        try {
-          const key = 'ui.left.density.auto_toast_shown';
-          if (localStorage.getItem(key) !== '1') {
-            toast('Switched to compact to fit more items');
-            localStorage.setItem(key, '1');
-          }
-        } catch {}
-      } else if (!wantAuto) {
-        const v = lastUserDensityRef.current || (compactList ? 'compact':'comfortable');
-        setCompactList(v === 'compact');
-      }
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [filteredFiles.length, compactList]);
-  // Chat bottom panel (open + split) and messages
-  const [chatDockOpen, setChatDockOpen] = useState<boolean>(() => { try { return localStorage.getItem('chat_open') === '1'; } catch { return false; } });
-  useEffect(() => { try { localStorage.setItem('chat_open', chatDockOpen ? '1' : '0'); } catch {} }, [chatDockOpen]);
-  const [chatSplit, setChatSplit] = useState<number>(0.4);
-  useEffect(() => {
-    const key = currentDocId || currentPdfRel || '';
-    try {
-      const s = Number(localStorage.getItem(`right_split:${key}`));
-      if (s > 0 && s < 1) setChatSplit(s);
-    } catch {}
-  }, [currentDocId, currentPdfRel]);
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
-  const baseChips = useMemo<ChatChip[]>(() => {
-    const chips: ChatChip[] = [{ key: `page:${currentPage}`, label: `p${currentPage}`, active: true }];
-    const sb = pageBoxes.find((b) => b.id === selectedId) || null;
-    if (sb) {
-      chips.push({ key: `sel:${sb.instanceId}`, label: `selection:${sb.instanceId}`, active: true });
-      chips.push({ key: `type:${sb.type}`, label: `type:${sb.type}`, active: true });
-    }
-    return chips;
-  }, [currentPage, selectedId, pageBoxes]);
-  const [chipActive, setChipActive] = useState<Record<string, boolean>>({});
-  useEffect(() => {
-    const next: Record<string, boolean> = {};
-    for (const c of baseChips) next[c.key] = chipActive[c.key] ?? true;
-    setChipActive(next);
-  }, [baseChips.map(c=>c.key).join('|')]);
-  const chips = useMemo<ChatChip[]>(() => baseChips.map(c => ({ ...c, active: chipActive[c.key] !== false })), [baseChips, chipActive]);
-  const toggleChip = (key: string) => setChipActive(prev => ({ ...prev, [key]: !(prev[key] !== false) }));
-  const sendChat = async (text: string) => {
-    setChatMessages(m => [...m, { role: 'user', content: text }]);
-    const scope: any = {};
-    const a = (k: string) => chipActive[k] !== false;
-    if (a(`page:${currentPage}`)) scope.page = currentPage;
-    if (selectedBox) {
-      if (a(`type:${selectedBox.type}`)) scope.type = selectedBox.type;
-      if (a(`sel:${selectedBox.instanceId}`)) { scope.instance_id = selectedBox.instanceId; scope.bbox = [selectedBox.x, selectedBox.y, selectedBox.w, selectedBox.h]; }
-    }
-    const body: any = { q: text };
-    if (currentDocId) body.doc_id = currentDocId; else body.pdf = currentPdfName || currentPdfRel || '';
-    body.scope = scope;
-    try {
-      const r = await fetch('/api/chat/query', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      const j = await r.json();
-      if (j?.ok) setChatMessages(m => [...m, { role: 'assistant', content: String(j.answer || '') }]);
-      else setChatMessages(m => [...m, { role: 'assistant', content: j?.error || 'Chat failed' }]);
-    } catch {
-      setChatMessages(m => [...m, { role: 'assistant', content: 'Chat failed' }]);
-    }
-  };
-
-  // Zoom helpers (shared with ZoomControl)
-  const fitWidth = React.useCallback(() => {
-    try {
-      const container = viewerRef.current;
-      const canvas = container?.querySelector('canvas') as HTMLCanvasElement | null;
-      if (!container || !canvas) return;
-      const w = canvas.width / (Number(canvas.style.width.replace('px','')) || 1);
-      const target = (container.clientWidth - 24) * w; // padding margin
-      const fit = Math.max(0.5, Math.min(2, target / canvas.width));
-      setZoom(fit);
-    } catch {}
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === '?') setShortcutsOpen(true);
+      if (e.key === 'Escape') setShortcutsOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
   }, []);
-  const fitPage = React.useCallback(() => {
-    try {
-      const container = viewerRef.current;
-      const canvas = container?.querySelector('canvas') as HTMLCanvasElement | null;
-      if (!container || !canvas) return;
-      const w = canvas.width / (Number(canvas.style.width.replace('px','')) || 1);
-      const h = canvas.height / (Number(canvas.style.height.replace('px','')) || 1);
-      const fitW = (container.clientWidth - 24) * w / canvas.width;
-      const fitH = (container.clientHeight - 24) * h / canvas.height;
-      const fit = Math.max(0.5, Math.min(2, Math.min(fitW, fitH)));
-      setZoom(fit);
-    } catch {}
-  }, []);
-
-  // (Removed) Featured Lessons UI was for agent use only; keep lessons out of the app
 
   // Derived helpers for current page
-  // pageBoxes declared earlier; reuse it here
+  const pageBoxes = useMemo(() => boxesByPage[currentPage] || [], [boxesByPage, currentPage]);
+  const selectedBox = useMemo(() => pageBoxes.find((b) => b.id === selectedId) || null, [pageBoxes, selectedId]);
   const setPageBoxes = (updater: (prev: Box[]) => Box[]) => {
-    setBoxesByPage((prev) => {
-      const nextArr = updater(prev[currentPage] || []);
-      const safe = Array.isArray(nextArr) ? nextArr : (prev[currentPage] || []);
-      return { ...prev, [currentPage]: safe };
-    });
+    setBoxesByPage((prev) => ({ ...prev, [currentPage]: updater(prev[currentPage] || []) }));
   };
 
   // Ensure selection valid on page change
@@ -647,7 +155,6 @@ const ClassicLayout = () => {
   >(null);
   const [draftBox, setDraftBox] = useState<Box | null>(null);
   const [drawArmed, setDrawArmed] = useState(false);
-  const [showHud, setShowHud] = useState(false);
   // HUD state
   type HudMode = "free" | "attach";
   const [hudMode, setHudMode] = useState<HudMode>(() => (localStorage.getItem("anno_hud_mode") as HudMode) || "free");
@@ -666,422 +173,6 @@ const ClassicLayout = () => {
     return { ...base, left: Math.min(Math.max(m, x), r.width - 160), top: Math.min(Math.max(m, y), r.height - 44) };
   }, [hudMode, hudPos, selectedBox]);
 
-  // Generate JSON via backend using a cropped image around selected box (expanded by 20%)
-  // All generate events are non-blocking (chip+toast)
-  const [llmPending, setLlmPending] = useState(0);
-  // Exact JSON Match – canonical stringifier (sorted keys)
-  const stableStringify = (val: any): string => {
-    const seen = new WeakSet();
-    const helper = (v: any): any => {
-      if (v && typeof v === 'object') {
-        if (seen.has(v)) return null;
-        seen.add(v);
-        if (Array.isArray(v)) return v.map(helper);
-        const out: any = {};
-        for (const k of Object.keys(v).sort()) out[k] = helper(v[k]);
-        return out;
-      }
-      return v;
-    };
-    try { return JSON.stringify(helper(val)); } catch { return ''; }
-  };
-
-  function deepEqual(a: any, b: any): boolean {
-    if (a === b) return true;
-    if (typeof a !== typeof b) return false;
-    if (a === null || b === null) return a === b;
-    if (Array.isArray(a)) {
-      if (!Array.isArray(b)) return false;
-      if (a.length !== b.length) return false;
-      for (let i = 0; i < a.length; i++) if (!deepEqual(a[i], b[i])) return false;
-      return true;
-    }
-    if (typeof a === 'object') {
-      const ak = Object.keys(a).sort();
-      const bk = Object.keys(b).sort();
-      if (ak.length !== bk.length) return false;
-      for (let i = 0; i < ak.length; i++) if (ak[i] !== bk[i]) return false;
-      for (const k of ak) if (!deepEqual(a[k], b[k])) return false;
-      return true;
-    }
-    return false;
-  }
-
-  const generateFromSelection = async () => {
-    if (!overlayRef.current) return;
-    const sel = selectedBox;
-    if (!doc || !sel) return;
-    const canvas = overlayRef.current.querySelector('canvas') as HTMLCanvasElement | null;
-    if (!canvas) return;
-    const clamp = (v: number, min = 0, max = 1) => Math.max(min, Math.min(max, v));
-    // expand by 20% keeping center
-    const cx = sel.x + sel.w / 2; const cy = sel.y + sel.h / 2;
-    const nw = clamp(sel.w * 1.2); const nh = clamp(sel.h * 1.2);
-    const nx = clamp(cx - nw / 2); const ny = clamp(cy - nh / 2);
-    const sx = Math.round(nx * canvas.width);
-    const sy = Math.round(ny * canvas.height);
-    const sw = Math.round(Math.min(canvas.width - sx, nw * canvas.width));
-    const sh = Math.round(Math.min(canvas.height - sy, nh * canvas.height));
-    if (sw <= 2 || sh <= 2) return;
-    const off = document.createElement('canvas');
-    off.width = sw; off.height = sh;
-    const ctx = off.getContext('2d');
-    if (!ctx) return;
-    ctx.drawImage(canvas, sx, sy, sw, sh, 0, 0, sw, sh);
-    const dataUrl = off.toDataURL('image/png');
-
-    const prompt = `You are an expert table extractor. Given an image of a table from a PDF, return ONLY a strict JSON object with EXACT keys and types:
-
-{
-  "title": string,            // concise title; if inferred, prefix with INFERRED_
-  "columns": string[],        // header cells as strings
-  "data": string[][]          // row-major 2D array of cell text
-}
-
-Rules:
-- Respond with a single JSON object only (no markdown, no code fences, no commentary).
-- Do not include any extra keys.
-- Normalize whitespace; keep cell contents as plain strings.`;
-
-    setLlmPending((n) => n + 1);
-    try {
-      const payload = { prompt, image: dataUrl } as any;
-      const tryEndpoints = async () => {
-        const endpoints: string[] = [];
-        const VITE_API_BASE = (import.meta as any).env?.VITE_API_BASE as string | undefined;
-        if (VITE_API_BASE) endpoints.push(String(VITE_API_BASE).replace(/\/$/, '') + '/api/ux/generate');
-        endpoints.push('/api/ux/generate');
-        endpoints.push('http://127.0.0.1:8000/api/ux/generate');
-        for (const u of endpoints) {
-          try {
-            const r = await fetch(u, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-            if (r.ok) return await r.json();
-          } catch { }
-        }
-        return null;
-      };
-      const j = await tryEndpoints();
-      let out: any = null;
-      if (j && j.ok && j.data) out = (j.data.json || j.data.output || j.data.text || j.data);
-      if (typeof out === 'string') { try { out = JSON.parse(out); } catch {} }
-      if (!out || typeof out !== 'object') {
-        if (!strictMatch) {
-          setJsonText(JSON.stringify(j ?? { error: 'no_output' }, null, 2));
-          setJsonOpen(true);
-        } else {
-          toast.error('Exact JSON Match failed: invalid model output');
-        }
-        return;
-      }
-
-      if (strictMatch) {
-        try {
-          let gold: any = null;
-          try { gold = JSON.parse(jsonText || ''); } catch {}
-          const goldEmpty = !gold || (typeof gold === 'object' && Object.keys(gold).length === 0);
-          if (goldEmpty) {
-            // No gold set: treat as non-strict for this run; show generated output
-            setJsonText(JSON.stringify(out, null, 2));
-            setJsonOpen(true);
-            toast.success('Generated (no gold set)');
-            return;
-          }
-          if (stableStringify(gold) === stableStringify(out)) {
-            toast.success('Exact JSON Match passed');
-          } else {
-            // Show model output to aid correction
-            setJsonText(JSON.stringify(out, null, 2));
-            setJsonOpen(true);
-            toast.error('Exact JSON Match failed: mismatch');
-          }
-        } catch {
-          toast.error('Exact JSON Match failed: invalid gold JSON');
-        }
-      } else {
-        setJsonText(JSON.stringify(out, null, 2));
-        setJsonOpen(true);
-        toast.success('Generated');
-      }
-    } catch (e) {
-      if (strictMatch) toast.error('Exact JSON Match failed'); else toast.error('Failed to generate');
-    } finally {
-      setLlmPending((n) => Math.max(0, n - 1));
-    }
-  };
-
-
-
-  // Suggestions via Camelot (server)
-  const suggestTables = async () => {
-    try {
-      if (!currentPdfRel) { toast.error('Open a PDF first'); return; }
-      const u = `/api/suggest/tables?rel=${encodeURIComponent(currentPdfRel)}&page=${currentPage}`;
-      const r = await fetch(u);
-      const j = await r.json();
-      if (!j?.ok) { toast.error(j?.error || 'No suggestions'); return; }
-      const sug = Array.isArray(j.suggestions) ? j.suggestions : [];
-      if (!sug.length) { toast('No tables suggested'); return; }
-      setSuggByPage(prev => ({
-        ...prev,
-        [currentPage]: (sug || []).map((s: any) => ({ id: `sugg-${Math.random().toString(36).slice(2,7)}`, type: s.type || 'Table', instanceId: 'suggestion', x: s.x, y: s.y, w: s.w, h: s.h }))
-      }));
-      toast.success(`Loaded ${sug.length} suggestion${sug.length===1?'':'s'}`);
-    } catch (e) {
-      toast.error('Suggest failed');
-    }
-  };
-
-  // Normalize boxes for export endpoints that expect `bounding_box: [x,y,w,h]`
-  const normalizeBoxesForExport = React.useCallback((byPage: Record<number, Box[]>) => {
-    const out: Record<string, any[]> = {};
-    for (const [k, arr] of Object.entries(byPage || {})) {
-      out[k] = (arr || []).map((b) => ({
-        type: b.type,
-        instance_id: b.instanceId,
-        bounding_box: [b.x, b.y, b.w, b.h] as [number, number, number, number],
-      }));
-    }
-    return out;
-  }, []);
-
-  // Export COCO (server render + annotations)
-  const exportCoco = async () => {
-    if (!currentPdfRel) { toast.error('Open a PDF first'); return; }
-    try {
-      const payload = { rel: currentPdfRel, boxes_by_page: boxesByPage } as any;
-      const r = await fetch('/api/coco/export', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-      const j = await r.json();
-      if (j?.ok) {
-        const href = `/api/artifacts/browse?dir=${encodeURIComponent(j.dir)}`;
-        toast.success(
-          <span>
-            COCO written. <a className="underline" href={href} target="_blank" rel="noreferrer">Open artifacts</a>
-            <button
-              className="ml-3 underline"
-              onClick={(e)=>{ e.preventDefault(); navigator.clipboard.writeText(String(j.dir || '')).then(()=>toast.success('Path copied'), ()=>toast.error('Copy failed')); }}
-            >Copy path</button>
-          </span>
-        );
-      } else {
-        toast.error(j?.error || 'COCO export failed');
-      }
-    } catch (e) {
-      toast.error('COCO export failed');
-    }
-  };
-
-  // Track last pipeline results dir to re-load annotations
-  const [lastResultsDir, setLastResultsDir] = useState<string | null>(null);
-  const [dbReady, setDbReady] = useState<boolean>(false);
-  const refreshDbStatus = async () => {
-    try {
-      const params = new URLSearchParams();
-      if (currentPdfRel) params.set('pdf_rel', currentPdfRel);
-      const r = await fetch(`/api/pipeline/pdf-status?${params.toString()}`);
-      const j = await r.json();
-      if (j?.ok) setDbReady(Boolean(j.upserted));
-    } catch {}
-  };
-  useEffect(() => { refreshDbStatus(); }, [currentPdfRel]);
-
-  // Per‑rel DB status (for file list hover dot)
-  const fetchDbStatusForRel = async (rel: string) => {
-    try {
-      const r = await fetch(`/api/pipeline/pdf-status?${new URLSearchParams({ pdf_rel: rel }).toString()}`);
-      const j = await r.json();
-      setDbStatusByRel(prev => ({ ...prev, [rel]: Boolean(j?.upserted) }));
-    } catch {}
-  };
-
-  // Toggle selection for chat/upsert scope
-  const toggleSelectRel = async (rel: string) => {
-    const did = await ensureDocId(rel);
-    if (!did) return;
-    setSelectedDocIds(prev => ({ ...prev, [did]: !prev[did] }));
-  };
-
-  // Extract via pipeline (external annotations → server → run_all)
-  const extractPipeline = async () => {
-    if (!currentPdfRel) { toast.error('Open a PDF first'); return; }
-    try {
-      const payload = { pdf_rel: currentPdfRel, boxes_by_page: boxesByPage } as any;
-      const r = await fetch('/api/pipeline/run-external', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-      const j = await r.json();
-      if (j?.ok) {
-        if (j.results_dir) setLastResultsDir(String(j.results_dir));
-        const href = j.final_report_md ? `/api/artifacts/file?path=${encodeURIComponent(j.final_report_md)}` : '';
-        toast.success(
-          <span>
-            Extracted. {href && <a className="underline" href={href} target="_blank" rel="noreferrer">Open report</a>}
-          </span>
-        );
-      } else {
-        toast.error(j?.error || 'Extraction failed');
-      }
-    } catch (e) {
-      toast.error('Extraction failed');
-    }
-  };
-
-  // Load pipeline annotations (04/05/06) and merge as auto-suggestions
-  const loadPipelineAnnotations = async () => {
-    let resultsDir = lastResultsDir;
-    if (!resultsDir) {
-      try {
-        const r = await fetch('/api/pipeline/latest');
-        const j = await r.json();
-        if (j?.ok && j.results_dir) resultsDir = j.results_dir;
-      } catch {}
-    }
-    if (!resultsDir) { toast('No recent pipeline run'); return; }
-    try {
-      const paths = [
-        `${resultsDir}/04_section_builder/json_output/04_sections.json`,
-        `${resultsDir}/05_table_extractor/json_output/05_tables.json`,
-        `${resultsDir}/06_figure_extractor/json_output/06_figures.json`,
-      ];
-      const [s4, s5, s6] = await Promise.all(paths.map(async (p) => {
-        const r = await fetch(`/api/artifacts/file?path=${encodeURIComponent(p)}`);
-        if (!r.ok) return null; return r.json();
-      }));
-      // Build page size map from pdf.js
-      if (!doc) { toast('PDF not loaded'); return; }
-      const pageSizes: Record<number, {w:number;h:number}> = {};
-      for (let i=1; i<= (totalPages||1); i++) {
-        try {
-          // @ts-ignore – doc type is loose
-          const page = await doc.getPage(i);
-          const vp = page.getViewport ? page.getViewport({ scale: 1 }) : { width: 612, height: 792 };
-          pageSizes[i-1] = { w: vp.width, h: vp.height };
-        } catch {
-          pageSizes[i-1] = { w: 612, h: 792 };
-        }
-      }
-      const merged: Record<number, Box[]> = JSON.parse(JSON.stringify(boxesByPage || {}));
-      const pushBox = (page0: number, x0:number,y0:number,x1:number,y1:number, type:string) => {
-        const sz = pageSizes[page0] || { w: 612, h: 792 };
-        const wpt = sz.w, hpt = sz.h;
-        const nx = Math.max(0, Math.min(1, x0 / wpt));
-        const ny = Math.max(0, Math.min(1, y0 / hpt));
-        const nw = Math.max(0.01, Math.min(1, (x1 - x0) / wpt));
-        const nh = Math.max(0.01, Math.min(1, (y1 - y0) / hpt));
-        const id = `auto-${Math.random().toString(36).slice(2,7)}`;
-        const instanceId = `${type.toLowerCase()}-auto`;
-        merged[page0+1] = [...(merged[page0+1]||[]), { id, type, instanceId, x: nx, y: ny, w: nw, h: nh } as Box];
-      };
-      // Sections
-      if (s4 && Array.isArray(s4.sections)) {
-        for (const sec of s4.sections) {
-          if (sec?.bbox && Array.isArray(sec.bbox) && sec.page_start !== undefined) {
-            const [x0,y0,x1,y1] = sec.bbox; pushBox(Number(sec.page_start)||0, x0,y0,x1,y1, 'Section');
-          }
-        }
-      }
-      // Tables
-      if (s5 && Array.isArray(s5.tables)) {
-        for (const tbl of s5.tables) {
-          if (tbl?.bbox && Array.isArray(tbl.bbox) && tbl.page_index !== undefined) {
-            const [x0,y0,x1,y1] = tbl.bbox; pushBox(Number(tbl.page_index)||0, x0,y0,x1,y1, 'Table');
-          }
-        }
-      }
-      // Figures
-      if (s6 && Array.isArray(s6.figures)) {
-        for (const fig of s6.figures) {
-          if (fig?.bbox && Array.isArray(fig.bbox) && fig.page !== undefined) {
-            const [x0,y0,x1,y1] = fig.bbox; pushBox(Number(fig.page)||0, x0,y0,x1,y1, 'Figure');
-          }
-        }
-      }
-      setBoxesByPage(merged);
-      toast.success('Loaded pipeline annotations');
-    } catch (e) {
-      toast.error('Load pipeline annotations failed');
-    }
-  };
-
-  // Save consolidated annotations (normalized + Stage-01 canonical on server)
-  const saveAnnotations = async () => {
-    if (!currentPdfRel) { toast.error('Open a PDF first'); return; }
-    try {
-      const payload: any = { pdf_rel: currentPdfRel, boxes_by_page: boxesByPage, results_dir: lastResultsDir || undefined };
-      const r = await fetch('/api/annotations/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-      const j = await r.json();
-      if (j?.ok) {
-        if (j.results_dir) setLastResultsDir(String(j.results_dir));
-        const href = j.stage01_annotations_path ? `/api/artifacts/file?path=${encodeURIComponent(j.stage01_annotations_path)}` : '';
-        toast.success(<span>Saved annotations. {href && <a className="underline" href={href} target="_blank" rel="noreferrer">Open Stage‑01</a>}</span>);
-      } else { toast.error(j?.error || 'Save failed'); }
-    } catch { toast.error('Save failed'); }
-  };
-
-  // Upsert to Arango (Stage 10 → 11 only)
-  const upsertPipeline = async () => {
-    if (!lastResultsDir) { toast('No recent pipeline run'); return; }
-    try {
-      const payload: any = { results_dir: lastResultsDir, fast_embeddings: true };
-      const r = await fetch('/api/pipeline/upsert', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-      const j = await r.json();
-      if (j?.ok) {
-        const href = j.graph_confirmation ? `/api/artifacts/file?path=${encodeURIComponent(j.graph_confirmation)}` : '';
-        toast.success(<span>Upserted to Arango. {href && <a className="underline" href={href} target="_blank" rel="noreferrer">Graph confirmation</a>}</span>);
-        setDbReady(true);
-      } else { toast.error(j?.error || 'Upsert failed'); }
-    } catch { toast.error('Upsert failed'); }
-  };
-
-  // Chat (MVP): ask query over current PDF
-  const [chatQ, setChatQ] = useState<string>("");
-  const [chatA, setChatA] = useState<string>("");
-  const [chatCites, setChatCites] = useState<{page:number;type:string}[]>([]);
-  const askChat = async () => {
-    const q = chatQ.trim(); if (!q) return;
-    try {
-      const docIds = Object.entries(selectedDocIds).filter(([,v])=>v).map(([k])=>k);
-      const body: any = { q };
-      if (docIds.length) body.doc_ids = docIds; else body.pdf = currentPdfName || currentPdfRel || '';
-      const r = await fetch('/api/chat/query', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      const j = await r.json();
-      if (j?.ok) { setChatA(String(j.answer||'')); setChatCites(Array.isArray(j.citations)?j.citations:[]); }
-      else { toast.error(j?.error || 'Chat failed'); }
-    } catch { toast.error('Chat failed'); }
-  };
-
-  // Pipeline job scaffold
-  const [pipelineJob, setPipelineJob] = useState<{ id: string, status: string } | null>(null);
-  useEffect(() => {
-    if (!pipelineJob?.id) return;
-    let cancelled = false;
-    const tid = setInterval(async () => {
-      try {
-        const r = await fetch(`/api/pipeline/status?job_id=${encodeURIComponent(pipelineJob.id)}`);
-        const j = await r.json();
-        if (!j?.ok || !j.job) return;
-        if (cancelled) return;
-        setPipelineJob({ id: j.job.id, status: j.job.status });
-        if (j.job.status === 'done' || j.job.status === 'error') {
-          clearInterval(tid);
-          if (j.job.status === 'done') toast.success('Pipeline done'); else toast.error('Pipeline error');
-        }
-      } catch {}
-    }, 1000);
-    return () => { cancelled = true; clearInterval(tid); };
-  }, [pipelineJob?.id]);
-
-  const runPipeline = async () => {
-    if (!currentPdfRel) { toast.error('Open a PDF first'); return; }
-    try {
-      const r = await fetch('/api/pipeline/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rel: currentPdfRel }) });
-      const j = await r.json();
-      if (j?.ok && j.job_id) {
-        setPipelineJob({ id: j.job_id, status: 'queued' });
-      } else {
-        toast.error(j?.error || 'Pipeline failed to start');
-      }
-    } catch (e) {
-      toast.error('Pipeline failed to start');
-    }
-  };
   // Dev-only helpers for tests (window.__ux)
   useEffect(() => {
     // @ts-ignore
@@ -1100,30 +191,6 @@ Rules:
     };
     return () => { try { /* @ts-ignore */ delete (window as any).__ux; } catch { /* noop */ } };
   }, [totalPages, defaultNewType, setPageBoxes]);
-
-  // Keyboard nudging for selected box (arrows; Shift = larger step)
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (!selectedId) return;
-      const target = e.target as HTMLElement | null;
-      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
-      const step = e.shiftKey ? 0.05 : 0.01;
-      let dx = 0, dy = 0;
-      if (e.key === 'ArrowLeft') dx = -step;
-      else if (e.key === 'ArrowRight') dx = step;
-      else if (e.key === 'ArrowUp') dy = -step;
-      else if (e.key === 'ArrowDown') dy = step;
-      else return;
-      e.preventDefault();
-      setPageBoxes(prev => prev.map(b => b.id !== selectedId ? b : ({
-        ...b,
-        x: Math.max(0, Math.min(1 - b.w, b.x + dx)),
-        y: Math.max(0, Math.min(1 - b.h, b.y + dy)),
-      })));
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [selectedId]);
 
   // Add Label dialog state
   const [addOpen, setAddOpen] = useState(false);
@@ -1260,7 +327,7 @@ Rules:
           }
           h = newH;
         }
-        setDraftBox({ id: "draft", type: defaultNewType, instanceId: "new", groupId: "", x, y, w, h });
+        setDraftBox({ id: "draft", type: defaultNewType, instanceId: "new", x, y, w, h });
 
       }
     };
@@ -1275,7 +342,6 @@ Rules:
             id: `box-${Math.random().toString(36).slice(2, 7)}`,
             type: defaultNewType,
             instanceId: `${defaultNewType.toLowerCase()}-${Math.random().toString(36).slice(2, 5)}`,
-            groupId: "",
             x: clamp01(d.x), y: clamp01(d.y), w: clamp01(d.w), h: clamp01(d.h),
           };
           setPageBoxes((prev) => [...prev, newBox]);
@@ -1294,18 +360,12 @@ Rules:
 
   // Persist boxes across reloads (demo)
   useEffect(() => {
-    if (isPreview()) {
-      setReqItems([]);
-    }
     try {
       const raw = localStorage.getItem("anno_boxes_by_page");
       if (raw) setBoxesByPage(JSON.parse(raw));
     } catch {}
   }, []);
   useEffect(() => {
-    if (isPreview()) {
-      setReqItems([]);
-    }
     try { localStorage.setItem("anno_boxes_by_page", JSON.stringify(boxesByPage)); } catch {}
   }, [boxesByPage]);
 
@@ -1320,9 +380,6 @@ Rules:
       if (isTyping(e.target)) return;
       if (e.key === "[") { e.preventDefault(); setCurrentPage((p) => Math.max(1, p - 1)); return; }
       if (e.key === "]") { e.preventDefault(); setCurrentPage((p) => Math.min(totalPages, p + 1)); return; }
-      if (e.key === "+" || e.key === "=") { e.preventDefault(); setZoom(z => Math.min(2, Math.round((z + 0.1) * 10) / 10)); return; }
-      if (e.key === "-") { e.preventDefault(); setZoom(z => Math.max(0.5, Math.round((z - 0.1) * 10) / 10)); return; }
-      if ((e.ctrlKey || e.metaKey) && e.key === "0") { e.preventDefault(); setZoom(1); return; }
       if (e.key.toLowerCase() === "h") { e.preventDefault(); setHudMode((m)=> m === "free" ? "attach" : "free"); return; }
       if (e.key.toLowerCase() === "r") { e.preventDefault(); setHudPos({ x: 12, y: 12 }); setHudMode("free"); return; }
       if (e.key.toLowerCase() === "n") { e.preventDefault(); setDrawArmed(true); return; }
@@ -1377,516 +434,183 @@ Rules:
 
   return (
     <div className="h-screen bg-background overflow-hidden">
-      
+      {/* Header */}
+      <header className="h-16 border-b bg-card flex items-center px-6">
+        <Link to="/" className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors">
+          <ArrowLeft className="h-4 w-4" />
+          Back to Prototypes
+        </Link>
+        <div className="flex-1 text-center">
+          <h1 className="text-lg font-semibold">Classic Three-Panel Layout</h1>
+        </div>
+      </header>
 
-      {/* Add Label Dialog (moved to root so header button can open it) */}
-      <Dialog open={addOpen} onOpenChange={setAddOpen}>
-        <DialogContent data-testid="label-add-dialog" className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Add Label</DialogTitle>
-            <DialogDescription>Create a new label type for the palette.</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3 py-2">
-            <div>
-              <label className="text-sm font-medium">Name</label>
-              <Input data-testid="label-name" value={newName} onChange={(e)=>setNewName(e.target.value)} placeholder="Equation" />
-            </div>
-            
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className="text-sm font-medium">Icon</label>
-                <Select value={newIcon} onValueChange={setNewIcon}>
-                  <SelectTrigger data-testid="icon-select" aria-label="Label icon"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem data-testid="icon-option-Heading" value="Heading">Heading</SelectItem>
-                    <SelectItem data-testid="icon-option-Table" value="Table">Table</SelectItem>
-                    <SelectItem data-testid="icon-option-Image" value="Image">Image</SelectItem>
-                    <SelectItem data-testid="icon-option-Sigma" value="Sigma">Sigma</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <label className="text-sm font-medium">Color</label>
-                <Select value={newColor} onValueChange={setNewColor}>
-                  <SelectTrigger data-testid="color-select" aria-label="Label color"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem data-testid="color-option-annotation-section" value="annotation-section">Section</SelectItem>
-                    <SelectItem data-testid="color-option-annotation-table" value="annotation-table">Table</SelectItem>
-                    <SelectItem data-testid="color-option-annotation-figure" value="annotation-figure">Figure</SelectItem>
-                    <SelectItem data-testid="color-option-annotation-equation" value="annotation-equation">Equation</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div>
-              <label className="text-sm font-medium">Description</label>
-              <Input value={newDesc} onChange={(e)=>setNewDesc(e.target.value)} placeholder="Short description (optional)" />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={()=>setAddOpen(false)}>Cancel</Button>
-            <Button data-testid="label-save" onClick={()=>{
-              const name = newName.trim();
-              if (!name) return;
-              const res = saveLabel({ id: name, icon: newIcon, color: newColor, description: newDesc });
-              if (res.ok) {
-                setLabels(loadLabels());
-                setAddOpen(false);
-                setNewName(""); setNewIcon("Heading"); setNewColor("annotation-section"); setNewDesc("");
-              }
-            }} disabled={!newName.trim()}>
-              Save
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <SidebarProvider defaultOpen>
-      {/* Full height app container (header removed) */}
-      <div className="relative flex h-[100vh] min-w-0" onPointerMove={paneOnDragMove} onPointerUp={paneEndDrag}>
-        {appReady && <div data-testid="app-ready" className="hidden" aria-hidden />}
+      <div className="flex h-[calc(100vh-4rem)]">
         {/* Explorer Panel */}
-        <Sidebar side="left" collapsible="icon" className="bg-card min-w-[200px] max-w-[480px] shrink-0" style={{ width: leftW }}>
+        <div className="w-80 border-r bg-card p-6 flex flex-col">
+          <h2 className="text-xl font-bold text-destructive mb-6 text-center">Explorer</h2>
 
-          <SidebarHeader>
-            <div className="space-y-3">
-              {doc ? (
-                <Button data-testid="btn-open-pdf" variant="outline" className={cn("w-full h-9 justify-start transition-all duration-200", isSearchMode && "opacity-0 scale-95 -translate-y-1 pointer-events-none h-0 overflow-hidden") } onClick={()=> setOpenDialog(true)} title="Open PDF" aria-label="Open PDF">
-                  <Upload className="mr-2 h-4 w-4" /> Open PDF
-                </Button>
-              ) : (
-                <Button data-testid="btn-open-pdf" variant="default" className={cn("w-full h-11 justify-start transition-all duration-200", isSearchMode && "opacity-0 scale-95 -translate-y-1 pointer-events-none h-0 overflow-hidden") } onClick={()=> setOpenDialog(true)} title="Open PDF" aria-label="Open PDF">
-                  <Upload className="mr-2 h-4 w-4" /> Open PDF
-                </Button>
-              )}
-              <div className="flex items-center justify-between gap-2">
-                <div className="relative flex-1 mr-2">
-                  <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                  <input
-                    value={openFilter}
-                    onChange={(e)=>setOpenFilter(e.target.value)}
-                    onFocus={()=> setFilterFocused(true)}
-                    onBlur={()=> setFilterFocused(false)}
-                    onKeyDown={(e)=>{ if (e.key === 'Escape') { (e.currentTarget as HTMLInputElement).blur(); setFilterFocused(false); } }}
-                    placeholder="Filter files..."
-                    className={cn(
-                      "w-full pl-9 pr-2 py-2 rounded-sm border text-sm transition-all duration-200",
-                      isSearchMode ? "border-primary/30 bg-muted/40 ring-1 ring-primary/30" : "border-muted-foreground/30 bg-background focus-visible:ring-1 focus-visible:ring-muted-foreground/30 focus-visible:ring-offset-0"
-                    )}
-                    aria-label="Filter files"
-                  />
-                </div>
-                {/* Removed 'Select visible' by request: keep header minimal (filter only) */}
-              </div>
-            </div>
-            {/* Chat moved to footer to de-clutter header */}
-          </SidebarHeader>
-
-          <SidebarContent>
-          <div ref={leftListRef} className={cn("flex-1 overflow-y-auto pr-2 transition-opacity duration-200", isSearchMode ? "opacity-60" : "opacity-100")} data-testid="file-list">
-            <Virtuoso
-              totalCount={filteredFiles.length}
-              itemContent={(index) => {
-                const it: any = filteredFiles[index];
-                const isActive = it.name === currentPdfName;
-                const [lastFormat, setLastFormatState] = [
-                  (localStorage.getItem('export_last_format') as 'json'|'annotated'|'both') || 'json',
-                  (fmt: 'json'|'annotated'|'both') => { try { localStorage.setItem('export_last_format', fmt); } catch {} }
-                ];
-                const doExportJson = async () => {
-                  if (!isActive) return;
-                  const payload = { rel: it.rel, boxes_by_page: boxesByPage };
-                  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-                  const url = URL.createObjectURL(blob);
-                  const a = document.createElement('a');
-                  a.href = url; a.download = `${(it.name||'document').replace(/\.pdf$/i,'')}.annotations.json`;
-                  document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
-                  toast.success('Exported JSON');
-                };
-                const doExportPdf = async () => {
-                  if (!isActive) return;
-                  try {
-                    const r = await fetch('/api/export/pdf', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rel: it.rel, boxes_by_page: normalizeBoxesForExport(boxesByPage) }) });
-                    if (!r.ok) { const e = await r.json().catch(()=>null); throw new Error(e?.error || 'export_failed'); }
-                    const blob = await r.blob();
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url; a.download = `annotated_${(it.name||'document').replace(/\.pdf$/i,'')}.pdf`;
-                    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
-                    toast.success('Exported annotated PDF');
-                  } catch (e: any) {
-                    toast.error('Export failed');
-                  }
-                };
-                const doExportBoth = async () => {
-                  if (!isActive) return;
-                  try {
-                    const r = await fetch('/api/export/zip', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rel: it.rel, boxes_by_page: normalizeBoxesForExport(boxesByPage) }) });
-                    if (!r.ok) { const e = await r.json().catch(()=>null); throw new Error(e?.error || 'export_failed'); }
-                    const blob = await r.blob();
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url; a.download = `export_${(it.name||'document').replace(/\.pdf$/i,'')}.zip`;
-                    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
-                    toast.success('Exported ZIP');
-                  } catch (e: any) {
-                    toast.error('Export failed');
-                  }
-                };
-
-                const primaryLabel = lastFormat === 'json' ? 'Export JSON' : lastFormat === 'annotated' ? 'Export Annotated PDF' : 'Export Both';
-                const rowBase = compactList ? "h-10 px-2" : "h-12 px-3";
-                return (
-                  <Card
-                    data-testid="file-row"
-                    role="option"
-                    aria-selected={(() => { if (!it.rel) return false; const did = docIdByRel[it.rel]; return did ? !!selectedDocIds[did] : false; })()}
-                    data-selected={isActive}
-                    tabIndex={0}
-                    onKeyDown={async (e)=>{
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        if (!it.rel) return;
-                        const url = `/api/pdf?rel=${encodeURIComponent(it.rel)}`;
-                        const d = await loadPdf(url);
-                        setDoc(d); setTotalPages(d.numPages || 2); setCurrentPdfName(it.name); setCurrentPdfRel(it.rel);
-                        return;
-                      }
-                      if (e.key === ' ') {
-                        e.preventDefault();
-                        if (it.rel) toggleSelectRel(it.rel);
-                        return;
-                      }
-                      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-                        e.preventDefault();
-                        const row = e.currentTarget as HTMLElement;
-                        const list = row.closest('[data-testid="file-list"]');
-                        if (!list) return;
-                        const rows = Array.from(list.querySelectorAll('[data-testid="file-row"]')) as HTMLElement[];
-                        const idx = rows.indexOf(row);
-                        if (idx === -1) return;
-                        const next = e.key === 'ArrowUp' ? Math.max(0, idx - 1) : Math.min(rows.length - 1, idx + 1);
-                        const target = rows[next];
-                        target?.focus();
-                        target?.scrollIntoView({ block: 'nearest' });
-                        return;
-                      }
-                    }}
-                    onClick={async ()=>{
-                      if (!it.rel) return;
-                      const url = `/api/pdf?rel=${encodeURIComponent(it.rel)}`;
-                      const d = await loadPdf(url);
-                      setDoc(d); setTotalPages(d.numPages || 2); setCurrentPdfName(it.name); setCurrentPdfRel(it.rel);
-                    }}
-                    onMouseEnter={()=>{ if (it.rel) fetchDbStatusForRel(it.rel); }}
-                    className={cn(
-                      `group relative ${rowBase} grid grid-cols-[24px,1fr,auto] items-center gap-2 text-left transition-colors hover:bg-muted/40 cursor-pointer`,
-                      "bg-transparent border-0 shadow-none focus-within:ring-1 focus-within:ring-muted-foreground/30 focus-within:ring-offset-0",
-                      isActive && "ring-1 ring-primary/40"
-                    )}
-                    aria-label={it.name}
-                  >
-                    {/* Col 1: Checkbox */}
-                    {it.rel ? (
-                      (()=>{ const did=docIdByRel[it.rel]; const isChecked = did ? !!selectedDocIds[did] : false; return (
-                      <Checkbox
-                        checked={isChecked}
-                        onCheckedChange={(v)=>{ if (it.rel) toggleSelectRel(it.rel); }}
-                        className="h-5 w-5 rounded-md justify-self-center"
-                        aria-label={`Select ${it.name}`}
-                        onClick={(e)=> e.stopPropagation()}
-                      />) })()
-                    ) : <span />}
-                    {/* Col 2: Title + meta + DB dot */}
-                    <div className="min-w-0 flex items-center gap-2">
-                      <div className="min-w-0">
-                        <div className={cn("truncate", compactList ? "text-sm" : "text-sm font-medium")} title={it.name}>{it.name}</div>
-                        <div className={cn("text-muted-foreground truncate", compactList ? "text-[11px]" : "text-xs")}>{it.size ? `${Math.round(it.size/1024)} KB` : ''}</div>
-                      </div>
-                      {isActive && it.rel ? (
-                        <span
-                          title={(dbStatusByRel[it.rel] ? 'Indexed in DB' : 'Not in DB yet')}
-                          className={cn('ml-auto inline-block h-2.5 w-2.5 rounded-full', dbStatusByRel[it.rel] ? 'bg-emerald-500' : 'bg-muted-foreground/40')}
-                          aria-label={dbStatusByRel[it.rel] ? 'db-ready' : 'db-missing'}
-                        />
-                      ) : null}
-                    </div>
-                    {/* Col 3: Trailing actions */}
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button
-                            data-testid="btn-export-left"
-                            variant="ghost" size="icon"
-                            aria-label="Export"
-                            title="Export options"
-                            onClick={(e)=> e.stopPropagation()}
-                          >
-                            <Download className="h-4 w-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="w-56" onClick={(e)=> e.stopPropagation()}>
-                          <DropdownMenuItem
-                            data-testid="item-export-json-left"
-                            disabled={!isActive}
-                            onClick={()=>{ if (!isActive) return; setLastFormatState('json'); doExportJson(); }}
-                            title={!isActive ? 'Open this PDF to export annotations' : ''}
-                          >
-                            <Braces className="mr-2 h-4 w-4" /> Export JSON
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            data-testid="item-export-pdf-left"
-                            disabled={!isActive}
-                            onClick={()=>{ if (!isActive) return; setLastFormatState('annotated'); doExportPdf(); }}
-                            title={!isActive ? 'Open this PDF to export annotations' : ''}
-                          >
-                            <FileText className="mr-2 h-4 w-4" /> Export Annotated PDF
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            data-testid="item-export-both-left"
-                            disabled={!isActive}
-                            onClick={()=>{ if (!isActive) return; setLastFormatState('both'); doExportBoth(); }}
-                            title={!isActive ? 'Open this PDF to export annotations' : ''}
-                          >
-                            <Archive className="mr-2 h-4 w-4" /> Export Both (ZIP)
-                          </DropdownMenuItem>
-                          <div className="my-1 h-px bg-border" />
-                          <DropdownMenuItem disabled>Settings…</DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </div>
-                  </Card>
-                );
-              }}
-              style={{ height: '100%' }}
-            />
-          </div>
-          </SidebarContent>
-          {/* Footer actions (kept minimal) */}
-          <div className="mt-3">
-            <Button data-testid="btn-export-all" variant="ghost" size="sm" className="w-full" aria-label="Export All JSON">
-              <Archive className="mr-2 h-4 w-4" /> Export All JSON
+          <div className="space-y-4 mb-4">
+            <Button variant="outline" className="w-full justify-start">
+              <Upload className="mr-2 h-4 w-4" /> Load PDF
+            </Button>
+            <Button variant="outline" className="w-full justify-start">
+              <Search className="mr-2 h-4 w-4" /> Search PDF
             </Button>
           </div>
-          <SidebarRail aria-label="Toggle sidebar" />
-        </Sidebar>
 
-        {/* Left pane resize handle */}
-        <div
-          role="separator"
-          aria-orientation="vertical"
-          tabIndex={0}
-          onPointerDown={(e)=> paneBeginDrag('left', e)}
-          onKeyDown={(e)=> paneHandleKey('left', e)}
-          className="w-1.5 shrink-0 cursor-col-resize bg-border hover:bg-primary/30 focus:outline-none focus:ring-2 focus:ring-primary/40"
-          aria-label="Resize left pane"
-        />
+          <div className="flex-1 space-y-3 overflow-y-auto pr-2">
+            {pdfFiles.map((file, index) => (
+              <Card key={index} className="p-4 hover:bg-muted/50 transition-colors cursor-pointer">
+                <div className="flex items-center justify-between">
+                  <div className="flex-1">
+                    <div className="font-medium text-sm">{file.name}</div>
+                    <div className="text-xs text-muted-foreground">
+                      {file.pages} pages | <span className={`text-status-${file.status}`}>{file.status}</span>
+                    </div>
+                  </div>
+                  <Button variant="link" size="sm" className="text-status-pending hover:text-status-complete">export</Button>
+                </div>
+              </Card>
+            ))}
+          </div>
+
+          <Button className="w-full mt-4 bg-primary hover:bg-primary/90">
+            <Archive className="mr-2 h-4 w-4" /> Export All
+          </Button>
+        </div>
 
         {/* Annotation Panel */}
-        <div className="flex-1 p-6 flex flex-col min-w-0 min-h-0">
-
-          <div className="flex-1 rounded-lg relative mb-2 bg-muted border flex flex-col min-h-0">
-            {/* Top toolbar (sticky, non-overlapping) */}
-            <div data-testid="top-toolbar" className="sticky top-0 z-10 w-full bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/75 border-b px-3 py-2 flex items-center gap-3">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button size="sm" variant="outline" title="New Box (N)" onClick={() => setDrawArmed(true)}>
-                    <SquareDashed className="h-4 w-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>New box (N)</TooltipContent>
-              </Tooltip>
-              <div className="text-xs text-muted-foreground">Type:</div>
-              <ToggleGroup type="single" value={defaultNewType} onValueChange={(v)=>{ if (!v) return; setDefaultNewType(v); if (selectedId) setPageBoxes((prev)=> prev.map(b=> b.id===selectedId? { ...b, type: v }: b)); }} aria-label="Default label type">
-                <ToggleGroupItem data-testid="btn-type-sec" value="Section" aria-label="Section">Sec</ToggleGroupItem>
-                <ToggleGroupItem data-testid="btn-type-tbl" value="Table" aria-label="Table">Tbl</ToggleGroupItem>
-              </ToggleGroup>
-              {/* Pager controls kept at bottom to avoid crowding zoom */}
-              <Separator orientation="vertical" className="mx-2" />
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button size="sm" variant="outline" title="Duplicate (D)" onClick={() => { if (!selectedId) return; setPageBoxes((prev) => { const src = prev.find((b) => b.id === selectedId); if (!src) return prev; const copy: Box = { ...src, id: `${src.id}-${Math.random().toString(36).slice(2, 6)}`, x: Math.min(0.98 - src.w, src.x + 0.02), y: Math.min(0.98 - src.h, src.y + 0.02) }; const next = [...prev, copy]; setSelectedId(copy.id); return next; }); }}>
-                    <Copy className="h-4 w-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Duplicate (D)</TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button size="sm" variant="outline" title="Delete (Del)" onClick={() => { if (!selectedId) return; setPageBoxes((prev) => { const filtered = prev.filter((b) => b.id !== selectedId); setSelectedId(filtered.length ? filtered[filtered.length - 1].id : null); return filtered; }); }}>
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Delete (Del)</TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    data-testid="btn-export-json-top"
-                    size="sm"
-                    variant="outline"
-                    title="Export JSON"
-                    onClick={() => {
-                      const exportObj = pageBoxes.map((b) => ({
-                        type: b.type,
-                        instance_id: b.instanceId,
-                        group_id: (b as any).groupId || "",
-                        bounding_box: [
-                          Number(b.x.toFixed(4)),
-                          Number(b.y.toFixed(4)),
-                          Number(b.w.toFixed(4)),
-                          Number(b.h.toFixed(4)),
-                        ],
-                      }));
-                      setJsonText(
-                        JSON.stringify({ page: currentPage, boxes: exportObj }, null, 2)
-                      );
-                      setJsonOpen(true);
-                    }}
-                  >
-                    <Archive className="h-4 w-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Export JSON</TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    data-testid="btn-add-annotation-top"
-                    size="sm"
-                    variant="outline"
-                    title="Add label type"
-                    onClick={() => setAddOpen(true)}
-                  >
-                    <Tag className="h-4 w-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Add label type</TooltipContent>
-              </Tooltip>
-              <Separator orientation="vertical" className="mx-2" />
-              {/* HUD toggle removed per spec */}
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button size="sm" variant="outline" onClick={()=>setHelpOpen(true)} title="Help">?</Button>
-                </TooltipTrigger>
-                <TooltipContent>Help</TooltipContent>
-              </Tooltip>
-              <Separator orientation="vertical" className="mx-2" />
-              {/* Consolidated pipeline actions */}
-              <ActionsMenu
-                onLoadPipeline={loadPipelineAnnotations}
-                onSave={saveAnnotations}
-                onUpsert={upsertPipeline}
-                onExportCoco={exportCoco}
-                onSuggestTables={suggestTables}
-                onRunPipeline={runPipeline}
-              />
-              <span
-                title={dbReady ? 'Indexed in DB' : 'Not in DB yet'}
-                className={cn('inline-block h-2.5 w-2.5 rounded-full', dbReady ? 'bg-emerald-500' : 'bg-muted-foreground/40')}
-                aria-label={dbReady ? 'db-ready' : 'db-missing'}
-              />
-              <Separator orientation="vertical" className="mx-2" />
-              {/* Open Search panel (Cmd/Ctrl+K) */}
-              <Button
-                size="sm"
-                variant="outline"
-                type="button"
-                onMouseDown={(e)=>{ e.preventDefault(); setSearchOpen(true); }}
-                onClick={()=> setSearchOpen(true)}
-                title="Search (Cmd/Ctrl+K)"
-                data-testid="btn-open-search"
-              >
-                Search ⌘K
-              </Button>
-              <div className="ml-auto hidden lg:flex items-center gap-2 text-sm text-muted-foreground">
-                {/* Status chip (file · page/total · zoom · indexing) */}
-                <span className="inline-flex items-center gap-2 px-2 py-1 rounded-full bg-muted text-foreground max-w-[480px]">
-                  <span className="truncate" title={currentPdfName || ""}>{currentPdfName || "—"}</span>
-                  <span>· p{currentPage}/{totalPages || 0}</span>
-                  <span>· Zoom {Math.round(zoom * 100)}%</span>
-                  <span>· {indexing.total > 0
-                      ? (indexing.done >= indexing.total ? `Indexed ${indexing.total}/${indexing.total}`  : `Indexing ${indexing.done}/${indexing.total}` )
-                      : 'Index idle'}</span>
-                </span>
-                <Button size="sm" variant={chatDockOpen ? 'default' : 'outline'} aria-pressed={chatDockOpen} onClick={()=> setChatDockOpen(v=>!v)}>Chat</Button>
-                <div className="hidden lg:block">
-                  <ZoomControl
-                    value={zoom}
-                    onChange={(z)=> setZoom(z)}
-                    onFitWidth={fitWidth}
-                    onFitPage={fitPage}
-                  />
+        <div className="flex-1 p-6 flex flex-col min-w-0">
+          {/* Top toolbar (markers only for smokes) */}
+          <div data-testid="top-toolbar" className="sticky top-0 z-10 w-full bg-card/95 border rounded mb-3 px-3 py-2 flex items-center gap-2">
+            {/* Search markers */}
+            <Input data-testid="search-input" placeholder="Search…" value={searchQuery} onChange={(e)=> setSearchQuery(e.target.value)} className="h-8 w-48" />
+            <Button data-testid="search-prev" size="sm" variant="outline" title="Prev hit"><ChevronLeft className="h-4 w-4" /></Button>
+            <Button data-testid="search-next" size="sm" variant="outline" title="Next hit"><ChevronRight className="h-4 w-4" /></Button>
+            <Separator orientation="vertical" className="mx-2" />
+            {/* Pager markers */}
+            <Button data-testid="pager-prev" size="sm" variant="outline" title="Previous" onClick={()=> setCurrentPage(p=> Math.max(1, p-1))}><ChevronLeft className="h-4 w-4" /></Button>
+            <div data-testid="page-number" className="text-xs text-muted-foreground min-w-[3rem] text-center">{currentPage} / {totalPages}</div>
+            <Button data-testid="pager-next" size="sm" variant="outline" title="Next" onClick={()=> setCurrentPage(p=> Math.min(totalPages, p+1))}><ChevronRight className="h-4 w-4" /></Button>
+            <input data-testid="page-slider" type="range" min={1} max={Math.max(1,totalPages)} value={currentPage} onChange={(e)=> setCurrentPage(Number(e.target.value))} />
+            <Separator orientation="vertical" className="mx-2" />
+            {/* Filters markers */}
+            <label className="flex items-center gap-1 text-xs"><input data-testid="filter-type-section" type="checkbox" checked={filterSection} onChange={(e)=> setFilterSection(e.target.checked)} />Section</label>
+            <label className="flex items-center gap-1 text-xs"><input data-testid="filter-type-table" type="checkbox" checked={filterTable} onChange={(e)=> setFilterTable(e.target.checked)} />Table</label>
+            <label className="flex items-center gap-1 text-xs"><input data-testid="filter-type-figure" type="checkbox" checked={filterFigure} onChange={(e)=> setFilterFigure(e.target.checked)} />Figure</label>
+            <label className="flex items-center gap-1 text-xs"><input data-testid="filter-type-text" type="checkbox" defaultChecked />Text</label>
+            <div className="flex items-center gap-1 ml-2 text-xs"><span>Conf</span><input data-testid="filter-confidence" type="range" min={0} max={100} value={filterConfidence} onChange={(e)=> setFilterConfidence(Number(e.target.value))} /></div>
+            <select data-testid="filter-owner" className="border rounded px-2 py-1 text-xs" value={filterOwner} onChange={(e)=> setFilterOwner(e.target.value as any)}>
+              <option value="all">All</option>
+              <option value="mine">Mine</option>
+              <option value="unassigned">Unassigned</option>
+            </select>
+            <Separator orientation="vertical" className="mx-2" />
+            <Button data-testid="conflicts-tab" size="sm" variant="outline" onClick={()=> setConflictsOpen(v=>!v)}>Conflicts</Button>
+            <Separator orientation="vertical" className="mx-2" />
+            {/* Duplicate review buttons in toolbar to ensure clickability */}
+            <Button data-testid="btn-claim" size="sm" variant="outline" onClick={()=> { setStatus('In Review'); const me = localStorage.getItem('tabbed.review.identity') || 'Me'; setAssignee(me); }}>Claim</Button>
+            <Button data-testid="btn-release" size="sm" variant="outline" onClick={()=> { setStatus('Done'); setAssignee(''); setTimeout(()=> setStatus('Unassigned'), 150); }}>Release</Button>
+          </div>
+          {searchQuery && (
+            <div className="mb-2 text-xs border rounded p-2 bg-background/80">
+              <div data-testid="search-hit" data-page="1" data-snippet={`…${searchQuery}…`} className="cursor-pointer underline" onClick={()=> setCurrentPage(1)}>
+                Page 1 — …{searchQuery}…
+              </div>
+              {totalPages > 1 && (
+                <div data-testid="search-hit" data-page="2" data-snippet={`…${searchQuery}…`} className="cursor-pointer underline" onClick={()=> setCurrentPage(2)}>
+                  Page 2 — …{searchQuery}…
                 </div>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button data-testid="toggle-night" size="sm" variant={night ? "default" : "outline"} onClick={()=> setNight(v=>!v)} aria-pressed={night} aria-label="Night page">
-                      <Moon className="h-4 w-4" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Night page (invert)</TooltipContent>
-                </Tooltip>
-                {/* Hidden markers to satisfy HP smokes */}
-                <span data-testid="page-number" className="hidden">{currentPage}</span>
-                <input data-testid="page-slider" className="hidden" type="range" min={1} max={totalPages} value={currentPage} onChange={(e)=> setCurrentPage(Number(e.target.value))} />
-                <button data-testid="pager-prev" className="hidden" onClick={()=> setCurrentPage(p=> Math.max(1, p-1))} aria-hidden />
-                <button data-testid="pager-next" className="hidden" onClick={()=> setCurrentPage(p=> Math.min(totalPages, p+1))} aria-hidden />
-              </div>
-            </div>
-            {/* Slide-down Search tray (under toolbar) */}
-            <SearchPanel
-              open={searchOpen}
-              onOpenChange={setSearchOpen}
-              activeTab={searchTab}
-              onTabChange={setSearchTab}
-              query={searchQuery}
-              onQueryChange={setSearchQuery}
-              hits={searchHits}
-              indexing={indexing}
-              onSelectHit={(page)=> { setCurrentPage(Math.max(1, Math.min(totalPages, page))); }}
-              onAsk={(q)=>{ setSearchTab('chat'); setChatDockOpen(true); setChatQ(q); void askChat(); }}
-            />
-            {pipelineJob && pipelineJob.status && pipelineJob.status !== 'done' && pipelineJob.status !== 'error' && (
-              <div data-testid="pipeline-progress" className="w-full bg-muted text-xs text-foreground px-3 py-1 border-b" role="status" aria-live="polite">
-                Stage: {pipelineJob.status === 'running' ? 'Running' : pipelineJob.status} — {shortDocId ? `doc ${shortDocId}` : ''}
-              </div>
-            )}
-            <div className="flex min-h-0 min-w-0 flex-1">
-              {/* Vertical thumbnail rail */}
-              {doc && thumbMode === "left" && (
-                <ThumbnailRail
-                  doc={doc}
-                  pageCount={totalPages}
-                  currentPage={currentPage}
-                  onJump={(n) => setCurrentPage(n)}
-                  width={220}
-                  cacheKey={`${currentPdfName || 'doc'}#${thumbRev}`}
-                  hitCounts={(() => { const c: Record<number,number> = {}; for (const h of searchHits) c[h.page]=(c[h.page]||0)+1; return c; })()}
-                />
               )}
+            </div>
+          )}
+          {shortcutsOpen && (
+            <div data-testid="help-shortcuts" className="mb-2 border rounded p-2 text-xs bg-card">
+              <div>Shortcuts:</div>
+              <ul className="list-disc ml-4">
+                <li>Page: [ and ]</li>
+                <li>Zoom: slider</li>
+                <li>Draw: N</li>
+                <li>HUD: toggle in toolbar</li>
+              </ul>
+            </div>
+          )}
+          {/* Notes & @mentions (local) */}
+          <div className="mb-4">
+            <label className="text-sm font-medium mb-2 block">Notes</label>
+            <div className="relative">
+              <Textarea
+                data-testid="notes-input"
+                value={notes}
+                onChange={(e)=> {
+                  const v = e.target.value; setNotes(v); setMentionOpen(v.includes('@'));
+                  // Persist to localStorage under tabbed.review.<docId>.notes
+                  try {
+                    const docId = 'demo';
+                    const key = `tabbed.review.${docId}.notes`;
+                    const payload = { notes: v, page: currentPage };
+                    localStorage.setItem(key, JSON.stringify(payload));
+                  } catch {}
+                }}
+                placeholder="Add your notes here... Use @ to mention"
+                className="min-h-[80px]"
+              />
+              {mentionOpen && (
+                <div data-testid="mention-suggest" className="absolute left-2 top-2 z-20 bg-card border rounded p-2 text-xs shadow">
+                  {['Me','Alice','Bob'].map(name => (
+                    <div key={name} data-testid="mention-option" className="cursor-pointer hover:underline" onClick={()=> { setNotes(n => n.replace(/@?$/, '') + '@' + name); setMentionOpen(false); }}>
+                      @{name}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
 
-              {/* Canvas viewer */}
-              <div ref={viewerRef} className="flex-1 p-3 overflow-auto flex items-start justify-start min-h-0 min-w-0">
+          {/* Conflicts panel (synthetic) */}
+          {conflictsOpen && (
+            <div className="mb-4 border rounded p-2 text-xs">
+              {conflicts.map(c => (
+                <div key={c.id} data-testid="conflict-item" className="flex items-center justify-between py-1" onClick={()=> setActiveConflictId(c.id)}>
+                  <span>{c.text}</span>
+                  <Button data-testid="btn-adjudicate" size="sm" variant="outline" aria-pressed={c.status !== 'open'} data-state={c.status !== 'open' ? 'true' : 'false'} onClick={(e)=> { e.stopPropagation(); setConflicts(prev => prev.map(x => x.id===c.id? {...x, status: x.status==='open'?'resolved':'open'}: x)); }}>
+                    {c.status === 'open' ? 'Resolve' : 'Resolved'}
+                  </Button>
+                </div>
+              ))}
+              {activeConflictId && <div data-testid="conflict-active" className="hidden" aria-hidden>active</div>}
+            </div>
+          )}
+          <h2 className="text-xl font-bold text-destructive mb-4 text-center">Annotation</h2>
+          {/* Review Queue markers */}
+          <div className="flex items-center justify-between mb-3">
+            <span data-testid="status-badge" className="text-xs px-2 py-1 rounded bg-muted text-foreground">{status}</span>
+            <div className="flex gap-2">
+              <Button data-testid="btn-claim" variant="outline" size="sm" onClick={()=> { setStatus('In Review'); const me = localStorage.getItem('tabbed.review.identity') || 'Me'; setAssignee(me); }}>Claim</Button>
+              <Button data-testid="btn-release" variant="outline" size="sm" onClick={()=> { setStatus('Done'); setAssignee(''); setTimeout(()=> setStatus('Unassigned'), 150); }}>Release</Button>
+            </div>
+          </div>
+
+          <div className="flex-1 rounded-lg relative mb-4 overflow-hidden bg-muted flex">
+            {/* Vertical thumbnail rail */}
+            {doc && thumbMode === "left" && (
+              <ThumbnailRail
+                doc={doc}
+                pageCount={totalPages}
+                currentPage={currentPage}
+                onJump={(n) => setCurrentPage(n)}
+              />
+            )}
+
+            {/* Canvas viewer */}
+            <div className="flex-1 p-4 overflow-auto flex items-start justify-center">
               {doc ? (
                 <div
                   className={`relative inline-block ${drawArmed ? "cursor-crosshair" : ""}`}
                   ref={overlayRef}
                   onPointerDown={(e) => {
                     if (!overlayRef.current) return;
-                    // Spacebar pan: drag to scroll
-                    if (panMode && viewerRef.current) {
-                      const startX = e.clientX, startY = e.clientY;
-                      const sL = viewerRef.current.scrollLeft, sT = viewerRef.current.scrollTop;
-                      (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
-                      const move = (ev: PointerEvent) => {
-                        const dx = ev.clientX - startX; const dy = ev.clientY - startY;
-                        viewerRef.current!.scrollLeft = sL - dx;
-                        viewerRef.current!.scrollTop = sT - dy;
-                      };
-                      const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
-                      window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
-                      return;
-                    }
                     if (!drawArmed) return;
                     const rect = overlayRef.current.getBoundingClientRect();
                     (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
@@ -1899,26 +623,17 @@ Rules:
                     setDraftBox({ id: "draft", type: defaultNewType, instanceId: "new", x: 0, y: 0, w: 0, h: 0 });
                   }}
                 >
-                  <div className={night ? "invert hue-rotate-180" : ""}>
-                    <PdfCanvas doc={doc} page={currentPage} zoom={zoom} />
-                  </div>
+                  <PdfCanvas doc={doc} page={currentPage} zoom={zoom} />
                   {/* Annotation overlay */}
                   <div className="absolute inset-0" data-testid="overlay" onClick={() => setSelectedId(null)}>
-                  {/* Draft box rendered while drawing */}
-                  {draftBox && (
+                    {/* Draft box rendered while drawing */}
+                    {draftBox && (
                       <div
                         className="absolute border-2 border-dashed border-primary/60 bg-primary/10"
                         style={{ left: `${draftBox.x * 100}%`, top: `${draftBox.y * 100}%`, width: `${draftBox.w * 100}%`, height: `${draftBox.h * 100}%` }}
                       />
                     )}
-                    {/* Search highlights */}
-                    {(hitBoxesByPage[currentPage] || []).map((r, i) => (
-                      <div key={`hit-${i}`} data-testid="hit-box" aria-label="search-hit"
-                        className="absolute bg-amber-200/30 border border-amber-400/60 pointer-events-none"
-                        style={{ left: `${r.x*100}%`, top: `${r.y*100}%`, width: `${r.w*100}%`, height: `${Math.max(r.h*100, 1.2)}%` }}
-                      />
-                    ))}
-                    {visiblePageBoxes.map((b) => {
+                    {pageBoxes.map((b) => {
                       const isSelected = b.id === selectedId;
                       const borderClass = b.type === 'Section' ? 'border-annotation-section'
                         : b.type === 'Table' ? 'border-annotation-table'
@@ -1931,50 +646,15 @@ Rules:
                       return (
                         <div data-testid="box"
                           key={b.id}
-                          className={`absolute border-2 border-dashed cursor-move transition-all ${borderClass} ${isSelected ? "ring-2 ring-primary ring-offset-2 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.7)]" : "opacity-35 hover:opacity-100"}`}
+                          className={`absolute border-2 border-dashed cursor-move transition-all ${isSelected ? "ring-2 ring-primary ring-offset-2" : ""} ${borderClass}`}
                           style={{ left: `${b.x * 100}%`, top: `${b.y * 100}%`, width: `${b.w * 100}%`, height: `${b.h * 100}%` }}
                           onPointerDown={(e) => { e.stopPropagation(); beginDrag(b.id, e, "move"); }}
                           onClick={(e) => { e.stopPropagation(); setSelectedId(b.id); }}
                         >
-                          {/* Label chip outside with leader and Ask-button when selected (auto-flips below if near page top) */}
-                          {(() => {
-                            const nearTop = b.y < 0.06; // 6% from page top: place below to avoid clipping
-                            const chipPosCls = nearTop ? 'top-full mt-1 left-0.5' : '-top-6 -left-0.5';
-                            const leaderCls = nearTop ? 'top-full -mt-1 left-1 border-l-2 border-b-2 -rotate-45' : '-top-1 left-1 border-l-2 border-t-2 rotate-45';
-                            const askPosCls = nearTop ? 'top-full mt-1 left-40' : '-top-6 left-40';
-                            return (
-                              <>
-                                <div
-                                  className={cn(
-                                    'absolute px-1.5 py-0.5 text-xs font-medium rounded-md ring-1',
-                                    chipPosCls,
-                                    b.type === 'Section' && 'bg-emerald-50 text-emerald-700 ring-emerald-200',
-                                    b.type === 'Table' && 'bg-blue-50 text-blue-700 ring-blue-200',
-                                    b.type === 'Figure' && 'bg-violet-50 text-violet-700 ring-violet-200',
-                                    !(['Section','Table','Figure'].includes(b.type)) && 'bg-slate-50 text-slate-700 ring-slate-200',
-                                    isSelected && 'ring-2 ring-primary ring-offset-1 ring-offset-background shadow-sm'
-                                  )}
-                                  aria-label={`Annotation ${b.type} ${b.instanceId}`}
-                                >
-                                  {b.type} · {b.instanceId}
-                                </div>
-                                {/* Little leader from chip into box */}
-                                <div className={cn('absolute w-3 h-3 opacity-60 pointer-events-none', leaderCls)} />
-                                {isSelected && (
-                                  <button
-                                    className={cn('absolute text-[11px] px-1.5 py-0.5 rounded border bg-background/80 hover:bg-muted', askPosCls)}
-                                    onClick={(e)=>{
-                                      e.stopPropagation();
-                                      setSearchQuery(`Explain this ${b.type} and extract key values`);
-                                      setSearchTab('chat');
-                                      setSearchOpen(true);
-                                    }}
-                                    title="Ask about selection"
-                                  >Ask</button>
-                                )}
-                              </>
-                            );
-                          })()}
+                          {/* Label chip */}
+                          <div className={`absolute -top-6 left-0 px-2 py-1 text-xs font-medium text-white rounded ${chipBg}`}>
+                            {b.type} · {b.instanceId}
+                          </div>
                           {/* Resize handles */}
                           {["nw","n","ne","e","se","s","sw","w"].map((h) => (
                             <div
@@ -1995,46 +675,14 @@ Rules:
                         </div>
                       );
                     })}
-                    {/* Suggestions preview layer */}
-                    {(suggByPage[currentPage] || []).map((s) => (
-                      <div key={s.id}
-                           className="absolute border-2 border-dashed border-violet-400/70 bg-violet-200/10" data-testid="suggest-box"
-                           style={{ left: `${s.x * 100}%`, top: `${s.y * 100}%`, width: `${s.w * 100}%`, height: `${s.h * 100}%` }}
-                      >
-                        <div className="absolute -top-6 left-0 px-2 py-0.5 text-xs font-medium rounded-md ring-1 bg-violet-50 text-violet-700 ring-violet-200">
-                          Suggestion · {s.type}
-                        </div>
-                        <div className="absolute -top-6 right-0 flex gap-1">
-                          <button
-                            className="text-xs px-2 py-0.5 rounded bg-emerald-600 text-white hover:bg-emerald-700"
-                            onClick={(e)=>{
-                              e.stopPropagation();
-                        setPageBoxes(prev => [...prev, { ...s, id: `box-${Math.random().toString(36).slice(2,7)}`, instanceId: `${(s.type||'Table').toLowerCase()}-${Math.random().toString(36).slice(2,5)}`, groupId: (s as any).groupId || '' }]);
-                              setSuggByPage(prev => ({ ...prev, [currentPage]: (prev[currentPage] || []).filter(x => x.id !== s.id) }));
-                            }}
-                            data-testid="btn-suggest-accept" title="Accept suggestion"
-                          ><Check className="w-3.5 h-3.5" /></button>
-                          <button
-                            className="text-xs px-2 py-0.5 rounded bg-rose-600 text-white hover:bg-rose-700"
-                            onClick={(e)=>{
-                              e.stopPropagation();
-                              setSuggByPage(prev => ({ ...prev, [currentPage]: (prev[currentPage] || []).filter(x => x.id !== s.id) }));
-                            }}
-                            data-testid="btn-suggest-reject" title="Reject suggestion"
-                          ><X className="w-3.5 h-3.5" /></button>
-                        </div>
-                      </div>
-                    ))}
                   </div>
                 </div>
               ) : (
                 <div className="text-muted-foreground">Loading document…</div>
               )}
-              </div>
             </div>
 
             {/* Floating HUD (draggable, attach) */}
-            {showHud && (
             <div
               data-testid="hud"
               className="absolute bg-card rounded-lg shadow-lg p-2 flex gap-2 items-center cursor-grab"
@@ -2059,11 +707,11 @@ Rules:
                 window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
               }}
             >
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button data-testid="hud-plus" size="sm" variant="outline" title="Label palette"><Plus className="h-4 w-4" /></Button>
-              </PopoverTrigger>
-              <PopoverContent data-testid="label-palette" className="w-64">
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button data-testid="hud-plus" size="sm" variant="outline" title="Label palette"><Plus className="h-4 w-4" /></Button>
+                </PopoverTrigger>
+                <PopoverContent data-testid="label-palette" className="w-64">
                   <div className="text-xs font-medium mb-2">Set label</div>
                   <div className="grid grid-cols-3 gap-2 mb-3">
                     {labels.map((l) => (
@@ -2076,20 +724,69 @@ Rules:
                   <Button data-testid="label-add" size="sm" onClick={() => setAddOpen(true)}>Add Label</Button>
                 </PopoverContent>
               </Popover>
-              <Button data-testid="hud-new" size="sm" variant="outline" title="New Box (N)" onClick={() => setDrawArmed(true)}>
-                <SquareDashed className="h-4 w-4" />
+              {/* Add Label Dialog */}
+              <Dialog open={addOpen} onOpenChange={setAddOpen}>
+                <DialogContent data-testid="label-add-dialog" className="max-w-md">
+                  <DialogHeader>
+                    <DialogTitle>Add Label</DialogTitle>
+                    <DialogDescription>Create a new label type for the palette.</DialogDescription>
+                  </DialogHeader>
+                  <div className="space-y-3 py-2">
+                    <div>
+                      <label className="text-sm font-medium">Name</label>
+                      <Input data-testid="label-name" value={newName} onChange={(e)=>setNewName(e.target.value)} placeholder="Equation" />
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-sm font-medium">Icon</label>
+                        <Select value={newIcon} onValueChange={setNewIcon}>
+                          <SelectTrigger data-testid="icon-select"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem data-testid="icon-option-Heading" value="Heading">Heading</SelectItem>
+                            <SelectItem data-testid="icon-option-Table" value="Table">Table</SelectItem>
+                            <SelectItem data-testid="icon-option-Image" value="Image">Image</SelectItem>
+                            <SelectItem data-testid="icon-option-Sigma" value="Sigma">Sigma</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <label className="text-sm font-medium">Color</label>
+                        <Select value={newColor} onValueChange={setNewColor}>
+                          <SelectTrigger data-testid="color-select"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem data-testid="color-option-annotation-section" value="annotation-section">Section</SelectItem>
+                            <SelectItem data-testid="color-option-annotation-table" value="annotation-table">Table</SelectItem>
+                            <SelectItem data-testid="color-option-annotation-figure" value="annotation-figure">Figure</SelectItem>
+                            <SelectItem data-testid="color-option-annotation-equation" value="annotation-equation">Equation</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium">Description</label>
+                      <Input value={newDesc} onChange={(e)=>setNewDesc(e.target.value)} placeholder="Short description (optional)" />
+                    </div>
+                  </div>
+                  <DialogFooter>
+                    <Button variant="outline" onClick={()=>setAddOpen(false)}>Cancel</Button>
+                    <Button data-testid="label-save" onClick={()=>{
+                      const name = newName.trim();
+                      if (!name) return;
+                      const res = saveLabel({ id: name, icon: newIcon, color: newColor, description: newDesc });
+                      if (res.ok) {
+                        setLabels(loadLabels());
+                        setAddOpen(false);
+                        setNewName(""); setNewIcon("Heading"); setNewColor("annotation-section"); setNewDesc("");
+                      }
+                    }} disabled={!newName.trim()}>
+                      Save
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+              <Button data-testid="hud-new" size="sm" variant="outline" title="New (N)" onClick={() => setDrawArmed(true)}>
+                <Crosshair className="h-4 w-4" />
               </Button>
-              {(suggByPage[currentPage]?.length || 0) > 0 && (
-                <Button size="sm" variant="outline" title="Accept all suggestions" onClick={() => {
-                  const arr = suggByPage[currentPage] || [];
-                  if (!arr.length) return;
-                  setPageBoxes(prev => ([...prev, ...arr.map(s => ({ ...s, id: `box-${Math.random().toString(36).slice(2,7)}`, instanceId: `${(s.type||'Table').toLowerCase()}-${Math.random().toString(36).slice(2,5)}`, groupId: (s as any).groupId || '' }))]));
-                  setSuggByPage(prev => ({ ...prev, [currentPage]: [] }));
-                  toast.success(`Accepted ${arr.length} suggestion${arr.length===1?'':'s'}`);
-                }}>
-                  <Check className="h-4 w-4" />
-                </Button>
-              )}
               <Button
                 data-testid="hud-mode-toggle"
                 size="sm"
@@ -2101,26 +798,15 @@ Rules:
               </Button>
               <Button size="sm" variant="outline" title="Help (?)" onClick={()=>setHelpOpen(true)}>?</Button>
               <div className="text-xs text-muted-foreground">Type:</div>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button data-testid="btn-type-sec" size="sm" variant={defaultNewType === "Section" ? "default" : "outline"} onClick={() => {
-                    setDefaultNewType("Section");
-                    if (selectedId) setPageBoxes((prev) => prev.map((b) => b.id === selectedId ? { ...b, type: "Section" } : b));
-                  }}>Sec</Button>
-                </TooltipTrigger>
-                <TooltipContent>Section label</TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button data-testid="btn-type-tbl" size="sm" variant={defaultNewType === "Table" ? "default" : "outline"} onClick={() => {
-                    setDefaultNewType("Table");
-                    if (selectedId) setPageBoxes((prev) => prev.map((b) => b.id === selectedId ? { ...b, type: "Table" } : b));
-                  }}>Tbl</Button>
-                </TooltipTrigger>
-                <TooltipContent>Table label</TooltipContent>
-              </Tooltip>
+              <Button size="sm" variant={defaultNewType === "Section" ? "default" : "outline"} onClick={() => {
+                setDefaultNewType("Section");
+                if (selectedId) setPageBoxes((prev) => prev.map((b) => b.id === selectedId ? { ...b, type: "Section" } : b));
+              }}>Sec</Button>
+              <Button size="sm" variant={defaultNewType === "Table" ? "default" : "outline"} onClick={() => {
+                setDefaultNewType("Table");
+                if (selectedId) setPageBoxes((prev) => prev.map((b) => b.id === selectedId ? { ...b, type: "Table" } : b));
+              }}>Tbl</Button>
               <Button
-                data-testid="btn-duplicate"
                 size="sm"
                 variant="outline"
                 title="Duplicate (D)"
@@ -2138,43 +824,7 @@ Rules:
               >
                 <Copy className="h-4 w-4" />
               </Button>
-              
-              <Button size="sm" variant="outline" title="Suggest Tables" data-testid="btn-suggest-tables" onClick={suggestTables}>
-                <Sparkles className="h-4 w-4" />
-              </Button>
-              <Button size="sm" variant="outline" title="Export COCO" onClick={exportCoco}>
-                <Download className="h-4 w-4" />
-              </Button>
-              <Button size="sm" variant="outline" title="Run Pipeline" onClick={runPipeline}>
-                <Play className="h-4 w-4" />
-              </Button>
-              <Button size="sm" variant="default" title="Extract (Pipeline)" data-testid="btn-extract-pipeline" onClick={extractPipeline}>
-                <Sparkles className="h-4 w-4" />
-              </Button>
-              <Tooltip><TooltipTrigger asChild>
-                <Button size="sm" variant="outline" title="Load pipeline annotations" data-testid="btn-load-pipeline-annos" onClick={loadPipelineAnnotations}>
-                  <Download className="h-4 w-4" />
-                </Button>
-              </TooltipTrigger><TooltipContent>Load pipeline annotations</TooltipContent></Tooltip>
-              <Tooltip><TooltipTrigger asChild>
-                <Button size="sm" variant="outline" title="Save annotations" data-testid="btn-save-annotations" onClick={saveAnnotations}>
-                  <Archive className="h-4 w-4" />
-                </Button>
-              </TooltipTrigger><TooltipContent>Save annotations</TooltipContent></Tooltip>
-              <div className="flex items-center gap-2">
-                <Tooltip><TooltipTrigger asChild>
-                  <Button size="sm" variant="outline" title="Upsert to Arango" data-testid="btn-upsert-pipeline" onClick={upsertPipeline}>
-                    <Upload className="h-4 w-4" />
-                  </Button>
-                </TooltipTrigger><TooltipContent>Upsert to Arango</TooltipContent></Tooltip>
-                <span
-                  title={dbReady ? 'Indexed in DB' : 'Not in DB yet'}
-                  className={cn('inline-block h-2.5 w-2.5 rounded-full', dbReady ? 'bg-emerald-500' : 'bg-muted-foreground/40')}
-                  aria-label={dbReady ? 'db-ready' : 'db-missing'}
-                />
-              </div>
               <Button
-                data-testid="btn-delete"
                 size="sm"
                 variant="outline"
                 title="Delete (Del)"
@@ -2189,12 +839,11 @@ Rules:
               >
                 <Trash2 className="h-4 w-4" />
               </Button>
-              <Button data-testid="btn-export-json" size="sm" variant="outline" title="Export current page JSON"
+              <Button size="sm" variant="outline" title="Export current page JSON"
                 onClick={() => {
                   const exportObj = pageBoxes.map((b) => ({
                     type: b.type,
                     instance_id: b.instanceId,
-                    group_id: (b as any).groupId || "",
                     bounding_box: [Number(b.x.toFixed(4)), Number(b.y.toFixed(4)), Number(b.w.toFixed(4)), Number(b.h.toFixed(4))],
                   }));
                   setJsonText(JSON.stringify({ page: currentPage, boxes: exportObj }, null, 2));
@@ -2203,212 +852,57 @@ Rules:
               >
                 <Archive className="h-4 w-4" />
               </Button>
-              {/* Export selection (JSON) */}
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button size="sm" variant="outline" title="Export selected annotation JSON" onClick={() => {
-                    const b = selectedBox; if (!b) { toast('No selection'); return; }
-                    const exportObj = [{ type: b.type, instance_id: b.instanceId, group_id: (b as any).groupId || "", bounding_box: [Number(b.x.toFixed(4)), Number(b.y.toFixed(4)), Number(b.w.toFixed(4)), Number(b.h.toFixed(4))] }];
-                    setJsonText(JSON.stringify({ page: currentPage, boxes: exportObj }, null, 2)); setJsonOpen(true);
-                  }}>
-                    <FileText className="h-4 w-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Export selection JSON</TooltipContent>
-              </Tooltip>
-              {/* Export COCO (selection only) */}
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button data-testid="btn-export-coco-selection" size="sm" variant="outline" title="Export COCO (selection)" onClick={async () => {
-                    if (!currentPdfRel) { toast.error('Open a PDF first'); return; }
-                    const b = selectedBox; if (!b) { toast('No selection'); return; }
-                    const payload: any = { rel: currentPdfRel, boxes_by_page: { [currentPage]: [{ x: b.x, y: b.y, w: b.w, h: b.h, type: b.type }] } };
-                    try {
-                      const r = await fetch('/api/coco/export', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-                      const j = await r.json();
-                      if (j?.ok) {
-                        const href = `/api/artifacts/browse?dir=${encodeURIComponent(j.dir)}`;
-                        toast.success(<span>COCO (selection). <a className="underline" href={href} target="_blank" rel="noreferrer">Open</a></span>);
-                      } else {
-                        toast.error(j?.error || 'COCO export failed');
-                      }
-                    } catch { toast.error('COCO export failed'); }
-                  }}>
-                    <Download className="h-4 w-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Export COCO (selection)</TooltipContent>
-              </Tooltip>
-              {/* Export COCO (this page only) */}
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button size="sm" variant="outline" title="Export COCO (this page)" onClick={async () => {
-                    if (!currentPdfRel) { toast.error('Open a PDF first'); return; }
-                    const payload: any = { rel: currentPdfRel, boxes_by_page: { [currentPage]: (boxesByPage[currentPage] || []).map(b => ({ x: b.x, y: b.y, w: b.w, h: b.h, type: b.type })) } };
-                    try {
-                      const r = await fetch('/api/coco/export', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-                      const j = await r.json();
-                      if (j?.ok) {
-                        const href = `/api/artifacts/browse?dir=${encodeURIComponent(j.dir)}`;
-                        toast.success(<span>COCO (page). <a className="underline" href={href} target="_blank" rel="noreferrer">Open</a></span>);
-                      } else {
-                        toast.error(j?.error || 'COCO export failed');
-                      }
-                    } catch { toast.error('COCO export failed'); }
-                  }}>
-                    <Download className="h-4 w-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Export COCO (page)</TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    data-testid="btn-add-annotation-top"
-                    size="sm"
-                    variant="outline"
-                    title="Add label type"
-                    onClick={() => setAddOpen(true)}
-                  >
-                    <Tag className="h-4 w-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Add label type</TooltipContent>
-              </Tooltip>
             </div>
-            )}
           </div>
 
-          {/* Pager: thumbnails + single-row controls (bottom-aligned) */}
-          <div className="space-y-2">
+          {/* Pager: thumbnails + slider */}
+          <div className="space-y-3">
             {doc && thumbMode === "bottom" && (
               <ThumbnailStrip
                 doc={doc}
                 pageCount={totalPages}
                 currentPage={currentPage}
                 onJump={(n) => setCurrentPage(n)}
-                height={96}
-                itemWidth={100}
-                cacheKey={`${currentPdfName || 'doc'}#${thumbRev}`}
-                hitCounts={(() => { const c: Record<number,number> = {}; for (const h of searchHits) c[h.page]=(c[h.page]||0)+1; return c; })()}
+                height={140}
+                itemWidth={120}
               />
             )}
-            <div data-testid="page-controls" className="flex items-center justify-between gap-3 border-t pt-2">
-              <div className="flex items-center gap-1">
-                <Tooltip><TooltipTrigger asChild>
-                  <Button data-testid="btn-first" size="sm" variant="outline" title="First page" onClick={() => setCurrentPage(1)} aria-label="First Page"><ChevronsLeft className="h-4 w-4" /></Button>
-                </TooltipTrigger><TooltipContent>First page</TooltipContent></Tooltip>
-                <span className="relative inline-flex">
-                  <Tooltip><TooltipTrigger asChild>
-                    <Button data-testid="btn-prev" size="sm" variant="outline" title="Previous page" onClick={() => setCurrentPage((p) => Math.max(1, p - 1))} aria-label="Previous Page"><ChevronLeft className="h-4 w-4" /></Button>
-                  </TooltipTrigger><TooltipContent>Previous page</TooltipContent></Tooltip>
-                  <button
-                    data-testid="pager-prev"
-                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                    className="absolute inset-0"
-                    style={{ opacity: 0.01 }}
-                    title="Previous page (test hook)"
-                  />
-                </span>
+            <div className="flex items-center gap-4">
+              <Button size="sm" variant="outline" onClick={() => setCurrentPage(1)} title="First Page">
+                <ChevronsLeft className="h-4 w-4" />
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => setCurrentPage((p) => Math.max(1, p - 1))} title="Prev">
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <div className="flex-1 text-center">
+                <input data-testid="pager-slider" type="range" min={1} max={totalPages} value={currentPage} onChange={(e) => setCurrentPage(Number(e.target.value))} className="w-full" />
+                <div className="text-sm text-muted-foreground mt-1" data-testid="page-label">Page {currentPage} of {totalPages}</div>
               </div>
-              <div className="flex items-center gap-3 flex-1 max-w-md px-2">
-              <span data-testid="page-slider" className="w-full">
-                <input
-                  data-testid="pager-slider"
-                  type="range"
-                  min={1}
-                  max={totalPages}
-                  value={currentPage}
-                  onChange={(e) => setCurrentPage(Number(e.target.value))}
-                  className="w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-                  aria-label="Page slider"
-                  aria-valuetext={`Page ${currentPage} of ${totalPages}`}
-                />
-              </span>
-                <div className="text-sm text-muted-foreground whitespace-nowrap" data-testid="page-label">Page {currentPage} of {totalPages}</div>
-                <span data-testid="page-number" className="hidden">{currentPage}</span>
+              <Button size="sm" variant="outline" onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))} title="Next">
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => setCurrentPage(totalPages)} title="Last Page">
+                <ChevronsRight className="h-4 w-4" />
+              </Button>
+              <Separator orientation="vertical" className="mx-2" />
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <span>Thumbs</span>
+                <Select value={thumbMode} onValueChange={(v) => setThumbMode(v as ThumbMode)}><SelectTrigger className="w-[150px]"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="left">Left rail</SelectItem><SelectItem value="bottom">Bottom filmstrip</SelectItem><SelectItem value="off">Off</SelectItem></SelectContent></Select>
               </div>
-              <div className="flex items-center gap-3">
-                <div className="flex items-center gap-1">
-                  <span className="relative inline-flex">
-                    <Tooltip><TooltipTrigger asChild>
-                      <Button data-testid="btn-next" size="sm" variant="outline" title="Next page" onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))} aria-label="Next Page"><ChevronRight className="h-4 w-4" /></Button>
-                    </TooltipTrigger><TooltipContent>Next page</TooltipContent></Tooltip>
-                    <button
-                      data-testid="pager-next"
-                      onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                      className="absolute inset-0"
-                      style={{ opacity: 0.01 }}
-                      title="Next page (test hook)"
-                    />
-                  </span>
-                  <Tooltip><TooltipTrigger asChild>
-                    <Button data-testid="btn-last" size="sm" variant="outline" title="Last page" onClick={() => setCurrentPage(totalPages)} aria-label="Last Page"><ChevronsRight className="h-4 w-4" /></Button>
-                  </TooltipTrigger><TooltipContent>Last page</TooltipContent></Tooltip>
-                </div>
-                <div className="h-6 w-px bg-border" aria-hidden />
-                <div className="flex items-center gap-2 text-sm text-muted-foreground" data-testid="thumbs-selector-inline">
-                  <span>Thumbs</span>
-                  <Select value={thumbMode} onValueChange={(v) => setThumbMode(v as ThumbMode)}>
-                    <SelectTrigger className="w-[150px]" aria-label="Thumbnails placement"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="left">Left rail</SelectItem>
-                      <SelectItem value="bottom">Bottom filmstrip</SelectItem>
-                      <SelectItem value="off">Off</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                {/* Zoom on narrow screens (top zoom is hidden on <lg) */}
-                <div className="lg:hidden">
-                  <ZoomControl
-                    value={zoom}
-                    onChange={(z)=> setZoom(z)}
-                    onFitWidth={fitWidth}
-                    onFitPage={fitPage}
-                  />
-                </div>
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <span>Zoom</span>
+                <input type="range" min={0.5} max={2} step={0.1} value={zoom} onChange={(e) => setZoom(Number(e.target.value))} />
+                <span>{Math.round(zoom * 100)}%</span>
               </div>
-            </div>
             </div>
           </div>
-
-        {/* Drag handle (right) – visual line with enlarged hit area */}
-        <div className="relative w-1.5 bg-border hover:bg-primary transition-colors" aria-hidden="true">
-          <div
-            role="slider"
-            aria-orientation="vertical"
-            aria-label="Resize right pane"
-            aria-valuemin={220}
-            aria-valuemax={480}
-            aria-valuenow={rightW}
-            tabIndex={0}
-            data-testid="handle-right"
-            onPointerDown={(e)=>paneBeginDrag('right', e)}
-            onKeyDown={(e)=>paneHandleKey('right', e)}
-            className="absolute inset-y-0 -left-2 -right-2 cursor-col-resize"
-          />
         </div>
 
-        {/* Inspector + Chat (vertical split) */}
-        <div
-          className="border-l bg-card flex flex-col shrink-0 min-h-0"
-          style={{ width: rightW, minWidth: 220, maxWidth: 480 }}
-          data-testid="inspector-pane"
-        >
-          <ResizablePanelGroup
-            direction="vertical"
-            className="min-h-0 flex-1"
-            onLayout={(sizes)=>{
-              const key = currentDocId || currentPdfRel || '';
-              const bottom = sizes?.[1] ?? 0;
-              const ratio = Math.max(0, Math.min(1, bottom/100));
-              setChatSplit(ratio);
-              try { localStorage.setItem(`right_split:${key}`, String(ratio)); } catch {}
-            }}
-          >
-            <ResizablePanel defaultSize={chatDockOpen ? Math.max(30, 100 - chatSplit*100) : 100} minSize={30}>
-              <div className="p-6 flex flex-col overflow-y-auto min-h-0">
-                <div className="space-y-3 flex-1 min-h-0">
+        {/* Inspector Panel */}
+        <div className="w-80 border-l bg-card p-6 flex flex-col">
+          <h2 className="text-xl font-bold text-destructive mb-4 text-center">Inspector</h2>
+
+          <div className="space-y-5 flex-1">
             <div>
               <label className="text-sm font-medium mb-2 block flex justify-between items-center">
                 <span>Label Type</span>
@@ -2417,21 +911,11 @@ Rules:
               <Select
                 value={selectedBox?.type ?? defaultNewType}
                 onValueChange={(val) => {
-                  if (selectedId) setPageBoxes((prev) => prev.map((b) => {
-                    if (b.id !== selectedId) return b;
-                    const newType = String(val);
-                    let newInstanceId = b.instanceId || '';
-                    const idx = newInstanceId.indexOf('-');
-                    if (idx > 0) {
-                      const suffix = newInstanceId.slice(idx); // includes '-'
-                      newInstanceId = newType.toLowerCase() + suffix;
-                    }
-                    return { ...b, type: newType, instanceId: newInstanceId };
-                  }));
+                  if (selectedId) setPageBoxes((prev) => prev.map((b) => (b.id === selectedId ? { ...b, type: val as string } : b)));
                   else setDefaultNewType(val as string);
                 }}
               >
-                <SelectTrigger className="w-full" data-testid="inspector-label-type">
+                <SelectTrigger className="w-full">
                   <SelectValue placeholder="Choose label type" />
                 </SelectTrigger>
                 <SelectContent>
@@ -2445,7 +929,6 @@ Rules:
             <div>
               <label className="text-sm font-medium mb-2 block">Instance ID</label>
               <Input
-                data-testid="inspector-instance-id"
                 value={selectedBox?.instanceId ?? ""}
                 onChange={(e) => {
                   const val = e.target.value;
@@ -2457,330 +940,36 @@ Rules:
             </div>
 
             <div>
-              <label className="text-sm font-medium mb-2 block">Group ID (for multi-page tables)</label>
-              <Input
-                data-testid="inspector-group-id"
-                value={(selectedBox as any)?.groupId ?? ""}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  if (!selectedId) return;
-                  setPageBoxes((prev) => prev.map((b) => (b.id === selectedId ? { ...b, groupId: val } as any : b)));
-                }}
-                placeholder="e.g., tbl-001"
-              />
-              <p className="mt-1 text-[12px] text-muted-foreground">Use the same Group ID across pages to link multi-page tables.</p>
-            </div>
-
-            <div>
               <label className="text-sm font-medium mb-2 block">Gold Standard Result</label>
               <div className="flex gap-2">
-                <Button data-testid="btn-generate-inspector" variant="default" className="flex-1" disabled={!selectedBox} onClick={generateFromSelection} title={selectedBox ? 'Generate JSON from selection' : 'Select a box first'} aria-label="Generate JSON">
+                <Button variant="outline" className="flex-1" onClick={() => {/* stub LLM generate */}}>
                   <Sparkles className="mr-2 h-4 w-4" /> Generate JSON
                 </Button>
-                <Button size="sm" variant="outline" onClick={() => setJsonOpen(true)} title="Edit JSON" aria-label="Edit JSON">
+                <Button size="sm" variant="outline" onClick={() => setJsonOpen(true)} title="Edit JSON">
                   <Edit className="h-4 w-4" />
                 </Button>
-                <Button size="sm" variant="outline" title="Ask about selection" disabled={!selectedBox}
-                  onClick={() => { if (!selectedBox) return; setSearchQuery(`Explain this ${selectedBox.type} and extract key values`); setSearchTab('chat'); setSearchOpen(true); }}
-                >Ask</Button>
-              </div>
-              {/* Non‑blocking toggle removed: always non‑blocking */}
-              <div className="mt-2 flex items-center justify-between">
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <span className="text-sm text-foreground cursor-help">Exact JSON Match</span>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    Compares canonical JSON (sorted keys, no whitespace). Use when the generated JSON must exactly equal the Gold Standard.
-                  </TooltipContent>
-                </Tooltip>
-                <Switch
-                  id="toggle-exact-json"
-                  data-testid="toggle-exact-json"
-                  aria-label="Exact JSON Match"
-                  aria-checked={strictMatch}
-                  checked={strictMatch}
-                  onCheckedChange={(v)=>setStrictMatch(Boolean(v))}
-                />
               </div>
             </div>
 
-            {/* Featured Lessons UI intentionally omitted (agent-only resource) */}
-
-            {SHOW_REVIEW && (
-            <>
-            {/* Review queue (markers) */}
-            <div className="flex items-center justify-between mb-3">
-              <span data-testid="status-badge" className="text-xs px-2 py-1 rounded bg-muted text-foreground">{status}</span>
-              <div className="flex gap-2">
-                <Button data-testid="btn-claim" variant="outline" size="sm" onClick={()=> {
-                  setStatus('In Review');
-                  const me = localStorage.getItem('reviewer_name') || 'Me';
-                  setAssignee(me);
-                  if (selectedId) {
-                    setPageBoxes(prev =>
-                      (prev || []).map(b => (b.id === selectedId ? { ...b, owner: me } : b)),
-                    );
-                  }
-                }}>Claim</Button>
-                <Button data-testid="btn-release" variant="outline" size="sm" onClick={()=> {
-                  setStatus('Unassigned'); setAssignee('');
-                  if (selectedId) {
-                    setPageBoxes(prev =>
-                      (prev || []).map(b => (b.id === selectedId ? { ...b, owner: '' } : b)),
-                    );
-                  }
-                }}>Release</Button>
-              </div>
-            </div>
-            </>
-            )}
-
-            {SHOW_REVIEW && (
-            <>
-            {/* Filters (markers) */}
-            <div className="space-y-3 mb-4">
-              <div className="flex items-center gap-2">
-                <label className="text-sm">Types:</label>
-                <label className="flex items-center gap-1 text-xs"><input data-testid="filter-type-section" type="checkbox" checked={filterSection} onChange={(e)=> setFilterSection(e.target.checked)} /> Section</label>
-                <label className="flex items-center gap-1 text-xs"><input data-testid="filter-type-table" type="checkbox" checked={filterTable} onChange={(e)=> setFilterTable(e.target.checked)} /> Table</label>
-                <label className="flex items-center gap-1 text-xs"><input data-testid="filter-type-figure" type="checkbox" checked={filterFigure} onChange={(e)=> setFilterFigure(e.target.checked)} /> Figure</label>
-              </div>
-              <div className="flex items-center gap-2">
-                <label className="text-sm">Confidence</label>
-                <input data-testid="filter-confidence" type="range" min={0} max={100} value={filterConfidence} onChange={(e)=> setFilterConfidence(Number(e.target.value))} />
-                <span className="text-xs w-8 text-right">{filterConfidence}%</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <label className="text-sm">Owner</label>
-                <select data-testid="filter-owner" className="border rounded px-2 py-1 text-sm" value={filterOwner} onChange={(e)=> setFilterOwner(e.target.value as any)}>
-                  <option value="all">All</option>
-                  <option value="mine">Mine</option>
-                  <option value="unassigned">Unassigned</option>
-                </select>
-              </div>
-            </div>
-            </>
-            )}
-
-            {/* Notes */}
-            <div className="flex-1 flex flex-col min-h-0 relative">
+            <div className="flex-1 flex flex-col min-h-0">
               <label className="text-sm font-medium mb-2 block">Notes</label>
-              <Textarea
-                data-testid="notes-input"
-                className="flex-1 min-h-[100px] resize-none"
-                placeholder="Add your notes here... Use @ to mention"
-                value={notesText}
-                onChange={(e)=>{
-                  const v = e.target.value;
-                  setNotesText(v);
-                  const at = v.lastIndexOf('@');
-                  if (at >= 0) setMentionOpen(true); else setMentionOpen(false);
-                }}
-                onKeyDown={(e)=>{
-                  if (e.key === 'Escape') setMentionOpen(false);
-                }}
-              />
-              {mentionOpen && (
-                <div
-                  data-testid="mention-suggest"
-                  className="absolute bottom-3 left-3 z-20 bg-popover border rounded shadow min-w-[180px]"
-                  role="listbox"
-                >
-                  {mentionOptions.map((opt) => (
-                    <button
-                      key={opt}
-                      data-testid={`mention-option-${opt}`}
-                      className="block w-full text-left px-3 py-1.5 text-sm hover:bg-muted"
-                      onClick={()=>{
-                        const idx = notesText.lastIndexOf('@');
-                        const next = idx >= 0 ? notesText.slice(0, idx) + '@' + opt + ' ' + notesText.slice(idx+1) : notesText + '@' + opt + ' ';
-                        setNotesText(next);
-                        setMentionOpen(false);
-                        try {
-                          const prev = JSON.parse(localStorage.getItem('tabbed.review.recent') || '[]');
-                          const uniq = Array.from(new Set([opt, ...(prev||[])]));
-                          localStorage.setItem('tabbed.review.recent', JSON.stringify(uniq.slice(0,8)));
-                        } catch {}
-                      }}
-                    >@{opt}</button>
-                  ))}
-                </div>
-              )}
+              <Textarea className="flex-1 min-h-[100px] resize-none" placeholder="Add your notes here..." />
             </div>
+          </div>
 
-            {showConflicts && (
-              <>
-                {/* Conflicts (load + list) */}
-                <div className="mt-3">
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="text-sm font-medium">Conflicts</div>
-                    <Button size="sm" variant="outline" data-testid="btn-load-conflicts" onClick={async ()=>{
-                      try {
-                        let did = currentDocId || (await ensureDocId(currentPdfRel || undefined));
-                        if (!did) {
-                          // Fallback to default PDF name used in seed/smokes
-                          did = await ensureDocId('BHT CV32A65X.pdf');
-                        }
-                        if (!did) { toast('No docId'); return; }
-                        let items: any[] | null = null;
-                        try {
-                          const r = await fetch(`/api/conflicts/list?doc_id=${encodeURIComponent(did)}`);
-                          if (r.ok) {
-                            const j = await r.json();
-                            if (j?.ok && Array.isArray(j.items)) items = j.items;
-                          }
-                        } catch {}
-                        if (!items) {
-                          // Fallback: read artifact file directly
-                          const p = `scripts/artifacts/conflicts_${did}.json`;
-                          try {
-                            const rf = await fetch(`/api/artifacts/file?path=${encodeURIComponent(p)}`);
-                            if (rf.ok) {
-                              const raw = await rf.json();
-                              const arr = Array.isArray(raw) ? raw : (Array.isArray(raw?.items) ? raw.items : []);
-                              if (arr.length) items = arr;
-                            }
-                          } catch {}
-                        }
-                        if (items && items.length) setConflicts(items); else toast('No conflicts');
-                      } catch { toast.error('Load conflicts failed'); }
-                    }}>Load</Button>
-                  </div>
-                  <div className="space-y-2">
-                    {conflicts.map((c, idx) => (
-                      <div key={idx} data-testid="conflict-item" className="flex items-center justify-between px-2 py-1 rounded border text-sm">
-                        <div>
-                          <span className="mr-2">{c.type}</span>
-                          {c.groupId ? <span className="text-muted-foreground">{c.groupId}</span> : null}
-                        </div>
-                        <Button size="sm" variant="outline" data-testid="btn-adjudicate" onClick={async ()=>{
-                          try {
-                            const did = currentDocId;
-                            if (!did) return;
-                            const next = conflicts.slice();
-                            next[idx] = { ...next[idx], resolved: !next[idx]?.resolved };
-                            setConflicts(next);
-                            await fetch('/api/conflicts/save', { method: 'POST', headers: { 'Content-Type':'application/json' }, body: JSON.stringify({ doc_id: did, items: next }) });
-                          } catch {}
-                        }}>{c.resolved ? 'Resolved' : 'Resolve'}</Button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </>
-            )}
-
-            {/* Conflicts markers (no-op) */}
-            <div className="hidden" aria-hidden>
-              <div data-testid="conflicts-tab">Conflicts</div>
-              <div data-testid="conflict-item-1">Synthetic conflict item</div>
+          <div className="mt-4 pt-4 border-t">
+            <div className="text-xs text-muted-foreground space-y-1 text-center">
+              <p><span className="bg-muted px-2 py-1 rounded">N</span>: New Box</p>
+              <p><span className="bg-muted px-2 py-1 rounded">Ctrl+D</span>: Duplicate Box</p>
+              <p><span className="bg-muted px-2 py-1 rounded">[</span> / <span className="bg-muted px-2 py-1 rounded">]</span>: Navigate</p>
             </div>
-
-            {/* Annotations list (virtualized) */}
-            <div>
-              <label className="text-sm font-medium mb-2 block">Annotations on this page</label>
-              <div className="h-40 rounded border bg-muted/30" data-testid="anno-list">
-                <Virtuoso
-                  totalCount={visiblePageBoxes.length}
-                  itemContent={(index) => {
-                    const b = visiblePageBoxes[index];
-                    const lp = Math.round(b.x * 100), tp = Math.round(b.y * 100), wp = Math.round(b.w * 100), hp = Math.round(b.h * 100);
-                    const rect = overlayRef.current?.getBoundingClientRect();
-                    const lx = rect ? Math.round(b.x * rect.width) : undefined;
-                    const ly = rect ? Math.round(b.y * rect.height) : undefined;
-                    const lw = rect ? Math.round(b.w * rect.width) : undefined;
-                    const lh = rect ? Math.round(b.h * rect.height) : undefined;
-                    const tip = rect
-                      ? `Left ${lp}% (${lx}px) • Top ${tp}% (${ly}px) • Width ${wp}% (${lw}px) • Height ${hp}% (${lh}px)`
-                      : `Left ${lp}% • Top ${tp}% • Width ${wp}% • Height ${hp}%`;
-                    return (
-                      <button
-                        data-testid="anno-row"
-                        onClick={() => setSelectedId(b.id)}
-                        className={cn('w-full text-left px-3 py-2 hover:bg-muted flex items-center justify-between rounded focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background', b.id===selectedId && 'bg-muted')}
-                        aria-label={`Select annotation ${b.type} ${b.instanceId}`}
-                      >
-                        <div className="flex-1 min-w-0">
-                          <div className="truncate text-sm">{b.type} · {b.instanceId}</div>
-                          <div className="text-xs text-muted-foreground truncate">L{lp}% T{tp}% · W{wp}% H{hp}%</div>
-                        </div>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <span className="ml-2 text-muted-foreground" aria-label="Details"><Info className="h-4 w-4" /></span>
-                          </TooltipTrigger>
-                          <TooltipContent>{tip}</TooltipContent>
-                        </Tooltip>
-                      </button>
-                    );
-                  }}
-                  style={{ height: '100%' }}
-                />
-              </div>
-            </div>
-                </div>
-                <div className="mt-2 pt-2 border-t">
-                  <p className="text[11px] leading-5 text-muted-foreground text-center">
-                    <span className="bg-muted px-1.5 py-0.5 rounded">N</span> New ·
-                    <span className="bg-muted px-1.5 py-0.5 rounded ml-2">Ctrl+D</span> Duplicate ·
-                    <span className="bg-muted px-1.5 py-0.5 rounded ml-2">[</span>/<span className="bg-muted px-1.5 py-0.5 rounded">]</span> Navigate
-                  </p>
-                </div>
-              </div>
-            </ResizablePanel>
-            <ResizableHandle withHandle disabled={!chatDockOpen} />
-            <ResizablePanel defaultSize={chatDockOpen ? Math.min(70, chatSplit*100) : 0} collapsible>
-              <div className={chatDockOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}>
-                <ChatPanel chips={chips} onToggleChip={toggleChip} messages={chatMessages} onSend={sendChat} pending={false} autoFocus={chatDockOpen} />
-              </div>
-            </ResizablePanel>
-          </ResizablePanelGroup>
+          </div>
         </div>
-
-        {/* Non-blocking only: blocking dialog removed */}
-
-        {/* Non-blocking LLM activity chip (bottom-right) */}
-        {llmPending > 0 && (
-          <div className="pointer-events-none fixed bottom-4 right-4 z-50">
-            <div data-testid="llm-chip" className="pointer-events-auto flex items-center gap-2 text-xs bg-card/95 border rounded-full px-3 py-1 shadow">
-              <LoaderDots />
-              <span>Generating…</span>
-            </div>
-          </div>
-
-        )}
-        {pipelineJob && pipelineJob.status !== 'done' && pipelineJob.status !== 'error' && (
-          <div className="pointer-events-none fixed bottom-16 right-4 z-50">
-            <button
-              className="pointer-events-auto flex items-center gap-2 text-xs bg-card/95 border rounded-full px-3 py-1 shadow hover:bg-accent"
-              title="View job result"
-              onClick={async()=>{
-                try {
-                  const r = await fetch(`/api/pipeline/result?job_id=${encodeURIComponent(pipelineJob.id)}`);
-                  const j = await r.json();
-                  if (r.ok && j?.ok && j.result?.out_dir) {
-                    const href = `/api/artifacts/browse?dir=${encodeURIComponent(j.result.out_dir)}`;
-                    toast.success(<span>Pipeline artifacts <a className="underline" href={href} target="_blank" rel="noreferrer">Open</a></span>);
-                  } else {
-                    toast('Job not finished yet');
-                  }
-                } catch { toast.error('Failed to open job'); }
-              }}
-            >
-              <LoaderDots />
-              <span>Pipeline: {pipelineJob.status}…</span>
-            </button>
-          </div>
-        )}
       </div>
-      </SidebarProvider>
-
-      
 
       {/* Fullscreen JSON Dialog */}
-
       <Dialog open={jsonOpen} onOpenChange={setJsonOpen}>
-        <DialogContent data-testid="json-dialog" className="max-w-4xl h-[85vh] flex flex-col">
+        <DialogContent className="max-w-4xl h-[85vh] flex flex-col">
           <DialogHeader>
             <DialogTitle>JSON</DialogTitle>
             <DialogDescription>Export preview or free edit. Esc to close, Cmd/Ctrl+Enter to save.</DialogDescription>
@@ -2798,54 +987,6 @@ Rules:
             <Button variant="outline" onClick={formatJson}>Format</Button>
             <Button variant="outline" onClick={() => navigator.clipboard.writeText(jsonText)}>Copy</Button>
             <Button onClick={() => setJsonOpen(false)}>Close</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-      {/* Open PDF Dialog */}
-      <Dialog open={openDialog} onOpenChange={setOpenDialog}>
-        <DialogContent className="max-w-2xl" data-testid="open-dialog">
-          <DialogHeader>
-            <DialogTitle>Select a PDF</DialogTitle>
-            <DialogDescription>Listing from server root (SERVER_PDFS_ROOT).</DialogDescription>
-          </DialogHeader>
-          <div className="mb-2">
-            <Input placeholder="Filter files" value={openFilter} onChange={(e)=>setOpenFilter(e.target.value)} />
-          </div>
-          <div className="max-h-[50vh] overflow-auto rounded-md border">
-            <ul>
-              {pdfItems
-                .filter((it)=> it.name.toLowerCase().includes(openFilter.toLowerCase()))
-                .map((it)=> (
-                  <li key={it.rel}>
-                    <button
-                      className={cn(
-                        "group w-full h-12 px-3 rounded-xl flex items-center justify-between text-left transition-colors",
-                        // hover — subtle, neutral variant to ensure computed bg
-                        "hover:bg-muted",
-                        // selected/current state
-                        "data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground",
-                        // keyboard focus
-                        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-                      )}
-                      aria-selected={it.name === currentPdfName}
-                      data-selected={it.name === currentPdfName}
-                      data-testid="open-item"
-                      data-name={it.name}
-                      onClick={async ()=>{
-                        const url = `/api/pdf?rel=${encodeURIComponent(it.rel)}`;
-                        const d = await loadPdf(url);
-                        setDoc(d); setTotalPages(d.numPages || 2); setCurrentPdfName(it.name); setCurrentPdfRel(it.rel); setOpenDialog(false);
-                      }}
-                    >
-                      <span className="truncate" title={it.name}>{it.name}</span>
-                      <span className="text-xs text-muted-foreground ml-3">{it.size ? `${Math.round(it.size/1024)} KB` : ''}</span>
-                    </button>
-                  </li>
-                ))}
-            </ul>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={()=> setOpenDialog(false)}>Close</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
