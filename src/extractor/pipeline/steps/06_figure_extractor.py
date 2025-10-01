@@ -52,9 +52,16 @@ try:
 except Exception as _e:
     logger.warning(f"LiteLLM cache init failed (continuing): {_e}")
 
-# Configure logger
-logger.remove()
-logger.add(sys.stderr, level="INFO")
+# Avoid configuring handlers at import time; configure in CLI path.
+def _configure_logging_once() -> None:
+    try:
+        logger.remove()
+    except Exception:
+        pass
+    try:
+        logger.add(sys.stderr, level="INFO")
+    except Exception:
+        pass
 
 # Create console instance
 console = Console()
@@ -414,13 +421,6 @@ def run(
     except Exception:
         pass
     timings = build_stage_timings(stage_start_ts, t0)
-    try:
-        samples = stop_resource_sampler(sampler) if sampler else []
-        if samples:
-            resources.setdefault("resource_samples", samples)
-    except Exception:
-        pass
-    timings = build_stage_timings(stage_start_ts, t0)
     result = {
         "timestamp": datetime.now().isoformat(),
         "source_json": str(stage_02_json),
@@ -560,13 +560,6 @@ def debug_bundle(
     except Exception:
         pass
     timings = build_stage_timings(stage_start_ts, t0)
-    try:
-        samples = stop_resource_sampler(sampler) if sampler else []
-        if samples:
-            resources.setdefault("resource_samples", samples)
-    except Exception:
-        pass
-    timings = build_stage_timings(stage_start_ts, t0)
     result = {
         "timestamp": datetime.now().isoformat(),
         "source_pdf": str(pdf_path),
@@ -588,7 +581,7 @@ def debug_bundle(
 
 def build_cli():
     import typer as _typer
-
+    _configure_logging_once()
     app = _typer.Typer(help="Robustly extracts and describes figures from a PDF.")
     app.command(name="run")(run)
     app.command(name="debug-bundle")(debug_bundle)

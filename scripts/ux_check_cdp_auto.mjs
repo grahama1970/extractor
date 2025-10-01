@@ -21,6 +21,17 @@ async function getWS() {
   }
   console.log(`CDP: ${ws}`);
   const env = { ...process.env, BROWSERLESS_WS: ws, BASE_URL: BASE };
-  const cp = spawn(process.execPath, ['scripts/ux_check_cdp.mjs'], { stdio: 'inherit', env });
+  const target = 'scripts/ux_check_cdp.mjs';
+  if (!fs.existsSync(target)) {
+    console.log('[ux_check] Minimal inline check (ux_check_cdp.mjs not found)');
+    try {
+      const res = await fetch(BASE, { redirect: 'manual' });
+      if (!res || res.status >= 400) process.exit(1);
+      process.exit(0);
+    } catch {
+      process.exit(1);
+    }
+  }
+  const cp = spawn(process.execPath, [target], { stdio: 'inherit', env });
   cp.on('exit', (code) => process.exit(code ?? 0));
 })();

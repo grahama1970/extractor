@@ -18,7 +18,7 @@ import json
 import asyncio
 import math
 from pathlib import Path
-from typing import Dict, List, Any, Optional, cast
+from typing import Dict, List, Any, Optional, cast, Tuple
 from datetime import datetime, timezone
 import numpy as np
 from numpy.typing import NDArray
@@ -404,7 +404,7 @@ def ensure_graph_and_edge_collection(
         sys.exit(1)
 
 
-def build_faiss_index(embeddings: NDArray[np.float32]) -> faiss.IndexFlatIP:
+def build_faiss_index(embeddings: NDArray[np.float32]) -> Tuple[str, Any]:
     """Build FAISS index with normalized embeddings for cosine similarity.
 
     Args:
@@ -578,7 +578,7 @@ async def enrich_edges_with_rationales(
 async def find_and_create_relationships(
     documents: List[Dict[str, Any]],
     embeddings: NDArray[np.float32],
-    index: faiss.IndexFlatIP,
+    index: Any,
     k_neighbors: int = 10,
     similarity_threshold: float = 0.55,
     batch_size: int = 100,

@@ -59,6 +59,25 @@ from extractor.core.schema.unified_document import SourceType
 from extractor.pipeline.utils.ann_index import build_ann_index, query_ann_index, load_ann_index
 from extractor.pipeline.utils.log_utils import sanitize_messages_for_return
 
+# Shared helper: table confidence heuristic (0.0–1.0)
+def _table_confidence(t: Dict[str, Any]) -> float:
+    try:
+        pm = t.get("pandas_metrics") or {}
+        shape = pm.get("shape") or [0, 0]
+        rows = int(shape[0] or 0)
+        density = float(pm.get("data_density") or 0.0)
+        camel = t.get("camelot_metrics") or {}
+        acc = float(camel.get("accuracy") or 0.0)
+        white = float(camel.get("whitespace") or 0.0)
+        score = 0.0
+        score += 0.2 if rows >= 3 else 0.0
+        score += min(max(density, 0.0), 1.0) * 0.4
+        score += min(max(acc / 100.0, 0.0), 1.0) * 0.4
+        score -= min(max(white / 100.0, 0.0), 1.0) * 0.1
+        return max(0.0, min(1.0, score))
+    except Exception:
+        return 0.0
+
 # --- Initialization & Configuration ---
 
 if not load_dotenv(find_dotenv(), override=False):
@@ -76,7 +95,6 @@ logger.add(
     format="<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{function}:{line}</cyan> - <level>{message}</level>",
 )
 
-app = typer.Typer(help="Reflows document sections using a VLM (offline)")
 STAGE07_DEBUG = os.getenv("STAGE07_DEBUG", "").lower() in ("1", "true", "yes", "y")
 console = Console()
 
@@ -479,23 +497,7 @@ async def reflow_section_with_llm(
     try:
         sec_diags = []
 
-        def _tconf(t):
-            try:
-                pm = t.get("pandas_metrics") or {}
-                shape = pm.get("shape") or [0, 0]
-                rows = int(shape[0] or 0)
-                density = float(pm.get("data_density") or 0.0)
-                camel = t.get("camelot_metrics") or {}
-                acc = float(camel.get("accuracy") or 0.0)
-                white = float(camel.get("whitespace") or 0.0)
-                score = 0.0
-                score += 0.2 if rows >= 3 else 0.0
-                score += min(max(density, 0.0), 1.0) * 0.4
-                score += min(max(acc / 100.0, 0.0), 1.0) * 0.4
-                score -= min(max(white / 100.0, 0.0), 1.0) * 0.1
-                return max(0.0, min(1.0, score))
-            except Exception:
-                return 0.0
+        # use shared helper
 
         # Decide if the model supports multimodal inputs
         supports_vision = any(
@@ -563,26 +565,8 @@ async def reflow_section_with_llm(
                     pass
 
             # Table images: include only low-confidence tables
-            def _tconf(t):
-                try:
-                    pm = t.get("pandas_metrics") or {}
-                    shape = pm.get("shape") or [0, 0]
-                    rows = int(shape[0] or 0)
-                    density = float(pm.get("data_density") or 0.0)
-                    camel = t.get("camelot_metrics") or {}
-                    acc = float(camel.get("accuracy") or 0.0)
-                    white = float(camel.get("whitespace") or 0.0)
-                    score = 0.0
-                    score += 0.2 if rows >= 3 else 0.0
-                    score += min(max(density, 0.0), 1.0) * 0.4
-                    score += min(max(acc / 100.0, 0.0), 1.0) * 0.4
-                    score -= min(max(white / 100.0, 0.0), 1.0) * 0.1
-                    return max(0.0, min(1.0, score))
-                except Exception:
-                    return 0.0
-
             for t in section_data.get("tables", []) or []:
-                conf = _tconf(t)
+                conf = _table_confidence(t)
                 if conf < TABLE_CONF_THRESHOLD:
                     tb64 = get_table_image_b64(t, results_base_dir)
                     if tb64:
@@ -781,7 +765,7 @@ async def reflow_section_with_llm(
             if sec_b64:
                 _attach_blocks(sec_b64, "section", {"section_id": section_data.get("id")})
             for t in section_data.get("tables", []) or []:
-                conf = _tconf(t)
+                conf = _table_confidence(t)
                 if conf < TABLE_CONF_THRESHOLD:
                     _attach_blocks(
                         get_table_image_b64(t, results_base_dir),
@@ -984,11 +968,11 @@ async def reflow_section_with_llm(
             # Include a JSON schema hint inline for Gemini-like providers
             schema_hint = ""
             if _is_gemini(LLM_MODEL):
-                try:
-                    import json as _json
-                    schema_hint = "\nJSON Schema (validate strictly):\n" + _json.dumps(_json_schema, ensure_ascii=False)
-                except Exception:
-                    schema_hint = "\nKeys: reflowed_json(object), ocr_corrections(object), improvements_made(string), summary(string)."
+                # Avoid referencing _json_schema before it is defined; provide a compact keys hint instead.
+                schema_hint = (
+                    "\nKeys: reflowed_json(object), ocr_corrections(object), "
+                    "improvements_made(string), summary(string)."
+                )
             user_text = (
                 f"Return ONLY valid JSON.{schema_hint}\n\n{context_text}" if _is_gemini(LLM_MODEL) else f"Return ONLY valid JSON.\n\n{context_text}"
             )
@@ -2442,6 +2426,7 @@ def debug_bundle(
     output_dir: Path = typer.Option("data/results/pipeline", "-o", help="Results directory"),
     include_images: bool = typer.Option(True, "--include-images/--no-include-images"),
     allow_fallback: bool = typer.Option(False, "--allow-fallback"),
+    request_timeout: int = typer.Option(120, "--timeout", help="Per-request LLM timeout (seconds)"),
 ):
     """Run Stage 07 directly from a consolidated JSON bundle (debug only)."""
     stage_output_dir = output_dir / "07_reflow_section"
@@ -2500,7 +2485,11 @@ def debug_bundle(
     async def run_tasks():
         tasks = [
             reflow_section_with_llm(
-                s, output_dir, include_images=include_images, allow_fallback=allow_fallback
+                s,
+                output_dir,
+                include_images=include_images,
+                allow_fallback=allow_fallback,
+                llm_timeout=request_timeout,
             )
             for s in sections_to_process
         ]
@@ -2574,26 +2563,8 @@ def build_reflow_request_messages(
             )
 
         # Low-confidence table image
-        def _tconf(t: Dict[str, Any]) -> float:
-            try:
-                pm = t.get("pandas_metrics") or {}
-                shape = pm.get("shape") or [0, 0]
-                rows = int(shape[0] or 0)
-                density = float(pm.get("data_density") or 0.0)
-                camel = t.get("camelot_metrics") or {}
-                acc = float(camel.get("accuracy") or 0.0)
-                white = float(camel.get("whitespace") or 0.0)
-                score = 0.0
-                score += 0.2 if rows >= 3 else 0.0
-                score += min(max(density, 0.0), 1.0) * 0.4
-                score += min(max(acc / 100.0, 0.0), 1.0) * 0.4
-                score -= min(max(white / 100.0, 0.0), 1.0) * 0.1
-                return max(0.0, min(1.0, score))
-            except Exception:
-                return 0.0
-
         for t in section_data.get("tables", []) or []:
-            if _tconf(t) < TABLE_CONF_THRESHOLD:
+            if _table_confidence(t) < TABLE_CONF_THRESHOLD:
                 tb64 = get_table_image_b64(t, results_base_dir)
                 if tb64:
                     image_blocks.append(

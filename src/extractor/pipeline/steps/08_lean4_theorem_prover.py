@@ -34,7 +34,7 @@ from rich.console import Console
 from tqdm.asyncio import tqdm
 
 # Import JSON utilities
-from extractor.core.services.utils.json_utils import clean_json_string
+from extractor.pipeline.utils.json_utils import clean_json_string
 from extractor.pipeline.utils.json_mode import JSON_SYSTEM_GUARD
 from extractor.pipeline.utils.diagnostics import (
     start_resource_sampler,
@@ -1025,6 +1025,41 @@ def run(
     output_path = json_output_dir / "08_theorems.json"
     with open(output_path, "w") as f:
         json.dump(final_output, f, indent=2, default=str, ensure_ascii=False)
+
+    # Write enriched per-requirement statuses for UX (merge 07 miner + 08 results)
+    try:
+        miner_json = output_dir / "07_requirements_miner" / "json_output" / "07_requirements.json"
+        enr_out = json_output_dir / "08_requirements_enriched.json"
+        enriched = {"requirements": []}
+        if miner_json.exists():
+            reqs = json.loads(miner_json.read_text()).get("requirements") or []
+            # Map proof results by normalized text if available
+            by_text = {}
+            try:
+                for r in (result.get("proof_results") or []):
+                    txt = (r.get("item") or {}).get("requirement_text") or (r.get("item") or {}).get("text_canonical") or ""
+                    key = str(txt).strip().lower()
+                    by_text.setdefault(key, []).append(r)
+            except Exception:
+                by_text = {}
+            for r in reqs:
+                txt = str(r.get("text_canonical") or r.get("text_raw") or "").strip()
+                key = txt.lower()
+                pr = (by_text.get(key) or [None])[0]
+                status = "proved" if (pr and pr.get("success")) else ("unproved" if not skip_proving else "new")
+                enriched["requirements"].append({
+                    **r,
+                    "status": status,
+                    "compile_log": (pr or {}).get("stderr", "") if pr else "",
+                    "formalization": {"lean_code": (pr or {}).get("lean_code", "")} if pr else None,
+                    "diagnostics": ([] if not pr else ([{"kind":"proof","message": pr.get("error","")}] if not pr.get("success") else [])),
+                })
+            enr_out.write_text(json.dumps(enriched, indent=2))
+    except Exception as e:
+        try:
+            logger.warning(f"Stage 08: failed to write 08_requirements_enriched.json: {e}")
+        except Exception:
+            pass
 
     console.print("\n[bold green]✅ Lean 4 Processing Complete[/bold green]")
     stats = result.get("statistics", {})

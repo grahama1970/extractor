@@ -62,8 +62,11 @@ export function ThumbnailStrip({
     );
   }
 
+  // Ensure the strip is tall enough for 3:4 thumbs at the given width plus a small padding for ring/padding
+  const minHeight = Math.round(itemWidth * 4 / 3) + 16;
+  const effectiveHeight = Math.max(height, minHeight);
   return (
-    <div className="w-full border rounded-md bg-muted/30 overflow-hidden" style={{ height }}>
+    <div className="w-full border rounded-md bg-muted/30 overflow-hidden" style={{ height: effectiveHeight }}>
       <Virtuoso
         ref={ref}
         totalCount={pageCount}
@@ -122,10 +125,10 @@ function ThumbItem({ doc, n, isActive, onJump, width, cacheKey, hitCount }: { do
       aria-current={isActive ? "page" : undefined}
       style={{ width: width + 16 }}
     >
-      <div className={cn("relative w-full h-full rounded-md overflow-hidden shadow-sm ring-1 ring-border")}
+      <div className={cn("relative w-full h-full rounded-md overflow-hidden shadow-sm ring-1", isActive ? "ring-primary" : "ring-border", "bg-white p-1 box-border")}
            style={{ aspectRatio: "3 / 4" }}>
         {src ? (
-          <img src={src} alt={`Page ${n}`} className="w-full h-full object-cover" />
+          <img src={src} alt={`Page ${n}`} className="w-full h-full object-contain" />
         ) : (
           <div className="w-full h-full animate-pulse bg-muted" />
         )}

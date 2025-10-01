@@ -48,7 +48,15 @@ Pipeline mapping
   - Acceptance (smokes): `ui_progress_pipeline_run.mjs`
 
 Downstream stages for “accurate”
-- 07 Reflow, 09 Summarizer, 10 Export (flattened), 11 Graph (optional), 14 Report (final)
+- 07 Reflow → 07½ Requirements Miner (offline, deterministic) → 08 Lean4 (opt‑in proving) → 09 Summarizer → 10 Export (flattened) → 11 Graph (optional) → 14 Report (final)
+
+**3b) Requirement tuning (human–agent loop, in the same route)**
+- Pane: right drawer `data-testid="req-pane"` shows requirement list from `/api/requirements/list?results_dir=…`.
+- Edit canonical text in place (`req-edit` → onBlur saves via `/api/requirements/save`).
+- Jump to evidence (`req-jump` scrolls to `page_num`); highlight from Stage‑07 boxes when available.
+- Re‑run formalization for the current results (`req-rerun-batch` → `/api/requirements/rerun`).
+- Statuses in 08 enriched JSON: `new|edited|ready_for_formal|compile_error|unproved|proved`.
+- Stage 14 `run_summary.json` includes `requirements` counts.
 
 **4) Load pipeline annotations into the UI**
 - Action: `[data-testid="btn-load-pipeline-annos"]`

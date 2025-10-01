@@ -636,6 +636,7 @@ Troubleshooting:
   - `make ci`
   - Defaults: `BASE_URL=http://127.0.0.1:8080`, `CDP_URL=http://127.0.0.1:3000/json/version`
   - Override: `make ci BASE_URL=http://127.0.0.1:8080 CDP_URL=http://127.0.0.1:9222/json/version`
+  - Stage 07 timeout (optional, CI): `export STAGE07_LLM_TIMEOUT=30`
 - Health-only (CDP): `make ux-health`
 - Full smokes (requires live servers + CDP): `make smokes`
 - Single issue smoke: `make smoke-issue ISSUE=019` (or `020`)

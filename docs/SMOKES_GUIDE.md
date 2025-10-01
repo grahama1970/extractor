@@ -281,3 +281,28 @@ Use `scripts/artifacts/` as the canonical output directory for logs and screensh
 - `tests/smoke/` – pytest-based smokes for pipeline stages.
 
 For questions or improvements, open an issue and tag the maintainers listed in `docs/PreviousContext.md`.
+## Blocking Smokes (UI)
+
+- Typecheck (Tabbed UI)
+  - `cd prototypes/tabbed/html && npm run typecheck`
+- UI health gate (route = `/main`)
+  - `BASE_URL=http://127.0.0.1:8080/main npm run ux:check`
+  - Pass: no dev overlay; `appReady/rootMounted/uiReady=true`; `pointerDrawOk=true`; `toolbarClear=true`; artifacts saved to `scripts/artifacts/`.
+- DOM essentials
+  - Inspector pane: `BASE_URL=http://127.0.0.1:8080 node scripts/smokes/ui_inspector_pane_present.mjs`
+  - Requirements pane: `BASE_URL=http://127.0.0.1:8080 node scripts/smokes/ui_requirements_pane_dom.mjs`
+- Console errors (CDP preferred)
+  - `BROWSERLESS_WS=ws://127.0.0.1:9222/devtools/browser npm run ux:check:cdp`
+  - Fallback: `BASE_URL=http://127.0.0.1:8080/main node scripts/smokes/console_errors.mjs`
+
+## Blocking Smokes (Pipeline / Requirements)
+
+- Stage outputs stable: `python scripts/smokes/pipeline/smoke_stage10_flatten.py`
+- Graph creation: `python scripts/smokes/pipeline/smoke_stage11_graph.py`
+- Final report: `python scripts/smokes/pipeline/smoke_stage14_report.py`
+- Requirements summary: `python scripts/smokes/pipeline/acceptance/smoke_requirements_summary.py`
+
+## Advisory (warn‑only) Smokes
+
+- Toolbar tooltips: `node scripts/smokes/ui_toolbar_tooltips.mjs`
+- Zoom buttons: `node scripts/smokes/ui_zoom_buttons_present.mjs`

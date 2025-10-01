@@ -587,16 +587,17 @@ def run(
         password = os.getenv("ARANGO_PASSWORD")
         db_name = os.getenv("ARANGO_DATABASE", "pdf_knowledge_base")
 
-        if not password:
-            raise ValueError("ARANGO_PASSWORD environment variable is not set.")
+        if not password or ArangoClient is None:
+            console.print("[yellow]Arango not configured/available → export skipped; flattened JSON already saved.[/yellow]")
+            return
 
         client = ArangoClient(hosts=f"http://{host}:{port}")
         db = client.db(db_name, username=user, password=password)
         db.version()
         logger.success(f"Connected to ArangoDB database '{db_name}'.")
     except (ArangoError, ValueError) as e:
-        logger.error(f"Failed to connect to ArangoDB: {e}")
-        raise typer.Exit(1)
+        console.print(f"[yellow]Arango connection failed → export skipped ({e}); flattened JSON already saved.[/yellow]")
+        return
 
     setup_arango_collection(db, collection_name)
 
@@ -619,8 +620,8 @@ def run(
         console.print(f"   - Confirmation saved to: [cyan]{output_path}[/cyan]")
 
     except ArangoError as e:
-        console.print(f"[bold red]Fatal error during bulk import: {e}[/bold red]")
-        raise typer.Exit(1)
+        console.print(f"[yellow]Bulk import failed → export skipped ({e}); flattened JSON present.[/yellow]")
+        return
 
 
 def debug_bundle(
@@ -710,16 +711,21 @@ def debug_bundle(
         password = os.getenv("ARANGO_PASSWORD")
         db_name = os.getenv("ARANGO_DATABASE", "pdf_knowledge_base")
 
-        if not password:
-            raise ValueError("ARANGO_PASSWORD environment variable is not set.")
+        if not password or ArangoClient is None:
+            console.print("[yellow]Arango not configured/available → export skipped; flattened JSON written.[/yellow]")
+            output_path = json_output_dir / "10_flattened_data.json"
+            output_path.write_text(json.dumps(pdf_objects_to_load, indent=2))
+            return
 
         client = ArangoClient(hosts=f"http://{host}:{port}")
         db = client.db(db_name, username=user, password=password)
         db.version()
         logger.success(f"Connected to ArangoDB database '{db_name}'.")
     except (ArangoError, ValueError) as e:
-        logger.error(f"Failed to connect to ArangoDB: {e}")
-        raise typer.Exit(1)
+        console.print(f"[yellow]Arango connection failed → export skipped ({e}); flattened JSON written.[/yellow]")
+        output_path = json_output_dir / "10_flattened_data.json"
+        output_path.write_text(json.dumps(pdf_objects_to_load, indent=2))
+        return
 
     setup_arango_collection(db, collection_name)
     try:
@@ -737,8 +743,8 @@ def debug_bundle(
         output_path.write_text(json.dumps(confirmation, indent=2))
         console.print(f"[green]Debug bundle: export complete. Confirmation saved to {output_path}")
     except ArangoError as e:
-        console.print(f"[bold red]Fatal error during bulk import: {e}[/bold red]")
-        raise typer.Exit(1)
+        console.print(f"[yellow]Bulk import failed → export skipped ({e}); flattened JSON available.[/yellow]")
+        return
 
 
 def build_cli():

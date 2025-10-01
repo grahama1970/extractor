@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
-  Upload, Search, Archive, Copy, Trash2, Plus, SquareDashed, Loader2,
+  Upload, Search, Archive, Copy, Trash2, Plus, SquareDashed, Loader2, Minus, Play,
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronDown,
   Edit, Sparkles, ArrowLeft, Tag, Moon, Info, Braces, FileText, Download, MoreHorizontal,
   Check, X
@@ -30,11 +30,19 @@ import { toast } from "@/components/ui/sonner";
 import { ThumbnailRail } from "@/components/ThumbnailRail";
 import { ThumbnailStrip } from "@/components/ThumbnailStrip";
 import { PdfCanvas } from "@/components/PdfCanvas";
+import { ZoomControl } from "@/components/ZoomControl";
+import { ActionsMenu } from "@/components/ActionsMenu";
 import { loadPdf, type PdfDoc, getPageText, getQueryBoxes } from "@/lib/pdf";
 import { DEFAULT_LABELS, loadLabels, saveLabel, type LabelDef } from "@/lib/labels";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { cn } from "@/lib/utils";
 import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
+import SearchPanel from "@/components/SearchPanel";
+import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
+import { ChatPanel, type ChatMessage, type ChatChip } from "@/components/chat/ChatPanel";
+import { isPreview } from "@/lib/env";
 import {
   SidebarProvider,
   SidebarHeader,
@@ -97,13 +105,58 @@ const ClassicLayout = () => {
   const [labels, setLabels] = useState<LabelDef[]>(() => (typeof window !== 'undefined' ? loadLabels() : DEFAULT_LABELS));
   useEffect(() => { setLabels(loadLabels()); }, []);
 
+  // Feature flags / compact UX toggles
+  // Toggle the "review" widgets (Claim/Release/Confidence/Owner) in the inspector.
+  // Leave false to keep inspector focused on annotation properties.
+  const SHOW_REVIEW = false;
+  const showConflicts = React.useMemo(() => {
+    try {
+      // Vite env or localStorage override
+      return Boolean((import.meta as any)?.env?.VITE_SHOW_CONFLICTS ?? (localStorage.getItem('show_conflicts') === '1'));
+    } catch { return false; }
+  }, []);
+
   const [jsonOpen, setJsonOpen] = useState(false);
   const [jsonText, setJsonText] = useState("{}");
   const [notesText, setNotesText] = useState("");
   const [mentionOpen, setMentionOpen] = useState(false);
   const [mentionOptions, setMentionOptions] = useState<string[]>([]);
   const [conflicts, setConflicts] = useState<any[]>([]);
+  // Requirements pane (empty-state friendly)
+  const [reqResultsDir, setReqResultsDir] = useState<string | null>(null);
+  const [reqItems, setReqItems] = useState<any[]>([]);
+  const [reqLoading, setReqLoading] = useState(false);
+  const refreshRequirements = async () => {
+    if (isPreview()) {
+      setReqResultsDir(null);
+      setReqItems([]);
+      return;
+    }
+    try {
+      setReqLoading(true);
+      let rd = reqResultsDir || lastResultsDir;
+      if (!rd) {
+        try {
+          const r = await fetch('/api/pipeline/latest');
+          const j = await r.json();
+          if (j?.ok && j.results_dir) rd = j.results_dir;
+        } catch {}
+      }
+      setReqResultsDir(rd || null);
+      if (!rd) { setReqItems([]); return; }
+      const u = `/api/requirements/list?` + new URLSearchParams({ results_dir: String(rd) }).toString();
+      const r = await fetch(u);
+      if (!r.ok) { setReqItems([]); return; }
+      const j = await r.json();
+      if (j?.ok && Array.isArray(j.requirements)) setReqItems(j.requirements);
+    } finally {
+      setReqLoading(false);
+    }
+  };
   useEffect(() => {
+    if (isPreview()) {
+      setReqItems([]);
+    }
     try {
       const recent = JSON.parse(localStorage.getItem('tabbed.review.recent') || '[]');
       const me = localStorage.getItem('reviewer_name') || 'Me';
@@ -163,6 +216,34 @@ const ClassicLayout = () => {
   const shortDocId = useMemo(() => currentDocId ? currentDocId.slice(0, 12) : null, [currentDocId]);
   const [dbStatusByRel, setDbStatusByRel] = useState<Record<string, boolean>>({});
   const selectedCount = useMemo(() => Object.values(selectedDocIds).filter(Boolean).length, [selectedDocIds]);
+  // Left list density (persisted)
+  const [compactList, setCompactList] = useState<boolean>(() => {
+    try {
+      const k = localStorage.getItem("ui.left.density");
+      if (k === "compact") return true;
+      if (k === "comfortable") return false;
+      return localStorage.getItem("left_density") === "compact";
+    } catch { return false; }
+  });
+  const lastUserDensityRef = useRef<"compact"|"comfortable">(compactList ? "compact" : "comfortable");
+  useEffect(() => {
+    if (isPreview()) {
+      setReqItems([]);
+    }
+    try {
+      const u = localStorage.getItem("ui.left.density_user");
+      if (u === "compact" || u === "comfortable") lastUserDensityRef.current = u;
+    } catch {}
+  }, []);
+  const setDensityUser = (v: "compact"|"comfortable") => {
+    setCompactList(v === "compact");
+    lastUserDensityRef.current = v;
+    try {
+      localStorage.setItem("ui.left.density", v);
+      localStorage.setItem("ui.left.density_user", v);
+      localStorage.setItem("left_density", v === "compact" ? "compact" : "comfortable");
+    } catch {}
+  };
 
   // Autosave/load annotation state per PDF (localStorage)
   const autosaveKey = useMemo(() => currentPdfRel ? `anno_state:${currentPdfRel}` : null, [currentPdfRel]);
@@ -208,6 +289,7 @@ const ClassicLayout = () => {
     try { return localStorage.getItem('reviewer_name') || 'Me'; } catch { return 'Me'; }
   }, []);
   const pageBoxes = React.useMemo(() => boxesByPage[currentPage] || [], [boxesByPage, currentPage]);
+  const selectedBox = useMemo(() => pageBoxes.find((b) => b.id === selectedId) || null, [pageBoxes, selectedId]);
   const visiblePageBoxes = React.useMemo(() => {
     const okType = (b: Box) => (
       (b.type === 'Section' ? filterSection : b.type === 'Table' ? filterTable : b.type === 'Figure' ? filterFigure : true)
@@ -269,6 +351,16 @@ const ClassicLayout = () => {
   useEffect(() => {
     let mounted = true;
     (async () => {
+      // In preview (non-dev), avoid /api calls to keep console clean; use stub doc
+      try {
+        // @ts-ignore — Vite provides env
+        if (!(import.meta as any)?.env?.DEV) {
+          const d = await loadPdf('/api/pdf?rel=__stub__');
+          if (!mounted) return;
+          setDoc(d); setTotalPages(d.numPages || 2); setCurrentPdfName('Demo Placeholder'); setCurrentPdfRel('');
+          return;
+        }
+      } catch {}
       try {
         const r = await fetch('/api/list', { credentials: 'omit' });
         const j = await r.json();
@@ -286,16 +378,15 @@ const ClassicLayout = () => {
           return;
         }
       } catch { /* fallthrough to placeholder */ }
-      // Backend not reachable or list failed; try direct API target first, then static fallback
-      try {
-        const d0 = await loadPdf('/api/pdf?rel=' + encodeURIComponent('BHT CV32A65X.pdf'));
-        if (!mounted) return;
-        setDoc(d0); setTotalPages(d0.numPages || 2); setCurrentPdfName('BHT CV32A65X.pdf'); setCurrentPdfRel('BHT CV32A65X.pdf');
-        return;
-      } catch {}
-      const d = await loadPdf('/bht.pdf');
+      // Backend not reachable or list failed; provide a stub doc so UX remains functional
       if (!mounted) return;
-      setDoc(d); setTotalPages(d.numPages || 2); setCurrentPdfName('Demo Placeholder'); setCurrentPdfRel(null);
+      try {
+        const d = await loadPdf('/api/pdf?rel=__stub__');
+        if (!mounted) return;
+        setDoc(d); setTotalPages(d.numPages || 2); setCurrentPdfName('Demo Placeholder'); setCurrentPdfRel('');
+      } catch {
+        setDoc(null as any); setTotalPages(0); setCurrentPdfName(null); setCurrentPdfRel(null);
+      }
     })();
     return () => { mounted = false };
   }, []);
@@ -368,23 +459,29 @@ const ClassicLayout = () => {
     return () => { cancelled = true; };
   }, [searchQuery, doc, currentPage, totalPages]);
 
+  // Search panel tray (Cmd/Ctrl+K)
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchTab, setSearchTab] = useState<"page"|"document"|"chat">("document");
+
   // Keyboard shortcuts: [, ] paging; N arm draw; ? help; Space pan
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
       if (tag === 'input' || tag === 'textarea') return;
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setSearchOpen((o)=>!o); return; }
+      if (e.altKey && e.key === '2') { e.preventDefault(); setChatDockOpen(v=>!v); return; }
       if (e.key === '[') { setCurrentPage((p)=> Math.max(1, p-1)); e.preventDefault(); }
       if (e.key === ']') { setCurrentPage((p)=> Math.min(totalPages, p+1)); e.preventDefault(); }
       if (e.key === 'n' || e.key === 'N') { setDrawArmed(true); e.preventDefault(); }
       if (e.key === '?') { setHelpOpen(true); e.preventDefault(); }
       if (e.key === ' ') { setPanMode(true); }
-      if (e.key === 'Escape') { setDrawArmed(false); setDraftBox(null); }
+      if (e.key === 'Escape') { if (searchOpen) { setSearchOpen(false); e.preventDefault(); return; } setDrawArmed(false); setDraftBox(null); }
     };
     const onKeyUp = (e: KeyboardEvent) => { if (e.key === ' ') setPanMode(false); };
     window.addEventListener('keydown', onKey);
     window.addEventListener('keyup', onKeyUp);
     return () => { window.removeEventListener('keydown', onKey); window.removeEventListener('keyup', onKeyUp); };
-  }, [totalPages]);
+  }, [totalPages, searchOpen]);
 
   // Thumbnails mode (left | bottom | off) with persistence
   type ThumbMode = "left" | "bottom" | "off";
@@ -393,19 +490,133 @@ const ClassicLayout = () => {
   // Bust thumbnail cache when document changes to avoid stale placeholders
   const [thumbRev, setThumbRev] = useState(0);
   useEffect(() => { setThumbRev((n) => n + 1); }, [doc, currentPdfName]);
+  // Persist thumbnails enabled preference (maps to thumbMode !== 'off')
+  useEffect(() => {
+    if (isPreview()) {
+      setReqItems([]);
+    }
+    try { localStorage.setItem("ui.left.thumb", thumbMode !== 'off' ? '1' : '0'); } catch {}
+  }, [thumbMode]);
   // Night page mode
   const [night, setNight] = useState<boolean>(() => { try { return localStorage.getItem('night_page') === '1'; } catch { return false; } });
   useEffect(() => { try { localStorage.setItem('night_page', night ? '1' : '0'); } catch {} }, [night]);
   // App-ready marker once a document is available
   const appReady = !!doc;
+  // Search focus takeover (filter expands, list dims)
+  const [filterFocused, setFilterFocused] = useState(false);
+  const isSearchMode = filterFocused || searchOpen;
+  // Auto-compact when left list area is short
+  const leftListRef = useRef<HTMLDivElement|null>(null);
+  useEffect(() => {
+    const el = leftListRef.current; if (!el) return;
+    const ro = new ResizeObserver(() => {
+      const h = el.clientHeight;
+      const fewer = filteredFiles.length < 6;
+      const wantAuto = h < 720 || fewer;
+      if (wantAuto && !compactList) {
+        setCompactList(true);
+        try {
+          const key = 'ui.left.density.auto_toast_shown';
+          if (localStorage.getItem(key) !== '1') {
+            toast('Switched to compact to fit more items');
+            localStorage.setItem(key, '1');
+          }
+        } catch {}
+      } else if (!wantAuto) {
+        const v = lastUserDensityRef.current || (compactList ? 'compact':'comfortable');
+        setCompactList(v === 'compact');
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [filteredFiles.length, compactList]);
+  // Chat bottom panel (open + split) and messages
+  const [chatDockOpen, setChatDockOpen] = useState<boolean>(() => { try { return localStorage.getItem('chat_open') === '1'; } catch { return false; } });
+  useEffect(() => { try { localStorage.setItem('chat_open', chatDockOpen ? '1' : '0'); } catch {} }, [chatDockOpen]);
+  const [chatSplit, setChatSplit] = useState<number>(0.4);
+  useEffect(() => {
+    const key = currentDocId || currentPdfRel || '';
+    try {
+      const s = Number(localStorage.getItem(`right_split:${key}`));
+      if (s > 0 && s < 1) setChatSplit(s);
+    } catch {}
+  }, [currentDocId, currentPdfRel]);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const baseChips = useMemo<ChatChip[]>(() => {
+    const chips: ChatChip[] = [{ key: `page:${currentPage}`, label: `p${currentPage}`, active: true }];
+    const sb = pageBoxes.find((b) => b.id === selectedId) || null;
+    if (sb) {
+      chips.push({ key: `sel:${sb.instanceId}`, label: `selection:${sb.instanceId}`, active: true });
+      chips.push({ key: `type:${sb.type}`, label: `type:${sb.type}`, active: true });
+    }
+    return chips;
+  }, [currentPage, selectedId, pageBoxes]);
+  const [chipActive, setChipActive] = useState<Record<string, boolean>>({});
+  useEffect(() => {
+    const next: Record<string, boolean> = {};
+    for (const c of baseChips) next[c.key] = chipActive[c.key] ?? true;
+    setChipActive(next);
+  }, [baseChips.map(c=>c.key).join('|')]);
+  const chips = useMemo<ChatChip[]>(() => baseChips.map(c => ({ ...c, active: chipActive[c.key] !== false })), [baseChips, chipActive]);
+  const toggleChip = (key: string) => setChipActive(prev => ({ ...prev, [key]: !(prev[key] !== false) }));
+  const sendChat = async (text: string) => {
+    setChatMessages(m => [...m, { role: 'user', content: text }]);
+    const scope: any = {};
+    const a = (k: string) => chipActive[k] !== false;
+    if (a(`page:${currentPage}`)) scope.page = currentPage;
+    if (selectedBox) {
+      if (a(`type:${selectedBox.type}`)) scope.type = selectedBox.type;
+      if (a(`sel:${selectedBox.instanceId}`)) { scope.instance_id = selectedBox.instanceId; scope.bbox = [selectedBox.x, selectedBox.y, selectedBox.w, selectedBox.h]; }
+    }
+    const body: any = { q: text };
+    if (currentDocId) body.doc_id = currentDocId; else body.pdf = currentPdfName || currentPdfRel || '';
+    body.scope = scope;
+    try {
+      const r = await fetch('/api/chat/query', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const j = await r.json();
+      if (j?.ok) setChatMessages(m => [...m, { role: 'assistant', content: String(j.answer || '') }]);
+      else setChatMessages(m => [...m, { role: 'assistant', content: j?.error || 'Chat failed' }]);
+    } catch {
+      setChatMessages(m => [...m, { role: 'assistant', content: 'Chat failed' }]);
+    }
+  };
+
+  // Zoom helpers (shared with ZoomControl)
+  const fitWidth = React.useCallback(() => {
+    try {
+      const container = viewerRef.current;
+      const canvas = container?.querySelector('canvas') as HTMLCanvasElement | null;
+      if (!container || !canvas) return;
+      const w = canvas.width / (Number(canvas.style.width.replace('px','')) || 1);
+      const target = (container.clientWidth - 24) * w; // padding margin
+      const fit = Math.max(0.5, Math.min(2, target / canvas.width));
+      setZoom(fit);
+    } catch {}
+  }, []);
+  const fitPage = React.useCallback(() => {
+    try {
+      const container = viewerRef.current;
+      const canvas = container?.querySelector('canvas') as HTMLCanvasElement | null;
+      if (!container || !canvas) return;
+      const w = canvas.width / (Number(canvas.style.width.replace('px','')) || 1);
+      const h = canvas.height / (Number(canvas.style.height.replace('px','')) || 1);
+      const fitW = (container.clientWidth - 24) * w / canvas.width;
+      const fitH = (container.clientHeight - 24) * h / canvas.height;
+      const fit = Math.max(0.5, Math.min(2, Math.min(fitW, fitH)));
+      setZoom(fit);
+    } catch {}
+  }, []);
 
   // (Removed) Featured Lessons UI was for agent use only; keep lessons out of the app
 
   // Derived helpers for current page
   // pageBoxes declared earlier; reuse it here
-  const selectedBox = useMemo(() => pageBoxes.find((b) => b.id === selectedId) || null, [pageBoxes, selectedId]);
   const setPageBoxes = (updater: (prev: Box[]) => Box[]) => {
-    setBoxesByPage((prev) => ({ ...prev, [currentPage]: updater(prev[currentPage] || []) }));
+    setBoxesByPage((prev) => {
+      const nextArr = updater(prev[currentPage] || []);
+      const safe = Array.isArray(nextArr) ? nextArr : (prev[currentPage] || []);
+      return { ...prev, [currentPage]: safe };
+    });
   };
 
   // Ensure selection valid on page change
@@ -620,6 +831,19 @@ Rules:
     }
   };
 
+  // Normalize boxes for export endpoints that expect `bounding_box: [x,y,w,h]`
+  const normalizeBoxesForExport = React.useCallback((byPage: Record<number, Box[]>) => {
+    const out: Record<string, any[]> = {};
+    for (const [k, arr] of Object.entries(byPage || {})) {
+      out[k] = (arr || []).map((b) => ({
+        type: b.type,
+        instance_id: b.instanceId,
+        bounding_box: [b.x, b.y, b.w, b.h] as [number, number, number, number],
+      }));
+    }
+    return out;
+  }, []);
+
   // Export COCO (server render + annotations)
   const exportCoco = async () => {
     if (!currentPdfRel) { toast.error('Open a PDF first'); return; }
@@ -659,6 +883,22 @@ Rules:
     } catch {}
   };
   useEffect(() => { refreshDbStatus(); }, [currentPdfRel]);
+
+  // Per‑rel DB status (for file list hover dot)
+  const fetchDbStatusForRel = async (rel: string) => {
+    try {
+      const r = await fetch(`/api/pipeline/pdf-status?${new URLSearchParams({ pdf_rel: rel }).toString()}`);
+      const j = await r.json();
+      setDbStatusByRel(prev => ({ ...prev, [rel]: Boolean(j?.upserted) }));
+    } catch {}
+  };
+
+  // Toggle selection for chat/upsert scope
+  const toggleSelectRel = async (rel: string) => {
+    const did = await ensureDocId(rel);
+    if (!did) return;
+    setSelectedDocIds(prev => ({ ...prev, [did]: !prev[did] }));
+  };
 
   // Extract via pipeline (external annotations → server → run_all)
   const extractPipeline = async () => {
@@ -1054,12 +1294,18 @@ Rules:
 
   // Persist boxes across reloads (demo)
   useEffect(() => {
+    if (isPreview()) {
+      setReqItems([]);
+    }
     try {
       const raw = localStorage.getItem("anno_boxes_by_page");
       if (raw) setBoxesByPage(JSON.parse(raw));
     } catch {}
   }, []);
   useEffect(() => {
+    if (isPreview()) {
+      setReqItems([]);
+    }
     try { localStorage.setItem("anno_boxes_by_page", JSON.stringify(boxesByPage)); } catch {}
   }, [boxesByPage]);
 
@@ -1131,17 +1377,7 @@ Rules:
 
   return (
     <div className="h-screen bg-background overflow-hidden">
-      {/* Header */}
-      <header className="h-16 border-b bg-card flex items-center px-6">
-        <Link to="/" className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors">
-          <ArrowLeft className="h-4 w-4" />
-          Back to Prototypes
-        </Link>
-        <div className="flex-1 text-center">
-          <h1 className="text-lg font-semibold">Classic Three-Panel Layout</h1>
-        </div>
-        {/* Removed legacy header-level Add Label button; action now lives in the top center toolbar */}
-      </header>
+      
 
       {/* Add Label Dialog (moved to root so header button can open it) */}
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
@@ -1155,6 +1391,7 @@ Rules:
               <label className="text-sm font-medium">Name</label>
               <Input data-testid="label-name" value={newName} onChange={(e)=>setNewName(e.target.value)} placeholder="Equation" />
             </div>
+            
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <label className="text-sm font-medium">Icon</label>
@@ -1205,63 +1442,48 @@ Rules:
       </Dialog>
 
       <SidebarProvider defaultOpen>
-      <div className="relative flex h-[calc(100vh-4rem)]" onPointerMove={paneOnDragMove} onPointerUp={paneEndDrag}>
+      {/* Full height app container (header removed) */}
+      <div className="relative flex h-[100vh] min-w-0" onPointerMove={paneOnDragMove} onPointerUp={paneEndDrag}>
         {appReady && <div data-testid="app-ready" className="hidden" aria-hidden />}
         {/* Explorer Panel */}
-        <Sidebar side="left" collapsible="icon" className="bg-card">
+        <Sidebar side="left" collapsible="icon" className="bg-card min-w-[200px] max-w-[480px] shrink-0" style={{ width: leftW }}>
 
           <SidebarHeader>
             <div className="space-y-3">
-              <Button data-testid="btn-open-pdf" variant="default" className="w-full justify-start" onClick={()=> setOpenDialog(true)} title="Open PDF" aria-label="Open PDF">
-                <Upload className="mr-2 h-4 w-4" /> Open PDF
-              </Button>
+              {doc ? (
+                <Button data-testid="btn-open-pdf" variant="outline" className={cn("w-full h-9 justify-start transition-all duration-200", isSearchMode && "opacity-0 scale-95 -translate-y-1 pointer-events-none h-0 overflow-hidden") } onClick={()=> setOpenDialog(true)} title="Open PDF" aria-label="Open PDF">
+                  <Upload className="mr-2 h-4 w-4" /> Open PDF
+                </Button>
+              ) : (
+                <Button data-testid="btn-open-pdf" variant="default" className={cn("w-full h-11 justify-start transition-all duration-200", isSearchMode && "opacity-0 scale-95 -translate-y-1 pointer-events-none h-0 overflow-hidden") } onClick={()=> setOpenDialog(true)} title="Open PDF" aria-label="Open PDF">
+                  <Upload className="mr-2 h-4 w-4" /> Open PDF
+                </Button>
+              )}
               <div className="flex items-center justify-between gap-2">
                 <div className="relative flex-1 mr-2">
                   <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
                   <input
                     value={openFilter}
                     onChange={(e)=>setOpenFilter(e.target.value)}
-                    placeholder="type to filter..."
-                    className="w-full pl-9 pr-2 py-2 rounded-md border bg-background text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+                    onFocus={()=> setFilterFocused(true)}
+                    onBlur={()=> setFilterFocused(false)}
+                    onKeyDown={(e)=>{ if (e.key === 'Escape') { (e.currentTarget as HTMLInputElement).blur(); setFilterFocused(false); } }}
+                    placeholder="Filter files..."
+                    className={cn(
+                      "w-full pl-9 pr-2 py-2 rounded-sm border text-sm transition-all duration-200",
+                      isSearchMode ? "border-primary/30 bg-muted/40 ring-1 ring-primary/30" : "border-muted-foreground/30 bg-background focus-visible:ring-1 focus-visible:ring-muted-foreground/30 focus-visible:ring-offset-0"
+                    )}
                     aria-label="Filter files"
                   />
                 </div>
-                <div className="flex items-center gap-2">
-                  <label className="flex items-center gap-1 text-xs text-muted-foreground">
-                    <input
-                      type="checkbox"
-                      aria-label="Select visible"
-                      onChange={async (e)=>{
-                        const want = e.currentTarget.checked;
-                        const ids: string[] = [];
-                        for (const it of filteredFiles) {
-                          if (!it?.rel) continue;
-                          const did = await ensureDocId(it.rel);
-                          if (did) ids.push(did);
-                        }
-                        setSelectedDocIds(prev => {
-                          const next = { ...prev } as Record<string, boolean>;
-                          for (const id of ids) next[id] = want;
-                          return next;
-                        });
-                      }}
-                      checked={(() => {
-                        const ids = filteredFiles.map((it:any)=> it?.rel && docIdByRel[it.rel] ? docIdByRel[it.rel] : null).filter(Boolean) as string[];
-                        return ids.length > 0 && ids.every(id => !!selectedDocIds[id]);
-                      })()}
-                    />
-                    Select visible
-                  </label>
-                  {selectedCount > 0 && (
-                    <Badge variant="secondary" className="shrink-0">{selectedCount}</Badge>
-                  )}
-                </div>
+                {/* Removed 'Select visible' by request: keep header minimal (filter only) */}
               </div>
             </div>
+            {/* Chat moved to footer to de-clutter header */}
           </SidebarHeader>
 
           <SidebarContent>
-          <div className="flex-1 overflow-y-auto pr-2" data-testid="file-list">
+          <div ref={leftListRef} className={cn("flex-1 overflow-y-auto pr-2 transition-opacity duration-200", isSearchMode ? "opacity-60" : "opacity-100")} data-testid="file-list">
             <Virtuoso
               totalCount={filteredFiles.length}
               itemContent={(index) => {
@@ -1284,7 +1506,7 @@ Rules:
                 const doExportPdf = async () => {
                   if (!isActive) return;
                   try {
-                    const r = await fetch('/api/export/pdf', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rel: it.rel, boxes_by_page: boxesByPage }) });
+                    const r = await fetch('/api/export/pdf', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rel: it.rel, boxes_by_page: normalizeBoxesForExport(boxesByPage) }) });
                     if (!r.ok) { const e = await r.json().catch(()=>null); throw new Error(e?.error || 'export_failed'); }
                     const blob = await r.blob();
                     const url = URL.createObjectURL(blob);
@@ -1299,7 +1521,7 @@ Rules:
                 const doExportBoth = async () => {
                   if (!isActive) return;
                   try {
-                    const r = await fetch('/api/export/zip', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rel: it.rel, boxes_by_page: boxesByPage }) });
+                    const r = await fetch('/api/export/zip', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rel: it.rel, boxes_by_page: normalizeBoxesForExport(boxesByPage) }) });
                     if (!r.ok) { const e = await r.json().catch(()=>null); throw new Error(e?.error || 'export_failed'); }
                     const blob = await r.blob();
                     const url = URL.createObjectURL(blob);
@@ -1313,20 +1535,41 @@ Rules:
                 };
 
                 const primaryLabel = lastFormat === 'json' ? 'Export JSON' : lastFormat === 'annotated' ? 'Export Annotated PDF' : 'Export Both';
+                const rowBase = compactList ? "h-10 px-2" : "h-12 px-3";
                 return (
                   <Card
                     data-testid="file-row"
                     role="option"
-                    aria-selected={isActive}
+                    aria-selected={(() => { if (!it.rel) return false; const did = docIdByRel[it.rel]; return did ? !!selectedDocIds[did] : false; })()}
                     data-selected={isActive}
                     tabIndex={0}
                     onKeyDown={async (e)=>{
-                      if (e.key === 'Enter' || e.key === ' ') {
+                      if (e.key === 'Enter') {
                         e.preventDefault();
                         if (!it.rel) return;
                         const url = `/api/pdf?rel=${encodeURIComponent(it.rel)}`;
                         const d = await loadPdf(url);
                         setDoc(d); setTotalPages(d.numPages || 2); setCurrentPdfName(it.name); setCurrentPdfRel(it.rel);
+                        return;
+                      }
+                      if (e.key === ' ') {
+                        e.preventDefault();
+                        if (it.rel) toggleSelectRel(it.rel);
+                        return;
+                      }
+                      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                        e.preventDefault();
+                        const row = e.currentTarget as HTMLElement;
+                        const list = row.closest('[data-testid="file-list"]');
+                        if (!list) return;
+                        const rows = Array.from(list.querySelectorAll('[data-testid="file-row"]')) as HTMLElement[];
+                        const idx = rows.indexOf(row);
+                        if (idx === -1) return;
+                        const next = e.key === 'ArrowUp' ? Math.max(0, idx - 1) : Math.min(rows.length - 1, idx + 1);
+                        const target = rows[next];
+                        target?.focus();
+                        target?.scrollIntoView({ block: 'nearest' });
+                        return;
                       }
                     }}
                     onClick={async ()=>{
@@ -1337,28 +1580,30 @@ Rules:
                     }}
                     onMouseEnter={()=>{ if (it.rel) fetchDbStatusForRel(it.rel); }}
                     className={cn(
-                      "group relative h-12 px-3 rounded-xl flex items-center justify-between text-left transition-colors hover:bg-muted cursor-pointer my-1",
-                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
-                      isActive && "ring-1 ring-primary before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:bg-primary before:rounded"
+                      `group relative ${rowBase} grid grid-cols-[24px,1fr,auto] items-center gap-2 text-left transition-colors hover:bg-muted/40 cursor-pointer`,
+                      "bg-transparent border-0 shadow-none focus-within:ring-1 focus-within:ring-muted-foreground/30 focus-within:ring-offset-0",
+                      isActive && "ring-1 ring-primary/40"
                     )}
                     aria-label={it.name}
-                    title={it.name}
                   >
-                    <div className="flex-1 min-w-0 flex items-center gap-2">
-                      {it.rel ? (
-                        <input
-                          type="checkbox"
-                          aria-label="Select document"
-                          onClick={(e)=> e.stopPropagation()}
-                          onChange={()=> toggleSelectRel(it.rel)}
-                          checked={(()=>{ const did=docIdByRel[it.rel]; return did ? !!selectedDocIds[did] : false; })()}
-                        />
-                      ) : null}
+                    {/* Col 1: Checkbox */}
+                    {it.rel ? (
+                      (()=>{ const did=docIdByRel[it.rel]; const isChecked = did ? !!selectedDocIds[did] : false; return (
+                      <Checkbox
+                        checked={isChecked}
+                        onCheckedChange={(v)=>{ if (it.rel) toggleSelectRel(it.rel); }}
+                        className="h-5 w-5 rounded-md justify-self-center"
+                        aria-label={`Select ${it.name}`}
+                        onClick={(e)=> e.stopPropagation()}
+                      />) })()
+                    ) : <span />}
+                    {/* Col 2: Title + meta + DB dot */}
+                    <div className="min-w-0 flex items-center gap-2">
                       <div className="min-w-0">
-                        <div className="font-medium text-sm truncate" title={it.name}>{it.name}</div>
-                        <div className="text-xs text-muted-foreground truncate">{it.size ? `${Math.round(it.size/1024)} KB` : ''}</div>
+                        <div className={cn("truncate", compactList ? "text-sm" : "text-sm font-medium")} title={it.name}>{it.name}</div>
+                        <div className={cn("text-muted-foreground truncate", compactList ? "text-[11px]" : "text-xs")}>{it.size ? `${Math.round(it.size/1024)} KB` : ''}</div>
                       </div>
-                      {it.rel ? (
+                      {isActive && it.rel ? (
                         <span
                           title={(dbStatusByRel[it.rel] ? 'Indexed in DB' : 'Not in DB yet')}
                           className={cn('ml-auto inline-block h-2.5 w-2.5 rounded-full', dbStatusByRel[it.rel] ? 'bg-emerald-500' : 'bg-muted-foreground/40')}
@@ -1366,7 +1611,7 @@ Rules:
                         />
                       ) : null}
                     </div>
-                    {/* Trailing actions: tiny, reveal on hover/focus */}
+                    {/* Col 3: Trailing actions */}
                     <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
@@ -1417,19 +1662,30 @@ Rules:
             />
           </div>
           </SidebarContent>
-
-          <Button data-testid="btn-export-all" variant="default" className="w-full mt-4" aria-label="Export All JSON">
-            <Archive className="mr-2 h-4 w-4" /> Export All JSON
-          </Button>
+          {/* Footer actions (kept minimal) */}
+          <div className="mt-3">
+            <Button data-testid="btn-export-all" variant="ghost" size="sm" className="w-full" aria-label="Export All JSON">
+              <Archive className="mr-2 h-4 w-4" /> Export All JSON
+            </Button>
+          </div>
           <SidebarRail aria-label="Toggle sidebar" />
         </Sidebar>
 
-        {/* Left rail collapse is handled by SidebarRail; no manual drag handle */}
+        {/* Left pane resize handle */}
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          tabIndex={0}
+          onPointerDown={(e)=> paneBeginDrag('left', e)}
+          onKeyDown={(e)=> paneHandleKey('left', e)}
+          className="w-1.5 shrink-0 cursor-col-resize bg-border hover:bg-primary/30 focus:outline-none focus:ring-2 focus:ring-primary/40"
+          aria-label="Resize left pane"
+        />
 
         {/* Annotation Panel */}
-        <div className="flex-1 p-6 flex flex-col min-w-0">
+        <div className="flex-1 p-6 flex flex-col min-w-0 min-h-0">
 
-          <div className="flex-1 rounded-lg relative mb-4 overflow-hidden bg-muted flex flex-col min-h-0">
+          <div className="flex-1 rounded-lg relative mb-2 bg-muted border flex flex-col min-h-0">
             {/* Top toolbar (sticky, non-overlapping) */}
             <div data-testid="top-toolbar" className="sticky top-0 z-10 w-full bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/75 border-b px-3 py-2 flex items-center gap-3">
               <Tooltip>
@@ -1516,140 +1772,52 @@ Rules:
                 <TooltipContent>Help</TooltipContent>
               </Tooltip>
               <Separator orientation="vertical" className="mx-2" />
-              {/* Pipeline actions (duplicated from HUD for visibility) */}
-              <Button size="sm" variant="outline" title="Load pipeline annotations" data-testid="btn-load-pipeline-annos" onClick={loadPipelineAnnotations}>
-                <Download className="h-4 w-4" />
-              </Button>
-              <Button size="sm" variant="outline" title="Save annotations" data-testid="btn-save-annotations" onClick={saveAnnotations}>
-                <Archive className="h-4 w-4" />
-              </Button>
-              <div className="flex items-center gap-2">
-                <Button size="sm" variant="outline" title="Upsert to Arango" data-testid="btn-upsert-pipeline" onClick={upsertPipeline}>
-                  <Upload className="h-4 w-4" />
-                </Button>
-                <span
-                  title={dbReady ? 'Indexed in DB' : 'Not in DB yet'}
-                  className={cn('inline-block h-2.5 w-2.5 rounded-full', dbReady ? 'bg-emerald-500' : 'bg-muted-foreground/40')}
-                  aria-label={dbReady ? 'db-ready' : 'db-missing'}
-                />
-              </div>
+              {/* Consolidated pipeline actions */}
+              <ActionsMenu
+                onLoadPipeline={loadPipelineAnnotations}
+                onSave={saveAnnotations}
+                onUpsert={upsertPipeline}
+                onExportCoco={exportCoco}
+                onSuggestTables={suggestTables}
+                onRunPipeline={runPipeline}
+              />
+              <span
+                title={dbReady ? 'Indexed in DB' : 'Not in DB yet'}
+                className={cn('inline-block h-2.5 w-2.5 rounded-full', dbReady ? 'bg-emerald-500' : 'bg-muted-foreground/40')}
+                aria-label={dbReady ? 'db-ready' : 'db-missing'}
+              />
               <Separator orientation="vertical" className="mx-2" />
-              {/* Search controls */}
-              <div className="flex items-center gap-2 ml-2 relative">
-                <Input
-                  data-testid="search-input"
-                  placeholder="Search…"
-                  value={searchQuery}
-                  onChange={(e)=> setSearchQuery(e.target.value)}
-                  className="h-8 w-56"
-                />
-                <Button
-                  data-testid="search-prev"
-                  size="sm"
-                  variant="outline"
-                  title="Prev hit"
-                  disabled={!hasHits}
-                  onClick={() => {
-                    if (!hasHits) return;
-                    setHitIndex((i) => {
-                      const next = i <= 0 ? searchHits.length - 1 : i - 1;
-                      const page = searchHits[next]?.page;
-                      if (page) setCurrentPage(Math.max(1, Math.min(totalPages, page)));
-                      return next;
-                    });
-                  }}
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                </Button>
-                <Button
-                  data-testid="search-next"
-                  size="sm"
-                  variant="outline"
-                  title="Next hit"
-                  disabled={!hasHits}
-                  onClick={() => {
-                    if (!hasHits) return;
-                    setHitIndex((i) => {
-                      const next = (i + 1) % searchHits.length;
-                      const page = searchHits[next]?.page;
-                      if (page) setCurrentPage(Math.max(1, Math.min(totalPages, page)));
-                      return next;
-                    });
-                  }}
-                >
-                  <ChevronRight className="h-4 w-4" />
-                </Button>
-
-                {/* Results dropdown */}
-                {searchQuery && (
-                  <div className="absolute top-10 left-0 z-20 bg-popover border rounded shadow min-w-[300px] max-h-60 overflow-auto">
-                    {hasHits ? (
-                      searchHits.slice(0, 10).map((h, idx) => (
-                        <button
-                          key={`hit-${idx}-${h.page}`}
-                          data-testid="search-hit"
-                          data-page={String(h.page)}
-                          data-snippet={h.snippet}
-                          onClick={() => { setCurrentPage(Math.max(1, Math.min(totalPages, h.page))); setHitIndex(idx); }}
-                          className="block w-full text-left px-3 py-1.5 text-sm hover:bg-muted"
-                          title={`Go to page ${h.page}`}
-                        >
-                          <span className="text-muted-foreground mr-2">p{h.page}:</span>
-                          <span className="truncate inline-block max-w-[220px] align-middle">{h.snippet || '…'}</span>
-                        </button>
-                      ))
-                    ) : (
-                      <div className="px-3 py-2 text-sm text-muted-foreground">No results</div>
-                    )}
-                    {indexing.total > 0 && indexing.done < indexing.total && (
-                      <div className="px-3 py-1 text-[11px] text-muted-foreground border-t">Indexing… {indexing.done}/{indexing.total}</div>
-                    )}
-                  </div>
-                )}
-              </div>
+              {/* Open Search panel (Cmd/Ctrl+K) */}
+              <Button
+                size="sm"
+                variant="outline"
+                type="button"
+                onMouseDown={(e)=>{ e.preventDefault(); setSearchOpen(true); }}
+                onClick={()=> setSearchOpen(true)}
+                title="Search (Cmd/Ctrl+K)"
+                data-testid="btn-open-search"
+              >
+                Search ⌘K
+              </Button>
               <div className="ml-auto hidden lg:flex items-center gap-2 text-sm text-muted-foreground">
-                {/* Compact top pager (wide screens) */}
-                <Tooltip><TooltipTrigger asChild>
-                  <Button data-testid="btn-first-top" size="sm" variant="outline" title="First page" onClick={() => setCurrentPage(1)} aria-label="First Page"><ChevronsLeft className="h-4 w-4" /></Button>
-                </TooltipTrigger><TooltipContent>First page</TooltipContent></Tooltip>
-                <Tooltip><TooltipTrigger asChild>
-                  <Button data-testid="btn-prev-top" size="sm" variant="outline" title="Previous page" onClick={() => setCurrentPage((p) => Math.max(1, p - 1))} aria-label="Previous Page"><ChevronLeft className="h-4 w-4" /></Button>
-                </TooltipTrigger><TooltipContent>Previous page</TooltipContent></Tooltip>
-                <div className="text-xs text-muted-foreground whitespace-nowrap" data-testid="page-label-top">{currentPage} / {totalPages}</div>
-                <Tooltip><TooltipTrigger asChild>
-                  <Button data-testid="btn-next-top" size="sm" variant="outline" title="Next page" onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))} aria-label="Next Page"><ChevronRight className="h-4 w-4" /></Button>
-                </TooltipTrigger><TooltipContent>Next page</TooltipContent></Tooltip>
-                <Tooltip><TooltipTrigger asChild>
-                  <Button data-testid="btn-last-top" size="sm" variant="outline" title="Last page" onClick={() => setCurrentPage(totalPages)} aria-label="Last Page"><ChevronsRight className="h-4 w-4" /></Button>
-                </TooltipTrigger><TooltipContent>Last page</TooltipContent></Tooltip>
-                <Separator orientation="vertical" className="mx-2" />
-                <span>Zoom</span>
-                <input data-testid="zoom-top" type="range" min={0.5} max={2} step={0.1} value={zoom} onChange={(e) => setZoom(Number(e.target.value))} />
-                <span>{Math.round(zoom * 100)}%</span>
-                <Button size="sm" variant="outline" title="Fit to width" onClick={() => {
-                  try {
-                    const container = viewerRef.current;
-                    const canvas = container?.querySelector('canvas') as HTMLCanvasElement | null;
-                    if (!container || !canvas) return;
-                    const w = canvas.width / (Number(canvas.style.width.replace('px','')) || 1);
-                    const target = (container.clientWidth - 24) * w; // padding margin
-                    const fit = Math.max(0.5, Math.min(2, target / canvas.width));
-                    setZoom(fit);
-                  } catch {}
-                }}>Fit W</Button>
-                <Button size="sm" variant="outline" title="Fit to page" onClick={() => {
-                  try {
-                    const container = viewerRef.current;
-                    const canvas = container?.querySelector('canvas') as HTMLCanvasElement | null;
-                    if (!container || !canvas) return;
-                    const w = canvas.width / (Number(canvas.style.width.replace('px','')) || 1);
-                    const h = canvas.height / (Number(canvas.style.height.replace('px','')) || 1);
-                    const fitW = (container.clientWidth - 24) * w / canvas.width;
-                    const fitH = (container.clientHeight - 24) * h / canvas.height;
-                    const fit = Math.max(0.5, Math.min(2, Math.min(fitW, fitH)));
-                    setZoom(fit);
-                  } catch {}
-                }}>Fit P</Button>
+                {/* Status chip (file · page/total · zoom · indexing) */}
+                <span className="inline-flex items-center gap-2 px-2 py-1 rounded-full bg-muted text-foreground max-w-[480px]">
+                  <span className="truncate" title={currentPdfName || ""}>{currentPdfName || "—"}</span>
+                  <span>· p{currentPage}/{totalPages || 0}</span>
+                  <span>· Zoom {Math.round(zoom * 100)}%</span>
+                  <span>· {indexing.total > 0
+                      ? (indexing.done >= indexing.total ? `Indexed ${indexing.total}/${indexing.total}`  : `Indexing ${indexing.done}/${indexing.total}` )
+                      : 'Index idle'}</span>
+                </span>
+                <Button size="sm" variant={chatDockOpen ? 'default' : 'outline'} aria-pressed={chatDockOpen} onClick={()=> setChatDockOpen(v=>!v)}>Chat</Button>
+                <div className="hidden lg:block">
+                  <ZoomControl
+                    value={zoom}
+                    onChange={(z)=> setZoom(z)}
+                    onFitWidth={fitWidth}
+                    onFitPage={fitPage}
+                  />
+                </div>
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button data-testid="toggle-night" size="sm" variant={night ? "default" : "outline"} onClick={()=> setNight(v=>!v)} aria-pressed={night} aria-label="Night page">
@@ -1665,12 +1833,25 @@ Rules:
                 <button data-testid="pager-next" className="hidden" onClick={()=> setCurrentPage(p=> Math.min(totalPages, p+1))} aria-hidden />
               </div>
             </div>
+            {/* Slide-down Search tray (under toolbar) */}
+            <SearchPanel
+              open={searchOpen}
+              onOpenChange={setSearchOpen}
+              activeTab={searchTab}
+              onTabChange={setSearchTab}
+              query={searchQuery}
+              onQueryChange={setSearchQuery}
+              hits={searchHits}
+              indexing={indexing}
+              onSelectHit={(page)=> { setCurrentPage(Math.max(1, Math.min(totalPages, page))); }}
+              onAsk={(q)=>{ setSearchTab('chat'); setChatDockOpen(true); setChatQ(q); void askChat(); }}
+            />
             {pipelineJob && pipelineJob.status && pipelineJob.status !== 'done' && pipelineJob.status !== 'error' && (
               <div data-testid="pipeline-progress" className="w-full bg-muted text-xs text-foreground px-3 py-1 border-b" role="status" aria-live="polite">
                 Stage: {pipelineJob.status === 'running' ? 'Running' : pipelineJob.status} — {shortDocId ? `doc ${shortDocId}` : ''}
               </div>
             )}
-            <div className="flex min-h-0 flex-1">
+            <div className="flex min-h-0 min-w-0 flex-1">
               {/* Vertical thumbnail rail */}
               {doc && thumbMode === "left" && (
                 <ThumbnailRail
@@ -1678,13 +1859,14 @@ Rules:
                   pageCount={totalPages}
                   currentPage={currentPage}
                   onJump={(n) => setCurrentPage(n)}
+                  width={220}
                   cacheKey={`${currentPdfName || 'doc'}#${thumbRev}`}
                   hitCounts={(() => { const c: Record<number,number> = {}; for (const h of searchHits) c[h.page]=(c[h.page]||0)+1; return c; })()}
                 />
               )}
 
               {/* Canvas viewer */}
-              <div ref={viewerRef} className="flex-1 p-4 overflow-auto flex items-start justify-center min-h-0">
+              <div ref={viewerRef} className="flex-1 p-3 overflow-auto flex items-start justify-start min-h-0 min-w-0">
               {doc ? (
                 <div
                   className={`relative inline-block ${drawArmed ? "cursor-crosshair" : ""}`}
@@ -1732,7 +1914,7 @@ Rules:
                     {/* Search highlights */}
                     {(hitBoxesByPage[currentPage] || []).map((r, i) => (
                       <div key={`hit-${i}`} data-testid="hit-box" aria-label="search-hit"
-                        className="absolute bg-amber-300/30 outline outline-1 outline-amber-400/50 pointer-events-none"
+                        className="absolute bg-amber-200/30 border border-amber-400/60 pointer-events-none"
                         style={{ left: `${r.x*100}%`, top: `${r.y*100}%`, width: `${r.w*100}%`, height: `${Math.max(r.h*100, 1.2)}%` }}
                       />
                     ))}
@@ -1749,26 +1931,50 @@ Rules:
                       return (
                         <div data-testid="box"
                           key={b.id}
-                          className={`absolute border-2 border-dashed cursor-move transition-all ${isSelected ? "ring-2 ring-primary ring-offset-2" : ""} ${borderClass}`}
+                          className={`absolute border-2 border-dashed cursor-move transition-all ${borderClass} ${isSelected ? "ring-2 ring-primary ring-offset-2 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.7)]" : "opacity-35 hover:opacity-100"}`}
                           style={{ left: `${b.x * 100}%`, top: `${b.y * 100}%`, width: `${b.w * 100}%`, height: `${b.h * 100}%` }}
                           onPointerDown={(e) => { e.stopPropagation(); beginDrag(b.id, e, "move"); }}
                           onClick={(e) => { e.stopPropagation(); setSelectedId(b.id); }}
                         >
-                          {/* Label chip (subtle tag) */}
-                          <div
-                            data-testid="box-chip"
-                            className={cn(
-                              'absolute -top-6 left-0 px-2 py-0.5 text-xs font-medium rounded-md ring-1 backdrop-blur-[1px]',
-                              b.type === 'Section' && 'bg-emerald-50 text-emerald-700 ring-emerald-200',
-                              b.type === 'Table' && 'bg-blue-50 text-blue-700 ring-blue-200',
-                              b.type === 'Figure' && 'bg-violet-50 text-violet-700 ring-violet-200',
-                              !(['Section','Table','Figure'].includes(b.type)) && 'bg-slate-50 text-slate-700 ring-slate-200',
-                              isSelected && 'ring-2 ring-primary ring-offset-1 ring-offset-background shadow-sm'
-                            )}
-                            aria-label={`Annotation ${b.type} ${b.instanceId}`}
-                          >
-                            {b.type} · {b.instanceId}
-                          </div>
+                          {/* Label chip outside with leader and Ask-button when selected (auto-flips below if near page top) */}
+                          {(() => {
+                            const nearTop = b.y < 0.06; // 6% from page top: place below to avoid clipping
+                            const chipPosCls = nearTop ? 'top-full mt-1 left-0.5' : '-top-6 -left-0.5';
+                            const leaderCls = nearTop ? 'top-full -mt-1 left-1 border-l-2 border-b-2 -rotate-45' : '-top-1 left-1 border-l-2 border-t-2 rotate-45';
+                            const askPosCls = nearTop ? 'top-full mt-1 left-40' : '-top-6 left-40';
+                            return (
+                              <>
+                                <div
+                                  className={cn(
+                                    'absolute px-1.5 py-0.5 text-xs font-medium rounded-md ring-1',
+                                    chipPosCls,
+                                    b.type === 'Section' && 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+                                    b.type === 'Table' && 'bg-blue-50 text-blue-700 ring-blue-200',
+                                    b.type === 'Figure' && 'bg-violet-50 text-violet-700 ring-violet-200',
+                                    !(['Section','Table','Figure'].includes(b.type)) && 'bg-slate-50 text-slate-700 ring-slate-200',
+                                    isSelected && 'ring-2 ring-primary ring-offset-1 ring-offset-background shadow-sm'
+                                  )}
+                                  aria-label={`Annotation ${b.type} ${b.instanceId}`}
+                                >
+                                  {b.type} · {b.instanceId}
+                                </div>
+                                {/* Little leader from chip into box */}
+                                <div className={cn('absolute w-3 h-3 opacity-60 pointer-events-none', leaderCls)} />
+                                {isSelected && (
+                                  <button
+                                    className={cn('absolute text-[11px] px-1.5 py-0.5 rounded border bg-background/80 hover:bg-muted', askPosCls)}
+                                    onClick={(e)=>{
+                                      e.stopPropagation();
+                                      setSearchQuery(`Explain this ${b.type} and extract key values`);
+                                      setSearchTab('chat');
+                                      setSearchOpen(true);
+                                    }}
+                                    title="Ask about selection"
+                                  >Ask</button>
+                                )}
+                              </>
+                            );
+                          })()}
                           {/* Resize handles */}
                           {["nw","n","ne","e","se","s","sw","w"].map((h) => (
                             <div
@@ -1940,21 +2146,27 @@ Rules:
                 <Download className="h-4 w-4" />
               </Button>
               <Button size="sm" variant="outline" title="Run Pipeline" onClick={runPipeline}>
-                <Braces className="h-4 w-4" />
+                <Play className="h-4 w-4" />
               </Button>
               <Button size="sm" variant="default" title="Extract (Pipeline)" data-testid="btn-extract-pipeline" onClick={extractPipeline}>
                 <Sparkles className="h-4 w-4" />
               </Button>
-              <Button size="sm" variant="outline" title="Load pipeline annotations" data-testid="btn-load-pipeline-annos" onClick={loadPipelineAnnotations}>
-                <Download className="h-4 w-4" />
-              </Button>
-              <Button size="sm" variant="outline" title="Save annotations" data-testid="btn-save-annotations" onClick={saveAnnotations}>
-                <Archive className="h-4 w-4" />
-              </Button>
-              <div className="flex items-center gap-2">
-                <Button size="sm" variant="outline" title="Upsert to Arango" data-testid="btn-upsert-pipeline" onClick={upsertPipeline}>
-                  <Upload className="h-4 w-4" />
+              <Tooltip><TooltipTrigger asChild>
+                <Button size="sm" variant="outline" title="Load pipeline annotations" data-testid="btn-load-pipeline-annos" onClick={loadPipelineAnnotations}>
+                  <Download className="h-4 w-4" />
                 </Button>
+              </TooltipTrigger><TooltipContent>Load pipeline annotations</TooltipContent></Tooltip>
+              <Tooltip><TooltipTrigger asChild>
+                <Button size="sm" variant="outline" title="Save annotations" data-testid="btn-save-annotations" onClick={saveAnnotations}>
+                  <Archive className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger><TooltipContent>Save annotations</TooltipContent></Tooltip>
+              <div className="flex items-center gap-2">
+                <Tooltip><TooltipTrigger asChild>
+                  <Button size="sm" variant="outline" title="Upsert to Arango" data-testid="btn-upsert-pipeline" onClick={upsertPipeline}>
+                    <Upload className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger><TooltipContent>Upsert to Arango</TooltipContent></Tooltip>
                 <span
                   title={dbReady ? 'Indexed in DB' : 'Not in DB yet'}
                   className={cn('inline-block h-2.5 w-2.5 rounded-full', dbReady ? 'bg-emerald-500' : 'bg-muted-foreground/40')}
@@ -2117,26 +2329,23 @@ Rules:
                 <span data-testid="page-number" className="hidden">{currentPage}</span>
               </div>
               <div className="flex items-center gap-3">
-              <div className="flex items-center gap-1">
-                <span className="relative inline-flex">
-                <Tooltip><TooltipTrigger asChild>
-                  <Button data-testid="btn-next" size="sm" variant="outline" title="Next page" onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))} aria-label="Next Page"><ChevronRight className="h-4 w-4" /></Button>
-                </TooltipTrigger><TooltipContent>Next page</TooltipContent></Tooltip>
-                <Tooltip><TooltipTrigger asChild>
-                  <Button data-testid="btn-run-pipeline" size="sm" variant="outline" title="Run pipeline" onClick={runPipeline} aria-label="Run Pipeline"><Braces className="h-4 w-4" /></Button>
-                </TooltipTrigger><TooltipContent>Run Pipeline</TooltipContent></Tooltip>
-                  <button
-                    data-testid="pager-next"
-                    onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                    className="absolute inset-0"
-                    style={{ opacity: 0.01 }}
-                    title="Next page (test hook)"
-                  />
-                </span>
-                <Tooltip><TooltipTrigger asChild>
-                  <Button data-testid="btn-last" size="sm" variant="outline" title="Last page" onClick={() => setCurrentPage(totalPages)} aria-label="Last Page"><ChevronsRight className="h-4 w-4" /></Button>
-                </TooltipTrigger><TooltipContent>Last page</TooltipContent></Tooltip>
-              </div>
+                <div className="flex items-center gap-1">
+                  <span className="relative inline-flex">
+                    <Tooltip><TooltipTrigger asChild>
+                      <Button data-testid="btn-next" size="sm" variant="outline" title="Next page" onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))} aria-label="Next Page"><ChevronRight className="h-4 w-4" /></Button>
+                    </TooltipTrigger><TooltipContent>Next page</TooltipContent></Tooltip>
+                    <button
+                      data-testid="pager-next"
+                      onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                      className="absolute inset-0"
+                      style={{ opacity: 0.01 }}
+                      title="Next page (test hook)"
+                    />
+                  </span>
+                  <Tooltip><TooltipTrigger asChild>
+                    <Button data-testid="btn-last" size="sm" variant="outline" title="Last page" onClick={() => setCurrentPage(totalPages)} aria-label="Last Page"><ChevronsRight className="h-4 w-4" /></Button>
+                  </TooltipTrigger><TooltipContent>Last page</TooltipContent></Tooltip>
+                </div>
                 <div className="h-6 w-px bg-border" aria-hidden />
                 <div className="flex items-center gap-2 text-sm text-muted-foreground" data-testid="thumbs-selector-inline">
                   <span>Thumbs</span>
@@ -2148,6 +2357,15 @@ Rules:
                       <SelectItem value="off">Off</SelectItem>
                     </SelectContent>
                   </Select>
+                </div>
+                {/* Zoom on narrow screens (top zoom is hidden on <lg) */}
+                <div className="lg:hidden">
+                  <ZoomControl
+                    value={zoom}
+                    onChange={(z)=> setZoom(z)}
+                    onFitWidth={fitWidth}
+                    onFitPage={fitPage}
+                  />
                 </div>
               </div>
             </div>
@@ -2171,10 +2389,26 @@ Rules:
           />
         </div>
 
-        {/* Inspector Panel */}
-        <div className="border-l bg-card p-6 flex flex-col" style={{ width: rightW }}>
-
-          <div className="space-y-3 flex-1">
+        {/* Inspector + Chat (vertical split) */}
+        <div
+          className="border-l bg-card flex flex-col shrink-0 min-h-0"
+          style={{ width: rightW, minWidth: 220, maxWidth: 480 }}
+          data-testid="inspector-pane"
+        >
+          <ResizablePanelGroup
+            direction="vertical"
+            className="min-h-0 flex-1"
+            onLayout={(sizes)=>{
+              const key = currentDocId || currentPdfRel || '';
+              const bottom = sizes?.[1] ?? 0;
+              const ratio = Math.max(0, Math.min(1, bottom/100));
+              setChatSplit(ratio);
+              try { localStorage.setItem(`right_split:${key}`, String(ratio)); } catch {}
+            }}
+          >
+            <ResizablePanel defaultSize={chatDockOpen ? Math.max(30, 100 - chatSplit*100) : 100} minSize={30}>
+              <div className="p-6 flex flex-col overflow-y-auto min-h-0">
+                <div className="space-y-3 flex-1 min-h-0">
             <div>
               <label className="text-sm font-medium mb-2 block flex justify-between items-center">
                 <span>Label Type</span>
@@ -2234,6 +2468,7 @@ Rules:
                 }}
                 placeholder="e.g., tbl-001"
               />
+              <p className="mt-1 text-[12px] text-muted-foreground">Use the same Group ID across pages to link multi-page tables.</p>
             </div>
 
             <div>
@@ -2245,6 +2480,9 @@ Rules:
                 <Button size="sm" variant="outline" onClick={() => setJsonOpen(true)} title="Edit JSON" aria-label="Edit JSON">
                   <Edit className="h-4 w-4" />
                 </Button>
+                <Button size="sm" variant="outline" title="Ask about selection" disabled={!selectedBox}
+                  onClick={() => { if (!selectedBox) return; setSearchQuery(`Explain this ${selectedBox.type} and extract key values`); setSearchTab('chat'); setSearchOpen(true); }}
+                >Ask</Button>
               </div>
               {/* Non‑blocking toggle removed: always non‑blocking */}
               <div className="mt-2 flex items-center justify-between">
@@ -2269,6 +2507,8 @@ Rules:
 
             {/* Featured Lessons UI intentionally omitted (agent-only resource) */}
 
+            {SHOW_REVIEW && (
+            <>
             {/* Review queue (markers) */}
             <div className="flex items-center justify-between mb-3">
               <span data-testid="status-badge" className="text-xs px-2 py-1 rounded bg-muted text-foreground">{status}</span>
@@ -2277,21 +2517,27 @@ Rules:
                   setStatus('In Review');
                   const me = localStorage.getItem('reviewer_name') || 'Me';
                   setAssignee(me);
-                  if (selectedId) setPageBoxes(prev => ({
-                    ...prev,
-                    [currentPage]: (prev[currentPage]||[]).map(b => b.id === selectedId ? { ...b, owner: me } : b)
-                  }));
+                  if (selectedId) {
+                    setPageBoxes(prev =>
+                      (prev || []).map(b => (b.id === selectedId ? { ...b, owner: me } : b)),
+                    );
+                  }
                 }}>Claim</Button>
                 <Button data-testid="btn-release" variant="outline" size="sm" onClick={()=> {
                   setStatus('Unassigned'); setAssignee('');
-                  if (selectedId) setPageBoxes(prev => ({
-                    ...prev,
-                    [currentPage]: (prev[currentPage]||[]).map(b => b.id === selectedId ? { ...b, owner: '' } : b)
-                  }));
+                  if (selectedId) {
+                    setPageBoxes(prev =>
+                      (prev || []).map(b => (b.id === selectedId ? { ...b, owner: '' } : b)),
+                    );
+                  }
                 }}>Release</Button>
               </div>
             </div>
+            </>
+            )}
 
+            {SHOW_REVIEW && (
+            <>
             {/* Filters (markers) */}
             <div className="space-y-3 mb-4">
               <div className="flex items-center gap-2">
@@ -2314,6 +2560,8 @@ Rules:
                 </select>
               </div>
             </div>
+            </>
+            )}
 
             {/* Notes */}
             <div className="flex-1 flex flex-col min-h-0 relative">
@@ -2361,63 +2609,67 @@ Rules:
               )}
             </div>
 
-            {/* Conflicts (load + list) */}
-            <div className="mt-3">
-              <div className="flex items-center justify-between mb-2">
-                <div className="text-sm font-medium">Conflicts</div>
-                <Button size="sm" variant="outline" data-testid="btn-load-conflicts" onClick={async ()=>{
-                  try {
-                    let did = currentDocId || (await ensureDocId(currentPdfRel || undefined));
-                    if (!did) {
-                      // Fallback to default PDF name used in seed/smokes
-                      did = await ensureDocId('BHT CV32A65X.pdf');
-                    }
-                    if (!did) { toast('No docId'); return; }
-                    let items: any[] | null = null;
-                    try {
-                      const r = await fetch(`/api/conflicts/list?doc_id=${encodeURIComponent(did)}`);
-                      if (r.ok) {
-                        const j = await r.json();
-                        if (j?.ok && Array.isArray(j.items)) items = j.items;
-                      }
-                    } catch {}
-                    if (!items) {
-                      // Fallback: read artifact file directly
-                      const p = `scripts/artifacts/conflicts_${did}.json`;
+            {showConflicts && (
+              <>
+                {/* Conflicts (load + list) */}
+                <div className="mt-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="text-sm font-medium">Conflicts</div>
+                    <Button size="sm" variant="outline" data-testid="btn-load-conflicts" onClick={async ()=>{
                       try {
-                        const rf = await fetch(`/api/artifacts/file?path=${encodeURIComponent(p)}`);
-                        if (rf.ok) {
-                          const raw = await rf.json();
-                          const arr = Array.isArray(raw) ? raw : (Array.isArray(raw?.items) ? raw.items : []);
-                          if (arr.length) items = arr;
+                        let did = currentDocId || (await ensureDocId(currentPdfRel || undefined));
+                        if (!did) {
+                          // Fallback to default PDF name used in seed/smokes
+                          did = await ensureDocId('BHT CV32A65X.pdf');
                         }
-                      } catch {}
-                    }
-                    if (items && items.length) setConflicts(items); else toast('No conflicts');
-                  } catch { toast.error('Load conflicts failed'); }
-                }}>Load</Button>
-              </div>
-              <div className="space-y-2">
-                {conflicts.map((c, idx) => (
-                  <div key={idx} data-testid="conflict-item" className="flex items-center justify-between px-2 py-1 rounded border text-sm">
-                    <div>
-                      <span className="mr-2">{c.type}</span>
-                      {c.groupId ? <span className="text-muted-foreground">{c.groupId}</span> : null}
-                    </div>
-                    <Button size="sm" variant="outline" data-testid="btn-adjudicate" onClick={async ()=>{
-                      try {
-                        const did = currentDocId;
-                        if (!did) return;
-                        const next = conflicts.slice();
-                        next[idx] = { ...next[idx], resolved: !next[idx]?.resolved };
-                        setConflicts(next);
-                        await fetch('/api/conflicts/save', { method: 'POST', headers: { 'Content-Type':'application/json' }, body: JSON.stringify({ doc_id: did, items: next }) });
-                      } catch {}
-                    }}>{c.resolved ? 'Resolved' : 'Resolve'}</Button>
+                        if (!did) { toast('No docId'); return; }
+                        let items: any[] | null = null;
+                        try {
+                          const r = await fetch(`/api/conflicts/list?doc_id=${encodeURIComponent(did)}`);
+                          if (r.ok) {
+                            const j = await r.json();
+                            if (j?.ok && Array.isArray(j.items)) items = j.items;
+                          }
+                        } catch {}
+                        if (!items) {
+                          // Fallback: read artifact file directly
+                          const p = `scripts/artifacts/conflicts_${did}.json`;
+                          try {
+                            const rf = await fetch(`/api/artifacts/file?path=${encodeURIComponent(p)}`);
+                            if (rf.ok) {
+                              const raw = await rf.json();
+                              const arr = Array.isArray(raw) ? raw : (Array.isArray(raw?.items) ? raw.items : []);
+                              if (arr.length) items = arr;
+                            }
+                          } catch {}
+                        }
+                        if (items && items.length) setConflicts(items); else toast('No conflicts');
+                      } catch { toast.error('Load conflicts failed'); }
+                    }}>Load</Button>
                   </div>
-                ))}
-              </div>
-            </div>
+                  <div className="space-y-2">
+                    {conflicts.map((c, idx) => (
+                      <div key={idx} data-testid="conflict-item" className="flex items-center justify-between px-2 py-1 rounded border text-sm">
+                        <div>
+                          <span className="mr-2">{c.type}</span>
+                          {c.groupId ? <span className="text-muted-foreground">{c.groupId}</span> : null}
+                        </div>
+                        <Button size="sm" variant="outline" data-testid="btn-adjudicate" onClick={async ()=>{
+                          try {
+                            const did = currentDocId;
+                            if (!did) return;
+                            const next = conflicts.slice();
+                            next[idx] = { ...next[idx], resolved: !next[idx]?.resolved };
+                            setConflicts(next);
+                            await fetch('/api/conflicts/save', { method: 'POST', headers: { 'Content-Type':'application/json' }, body: JSON.stringify({ doc_id: did, items: next }) });
+                          } catch {}
+                        }}>{c.resolved ? 'Resolved' : 'Resolve'}</Button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
 
             {/* Conflicts markers (no-op) */}
             <div className="hidden" aria-hidden>
@@ -2466,32 +2718,23 @@ Rules:
                 />
               </div>
             </div>
-          </div>
-
-          <div className="mt-4 pt-4 border-t">
-            <div className="text-xs text-muted-foreground space-y-1 text-center">
-              <p><span className="bg-muted px-2 py-1 rounded">N</span>: New Box</p>
-              <p><span className="bg-muted px-2 py-1 rounded">Ctrl+D</span>: Duplicate Box</p>
-              <p><span className="bg-muted px-2 py-1 rounded">[</span> / <span className="bg-muted px-2 py-1 rounded">]</span>: Navigate</p>
-            </div>
-          </div>
-
-          {/* Chat (MVP) */}
-          <div className="mt-4 border-t pt-3">
-            <label className="text-sm font-medium mb-1 block">Chat (current PDF)</label>
-            <div className="flex items-center gap-2">
-              <Input value={chatQ} onChange={(e)=>setChatQ(e.target.value)} placeholder="Ask a question…" onKeyDown={(e)=>{ if (e.key==='Enter') askChat(); }} />
-              <Button size="sm" onClick={askChat}>Ask</Button>
-            </div>
-            {chatA && (
-              <div className="mt-2 text-sm whitespace-pre-wrap">
-                {chatA}
-                {chatCites?.length ? (
-                  <div className="mt-2 text-xs text-muted-foreground">Citations: {chatCites.slice(0,3).map((c,i)=>`p${c.page} ${c.type}`).join(', ')}</div>
-                ) : null}
+                </div>
+                <div className="mt-2 pt-2 border-t">
+                  <p className="text[11px] leading-5 text-muted-foreground text-center">
+                    <span className="bg-muted px-1.5 py-0.5 rounded">N</span> New ·
+                    <span className="bg-muted px-1.5 py-0.5 rounded ml-2">Ctrl+D</span> Duplicate ·
+                    <span className="bg-muted px-1.5 py-0.5 rounded ml-2">[</span>/<span className="bg-muted px-1.5 py-0.5 rounded">]</span> Navigate
+                  </p>
+                </div>
               </div>
-            )}
-          </div>
+            </ResizablePanel>
+            <ResizableHandle withHandle disabled={!chatDockOpen} />
+            <ResizablePanel defaultSize={chatDockOpen ? Math.min(70, chatSplit*100) : 0} collapsible>
+              <div className={chatDockOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}>
+                <ChatPanel chips={chips} onToggleChip={toggleChip} messages={chatMessages} onSend={sendChat} pending={false} autoFocus={chatDockOpen} />
+              </div>
+            </ResizablePanel>
+          </ResizablePanelGroup>
         </div>
 
         {/* Non-blocking only: blocking dialog removed */}
@@ -2531,6 +2774,8 @@ Rules:
         )}
       </div>
       </SidebarProvider>
+
+      
 
       {/* Fullscreen JSON Dialog */}
 

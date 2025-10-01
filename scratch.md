@@ -1,16 +1,11 @@
-Remaining clarifications (small, unblockers)
+prototypes/tabbed/html/src/pages/ClassicLayout.tsx (your current copy after you patch)
 
-  - Conflict artifact: confirm file path/name and shape. Proposal:
-  scripts/artifacts/conflicts_<docId>.json with { docId, items:[{id,
-  type:'duplicate'|'numeric_mismatch', groupId?, resolved:boolean,
-  notes?}] }.
-  > confirmed
-  - JSON export v1: keep { page, boxes:[{ type, instance_id,
-  group_id, bounding_box:[x,y,w,h] }]} as now? (Matches smokes and
-  keeps room for schema growth.)
-  - Progress microcopy: OK to use “Stage 0N: <name> … <percent>%”
-  and show stage name only when percent unknown?
-  > confirmed
-  - docId: SHA‑256 full hex (64 chars) acceptable, or prefer short
-  first-12 chars for UI display only (storage keeps full)?
-  > first 12 characters is fine for now
+prototypes/tabbed/html/src/index.css (full file)
+
+prototypes/tabbed/html/src/App.css (if it still exists; confirm whether it’s imported anywhere)
+
+prototypes/tabbed/html/src/components/ui/sidebar.tsx (we rely on its layout helpers; want to confirm no extra overflow or width rules)
+
+prototypes/tabbed/html/index.html (to confirm no external stylesheet is pulled)
+
+Any project-level CSS that might affect layout (e.g., a global :root or .container wrapper)

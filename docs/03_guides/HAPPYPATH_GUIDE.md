@@ -101,6 +101,27 @@ Principles
 - Fast mode is for iteration only; it does not produce normalized outputs used by downstream consumers.
 - Accurate mode invoked from this CLI uses deterministic toggles by default (offline-friendly) and is suitable for parity checks.
 
+## Requirement Tuning (Stage 07½/08)
+
+After Stage 07 (reflow), the pipeline automatically runs a deterministic Requirements Miner (Stage 07½) that writes:
+
+- `<out_dir>/07_requirements_miner/json_output/07_requirements.json`
+
+When you opt into proving (`--prove`), Stage 08 will also emit per‑requirement enrichment:
+
+- `<out_dir>/08_lean4_theorem_prover/json_output/08_requirements_enriched.json`
+
+The Classic UI exposes a minimal right‑pane workbench to fix and retry requirements without leaving `/main`:
+
+- Refresh list: `/api/requirements/list?results_dir=…`
+- Edit canonical text: POST `/api/requirements/save`
+- Re‑run formalization: POST `/api/requirements/rerun`
+- Jump to PDF evidence: `req-jump` (scrolls to `page_num`)
+
+CI/Smokes (selected):
+- Miner (sentences): `uv run scripts/smokes/pipeline/requirements/smoke_07_miner_sentences.py`
+- Enriched statuses: `uv run scripts/smokes/pipeline/requirements/smoke_08_compile_statuses.py`
+
 **Appendix — Useful Commands**
 - PDF accurate (explicit run_all):
   ```bash
@@ -186,3 +207,20 @@ CI/offline notes:
 - Keep deterministic/no‑LLM for batch runs.
 - Use `--fallback-lemma-candidates` (enabled by one‑click with FLAT10) to densify graphs without LSP.
 - LSP/Pantograph jobs are opt‑in; do not enable in CI unless needed.
+### Pre‑Feature Gate (UI)
+
+- `cd prototypes/tabbed/html && npm run typecheck`
+- `BASE_URL=http://127.0.0.1:8080/main npm run ux:check`
+- DOM checks (as needed):
+  - `node scripts/smokes/ui_inspector_pane_present.mjs`
+  - `node scripts/smokes/ui_requirements_pane_dom.mjs`
+- Artifacts: attach `scripts/artifacts/ux_check_*.{log,png}` to issues/PRs.
+
+### Pre‑Feature Gate (Backend/CLI)
+
+- Single CLI surface: `PYTHONPATH=src python -m src.cli extract <input> <out_dir> --mode fast|accurate`
+- Pipeline smokes:
+  - `python scripts/smokes/pipeline/smoke_stage10_flatten.py`
+  - `python scripts/smokes/pipeline/smoke_stage11_graph.py`
+  - `python scripts/smokes/pipeline/smoke_stage14_report.py`
+  - `python scripts/smokes/pipeline/acceptance/smoke_requirements_summary.py`

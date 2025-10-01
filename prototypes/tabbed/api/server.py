@@ -112,6 +112,60 @@ ARTIFACTS_ROOT = os.getenv('ARTIFACTS_ROOT', _default_artifacts_root())
 
 app = FastAPI()
 
+
+def _latest_results_dir() -> Optional[Path]:
+    try:
+        p = Path(ARTIFACTS_ROOT) / "latest_results.json"
+        if not p.exists():
+            return None
+        j = json.loads(p.read_text())
+        rd = j.get("results_dir")
+        if not rd:
+            return None
+        rp = Path(rd).resolve()
+        return rp if rp.exists() else None
+    except Exception:
+        return None
+
+
+def _chat_fallback_from_latest(q: str, top_k: int = 8) -> Dict[str, Any]:
+    """Best-effort chat fallback when Arango is unavailable.
+
+    Loads Stage 10 flattened JSON from the latest results pointer and returns
+    a trivial top match by substring/score. This is intentionally simple and offline-friendly.
+    """
+    rd = _latest_results_dir()
+    if not rd:
+        return {"ok": True, "answer": "No relevant content found.", "citations": [], "count": 0}
+    flat = rd / "10_arangodb_exporter" / "json_output" / "10_flattened_data.json"
+    if not flat.exists():
+        return {"ok": True, "answer": "No relevant content found.", "citations": [], "count": 0}
+    try:
+        data = json.loads(flat.read_text())
+        items = data if isinstance(data, list) else data.get("items") or []
+        ql = q.lower()
+        scored = []
+        for it in items:
+            txt = str(it.get("text_content", ""))
+            score = 0.0
+            if ql and txt:
+                tl = txt.lower()
+                score += 1.0 if ql in tl else 0.0
+                qs = set(ql.split())
+                ts = set(tl.split())
+                if qs and ts:
+                    score += len(qs & ts) / max(1.0, len(qs))
+            if score > 0:
+                scored.append((score, it))
+        scored.sort(key=lambda x: x[0], reverse=True)
+        top = [it for _, it in scored[: max(1, int(top_k))]]
+        answer = (top[0].get("text_content") or "").strip() if top else "No relevant content found."
+        cits = [{"page": it.get("page_num"), "type": it.get("object_type") } for it in top[:3]]
+        return {"ok": True, "answer": answer, "citations": cits, "count": len(scored)}
+    except Exception:
+        return {"ok": True, "answer": "No relevant content found.", "citations": [], "count": 0}
+
+
 # CORS: wildcard requires allow_credentials=False. If credentials are needed, set explicit origins via env.
 _cors_origins = os.getenv("CORS_ALLOW_ORIGINS", "*")
 if _cors_origins.strip() == "*":
@@ -580,25 +634,25 @@ async def api_export_pdf(payload: Dict[str, Any], tasks: BackgroundTasks):
                     continue
                 if pnum < 1 or pnum > doc.page_count:
                     continue
-            page = doc.load_page(pnum - 1)
-            pw, ph = page.rect.width, page.rect.height
-            for b in arr or []:
-                bb = b.get("bounding_box") or b.get("bbox") or []
-                if not (isinstance(bb, (list, tuple)) and len(bb) == 4):
-                    continue
-                x, y, w, h = bb
-                rect = fitz.Rect(x * pw, y * ph, (x + w) * pw, (y + h) * ph)
-                # Choose color by type
-                t = (b.get("type") or "Section").lower()
-                if t == "table":
-                    color = (0.2, 0.4, 0.9)
-                elif t == "figure":
-                    color = (0.5, 0.3, 0.9)
-                else:
-                    color = (0.1, 0.7, 0.5)
-                page.draw_rect(rect, color=color, fill=(color[0], color[1], color[2], 0.08), width=1.2)
-                label = f"{b.get('type') or ''} · {b.get('instance_id') or ''}"
-                page.insert_text((rect.x0 + 4, rect.y0 - 8), label, fontsize=8, color=color)
+                page = doc.load_page(pnum - 1)
+                pw, ph = page.rect.width, page.rect.height
+                for b in arr or []:
+                    bb = b.get("bounding_box") or b.get("bbox") or []
+                    if not (isinstance(bb, (list, tuple)) and len(bb) == 4):
+                        continue
+                    x, y, w, h = bb
+                    rect = fitz.Rect(x * pw, y * ph, (x + w) * pw, (y + h) * ph)
+                    # Choose color by type
+                    t = (b.get("type") or "Section").lower()
+                    if t == "table":
+                        color = (0.2, 0.4, 0.9)
+                    elif t == "figure":
+                        color = (0.5, 0.3, 0.9)
+                    else:
+                        color = (0.1, 0.7, 0.5)
+                    page.draw_rect(rect, color=color, fill=(color[0], color[1], color[2], 0.08), width=1.2)
+                    label = f"{b.get('type') or ''} · {b.get('instance_id') or ''}"
+                    page.insert_text((rect.x0 + 4, rect.y0 - 8), label, fontsize=8, color=color)
             # Write to temp file
             fd, tmp_path = tempfile.mkstemp(suffix=".pdf")
             os.close(fd)
@@ -680,8 +734,13 @@ async def api_export_zip(payload: Dict[str, Any], tasks: BackgroundTasks):
 
 
 # Shared LiteLLM integration (project-standard)
-from extractor.pipeline.utils.litellm_call import litellm_call  # type: ignore
-from extractor.pipeline.utils.litellm_cache import initialize_litellm_cache  # type: ignore
+try:
+    from extractor.pipeline.utils.litellm_call import litellm_call  # type: ignore
+    from extractor.pipeline.utils.litellm_cache import initialize_litellm_cache  # type: ignore
+except Exception:  # pragma: no cover
+    litellm_call = None  # type: ignore
+    def initialize_litellm_cache():  # type: ignore
+        return None
 
 # Initialize cache best-effort
 try:
@@ -710,9 +769,9 @@ async def http_generate(payload: Dict[str, Any]):
     prompt = payload.get("prompt") or ""
     image = payload.get("image")
 
+    temp_path: str | None = None
     try:
         params: Dict[str, Any] = {"model": model, "text": prompt}
-        temp_path: str | None = None
         if image:
             # Support data URLs by writing to a temporary file
             if isinstance(image, str) and image.startswith("data:image/") and "," in image:
@@ -732,6 +791,8 @@ async def http_generate(payload: Dict[str, Any]):
             else:
                 params["image"] = image
         # Enforce JSON object outputs for downstream parsing
+        if litellm_call is None:
+            return JSONResponse({"ok": False, "error": "litellm_unavailable"}, status_code=503)
         results = await litellm_call(
             [params],
             wrap_json=True,
@@ -1324,7 +1385,7 @@ async def api_chat_query(payload: dict):
         db = _arango_connect()
         if db and db.has_collection("pdf_objects"):
             view = _ensure_pdf_objects_view(db) or ""
-            bind: Dict[str, Any] = {"q": q}
+            bind: Dict[str, Any] = {"q": q, "doc_ids": []}
             if doc_ids and isinstance(doc_ids, list):
                 bind["doc_ids"] = [str(x) for x in doc_ids if isinstance(x, (str, int))]
             bind["pdf"] = pdf_hint.lower()
@@ -1377,12 +1438,9 @@ async def api_chat_query(payload: dict):
             answer = (items[0].get("text") or "").strip() if items else "No relevant content found."
             cits = [{"page": it.get("page"), "type": it.get("type") } for it in items[:3]]
             return {"ok": True, "session_id": session_id, "answer": answer, "citations": cits, "count": len(rows)}
-        # Fallback: legacy chunks search
-        res = await api_search({"q": q})  # type: ignore
-        items = res.get("items") if isinstance(res, dict) else []
-        answer_text = items[0]["text"] if items else "No relevant content found."
-        citations = [{"page": it.get("page"), "type": it.get("type") } for it in items[:3]]
-        return {"ok": True, "session_id": session_id, "answer": answer_text, "citations": citations}
+        # Fallback: read latest Stage 10 flattened JSON when DB is unavailable
+        fb = _chat_fallback_from_latest(q, top_k=top_k)
+        return {"ok": True, "session_id": session_id, "answer": fb.get("answer", "No relevant content found."), "citations": fb.get("citations", []), "count": fb.get("count", 0)}
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
@@ -1485,6 +1543,21 @@ class _SaveAnnotationsReq(BaseModel):
 class _UpsertReq(BaseModel):
     results_dir: str
     fast_embeddings: bool = True
+
+class _ReqListReq(BaseModel):
+    results_dir: str
+
+class _ReqEdit(BaseModel):
+    id: str
+    text_canonical: str
+
+class _ReqSaveReq(BaseModel):
+    results_dir: str
+    edits: List[_ReqEdit]
+
+class _ReqRerunReq(BaseModel):
+    results_dir: str
+    filter_status: List[str] | None = None
 
 
 # -----------------------------
@@ -1700,14 +1773,16 @@ def api_pipeline_run_external(req: _RunExternalReq):
 
 @app.get("/api/artifacts/file")
 def api_artifact_file(path: str):
-    p = Path(path)
-    if not p.exists() or not p.is_file():
-        return JSONResponse({"ok": False, "error": "not_found"}, status_code=404)
+    # Restrict access to ARTIFACTS_ROOT for safety
+    target = Path(path if Path(path).is_absolute() else Path(ARTIFACTS_ROOT) / path).resolve()
+    root = Path(ARTIFACTS_ROOT).resolve()
     try:
-        _ = p.resolve().relative_to(Path.cwd())
+        _ = target.relative_to(root)
     except Exception:
-        return JSONResponse({"ok": False, "error": "outside_workspace"}, status_code=400)
-    return FileResponse(str(p))
+        return JSONResponse({"ok": False, "error": "outside_artifacts_root"}, status_code=400)
+    if not target.exists() or not target.is_file():
+        return JSONResponse({"ok": False, "error": "not_found"}, status_code=404)
+    return FileResponse(str(target))
 
 
 # -----------------------------
@@ -1807,6 +1882,116 @@ def api_pipeline_upsert(req: _UpsertReq):
             "export_confirmation": str(confirm10) if confirm10.exists() else None,
             "graph_confirmation": str(confirm11) if confirm11.exists() else None,
         }
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+# -----------------------------
+# Requirements API (miner/enrichment UX support)
+# -----------------------------
+
+@app.get("/api/requirements/list")
+def api_requirements_list(results_dir: str):
+    try:
+        results = Path(results_dir).resolve()
+        req07 = results / "07_requirements_miner" / "json_output" / "07_requirements.json"
+        req08 = results / "08_lean4_theorem_prover" / "json_output" / "08_requirements_enriched.json"
+        if not req07.exists():
+            return JSONResponse({"ok": False, "error": "requirements_not_found"}, status_code=404)
+        base = json.loads(req07.read_text())
+        items = base.get("requirements") or []
+        by_id = {str(r.get("id")): r for r in items if r.get("id")}
+        if req08.exists():
+            try:
+                enr = json.loads(req08.read_text()).get("requirements") or []
+                for e in enr:
+                    rid = str(e.get("id"))
+                    if rid in by_id:
+                        by_id[rid]["status"] = e.get("status")
+            except Exception:
+                pass
+        # Build light list for UI
+        out = []
+        for r in by_id.values():
+            out.append({
+                "id": r.get("id"),
+                "text_canonical": r.get("text_canonical") or r.get("text_raw"),
+                "status": r.get("status", "new"),
+                "confidence": r.get("confidence", 0.0),
+                "source": r.get("source", {}),
+            })
+        return {"ok": True, "results_dir": str(results), "requirements": out}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/requirements/save")
+def api_requirements_save(req: _ReqSaveReq):
+    try:
+        results = Path(req.results_dir).resolve()
+        req07 = results / "07_requirements_miner" / "json_output" / "07_requirements.json"
+        if not req07.exists():
+            return JSONResponse({"ok": False, "error": "requirements_not_found"}, status_code=404)
+        data = json.loads(req07.read_text())
+        items = data.get("requirements") or []
+        by_id = {str(r.get("id")): r for r in items if r.get("id")}
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        changed = 0
+        for e in req.edits:
+            r = by_id.get(e.id)
+            if r:
+                r["text_canonical"] = e.text_canonical
+                r.setdefault("last_user_edit", {})
+                r["last_user_edit"] = {"by": "ui", "at": now}
+                changed += 1
+        if changed:
+            req07.write_text(json.dumps({"requirements": list(by_id.values())}, indent=2))
+        # Mark edited in enriched file (create if absent)
+        enr_dir = results / "08_lean4_theorem_prover" / "json_output"
+        enr = enr_dir / "08_requirements_enriched.json"
+        enr_dir.mkdir(parents=True, exist_ok=True)
+        enr_items = []
+        if enr.exists():
+            try:
+                enr_items = json.loads(enr.read_text()).get("requirements") or []
+            except Exception:
+                enr_items = []
+        enr_by_id = {str(x.get("id")): x for x in enr_items if x.get("id")}
+        for e in req.edits:
+            x = enr_by_id.get(e.id) or {"id": e.id}
+            x["status"] = "edited"
+            x["compile_log"] = x.get("compile_log", "")
+            x["diagnostics"] = x.get("diagnostics", [])
+            x["formalization"] = x.get("formalization", None)
+            # ensure text_canonical matches edited
+            x["text_canonical"] = e.text_canonical
+            enr_by_id[e.id] = x
+        enr.write_text(json.dumps({"requirements": list(enr_by_id.values())}, indent=2))
+        return {"ok": True, "edited": changed}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/requirements/rerun")
+def api_requirements_rerun(req: _ReqRerunReq):
+    try:
+        results = Path(req.results_dir).resolve()
+        if not results.exists():
+            return JSONResponse({"ok": False, "error": "results_dir_not_found"}, status_code=400)
+        reflow_json = results / "07_reflow_section" / "json_output" / "07_reflowed.json"
+        if not reflow_json.exists():
+            return JSONResponse({"ok": False, "error": "missing_reflowed"}, status_code=400)
+        env = os.environ.copy(); env["PYTHONPATH"] = str(REPO_ROOT / "src")
+        # Prefer native Stage 08 run; FORCE_PROVE08 can be set by operator to override offline
+        cmd = [
+            sys.executable,
+            "src/extractor/pipeline/steps/08_lean4_theorem_prover.py",
+            str(reflow_json),
+            "-o", str(results),
+        ]
+        p = subprocess.run(cmd, env=env)
+        ok = p.returncode == 0
+        enr = results / "08_lean4_theorem_prover" / "json_output" / "08_requirements_enriched.json"
+        return {"ok": ok, "enriched": str(enr) if enr.exists() else None}
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 

@@ -36,7 +36,6 @@ from rich.console import Console
 from extractor.pipeline.utils.metrics_logger import log_metric
 from extractor.pipeline.tools.reqif_export import export_reqif
 
-app = typer.Typer(help="Run all pipeline stages end-to-end")
 console = Console()
 
 
@@ -156,79 +155,82 @@ def _ensure_env(
     return e
 
 
-@app.command()
-def run(
-    pdf: Path = typer.Option(
-        ..., exists=True, file_okay=True, dir_okay=False, readable=True, help="Input PDF"
-    ),
-    results: Path = typer.Option(
+def build_cli() -> typer.Typer:
+    app = typer.Typer(help="Run all pipeline stages end-to-end")
+
+    @app.command()
+    def run(
+        pdf: Path = typer.Option(
+            ..., exists=True, file_okay=True, dir_okay=False, readable=True, help="Input PDF"
+        ),
+        results: Path = typer.Option(
         Path("data/results/pipeline"),
         exists=False,
         file_okay=False,
         dir_okay=True,
         help="Results directory",
     ),
-    arango_db: str = typer.Option(
+        arango_db: str = typer.Option(
         "pdf_knowledge_base_test", help="Dedicated ArangoDB database for this run"
     ),
-    session: Optional[str] = typer.Option(
+        session: Optional[str] = typer.Option(
         None, help="Optional fixed session id (defaults to timestamp)"
     ),
-    lean4_cli: Optional[str] = typer.Option(
+        lean4_cli: Optional[str] = typer.Option(
         "python /home/graham/workspace/experiments/lean4/src/lean4_prover/cli_mini.py",
         help="Path to Lean4 CLI (cli_mini.py)",
     ),
-    resume: bool = typer.Option(
+        resume: bool = typer.Option(
         False,
         "--resume/--no-resume",
         help="Skip stages that already have outputs recorded in pipeline_manifest.json",
     ),
-    # Offline/skip toggles per stage
-    offline: bool = typer.Option(
+        # Offline/skip toggles per stage
+        offline: bool = typer.Option(
         False,
         "--offline/--no-offline",
         help="Run with offline-friendly flags across stages (skips LLM/DB/heavy ops)",
     ),
-    skip_llm03: bool = typer.Option(
+        skip_llm03: bool = typer.Option(
         False, "--skip-llm03/--no-skip-llm03", help="Stage 03: skip vision LLM verification"
     ),
-    skip_descriptions06: bool = typer.Option(
+        skip_descriptions06: bool = typer.Option(
         False,
         "--skip-descriptions06/--no-skip-descriptions06",
         help="Stage 06: skip LLM descriptions for figures",
     ),
-    summary_only07: bool = typer.Option(
+        summary_only07: bool = typer.Option(
         False, "--summary-only07/--full07", help="Stage 07: summary-only (no VLM merge)"
     ),
-    skip_tables05: bool = typer.Option(
+        skip_tables05: bool = typer.Option(
         False, "--skip-tables05/--no-skip-tables05", help="Stage 05: skip table extraction"
     ),
-    skip_figures06: bool = typer.Option(
+        skip_figures06: bool = typer.Option(
         False, "--skip-figures06/--no-skip-figures06", help="Stage 06: skip figure extraction"
     ),
-    skip_proving08: bool = typer.Option(
+        skip_proving08: bool = typer.Option(
         False, "--skip-proving08/--prove08", help="Stage 08: skip proving"
     ),
-    skip_export10: bool = typer.Option(
+        skip_export10: bool = typer.Option(
         False, "--skip-export10/--no-skip-export10", help="Stage 10: skip Arango export"
     ),
-    skip_embeddings10: bool = typer.Option(
+        skip_embeddings10: bool = typer.Option(
         False,
         "--skip-embeddings10/--no-skip-embeddings10",
         help="Stage 10: skip embedding computation",
     ),
-    fast_embeddings10: bool = typer.Option(
+        fast_embeddings10: bool = typer.Option(
         False,
         "--fast-embeddings10/--no-fast-embeddings10",
         help="Stage 10: use deterministic 8D hash embeddings",
     ),
-    skip_graph11: bool = typer.Option(
+        skip_graph11: bool = typer.Option(
         False, "--skip-graph11/--no-skip-graph11", help="Stage 11: write edges JSON only"
     ),
-    validate: bool = typer.Option(
+        validate: bool = typer.Option(
         False, "--validate/--no-validate", help="Validate stages against gold invariants"
     ),
-    annotations_json: Optional[Path] = typer.Option(
+        annotations_json: Optional[Path] = typer.Option(
         None,
         "--annotations-json",
         help="External annotations JSON (skip Stage 01 and use this file)",
@@ -237,7 +239,7 @@ def run(
         dir_okay=False,
         readable=True,
     ),
-    clean_pdf: Optional[Path] = typer.Option(
+        clean_pdf: Optional[Path] = typer.Option(
         None,
         "--clean-pdf",
         help="External clean PDF path to use with --annotations-json",
@@ -246,7 +248,7 @@ def run(
         dir_okay=False,
         readable=True,
     ),
-):
+    ):
     # Deprecation notice: prefer the unified surface
     try:
         import typer as _ty
@@ -525,6 +527,26 @@ def run(
             _validate_output("07", reflow_json)
         record_stage(stage07_name, [reflow_json])
 
+    # Stage 07½ — Requirements Miner (deterministic, offline-friendly)
+    stage07r_name = "07_requirements_miner"
+    req_dir = results / stage07r_name / "json_output"
+    req_json = req_dir / "07_requirements.json"
+    if resume and stage_completed(stage07r_name, [req_json]):
+        console.print(f"[yellow]Skipping {stage07r_name} (resume)\[/yellow]")
+    elif os.getenv("STAGE07_REQUIREMENTS_MINER", "1").lower() in {"1","true","yes","y"}:
+        _run(
+            [
+                sys.executable,
+                "src/extractor/pipeline/steps/07_requirements_miner.py",
+                str(reflow_json),
+                "-o",
+                str(results),
+            ],
+            env,
+            stage_name=stage07r_name,
+        )
+        record_stage(stage07r_name, [req_json])
+
     # Stage 08 (full proving via Lean4 CLI)
     # Allow explicit --prove08 to override offline skipping
     force_prove = (not skip_proving08) or os.getenv("FORCE_PROVE08", "").lower() in {"1", "true", "yes", "y"}
@@ -548,7 +570,31 @@ def run(
             stage_name=stage08_name,
         )
         record_stage(stage08_name, [_theorems_json])
-    # Stage 08 has no invariant file; skip
+    # Ensure enriched requirements JSON exists for UX and Stage 14 summaries
+    try:
+        enr_dir = results / stage08_name / "json_output"
+        enr_json = enr_dir / "08_requirements_enriched.json"
+        if not enr_json.exists() and req_json.exists():
+            req = json.loads(req_json.read_text())
+            enriched = {
+                "requirements": [
+                    {
+                        **r,
+                        "status": "unproved" if not skip_proving_effective else "new",
+                        "compile_log": "",
+                        "formalization": None,
+                        "diagnostics": [],
+                    }
+                    for r in (req.get("requirements") or [])
+                ]
+            }
+            enr_dir.mkdir(parents=True, exist_ok=True)
+            enr_json.write_text(json.dumps(enriched, indent=2))
+            current_outputs = manifest.get(stage08_name, {}).get("outputs", [])
+            if str(enr_json) not in current_outputs:
+                record_stage(stage08_name, [p for p in [_theorems_json, enr_json] if p.exists()])
+    except Exception as e:
+        console.print(f"[yellow]Stage 08 enrichment synthesis warning: {e}\[/yellow]")
 
     # Stage 09
     stage09_name = "09_section_summarizer"
@@ -698,6 +744,12 @@ def run(
         },
     )
 
+    # end run()
+
+    # end run()
+
+    return app
+
 
 if __name__ == "__main__":
-    app()
+    build_cli()()

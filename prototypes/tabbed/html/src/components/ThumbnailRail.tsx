@@ -40,7 +40,7 @@ export function ThumbnailRail({
   }, [currentPage]);
 
   return (
-    <div className="w-40 border-r bg-muted/30 overflow-hidden">
+    <div className="shrink-0 border-r bg-muted/30 overflow-x-hidden overflow-y-auto min-h-0" style={{ width }}>
       <Virtuoso
         ref={ref}
         totalCount={pageCount}
@@ -112,19 +112,24 @@ function ThumbItem({
     <button
       onClick={() => onJump(n)}
       className={cn(
-        "group w-full px-2 py-3 text-left focus:outline-none relative",
+        "group w-full px-2 py-2 text-left focus:outline-none relative",
         isActive && "bg-primary/10 before:absolute before:left-0 before:top-0 before:bottom-0 before:w-0.5 before:bg-primary"
       )}
       aria-current={isActive ? "page" : undefined}
+      style={{
+        // innerWidth accounts for horizontal padding inside the button (px-2 => 16px)
+        height: Math.round(Math.max(1, (width - 16)) * 4 / 3) + 36,
+      }}
     >
       <div
         className={cn(
-          "aspect-[3/4] w-full rounded-xl overflow-hidden shadow-sm ring-1 ring-border",
-          "group-hover:ring-primary"
+          "relative w-full rounded-xl overflow-hidden shadow-sm ring-1 bg-white p-1",
+          isActive ? "ring-primary" : "ring-border"
         )}
+        style={{ aspectRatio: '3 / 4' }}
       >
         {src ? (
-          <img src={src} alt={`Page ${n}`} className="w-full h-full object-cover" />
+          <img src={src} alt={`Page ${n}`} className="w-full h-full object-contain" />
         ) : (
           <div className="w-full h-full animate-pulse bg-muted" />
         )}

@@ -26,7 +26,7 @@ from dotenv import load_dotenv, find_dotenv
 from extractor.pipeline.utils.litellm_cache import initialize_litellm_cache
 from extractor.pipeline.utils.diagnostics import get_run_id
 from extractor.pipeline.utils.litellm_call import litellm_call
-from extractor.core.services.utils.json_utils import clean_json_string
+from extractor.pipeline.utils.json_utils import clean_json_string
 from extractor.pipeline.utils.json_mode import JSON_SYSTEM_GUARD
 from tqdm import tqdm
 

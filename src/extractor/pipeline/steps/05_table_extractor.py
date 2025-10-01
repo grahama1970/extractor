@@ -712,9 +712,11 @@ def extract_all_tables(
                     per_attempt = int(dur / max(1, cnt)) if cnt else dur
                     entry["per_page_ms"][str(page_num)] = per_attempt
             except Exception:
+                # Per-page strategy timing aggregation failed; continue.
                 pass
-                if best_strategy:
-                    last_good_strategy = best_strategy
+            # Record last good strategy outside the exception path so it updates on success.
+            if best_strategy:
+                last_good_strategy = best_strategy
 
             console.print(f"  Page {page_num + 1}: Found {len(tables)} tables")
 

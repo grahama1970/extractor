@@ -47,14 +47,14 @@ BEFORE CODING:
 
 Quick Start:
 ```bash
-# Run with complete pipeline output
-python 07_report_generator.py working --pipeline-dir pipeline_run/
+# Run with complete pipeline output (Stage 14)
+python 14_report_generator.py working --pipeline-dir pipeline_run/
 
 # Debug mode
-python 07_report_generator.py debug
+python 14_report_generator.py debug
 
 # Check results
-cat reports/07_report_*.json | jq '.'
+cat reports/14_report_*.json | jq '.'
 ```
 
 Dependencies:
@@ -590,6 +590,26 @@ async def generate_comprehensive_report(
         except Exception:
             pass
 
+        # Requirements counts
+        req_counts = {}
+        try:
+            req07 = output_dir / "07_requirements_miner" / "json_output" / "07_requirements.json"
+            if req07.exists():
+                r = json.loads(req07.read_text()).get("requirements") or []
+                req_counts["total"] = len(r)
+                req_counts["with_condition"] = sum(1 for x in r if x.get("condition"))
+            req08 = output_dir / "08_lean4_theorem_prover" / "json_output" / "08_requirements_enriched.json"
+            if req08.exists():
+                enr = json.loads(req08.read_text()).get("requirements") or []
+                by_status = {}
+                for e in enr:
+                    s = str(e.get("status") or "unknown")
+                    by_status[s] = by_status.get(s, 0) + 1
+                if by_status:
+                    req_counts["by_status"] = by_status
+        except Exception:
+            pass
+
         run_summary = {
             "stage_durations_ms": stats.get("stage_durations_ms", {}),
             "graph": {
@@ -598,6 +618,7 @@ async def generate_comprehensive_report(
             },
             "exporters": exporters,
             "rtm": {"link_count": (stats.get("rtm") or {}).get("link_count", 0)},
+            "requirements": req_counts,
         }
         (output_dir / "run_summary.json").write_text(json.dumps(run_summary, indent=2, sort_keys=True))
     except Exception:
