@@ -2,6 +2,27 @@ BASE_URL ?= http://127.0.0.1:8080
 CDP_URL  ?= http://127.0.0.1:3000/json/version
 PY       ?= .venv/bin/python
 
+# Live scenario runner (mirrors LiteLLM/CodeWorld)
+.PHONY: run-scenarios
+run-scenarios:
+	python scenarios/run_all.py
+
+.PHONY: run-scenarios-ux
+run-scenarios-ux:
+	SCENARIOS_FILTER=ux_ python scenarios/run_all.py
+
+.PHONY: run-scenarios-pipeline
+run-scenarios-pipeline:
+	SCENARIOS_FILTER=pipeline_ python scenarios/run_all.py
+
+.PHONY: pipeline
+pipeline:
+	python scenarios/pipeline/run_pipeline_all.py
+
+.PHONY: pipeline:smoke
+pipeline:smoke:
+	SCENARIOS_FILTER=pipeline_api_health,pipeline_step_10_export_flattened,pipeline_step_11_graph_db python scenarios/run_all.py
+
 
 .PHONY: coco-export smoke-tabbed-api help setup setup-smokes smokes-python dev stop lint fmt type test api-smokes ux-health smokes ci scaffold smoke-issue \
 		gamified-e2e gamified-all gamified-all-fast gamified-codex gamified-cli \
@@ -570,3 +591,45 @@ graph-viewer-render:
 	@[ -n "$(JSON)" ] || (echo "Set JSON=graph.json" && exit 2)
 	uv run scripts/viewers/render_vis_html.py $(JSON) viewer.html
 	@echo "Open viewer.html in a browser"
+# Rinse/Repeat UX gate with timeouts and optional bundle
+.PHONY: rinse rinse-cdp
+rinse:
+	ATTEMPTS?=3
+	@echo "[make rinse] attempts=$(ATTEMPTS)"
+	ATTEMPTS=$(ATTEMPTS) bash scripts/ci_rinse_repeat.sh
+
+	rinse-cdp:
+	ATTEMPTS?=3
+	@echo "[make rinse-cdp] attempts=$(ATTEMPTS)"
+	ATTEMPTS=$(ATTEMPTS) BROWSERLESS_WS?=ws://127.0.0.1:9222/devtools/browser \
+	  bash scripts/ci_rinse_repeat.sh
+
+# Run UI/API smokes with timeouts (fast and full variants)
+.PHONY: smokes-rinse smokes-rinse-full
+smokes-rinse:
+	@echo "[make smokes-rinse] FAST=1"
+	SMOKES_FAST=1 timeout 900s node scripts/smokes/all.mjs
+
+smokes-rinse-full:
+	@echo "[make smokes-rinse-full]"
+	timeout 1800s node scripts/smokes/all.mjs
+
+
+# --- CI helpers ---
+PDF_DIR ?= prototypes/tabbed/pdfs
+TARGET_URL ?= http://127.0.0.1:4173/main
+
+.PHONY: ensure-pdfs
+ensure-pdfs:
+	@if ! ls -1 "$(PDF_DIR)"/*.pdf >/dev/null 2>&1; then 	  echo "[ensure-pdfs] No PDFs found in $(PDF_DIR). Add at least one .pdf or set PDF_DIR=..."; 	  exit 1; 	fi
+
+.PHONY: lint-api-gates
+lint-api-gates:
+	@echo "[lint-api-gates] checking that /api calls are gated in preview/dev..."
+	@! rg -n --hidden "/api/" prototypes/tabbed/html/src 	  | rg -v "isPreview\(|isDev\(" 	  || (echo "[lint-api-gates] Found ungated /api references. Gate them behind isPreview()/isDev()." && exit 1)
+
+.PHONY: ci-rinse
+ci-rinse:
+	@echo "[ci-rinse] preview gate"; 	VITE_PREVIEW=1 CONSOLE_ERRORS_TIMEOUT_MS=90000 TARGET_URL=$(TARGET_URL) node scenarios/ux/console_errors.mjs
+	@echo "[ci-rinse] no-preview-api check"; 	VITE_PREVIEW=1 TARGET_URL=$(TARGET_URL) node scenarios/ux/no_preview_api_requests.mjs
+	@echo "[ci-rinse] backend smokes"; 	$(MAKE) ensure-pdfs && $(MAKE) smokes-rinse

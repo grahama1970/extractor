@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 
 const stepsBase = [
   { cmd: ['node', 'scripts/smokes/llm_health.mjs'], name: 'llm_health' },
-  { cmd: ['node', 'scripts/smokes/console_errors.mjs'], name: 'console_errors' },
+  { cmd: ['node', 'scenarios/ux/console_errors.mjs'], name: 'console_errors' },
     { cmd: ['node', 'scripts/smokes/api_tabbed_basic.mjs'], name: 'api_tabbed_basic' },
   { cmd: ['node', 'scripts/smokes/api_coco_export.mjs'], name: 'api_coco_export' },
   { cmd: ['node', 'scripts/smokes/api_suggest_tables.mjs'], name: 'api_suggest_tables' },
