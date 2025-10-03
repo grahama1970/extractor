@@ -109,7 +109,6 @@ def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool
     converter = PdfConverter(
         artifact_dict=models,
         config=config,
-        texify_model=models.get("texify_model"),
     )
 
     # Build the document (this creates and processes all blocks)
