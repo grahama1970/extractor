@@ -202,6 +202,22 @@ class EPUBProvider:
                 metadata=BlockMetadata(attributes={"tag": tag, "list_type": list_type}, confidence=1.0),
             )
             blocks.append(list_block)
+            # Optional nested depth from DOM
+            import os as _os
+            use_nested_depths = _os.environ.get("EXTRACT_NESTED_LIST_DEPTHS", "").lower() in {"1", "true"}
+
+            def _li_depth(li_el):
+                if not use_nested_depths:
+                    return 1
+                depth = 1
+                parent = getattr(li_el, "parent", None)
+                while parent is not None:
+                    t = getattr(parent, "name", "").lower()
+                    if t in ("ul", "ol", "dl"):
+                        depth += 1
+                    parent = getattr(parent, "parent", None)
+                return max(1, depth - 1)
+
             for idx, li in enumerate(node.find_all("li", recursive=False)):
                 li_text = li.get_text(" ", strip=True)
                 if li_text:
@@ -212,7 +228,7 @@ class EPUBProvider:
                             content=li_text,
                             parent_id=list_block.id,
                             metadata=BlockMetadata(
-                                {"index": idx, "ordered": tag == "ol", "list_type": list_type, "depth": 1}, confidence=1.0
+                                {"index": idx, "ordered": tag == "ol", "list_type": list_type, "depth": _li_depth(li)}, confidence=1.0
                             ),
                         )
                     )

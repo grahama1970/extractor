@@ -475,6 +475,22 @@ class HTMLProvider:
         )
         blocks.append(list_block)
 
+        # Optional nested depth from DOM
+        import os as _os
+        use_nested_depths = _os.environ.get("EXTRACT_NESTED_LIST_DEPTHS", "").lower() in {"1", "true"}
+
+        def _li_depth(li_el: Tag) -> int:
+            if not use_nested_depths:
+                return 1
+            depth = 1
+            parent = getattr(li_el, "parent", None)
+            while parent is not None:
+                t = getattr(parent, "name", "").lower()
+                if t in ("ul", "ol", "dl"):
+                    depth += 1
+                parent = getattr(parent, "parent", None)
+            return max(1, depth - 1)
+
         # Process list items
         for idx, li in enumerate(element.find_all("li", recursive=False)):
             # Check for nested complex content
@@ -497,7 +513,7 @@ class HTMLProvider:
                         content=item_text.strip(),
                         parent_id=list_block.id,
                         metadata=BlockMetadata(
-                            attributes={"index": idx, "list_type": list_type, "depth": 1}, confidence=1.0
+                            attributes={"index": idx, "list_type": list_type, "depth": _li_depth(li)}, confidence=1.0
                         ),
                     )
                 )
