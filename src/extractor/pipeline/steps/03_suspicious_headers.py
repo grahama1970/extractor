@@ -68,11 +68,9 @@ def build_cli():
     return app
 
 
-def _env_vlm_model(default: str = "gemini/gemini-2.5-flash") -> str:
-    """Return VLM model from a single environment variable for clarity.
-    We use only LITELLM_VLM_MODEL to avoid confusion.
-    """
-    return os.getenv("LITELLM_VLM_MODEL") or default
+def _env_vlm_model(default: str = "") -> str:
+    """Return VLM model from environment only. No hardcoded defaults."""
+    return (os.getenv("LITELLM_VLM_MODEL") or "").strip()
 
 
 @dataclass

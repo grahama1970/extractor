@@ -88,9 +88,11 @@ async def summarize_section(
                 os.getenv("LITELLM_DEFAULT_MODEL"),
                 os.getenv("DEFAULT_LITELLM_MODEL"),
                 os.getenv("LITELLM_SMALL_MODEL"),
-                "openai/gpt-5-mini",
+                os.getenv("LITELLM_VLM_MODEL"),
             ]
-            model_name = next((c.strip() for c in candidates if c and c.strip()), "openai/gpt-5-mini")
+            model_name = next((c.strip() for c in candidates if c and c.strip()), None)
+            if not model_name:
+                raise ValueError("No LLM model configured. Set LITELLM_DEFAULT_MODEL or DEFAULT_LITELLM_MODEL or LITELLM_VLM_MODEL in .env.")
             # Use the shared LiteLLM batch runner for consistency with other stages
             is_gpt5 = "gpt-5" in (model_name or "").lower()
             params = {
@@ -238,13 +240,16 @@ async def create_checkpoint_summary(
             "You output ONLY well-formed JSON objects. No prose, markdown, or extra text. "
             "Use double-quoted keys/strings and no trailing commas."
         )
-        model_name = (
-            os.getenv("LITELLM_MODEL")
-            or os.getenv("LITELLM_DEFAULT_MODEL")
-            or os.getenv("DEFAULT_LITELLM_MODEL")
-            or os.getenv("LITELLM_SMALL_MODEL")
-            or "openai/gpt-5-mini"
-        )
+            model_name = (
+                os.getenv("LITELLM_MODEL")
+                or os.getenv("LITELLM_DEFAULT_MODEL")
+                or os.getenv("DEFAULT_LITELLM_MODEL")
+                or os.getenv("LITELLM_SMALL_MODEL")
+                or os.getenv("LITELLM_VLM_MODEL")
+            )
+            model_name = (model_name or "").strip()
+            if not model_name:
+                raise ValueError("No LLM model configured. Set LITELLM_DEFAULT_MODEL or DEFAULT_LITELLM_MODEL or LITELLM_VLM_MODEL in .env.")
         is_gpt5 = "gpt-5" in (model_name or "").lower()
         params: Dict[str, Any] = {
             "model": model_name,

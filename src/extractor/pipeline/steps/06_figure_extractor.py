@@ -69,7 +69,7 @@ console = Console()
 # Make key parameters configurable via environment variables
 VERTICAL_PADDING_RATIO = float(os.getenv("FIGURE_VERTICAL_PADDING", "0.2"))
 # Use local model for simple image descriptions (2-3 sentences)
-VLM_MODEL = os.getenv("LITELLM_VLM_MODEL", "gemini/gemini-2.5-flash")
+VLM_MODEL = (os.getenv("LITELLM_VLM_MODEL") or "").strip()
 
 
 # --- Core Functions ---

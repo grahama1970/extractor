@@ -185,7 +185,7 @@ class Config:
     render_dpi: int = 150
     llm_model: str = field(
         default_factory=lambda: os.getenv(
-            "LITELLM_DEFAULT_MODEL", os.getenv("DEFAULT_LITELLM_MODEL", "openai/gpt-4o-mini")
+            "LITELLM_DEFAULT_MODEL", os.getenv("DEFAULT_LITELLM_MODEL", "")
         )
     )
     llm_concurrency: int = 5
@@ -1237,8 +1237,8 @@ def debug_bundle(
             opts.get(
                 "model",
                 os.getenv(
-                    "LITELLM_DEFAULT_MODEL",
-                    os.getenv("DEFAULT_LITELLM_MODEL", "openai/gpt-4o-mini"),
+            "LITELLM_DEFAULT_MODEL",
+                    os.getenv("DEFAULT_LITELLM_MODEL", ""),
                 ),
             )
         ),
