@@ -20,6 +20,7 @@ SCENARIOS = [
     "scenarios.extractors.spreadsheet_feature",
     "scenarios.extractors.pptx_feature",
     "scenarios.extractors.image_feature",
+    "scenarios.extractors.pdf_feature",
     "scenarios.extractors.cross_format_similarity",
 ]
 
@@ -47,4 +48,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
