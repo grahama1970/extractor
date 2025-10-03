@@ -62,7 +62,8 @@ def main() -> int:
         write_summary(name, res)
         return 0
 
-    prov = PdfProvider(str(sample))
+    # Force OCR path to avoid pdftext dependency in smoke
+    prov = PdfProvider(str(sample), config={"force_ocr": True})
     ok = len(prov) >= 1 and prov.get_page_bbox(0) is not None
     res = ScenarioResult(
         name=name,
@@ -83,4 +84,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

@@ -706,3 +706,8 @@ ci-rinse-preview:
 	VITE_PREVIEW=1 CONSOLE_ERRORS_TIMEOUT_MS=90000 TARGET_URL=$(TARGET_URL) node scenarios/ux/console_errors.mjs
 	@echo "[ci-rinse-preview] no-preview-api check"; \
 	VITE_PREVIEW=1 TARGET_URL=$(TARGET_URL) node scenarios/ux/no_preview_api_requests.mjs
+.PHONY: env-accurate
+env-accurate:
+	@echo "Syncing environment with accurate extras (Torch + Surya + table_rec)"
+	uv sync --extra accurate
+	@echo "Done. Activate with: source .venv/bin/activate"

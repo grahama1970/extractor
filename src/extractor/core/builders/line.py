@@ -21,14 +21,19 @@ Example Usage:
 from collections import defaultdict
 from copy import deepcopy
 from itertools import chain
-from typing import Annotated, List, Optional, Tuple
+from typing import Annotated, List, Optional, Tuple, Any
 
 import numpy as np
 from ftfy import fix_text
 from PIL import Image
 
-from surya.detection import DetectionPredictor, TextDetectionResult
-from surya.ocr_error import OCRErrorPredictor
+try:
+    from surya.detection import DetectionPredictor, TextDetectionResult  # type: ignore
+    from surya.ocr_error import OCRErrorPredictor  # type: ignore
+except Exception:  # pragma: no cover
+    DetectionPredictor = Any  # type: ignore
+    TextDetectionResult = Any  # type: ignore
+    OCRErrorPredictor = Any  # type: ignore
 
 from extractor.core.builders import BaseBuilder
 from extractor.core.providers import ProviderOutput, ProviderPageLines
@@ -127,9 +132,9 @@ class LineBuilder(BaseBuilder):
 
     def __init__(
         self,
-        detection_model: DetectionPredictor,
+        detection_model: Optional[DetectionPredictor],
         inline_detection_model: Optional[DetectionPredictor],
-        ocr_error_model: OCRErrorPredictor,
+        ocr_error_model: Optional[OCRErrorPredictor],
         config=None,
     ):
         super().__init__(config)
@@ -174,20 +179,24 @@ class LineBuilder(BaseBuilder):
         run_detection: List[bool],
         do_inline_math_detection: bool,
     ):
-        self.detection_model.disable_tqdm = self.disable_tqdm
-        page_detection_results = self.detection_model(
-            images=page_images, batch_size=self.get_detection_batch_size()
-        )
+        if self.detection_model is None:
+            page_detection_results = [None] * len(page_images)
+        else:
+            self.detection_model.disable_tqdm = self.disable_tqdm
+            page_detection_results = self.detection_model(
+                images=page_images, batch_size=self.get_detection_batch_size()
+            )
         inline_detection_results = [None] * len(page_detection_results)
         if do_inline_math_detection:
-            self.inline_detection_model.disable_tqdm = self.disable_tqdm
-            inline_detection_results = self.inline_detection_model(
-                images=page_images,
-                text_boxes=[
-                    [b.bbox for b in det_result.bboxes] for det_result in page_detection_results
-                ],
-                batch_size=self.get_detection_batch_size(),
-            )
+            if self.inline_detection_model is not None and all(r is not None for r in page_detection_results):
+                self.inline_detection_model.disable_tqdm = self.disable_tqdm
+                inline_detection_results = self.inline_detection_model(
+                    images=page_images,
+                    text_boxes=[
+                        [b.bbox for b in det_result.bboxes] for det_result in page_detection_results
+                    ],
+                    batch_size=self.get_detection_batch_size(),
+                )
 
         assert len(page_detection_results) == len(inline_detection_results) == sum(run_detection)
         detection_results = []
@@ -333,6 +342,11 @@ class LineBuilder(BaseBuilder):
             page_text = "\n".join(" ".join(s.text for s in line.spans) for line in provider_lines)
             page_texts.append(page_text)
 
+        if self.ocr_error_model is None:
+            class _Res:
+                def __init__(self, n):
+                    self.labels = ["good"] * n
+            return _Res(len(pages))
         self.ocr_error_model.disable_tqdm = self.disable_tqdm
         ocr_error_detection_results = self.ocr_error_model(
             page_texts, batch_size=int(self.get_ocr_error_batch_size())

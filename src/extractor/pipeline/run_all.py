@@ -158,146 +158,224 @@ def _ensure_env(
 def build_cli() -> typer.Typer:
     app = typer.Typer(help="Run all pipeline stages end-to-end")
 
+    def _preflight_strict() -> None:
+        strict = os.getenv("OFFLINE_PDF_PREDICTORS", "1").lower() in {"0", "false"}
+        if not strict:
+            return
+        try:
+            from extractor.core.models import create_model_dict
+            m = create_model_dict()
+            required = [
+                "detection_model",
+                "layout_model",
+                "ocr_error_model",
+                "recognition_model",
+                "table_rec_model",
+            ]
+            missing = [k for k in required if k not in m or m.get(k) is None]
+            if missing:
+                console.print("[red]Strict mode: missing predictors -> " + ", ".join(missing) + "[/red]")
+                console.print("[yellow]Hint: activate venv and run: `uv sync --extra accurate`[/yellow]")
+                raise typer.Exit(1)
+        except Exception as e:
+            console.print(f"[red]Strict mode preflight failed: {e}[/red]")
+            console.print("[yellow]Hint: `uv sync --extra accurate`[/yellow]")
+            raise typer.Exit(1)
+
     @app.command()
     def run(
         pdf: Path = typer.Option(
             ..., exists=True, file_okay=True, dir_okay=False, readable=True, help="Input PDF"
         ),
         results: Path = typer.Option(
-        Path("data/results/pipeline"),
-        exists=False,
-        file_okay=False,
-        dir_okay=True,
-        help="Results directory",
-    ),
+            Path("data/results/pipeline"),
+            exists=False,
+            file_okay=False,
+            dir_okay=True,
+            help="Results directory",
+        ),
         arango_db: str = typer.Option(
-        "pdf_knowledge_base_test", help="Dedicated ArangoDB database for this run"
-    ),
+            "pdf_knowledge_base_test", help="Dedicated ArangoDB database for this run"
+        ),
         session: Optional[str] = typer.Option(
-        None, help="Optional fixed session id (defaults to timestamp)"
-    ),
+            None, help="Optional fixed session id (defaults to timestamp)"
+        ),
         lean4_cli: Optional[str] = typer.Option(
-        "python /home/graham/workspace/experiments/lean4/src/lean4_prover/cli_mini.py",
-        help="Path to Lean4 CLI (cli_mini.py)",
-    ),
+            "python /home/graham/workspace/experiments/lean4/src/lean4_prover/cli_mini.py",
+            help="Path to Lean4 CLI (cli_mini.py)",
+        ),
         resume: bool = typer.Option(
-        False,
-        "--resume/--no-resume",
-        help="Skip stages that already have outputs recorded in pipeline_manifest.json",
-    ),
+            False,
+            "--resume/--no-resume",
+            help="Skip stages that already have outputs recorded in pipeline_manifest.json",
+        ),
         # Offline/skip toggles per stage
         offline: bool = typer.Option(
-        False,
-        "--offline/--no-offline",
-        help="Run with offline-friendly flags across stages (skips LLM/DB/heavy ops)",
-    ),
+            False,
+            "--offline/--no-offline",
+            help="Run with offline-friendly flags across stages (skips LLM/DB/heavy ops)",
+        ),
         skip_llm03: bool = typer.Option(
-        False, "--skip-llm03/--no-skip-llm03", help="Stage 03: skip vision LLM verification"
-    ),
+            False, "--skip-llm03/--no-skip-llm03", help="Stage 03: skip vision LLM verification"
+        ),
         skip_descriptions06: bool = typer.Option(
-        False,
-        "--skip-descriptions06/--no-skip-descriptions06",
-        help="Stage 06: skip LLM descriptions for figures",
-    ),
+            False,
+            "--skip-descriptions06/--no-skip-descriptions06",
+            help="Stage 06: skip LLM descriptions for figures",
+        ),
         summary_only07: bool = typer.Option(
-        False, "--summary-only07/--full07", help="Stage 07: summary-only (no VLM merge)"
-    ),
+            False, "--summary-only07/--full07", help="Stage 07: summary-only (no VLM merge)"
+        ),
         skip_tables05: bool = typer.Option(
-        False, "--skip-tables05/--no-skip-tables05", help="Stage 05: skip table extraction"
-    ),
+            False, "--skip-tables05/--no-skip-tables05", help="Stage 05: skip table extraction"
+        ),
         skip_figures06: bool = typer.Option(
-        False, "--skip-figures06/--no-skip-figures06", help="Stage 06: skip figure extraction"
-    ),
+            False, "--skip-figures06/--no-skip-figures06", help="Stage 06: skip figure extraction"
+        ),
         skip_proving08: bool = typer.Option(
-        False, "--skip-proving08/--prove08", help="Stage 08: skip proving"
-    ),
+            False, "--skip-proving08/--prove08", help="Stage 08: skip proving"
+        ),
         skip_export10: bool = typer.Option(
-        False, "--skip-export10/--no-skip-export10", help="Stage 10: skip Arango export"
-    ),
+            False, "--skip-export10/--no-skip-export10", help="Stage 10: skip Arango export"
+        ),
         skip_embeddings10: bool = typer.Option(
-        False,
-        "--skip-embeddings10/--no-skip-embeddings10",
-        help="Stage 10: skip embedding computation",
-    ),
+            False,
+            "--skip-embeddings10/--no-skip-embeddings10",
+            help="Stage 10: skip embedding computation",
+        ),
         fast_embeddings10: bool = typer.Option(
-        False,
-        "--fast-embeddings10/--no-fast-embeddings10",
-        help="Stage 10: use deterministic 8D hash embeddings",
-    ),
+            False,
+            "--fast-embeddings10/--no-fast-embeddings10",
+            help="Stage 10: use deterministic 8D hash embeddings",
+        ),
         skip_graph11: bool = typer.Option(
-        False, "--skip-graph11/--no-skip-graph11", help="Stage 11: write edges JSON only"
-    ),
+            False, "--skip-graph11/--no-skip-graph11", help="Stage 11: write edges JSON only"
+        ),
         validate: bool = typer.Option(
-        False, "--validate/--no-validate", help="Validate stages against gold invariants"
-    ),
+            False, "--validate/--no-validate", help="Validate stages against gold invariants"
+        ),
         annotations_json: Optional[Path] = typer.Option(
-        None,
-        "--annotations-json",
-        help="External annotations JSON (skip Stage 01 and use this file)",
-        exists=True,
-        file_okay=True,
-        dir_okay=False,
-        readable=True,
-    ),
+            None,
+            "--annotations-json",
+            help="External annotations JSON (skip Stage 01 and use this file)",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+        ),
         clean_pdf: Optional[Path] = typer.Option(
-        None,
-        "--clean-pdf",
-        help="External clean PDF path to use with --annotations-json",
-        exists=True,
-        file_okay=True,
-        dir_okay=False,
-        readable=True,
-    ),
+            None,
+            "--clean-pdf",
+            help="External clean PDF path to use with --annotations-json",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+        ),
     ):
-    # Deprecation notice: prefer the unified surface
-    try:
-        import typer as _ty
-        _ty.secho("[deprecated] Prefer 'pipeline-run --mode accurate' for the Happy Path.", fg=_ty.colors.YELLOW)
-    except Exception:
-        pass
-    """Run all stages 01→14 on the provided PDF."""
-    results.mkdir(parents=True, exist_ok=True)
-    pipeline_start = time.monotonic()
-    sid = session or os.getenv("LITELLM_SESSION_ID") or datetime.now().strftime("%Y%m%d-%H%M%S")
-    ci_mode = os.getenv("CI", "").lower() in {"1", "true", "yes", "on"}
-    env = _ensure_env(
-        {},
-        results,
-        arango_db,
-        sid,
-        lean4_cli,
-        deterministic_lean4=offline or ci_mode,
-        no_llm_lean4=offline,
-    )
-
-    manifest_path = results / "pipeline_manifest.json"
-    manifest: Dict[str, Any] = {}
-    if resume and manifest_path.exists():
+        """Run all stages 01→14 on the provided PDF."""
+        _preflight_strict()
+        # Deprecation notice: prefer the unified surface
         try:
-            manifest = json.loads(manifest_path.read_text())
-        except Exception:
-            manifest = {}
-
-    def stage_completed(stage_name: str, outputs: list[Path]) -> bool:
-        entry = manifest.get(stage_name)
-        if not entry:
-            return False
-        for p in outputs:
-            if not p.exists():
-                return False
-        return True
-
-    def record_stage(stage_name: str, outputs: list[Path]) -> None:
-        manifest[stage_name] = {
-            "completed_at": datetime.now().isoformat(),
-            "outputs": [str(p) for p in outputs],
-        }
-        try:
-            manifest_path.write_text(
-                json.dumps(manifest, indent=2, ensure_ascii=False)
+            import typer as _ty
+            _ty.secho(
+                "[deprecated] Prefer 'pipeline-run --mode accurate' for the Happy Path.",
+                fg=_ty.colors.YELLOW,
             )
         except Exception:
             pass
+        results.mkdir(parents=True, exist_ok=True)
+        pipeline_start = time.monotonic()
+        sid = session or os.getenv("LITELLM_SESSION_ID") or datetime.now().strftime("%Y%m%d-%H%M%S")
+        ci_mode = os.getenv("CI", "").lower() in {"1", "true", "yes", "on"}
+        env = _ensure_env(
+            {},
+            results,
+            arango_db,
+            sid,
+            lean4_cli,
+            deterministic_lean4=offline or ci_mode,
+            no_llm_lean4=offline,
+        )
+        return _run_pipeline_core(
+            pdf=pdf,
+            results=results,
+            arango_db=arango_db,
+            sid=sid,
+            env=env,
+            resume=resume,
+            offline=offline,
+            skip_llm03=skip_llm03,
+            skip_descriptions06=skip_descriptions06,
+            summary_only07=summary_only07,
+            skip_tables05=skip_tables05,
+            skip_figures06=skip_figures06,
+            skip_proving08=skip_proving08,
+            skip_export10=skip_export10,
+            skip_embeddings10=skip_embeddings10,
+            fast_embeddings10=fast_embeddings10,
+            skip_graph11=skip_graph11,
+            validate=validate,
+            annotations_json=annotations_json,
+            clean_pdf=clean_pdf,
+            pipeline_start=pipeline_start,
+        )
+
+    def _run_pipeline_core(
+        *,
+        pdf: Path,
+        results: Path,
+        arango_db: str,
+        sid: str,
+        env: dict[str, str],
+        resume: bool,
+        offline: bool,
+        skip_llm03: bool,
+        skip_descriptions06: bool,
+        summary_only07: bool,
+        skip_tables05: bool,
+        skip_figures06: bool,
+        skip_proving08: bool,
+        skip_export10: bool,
+        skip_embeddings10: bool,
+        fast_embeddings10: bool,
+        skip_graph11: bool,
+        validate: bool,
+        annotations_json: Optional[Path],
+        clean_pdf: Optional[Path],
+        pipeline_start: float,
+        ) -> None:
+        manifest_path = results / "pipeline_manifest.json"
+        manifest: Dict[str, Any] = {}
+        if resume and manifest_path.exists():
+            try:
+                manifest = json.loads(manifest_path.read_text())
+            except Exception:
+                manifest = {}
+
+        def stage_completed(stage_name: str, outputs: list[Path]) -> bool:
+            entry = manifest.get(stage_name)
+            if not entry:
+                return False
+            for p in outputs:
+                if not p.exists():
+                    return False
+            return True
+
+        def record_stage(stage_name: str, outputs: list[Path]) -> None:
+            manifest[stage_name] = {
+                "completed_at": datetime.now().isoformat(),
+                "outputs": [str(p) for p in outputs],
+            }
+            try:
+                manifest_path.write_text(
+                    json.dumps(manifest, indent=2, ensure_ascii=False)
+                )
+            except Exception:
+                pass
+
+    # End of internal helpers; return CLI app now to avoid executing any module-level stage logic
+    return app
 
     # Stage 01 (or external annotations path)
     anno_dir = results / "01_annotation_processor"

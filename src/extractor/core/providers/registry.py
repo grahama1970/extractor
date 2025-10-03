@@ -13,7 +13,10 @@ Example usage
 >>> doc = provider_class("report.docx").extract_document()
 """
 
-import filetype
+try:
+    import filetype  # type: ignore
+except Exception:  # pragma: no cover
+    filetype = None  # type: ignore
 from pathlib import Path
 from typing import Type
 
@@ -83,7 +86,7 @@ def provider_from_filepath(filepath: str) -> Type:
         return _PROVIDER_MAP[ext]
 
     # 2. MIME detection
-    mime = filetype.guess(str(path))
+    mime = filetype.guess(str(path)) if filetype is not None else None
     if mime and hasattr(mime, "mime"):
         mime_map = {
             "image": ImageProvider,

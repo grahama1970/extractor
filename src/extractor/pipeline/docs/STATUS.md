@@ -117,7 +117,7 @@ Override any of these via CLI flags where available (e.g., `--model`). Ensure `O
     -o src/extractor/pipeline/poc_simplified/results \
     --skip-graph-creation
 
-  To write edges to ArangoDB instead, ensure DB env vars in `.env` (`ARANGO_HOST`, `ARANGO_PORT`, `ARANGO_USER`, `ARANGO_PASSWORD`, `ARANGO_DATABASE`) and omit `--skip-graph-creation`.
+  To write edges to ArangoDB instead, ensure DB env vars in `.env` (`ARANGO_HOST`, `ARANGO_PORT`, `ARANGO_USER` or `ARANGO_USERNAME`, `ARANGO_PASS`, `ARANGO_DATABASE`) and omit `--skip-graph-creation`.
 
 - 14 – Generate final report:
   python src/extractor/pipeline/poc_simplified/pipeline/14_report_generator.py \

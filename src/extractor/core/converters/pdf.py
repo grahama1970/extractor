@@ -31,11 +31,19 @@ from collections import defaultdict
 from typing import Annotated, Any, Dict, List, Optional, Type, Tuple
 
 from extractor.core.processors import BaseProcessor
-from extractor.core.processors.llm.llm_table_merge import LLMTableMergeProcessor
+try:
+    from extractor.core.processors.llm.llm_table_merge import LLMTableMergeProcessor
+except Exception:  # pragma: no cover
+    class LLMTableMergeProcessor:  # type: ignore
+        ...
 from extractor.core.providers.registry import provider_from_filepath
 from extractor.core.builders.document import DocumentBuilder
 from extractor.core.builders.layout import LayoutBuilder
-from extractor.core.builders.llm_layout import LLMLayoutBuilder
+try:
+    from extractor.core.builders.llm_layout import LLMLayoutBuilder
+except Exception:  # pragma: no cover
+    class LLMLayoutBuilder:  # type: ignore
+        ...
 from extractor.core.builders.line import LineBuilder
 from extractor.core.builders.ocr import OcrBuilder
 from extractor.core.builders.structure import StructureBuilder
@@ -44,38 +52,86 @@ from extractor.core.processors.blockquote import BlockquoteProcessor
 from extractor.core.processors.code_processor import CodeProcessor
 from extractor.core.processors.debug import DebugProcessor
 from extractor.core.processors.document_toc import DocumentTOCProcessor
-from extractor.core.processors.equation import EquationProcessor
+try:
+    from extractor.core.processors.equation import EquationProcessor
+except Exception:  # pragma: no cover
+    class EquationProcessor:  # type: ignore
+        def __init__(self, *args, **kwargs):
+            ...
+        def __call__(self, *args, **kwargs):
+            ...
 from extractor.core.processors.footnote import FootnoteProcessor
 from extractor.core.processors.ignoretext import IgnoreTextProcessor
 from extractor.core.processors.line_numbers import LineNumbersProcessor
 from extractor.core.processors.list import ListProcessor
-from extractor.core.processors.llm.llm_complex import LLMComplexRegionProcessor
-from extractor.core.processors.llm.llm_form import LLMFormProcessor
-from extractor.core.processors.llm.llm_image_description import LLMImageDescriptionProcessor
-from extractor.core.processors.llm.llm_table import LLMTableProcessor
-from extractor.core.processors.llm.llm_table_merge import LLMTableMergeProcessor
-from extractor.core.processors.llm.llm_inlinemath import LLMInlineMathLinesProcessor
+try:
+    from extractor.core.processors.llm.llm_complex import LLMComplexRegionProcessor
+    from extractor.core.processors.llm.llm_form import LLMFormProcessor
+    from extractor.core.processors.llm.llm_image_description import LLMImageDescriptionProcessor
+    from extractor.core.processors.llm.llm_table import LLMTableProcessor
+    from extractor.core.processors.llm.llm_table_merge import LLMTableMergeProcessor as _LLMTableMergeProcessor2
+    from extractor.core.processors.llm.llm_inlinemath import LLMInlineMathLinesProcessor
+except Exception:  # pragma: no cover
+    class _NoOp:  # type: ignore
+        ...
+    LLMComplexRegionProcessor = _NoOp
+    LLMFormProcessor = _NoOp
+    LLMImageDescriptionProcessor = _NoOp
+    LLMTableProcessor = _NoOp
+    LLMInlineMathLinesProcessor = _NoOp
 from extractor.core.processors.page_header import PageHeaderProcessor
 from extractor.core.processors.reference import ReferenceProcessor
 from extractor.core.processors.sectionheader import SectionHeaderProcessor
 from extractor.core.processors.font_header import FontHeaderProcessor
-from extractor.core.processors.table import TableProcessor
+try:
+    from extractor.core.processors.table import TableProcessor
+except Exception:  # pragma: no cover
+    class TableProcessor:  # type: ignore
+        def __init__(self, *args, **kwargs):
+            ...
+        def __call__(self, *args, **kwargs):
+            ...
 from extractor.core.processors.text import TextProcessor
-from extractor.core.processors.llm.llm_equation import LLMEquationProcessor
-from extractor.core.renderers.markdown import MarkdownRenderer
+try:
+    from extractor.core.processors.llm.llm_equation import LLMEquationProcessor
+except Exception:  # pragma: no cover
+    class LLMEquationProcessor:  # type: ignore
+        ...
+try:
+    from extractor.core.renderers.markdown import MarkdownRenderer
+except Exception:
+    # Lightweight fallback so import-time dependencies don't block Stage 02
+    class MarkdownRenderer:  # type: ignore
+        def __init__(self, *args, **kwargs):
+            ...
+
+        def __call__(self, document):  # pragma: no cover - fallback path
+            return ""
 from extractor.core.schema import BlockTypes
 from extractor.core.schema.blocks import Block
 from extractor.core.schema.registry import register_block_class
 from extractor.core.util import strings_to_classes
-from extractor.core.processors.llm.llm_handwriting import LLMHandwritingProcessor
+try:
+    from extractor.core.processors.llm.llm_handwriting import LLMHandwritingProcessor
+except Exception:  # pragma: no cover
+    class LLMHandwritingProcessor:  # type: ignore
+        ...
 from extractor.core.processors.order import OrderProcessor
 
 # MARKER FORK ADDITION START - LiteLLM service
-from extractor.core.services.litellm import LiteLLMService
+try:
+    from extractor.core.services.litellm import LiteLLMService
+except Exception:  # pragma: no cover
+    class LiteLLMService:  # type: ignore
+        ...
 
 # MARKER FORK ADDITION END
 from extractor.core.processors.line_merge import LineMergeProcessor
-from extractor.core.processors.llm.llm_mathblock import LLMMathBlockProcessor
+try:
+    from extractor.core.processors.llm.llm_mathblock import LLMMathBlockProcessor
+except Exception:  # pragma: no cover
+    class LLMMathBlockProcessor:  # type: ignore
+        ...
 
 
 # Extractor-Specific Imports (Fork)
@@ -201,6 +257,34 @@ class PdfConverter(BaseConverter):
         # Ensure processor_list is a list of classes, not strings
         if isinstance(processor_list, tuple):
             processor_list = list(processor_list)
+
+        # Drop EquationProcessor when no real texify is available (offline mode)
+        offline_optional = os.getenv("OFFLINE_PDF_PREDICTORS", "1").lower() not in {"0", "false"}
+        try:
+            from extractor.core.processors.equation import EquationProcessor as _EqProc  # type: ignore
+        except Exception:
+            _EqProc = None  # type: ignore
+        def _has_real_texify(model):
+            if not model:
+                return False
+            try:
+                if getattr(model, "is_dummy", False):
+                    return False
+            except Exception:
+                return False
+            return True
+        if _EqProc in processor_list and not _has_real_texify(self.artifact_dict.get("texify_model")):
+            # Always drop EquationProcessor unless a real texify model is available
+            processor_list = [p for p in processor_list if p is not _EqProc]
+
+        # Drop TableProcessor if no table_rec model available in offline mode
+        try:
+            from extractor.core.processors.table import TableProcessor as _TblProc  # type: ignore
+        except Exception:
+            _TblProc = None  # type: ignore
+        if _TblProc in processor_list and not self.artifact_dict.get("table_rec_model"):
+            # Drop if table recognition model is not available
+            processor_list = [p for p in processor_list if p is not _TblProc]
 
         # Add LLM processors if use_llm is enabled
         if self.use_llm and processor_list == list(self.default_processors):

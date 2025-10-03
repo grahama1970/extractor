@@ -15,10 +15,15 @@ Example Usage:
 >>> # Add usage examples
 """
 
-from typing import Annotated, List, Optional
+from typing import Annotated, List, Optional, Any
 
-from surya.layout import LayoutPredictor
-from surya.layout.schema import LayoutResult, LayoutBox
+try:
+    from surya.layout import LayoutPredictor  # type: ignore
+    from surya.layout.schema import LayoutResult, LayoutBox  # type: ignore
+except Exception:  # pragma: no cover
+    LayoutPredictor = Any  # type: ignore
+    LayoutResult = Any  # type: ignore
+    LayoutBox = Any  # type: ignore
 from loguru import logger
 
 from extractor.core.builders import BaseBuilder
@@ -50,7 +55,7 @@ class LayoutBuilder(BaseBuilder):
         "Disable tqdm progress bars.",
     ] = False
 
-    def __init__(self, layout_model: LayoutPredictor, config=None):
+    def __init__(self, layout_model: Optional[LayoutPredictor] = None, config=None):
         self.layout_model = layout_model
 
         super().__init__(config)
@@ -60,7 +65,19 @@ class LayoutBuilder(BaseBuilder):
             # Assign the full content of every page to a single layout type
             layout_results = self.forced_layout(document.pages)
         else:
-            layout_results = self.surya_layout(document.pages)
+            if self.layout_model is None:
+                # Offline/optional mode: skip layout, leave pages as-is
+                for p in document.pages:
+                    try:
+                        p.layout_sliced = False
+                    except Exception:
+                        pass
+                layout_results = [None] * len(document.pages)
+            else:
+                layout_results = self.surya_layout(document.pages)
+        if layout_results and all(r is None for r in layout_results):
+            # nothing to add
+            return
         self.add_blocks_to_pages(document.pages, layout_results)
 
     def get_batch_size(self):

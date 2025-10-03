@@ -364,7 +364,9 @@ def run(
         "data/results/pipeline", "--output-dir", "-o", help="Parent directory for pipeline results."
     ),
     timeout: int = typer.Option(
-        300, "--timeout", help="Max seconds allowed for extraction before timing out."
+        int(os.getenv("STAGE02_TIMEOUT", "600")),
+        "--timeout",
+        help="Max seconds allowed for extraction before timing out (default from STAGE02_TIMEOUT).",
     ),
     debug: bool = typer.Option(
         False, "--debug", help="Enable verbose logging to a stage log file."
@@ -386,6 +388,28 @@ def run(
     """
     Extracts text and layout blocks from a PDF using Marker and saves them to a structured output directory.
     """
+    # Strict-mode preflight: ensure predictors exist
+    try:
+        strict = os.getenv("OFFLINE_PDF_PREDICTORS", "1").lower() in {"0", "false"}
+        if strict:
+            from extractor.core.models import create_model_dict
+            m = create_model_dict()
+            required = [
+                "detection_model",
+                "layout_model",
+                "ocr_error_model",
+                "recognition_model",
+                "table_rec_model",
+            ]
+            miss = [k for k in required if k not in m or m.get(k) is None]
+            if miss:
+                console.print("[red]Strict mode: missing predictors -> " + ", ".join(miss) + "[/red]")
+                console.print("[yellow]Hint: activate venv and run: `uv sync --extra accurate`[/yellow]")
+                raise typer.Exit(1)
+    except Exception as _e:
+        console.print(f"[red]Strict preflight failed: {_e}[/red]")
+        console.print("[yellow]Hint: `uv sync --extra accurate`[/yellow]")
+        raise typer.Exit(1)
     run_id = uuid.uuid4().hex
     diagnostics = []
     errors_count = 0

@@ -17,10 +17,13 @@ Example Usage:
 """
 
 import copy
-from typing import Annotated, List, Optional
+from typing import Annotated, List, Optional, Any
 
 from ftfy import fix_text
-from surya.recognition import RecognitionPredictor
+try:
+    from surya.recognition import RecognitionPredictor  # type: ignore
+except Exception:  # pragma: no cover
+    RecognitionPredictor = Any  # type: ignore
 
 from extractor.core.builders import BaseBuilder
 from extractor.core.providers.pdf import PdfProvider
@@ -51,7 +54,7 @@ class OcrBuilder(BaseBuilder):
         "Disable tqdm progress bars.",
     ] = False
 
-    def __init__(self, recognition_model: RecognitionPredictor, config=None):
+    def __init__(self, recognition_model: Optional[RecognitionPredictor], config=None):
         super().__init__(config)
 
         self.recognition_model = recognition_model
@@ -112,7 +115,7 @@ class OcrBuilder(BaseBuilder):
         line_boxes: List[List[float]],
         line_ids: List[List[BlockId]],
     ):
-        if sum(len(b) for b in line_boxes) == 0:
+        if self.recognition_model is None or sum(len(b) for b in line_boxes) == 0:
             return
 
         self.recognition_model.disable_tqdm = self.disable_tqdm

@@ -899,4 +899,3 @@ if __name__ == "__main__":
 
     print("✅ DOCX provider initialized successfully")
     print("Note: Full testing requires actual DOCX files")
-        self._numbering_map: Dict[str, List[int]] = {}

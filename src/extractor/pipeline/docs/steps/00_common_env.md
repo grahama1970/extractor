@@ -13,6 +13,7 @@ export LITELLM_VLM_MODEL=openai/gpt-5-mini
 export LITELLM_SESSION_ID=$(date +%s)-dev
 export LITELLM_ATTACH_SESSION=true
 export ARANGO_DATABASE=pdf_knowledge_base_test
+export ARANGO_PASS=your_arango_password_here
 ```
 
 Notes
