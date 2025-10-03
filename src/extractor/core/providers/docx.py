@@ -20,6 +20,7 @@ import re
 import hashlib
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Union
+import os
 from datetime import datetime
 
 from docx2python import docx2python
@@ -63,6 +64,13 @@ class DOCXProvider:
         """Extract DOCX content to unified document format"""
         filepath = Path(filepath)
         logger.info(f"Extracting DOCX document: {filepath}")
+
+        # Optional: build numbering depth map (v2 opt-in)
+        if os.environ.get("DOCX_USE_NUMBERING_DEPTH", "").lower() in {"1", "true"}:
+            try:
+                self._numbering_map = self._build_numbering_map(filepath)
+            except Exception:
+                self._numbering_map = {}
 
         # Extract with docx2python
         with docx2python(str(filepath)) as docx_content:
@@ -318,6 +326,16 @@ class DOCXProvider:
                         depth = 1
                         text = text[m.end() :]
                     list_t = "ol" if (m and m.group('bullet') and m.group('bullet')[0].isdigit()) else "ul"
+                    # v2 opt-in: derive depth from python-docx numbering map when available
+                    if self._numbering_map:
+                        ilvls = self._numbering_map.get(text) or self._numbering_map.get(text.strip())
+                        if ilvls:
+                            try:
+                                depth = int(ilvls.pop(0)) + 1
+                                if not ilvls:
+                                    self._numbering_map.pop(text, None)
+                            except Exception:
+                                pass
                     if current_list_type and current_list_type != list_t:
                         flush_list()
                     current_list_type = list_t
@@ -341,6 +359,32 @@ class DOCXProvider:
 
         flush_list()
         return blocks
+
+    def _build_numbering_map(self, filepath: Path) -> Dict[str, List[int]]:
+        """Best-effort map from paragraph text to Word numbering ilvl (depth-1).
+
+        Only used when DOCX_USE_NUMBERING_DEPTH=1. We prefer this lightweight
+        approximation over restructuring providers; ties (duplicate text)
+        are handled in FIFO order via list pops.
+        """
+        mapping: Dict[str, List[int]] = {}
+        try:
+            doc = PythonDocxDocument(str(filepath))
+        except Exception:
+            return mapping
+        for p in getattr(doc, "paragraphs", []):
+            txt = (getattr(p, "text", "") or "").strip()
+            if not txt:
+                continue
+            try:
+                pPr = p._p.pPr if getattr(p, "_p", None) is not None else None  # type: ignore[attr-defined]
+                numPr = pPr.numPr if pPr is not None else None
+                ilvl = numPr.ilvl.val if (numPr is not None and getattr(numPr, "ilvl", None) is not None) else None
+                if ilvl is not None:
+                    mapping.setdefault(txt, []).append(int(ilvl))
+            except Exception:
+                continue
+        return mapping
 
     def _extract_blocks_basic(self, docx_content) -> List[BaseBlock]:
         """Basic extraction when style information is not available"""
@@ -855,3 +899,4 @@ if __name__ == "__main__":
 
     print("✅ DOCX provider initialized successfully")
     print("Note: Full testing requires actual DOCX files")
+        self._numbering_map: Dict[str, List[int]] = {}
