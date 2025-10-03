@@ -78,6 +78,11 @@ def main() -> int:
     doc = PPTXProvider().extract_document(sample)
     # Headings may be limited on slides; hierarchy is optional
     counts, heads = summarise_unified(doc)
+    try:
+        from scenarios.extractors.common import write_unified_snapshot
+        snap_path = write_unified_snapshot("pptx", doc.id, doc.model_dump(by_alias=True, mode="json"))
+    except Exception:
+        snap_path = None
     inserted = try_arango_insert(doc)
 
     ok = True  # succeed if extraction returns a document
@@ -92,7 +97,7 @@ def main() -> int:
         block_counts=counts,
         heading_sample=heads,
         arango_inserted=inserted,
-        artifacts={},
+        artifacts={"unified": snap_path} if snap_path else {},
     )
     write_summary(name, res)
     return 0

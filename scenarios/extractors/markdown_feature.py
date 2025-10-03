@@ -71,6 +71,12 @@ def main() -> int:
     hierarchy_ok = (doc.hierarchy is not None) if has_headings else True
 
     counts, heads = summarise_unified(doc)
+    # Snapshot unified JSON for auditability
+    try:
+        from scenarios.extractors.common import write_unified_snapshot
+        snap_path = write_unified_snapshot("markdown", doc.id, doc.model_dump(by_alias=True, mode="json"))
+    except Exception:
+        snap_path = None
     inserted = try_arango_insert(doc)
 
     ok = hierarchy_ok
@@ -85,7 +91,7 @@ def main() -> int:
         block_counts=counts,
         heading_sample=heads,
         arango_inserted=inserted,
-        artifacts={},
+        artifacts={"unified": snap_path} if snap_path else {},
     )
     write_summary(name, res)
     return 0 if ok else 1

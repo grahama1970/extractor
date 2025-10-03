@@ -23,6 +23,9 @@ from typing import Any, Dict, Optional
 
 from loguru import logger
 import sys
+import json
+import time
+from typing import Dict
 import types
 
 
@@ -223,3 +226,23 @@ def write_summary(name: str, result: ScenarioResult) -> Path:
     out = ART_ROOT / f"extractor_{name}_{ts()}.json"
     out.write_text(json.dumps(result.__dict__, indent=2))
     return out
+
+
+def artifacts_root_for_run() -> Path:
+    """Hierarchical artifact root including date and a local run id.
+
+    This avoids collisions in CI and keeps artifacts discoverable.
+    """
+    date_dir = time.strftime("%Y-%m-%d")
+    run_id = os.environ.get("GITHUB_SHA", "local")
+    p = ART_ROOT / date_dir / run_id / "extractors"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def write_unified_snapshot(provider_name: str, doc_id: str, unified_dict: Dict[str, Any]) -> str:
+    root = artifacts_root_for_run()
+    fname = f"{provider_name}__{doc_id}__unified.json"
+    path = root / fname
+    path.write_text(json.dumps(unified_dict, indent=2))
+    return str(path)

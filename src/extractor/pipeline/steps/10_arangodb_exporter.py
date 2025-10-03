@@ -400,6 +400,8 @@ def flatten_document_to_pdf_objects(
 
         unique_id_str = f"{source_pdf}_{context.section_id}_{object_type}_{len(ordered_objects)}"
         key = hashlib.md5(unique_id_str.encode()).hexdigest()
+        trace_id = f"{doc_id}-{revision_id}-{len(ordered_objects):06d}"
+        trace_id = f"{doc_id}-{revision_id}-{len(ordered_objects):06d}"
 
         embedding = None
         if not skip_embeddings and text_content:
@@ -435,6 +437,7 @@ def flatten_document_to_pdf_objects(
                 "doc_id": doc_id,
                 "doc_set_id": doc_set_id,
                 "revision_id": revision_id,
+                "trace_id": trace_id,
                 "source_pdf": source_pdf,
                 "object_index_in_doc": len(ordered_objects),
                 "page_num": block.metadata.page_number,
@@ -1167,6 +1170,7 @@ def flatten_document_to_pdf_objects(
                 "doc_id": doc_id,
                 "doc_set_id": doc_set_id,
                 "revision_id": revision_id,
+                "trace_id": trace_id,
                 "source_pdf": source_pdf,
                 "object_index_in_doc": len(ordered_objects),
                 "page_num": block.metadata.page_number,
