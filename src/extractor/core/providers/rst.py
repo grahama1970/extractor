@@ -35,6 +35,7 @@ from extractor.core.schema.unified_document import (
     HierarchyNode,
     TableCell,
 )
+from extractor.core.providers.utils import emit_list_blocks, normalize_heading_level
 
 
 class RSTProvider:
@@ -153,7 +154,7 @@ class RSTProvider:
                     type=BlockType.HEADING,
                     content=node.astext().strip(),
                     metadata=BlockMetadata(
-                        attributes={"level": level},
+                        attributes={"level": normalize_heading_level(level)},
                         confidence=1.0,
                     ),
                 )
@@ -169,6 +170,23 @@ class RSTProvider:
                     metadata=BlockMetadata(attributes={}, confidence=1.0),
                 )
             )
+            return
+
+        if isinstance(node, (nodes.bullet_list, nodes.enumerated_list)):
+            list_type = "ol" if isinstance(node, nodes.enumerated_list) else "ul"
+            items: List[tuple[str, int]] = []
+            for li in node.findall(nodes.list_item, include_self=False, descend=False):
+                text = li.astext().strip()
+                items.append((text, 1))
+            if items:
+                lst, children = emit_list_blocks(
+                    items=items, list_type=list_type, parent_id="", id_prefix="rst-list", start_index=self.block_counter
+                )
+                blocks.append(lst)
+                blocks.extend(children)
+            # Continue into children for nested structures
+            for child in node.children:
+                self._walk_doctree(child, blocks)
             return
 
         if isinstance(node, nodes.literal_block):

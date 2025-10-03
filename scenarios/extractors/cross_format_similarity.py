@@ -125,20 +125,68 @@ def main() -> int:
         dists[k] = dist
         heads[k] = hs
 
+    # Thresholds from env (defaults per guidance)
+    h_threshold = float(os.getenv("CROSS_FORMAT_HEADING_OVERLAP", "0.8"))
+    t_threshold = float(os.getenv("CROSS_FORMAT_TABLE_PARITY", "0.8"))
+    f_threshold = float(os.getenv("CROSS_FORMAT_FIGURE_CAPTIONS", "0.8"))
+    enforce_paragraphs = os.getenv("CROSS_FORMAT_ENFORCE_PARAGRAPHS", "0").lower() in {"1", "true", "yes"}
+    p_threshold = float(os.getenv("CROSS_FORMAT_PARAGRAPH_PARITY", "0.2"))
+
+    # Build top-2 heading sets directly from docs
+    def top2_titles(doc) -> List[str]:
+        out = []
+        for b in getattr(doc, "blocks", []) or []:
+            t = str(getattr(b, "type", "")).split(".")[-1]
+            if t == "HEADING":
+                level = 9
+                if getattr(b, "metadata", None) and getattr(b.metadata, "attributes", None):
+                    try:
+                        level = int(b.metadata.attributes.get("level", 9))
+                    except Exception:
+                        level = 9
+                if level <= 2 and isinstance(getattr(b, "content", None), str):
+                    out.append(b.content.strip())
+        return out
+
+    top2 = {k: top2_titles(d) for k, d in docs.items()}
+
+    # Basic counts for additional parity checks
+    def count_type(dist: Dict[str, int], name: str) -> int:
+        return dist.get(name.upper(), 0)
+
     pairs: List[Tuple[str, str]] = [("md", "html"), ("md", "docx"), ("html", "docx")]
     ok = True
     reasons = []
 
     for a, b in pairs:
-        h_sim = _overlap(heads[a], heads[b])
-        d_sim = _dist_sim(dists[a], dists[b])
-        # Heuristics: heading sample overlap >= 0.3 and block dist sim >= 0.6
-        if h_sim < 0.3:
+        # Heading overlap on top-2 levels
+        h_sim = _overlap(top2[a], top2[b])
+        if h_sim < h_threshold:
             ok = False
-            reasons.append(f"low-heading-overlap({a},{b})={h_sim:.2f}")
-        if d_sim < 0.6:
+            reasons.append(f"headings<{h_threshold}({a},{b})={h_sim:.2f}")
+
+        # Table parity: counts within ±1 in at least t_threshold fraction
+        ta, tb = count_type(dists[a], "TABLE"), count_type(dists[b], "TABLE")
+        t_parity = 1.0 if abs(ta - tb) <= 1 else 0.0
+        if t_parity < t_threshold:
             ok = False
-            reasons.append(f"block-distribution-diverge({a},{b})={d_sim:.2f}")
+            reasons.append(f"tables_parity<{t_threshold}({a},{b})={t_parity:.2f}")
+
+        # Figure caption presence parity (presence counts approximated by FIGURE blocks)
+        fa, fb = count_type(dists[a], "FIGURE"), count_type(dists[b], "FIGURE")
+        f_parity = 1.0 if (fa == fb or (fa == 0 and fb == 0)) else (1.0 if min(fa, fb) / max(fa, fb) >= f_threshold else 0.0)
+        if f_parity < f_threshold:
+            ok = False
+            reasons.append(f"figures_parity<{f_threshold}({a},{b})={f_parity:.2f}")
+
+        # Optional: Paragraph count parity within ±p_threshold of max count
+        if enforce_paragraphs:
+            pa, pb = count_type(dists[a], "PARAGRAPH"), count_type(dists[b], "PARAGRAPH")
+            denom = max(pa, pb, 1)
+            p_div = abs(pa - pb) / denom
+            if p_div > p_threshold:
+                ok = False
+                reasons.append(f"paragraphs_diff>{p_threshold}({a},{b})={p_div:.2f}")
 
     res = ScenarioResult(
         name=name,
