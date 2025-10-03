@@ -275,6 +275,8 @@ def build_cli() -> typer.Typer:
     ):
         """Run all stages 01→14 on the provided PDF."""
         _preflight_strict()
+        if os.getenv("OFFLINE_PDF_PREDICTORS", "1").lower() not in {"0","false"}:
+            console.print("[cyan]INFO:[/cyan] Running in predictor lenient mode (OFFLINE_PDF_PREDICTORS=1). Set OFFLINE_PDF_PREDICTORS=0 for strict checks.")
         # Deprecation notice: prefer the unified surface
         try:
             import typer as _ty
@@ -721,7 +723,7 @@ def build_cli() -> typer.Typer:
                 str(summaries_json),
                 "-o",
                 str(results),
-                *( ["--skip-export"] if (skip_export10 or offline) else [] ),
+                *( ["--skip-export"] if (skip_export10 or (offline and not (os.getenv("ARANGO_PASS") or os.getenv("ARANGO_PASSWORD")))) else [] ),
                 *( ["--skip-embeddings"] if (skip_embeddings10 or offline) else [] ),
                 *( ["--fast-embeddings"] if fast_embeddings10 else [] ),
             ],
@@ -758,7 +760,7 @@ def build_cli() -> typer.Typer:
                 str(flat_json),
                 "-o",
                 str(results),
-                *( ["--skip-graph-creation"] if (skip_graph11 or offline) else [] ),
+                *( ["--skip-graph-creation"] if (skip_graph11 or (offline and not (os.getenv("ARANGO_PASS") or os.getenv("ARANGO_PASSWORD")))) else [] ),
             ],
             env,
             stage_name=stage11_name,
@@ -811,6 +813,16 @@ def build_cli() -> typer.Typer:
         record_stage(stage14_name, [p for p in [final_json, final_md] if p.exists()])
 
     print("\nAll stages completed. Final report:", results / "final_report.md")
+    # Surface Stage 02 fallback predictor mode if present
+    try:
+        s02_path = results / "02_marker_extractor" / "json_output" / "02_marker_blocks.json"
+        if s02_path.exists():
+            data = json.loads(s02_path.read_text())
+            if data.get("fallback_mode"):
+                missing = [k for k,v in (data.get("predictors_present") or {}).items() if not v]
+                console.print(f"[yellow]Stage 02 ran in fallback mode; missing predictors: {', '.join(missing)}[/yellow]")
+    except Exception:
+        pass
     log_metric(
         "pipeline_run",
         {

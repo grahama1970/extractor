@@ -65,13 +65,13 @@ DEBUG = False
 # Move multiprocessing worker to top-level for cross-platform compatibility (spawn/fork)
 def _worker(pdf_str: str, q: "mp.Queue[Dict[str, Any]]"):
     try:
-        blocks_local = extract_blocks(Path(pdf_str))
-        q.put({"ok": True, "blocks": blocks_local})
+        blocks_local, presence = extract_blocks(Path(pdf_str))
+        q.put({"ok": True, "blocks": blocks_local, "predictors": presence})
     except Exception as exc:
         q.put({"ok": False, "error": str(exc)})
 
 
-def extract_blocks(pdf_path: Path) -> List[Dict[str, Any]]:
+def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool]]:
     """
     Return the native JSON list of blocks produced by Marker.
 
@@ -87,8 +87,15 @@ def extract_blocks(pdf_path: Path) -> List[Dict[str, Any]]:
             "(extractor.core.converters/pdf and extractor.core.models)."
         ) from e
 
-    # Create model dictionary
+    # Create model dictionary (predictors may be missing in offline mode)
     models = create_model_dict()
+    predictor_presence = {
+        "detection_model": bool(models.get("detection_model")),
+        "layout_model": bool(models.get("layout_model")),
+        "recognition_model": bool(models.get("recognition_model")),
+        "table_rec_model": bool(models.get("table_rec_model")),
+        "texify_model": bool(models.get("texify_model")),
+    }
 
     # Create config as simple dict
     config = {
@@ -98,7 +105,13 @@ def extract_blocks(pdf_path: Path) -> List[Dict[str, Any]]:
     }
 
     # Create the PDF converter
-    converter = PdfConverter(artifact_dict=models, config=config)
+    offline_optional = os.getenv("OFFLINE_PDF_PREDICTORS", "1").lower() not in {"0", "false"}
+    converter = PdfConverter(
+        artifact_dict=models,
+        config=config,
+        offline_optional=offline_optional,
+        texify_model=models.get("texify_model"),
+    )
 
     # Build the document (this creates and processes all blocks)
     document = converter.build_document(str(pdf_path))
@@ -117,7 +130,7 @@ def extract_blocks(pdf_path: Path) -> List[Dict[str, Any]]:
     # Cache PyMuPDF page text once per page to avoid repeated parsing
     page_text_cache: Dict[int, Any] = {}
 
-    blocks = []
+    blocks: List[Dict[str, Any]] = []
     for page in document.pages:
         # Get blocks from children (includes all processed blocks)
         if hasattr(page, "children") and page.children:
@@ -354,7 +367,7 @@ def extract_blocks(pdf_path: Path) -> List[Dict[str, Any]]:
     except Exception:
         pass
 
-    return blocks
+    return blocks, predictor_presence
 
 
 # --------------------------------------------------------------------------- #
@@ -477,7 +490,7 @@ def run(
         # Inline execution (best for debugging)
         try:
             t_ex0 = time.monotonic()
-            blocks = extract_blocks(pdf_path)
+            blocks, predictor_presence = extract_blocks(pdf_path)
             extract_duration_ms = int((time.monotonic() - t_ex0) * 1000)
         except Exception as e:
             logger.exception("Stage 02 failed during inline extraction")
@@ -543,6 +556,7 @@ def run(
             raise typer.Exit(1)
 
         blocks = result["blocks"]
+        predictor_presence = result.get("predictors", {})
 
     # Optional: force-tag all SectionHeader blocks as suspicious_header for Stage 03 testing
     if mark_all_headers_suspicious:
@@ -554,6 +568,14 @@ def run(
             pass
 
     suspicious_blocks = [b for b in blocks if b.get("is_suspicious")]
+    # predictor mode flags
+    strict = os.getenv("OFFLINE_PDF_PREDICTORS", "1").lower() in {"0", "false"}
+    missing = [k for k, v in (predictor_presence or {}).items() if not v]
+    fallback_mode = (not strict) and bool(missing)
+    if strict:
+        predictor_mode = "strict_all_present"
+    else:
+        predictor_mode = "lenient_missing_predictors" if missing else "lenient_all_present"
 
     stage_end_ts = __import__("datetime").datetime.now().isoformat()
     try:
@@ -589,6 +611,9 @@ def run(
         "diagnostics": diagnostics,
         "timings": timings,
         "resources": resources,
+        "predictors_present": predictor_presence,
+        "fallback_mode": fallback_mode,
+        "predictor_mode": predictor_mode,
     }
 
     base = "02_marker_blocks"

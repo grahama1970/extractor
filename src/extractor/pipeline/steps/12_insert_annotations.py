@@ -109,16 +109,16 @@ def run(
 
     host = os.getenv("ARANGO_HOST", "localhost")
     port = int(os.getenv("ARANGO_PORT", 8529))
-    user = os.getenv("ARANGO_USER", "root")
-    password = os.getenv("ARANGO_PASS")
-    db_name = os.getenv("ARANGO_DATABASE", "pdf_knowledge_base")
+    user = os.getenv("ARANGO_USERNAME") or os.getenv("ARANGO_USER", "root")
+    password = os.getenv("ARANGO_PASS") or os.getenv("ARANGO_PASSWORD")
+    db_name = os.getenv("ARANGO_DB") or os.getenv("ARANGO_DATABASE", "pdf_knowledge_base")
     vertex_col = os.getenv("GRAPH_VERTEX_COLLECTION", "pdf_objects")
     ann_col = os.getenv("ARANGO_ANNOTATIONS_COLLECTION", "annotations")
     edge_col = os.getenv("GRAPH_EDGE_COLLECTION", "pdf_relationships")
     graph_name = os.getenv("GRAPH_NAME", "pdf_knowledge_graph")
 
     if not password:
-        console.print("[red]ARANGO_PASS not set[/red]")
+        console.print("[red]ARANGO_PASS / ARANGO_PASSWORD not set[/red]")
         raise typer.Exit(1)
 
     client = ArangoClient(hosts=f"http://{host}:{port}")

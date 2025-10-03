@@ -83,13 +83,14 @@ async def summarize_section(
 
             # Prefer explicit JSON formatting via system guard + provider JSON mode (when supported)
             system_json_guard = JSON_SYSTEM_GUARD
-            model_name = (
-                os.getenv("LITELLM_MODEL")
-                or os.getenv("LITELLM_DEFAULT_MODEL")
-                or os.getenv("DEFAULT_LITELLM_MODEL")
-                or os.getenv("LITELLM_SMALL_MODEL")
-                or "openai/gpt-5-mini"
-            )
+            candidates = [
+                os.getenv("LITELLM_MODEL"),
+                os.getenv("LITELLM_DEFAULT_MODEL"),
+                os.getenv("DEFAULT_LITELLM_MODEL"),
+                os.getenv("LITELLM_SMALL_MODEL"),
+                "openai/gpt-5-mini",
+            ]
+            model_name = next((c.strip() for c in candidates if c and c.strip()), "openai/gpt-5-mini")
             # Use the shared LiteLLM batch runner for consistency with other stages
             is_gpt5 = "gpt-5" in (model_name or "").lower()
             params = {

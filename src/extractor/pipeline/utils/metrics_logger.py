@@ -29,8 +29,8 @@ def _get_arango_db() -> Optional[StandardDatabase]:
     host = os.getenv("ARANGO_HOST")
     port = os.getenv("ARANGO_PORT")
     user = os.getenv("ARANGO_USERNAME") or os.getenv("ARANGO_USER")
-    password = os.getenv("ARANGO_PASS")
-    database = os.getenv("ARANGO_DATABASE")
+    password = os.getenv("ARANGO_PASS") or os.getenv("ARANGO_PASSWORD")
+    database = os.getenv("ARANGO_DB") or os.getenv("ARANGO_DATABASE")
     if not all([host, port, user, password, database]):
         return None
     try:
