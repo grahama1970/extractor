@@ -192,13 +192,14 @@ class EPUBProvider:
                 )
 
         # Lists
-        elif tag in {"ul", "ol"}:
+        elif tag in {"ul", "ol", "dl"}:
+            list_type = "ol" if tag == "ol" else ("dl" if tag == "dl" else "ul")
             list_block = BaseBlock(
                 id=self._generate_block_id(),
                 type=BlockType.LIST,
                 content={"ordered": tag == "ol"},
                 parent_id=parent_id,
-                metadata=BlockMetadata(attributes={"tag": tag}, confidence=1.0),
+                metadata=BlockMetadata(attributes={"tag": tag, "list_type": list_type}, confidence=1.0),
             )
             blocks.append(list_block)
             for idx, li in enumerate(node.find_all("li", recursive=False)):
@@ -211,7 +212,7 @@ class EPUBProvider:
                             content=li_text,
                             parent_id=list_block.id,
                             metadata=BlockMetadata(
-                                {"index": idx, "ordered": tag == "ol"}, confidence=1.0
+                                {"index": idx, "ordered": tag == "ol", "list_type": list_type, "depth": 1}, confidence=1.0
                             ),
                         )
                     )

@@ -462,7 +462,8 @@ class HTMLProvider:
     def _process_list(self, element: Tag, parent_id: Optional[str]) -> List[BaseBlock]:
         """Process list element"""
         blocks = []
-        list_type = "ordered" if element.name == "ol" else "unordered"
+        list_tag = element.name.lower()
+        list_type = "ol" if list_tag == "ol" else ("dl" if list_tag == "dl" else "ul")
 
         # Create list container block
         list_block = BaseBlock(
@@ -470,7 +471,7 @@ class HTMLProvider:
             type=BlockType.LIST,
             content={"type": list_type},
             parent_id=parent_id,
-            metadata=BlockMetadata(attributes={"tag": element.name}, confidence=1.0),
+            metadata=BlockMetadata(attributes={"tag": element.name, "list_type": list_type}, confidence=1.0),
         )
         blocks.append(list_block)
 
@@ -496,7 +497,7 @@ class HTMLProvider:
                         content=item_text.strip(),
                         parent_id=list_block.id,
                         metadata=BlockMetadata(
-                            attributes={"index": idx, "list_type": list_type}, confidence=1.0
+                            attributes={"index": idx, "list_type": list_type, "depth": 1}, confidence=1.0
                         ),
                     )
                 )

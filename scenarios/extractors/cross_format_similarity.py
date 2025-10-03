@@ -13,6 +13,8 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 
 from loguru import logger
+import re
+import unicodedata
 
 from scenarios.extractors.common import (
     ScenarioResult,
@@ -133,6 +135,17 @@ def main() -> int:
     p_threshold = float(os.getenv("CROSS_FORMAT_PARAGRAPH_PARITY", "0.2"))
 
     # Build top-2 heading sets directly from docs
+    _PUNCT = re.compile(r"[^\w\s]", flags=re.UNICODE)
+    _WS = re.compile(r"\s+", flags=re.UNICODE)
+
+    def _heading_key(s: str) -> str:
+        if not s:
+            return ""
+        s_norm = unicodedata.normalize("NFKD", s)
+        s_norm = _PUNCT.sub(" ", s_norm)
+        s_norm = _WS.sub(" ", s_norm).strip().lower()
+        return s_norm
+
     def top2_titles(doc) -> List[str]:
         out = []
         for b in getattr(doc, "blocks", []) or []:
@@ -145,7 +158,7 @@ def main() -> int:
                     except Exception:
                         level = 9
                 if level <= 2 and isinstance(getattr(b, "content", None), str):
-                    out.append(b.content.strip())
+                    out.append(_heading_key(b.content))
         return out
 
     top2 = {k: top2_titles(d) for k, d in docs.items()}

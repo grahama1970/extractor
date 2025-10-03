@@ -20,6 +20,8 @@ import hashlib
 import base64
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Union
+import os
+import re
 
 from pptx import Presentation
 from pptx.slide import Slide
@@ -432,6 +434,32 @@ class PPTXProvider:
                             ),
                         )
                     )
+            # Optional: infer plain lists for non-placeholder text frames (opt-in)
+            infer_plain = os.environ.get("SCENARIO_PPTX_INFER_PLAIN_LISTS", "").lower() in {"1", "true"}
+            if infer_plain and (not getattr(shape, "is_placeholder", False)) and len(all_paragraphs) >= 3:
+                texts = [t for _, t in all_paragraphs]
+                bullet_like = re.compile(r"^(\u2022|[\-\*\u2013]|\d+\.|[a-zA-Z]\))\s+")
+                hits = sum(1 for t in texts if bullet_like.search(t))
+                if hits >= 2 or all(len(t) <= 120 for t in texts):
+                    # Create list parent under the provided parent_id
+                    list_parent = BaseBlock(
+                        id=self._generate_block_id(),
+                        type=BlockType.LIST,
+                        content="",
+                        parent_id=parent_id,
+                        metadata=BlockMetadata(attributes={"list_type": "ul"}, confidence=0.9),
+                    )
+                    blocks.append(list_parent)
+                    for idx, line in enumerate(texts, start=1):
+                        blocks.append(
+                            BaseBlock(
+                                id=self._generate_block_id(),
+                                type=BlockType.LISTITEM,
+                                content=bullet_like.sub("", line).strip(),
+                                parent_id=list_parent.id,
+                                metadata=BlockMetadata(attributes={"depth": 1, "list_type": "ul"}, confidence=0.9),
+                            )
+                        )
         return blocks
 
     def _create_list_blocks(self, items: List[Dict[str, Any]], slide_idx: int, *, parent_id: Optional[str]) -> List[BaseBlock]:
