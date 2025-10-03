@@ -409,7 +409,7 @@ class PPTXProvider:
                         }
                     )
                 if list_items:
-                    blocks.append(self._create_list_block(list_items, slide_idx, parent_id=parent_id))
+                    blocks.extend(self._create_list_blocks(list_items, slide_idx, parent_id=parent_id))
             else:
                 for _, text in all_paragraphs:
                     blocks.append(
@@ -434,32 +434,42 @@ class PPTXProvider:
                     )
         return blocks
 
-    def _create_list_block(self, items: List[Dict[str, Any]], slide_idx: int, *, parent_id: Optional[str]) -> BaseBlock:
-        """Create a list block from items"""
-        content_lines = []
-        for item in items:
-            indent = "  " * item["level"]
-            marker = f"{item['level'] + 1}." if item["is_numbered"] else "-"
-            content_lines.append(f"{indent}{marker} {item['text']}")
-
-        return BaseBlock(
+    def _create_list_blocks(self, items: List[Dict[str, Any]], slide_idx: int, *, parent_id: Optional[str]) -> List[BaseBlock]:
+        """Create LIST + LISTITEM blocks from items."""
+        list_type = "ol" if items and items[0].get("is_numbered") else "ul"
+        list_block = BaseBlock(
             id=self._generate_block_id(),
-            type=BlockType.LISTITEM,
-            content="\n".join(content_lines),
+            type=BlockType.LIST,
+            content="",
             parent_id=parent_id,
             metadata=BlockMetadata(
                 page_number=slide_idx + 1,
                 bbox=None,
                 source_id=f"slide_{slide_idx}_list",
                 language=None,
-                attributes={
-                    "slide_number": slide_idx + 1,
-                    "list_type": "ordered" if items[0]["is_numbered"] else "unordered",
-                    "item_count": len(items),
-                },
+                attributes={"slide_number": slide_idx + 1, "list_type": list_type},
                 confidence=0.95,
             ),
         )
+        item_blocks: List[BaseBlock] = []
+        for idx, it in enumerate(items, start=1):
+            item_blocks.append(
+                BaseBlock(
+                    id=self._generate_block_id(),
+                    type=BlockType.LISTITEM,
+                    content=it.get("text", ""),
+                    parent_id=list_block.id,
+                    metadata=BlockMetadata(
+                        page_number=slide_idx + 1,
+                        bbox=None,
+                        source_id=f"slide_{slide_idx}_li_{idx}",
+                        language=None,
+                        attributes={"slide_number": slide_idx + 1, "depth": int(it.get("level", 0)) + 1, "list_type": list_type},
+                        confidence=0.95,
+                    ),
+                )
+            )
+        return [list_block, *item_blocks]
 
     def _extract_table(self, shape: Any, slide_idx: int, *, parent_id: Optional[str]) -> Optional[TableBlock]:
         """Extract table from shape"""

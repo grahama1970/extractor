@@ -26,6 +26,7 @@ from docx2python import docx2python
 from docx2python.iterators import iter_at_depth, iter_tables
 from docx import Document as PythonDocxDocument
 from loguru import logger
+from extractor.core.providers.utils import emit_list_blocks, normalize_heading_level
 
 from extractor.core.schema.unified_document import (
     UnifiedDocument,
@@ -221,6 +222,24 @@ class DOCXProvider:
             logger.debug(f"First body element type: {type(docx_content.body[0])}")
 
         # Iterate through document paragraphs at depth 4
+        pending_items: List[tuple[str, int]] = []
+        current_list_type: Optional[str] = None
+        last_heading_id: Optional[str] = None
+
+        def flush_list():
+            nonlocal pending_items, current_list_type
+            if pending_items:
+                list_block, li_blocks = emit_list_blocks(
+                    items=pending_items,
+                    list_type=current_list_type or "ul",
+                    parent_id=last_heading_id or "",
+                    id_prefix="docx-list",
+                    start_index=self.block_counter,
+                )
+                blocks.append(list_block)
+                blocks.extend(li_blocks)
+                pending_items = []
+                current_list_type = None
         for par_idx, par in enumerate(iter_at_depth(docx_content.document_pars, 4)):
             # Check if this is a Par object (from docx2python v3)
             if hasattr(par, "style") and hasattr(par, "runs"):
@@ -253,19 +272,25 @@ class DOCXProvider:
                         block_type = BlockType.HEADING
                         try:
                             lvl = style_name.replace("Heading", "").strip()
-                            level = int(lvl) if lvl.isdigit() else 1
+                            level = normalize_heading_level(int(lvl) if lvl.isdigit() else 1)
                         except Exception:
                             level = 1
+                    elif "List" in style_name or "List Paragraph" in style_name:
+                        # Style indicates list; treat paragraph as list item
+                        block_type = BlockType.LISTITEM
 
                 # Fallback content heuristics for mangled DOCX (no heading styles)
                 if block_type == BlockType.PARAGRAPH:
                     # e.g., "4.1.5.4. Heading text" (allow NBSP)
                     if re.match(r"^\d+(?:\.\d+)*\.[\s\u00A0]+", text):
                         block_type = BlockType.HEADING
-                        level = text.count(".") + 1
+                        level = normalize_heading_level(text.count(".") + 1)
                     elif len(text) < 80 and text.isupper():
                         block_type = BlockType.HEADING
                         level = 2
+                    # Detect ad-hoc list markers (•, -, – or 1.)
+                    elif re.match(r"^(?:[\u2022\-\–]\s+|\d+[\.)]\s+)", text):
+                        block_type = BlockType.LISTITEM
 
                 metadata = BlockMetadata(
                     attributes={"style": style_name, "paragraph_index": par_idx}, confidence=1.0
@@ -274,14 +299,39 @@ class DOCXProvider:
                 if level is not None:
                     metadata.attributes["level"] = level
 
-                blocks.append(
-                    BaseBlock(
+                if block_type == BlockType.HEADING:
+                    flush_list()
+                    hb = BaseBlock(
                         id=self._generate_block_id(),
-                        type=block_type,
+                        type=BlockType.HEADING,
                         content=text,
                         metadata=metadata,
                     )
-                )
+                    blocks.append(hb)
+                    last_heading_id = hb.id
+                elif block_type == BlockType.LISTITEM:
+                    # Simple depth estimate from leading spaces / bullets
+                    m = re.match(r"^(?P<bullet>[\u2022\-\–]|\d+[\.)])\s+", text)
+                    depth = 1
+                    if m:
+                        # count spaces before text (docx2python may not preserve indent reliably; keep 1)
+                        depth = 1
+                        text = text[m.end() :]
+                    list_t = "ol" if (m and m.group('bullet') and m.group('bullet')[0].isdigit()) else "ul"
+                    if current_list_type and current_list_type != list_t:
+                        flush_list()
+                    current_list_type = list_t
+                    pending_items.append((text, depth))
+                else:
+                    flush_list()
+                    blocks.append(
+                        BaseBlock(
+                            id=self._generate_block_id(),
+                            type=block_type,
+                            content=text,
+                            metadata=metadata,
+                        )
+                    )
             elif isinstance(par, str) and par.strip():
                 # Plain text paragraph (shouldn't happen with document_pars)
                 blocks.append(self._process_paragraph(par, 0, par_idx))
@@ -289,6 +339,7 @@ class DOCXProvider:
         # Don't extract tables here - they're already extracted as paragraphs
         # Tables in docx2python are part of the document structure, not separate
 
+        flush_list()
         return blocks
 
     def _extract_blocks_basic(self, docx_content) -> List[BaseBlock]:
