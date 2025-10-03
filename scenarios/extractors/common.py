@@ -181,6 +181,21 @@ def try_arango_insert(doc: Any) -> bool:
             return False
         ensure_collection(db, collection)
 
+        # Ensure a stable Arango _key for the document
+        try:
+            src_path = getattr(doc, "source_path", None)
+            eq = None
+            if isinstance(src_path, str) and src_path:
+                try:
+                    eq = Path(src_path).stem
+                except Exception:
+                    eq = src_path
+            # ensure_arango_key is a no-op if already set
+            if hasattr(doc, "ensure_arango_key"):
+                doc.ensure_arango_key(eq)  # type: ignore[attr-defined]
+        except Exception:
+            pass
+
         # Prefer using UnifiedDocument.to_arangodb() for a consistent shape
         try:
             payload: Dict[str, Any] = doc.to_arangodb()  # type: ignore[attr-defined]
