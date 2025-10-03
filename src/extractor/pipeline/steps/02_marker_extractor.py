@@ -105,11 +105,10 @@ def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool
     }
 
     # Create the PDF converter
-    offline_optional = os.getenv("OFFLINE_PDF_PREDICTORS", "1").lower() not in {"0", "false"}
+    strict_mode = os.getenv("OFFLINE_PDF_PREDICTORS", "1").lower() in {"0", "false"}
     converter = PdfConverter(
         artifact_dict=models,
         config=config,
-        offline_optional=offline_optional,
         texify_model=models.get("texify_model"),
     )
 
