@@ -103,7 +103,7 @@ class TestEnvironment:
         required_vars = [
             "ARANGO_HOST", 
             "ARANGO_USER", 
-            "ARANGO_PASSWORD", 
+            "ARANGO_PASS", 
             "ARANGO_DB_NAME"
         ]
         
@@ -118,7 +118,7 @@ class TestEnvironment:
             print("""
             export ARANGO_HOST="http://localhost:8529"
             export ARANGO_USER="root"
-            export ARANGO_PASSWORD="openSesame"
+            export ARANGO_PASS="openSesame"
             export ARANGO_DB_NAME="memory_bank"
             """)
             return False

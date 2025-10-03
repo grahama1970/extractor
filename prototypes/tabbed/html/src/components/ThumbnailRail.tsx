@@ -40,7 +40,11 @@ export function ThumbnailRail({
   }, [currentPage]);
 
   return (
-    <div className="shrink-0 border-r bg-muted/30 overflow-x-hidden overflow-y-auto min-h-0" style={{ width }}>
+    <div
+      data-testid="thumbs-left"
+      className="shrink-0 border-r bg-muted/30 overflow-x-hidden overflow-y-auto min-h-0"
+      style={{ width, transition: 'width 180ms ease' }}
+    >
       <Virtuoso
         ref={ref}
         totalCount={pageCount}
@@ -110,6 +114,7 @@ function ThumbItem({
 
   return (
     <button
+      data-testid={`thumb-${n}`}
       onClick={() => onJump(n)}
       className={cn(
         "group w-full px-2 py-2 text-left focus:outline-none relative",

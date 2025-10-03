@@ -35,6 +35,7 @@ SCENARIOS: List[Tuple[str, list[str]]] = [
     ("ux_a11y_focus_escape", ["node", str(SCEN_DIR / "ux" / "a11y_focus_escape.mjs")]),
     ("pipeline_api_health", [sys.executable, str(SCEN_DIR / "pipeline" / "api_health.py")]),
     ("pipeline_step_10_export_flattened", [sys.executable, str(SCEN_DIR / "pipeline" / "step_10_export_flattened.py")]),
+    ("pipeline_check_stage10_flattened", [sys.executable, str(SCEN_DIR / "pipeline" / "check_stage10_flattened.py")]),
     ("pipeline_step_11_graph_db", [sys.executable, str(SCEN_DIR / "pipeline" / "step_11_graph_db.py")]),
     ("pipeline_step_eval_step10", [sys.executable, str(SCEN_DIR / "pipeline" / "step_eval_agent.py")]),
     ("pipeline_step_eval_step05", [sys.executable, str(SCEN_DIR / "pipeline" / "step05_eval_agent.py")]),
@@ -43,6 +44,7 @@ SCENARIOS: List[Tuple[str, list[str]]] = [
     ("pipeline_step_eval_step09", [sys.executable, str(SCEN_DIR / "pipeline" / "step09_eval_agent.py")]),
     ("pipeline_step_eval_step14", [sys.executable, str(SCEN_DIR / "pipeline" / "step14_eval_agent.py")]),
     ("pipeline_run_all", [sys.executable, str(SCEN_DIR / "pipeline" / "run_pipeline_all.py")]),
+    ("pipeline_pytest_smokes", [sys.executable, str(SCEN_DIR / "pipeline" / "pytest_smokes.py")]),
 ]
 
 RESET = "\033[0m"

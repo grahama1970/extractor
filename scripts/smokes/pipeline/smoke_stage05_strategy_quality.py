@@ -68,11 +68,27 @@ def run_smoke(results: Path) -> None:
                 }
             )
 
+    fallback_metrics = (
+        (tables_data.get("metrics") or {})
+        .get("quality_fallback", {})
+    )
+
     art_dir = Path("scripts/artifacts")
     art_dir.mkdir(parents=True, exist_ok=True)
-    (art_dir / "stage05_strategy_quality.json").write_text(json.dumps(detections, ensure_ascii=False, indent=2))
+    artifact_payload = {
+        "detections": detections,
+        "quality_fallback": fallback_metrics,
+    }
+    (art_dir / "stage05_strategy_quality.json").write_text(
+        json.dumps(artifact_payload, ensure_ascii=False, indent=2)
+    )
     if detections:
         typer.echo("WARN: Detected fragmentation tokens; see stage05_strategy_quality.json")
+    elif fallback_metrics.get("pages_with_fallback"):
+        typer.echo(
+            "OK: No fragmentation tokens; fallback engaged on "
+            f"{fallback_metrics.get('pages_with_fallback')} page(s)."
+        )
     else:
         typer.echo("OK: No obvious fragmentation tokens detected")
 

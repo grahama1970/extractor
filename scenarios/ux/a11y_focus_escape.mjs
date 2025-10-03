@@ -20,7 +20,8 @@ async function main(){
   page.setDefaultTimeout(20000);
 
   await page.goto(BASE, { waitUntil:'domcontentloaded' });
-  await page.waitForSelector('[data-testid="page-label"]');
+  try { await page.waitForSelector('[data-testid="page-label"]',{timeout:3500}); }
+  catch { await page.goto(BASE.replace(/\/+$/,'') + '/main', { waitUntil:'domcontentloaded' }); await page.waitForSelector('[data-testid="page-label"]',{timeout:3500}); }
   // Open a known dialog if present (e.g., Generate JSON)
   const btn = await page.evaluateHandle(() => Array.from(document.querySelectorAll('button')).find(b=>/Generate JSON/i.test(b.textContent||'')) || null);
   if (!btn) { console.log('SKIP: dialog trigger not found'); await browser.disconnect(); process.exit(0); }
@@ -30,7 +31,7 @@ async function main(){
   const shot1 = path.join(OUT, `ux_a11y_dialog_open_${ts()}.png`);
   await page.screenshot({ path: shot1, fullPage: true }).catch(()=>{});
   await page.keyboard.press('Escape');
-  await page.waitForTimeout(200);
+  if (typeof page.waitForTimeout === 'function') { await page.waitForTimeout(350); } else { await new Promise(r=>setTimeout(r,350)); }
   const isOpen = await page.$('[role="dialog"]');
   const activeTag = await page.evaluate(()=>document.activeElement?.tagName||'');
   // Consider focus returned if a button or the mount element is active

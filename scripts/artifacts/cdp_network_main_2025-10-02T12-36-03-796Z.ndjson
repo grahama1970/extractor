@@ -1,0 +1,6 @@
+{"t":1759408563799,"ev":"request","url":"http://127.0.0.1:8080/main","method":"GET","type":"document"}
+{"t":1759408563804,"ev":"response","url":"http://127.0.0.1:8080/main","status":200,"type":"document","payload":null}
+{"t":1759408563811,"ev":"request","url":"http://127.0.0.1:8080/assets/index-BTqCgiUV.js","method":"GET","type":"script"}
+{"t":1759408563811,"ev":"request","url":"http://127.0.0.1:8080/assets/index-CwlKxIDO.css","method":"GET","type":"stylesheet"}
+{"t":1759408563816,"ev":"response","url":"http://127.0.0.1:8080/assets/index-CwlKxIDO.css","status":200,"type":"stylesheet","payload":null}
+{"t":1759408563858,"ev":"response","url":"http://127.0.0.1:8080/assets/index-BTqCgiUV.js","status":200,"type":"script","payload":null}

@@ -7,7 +7,7 @@ import pytest
 ARANGO_URL = os.getenv("ARANGO_URL", "http://127.0.0.1:8529")
 ARANGO_DB = os.getenv("ARANGO_DB", os.getenv("ARANGO_DATABASE", "lessons"))
 ARANGO_USER = os.getenv("ARANGO_USER", "root")
-ARANGO_PASS = os.getenv("ARANGO_PASS", os.getenv("ARANGO_PASSWORD", "openSesame"))
+ARANGO_PASS = os.getenv("ARANGO_PASS", os.getenv("ARANGO_PASS", "openSesame"))
 
 
 def _get_db():

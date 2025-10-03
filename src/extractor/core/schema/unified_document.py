@@ -279,6 +279,20 @@ class UnifiedDocument(BaseModel):
             data.pop("_key")
         return data
 
+    def ensure_arango_key(self, equivalence_id: str | None = None) -> None:
+        """
+        Ensure this document has a stable Arango _key.
+
+        If an equivalence_id is provided (e.g., doc_set_id:revision), prefer it;
+        otherwise derive a stable key from the internal id.
+        """
+        if self.arango_key:
+            return
+        import hashlib
+
+        basis = (equivalence_id or self.id or "document").encode("utf-8")
+        self.arango_key = hashlib.sha1(basis).hexdigest()[:40]
+
     def get_text_content(self) -> str:
         """Extract all text content from blocks"""
         text_parts = []

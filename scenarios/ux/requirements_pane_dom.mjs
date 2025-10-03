@@ -10,10 +10,11 @@ async function main(){
   const browser = await connectOrSkip();
   const page = await browser.newPage();
   await page.goto(BASE, { waitUntil:'domcontentloaded' });
-  await page.waitForSelector('[data-testid="page-label"]');
+  try { await page.waitForSelector('[data-testid="page-label"]',{timeout:2000}); }
+  catch { await page.goto(BASE.replace(/\/+$/,'') + '/main', { waitUntil:'domcontentloaded' }); await page.waitForSelector('[data-testid="page-label"]'); }
   // Open requirements pane via a known toggle if present
   const btn = await page.$('[data-testid="toggle-requirements"], [data-testid="open-requirements"]');
-  if (btn) { await btn.click(); await page.waitForTimeout(200); }
+  if (btn) { await btn.click(); if (typeof page.waitForTimeout==='function'){ await page.waitForTimeout(200);} else { await new Promise(r=>setTimeout(r,200)); } }
   const present = await page.$('[data-testid="requirements-pane"], [data-testid^="req-"]');
   await page.screenshot({ path: path.join(OUT_DIR, `ux_requirements_${ts()}.png`), fullPage:true }).catch(()=>{});
   await browser.disconnect();
@@ -21,4 +22,3 @@ async function main(){
   console.log('Scenario ux/requirements_pane_dom: OK');
 }
 main().catch(e=>{ console.error('ux/requirements_pane_dom crashed:', e?.message||e); process.exit(2); });
-

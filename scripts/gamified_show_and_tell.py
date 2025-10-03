@@ -19,7 +19,7 @@ Runs a 3-variant Codex execution, prints Run ID, winner, and Web Logger URLs.
 Requires ArangoDB to be running and Codex CLI path provided (or in PATH).
 
 Usage:
-  export ARANGO_HOST=127.0.0.1 ARANGO_PORT=8529 ARANGO_USERNAME=root ARANGO_PASSWORD=openSesame ARANGO_DB=marker
+  export ARANGO_HOST=127.0.0.1 ARANGO_PORT=8529 ARANGO_USERNAME=root ARANGO_PASS=openSesame ARANGO_DB=marker
   export CODEX_BINARY_PATH=/absolute/path/to/codex
   ./scripts/gamified_show_and_tell.py --codebase .
 
@@ -51,7 +51,7 @@ def main(
   dashboard_port: int = typer.Option(5199, help="Dashboard dev port"),
 ):
   # Preflight Arango env
-  missing = [k for k in ["ARANGO_HOST","ARANGO_PORT","ARANGO_USERNAME","ARANGO_PASSWORD","ARANGO_DB"] if not os.environ.get(k)]
+  missing = [k for k in ["ARANGO_HOST","ARANGO_PORT","ARANGO_USERNAME","ARANGO_PASS","ARANGO_DB"] if not os.environ.get(k)]
   if missing:
     typer.secho(f"Missing Arango env: {', '.join(missing)}", fg=typer.colors.RED)
     raise typer.Exit(code=2)

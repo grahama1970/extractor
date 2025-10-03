@@ -96,7 +96,7 @@ def check_environment_variables():
     required_vars = [
         "ARANGO_HOST", 
         "ARANGO_USER", 
-        "ARANGO_PASSWORD", 
+        "ARANGO_PASS", 
         "ARANGO_DB_NAME"
     ]
     
@@ -105,7 +105,7 @@ def check_environment_variables():
         value = os.environ.get(var, None)
         if value:
             # Mask password
-            if var == "ARANGO_PASSWORD":
+            if var == "ARANGO_PASS":
                 display_val = "********"
             else:
                 display_val = value
@@ -120,7 +120,7 @@ def check_environment_variables():
         print("""
         export ARANGO_HOST="http://localhost:8529"
         export ARANGO_USER="root"
-        export ARANGO_PASSWORD="openSesame"
+        export ARANGO_PASS="openSesame"
         export ARANGO_DB_NAME="memory_bank"
         """)
     else:

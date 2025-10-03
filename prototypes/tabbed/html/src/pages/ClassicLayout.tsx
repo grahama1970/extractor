@@ -18,12 +18,16 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Separator } from "@/components/ui/separator";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
+import { toast } from "@/components/ui/sonner";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ThumbnailRail } from "@/components/ThumbnailRail";
 import { ThumbnailStrip } from "@/components/ThumbnailStrip";
 import { PdfCanvas } from "@/components/PdfCanvas";
 import { loadPdf, type PdfDoc } from "@/lib/pdf";
+import { isDev } from "@/lib/env";
 import { DEFAULT_LABELS, loadLabels, saveLabel, type LabelDef } from "@/lib/labels";
 
 // Types
@@ -78,6 +82,22 @@ const ClassicLayout = () => {
 
   const [jsonOpen, setJsonOpen] = useState(false);
   const [jsonText, setJsonText] = useState("{}");
+  // Toolbar label popover
+  const [labelMenuOpen, setLabelMenuOpen] = useState<boolean>(false);
+  // Requirements pane (stub for scenarios)
+  const [reqOpen, setReqOpen] = useState<boolean>(false);
+  // Document selection & meta
+  const [docRel, setDocRel] = useState<string>(() => {
+    try { return localStorage.getItem('anno_doc_rel') || 'BHT CV32A65X.pdf'; } catch { return 'BHT CV32A65X.pdf'; }
+  });
+  const [pdfList, setPdfList] = useState<string[]>([]);
+  const [docName, setDocName] = useState<string>(docRel);
+  // Save indicator (UI-only)
+  const [saving, setSaving] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const scheduleSaved = useRef<number | null>(null);
+  // Inspector width (px)
+  const [inspectorW, setInspectorW] = useState<number>(()=>{ try { return Number(localStorage.getItem('anno_inspector_w')) || 320; } catch { return 320; } });
 
   // Scroll active thumbnail into view (pager chips removed; still keep util)
   const thumbRefs = useRef<Record<number, HTMLButtonElement | null>>({});
@@ -98,7 +118,7 @@ const ClassicLayout = () => {
   // load demo PDF once
   useEffect(() => {
     let mounted = true;
-    loadPdf("/bht.pdf").then((d) => {
+    loadPdf("/api/pdf?rel=" + encodeURIComponent("BHT CV32A65X.pdf")).then((d) => {
       if (!mounted) return;
       setDoc(d);
       setTotalPages(d.numPages || 2);
@@ -106,10 +126,40 @@ const ClassicLayout = () => {
     return () => { mounted = false };
   }, []);
 
+  // Load list of PDFs and react to docRel changes
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch('/api/list', { cache: 'no-store' });
+        const j = await r.json();
+        if (Array.isArray(j)) setPdfList(j.map((x: any) => String(x)));
+        else if (j?.files) setPdfList((j.files as any[]).map(String));
+      } catch {
+        setPdfList(['BHT CV32A65X.pdf','Design Documentation for CV32A65X architecture.pdf','nvidia-ampere-architecture-whitepaper.pdf']);
+      }
+    })();
+  }, []);
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const d = await loadPdf('/api/pdf?rel=' + encodeURIComponent(docRel));
+        if (!mounted) return;
+        setDoc(d);
+        setTotalPages(d.numPages || 2);
+        try { localStorage.setItem('anno_doc_rel', docRel); } catch {}
+      } catch {}
+    })();
+    return () => { mounted = false };
+  }, [docRel]);
+
   // Thumbnails mode (left | bottom | off) with persistence
   type ThumbMode = "left" | "bottom" | "off";
   const [thumbMode, setThumbMode] = useState<ThumbMode>(() => (localStorage.getItem("anno_thumb_mode") as ThumbMode) || "left");
   useEffect(() => { localStorage.setItem("anno_thumb_mode", thumbMode); }, [thumbMode]);
+  // Left rail collapse + hover expand
+  const [thumbCollapsed, setThumbCollapsed] = useState<boolean>(()=> (typeof window!=='undefined' && localStorage.getItem('anno_thumb_left_collapsed') === '1'));
+  const [thumbHover, setThumbHover] = useState<boolean>(false);
   // Keyboard shortcuts: '?' opens help
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -367,6 +417,10 @@ const ClassicLayout = () => {
   }, []);
   useEffect(() => {
     try { localStorage.setItem("anno_boxes_by_page", JSON.stringify(boxesByPage)); } catch {}
+    // Save indicator simulation
+    setDirty(true); setSaving(true);
+    if (scheduleSaved.current) window.clearTimeout(scheduleSaved.current);
+    scheduleSaved.current = window.setTimeout(() => { setSaving(false); setDirty(false); }, 400);
   }, [boxesByPage]);
 
   // Keyboard shortcuts
@@ -495,7 +549,7 @@ const ClassicLayout = () => {
             <Button data-testid="pager-next" size="sm" variant="outline" title="Next" onClick={()=> setCurrentPage(p=> Math.min(totalPages, p+1))}><ChevronRight className="h-4 w-4" /></Button>
             <input data-testid="page-slider" type="range" min={1} max={Math.max(1,totalPages)} value={currentPage} onChange={(e)=> setCurrentPage(Number(e.target.value))} />
             <Separator orientation="vertical" className="mx-2" />
-            {/* Filters markers */}
+          {/* Filters markers */}
             <label className="flex items-center gap-1 text-xs"><input data-testid="filter-type-section" type="checkbox" checked={filterSection} onChange={(e)=> setFilterSection(e.target.checked)} />Section</label>
             <label className="flex items-center gap-1 text-xs"><input data-testid="filter-type-table" type="checkbox" checked={filterTable} onChange={(e)=> setFilterTable(e.target.checked)} />Table</label>
             <label className="flex items-center gap-1 text-xs"><input data-testid="filter-type-figure" type="checkbox" checked={filterFigure} onChange={(e)=> setFilterFigure(e.target.checked)} />Figure</label>
@@ -508,8 +562,50 @@ const ClassicLayout = () => {
             </select>
             <Separator orientation="vertical" className="mx-2" />
             <Button data-testid="conflicts-tab" size="sm" variant="outline" onClick={()=> setConflictsOpen(v=>!v)}>Conflicts</Button>
+            <Button data-testid="help-trigger" size="sm" variant="outline" title="Keyboard help (?)" onClick={()=> setShortcutsOpen(true)}>Help</Button>
+            <Button data-testid="toggle-requirements" size="sm" variant="outline" onClick={()=> setReqOpen(v=>!v)}>Requirements</Button>
             <Separator orientation="vertical" className="mx-2" />
-            {/* Duplicate review buttons in toolbar to ensure clickability */}
+            {/* Interaction toolbar for scenarios */}
+            <Button data-testid="toolbar-new" size="sm" variant={drawArmed?"default":"outline"} title="New (draw)" onClick={()=> setDrawArmed(true)}>
+              <Plus className="h-4 w-4 mr-1" /> New
+            </Button>
+            <Button data-testid="toolbar-dup" size="sm" variant="outline" title="Duplicate" onClick={()=>{
+              if (!selectedId) return;
+              setPageBoxes((prev) => {
+                const src = prev.find((b) => b.id === selectedId);
+                if (!src) return prev;
+                const copy: Box = { ...src, id: `${src.id}-${Math.random().toString(36).slice(2,6)}`, x: Math.min(0.98 - src.w, src.x + 0.02), y: Math.min(0.98 - src.h, src.y + 0.02) };
+                const next = [...prev, copy];
+                setSelectedId(copy.id);
+                return next;
+              });
+            }}>
+              <Copy className="h-4 w-4 mr-1" /> Dup
+            </Button>
+            <Button data-testid="toolbar-del" size="sm" variant="outline" title="Delete" onClick={()=>{
+              if (!selectedId) return;
+              setPageBoxes((prev) => {
+                const filtered = prev.filter((b) => b.id !== selectedId);
+                setSelectedId(filtered.length ? filtered[filtered.length-1].id : null);
+                return filtered;
+              });
+            }}>
+              <Trash2 className="h-4 w-4 mr-1" /> Del
+            </Button>
+            <div className="relative">
+              <Button data-testid="toolbar-label" size="sm" variant="outline" title="Label menu" onClick={()=> setLabelMenuOpen(v=>!v)}>
+                <Edit className="h-4 w-4 mr-1" /> Label
+              </Button>
+              {labelMenuOpen && (
+                <div className="absolute mt-1 z-20 bg-card border rounded shadow p-1 text-xs">
+                  <div data-testid="label-item-section" className="px-2 py-1 cursor-pointer hover:bg-accent rounded" onClick={()=>{ if (selectedId) setPageBoxes(p=> p.map(b=> b.id===selectedId? {...b, type:'Section'}: b)); setLabelMenuOpen(false); }}>Section</div>
+                  <div data-testid="label-item-table" className="px-2 py-1 cursor-pointer hover:bg-accent rounded" onClick={()=>{ if (selectedId) setPageBoxes(p=> p.map(b=> b.id===selectedId? {...b, type:'Table'}: b)); setLabelMenuOpen(false); }}>Table</div>
+                  <div data-testid="label-item-figure" className="px-2 py-1 cursor-pointer hover:bg-accent rounded" onClick={()=>{ if (selectedId) setPageBoxes(p=> p.map(b=> b.id===selectedId? {...b, type:'Figure'}: b)); setLabelMenuOpen(false); }}>Figure</div>
+                </div>
+              )}
+            </div>
+            <Separator orientation="vertical" className="mx-2" />
+            {/* Duplicate review buttons (existing demo actions) */}
             <Button data-testid="btn-claim" size="sm" variant="outline" onClick={()=> { setStatus('In Review'); const me = localStorage.getItem('tabbed.review.identity') || 'Me'; setAssignee(me); }}>Claim</Button>
             <Button data-testid="btn-release" size="sm" variant="outline" onClick={()=> { setStatus('Done'); setAssignee(''); setTimeout(()=> setStatus('Unassigned'), 150); }}>Release</Button>
           </div>
@@ -523,6 +619,16 @@ const ClassicLayout = () => {
                   Page 2 — …{searchQuery}…
                 </div>
               )}
+            </div>
+          )}
+          {reqOpen && (
+            <div data-testid="requirements-pane" className="mb-2 border rounded p-2 text-xs bg-card">
+              <div data-testid="req-title" className="font-medium mb-1">Requirements</div>
+              <ul className="list-disc ml-4">
+                <li data-testid="req-item">Draw, duplicate, delete boxes</li>
+                <li data-testid="req-item">Change labels via toolbar</li>
+                <li data-testid="req-item">Thumbnails render (left/bottom)</li>
+              </ul>
             </div>
           )}
           {shortcutsOpen && (
@@ -595,12 +701,15 @@ const ClassicLayout = () => {
           <div className="flex-1 rounded-lg relative mb-4 overflow-hidden bg-muted flex">
             {/* Vertical thumbnail rail */}
             {doc && thumbMode === "left" && (
-              <ThumbnailRail
-                doc={doc}
-                pageCount={totalPages}
-                currentPage={currentPage}
-                onJump={(n) => setCurrentPage(n)}
-              />
+              <div onMouseEnter={()=> setThumbHover(true)} onMouseLeave={()=> setThumbHover(false)}>
+                <ThumbnailRail
+                  doc={doc}
+                  pageCount={totalPages}
+                  currentPage={currentPage}
+                  onJump={(n) => setCurrentPage(n)}
+                  width={(thumbCollapsed && !thumbHover) ? 32 : 144}
+                />
+              </div>
             )}
 
             {/* Canvas viewer */}
@@ -660,6 +769,7 @@ const ClassicLayout = () => {
                             <div
                               key={h}
                               onPointerDown={(e) => { e.stopPropagation(); beginDrag(b.id, e, h as any); }}
+                              data-testid={`resize-handle-${h}`}
                               className={`absolute w-3 h-3 bg-primary rounded-full shadow -translate-x-1/2 -translate-y-1/2 ${
                                 h === "nw" ? "left-0 top-0 cursor-nwse-resize" :
                                 h === "n"  ? "left-1/2 top-0 cursor-ns-resize" :
@@ -855,6 +965,33 @@ const ClassicLayout = () => {
             </div>
           </div>
 
+          {/* Document header */}
+          <div className="flex items-center justify-between mb-2" data-testid="doc-header">
+            <div className="text-sm text-muted-foreground truncate">{docName} · {totalPages || 0} pages</div>
+            <div className="flex items-center gap-2">
+              <div className="text-xs px-2 py-1 rounded border bg-background/80" aria-live="polite">{saving ? 'Saving…' : (dirty ? 'Edited' : 'Saved')}</div>
+              <Select value={docRel} onValueChange={(v)=> setDocRel(v)}>
+                <SelectTrigger className="w-[260px]"><SelectValue placeholder="Choose PDF" /></SelectTrigger>
+                <SelectContent>
+                  <div className="px-2 py-1 text-xs text-muted-foreground">Recent</div>
+                  {pdfList.slice(0,3).map((f)=> (<SelectItem key={`r-${f}`} value={f}>{f}</SelectItem>))}
+                  <div className="px-2 py-1 text-xs text-muted-foreground">All</div>
+                  {pdfList.map((f)=> (<SelectItem key={`a-${f}`} value={f}>{f}</SelectItem>))}
+                </SelectContent>
+              </Select>
+              <input id="openLocalPdf" type="file" accept="application/pdf" className="hidden" onChange={async (e)=>{
+                try {
+                  const file = e.target.files?.[0]; if (!file) return;
+                  const url = URL.createObjectURL(file);
+                  const d = await loadPdf(url);
+                  setDoc(d); setTotalPages(d?.numPages || 0); setDocName(file.name);
+                  toast(`Opened ${file.name}`);
+                } catch {}
+              }} />
+              <Button size="sm" variant="outline" onClick={()=> document.getElementById('openLocalPdf')?.click()}>Open…</Button>
+            </div>
+          </div>
+
           {/* Pager: thumbnails + slider */}
           <div className="space-y-3">
             {doc && thumbMode === "bottom" && (
@@ -888,18 +1025,58 @@ const ClassicLayout = () => {
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <span>Thumbs</span>
                 <Select value={thumbMode} onValueChange={(v) => setThumbMode(v as ThumbMode)}><SelectTrigger className="w-[150px]"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="left">Left rail</SelectItem><SelectItem value="bottom">Bottom filmstrip</SelectItem><SelectItem value="off">Off</SelectItem></SelectContent></Select>
+                {thumbMode === 'left' && (
+                  <Button
+                    data-testid="thumbs-toggle"
+                    size="sm"
+                    variant="outline"
+                    title="Collapse/expand thumbnail rail"
+                    onClick={()=>{
+                      const next = !thumbCollapsed; setThumbCollapsed(next);
+                      try { localStorage.setItem('anno_thumb_left_collapsed', next ? '1' : '0'); } catch {}
+                    }}
+                  >{thumbCollapsed ? 'Expand' : 'Collapse'}</Button>
+                )}
               </div>
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <span>Zoom</span>
-                <input type="range" min={0.5} max={2} step={0.1} value={zoom} onChange={(e) => setZoom(Number(e.target.value))} />
-                <span>{Math.round(zoom * 100)}%</span>
-              </div>
+              <Tooltip delayDuration={100}>
+                <TooltipTrigger asChild>
+                  <div className="relative flex items-center gap-2 text-sm text-muted-foreground" data-testid="toolbar-zoom">
+                    <span>Zoom</span>
+                    <Button data-testid="zoom-minus" size="icon" variant="outline" onClick={()=> setZoom(v=> Math.max(0.5, Math.round((v-0.1)*10)/10))}>-</Button>
+                    <Badge variant="secondary" aria-live="polite">{Math.round(zoom*100)}%</Badge>
+                    <Button data-testid="zoom-plus" size="icon" variant="outline" onClick={()=> setZoom(v=> Math.min(2, Math.round((v+0.1)*10)/10))}>+</Button>
+                    <input type="range" min={0.5} max={2} step={0.1} value={zoom} onChange={(e) => setZoom(Number(e.target.value))} />
+                    <Button data-testid="toolbar-zoom-fit" size="sm" variant="outline" onClick={()=> setZoom(1)}>Fit</Button>
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent>
+                  Zoom level: {Math.round(zoom*100)}%
+                </TooltipContent>
+              </Tooltip>
             </div>
           </div>
         </div>
 
-        {/* Inspector Panel */}
-        <div className="w-80 border-l bg-card p-6 flex flex-col">
+        {/* Resize handle + Inspector Panel */}
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          data-testid="resize-inspector"
+          className="w-1.5 cursor-col-resize hover:bg-primary/40 bg-border"
+          title="Resize inspector"
+          onPointerDown={(e)=>{
+            const startX = e.clientX; const startW = inspectorW;
+            (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+            const move = (ev: PointerEvent) => {
+              const next = Math.max(220, Math.min(560, startW + (startX - ev.clientX)));
+              setInspectorW(next);
+              try { localStorage.setItem('anno_inspector_w', String(next)); } catch {}
+            };
+            const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
+            window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
+          }}
+        />
+        <div className="border-l bg-card p-6 flex flex-col" data-testid="inspector-pane" style={{ width: inspectorW }}>
           <h2 className="text-xl font-bold text-destructive mb-4 text-center">Inspector</h2>
 
           <div className="space-y-5 flex-1">

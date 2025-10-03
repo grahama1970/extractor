@@ -1,0 +1,8 @@
+{"t":1759417685746,"ev":"request","url":"http://127.0.0.1:8080/main","method":"GET","type":"document"}
+{"t":1759417685749,"ev":"response","url":"http://127.0.0.1:8080/main","status":200,"type":"document","payload":null}
+{"t":1759417685756,"ev":"request","url":"http://127.0.0.1:8080/assets/index-BkkaVJAW.js","method":"GET","type":"script"}
+{"t":1759417685756,"ev":"request","url":"http://127.0.0.1:8080/assets/index-YKM7uFw3.css","method":"GET","type":"stylesheet"}
+{"t":1759417685763,"ev":"response","url":"http://127.0.0.1:8080/assets/index-YKM7uFw3.css","status":200,"type":"stylesheet","payload":null}
+{"t":1759417685793,"ev":"response","url":"http://127.0.0.1:8080/assets/index-BkkaVJAW.js","status":200,"type":"script","payload":null}
+{"t":1759417685834,"ev":"request","url":"http://127.0.0.1:8080/assets/pdf-BnPRJEQ6.js","method":"GET","type":"script"}
+{"t":1759417685854,"ev":"response","url":"http://127.0.0.1:8080/assets/pdf-BnPRJEQ6.js","status":200,"type":"script","payload":null}

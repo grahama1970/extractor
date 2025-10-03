@@ -108,7 +108,7 @@ class AnnotationStorage:
             # Get credentials from environment
             host = os.getenv('ARANGO_HOST', 'http://localhost:8529')
             username = os.getenv('ARANGO_USERNAME', 'root')
-            password = os.getenv('ARANGO_PASSWORD', '')
+            password = os.getenv('ARANGO_PASS', '')
             
             # Connect to ArangoDB
             self.client = ArangoClient(hosts=host)

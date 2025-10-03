@@ -10,7 +10,8 @@ async function main(){
   const browser = await connectOrSkip();
   const page = await browser.newPage();
   await page.goto(BASE, { waitUntil:'domcontentloaded' });
-  await page.waitForSelector('[data-testid="page-label"]');
+  try { await page.waitForSelector('[data-testid="page-label"]',{timeout:2000}); }
+  catch { await page.goto(BASE.replace(/\/+$/,'') + '/main', { waitUntil:'domcontentloaded' }); await page.waitForSelector('[data-testid="page-label"]'); }
   const present = await page.$('[data-testid="inspector-pane"], [data-testid="inspector"]');
   await page.screenshot({ path: path.join(OUT_DIR, `ux_inspector_${ts()}.png`), fullPage:true }).catch(()=>{});
   await browser.disconnect();
@@ -18,4 +19,3 @@ async function main(){
   console.log('Scenario ux/inspector_pane_present: OK');
 }
 main().catch(e=>{ console.error('ux/inspector_pane_present crashed:', e?.message||e); process.exit(2); });
-

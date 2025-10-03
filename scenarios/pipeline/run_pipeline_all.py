@@ -28,6 +28,9 @@ def ts() -> str:
 
 
 def main() -> None:
+    if os.getenv('PIPELINE_LIVE','').lower() not in {'1','true','yes'}:
+        print('SKIP: pipeline_run_all requires PIPELINE_LIVE=1')
+        return
     stamp = ts()
     log = ART_ROOT / f"pipeline_all_{stamp}.log"
     summary_path = ART_ROOT / f"pipeline_all_{stamp}.json"

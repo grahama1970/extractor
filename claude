@@ -1,3 +1,0 @@
-#!/bin/bash
-# Mock claude for testing
-echo "Mock claude response for testing"

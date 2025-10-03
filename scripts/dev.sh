@@ -189,6 +189,7 @@ launch_console_sanity() {
 
     BASE_URL="$BASE_URL" \
     BROWSERLESS_DISCOVERY_URL="$DISC_URL" \
+    BASE_URL="$BASE_URL" \
     node "$ROOT_DIR/scripts/smokes/console_errors.mjs" || true
   ) &
 }
@@ -314,7 +315,7 @@ if [ -d "prototypes/tabbed/html" ]; then
       # Optional: auto-launch CDP and run one-shot console error smoke
       if [ "${DEV_CDP_SANITY:-0}" = "1" ]; then
         DEFAULT_DISC="${BROWSERLESS_DISCOVERY_URL:-http://127.0.0.1:3000/json/version}"
-        launch_console_sanity "http://127.0.0.1:8080" "$DEFAULT_DISC"
+        launch_console_sanity "http://127.0.0.1:8080/main" "$DEFAULT_DISC"
       fi
       wait "$VITE_PID"
     )
@@ -325,7 +326,7 @@ if [ -d "prototypes/tabbed/html" ]; then
       VITE_PID=$!
       if [ "${DEV_CDP_SANITY:-0}" = "1" ]; then
         DEFAULT_DISC="${BROWSERLESS_DISCOVERY_URL:-http://127.0.0.1:3000/json/version}"
-        launch_console_sanity "http://127.0.0.1:8080" "$DEFAULT_DISC"
+        launch_console_sanity "http://127.0.0.1:8080/main" "$DEFAULT_DISC"
       fi
       wait "$VITE_PID"
     )

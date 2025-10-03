@@ -68,7 +68,7 @@ class PDFObjectIdentifier:
             # Connection parameters from environment
             host = os.getenv("ARANGO_HOST", "http://localhost:8529")
             username = os.getenv("ARANGO_USER", "root")
-            password = os.getenv("ARANGO_PASSWORD", "")
+            password = os.getenv("ARANGO_PASS", "")
             database = os.getenv("ARANGO_DATABASE", "extractor_kb")
             
             # Create client

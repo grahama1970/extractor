@@ -8,7 +8,7 @@ def _set_env():
     os.environ.setdefault("ARANGO_URL", "http://127.0.0.1:8529")
     os.environ.setdefault("ARANGO_DB", os.getenv("ARANGO_DATABASE", "lessons"))
     os.environ.setdefault("ARANGO_USER", "root")
-    os.environ.setdefault("ARANGO_PASS", os.getenv("ARANGO_PASSWORD", "openSesame"))
+    os.environ.setdefault("ARANGO_PASS", os.getenv("ARANGO_PASS", "openSesame"))
 
 
 @pytest.fixture(scope="module")

@@ -14,7 +14,7 @@ def get_db():
     url = os.getenv("ARANGO_URL", "http://127.0.0.1:8529")
     db_name = os.getenv("ARANGO_DB", os.getenv("ARANGO_DATABASE", "lessons"))
     user = os.getenv("ARANGO_USER", "root")
-    password = os.getenv("ARANGO_PASS", os.getenv("ARANGO_PASSWORD", ""))
+    password = os.getenv("ARANGO_PASS", os.getenv("ARANGO_PASS", ""))
 
     client = ArangoClient(hosts=url)
     sys_db = client.db("_system", username=user, password=password)

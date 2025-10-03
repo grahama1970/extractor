@@ -15,12 +15,21 @@ run-scenarios-ux:
 run-scenarios-pipeline:
 	SCENARIOS_FILTER=pipeline_ python scenarios/run_all.py
 
+.PHONY: run-extractor-scenarios
+run-extractor-scenarios:
+	PYTHONPATH=src python scenarios/extractors/run_all.py
+
+.PHONY: bundle-extractor-artifacts
+bundle-extractor-artifacts:
+	@echo "Artifacts root: $${SCENARIOS_ARTIFACT_ROOT:-scripts/artifacts}"
+	@find $${SCENARIOS_ARTIFACT_ROOT:-scripts/artifacts} -maxdepth 3 -type f \( -name '*.json' -o -name '*.png' \) | sort
+
 .PHONY: pipeline
 pipeline:
 	python scenarios/pipeline/run_pipeline_all.py
 
-.PHONY: pipeline:smoke
-pipeline:smoke:
+.PHONY: pipeline-smoke
+pipeline-smoke:
 	SCENARIOS_FILTER=pipeline_api_health,pipeline_step_10_export_flattened,pipeline_step_11_graph_db python scenarios/run_all.py
 
 
@@ -29,7 +38,7 @@ pipeline:smoke:
 		smoke-litellm smoke-litellm-image smoke-litellm-all smoke-litellm-results \
 		smoke-07-reflow-min bundle-tabbed state-of-project
 
-	help:
+help:
 	@echo "Common targets:"
 	@echo "  make setup         # create venv + install dev deps (uv if available)"
 	@echo "  make dev           # start backend + vite (scripts/dev.sh)"
@@ -41,6 +50,10 @@ pipeline:smoke:
 	@echo "  make ci            # local CI gate (server checks + full suite)"
 	@echo "  make scaffold ISSUE=007 TITLE=\"label button\"  # scaffold issue + smoke"
 	@echo "  make smoke-issue ISSUE=007                        # run that issue smoke"
+	@echo "  make run-01-05 PDF=... OUT=...                    # run pipeline steps 01→05 into OUT"
+	@echo "  make annotate-from-results OUT=... [TABLES_AS=json|markdown|box] [EXPORT_PAGES=1]  # annotate with sidecars"
+	@echo "  make annotate-run-01-05 PDF=... OUT=... [TABLES_AS=json] [EXPORT_PAGES=1]        # run 01→05 then annotate"
+	@echo "  make bundle-annotated SLUG=...                    # tar.gz annotated PDF + pages + sidecars"
 	@echo "  make gamified-e2e  # run gamified e2e smoke (Codex path, fast)"
 	@echo "  make gamified-all  # run all gamified smokes"
 	@echo "  make gamified-codex# run Codex exec smoke (requires codex)"
@@ -117,6 +130,45 @@ dev:
 stop:
 	- fuser -k 8080/tcp 2>/dev/null || true
 	- fuser -k 8001/tcp 2>/dev/null || true
+
+# --- Pipeline 01→05 + Annotator helpers ---
+
+.PHONY: run-01-05
+run-01-05:
+	@if [ -z "$(PDF)" ] || [ -z "$(OUT)" ]; then \
+	  echo "Usage: make run-01-05 PDF=path/to/file.pdf OUT=data/results/pipeline_runs/slug"; exit 1; fi
+	rm -rf "$(OUT)" && mkdir -p "$(OUT)/tmp_pdf"
+	python src/extractor/pipeline/steps/01_annotation_processor.py run "$(PDF)" -o "$(OUT)"
+	$(eval CLEAN:=$(shell jq -r .clean_pdf_path "$(OUT)/01_annotation_processor/json_output/01_annotations.json" 2>/dev/null))
+	cp "$(CLEAN)" "$(OUT)/tmp_pdf/"
+	python src/extractor/pipeline/steps/02_marker_extractor.py run "$(OUT)/tmp_pdf/$(notdir $(CLEAN))" -o "$(OUT)" --no-spawn
+	python src/extractor/pipeline/steps/03_suspicious_headers.py run "$(OUT)/02_marker_extractor/json_output/02_marker_blocks.json" --pdf-dir "$(OUT)/tmp_pdf" -o "$(OUT)" --skip-llm
+	python src/extractor/pipeline/steps/04_section_builder.py run "$(OUT)/03_suspicious_headers/json_output/03_verified_blocks.json" --pdf-dir "$(OUT)/tmp_pdf" -o "$(OUT)"
+	python src/extractor/pipeline/steps/05_table_extractor.py run "$(OUT)/04_section_builder/json_output/04_sections.json" --pdf-dir "$(OUT)/tmp_pdf" -o "$(OUT)"
+	@echo "[run-01-05] CLEAN=$(CLEAN)"
+
+.PHONY: annotate-from-results
+annotate-from-results:
+	@if [ -z "$(OUT)" ]; then echo "Usage: make annotate-from-results OUT=... [TABLES_AS=json|markdown|box] [EXPORT_PAGES=1]"; exit 1; fi
+	$(eval CLEAN:=$(shell jq -r .clean_pdf_path "$(OUT)/01_annotation_processor/json_output/01_annotations.json" 2>/dev/null))
+	@if [ -z "$(CLEAN)" ] || [ ! -f "$(CLEAN)" ]; then echo "[annotate-from-results] CLEAN PDF not found under $(OUT). Run make run-01-05 first."; exit 1; fi
+	$(eval TABLES_AS?=json)
+	$(eval EXPORT_PAGES?=1)
+	$(eval SLUG?=$(shell basename $(OUT)))
+	uv run scripts/tools/pdf_annotate_from_pipeline.py \
+	  --input-pdf "$(OUT)/01_annotation_processor/$(notdir $(CLEAN))" \
+	  --results "$(OUT)" \
+	  --output scripts/artifacts/annotated_$(SLUG).pdf \
+	  --tables-as $(TABLES_AS) --no-labels $(if $(EXPORT_PAGES),--export-pages,)
+	@echo "[annotate-from-results] Wrote scripts/artifacts/annotated_$(SLUG).pdf"
+
+.PHONY: annotate-run-01-05
+annotate-run-01-05: run-01-05 annotate-from-results
+
+.PHONY: bundle-annotated
+bundle-annotated:
+	@if [ -z "$(SLUG)" ]; then echo "Usage: make bundle-annotated SLUG=..."; exit 1; fi
+	uv run scripts/tools/bundle_annotated_artifacts.py --slug "$(SLUG)"
 
 lint:
 	- ruff check .
@@ -628,8 +680,29 @@ lint-api-gates:
 	@echo "[lint-api-gates] checking that /api calls are gated in preview/dev..."
 	@! rg -n --hidden "/api/" prototypes/tabbed/html/src 	  | rg -v "isPreview\(|isDev\(" 	  || (echo "[lint-api-gates] Found ungated /api references. Gate them behind isPreview()/isDev()." && exit 1)
 
+# --- CI one-shot (scenarios-first) ---
+
+# Defaults for CDP + base URL (override in CI if needed)
+BASE_URL ?= http://127.0.0.1:8080
+CDP_DISCOVERY ?= http://127.0.0.1:9222/json/version
+
 .PHONY: ci-rinse
 ci-rinse:
-	@echo "[ci-rinse] preview gate"; 	VITE_PREVIEW=1 CONSOLE_ERRORS_TIMEOUT_MS=90000 TARGET_URL=$(TARGET_URL) node scenarios/ux/console_errors.mjs
-	@echo "[ci-rinse] no-preview-api check"; 	VITE_PREVIEW=1 TARGET_URL=$(TARGET_URL) node scenarios/ux/no_preview_api_requests.mjs
-	@echo "[ci-rinse] backend smokes"; 	$(MAKE) ensure-pdfs && $(MAKE) smokes-rinse
+	@echo "[ci-rinse] UX pack (scenarios)"
+	SCENARIOS_FILTER=ux_ \
+	SCENARIOS_STOP_ON_FIRST_FAILURE=0 \
+	BASE_URL=$(BASE_URL) \
+	BROWSERLESS_DISCOVERY_URL=$(CDP_DISCOVERY) \
+	python3 scenarios/run_all.py
+	@echo "[ci-rinse] Pipeline subset (scenarios)"
+	SCENARIOS_FILTER=pipeline_api_health,pipeline_check_stage10_flattened,pipeline_step_11_graph_db \
+	python3 scenarios/run_all.py
+	@echo "[ci-rinse] Summaries:"
+	@find scripts/artifacts -maxdepth 4 -type f -name "scenarios_summary.json" -print | tail -n 6
+
+.PHONY: ci-rinse-preview
+ci-rinse-preview:
+	@echo "[ci-rinse-preview] preview gate"; \
+	VITE_PREVIEW=1 CONSOLE_ERRORS_TIMEOUT_MS=90000 TARGET_URL=$(TARGET_URL) node scenarios/ux/console_errors.mjs
+	@echo "[ci-rinse-preview] no-preview-api check"; \
+	VITE_PREVIEW=1 TARGET_URL=$(TARGET_URL) node scenarios/ux/no_preview_api_requests.mjs

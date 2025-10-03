@@ -132,6 +132,12 @@ TABLE_HEADER_COALESCE_ENABLED = os.getenv("TABLE_HEADER_COALESCE_ENABLED", "true
     "y",
 )
 TABLE_HEADER_REPEAT_MIN_MATCH = float(os.getenv("TABLE_HEADER_REPEAT_MIN_MATCH", 0.6))
+FRAGMENTATION_RETRY_THRESHOLD = max(
+    0, int(os.getenv("TABLE_FRAGMENTATION_RETRY_THRESHOLD", 0))
+)
+FRAGMENTATION_IMPROVEMENT_MIN = max(
+    1, int(os.getenv("TABLE_FRAGMENTATION_MIN_IMPROVEMENT", 1))
+)
 
 # --- Core Functions ---
 
@@ -206,6 +212,25 @@ def fragmentation_score(df: pd.DataFrame) -> int:
         if sanitize_cell(cell) != str(cell):
             count += 1
     return count
+
+
+def should_retry_fragmentation(score: int) -> bool:
+    """Return True when the fragmentation score exceeds the retry threshold."""
+    return score > FRAGMENTATION_RETRY_THRESHOLD
+
+
+def has_fragmentation_improvement(existing: int, new: int) -> bool:
+    """Check if the new fragmentation score improves on the existing one."""
+    return (existing - new) >= FRAGMENTATION_IMPROVEMENT_MIN
+
+
+def should_replace_table(existing_frag: int, new_frag: int, existing_score: float, new_score: float) -> bool:
+    """Decide whether a new extraction should replace the existing candidate."""
+    if has_fragmentation_improvement(existing_frag, new_frag):
+        return True
+    if new_frag == existing_frag and new_score > existing_score:
+        return True
+    return False
 
 
 def try_camelot_strategy(
@@ -317,10 +342,15 @@ def extract_tables_from_page(
     output_dir: Path,
     last_good_strategy: Optional[str] = None,
     diagnostics: Optional[list] = None,
-) -> Tuple[List[Dict[str, Any]], Optional[str], Dict[str, Any]]:
+) -> Tuple[List[Dict[str, Any]], Optional[str], Dict[str, Any], Dict[str, Any]]:
     """Extract all tables from a single page using multiple strategies."""
-    page_tables = {}
+    page_tables: Dict[tuple, Dict[str, Any]] = {}
     best_strategy = None
+    page_metrics = {
+        "retry_candidates": 0,
+        "fallback_tables": 0,
+        "fallback_applied": False,
+    }
 
     # Strategy policy:
     # - Try baseline lattice(line_scale=15) first
@@ -343,7 +373,91 @@ def extract_tables_from_page(
 
     # Track per-strategy durations
     strategy_durations = {}
-    _found_by_strategy = {}
+    fallback_applied_for_page = False
+
+    def _bbox_tuple_for(table_obj: Any) -> Optional[tuple]:
+        bt = getattr(table_obj, "_bbox", None)
+        if not bt and hasattr(table_obj, "cells") and getattr(table_obj, "cells"):
+            try:
+                xs = [c.x1 for c in table_obj.cells] + [c.x2 for c in table_obj.cells]
+                ys = [c.y1 for c in table_obj.cells] + [c.y2 for c in table_obj.cells]
+                bt = (min(xs), min(ys), max(xs), max(ys))
+            except Exception:
+                bt = None
+        return bt
+
+    def _iou(a: tuple, b: tuple) -> float:
+        try:
+            ax0, ay0, ax1, ay1 = a
+            bx0, by0, bx1, by1 = b
+            inter_w = max(0.0, min(ax1, bx1) - max(ax0, bx0))
+            inter_h = max(0.0, min(ay1, by1) - max(ay0, by0))
+            inter = inter_w * inter_h
+            area_a = max(0.0, (ax1 - ax0)) * max(0.0, (ay1 - ay0))
+            area_b = max(0.0, (bx1 - bx0)) * max(0.0, (by1 - by0))
+            union = area_a + area_b - inter
+            return float(inter / union) if union > 0 else 0.0
+        except Exception:
+            return 0.0
+
+    def _quantize_bbox(bt: tuple) -> tuple:
+        return tuple(round(float(x), 2) for x in bt)
+
+    def _register_table(
+        strategy_name: str,
+        table_obj: Any,
+        bbox_key: tuple,
+        score_val: float,
+    ) -> Tuple[str, bool]:
+        nonlocal fallback_applied_for_page, best_strategy
+
+        new_frag = fragmentation_score(table_obj.df)
+        history_entry = {
+            "strategy": strategy_name,
+            "fragmentation": new_frag,
+            "score": score_val,
+        }
+        existing = page_tables.get(bbox_key)
+        if existing is not None:
+            existing_frag = int(existing.get("fragmentation", 0) or 0)
+            existing_score = float(existing.get("score", 0.0) or 0.0)
+            if not should_replace_table(existing_frag, new_frag, existing_score, score_val):
+                return "skipped", bool(existing.get("quality_fallback", False))
+            history = list(existing.get("history", []))
+            history.append(history_entry)
+            quality_fallback = bool(existing.get("quality_fallback", False))
+            if strategy_name != existing.get("strategy") and (
+                has_fragmentation_improvement(existing_frag, new_frag)
+                or should_retry_fragmentation(existing_frag)
+            ):
+                quality_fallback = True
+            page_tables[bbox_key] = {
+                "table": table_obj,
+                "score": score_val,
+                "strategy": strategy_name,
+                "fragmentation": new_frag,
+                "history": history,
+                "quality_fallback": quality_fallback,
+            }
+            if page_tables[bbox_key]["quality_fallback"]:
+                fallback_applied_for_page = True
+            best_strategy = strategy_name
+            return "replaced", page_tables[bbox_key]["quality_fallback"]
+
+        quality_fallback = strategy_name != baseline_name
+        page_tables[bbox_key] = {
+            "table": table_obj,
+            "score": score_val,
+            "strategy": strategy_name,
+            "fragmentation": new_frag,
+            "history": [history_entry],
+            "quality_fallback": quality_fallback,
+        }
+        if quality_fallback:
+            fallback_applied_for_page = True
+        best_strategy = strategy_name
+        return "added", quality_fallback
+
     # Try each strategy
     # First pass: baseline only
     for strategy in strategies_to_try:
@@ -358,34 +472,6 @@ def extract_tables_from_page(
         strategy_durations[nm]["total_ms"] += _dt
 
         found_count = 0
-
-        def _bbox_tuple_for(table_obj: Any) -> Optional[tuple]:
-            bt = getattr(table_obj, "_bbox", None)
-            if not bt and hasattr(table_obj, "cells") and getattr(table_obj, "cells"):
-                try:
-                    xs = [c.x1 for c in table_obj.cells] + [c.x2 for c in table_obj.cells]
-                    ys = [c.y1 for c in table_obj.cells] + [c.y2 for c in table_obj.cells]
-                    bt = (min(xs), min(ys), max(xs), max(ys))
-                except Exception:
-                    bt = None
-            return bt
-
-        def _iou(a: tuple, b: tuple) -> float:
-            try:
-                ax0, ay0, ax1, ay1 = a
-                bx0, by0, bx1, by1 = b
-                inter_w = max(0.0, min(ax1, bx1) - max(ax0, bx0))
-                inter_h = max(0.0, min(ay1, by1) - max(ay0, by0))
-                inter = inter_w * inter_h
-                area_a = max(0.0, (ax1 - ax0)) * max(0.0, (ay1 - ay0))
-                area_b = max(0.0, (bx1 - bx0)) * max(0.0, (by1 - by0))
-                union = area_a + area_b - inter
-                return float(inter / union) if union > 0 else 0.0
-            except Exception:
-                return 0.0
-
-        def _quantize_bbox(bt: tuple) -> tuple:
-            return tuple(round(float(x), 2) for x in bt)
 
         for table in tables:
             bbox_tuple = _bbox_tuple_for(table)
@@ -402,41 +488,45 @@ def extract_tables_from_page(
             for existing_key in list(page_tables.keys()):
                 iou = _iou(bbox_q, existing_key)
                 if iou >= 0.90:
-                    if score > page_tables[existing_key]["score"]:
-                        page_tables[existing_key] = {
-                            "table": table,
-                            "score": score,
-                            "strategy": strategy["name"],
-                            "fragmentation": fragmentation_score(table.df),
-                        }
-                        if not best_strategy:
-                            best_strategy = strategy["name"]
-                    replaced_existing = True
+                    action, quality_flag = _register_table(
+                        strategy["name"], table, existing_key, score
+                    )
+                    replaced_existing = action != "skipped"
+                    if action == "replaced" and quality_flag:
+                        strategy_durations[nm].setdefault("quality_upgrades", 0)
+                        strategy_durations[nm]["quality_upgrades"] += 1
                     break
             if not replaced_existing:
-                page_tables[bbox_q] = {
-                    "table": table,
-                    "score": score,
-                    "strategy": strategy["name"],
-                    "fragmentation": fragmentation_score(table.df),
-                }
-                if not best_strategy:
-                    best_strategy = strategy["name"]
-                found_count += 1
+                action, quality_flag = _register_table(
+                    strategy["name"], table, bbox_q, score
+                )
+                if action in {"added", "replaced"}:
+                    found_count += 1
+                    if action == "replaced" and quality_flag:
+                        strategy_durations[nm].setdefault("quality_upgrades", 0)
+                        strategy_durations[nm]["quality_upgrades"] += 1
 
         # record per-page count for this strategy after processing
         strategy_durations[nm].setdefault("found", {})[page_num] = int(found_count)
-        # If baseline found any, stop before trying others
-        if strategy.get("name") == baseline_name and found_count > 0 and min(page_tables[k]["fragmentation"] for k in page_tables) == 0:
+        # If baseline found any tables with zero fragmentation, stop early
+        if (
+            strategy.get("name") == baseline_name
+            and found_count > 0
+            and any(
+                info.get("fragmentation", 0) == 0 for info in page_tables.values()
+            )
+        ):
             break
 
-    needs_more = not page_tables
-    if not needs_more and page_tables:
-        try:
-            frag_vals = [info.get("fragmentation", 0) for info in page_tables.values()]
-            needs_more = min(frag_vals) > 0
-        except Exception:
-            needs_more = False
+    retry_keys = {
+        key
+        for key, info in page_tables.items()
+        if should_retry_fragmentation(int(info.get("fragmentation", 0) or 0))
+    }
+    if retry_keys:
+        page_metrics["retry_candidates"] = len(retry_keys)
+
+    needs_more = not page_tables or bool(retry_keys)
 
     if needs_more:
         stop_after_first = not page_tables
@@ -491,27 +581,32 @@ def extract_tables_from_page(
                 for existing_key in list(page_tables.keys()):
                     iou = _iou(bbox_q, existing_key)
                     if iou >= 0.90:
-                        if score > page_tables[existing_key]["score"]:
-                            page_tables[existing_key] = {
-                                "table": table,
-                                "score": score,
-                                "strategy": strategy["name"],
-                                "fragmentation": fragmentation_score(table.df),
-                            }
-                        replaced_existing = True
+                        action, quality_flag = _register_table(
+                            strategy["name"], table, existing_key, score
+                        )
+                        replaced_existing = action != "skipped"
+                        if action == "replaced" and quality_flag:
+                            strategy_durations[nm].setdefault("quality_upgrades", 0)
+                            strategy_durations[nm]["quality_upgrades"] += 1
                         break
                 if not replaced_existing:
-                    page_tables[bbox_q] = {
-                        "table": table,
-                        "score": score,
-                        "strategy": strategy["name"],
-                        "fragmentation": fragmentation_score(table.df),
-                    }
-                    found_count += 1
+                    action, quality_flag = _register_table(
+                        strategy["name"], table, bbox_q, score
+                    )
+                    if action in {"added", "replaced"}:
+                        found_count += 1
+                        if action == "replaced" and quality_flag:
+                            strategy_durations[nm].setdefault("quality_upgrades", 0)
+                            strategy_durations[nm]["quality_upgrades"] += 1
 
             strategy_durations[nm].setdefault("found", {})[page_num] = int(found_count)
             if stop_after_first and found_count > 0:
                 break
+
+    page_metrics["fallback_applied"] = fallback_applied_for_page
+    page_metrics["fallback_tables"] = sum(
+        1 for info in page_tables.values() if info.get("quality_fallback")
+    )
 
     # Convert to output format: select exactly one best table per page
     extracted_tables = []
@@ -580,6 +675,8 @@ def extract_tables_from_page(
                 "order": table.order,
             },
             "score": table_info["score"],
+            "quality_fallback": bool(table_info.get("quality_fallback", False)),
+            "strategy_history": table_info.get("history", []),
         }
 
         if img_path:
@@ -593,7 +690,7 @@ def extract_tables_from_page(
 
         extracted_tables.append(table_data)
 
-    return extracted_tables, best_strategy, strategy_durations
+    return extracted_tables, best_strategy, strategy_durations, page_metrics
 
 
 def _normalize_cell(val: Any) -> str:
@@ -660,11 +757,18 @@ def coalesce_repeated_header_rows(
 
 def extract_all_tables(
     pdf_path: Path, output_dir: Path, diagnostics: Optional[list] = None
-) -> List[Dict[str, Any]]:
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any], Dict[str, Any]]:
     """Extract all tables from a PDF."""
-    all_tables = []
+    all_tables: List[Dict[str, Any]] = []
     last_good_strategy = None
-    strategy_summary = {}
+    strategy_summary: Dict[str, Dict[str, Any]] = {}
+    quality_summary = {
+        "pages_processed": 0,
+        "pages_with_tables": 0,
+        "pages_with_fallback": 0,
+        "tables_with_fallback": 0,
+        "retry_candidates": 0,
+    }
 
     # Open PDF with PyMuPDF for image extraction
     try:
@@ -680,8 +784,20 @@ def extract_all_tables(
         for page_num in range(total_pages):
             logger.info(f"Processing page {page_num + 1}/{total_pages}")
 
-            tables, best_strategy, sdurs = extract_tables_from_page(
+            tables, best_strategy, sdurs, page_metrics = extract_tables_from_page(
                 pdf_path, page_num, pdf_doc, output_dir, last_good_strategy, diagnostics
+            )
+
+            quality_summary["pages_processed"] += 1
+            if tables:
+                quality_summary["pages_with_tables"] += 1
+            if page_metrics.get("fallback_applied"):
+                quality_summary["pages_with_fallback"] += 1
+            quality_summary["tables_with_fallback"] += int(
+                page_metrics.get("fallback_tables", 0) or 0
+            )
+            quality_summary["retry_candidates"] += int(
+                page_metrics.get("retry_candidates", 0) or 0
             )
 
             if tables:
@@ -723,7 +839,7 @@ def extract_all_tables(
     finally:
         pdf_doc.close()
 
-    return all_tables
+    return all_tables, strategy_summary, quality_summary
 
 
 def run(
@@ -793,7 +909,9 @@ def run(
     image_output_dir.mkdir(exist_ok=True)
 
     # --- Table Extraction ---
-    all_tables = extract_all_tables(pdf_path, image_output_dir, diagnostics)
+    all_tables, strategy_summary, quality_summary = extract_all_tables(
+        pdf_path, image_output_dir, diagnostics
+    )
 
     # --- Heuristic merge: stitch header-only tables with body tables across pages
     def is_header_row_table(t: Dict[str, Any]) -> bool:
@@ -1127,6 +1245,14 @@ def run(
         timings["strategy_durations"] = strategy_summary
     except Exception:
         pass
+    metrics_payload = {
+        "quality_fallback": {
+            **quality_summary,
+            "retry_threshold": FRAGMENTATION_RETRY_THRESHOLD,
+            "improvement_min": FRAGMENTATION_IMPROVEMENT_MIN,
+        }
+    }
+
     result = {
         "timestamp": datetime.now().isoformat(),
         "source_json": str(input_json),
@@ -1140,6 +1266,7 @@ def run(
         "diagnostics": diagnostics,
         "timings": timings,
         "resources": resources,
+        "metrics": metrics_payload,
     }
 
     output_path = json_output_dir / "05_tables.json"
@@ -1215,8 +1342,9 @@ def debug_bundle(
         raise typer.Exit(1)
 
     # Extract tables and associate
-    all_tables = extract_all_tables(pdf_path, image_output_dir, diagnostics)
-    strategy_summary = {}
+    all_tables, strategy_summary, quality_summary = extract_all_tables(
+        pdf_path, image_output_dir, diagnostics
+    )
     with open(tmp_sections, "r") as f:
         sections_data = json.load(f)
     sections = sections_data.get("sections", [])
@@ -1279,6 +1407,14 @@ def debug_bundle(
         timings["strategy_durations"] = strategy_summary
     except Exception:
         pass
+    metrics_payload = {
+        "quality_fallback": {
+            **quality_summary,
+            "retry_threshold": FRAGMENTATION_RETRY_THRESHOLD,
+            "improvement_min": FRAGMENTATION_IMPROVEMENT_MIN,
+        }
+    }
+
     result = {
         "timestamp": datetime.now().isoformat(),
         "source_pdf": str(pdf_path),
@@ -1291,6 +1427,7 @@ def debug_bundle(
         "diagnostics": diagnostics,
         "timings": timings,
         "resources": resources,
+        "metrics": metrics_payload,
     }
     output_path = json_output_dir / "05_tables.json"
     with open(output_path, "w") as f:

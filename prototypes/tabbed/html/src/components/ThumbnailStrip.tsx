@@ -43,7 +43,7 @@ export function ThumbnailStrip({
   // For small docs, render a simple row so multiple thumbs are visible without scrolling
   if (pageCount <= 4) {
     return (
-      <div className="w-full border rounded-md bg-muted/30 overflow-x-auto" style={{ height }}>
+      <div data-testid="thumbs-bottom" className="w-full border rounded-md bg-muted/30 overflow-x-auto" style={{ height }}>
         <div className="h-full flex items-stretch gap-2 px-2">
           {Array.from({ length: pageCount }).map((_, idx) => (
             <ThumbItem
@@ -66,7 +66,7 @@ export function ThumbnailStrip({
   const minHeight = Math.round(itemWidth * 4 / 3) + 16;
   const effectiveHeight = Math.max(height, minHeight);
   return (
-    <div className="w-full border rounded-md bg-muted/30 overflow-hidden" style={{ height: effectiveHeight }}>
+    <div data-testid="thumbs-bottom" className="w-full border rounded-md bg-muted/30 overflow-hidden" style={{ height: effectiveHeight }}>
       <Virtuoso
         ref={ref}
         totalCount={pageCount}
@@ -117,6 +117,7 @@ function ThumbItem({ doc, n, isActive, onJump, width, cacheKey, hitCount }: { do
 
   return (
     <button
+      data-testid={`thumb-${n}`}
       onClick={() => onJump(n)}
       className={cn(
         "px-2 py-2 h-full inline-flex items-center",

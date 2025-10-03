@@ -20,7 +20,12 @@ import os
 import sys
 import time
 from pathlib import Path
-from ._eval_utils import summarize, structure_diff, shorten
+try:
+    from ._eval_utils import summarize, structure_diff, shorten
+except Exception:
+    import sys, os
+    sys.path.insert(0, os.path.dirname(__file__))
+    from _eval_utils import summarize, structure_diff, shorten
 
 ROOT = Path(__file__).resolve().parents[2]
 ART_ROOT = Path(os.getenv("SCENARIOS_ARTIFACT_ROOT", ROOT / "scripts" / "artifacts"))

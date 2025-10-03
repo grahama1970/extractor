@@ -73,6 +73,8 @@ Always-On CDP/MCP Rule (must follow)
   - From MCP: capture a full-page screenshot and list console messages for each route under test.
   - Treat the CDP artifacts as the source of truth for pass/fail.
   - If a non‑CDP gate is used first (e.g., `npm run ux:check`), follow it immediately with a CDP/MCP attach to validate and save artifacts.
+  - If the MCP client reports the Chrome profile is already in use or refuses new sessions, restart the headless browser with `ch-headless` (defined in `~/.zshrc`). That helper stops any lingering Chromium/Chrome processes and relaunches `/snap/bin/chromium` headlessly on port 9222 with a clean user data dir.
+  - After restarting Chromium, the Codex CLI must also restart the `chrome-devtools-mcp` server so it reattaches to the fresh browser. If MCP calls still fail after `ch-headless`, restart the Codex CLI (or its chrome-devtools MCP task) before retrying.
 
 ---
 

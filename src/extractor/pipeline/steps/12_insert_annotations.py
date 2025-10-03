@@ -13,7 +13,7 @@ CLI:
     -o data/results/pipeline
 
 Env required:
-  ARANGO_HOST, ARANGO_PORT, ARANGO_USER, ARANGO_PASSWORD, ARANGO_DATABASE
+  ARANGO_HOST, ARANGO_PORT, ARANGO_USER, ARANGO_PASS, ARANGO_DATABASE
   GRAPH_NAME (default pdf_knowledge_graph)
   GRAPH_EDGE_COLLECTION (default pdf_relationships)
   ARANGO_ANNOTATIONS_COLLECTION (default annotations)
@@ -110,7 +110,7 @@ def run(
     host = os.getenv("ARANGO_HOST", "localhost")
     port = int(os.getenv("ARANGO_PORT", 8529))
     user = os.getenv("ARANGO_USER", "root")
-    password = os.getenv("ARANGO_PASSWORD")
+    password = os.getenv("ARANGO_PASS")
     db_name = os.getenv("ARANGO_DATABASE", "pdf_knowledge_base")
     vertex_col = os.getenv("GRAPH_VERTEX_COLLECTION", "pdf_objects")
     ann_col = os.getenv("ARANGO_ANNOTATIONS_COLLECTION", "annotations")
@@ -118,7 +118,7 @@ def run(
     graph_name = os.getenv("GRAPH_NAME", "pdf_knowledge_graph")
 
     if not password:
-        console.print("[red]ARANGO_PASSWORD not set[/red]")
+        console.print("[red]ARANGO_PASS not set[/red]")
         raise typer.Exit(1)
 
     client = ArangoClient(hosts=f"http://{host}:{port}")

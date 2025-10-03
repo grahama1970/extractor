@@ -44,7 +44,7 @@ def _connect_arango() -> Optional[StandardDatabase]:  # type: ignore[valid-type]
     host = _get_env("ARANGO_HOST", "127.0.0.1")
     port = int(_get_env("ARANGO_PORT", "8529") or "8529")
     user = _get_env("ARANGO_USERNAME") or _get_env("ARANGO_USER") or "root"
-    password = _get_env("ARANGO_PASSWORD", "")
+    password = _get_env("ARANGO_PASS", "")
     db_name = _get_env("ARANGO_DB") or _get_env("ARANGO_DATABASE") or "marker"
     client = ArangoClient(hosts=f"http://{host}:{port}")
     db = client.db("_system", username=user, password=password)

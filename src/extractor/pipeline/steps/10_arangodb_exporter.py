@@ -583,9 +583,9 @@ def run(
     try:
         host = os.getenv("ARANGO_HOST", "localhost")
         port = int(os.getenv("ARANGO_PORT", 8529))
-        user = os.getenv("ARANGO_USER", "root")
-        password = os.getenv("ARANGO_PASSWORD")
-        db_name = os.getenv("ARANGO_DATABASE", "pdf_knowledge_base")
+        user = os.getenv("ARANGO_USERNAME") or os.getenv("ARANGO_USER", "root")
+        password = os.getenv("ARANGO_PASS") or os.getenv("ARANGO_PASSWORD")
+        db_name = os.getenv("ARANGO_DB") or os.getenv("ARANGO_DATABASE", "pdf_knowledge_base")
 
         if not password or ArangoClient is None:
             console.print("[yellow]Arango not configured/available → export skipped; flattened JSON already saved.[/yellow]")
@@ -707,9 +707,9 @@ def debug_bundle(
     try:
         host = os.getenv("ARANGO_HOST", "localhost")
         port = int(os.getenv("ARANGO_PORT", 8529))
-        user = os.getenv("ARANGO_USER", "root")
-        password = os.getenv("ARANGO_PASSWORD")
-        db_name = os.getenv("ARANGO_DATABASE", "pdf_knowledge_base")
+        user = os.getenv("ARANGO_USERNAME") or os.getenv("ARANGO_USER", "root")
+        password = os.getenv("ARANGO_PASS") or os.getenv("ARANGO_PASSWORD")
+        db_name = os.getenv("ARANGO_DB") or os.getenv("ARANGO_DATABASE", "pdf_knowledge_base")
 
         if not password or ArangoClient is None:
             console.print("[yellow]Arango not configured/available → export skipped; flattened JSON written.[/yellow]")
@@ -759,7 +759,9 @@ def build_cli():
 
 
 if __name__ == "__main__":
-    build_cli()()#!/usr/bin/env python3
+    build_cli()()
+"""DUPLICATE REMOVED BEGIN
+#!/usr/bin/env python3
 """
 Pipeline Stage: Flatten and Load to ArangoDB with Guaranteed Order
 
@@ -1299,11 +1301,11 @@ def run(
         host = os.getenv("ARANGO_HOST", "localhost")
         port = int(os.getenv("ARANGO_PORT", 8529))
         user = os.getenv("ARANGO_USER", "root")
-        password = os.getenv("ARANGO_PASSWORD")
+        password = os.getenv("ARANGO_PASS")
         db_name = os.getenv("ARANGO_DATABASE", "pdf_knowledge_base")
 
         if not password:
-            raise ValueError("ARANGO_PASSWORD environment variable is not set.")
+            raise ValueError("ARANGO_PASS environment variable is not set.")
 
         client = ArangoClient(hosts=f"http://{host}:{port}")
         db = client.db(db_name, username=user, password=password)
@@ -1422,11 +1424,11 @@ def debug_bundle(
         host = os.getenv("ARANGO_HOST", "localhost")
         port = int(os.getenv("ARANGO_PORT", 8529))
         user = os.getenv("ARANGO_USER", "root")
-        password = os.getenv("ARANGO_PASSWORD")
+        password = os.getenv("ARANGO_PASS")
         db_name = os.getenv("ARANGO_DATABASE", "pdf_knowledge_base")
 
         if not password:
-            raise ValueError("ARANGO_PASSWORD environment variable is not set.")
+            raise ValueError("ARANGO_PASS environment variable is not set.")
 
         client = ArangoClient(hosts=f"http://{host}:{port}")
         db = client.db(db_name, username=user, password=password)
@@ -1470,3 +1472,4 @@ def build_cli():
 if __name__ == "__main__":
     build_cli()()
 import re
+DUPLICATE REMOVED END"""

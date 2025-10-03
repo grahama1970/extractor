@@ -1,3 +1,11 @@
+import pytest
+
+# Deprecated: replaced by scenarios-based check
+pytest.skip(
+    "Deprecated smoke: use scenarios/pipeline/check_stage10_flattened.py",
+    allow_module_level=True,
+)
+
 def test_flatten_document_minimal():
     # dynamic import due to filename starting with digits
     import importlib.util

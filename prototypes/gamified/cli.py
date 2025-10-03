@@ -729,7 +729,7 @@ def run(
     arango_host: str = typer.Option(os.environ.get("ARANGO_HOST", "127.0.0.1"), help="ArangoDB host"),
     arango_port: int = typer.Option(int(os.environ.get("ARANGO_PORT", 8529)), help="ArangoDB port"),
     arango_username: str = typer.Option(os.environ.get("ARANGO_USERNAME", "root"), help="ArangoDB username"),
-    arango_password: str = typer.Option(os.environ.get("ARANGO_PASSWORD", "openSesame"), help="ArangoDB password"),
+    arango_password: str = typer.Option(os.environ.get("ARANGO_PASS", "openSesame"), help="ArangoDB password"),
     arango_db: str = typer.Option(os.environ.get("ARANGO_DB", "marker"), help="ArangoDB database name"),
 ):
     """Minimal, batteries-included gamified run."""
@@ -910,7 +910,7 @@ def run(
                 "ARANGO_HOST": arango_host,
                 "ARANGO_PORT": str(arango_port),
                 "ARANGO_USERNAME": arango_username,
-                "ARANGO_PASSWORD": arango_password,
+                "ARANGO_PASS": arango_password,
                 "ARANGO_DB": arango_db,
             }
             backend_proc = _start_backend(api_base, extra_env=backend_env)

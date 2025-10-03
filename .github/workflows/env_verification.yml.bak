@@ -1,0 +1,40 @@
+name: Environment Verification
+
+on:
+  workflow_dispatch:
+
+jobs:
+  healthcheck:
+    runs-on: ubuntu-latest
+    services:
+      arangodb:
+        image: arangodb/arangodb:3.12
+        env:
+          ARANGO_ROOT_PASSWORD: openSesame
+        ports:
+          - 8529:8529
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Wait for ArangoDB to be ready
+        shell: bash
+        run: |
+          echo "Waiting for ArangoDB on http://localhost:8529 ..."
+          for i in {1..60}; do
+            if curl -sS http://localhost:8529/_api/version >/dev/null; then
+              echo "ArangoDB is up"; break; fi
+            echo "Still waiting... ($i)"; sleep 2;
+          done
+
+      - name: Run environment verification
+        shell: bash
+        env:
+          ARANGO_HOST: localhost
+          ARANGO_PORT: "8529"
+          ARANGO_USERNAME: root
+          ARANGO_PASSWORD: openSesame
+        run: |
+          chmod +x scripts/verify_environment.sh
+          bash scripts/verify_environment.sh
+

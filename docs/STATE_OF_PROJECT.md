@@ -203,13 +203,13 @@ Takeaway: We did not find a single system that combines robust AI extraction (ta
 - **Automation Hooks** – Make targets (`make smokes-pipeline-happy`, `make quick-pipeline`, `make extract-fast …`) and VS Code tasks provide one-click validation loops.
 
 ## Known Gaps & Watchlist
-- Stage 05 logs fragmentation but does not yet auto-trigger the planned vision/Camelot retry loop—implement the quality-aware fallback referenced in `next_step` memory.
+- Stage 05 now wires the fragmentation detector into a Camelot fallback loop and tracks per-page metrics; next, extend the path to trigger vision transcription when all lattice/stream strategies still fragment.
 - Happy Path documentation (`docs/03_guides/HAPPYPATH_GUIDE.md`) still references the legacy gamified CLI verbs; align with the unified CLI terminology.
 - Accurate PDF runtime remains heavy; continue using the fast toggles for dev and profile Stage 01 concurrency on larger PDFs.
 - OCR remains English-only; add language detection + surya compatibility when multi-language support becomes a requirement.
 
 ## Recommended Next Actions
-- Wire the Stage 05 fragmentation detector into a retry path (alternate Camelot settings or vision transcription) and add a smoke asserting fallback activation.
+- Validate Stage 05 fallback metrics against larger PDFs and extend the retry path with a vision transcription option for persistent fragmentation, building on the new smoke coverage.
 - Refresh Happy Path documentation to highlight `python -m src.cli extract`, `pipeline-run`, and the structured pipeline flow.
 - Expand PPTX smokes with real-world templates to harden notes/chart extraction beyond synthetic samples.
 - Consider folding provider parity smokes into the local CI path once runtime is acceptable (<15 minutes).

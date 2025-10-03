@@ -66,10 +66,10 @@ def main(results: Path = typer.Option(Path("data/results/pipeline_db_smoke"), "-
     host = os.getenv("ARANGO_HOST", "localhost")
     port = int(os.getenv("ARANGO_PORT", 8529))
     user = os.getenv("ARANGO_USER", "root")
-    password = os.getenv("ARANGO_PASSWORD")
+    password = os.getenv("ARANGO_PASS")
     db_name = os.getenv("ARANGO_DATABASE", "pdf_knowledge_base_test")
     if not password:
-        raise SystemExit("ARANGO_PASSWORD not set")
+        raise SystemExit("ARANGO_PASS not set")
 
     client = ArangoClient(hosts=f"http://{host}:{port}")
     db = client.db(db_name, username=user, password=password)

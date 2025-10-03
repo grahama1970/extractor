@@ -16,7 +16,7 @@ set -u
 ARANGO_HOST="${ARANGO_HOST:-localhost}"
 ARANGO_PORT="${ARANGO_PORT:-8529}"
 ARANGO_USERNAME="${ARANGO_USERNAME:-root}"
-ARANGO_PASSWORD="${ARANGO_PASSWORD:-openSesame}"
+ARANGO_PASS="${ARANGO_PASS:-openSesame}"
 BASE_URL="http://${ARANGO_HOST}:${ARANGO_PORT}"
 
 pass() { echo "[PASS] $1"; }
@@ -45,7 +45,7 @@ if [[ "$(cat /tmp/codex_fs_check.txt)" == "codex_write_ok" ]]; then pass "Can wr
 echo
 
 echo "== ArangoDB Connectivity (via env) =="
-VER_HTTP=$(curl -sS -u "$ARANGO_USERNAME:$ARANGO_PASSWORD" -o /tmp/arangov1.json -w "%{http_code}" "$BASE_URL/_api/version" || true)
+VER_HTTP=$(curl -sS -u "$ARANGO_USERNAME:$ARANGO_PASS" -o /tmp/arangov1.json -w "%{http_code}" "$BASE_URL/_api/version" || true)
 if [[ "$VER_HTTP" == "200" ]]; then
   pass "GET /_api/version (HTTP 200)"
   echo "Response: $(cat /tmp/arangov1.json | tr -d '\n')"
@@ -54,7 +54,7 @@ else
   fail "Cannot GET /_api/version"
 fi
 
-DB_HTTP=$(curl -sS -u "$ARANGO_USERNAME:$ARANGO_PASSWORD" -o /tmp/arangodbuser.json -w "%{http_code}" "$BASE_URL/_api/database/user" || true)
+DB_HTTP=$(curl -sS -u "$ARANGO_USERNAME:$ARANGO_PASS" -o /tmp/arangodbuser.json -w "%{http_code}" "$BASE_URL/_api/database/user" || true)
 if [[ "$DB_HTTP" == "200" ]]; then
   pass "GET /_api/database/user (HTTP 200)"
   echo "Databases (truncated): $(head -c 200 /tmp/arangodbuser.json)"

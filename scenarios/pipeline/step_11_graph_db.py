@@ -28,7 +28,7 @@ def main() -> None:
         port = env("ARANGO_PORT") or "8529"
         arango_url = f"{host}:{port}"
     user = env("ARANGO_USER") or env("ARANGO_USERNAME")
-    password = env("ARANGO_PASSWORD")
+    password = env("ARANGO_PASS")
     dbname = env("ARANGO_DB") or env("ARANGO_DATABASE")
     if not dbname or not user or not password:
         print("SKIP: missing ARANGO_* credentials; not probing graph DB")

@@ -10,7 +10,8 @@ async function main(){
   const browser = await connectOrSkip();
   const page = await browser.newPage();
   await page.goto(BASE, { waitUntil:'domcontentloaded' });
-  await page.waitForSelector('[data-testid="page-label"]');
+  try { await page.waitForSelector('[data-testid="page-label"]',{timeout:2000}); }
+  catch { await page.goto(BASE.replace(/\/+$/,'') + '/main', { waitUntil:'domcontentloaded' }); await page.waitForSelector('[data-testid="page-label"]'); }
 
   // Draw a box first if none present
   let boxes = await page.$$('[data-testid="box"]');
@@ -21,6 +22,12 @@ async function main(){
       const r = await overlay.evaluate(el=>{ const b=el.getBoundingClientRect(); return {x:b.left,y:b.top,w:b.width,h:b.height}; });
       const sx=r.x+r.w*0.3, sy=r.y+r.h*0.3, ex=r.x+r.w*0.5, ey=r.y+r.h*0.4;
       await page.mouse.move(sx,sy); await page.mouse.down(); await page.mouse.move(ex,ey,{steps:8}); await page.mouse.up();
+    }
+    // Fallback: use window.__ux helper
+    boxes = await page.$$('[data-testid="box"]');
+    if (boxes.length === 0){
+      await page.evaluate(()=>{ try{ window.__ux && window.__ux.drawBox(1,0.30,0.30,0.50,0.40,'Section'); }catch{} });
+      if (typeof page.waitForTimeout==='function'){ await page.waitForTimeout(150);} else { await new Promise(r=>setTimeout(r,150)); }
     }
   }
   const first = await page.$('[data-testid="box"]');
@@ -37,4 +44,3 @@ async function main(){
   console.log('Scenario ux/selection_handles_resize: OK');
 }
 main().catch(e=>{ console.error('ux/selection_handles_resize crashed:', e?.message||e); process.exit(2); });
-

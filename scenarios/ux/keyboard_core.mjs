@@ -10,7 +10,8 @@ async function main(){
   const browser = await connectOrSkip();
   const page = await browser.newPage();
   await page.goto(BASE, { waitUntil:'domcontentloaded' });
-  await page.waitForSelector('[data-testid="page-label"]');
+  try { await page.waitForSelector('[data-testid="page-label"]',{timeout:2000}); }
+  catch { await page.goto(BASE.replace(/\/+$/,'') + '/main', { waitUntil:'domcontentloaded' }); await page.waitForSelector('[data-testid="page-label"]'); }
 
   // Press N to arm new (if supported), then draw; press Delete to remove
   await page.keyboard.press('KeyN').catch(()=>{});
@@ -22,7 +23,7 @@ async function main(){
   }
   let count = await page.$$eval('[data-testid="box"]', els=>els.length).catch(()=>0);
   await page.keyboard.press('Delete').catch(()=>{});
-  await page.waitForTimeout(100);
+  if (typeof page.waitForTimeout === 'function') { await page.waitForTimeout(100); } else { await new Promise(r=>setTimeout(r,100)); }
   const after = await page.$$eval('[data-testid="box"]', els=>els.length).catch(()=>0);
   await page.screenshot({ path: path.join(OUT_DIR, `ux_keyboard_core_${ts()}.png`), fullPage: true }).catch(()=>{});
   await browser.disconnect();
@@ -31,4 +32,3 @@ async function main(){
   console.log('Scenario ux/keyboard_core: OK', {count, after});
 }
 main().catch(e=>{ console.error('ux/keyboard_core crashed:', e?.message||e); process.exit(2); });
-

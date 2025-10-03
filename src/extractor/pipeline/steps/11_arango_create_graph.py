@@ -852,11 +852,11 @@ def run(
             host = os.getenv("ARANGO_HOST", "localhost")
             port = int(os.getenv("ARANGO_PORT", 8529))
             user = os.getenv("ARANGO_USER", "root")
-            password = os.getenv("ARANGO_PASSWORD")
+            password = os.getenv("ARANGO_PASS")
             db_name = os.getenv("ARANGO_DATABASE", "pdf_knowledge_base")
 
             if not password:
-                raise ValueError("ARANGO_PASSWORD environment variable is not set.")
+                raise ValueError("ARANGO_PASS environment variable is not set.")
 
             client = ArangoClient(hosts=f"http://{host}:{port}")
             db = client.db(db_name, username=user, password=password)

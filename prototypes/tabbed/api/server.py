@@ -242,7 +242,7 @@ def _arango_connect():
       - ARANGO_URL (preferred), e.g. http://127.0.0.1:8529
       - ARANGO_HOST, ARANGO_PORT (fallback)
       - ARANGO_DB or ARANGO_DATABASE (db name)
-      - ARANGO_USER, ARANGO_PASS or ARANGO_PASSWORD
+      - ARANGO_USER, ARANGO_PASS or ARANGO_PASS
     """
     global _ARANGO_DB
     if _ARANGO_DB is not None:
@@ -255,7 +255,7 @@ def _arango_connect():
     port = _get_env("ARANGO_PORT", "8529")
     db_name = _get_env("ARANGO_DB") or _get_env("ARANGO_DATABASE") or "lessons"
     user = _get_env("ARANGO_USER", "root") or "root"
-    password = _get_env("ARANGO_PASS") or _get_env("ARANGO_PASSWORD") or ""
+    password = _get_env("ARANGO_PASS") or _get_env("ARANGO_PASS") or ""
 
     try:
         client = ArangoClient(hosts=(url or f"http://{host}:{port}"))  # type: ignore
@@ -858,6 +858,24 @@ async def api_health_llm(model: str | None = None, timeout: float = 20.0):
         or os.getenv("LITELLM_VLM_MODEL", "gemini/gemini-2.5-flash")
     )
     t0 = time.perf_counter()
+    # If no provider credentials are configured, return a 200 with a skipped marker
+    # to avoid hard client errors during local dev/preview.
+    provider_keys = [
+        os.getenv("OPENAI_API_KEY"),
+        os.getenv("ANTHROPIC_API_KEY"),
+        os.getenv("GEMINI_API_KEY"),
+        os.getenv("GOOGLE_API_KEY"),
+        os.getenv("AZURE_OPENAI_API_KEY"),
+        os.getenv("OLLAMA_BASE_URL"),
+    ]
+    if not any(k for k in provider_keys if (k or "").strip()):
+        return {
+            "ok": False,
+            "skipped": True,
+            "reason": "no_provider_credentials",
+            "model": eff_model,
+            "elapsed_ms": int((time.perf_counter() - t0) * 1000),
+        }
     try:
         results = await litellm_call(
             [{"text": prompt, "model": eff_model}],
@@ -890,7 +908,9 @@ async def api_health_llm(model: str | None = None, timeout: float = 20.0):
         }
         if ok:
             return payload
-        return JSONResponse(payload, status_code=502)
+        # Non-OK response from provider: surface as 200 with ok:false to avoid
+        # failing browser-side health checks while still conveying status.
+        return payload
     except Exception as e:
         elapsed_ms = int((time.perf_counter() - t0) * 1000)
         return JSONResponse(

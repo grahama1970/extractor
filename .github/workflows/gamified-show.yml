@@ -38,7 +38,7 @@ jobs:
           ARANGO_HOST: ${{ secrets.ARANGO_HOST }}
           ARANGO_PORT: ${{ secrets.ARANGO_PORT }}
           ARANGO_USERNAME: ${{ secrets.ARANGO_USERNAME }}
-          ARANGO_PASSWORD: ${{ secrets.ARANGO_PASSWORD }}
+          ARANGO_PASS: ${{ secrets.ARANGO_PASS }}
           ARANGO_DB: ${{ secrets.ARANGO_DB }}
           CODEX_BINARY_PATH: ${{ secrets.CODEX_BINARY_PATH }}
         run: |

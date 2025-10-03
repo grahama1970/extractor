@@ -1,0 +1,10 @@
+{"t":1759408580084,"ev":"request","url":"http://127.0.0.1:8080/main","method":"GET","type":"document"}
+{"t":1759408580090,"ev":"response","url":"http://127.0.0.1:8080/main","status":200,"type":"document","payload":null}
+{"t":1759408580096,"ev":"request","url":"http://127.0.0.1:8080/assets/index-BTqCgiUV.js","method":"GET","type":"script"}
+{"t":1759408580096,"ev":"request","url":"http://127.0.0.1:8080/assets/index-CwlKxIDO.css","method":"GET","type":"stylesheet"}
+{"t":1759408580099,"ev":"response","url":"http://127.0.0.1:8080/assets/index-CwlKxIDO.css","status":200,"type":"stylesheet","payload":null}
+{"t":1759408580124,"ev":"response","url":"http://127.0.0.1:8080/assets/index-BTqCgiUV.js","status":200,"type":"script","payload":null}
+{"t":1759408580230,"ev":"request","url":"http://127.0.0.1:8080/api/pipeline/pdf-status?","method":"GET","type":"fetch"}
+{"t":1759408580246,"ev":"request","url":"http://127.0.0.1:8080/api/pipeline/pdf-status?","method":"GET","type":"fetch"}
+{"t":1759408580269,"ev":"response","url":"http://127.0.0.1:8080/api/pipeline/pdf-status?","status":500,"type":"fetch","payload":""}
+{"t":1759408580273,"ev":"response","url":"http://127.0.0.1:8080/api/pipeline/pdf-status?","status":500,"type":"fetch","payload":""}

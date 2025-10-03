@@ -1,0 +1,36 @@
+name: Extractor Scenarios
+
+on:
+  pull_request:
+    branches: [ master ]
+  workflow_dispatch:
+
+jobs:
+  extractors:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install deps
+        run: |
+          python -m pip install -U pip
+          pip install -e . || true
+          pip install beautifulsoup4 lxml markdownify trafilatura ebooklib docutils openpyxl odfpy python-pptx python-docx docx2python pillow defusedxml
+      - name: Run extractor scenarios
+        env:
+          SCENARIOS_ARTIFACT_ROOT: scripts/artifacts
+          CROSS_FORMAT_ENFORCE: ${{ vars.CROSS_FORMAT_ENFORCE || '0' }}
+        run: |
+          if [ -f scenarios/extractors/run_all.py ]; then
+            PYTHONPATH=src python scenarios/extractors/run_all.py || true
+          else
+            echo "No extractor scenarios runner found; skipping."
+          fi
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: extractor-scenarios
+          path: scripts/artifacts

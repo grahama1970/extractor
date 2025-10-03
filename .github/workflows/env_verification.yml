@@ -33,7 +33,7 @@ jobs:
           ARANGO_HOST: localhost
           ARANGO_PORT: "8529"
           ARANGO_USERNAME: root
-          ARANGO_PASSWORD: openSesame
+          ARANGO_PASS: openSesame
         run: |
           chmod +x scripts/verify_environment.sh
           bash scripts/verify_environment.sh

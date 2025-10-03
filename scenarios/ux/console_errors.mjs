@@ -5,12 +5,13 @@
 */
 import fs from 'node:fs';
 import path from 'node:path';
-import { connectOrSkip, OUT_DIR, OUT_LOGS, ts, navigate, gateNoConsoleErrors, applyViewportFromEnv } from '../lib/cdp.mjs';
+import { connectOrSkip, OUT_DIR, OUT_LOGS, ts, navigate, gateNoConsoleErrors, applyViewportFromEnv, ensureArtifacts } from '../lib/cdp.mjs';
 
 const DISCOVERY = process.env.BROWSERLESS_DISCOVERY_URL || '';
 let WS = (process.env.BROWSERLESS_WS || '').trim();
 const BASE = (process.env.BASE_URL || 'http://127.0.0.1:8080/main').replace(/\/+$/, '');
-fs.mkdirSync(OUT_DIR, { recursive: true });
+// Ensure both screenshots and logs directories exist
+ensureArtifacts();
 
 async function discoverWS(){ if(!DISCOVERY) return null; try{ const r=await fetch(DISCOVERY); const j=await r.json(); return j?.webSocketDebuggerUrl?.replace('0.0.0.0','127.0.0.1')||null; }catch{ return null; } }
 function isFavicon(u=''){ return /favicon\.ico(\?|$)/.test(u) || u.includes('favicon'); }
@@ -28,7 +29,11 @@ async function main(){
   let navOk=true; try { await navigate(page, BASE); } catch{ navOk=false; }
   const overlay = await page.evaluate(()=>!!document.querySelector('vite-error-overlay')).catch(()=>false);
   const rootMounted = await page.evaluate(()=>{const r=document.getElementById('root'); return !!r && r.childElementCount>0;}).catch(()=>false);
-  let ready=false; try{ await page.waitForSelector('[data-testid="page-label"]',{timeout:3000}); ready=true; }catch{}
+  let ready=false; try{ await page.waitForSelector('[data-testid="page-label"]',{timeout:2500}); ready=true; }catch{}
+  if (!ready) {
+    try { await navigate(page, BASE.replace(/\/+$/,'') + '/main'); await page.waitForSelector('[data-testid="page-label"]',{timeout:2500}); ready=true; }
+    catch {}
+  }
 
   const broken = !navOk || overlay || !rootMounted || !ready || consoleErrors.length>0 || pageErrors.length>0;
   const stamp=ts(); const shot=path.join(OUT_DIR,`ux_console_errors_${stamp}.png`); const logp=path.join(OUT_LOGS,`ux_console_errors_${stamp}.log`);
