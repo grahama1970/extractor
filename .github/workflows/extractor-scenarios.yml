@@ -58,6 +58,8 @@ jobs:
           CROSS_FORMAT_HEADING_OVERLAP: '0.8'
           CROSS_FORMAT_TABLE_PARITY: '0.8'
           CROSS_FORMAT_FIGURE_CAPTIONS: '0.8'
+          CROSS_FORMAT_ENFORCE_PARAGRAPHS: '1'
+          CROSS_FORMAT_PARAGRAPH_PARITY: '0.2'
         run: |
           if [ -f scenarios/extractors/run_all.py ]; then
             PYTHONPATH=src python scenarios/extractors/run_all.py || true

@@ -44,6 +44,7 @@ class RSTProvider:
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         self.config = config or {}
         self.block_counter = 0
+        self._last_heading_id: Optional[str] = None
         # Ensure docutils directives/roles are loaded when available
         try:
             directives.setup()
@@ -88,6 +89,7 @@ class RSTProvider:
 
         # 2. Convert doctree to blocks
         blocks: List[BaseBlock] = []
+        self._last_heading_id = None
         self._walk_doctree(doctree, blocks)
 
         # 3. Build hierarchy from headings
@@ -148,17 +150,17 @@ class RSTProvider:
 
         if isinstance(node, nodes.title):
             level = getattr(node.parent, "level", 1)
-            blocks.append(
-                BaseBlock(
-                    id=self._generate_block_id(),
-                    type=BlockType.HEADING,
-                    content=node.astext().strip(),
-                    metadata=BlockMetadata(
-                        attributes={"level": normalize_heading_level(level)},
-                        confidence=1.0,
-                    ),
-                )
+            hb = BaseBlock(
+                id=self._generate_block_id(),
+                type=BlockType.HEADING,
+                content=node.astext().strip(),
+                metadata=BlockMetadata(
+                    attributes={"level": normalize_heading_level(level)},
+                    confidence=1.0,
+                ),
             )
+            blocks.append(hb)
+            self._last_heading_id = hb.id
             return
 
         if isinstance(node, nodes.paragraph):
@@ -180,7 +182,7 @@ class RSTProvider:
                 items.append((text, 1))
             if items:
                 lst, children = emit_list_blocks(
-                    items=items, list_type=list_type, parent_id="", id_prefix="rst-list", start_index=self.block_counter
+                    items=items, list_type=list_type, parent_id=self._last_heading_id or "", id_prefix="rst-list", start_index=self.block_counter
                 )
                 blocks.append(lst)
                 blocks.extend(children)
