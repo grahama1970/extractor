@@ -446,3 +446,32 @@ MINOR
    - Successful JSON with `reflowed_json`.
 3. Run tests: `pytest -q tests/test_stage07_json_extract.py tests/test_stage07_fallback.py tests/test_routing_bridge.py`.
 4. If stable, optionally integrate deterministic CI snapshot.
+
+---
+
+## Blocking Questions For Reviewer (Reflowed JSON Missing)
+
+Please answer these precisely and provide unified diffs where applicable:
+
+1) Message shape that reliably yields `reflowed_json` across OpenAI‑compatible providers (Chutes aggregator):
+   - Provide the exact SYSTEM and USER message snippets (including ordering of images vs. text) you recommend.
+   - Indicate whether to set `response_format={"type":"json_object"}` for DeepSeek‑V3‑0324‑turbo and GLM‑4.5‑Air via Chutes, or omit it.
+
+2) Parser contract when models are verbose or stream partials:
+   - Show code to guarantee extraction of a single top‑level JSON object with `reflowed_json`, even if the response includes markdown code fences or commentary.
+   - If you suggest a “wrapper key” (e.g., `{ "reflowed_json": { ... } }`), provide the prompt change and the parser snippet.
+
+3) Timeout and retry tuning for large multimodal prompts:
+   - Exact first‑token timeout you recommend and the retry strategy (images off? trimmed context?) to minimize stalls while preserving schema fidelity.
+
+4) Model choice and flags:
+   - Of the models we probed successfully (`deepseek-ai/DeepSeek-V3-0324-turbo`, `zai-org/GLM-4.5-Air`), which should be preferred for Stage 07 strict JSON? Any flags (temperature/top_p) to set explicitly for stability?
+
+5) LiteLLM callback warnings:
+   - Where and how should callbacks be registered/cleared to avoid `MAX_CALLBACKS` spam in long runs? Provide a minimal patch in `utils/litellm_call.py`.
+
+6) Token budgeting:
+   - Recommend a safe `STAGE07_MAX_TOKENS` and any prompt‑side truncation (e.g., cap text context at N chars) to ensure the JSON tail is not truncated.
+
+7) Acceptance test:
+   - Provide a minimal end‑to‑end test (unit or smoke) that asserts `reflowed_json` exists for one small synthetic section with a mocked LLM response, so regressions fail fast.
