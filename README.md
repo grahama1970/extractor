@@ -78,6 +78,28 @@ sections, path = extract_sections("data/input/pipeline/BHT_CV32A65X_marked.pdf")
 print(f"Sections: {len(sections)} at {path}")
 ```
 
+### SPARTA Ingest (Local refs → chunks)
+
+If you have a SPARTA workspace with `sparta_stix_enriched_local.json` and local
+resources under `resources_downloaded/`, you can produce lightweight chunks for
+retrieval/training without heavy dependencies:
+
+CLI:
+```bash
+PYTHONPATH=src python -m extractor.pipeline.sparta_ingest run \
+  --sparta-root /home/graham/workspace/experiments/sparta/sparta_complete \
+  --outdir data/author/sparta_chunks --chunk-chars 3000 --overlap 300
+```
+
+Notes:
+- Reads text from HTML/TXT; skips PDFs/images by default (use the full pipeline for PDFs).
+- Output: `data/author/sparta_chunks/sparta_chunks.jsonl` with fields
+  `{object_id, source_path, chunk_index, text, original_url}`.
+
+Install tips:
+- For the unified pipeline (accurate mode), install extras: `uv pip install -e .[accurate]`.
+- For minimal SPARTA ingest, no extra dependencies are required.
+
 ### Basic Usage
 ```bash
 # Extract any document with automatic format detection
