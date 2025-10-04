@@ -2193,6 +2193,16 @@ def run(
     Reflows document sections using multimodal context from previous stages.
     """
     console.print("[bold green]Starting Section Reflow (Stage 07)[/bold green]")
+    try:
+        api_base = (
+            os.getenv("OPENAI_BASE_URL")
+            or os.getenv("CHUTES_API_BASE")
+            or os.getenv("OPENAI_API_BASE")
+            or "n/a"
+        )
+        console.print(f"[cyan]Stage07 VLM model={LLM_MODEL} api_base={api_base}[/cyan]")
+    except Exception:
+        pass
     run_id = get_run_id()
     diagnostics = []
     errors_count = 0
@@ -2505,6 +2515,7 @@ def run(
             "run_id": run_id,
             "deterministic": bool(deterministic_mode()),
             "reflow_mode": reflow_mode,
+            "model": LLM_MODEL,
             "section_count": len(det_sections),
             "sections": det_sections,
         }

@@ -65,6 +65,12 @@ logger.add(sys.stderr, level=_log_level)
 # Best-effort .env loading; no exceptions
 _ = load_dotenv(find_dotenv(usecwd=True) or None)
 
+# Bridge CHUTES_* to OPENAI_* so openai/<org>/<model> routes to Chutes automatically
+if (os.getenv("CHUTES_API_BASE") and os.getenv("CHUTES_API_KEY")):
+    os.environ.setdefault("OPENAI_BASE_URL", os.getenv("CHUTES_API_BASE", "https://llm.chutes.ai/v1"))
+    os.environ.setdefault("OPENAI_API_KEY", os.getenv("CHUTES_API_KEY"))
+
+
 DEFAULT_MODEL = (
     os.getenv("LITELLM_DEFAULT_MODEL")
     or os.getenv("DEFAULT_LITELLM_MODEL")
@@ -385,7 +391,15 @@ async def litellm_call(
             key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
             if key:
                 params.update({"api_key": key, "provider": "gemini"})
-        elif m.startswith("openai/chutes/"):
+        elif (
+            m.startswith("openai/chutes/")
+            or m.startswith("openai/chutesai/")
+            or m.startswith("openai/zai-org/")
+            or m.startswith("openai/deepseek-ai/")
+            or m.startswith("openai/zhipu-ai/")
+            or m.startswith("openai/mistralai/")
+            or m.startswith("openai/Qwen/")
+        ):
             key = os.getenv("CHUTES_API_KEY") or os.getenv("CHUTES_KEY")
             base = os.getenv("CHUTES_API_BASE", "https://llm.chutes.ai/v1")
             provider = (os.getenv("CHUTES_PROVIDER") or "openai").strip() or "openai"
@@ -420,7 +434,13 @@ async def litellm_call(
             )
             if not key:
                 logger.warning("CHUTES_API_KEY not set; chutes provider calls will fail")
-        return {"model_name": m, "litellm_params": params}
+        entry = {"model_name": m, "litellm_params": params}
+        try:
+            # Provide minimal model_info to satisfy Router health checks
+            entry["model_info"] = {"id": params.get("model", m), "mode": "chat"}
+        except Exception:
+            pass
+        return entry
 
     router = Router(
         model_list=[_router_entry(m) for m in unique_models],
@@ -467,14 +487,37 @@ async def litellm_call(
             prepared = await _prepare_messages_image_urls(messages, image_cache_dir=image_cache_dir)
             req = CallRequest(model=model, messages=_sanitize_messages_for_return(prepared), kwargs=kwargs or None)
             async with sem:
-                try:
-                    resp = await router.acompletion(model=model, messages=prepared, **kwargs)
-                    content = format_answer_with_logging(idx, resp, wrap_json, prompts[idx], logger)
-                    return CallResult(idx, req, resp, None, content)
-                except BaseException as e:
-                    logger.exception("litellm_call task failed (idx=%s, model=%s)", idx, model)
-                    content = format_answer_with_logging(idx, e, wrap_json, prompts[idx], logger)
-                    return CallResult(idx, req, None, e, content)
+                tried_fallback = False
+                attempt_model = model
+                while True:
+                    try:
+                        resp = await router.acompletion(model=attempt_model, messages=prepared, **kwargs)
+                        content = format_answer_with_logging(idx, resp, wrap_json, prompts[idx], logger)
+                        return CallResult(idx, req, resp, None, content)
+                    except BaseException as e:
+                        etype = type(e).__name__
+                        status_str = getattr(getattr(e, "response", None), "status_code", None)
+                        fast_fail = (
+                            "AuthenticationError" in etype
+                            or "NotFound" in etype
+                            or status_str in (401, 403, 404)
+                        )
+                        if fast_fail and not tried_fallback:
+                            fb = os.getenv("LITELLM_LARGE_VLLM_MODEL") or os.getenv("LITELLM_LARGE_VLM_MODEL") or "openai/deepseek-ai/DeepSeek-V3-0324"
+                            if fb and fb != attempt_model:
+                                logger.warning(f"Model '{attempt_model}' failed with {etype}; retrying once with fallback '{fb}'.")
+                                attempt_model = fb
+                                tried_fallback = True
+                                # attempt to register fallback if not in router already
+                                try:
+                                    if all(fb != entry.get("model_name") for entry in getattr(router, "model_list", [])):
+                                        router.model_list.append(_router_entry(fb))
+                                except Exception:
+                                    pass
+                                continue
+                        logger.exception("litellm_call task failed (idx=%s, model=%s fast_fail=%s)", idx, attempt_model, fast_fail)
+                        content = format_answer_with_logging(idx, e, wrap_json, prompts[idx], logger)
+                        return CallResult(idx, req, None, e, content)
 
         tasks: List[asyncio.Task[CallResult]] = []
         for model, payload in batches.items():
