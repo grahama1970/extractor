@@ -72,8 +72,35 @@ def _default_document_title(source_path: Optional[str], sections: Sequence[Dict[
 
 
 def _hash_source(source_path: Optional[str], fallback: str = "document") -> str:
+    """
+    Legacy path-based hash (md5 of path or fallback).
+    Retained for backward compatibility when a stable file hash
+    cannot be computed.
+    """
     basis = source_path or fallback
     return hashlib.md5(basis.encode("utf-8")).hexdigest()
+
+
+def _stable_file_hash(path: Optional[str]) -> Optional[str]:
+    """
+    Return a stable SHA256(file_bytes + size) hex digest for the clean PDF
+    (or other source). Returns None if file unreadable or path is None.
+    Designed for deterministic UnifiedDocument IDs across machines.
+    """
+    if not path:
+        return None
+    p = Path(path)
+    if not p.exists() or not p.is_file():
+        return None
+    try:
+        data = p.read_bytes()
+        size = p.stat().st_size
+        h = hashlib.sha256()
+        h.update(size.to_bytes(8, "little"))
+        h.update(data)
+        return h.hexdigest()
+    except Exception:
+        return None
 
 
 def _paragraphs_from_text(text: str) -> List[str]:
@@ -225,6 +252,7 @@ def build_unified_document_from_reflow(
     source_type: Optional[str | SourceType] = None,
     document_metadata: Optional[Dict[str, Any]] = None,
     document_title: Optional[str] = None,
+    pdf_file_path: Optional[str] = None,
 ) -> UnifiedDocument:
     """Convert Stage 07 ``reflowed_sections`` into a :class:`UnifiedDocument`.
 
@@ -245,17 +273,31 @@ def build_unified_document_from_reflow(
 
     source_type_enum = _normalise_source_type(source_type)
     title = document_title or _default_document_title(source_path, sections)
-    document_id = _hash_source(source_path, fallback=title)
+    file_hash = _stable_file_hash(pdf_file_path or source_path)
+    if file_hash:
+        document_id = file_hash
+    else:
+        document_id = _hash_source(source_path, fallback=title)
 
     metadata = DocumentMetadata(
         title=title,
         format_metadata={
             "file_type": source_type_enum.value,
             "source_path": source_path,
+            "stable_file_hash": file_hash,
+            "id_basis": "file_hash" if file_hash else "path_hash",
         },
     )
     if document_metadata:
         metadata.format_metadata.update(document_metadata)
+    # Optional: mark deterministic mode for downstream consumers
+    try:
+        from extractor.pipeline.utils.mode import deterministic_mode
+
+        if deterministic_mode():
+            metadata.format_metadata["deterministic"] = True
+    except Exception:
+        pass
 
     block_counter = [0]
     blocks: List[BaseBlock] = []

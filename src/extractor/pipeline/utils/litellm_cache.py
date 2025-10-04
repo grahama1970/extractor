@@ -35,6 +35,7 @@ Input/Output:
 
 import litellm
 import os
+from typing import Tuple, Dict, Optional
 
 try:
     import redis
@@ -149,7 +150,16 @@ def initialize_litellm_cache() -> None:
         logger.debug("In-memory cache enabled")
 
 
-from typing import Tuple, Dict, Optional  # Add Optional
+def ensure_litellm_cache_initialized() -> None:
+    """Public idempotent wrapper used by both pipeline and core services
+    to avoid split cache initialization logic.
+    """
+    try:
+        initialize_litellm_cache()
+    except Exception:
+        # Do not raise from cache init; callers should remain resilient
+        pass
+
 
 
 def test_litellm_cache() -> Tuple[bool, Dict[str, Optional[bool]]]:

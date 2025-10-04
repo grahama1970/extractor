@@ -43,7 +43,7 @@ from extractor.core.services.utils.log_utils import (
     log_api_error,
 )
 from extractor.core.services.utils.json_utils import clean_json_string
-from extractor.core.services.utils.litellm_cache import initialize_litellm_cache
+from extractor.pipeline.utils.litellm_cache import ensure_litellm_cache_initialized
 from litellm import completion_cost
 from extractor.pipeline.utils.litellm_response_utils import extract_content
 
@@ -108,7 +108,7 @@ class LiteLLMService(BaseService):
         # Cache init
         if self.enable_cache:
             try:
-                initialize_litellm_cache()
+                ensure_litellm_cache_initialized()
                 logger.info("LiteLLM cache initialised")
             except Exception as exc:
                 logger.warning(f"Failed to initialise LiteLLM cache: {exc}")
