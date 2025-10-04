@@ -50,6 +50,13 @@ except Exception:
     psutil = None  # type: ignore
 import time
 
+def _log_event(event: str, **fields: Any) -> None:
+    """Emit structured log events while tolerating serialization issues."""
+    try:
+        logger.info(json.dumps({"event": event, **fields}, default=str))
+    except Exception:
+        logger.info(f"{event}: {fields}")
+
 # Cache initialization will be handled within command execution to avoid import-time side effects.
 
 
@@ -69,8 +76,12 @@ def build_cli():
 
 
 def _env_vlm_model(default: str = "") -> str:
-    """Return VLM model from environment only. No hardcoded defaults."""
-    return (os.getenv("LITELLM_VLM_MODEL") or "").strip()
+    """Return Stage 03 vision model from env (supports overrides)."""
+    for key in ("STAGE03_MODEL", "LITELLM_VLM_MODEL", "LITELLM_DEFAULT_MODEL", "DEFAULT_LITELLM_MODEL"):
+        value = os.getenv(key)
+        if value and value.strip():
+            return value.strip()
+    return default
 
 
 @dataclass
@@ -371,6 +382,14 @@ async def process_pdf_pipeline(config: Config):
     stage_start_ts = datetime.now().isoformat()
     t_stage0 = time.monotonic()
     resources = snapshot_resources("start")
+    _log_event(
+        "stage03.start",
+        model=(config.llm_model or "unset"),
+        render_dpi=config.render_dpi,
+        llm_concurrency=config.llm_concurrency,
+        item_timeout_s=config.item_timeout_seconds,
+        max_runtime_s=config.max_runtime_seconds,
+    )
     import os
 
     sampler = (
@@ -486,7 +505,35 @@ async def process_pdf_pipeline(config: Config):
             f"Limiting suspicious header verifications to first {len(tasks)} of {total_before}"
         )
 
-    if not tasks:
+    _log_event(
+        "stage03.candidates",
+        total=len(tasks),
+        limited=config.task_limit if config.task_limit else 0,
+        model=config.llm_model,
+    )
+    if tasks and not (config.llm_model and config.llm_model.strip()):
+        raise RuntimeError("Stage 03 requires a vision-capable model. Set STAGE03_MODEL or LITELLM_VLM_MODEL.")
+    # Evaluate guardrail
+    total_candidates = len(tasks)
+    threshold = max_suspicious
+    if expected_headers and expected_headers>0:
+        threshold = max(threshold, expected_headers*2)
+    if total_candidates > threshold:
+        # Persist a guard artifact and exit without any LLM calls
+        output_json_path = json_output_dir / "03_guard_raised.json"
+        payload = {
+            "status": "guard_raised",
+            "total_candidates": total_candidates,
+            "threshold": threshold,
+            "message": "Too many suspicious headers; aborting LLM verification.",
+        }
+        with open(output_json_path, "w") as f:
+            json.dump(payload, f, indent=2)
+        print(f"Guard raised; wrote {output_json_path}")
+        pdf_doc.close()
+        return
+
+        if not tasks:
         print("No suspicious headers found to verify.")
         # Still save a result file for consistency
         output_json_path = json_output_dir / "03_verified_blocks.json"
@@ -594,6 +641,7 @@ async def process_pdf_pipeline(config: Config):
                         "debug_kind": kind,
                         "auto": True,
                     }
+                    _log_event("stage03.item.auto_reject", index=idx, reason=f"heuristic:{kind}")
                     continue
             except Exception:
                 pass
@@ -717,6 +765,7 @@ async def process_pdf_pipeline(config: Config):
 
             if auto_reject:
                 auto_results[idx] = {"is_header": False, "reasoning": auto_reason}
+                _log_event("stage03.item.auto_reject", index=idx, reason=auto_reason)
                 continue
 
             # Render context image and build prompt
@@ -753,11 +802,30 @@ async def process_pdf_pipeline(config: Config):
             logger.exception(
                 f"Preparation failed for page {task.page_idx} block {task.block_idx}: {e}"
             )
+            _log_event("stage03.item.prep_error", index=idx, page=task.page_idx, error=str(e))
             auto_results[idx] = {"is_header": True, "reasoning": f"Preparation error: {e}"}
 
     # 6) LLM batch — verify and collect JSON payloads
     llm_payloads: List[Dict[str, Any]] = []
+    llm_batch_duration_ms = 0
+    llm_stats = {
+        "total_candidates": len(tasks),
+        "auto_resolved": len(auto_results),
+        "llm_requests": len(prepared),
+        "llm_success": 0,
+        "llm_errors": 0,
+        "llm_timeouts": 0,
+        "llm_parse_errors": 0,
+    }
     if prepared:
+        _log_event(
+            "stage03.llm_batch_start",
+            prepared=len(prepared),
+            auto=len(auto_results),
+            model=config.llm_model,
+            concurrency=config.llm_concurrency,
+            item_timeout_s=config.item_timeout_seconds,
+        )
         try:
             t_llm0 = time.monotonic()
             sid = os.getenv("LITELLM_SESSION_ID") or run_id
@@ -793,6 +861,7 @@ async def process_pdf_pipeline(config: Config):
             results = [
                 json.dumps({"error": {"type": "Timeout", "message": info.get("message")}})
             ] * len(prepared)
+            _log_event("stage03.llm_batch_timeout", prepared=len(prepared), timeout_s=config.max_runtime_seconds or config.item_timeout_seconds)
         except Exception as e:
             logger.error(f"Stage 03 model calls failed: {e}")
             info = classify_llm_error(e)
@@ -812,11 +881,14 @@ async def process_pdf_pipeline(config: Config):
             results = [
                 json.dumps({"error": {"type": type(e).__name__, "message": info.get("message")}})
             ] * len(prepared)
+            _log_event("stage03.llm_batch_error", prepared=len(prepared), error=str(e))
 
         for ans in results:
             try:
                 llm_payloads.append(json.loads(ans) if ans else {})
             except Exception:
+                llm_stats["llm_parse_errors"] += 1
+                llm_stats["llm_errors"] += 1
                 llm_payloads.append({"error": {"type": "ParseError", "message": ans[:200]}})
 
     # 7) Apply results back to blocks — update types, suspicion fields, persist
@@ -829,18 +901,28 @@ async def process_pdf_pipeline(config: Config):
             payload = llm_payloads[prep_idx] if prep_idx < len(llm_payloads) else {}
             prep_idx += 1
             if payload.get("error"):
-                # Keep header on model error but record reasoning
                 err = payload["error"]
+                err_type = str(err.get('type') or 'Unknown')
+                err_message = err.get('message')
+                if err_type.lower() == 'timeout':
+                    llm_stats["llm_timeouts"] += 1
+                elif err_type.lower() == 'parseerror':
+                    pass  # already counted when building llm_payloads
+                else:
+                    llm_stats["llm_errors"] += 1
+                _log_event("stage03.item.llm_error", index=idx, error_type=err_type, message=err_message)
                 llm_result = {
                     "is_header": True,
-                    "reasoning": f"LLM error: {err.get('type')}: {err.get('message')}",
+                    "reasoning": f"LLM error: {err_type}: {err_message}",
                 }
             else:
+                llm_stats["llm_success"] += 1
                 payload = cast(Dict[str, Any], payload)
                 if payload.get("is_header") is None:
                     payload["is_header"] = True
                 if payload.get("reasoning") is None:
                     payload["reasoning"] = ""
+                _log_event("stage03.item.llm_success", index=idx, decision=payload.get('is_header'))
                 llm_result = payload
 
         # Update JSON in place
@@ -883,6 +965,7 @@ async def process_pdf_pipeline(config: Config):
 
         # Persistence disabled in Stage 03 to keep this step offline and simple.
         # Export/persistence is handled in later stages.
+    _log_event("stage03.llm_batch_complete", stats=llm_stats)
     pdf_doc.close()
 
     # 8) Save the updated JSON — flatten pages to top-level blocks
@@ -913,6 +996,29 @@ async def process_pdf_pipeline(config: Config):
         "preflight_duration_ms": int(locals().get("preflight_duration_ms", 0)),
         "llm_batch_duration_ms": int(locals().get("llm_batch_duration_ms", 0)),
     }
+    llm_stats["llm_batch_duration_ms"] = int(llm_batch_duration_ms)
+    metrics_payload = {
+        "run_id": run_id,
+        "model": config.llm_model,
+        "stats": llm_stats,
+        "timings": timings,
+        "config": {
+            "render_dpi": config.render_dpi,
+            "llm_concurrency": config.llm_concurrency,
+            "item_timeout_seconds": config.item_timeout_seconds,
+            "max_runtime_seconds": config.max_runtime_seconds,
+            "task_limit": config.task_limit,
+        },
+        "candidates_total": len(tasks),
+    }
+    marker_data["stage03_stats"] = llm_stats
+    metrics_path = json_output_dir / "03_metrics.json"
+    try:
+        with open(metrics_path, "w") as f:
+            json.dump(metrics_payload, f, indent=2)
+        _log_event("stage03.metrics_written", path=str(metrics_path), stats=llm_stats)
+    except Exception as metrics_exc:
+        _log_event("stage03.metrics_write_failed", error=str(metrics_exc))
     try:
         samples = stop_resource_sampler(sampler) if sampler else []
         if samples:

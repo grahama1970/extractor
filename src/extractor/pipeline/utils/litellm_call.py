@@ -385,6 +385,41 @@ async def litellm_call(
             key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
             if key:
                 params.update({"api_key": key, "provider": "gemini"})
+        elif m.startswith("openai/chutes/"):
+            key = os.getenv("CHUTES_API_KEY") or os.getenv("CHUTES_KEY")
+            base = os.getenv("CHUTES_API_BASE", "https://llm.chutes.ai/v1")
+            provider = (os.getenv("CHUTES_PROVIDER") or "openai").strip() or "openai"
+            actual_model = os.getenv("CHUTES_REMOTE_MODEL")
+            if not actual_model:
+                parts = m.split("/", 2)
+                actual_model = parts[2] if len(parts) > 2 else m
+            params.update(
+                {
+                    "api_key": key,
+                    "api_base": base,
+                    "custom_llm_provider": provider,
+                    "model": actual_model,
+                }
+            )
+            if not key:
+                logger.warning("CHUTES_API_KEY not set; chutes provider calls will fail")
+        elif m.startswith("chutes/"):
+            key = os.getenv("CHUTES_API_KEY") or os.getenv("CHUTES_KEY")
+            base = os.getenv("CHUTES_API_BASE", "https://llm.chutes.ai/v1")
+            provider = (os.getenv("CHUTES_PROVIDER") or "openai").strip() or "openai"
+            actual_model = os.getenv("CHUTES_REMOTE_MODEL")
+            if not actual_model:
+                actual_model = m.split("/", 1)[1] if "/" in m else m
+            params.update(
+                {
+                    "api_key": key,
+                    "api_base": base,
+                    "custom_llm_provider": provider,
+                    "model": actual_model,
+                }
+            )
+            if not key:
+                logger.warning("CHUTES_API_KEY not set; chutes provider calls will fail")
         return {"model_name": m, "litellm_params": params}
 
     router = Router(

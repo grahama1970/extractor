@@ -156,6 +156,36 @@ def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool
                     else:
                         block_dict["text"] = getattr(block, "text", "")
 
+                    # Capture the block bbox (if available) so overlays align with real content
+                    try:
+                        if getattr(block, "polygon", None) is not None and getattr(block.polygon, "bbox", None):
+                            x0, y0, x1, y1 = block.polygon.bbox
+                            block_dict["bbox"] = [float(x0), float(y0), float(x1), float(y1)]
+                    except Exception:
+                        pass
+
+                    # Split inline header + body if present, e.g., "1.1 Title. Body text ..."
+                    try:
+                        if (
+                            block_dict["block_type"] == "SectionHeader"
+                            and isinstance(block_dict.get("text"), str)
+                        ):
+                            import re as _re
+                            t = block_dict["text"].strip()
+                            m = _re.match(r"^(?P<prefix>(?:\d+(?:[.\-](?:\d+|[A-Za-z]+))*|[IVXLCDM]+))[.)]?\s+(?P<title>[^.].*?)(?:\.|$)\s*(?P<body>.+)?$", t)
+                            if m and m.group("body") and len(m.group("body").split()) >= 3:
+                                header_text = f"{m.group('prefix')} {m.group('title').strip()}"
+                                header_entry = dict(block_dict)
+                                header_entry["text"] = header_text
+                                blocks.append(header_entry)
+                                body_entry = dict(block_dict)
+                                body_entry["block_type"] = "Text"
+                                body_entry["text"] = m.group("body").strip()
+                                blocks.append(body_entry)
+                                continue
+                    except Exception:
+                        pass
+
                     # Add first span font information if available
                     try:
                         spans = block.contained_blocks(document, (BlockTypes.Span,))
@@ -356,6 +386,18 @@ def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool
                             block_dict["id"] = str(block.id)
                     except Exception:
                         pass
+                    import re as _re
+                    # Demote sentence-like table blocks to Paragraph
+                    if block_dict.get("block_type") == "Table":
+                        _t = (block_dict.get("text") or "").strip()
+                        if _t:
+                            words=_t.split(); letters=[ch for ch in _t if ch.isalpha()];
+                            lower_ratio=(sum(ch.islower() for ch in letters)/len(letters)) if letters else 0.0
+                            has_term=_t.endswith(".") or _t.endswith(";") or _t.endswith("?")
+                            verbs={"is","are","was","were","be","been","being","has","have","had","can","could","should","may","might","will","shall","must","does","do","did"}
+                            has_verb=any(w.lower().strip(",.;:!?") in verbs for w in words)
+                            if (has_term or has_verb) and (len(words)>=4 or lower_ratio>=0.5):
+                                block_dict["block_type"] = "Text"
                     blocks.append(block_dict)
 
     # Close PyMuPDF if used
@@ -452,7 +494,8 @@ def run(
     except Exception:
         pass
 
-    console.print(f"Extracting blocks from: {pdf_path.name} (timeout {timeout}s)")
+    display_timeout = (f"{timeout}s" if timeout and timeout>0 else "no-limit")
+    console.print(f"Extracting blocks from: {pdf_path.name} (timeout {display_timeout})")
     stage_start_ts = __import__("datetime").datetime.now().isoformat()
     t_stage0 = time.monotonic()
     start_time = time.time()
@@ -501,7 +544,7 @@ def run(
         p = mp.Process(target=_worker, args=(str(pdf_path), q), daemon=True)
         t_ex0 = time.monotonic()
         p.start()
-        p.join(timeout)
+        p.join(None if (timeout is None or timeout<=0) else timeout)
 
         if p.is_alive():
             console.print(
@@ -513,7 +556,7 @@ def run(
                         "02_marker_extractor",
                         "error",
                         "extractor_timeout",
-                        f"Timed out after {timeout}s",
+                        "Timed out (no explicit limit)",
                         {"pdf_path": str(pdf_path), "timeout": timeout},
                     )
                 )
