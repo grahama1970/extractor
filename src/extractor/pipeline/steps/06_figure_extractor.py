@@ -414,6 +414,19 @@ def run(
                     break
 
     # --- Final Payload and Output ---
+    # Enforce deterministic ordering of figures for reproducibility
+    try:
+        def _k(fig: Dict[str, Any]):
+            bx = fig.get("bbox") or [0, 0, 0, 0]
+            return (
+                int(fig.get("page", 0)),
+                float(bx[1]) if len(bx) >= 2 else 0.0,
+                float(bx[0]) if len(bx) >= 1 else 0.0,
+                str(fig.get("figure_id", "")),
+            )
+        extracted_figures = sorted(extracted_figures, key=_k)
+    except Exception:
+        pass
     try:
         samples = stop_resource_sampler(sampler) if sampler else []
         if samples:
@@ -443,6 +456,28 @@ def run(
     console.print(
         f"✅ Figure extraction complete. Saved {len(extracted_figures)} figures to: {output_path}"
     )
+
+    # Deterministic summary for quick diffing across runs
+    try:
+        det = {
+            "count": len(extracted_figures),
+            "sorted": [
+                {
+                    "figure_id": str(fig.get("figure_id")),
+                    "page": int(fig.get("page", 0)),
+                    "y0": float((fig.get("bbox") or [0, 0, 0, 0])[1]) if fig.get("bbox") else 0.0,
+                    "x0": float((fig.get("bbox") or [0, 0, 0, 0])[0]) if fig.get("bbox") else 0.0,
+                    "image": fig.get("image_path"),
+                    "section_id": fig.get("section_id"),
+                }
+                for fig in extracted_figures
+            ],
+        }
+        (json_output_dir / "deterministic.json").write_text(
+            json.dumps(det, indent=2, ensure_ascii=False)
+        )
+    except Exception:
+        pass
 
 
 def debug_bundle(

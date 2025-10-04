@@ -1215,6 +1215,18 @@ def run(
                 continue
 
     # --- Final Payload and Output ---
+    # Enforce deterministic ordering of tables for downstream reproducibility
+    try:
+        def _k(t: Dict[str, Any]):
+            bx = t.get("bbox") or [0, 0, 0, 0]
+            return (
+                int(t.get("page_index", 0)),
+                float(bx[1]) if len(bx) >= 2 else 0.0,
+                float(bx[0]) if len(bx) >= 1 else 0.0,
+            )
+        filtered_tables = sorted(filtered_tables, key=_k)
+    except Exception:
+        pass
     try:
         samples = stop_resource_sampler(sampler) if sampler else []
         if samples:
@@ -1433,6 +1445,27 @@ def debug_bundle(
     with open(output_path, "w") as f:
         json.dump(result, f, indent=2, ensure_ascii=False)
     console.print(f"[green]Debug bundle: saved {len(filtered_tables)} tables to {output_path}")
+
+    # Deterministic summary for quick diffing across runs
+    try:
+        det = {
+            "count": len(filtered_tables),
+            "sorted": [
+                {
+                    "page": int(t.get("page_index", 0)),
+                    "y0": float((t.get("bbox") or [0, 0, 0, 0])[1]) if t.get("bbox") else 0.0,
+                    "x0": float((t.get("bbox") or [0, 0, 0, 0])[0]) if t.get("bbox") else 0.0,
+                    "table_index": int(t.get("table_index", 0)),
+                    "image": t.get("table_image_path"),
+                }
+                for t in filtered_tables
+            ],
+        }
+        (json_output_dir / "deterministic.json").write_text(
+            json.dumps(det, indent=2, ensure_ascii=False)
+        )
+    except Exception:
+        pass
 
 
 def build_cli():

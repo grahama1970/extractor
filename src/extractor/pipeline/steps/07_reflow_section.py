@@ -2167,6 +2167,11 @@ def run(
     include_images: bool = typer.Option(
         True, "--include-images/--no-include-images", help="Include images in LLM input"
     ),
+    skip_llm: bool = typer.Option(
+        False,
+        "--skip-llm/--no-skip-llm",
+        help="Deterministic pass-through: skip LLM and build structured reflow",
+    ),
     allow_fallback: bool = typer.Option(
         False,
         "--allow-fallback",
@@ -2313,8 +2318,39 @@ def run(
         console.print("[yellow]No sections found to process. Exiting.[/yellow]")
         return
 
+    # Allow env override for skip_llm
+    try:
+        if not skip_llm and (os.getenv("STAGE07_SKIP_LLM", "").lower() in ("1", "true", "yes", "y")):
+            skip_llm = True
+    except Exception:
+        pass
+
     # --- Processing ---
-    if summary_only:
+    if skip_llm:
+        processed_sections = []
+        for s in sections_to_process:
+            # Deterministic pass-through using structured fallback
+            try:
+                structured = _structured_fallback(s)
+                if SCHEMA_MODE == "reflow_json":
+                    sec_out = {**s, "reflowed_json": structured, "reflow_status": "pass_through"}
+                else:
+                    # Minimal text form for text schema
+                    sec_out = {
+                        **s,
+                        "reflowed_text": s.get("merged_text") or s.get("raw_text", ""),
+                        "reflow_status": "pass_through",
+                    }
+                processed_sections.append(sec_out)
+            except Exception:
+                # Guarantee progress even if a single section misbehaves
+                sec_out = {
+                    **s,
+                    "reflowed_text": s.get("merged_text") or s.get("raw_text", ""),
+                    "reflow_status": "pass_through",
+                }
+                processed_sections.append(sec_out)
+    elif summary_only:
         processed_sections = []
         for s in sections_to_process:
             # Emit summary-only payloads; do not call LLM
@@ -2412,6 +2448,52 @@ def run(
 
     console.print("\n[bold green]✅ Section reflow complete.[/bold green]")
     console.print(f"   - Results saved to: [cyan]{output_path}[/cyan]")
+
+    # Deterministic summary to aid quick diffing (section IDs + ordered figure/table anchors)
+    try:
+        def _bx(b):
+            bx = (b.get("bbox") if isinstance(b, dict) else None) or [0, 0, 0, 0]
+            return [float(bx[0]), float(bx[1]), float(bx[2]), float(bx[3])]
+
+        det_sections: list[dict] = []
+        for sec in processed_sections:
+            tables = sorted((sec.get("tables") or []), key=lambda t: (
+                int(t.get("page_index", 0)),
+                float((t.get("bbox") or [0,0,0,0])[1] if t.get("bbox") else 0.0),
+                float((t.get("bbox") or [0,0,0,0])[0] if t.get("bbox") else 0.0),
+            ))
+            figures = sorted((sec.get("figures") or []), key=lambda g: (
+                int(g.get("page", g.get("page_idx", 0))),
+                float((g.get("bbox") or [0,0,0,0])[1] if g.get("bbox") else 0.0),
+                float((g.get("bbox") or [0,0,0,0])[0] if g.get("bbox") else 0.0),
+            ))
+            det_sections.append(
+                {
+                    "id": sec.get("id"),
+                    "page_start": sec.get("page_start"),
+                    "page_end": sec.get("page_end"),
+                    "tables": [
+                        {
+                            "page": int(t.get("page_index", 0)),
+                            "bbox": _bx(t),
+                        }
+                        for t in tables
+                    ],
+                    "figures": [
+                        {
+                            "page": int(g.get("page", g.get("page_idx", 0))),
+                            "bbox": _bx(g),
+                        }
+                        for g in figures
+                    ],
+                }
+            )
+        det_payload = {"section_count": len(det_sections), "sections": det_sections}
+        (json_output_dir / "deterministic.json").write_text(
+            json.dumps(det_payload, indent=2, ensure_ascii=False)
+        )
+    except Exception:
+        pass
 
 
 def debug_bundle(
