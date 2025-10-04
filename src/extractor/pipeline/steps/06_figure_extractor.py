@@ -38,6 +38,7 @@ from extractor.pipeline.utils.diagnostics import (
     make_event,
     snapshot_resources,
     build_stage_timings,
+    gpu_metrics_available,
 )
 from extractor.pipeline.utils.litellm_call import litellm_call
 from extractor.pipeline.utils.litellm_cache import initialize_litellm_cache

@@ -18,7 +18,6 @@ from datetime import datetime
 import numpy as np
 from textwrap import dedent
 import pandas as pd
-from typing import Optional
 import re
 
 import typer
@@ -58,6 +57,7 @@ from extractor.pipeline.utils.unified_conversion import build_unified_document_f
 from extractor.core.schema.unified_document import SourceType
 from extractor.pipeline.utils.ann_index import build_ann_index, query_ann_index, load_ann_index
 from extractor.pipeline.utils.log_utils import sanitize_messages_for_return
+from extractor.pipeline.utils.embeddings import ensure_embedder as _ensure_embedder
 
 # Shared helper: table confidence heuristic (0.0–1.0)
 def _table_confidence(t: Dict[str, Any]) -> float:
@@ -102,7 +102,6 @@ console = Console()
 
 # Text embedding model (lazy-loaded)
 text_embedding_model: Any = None
-from extractor.pipeline.utils.embeddings import ensure_embedder as _ensure_embedder
 
 # removed local embedder implementation
 
@@ -1961,9 +1960,10 @@ def consolidate_data(
                             try:
                                 df1 = pd.DataFrame(t1.get("pandas_df") or [])
                                 df2 = pd.DataFrame(t2.get("pandas_df") or [])
-                                _collapse = lambda df: df.applymap(
-                                    lambda v: _sanitize_table_cell(v) if not pd.isna(v) else ""
-                                )
+                                def _collapse(df: pd.DataFrame) -> pd.DataFrame:
+                                    return df.applymap(
+                                        lambda v: _sanitize_table_cell(v) if not pd.isna(v) else ""
+                                    )
                                 if len(df1.columns) == len(df2.columns):
                                     out = pd.concat([_collapse(df1), _collapse(df2)], ignore_index=True)
                                     t1["pandas_df"] = out.to_dict("records")
