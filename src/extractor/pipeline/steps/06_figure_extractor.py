@@ -71,6 +71,9 @@ console = Console()
 VERTICAL_PADDING_RATIO = float(os.getenv("FIGURE_VERTICAL_PADDING", "0.2"))
 # Use local model for simple image descriptions (2-3 sentences)
 VLM_MODEL = (os.getenv("LITELLM_VLM_MODEL") or "").strip()
+FIGURE_MAX_CONCURRENCY = int(os.getenv("FIGURE_MAX_CONCURRENCY", "4"))
+if FIGURE_MAX_CONCURRENCY < 1:
+    FIGURE_MAX_CONCURRENCY = 1
 
 
 # --- Core Functions ---
@@ -115,10 +118,12 @@ async def describe_image_with_llm(image_data: bytes, context: str = "") -> str:
 
 
 async def extract_and_describe_figure(
+    pdf_doc: Any,
     pdf_path: Path,
     block: Dict[str, Any],
     figure_id: str,
     output_dir: Path,
+    sem: asyncio.Semaphore,
     skip_descriptions: bool = False,
 ) -> Optional[Dict[str, Any]]:
     """Extract a single figure with padding and get its description."""
@@ -126,11 +131,10 @@ async def extract_and_describe_figure(
         page_num = block.get("page_idx", 0)
         bbox = block.get("bbox")
 
-        with fitz.open(str(pdf_path)) as pdf_doc:
+        async with sem:
             if page_num >= len(pdf_doc):
                 logger.error(f"Page {page_num} out of range for {figure_id}")
                 return None
-
             page = pdf_doc[page_num]
 
             # Bbox estimation logic
@@ -238,23 +242,44 @@ async def process_figures_batch(
     output_dir: Path,
     skip_descriptions: bool = False,
 ) -> List[Dict[str, Any]]:
-    """Process all figures concurrently with a progress bar."""
-    tasks = [
-        extract_and_describe_figure(
-            pdf_path, block, f"figure_{i+1:03d}", output_dir, skip_descriptions=skip_descriptions
-        )
-        for i, block in enumerate(figure_blocks)
-    ]
+    """Process figures with bounded concurrency; reuse a single open PDF."""
+    results: List[Dict[str, Any]] = []
+    sem = asyncio.Semaphore(FIGURE_MAX_CONCURRENCY)
+    try:
+        pdf_doc = fitz.open(str(pdf_path))
+    except Exception as e:
+        logger.error(f"Failed to open PDF for figures: {e}")
+        return results
 
-    results = []
-    logger.info(f"Processing {len(tasks)} figures concurrently...")
+    async def _one(i: int, block: Dict[str, Any]):
+        fid = f"figure_{i+1:03d}"
+        try:
+            return await extract_and_describe_figure(
+                pdf_doc,
+                pdf_path,
+                block,
+                fid,
+                output_dir,
+                sem,
+                skip_descriptions=skip_descriptions,
+            )
+        except Exception as ex:
+            logger.error(f"Figure task {fid} failed: {ex}")
+            return None
 
-    for f in tqdm_asyncio.as_completed(tasks, desc="Extracting and Describing Figures"):
-        result = await f
-        if result:
-            results.append(result)
-            logger.info(f"Completed {result['figure_id']}")
-
+    tasks = [_one(i, b) for i, b in enumerate(figure_blocks)]
+    logger.info(
+        f"Processing {len(tasks)} figures (max_concurrency={FIGURE_MAX_CONCURRENCY})..."
+    )
+    for f in tqdm_asyncio.as_completed(tasks, desc="Extracting+Describing"):
+        r = await f
+        if r:
+            results.append(r)
+            logger.info(f"Completed {r['figure_id']}")
+    try:
+        pdf_doc.close()
+    except Exception:
+        pass
     return results
 
 
@@ -461,14 +486,19 @@ def run(
     # Deterministic summary for quick diffing across runs
     try:
         det = {
+            "version": 1,
+            "run_id": run_id,
             "count": len(extracted_figures),
             "sorted": [
                 {
                     "figure_id": str(fig.get("figure_id")),
                     "page": int(fig.get("page", 0)),
-                    "y0": float((fig.get("bbox") or [0, 0, 0, 0])[1]) if fig.get("bbox") else 0.0,
-                    "x0": float((fig.get("bbox") or [0, 0, 0, 0])[0]) if fig.get("bbox") else 0.0,
-                    "image": fig.get("image_path"),
+                    "y0": round(float((fig.get("bbox") or [0, 0, 0, 0])[1]), 2)
+                    if fig.get("bbox")
+                    else 0.0,
+                    "x0": round(float((fig.get("bbox") or [0, 0, 0, 0])[0]), 2)
+                    if fig.get("bbox")
+                    else 0.0,
                     "section_id": fig.get("section_id"),
                 }
                 for fig in extracted_figures

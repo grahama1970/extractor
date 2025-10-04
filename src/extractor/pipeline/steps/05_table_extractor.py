@@ -1290,6 +1290,28 @@ def run(
         f"✅ Table extraction complete. Saved {len(filtered_tables)} tables to: {output_path}"
     )
 
+    # Deterministic summary for diff-based QA (main run)
+    try:
+        det = {
+            "version": 1,
+            "run_id": run_id,
+            "count": len(filtered_tables),
+            "sorted": [
+                {
+                    "page": int(t.get("page_index", 0)),
+                    "y0": round(float((t.get("bbox") or [0, 0, 0, 0])[1]), 2) if t.get("bbox") else 0.0,
+                    "x0": round(float((t.get("bbox") or [0, 0, 0, 0])[0]), 2) if t.get("bbox") else 0.0,
+                    "table_index": int(t.get("table_index", 0)),
+                }
+                for t in filtered_tables
+            ],
+        }
+        (json_output_dir / "deterministic.json").write_text(
+            json.dumps(det, indent=2, ensure_ascii=False)
+        )
+    except Exception:
+        pass
+
 
 def debug_bundle(
     bundle: Path = typer.Argument(
