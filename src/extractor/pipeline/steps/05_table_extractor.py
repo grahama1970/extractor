@@ -1292,9 +1292,11 @@ def run(
 
     # Deterministic summary for diff-based QA (main run)
     try:
+        from extractor.pipeline.utils.mode import deterministic_mode  # lazy import
         det = {
             "version": 1,
             "run_id": run_id,
+            "deterministic": bool(deterministic_mode()),
             "count": len(filtered_tables),
             "sorted": [
                 {

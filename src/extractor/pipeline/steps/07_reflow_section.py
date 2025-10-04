@@ -2326,6 +2326,7 @@ def run(
         pass
 
     # --- Processing ---
+    reflow_mode = "pass_through" if skip_llm else ("summary_only" if summary_only else "llm")
     if skip_llm:
         processed_sections = []
         for s in sections_to_process:
@@ -2407,11 +2408,20 @@ def run(
 
     unified_document_payload = None
     try:
+        # Try to thread the clean PDF path through to unified document for stable id
+        pdf_file_path = None
+        try:
+            with open(figures_json) as _fj:
+                _fdata = json.load(_fj)
+                pdf_file_path = _fdata.get("source_pdf")
+        except Exception:
+            pdf_file_path = None
         unified_document = build_unified_document_from_reflow(
             sections=processed_sections,
             source_path=str(sections_json) if sections_json else None,
             source_type=SourceType.PDF,
-            document_metadata={"source_files": source_files},
+            document_metadata={"source_files": source_files, "reflow_mode": reflow_mode},
+            pdf_file_path=pdf_file_path,
         )
         unified_document_payload = unified_document.model_dump(by_alias=True, mode="json")
     except Exception as exc:  # pragma: no cover - defensive
@@ -2437,6 +2447,7 @@ def run(
         "diagnostics": diagnostics,
         "timings": timings,
         "resources": resources,
+        "reflow_mode": reflow_mode,
     }
 
     if unified_document_payload:
@@ -2449,8 +2460,9 @@ def run(
     console.print("\n[bold green]✅ Section reflow complete.[/bold green]")
     console.print(f"   - Results saved to: [cyan]{output_path}[/cyan]")
 
-    # Deterministic summary to aid quick diffing (section IDs + ordered figure/table anchors)
+    # Deterministic summary to aid quick diffing (section IDs + ordered anchors)
     try:
+        from extractor.pipeline.utils.mode import deterministic_mode  # lazy import
         def _bx(b):
             bx = (b.get("bbox") if isinstance(b, dict) else None) or [0, 0, 0, 0]
             return [float(bx[0]), float(bx[1]), float(bx[2]), float(bx[3])]
@@ -2488,7 +2500,14 @@ def run(
                     ],
                 }
             )
-        det_payload = {"section_count": len(det_sections), "sections": det_sections}
+        det_payload = {
+            "version": 1,
+            "run_id": run_id,
+            "deterministic": bool(deterministic_mode()),
+            "reflow_mode": reflow_mode,
+            "section_count": len(det_sections),
+            "sections": det_sections,
+        }
         (json_output_dir / "deterministic.json").write_text(
             json.dumps(det_payload, indent=2, ensure_ascii=False)
         )

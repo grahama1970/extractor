@@ -35,6 +35,7 @@ from rich.console import Console
 
 from extractor.pipeline.utils.metrics_logger import log_metric
 from extractor.pipeline.tools.reqif_export import export_reqif
+from extractor.pipeline.utils.mode import deterministic_mode, init_deterministic_seeds
 
 console = Console()
 
@@ -275,6 +276,10 @@ def build_cli() -> typer.Typer:
     ):
         """Run all stages 01→14 on the provided PDF."""
         _preflight_strict()
+        # Log and seed deterministic mode early (informational; stages are separate procs)
+        if deterministic_mode():
+            init_deterministic_seeds("run_all")
+            console.print("[cyan]Deterministic mode active (PIPELINE_DETERMINISTIC=1).[/cyan]")
         if os.getenv("OFFLINE_PDF_PREDICTORS", "1").lower() not in {"0","false"}:
             console.print("[cyan]INFO:[/cyan] Running in predictor lenient mode (OFFLINE_PDF_PREDICTORS=1). Set OFFLINE_PDF_PREDICTORS=0 for strict checks.")
         # Deprecation notice: prefer the unified surface
