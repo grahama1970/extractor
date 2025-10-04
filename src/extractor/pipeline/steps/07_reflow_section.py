@@ -1471,39 +1471,93 @@ async def reflow_section_with_llm(
                 "Stage 07: LLM returned empty content. Verify API keys and Chat Completions access; inspect logs in 07_reflow_section/logs for request_info and response dumps."
             )
 
-        # Parse/repair JSON robustly
+        # Hardened JSON extraction: scan → repair → fallback
+        parse_strategy = "unattempted"
+        result = None
+        def _light_repair(snippet: str) -> str:
+            import re as _re
+            tmp = _re.sub(r",(\s*[}\]])", r"\1", snippet)  # trailing commas
+            tmp = _re.sub(r"//.*?$", "", tmp, flags=_re.MULTILINE)
+            tmp = _re.sub(r"/\*.*?\*/", "", tmp, flags=_re.DOTALL)
+            return tmp.strip()
+
+        # Try direct parse first
         try:
-            parsed = clean_json_string(content, return_dict=True)
-            if isinstance(parsed, dict):
-                result = parsed
-            elif isinstance(parsed, list):
-                # If the model returned a top-level list, try using the first object
-                result = (
-                    parsed[0]
-                    if parsed and isinstance(parsed[0], dict)
-                    else {"reflowed_text": content}
-                )
-            elif isinstance(parsed, str):
-                tmp = json.loads(parsed)
-                result = tmp if isinstance(tmp, dict) else {"reflowed_text": content}
-            else:
-                result = {"reflowed_text": content}
+            result = json.loads(content)
+            parse_strategy = "direct"
         except Exception:
-            logger.warning("Invalid JSON from LLM; failing per policy (no fallback)")
+            # Trim code fences / chatter and scan for first balanced object/array
+            cleaned = content.replace("```json", "\n").replace("```", "\n").replace("`", "\n")
+            start = None
+            for i,ch in enumerate(cleaned):
+                if ch in "{[":
+                    start = i
+                    break
+            if start is not None:
+                cand = cleaned[start:]
+                depth = 0
+                in_str = False
+                esc = False
+                quote = ''
+                end = None
+                for i,ch in enumerate(cand):
+                    if in_str:
+                        if esc:
+                            esc = False
+                        elif ch == "\\":
+                            esc = True
+                        elif ch == quote:
+                            in_str = False
+                        continue
+                    else:
+                        # Enter quoted string (single or double quotes)
+                        if ch == '"' or ch == "'":
+                            in_str = True
+                            quote = ch
+                            continue
+                        if ch in "{[":
+                            depth += 1
+                        elif ch in "}]":
+                            depth -= 1
+                            if depth == 0:
+                                end = i + 1
+                                break
+                if end is not None:
+                    snippet = cand[:end]
+                    try:
+                        result = json.loads(snippet)
+                        parse_strategy = "scan"
+                    except Exception:
+                        try:
+                            result = json.loads(_light_repair(snippet))
+                            parse_strategy = "repaired"
+                        except Exception:
+                            result = None
+        if result is None:
+            # Final attempt via clean_json_string
+            try:
+                repaired2 = clean_json_string(content, return_dict=True)
+                if isinstance(repaired2, dict):
+                    result = repaired2
+                    parse_strategy = "clean_json"
+            except Exception:
+                result = None
+        if result is None:
+            logger.warning("Invalid JSON from LLM after hardened extraction")
             try:
                 sec_diags.append(
                     make_event(
                         "07_reflow_section",
                         "warning",
                         "llm_invalid_json",
-                        "LLM returned invalid JSON",
+                        "LLM returned invalid/verbose JSON; hardened extraction failed",
                         {},
                     )
                 )
             except Exception:
                 pass
             raise ValueError(
-                "Stage 07: LLM returned invalid JSON. See logs in 07_reflow_section/logs and verify the model returns strict JSON (no code fences) matching schema mode expectations."
+                "Stage 07: LLM returned invalid or unparsable JSON. Inspect response payloads and consider increasing STAGE07_MAX_TOKENS."
             )
 
         # Enforce schema presence; do not accept wrappers or missing keys
@@ -1696,6 +1750,12 @@ async def reflow_section_with_llm(
         try:
             md = out.setdefault("metadata", {})
             md.setdefault("diagnostics", []).extend(sec_diags)
+        except Exception:
+            pass
+        # Attach parse strategy for transparency
+        try:
+            md = out.setdefault("metadata", {})
+            md["parse_strategy"] = parse_strategy
         except Exception:
             pass
         return out
@@ -1933,9 +1993,8 @@ def consolidate_data(
                                 hdr = pd.DataFrame(t1.get("pandas_df") or [])
                                 body = pd.DataFrame(t2.get("pandas_df") or [])
                                 def _collapse_ws_df(df: pd.DataFrame) -> pd.DataFrame:
-                                    return df.applymap(
-                                        lambda v: _sanitize_table_cell(v) if not pd.isna(v) else ""
-                                    )
+                                    fn = lambda v: _sanitize_table_cell(v) if not pd.isna(v) else ""
+                                    return df.apply(lambda col: col.map(fn))
                                 # Apply header row as column names if shape aligns
                                 if len(body.columns) == len(hdr.columns):
                                     _hdr_clean = _collapse_ws_df(hdr)
@@ -1961,9 +2020,8 @@ def consolidate_data(
                                 df1 = pd.DataFrame(t1.get("pandas_df") or [])
                                 df2 = pd.DataFrame(t2.get("pandas_df") or [])
                                 def _collapse(df: pd.DataFrame) -> pd.DataFrame:
-                                    return df.applymap(
-                                        lambda v: _sanitize_table_cell(v) if not pd.isna(v) else ""
-                                    )
+                                    fn = lambda v: _sanitize_table_cell(v) if not pd.isna(v) else ""
+                                    return df.apply(lambda col: col.map(fn))
                                 if len(df1.columns) == len(df2.columns):
                                     out = pd.concat([_collapse(df1), _collapse(df2)], ignore_index=True)
                                     t1["pandas_df"] = out.to_dict("records")

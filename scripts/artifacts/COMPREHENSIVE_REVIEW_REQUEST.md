@@ -101,6 +101,25 @@ MINOR
 
 ## Unified Diffs (Surgical Fixes)
 
+### Single‑Section Minimal Repro (debug)
+
+```bash
+# Set a valid fallback to avoid 404 loops
+export LITELLM_LARGE_VLLM_MODEL="openai/deepseek-ai/DeepSeek-V3-0324-turbo"
+
+# Run one section end‑to‑end; saves raw + parsed artifacts
+PYTHONPATH=./src python debug/reflow_single_section.py \
+  --sections data/results/pipeline/04_section_builder/json_output/04_sections.json \
+  --tables   data/results/pipeline/05_table_extractor/json_output/05_tables.json \
+  --figures  data/results/pipeline/06_figure_extractor/json_output/06_figures.json \
+  --index 0 --timeout 45 \
+  --model openai/deepseek-ai/DeepSeek-V3-0324-turbo
+
+# Artifacts (examples):
+#   scripts/artifacts/reflow_single_section_0_raw.txt
+#   scripts/artifacts/reflow_single_section_0_result.json
+```
+
 ### A. Stage 07: Robust JSON Extraction + Prompt Hardening + Retry Logic
 
 ```python name=src/extractor/pipeline/steps/07_reflow_section.py url=https://github.com/grahama1970/extractor/blob/feat/section-heuristics-and-overlay/src/extractor/pipeline/steps/07_reflow_section.py
