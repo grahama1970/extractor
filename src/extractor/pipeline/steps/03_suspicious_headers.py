@@ -83,7 +83,8 @@ class Config:
     llm_concurrency: int = int(os.getenv("STAGE03_CONCURRENCY", "1"))
     debug: bool = False
     task_limit: int = 0  # 0 = no limit
-    max_runtime_seconds: int = 0  # 0 = no limit
+    max_runtime_seconds: int = 0  # 0 = no limit (CLI override or STAGE03_TIMEOUT)
+    item_timeout_seconds: int = int(os.getenv("STAGE03_ITEM_TIMEOUT", "90"))
     # Knowledge/annotations support
     annotations_json: Optional[Path] = None
     use_knowledge: bool = True
@@ -766,6 +767,7 @@ async def process_pdf_pipeline(config: Config):
                 concurrency=config.llm_concurrency,
                 desc="Verifying Headers",
                 session_id=sid,
+                request_timeout=config.item_timeout_seconds,
             )
             if config.max_runtime_seconds and config.max_runtime_seconds > 0:
                 results = await asyncio.wait_for(coro, timeout=config.max_runtime_seconds)
@@ -1094,6 +1096,7 @@ def run(
             pass
         persist_headers = False
 
+    eff_timeout = timeout if timeout and timeout > 0 else int(os.getenv("STAGE03_TIMEOUT", "600"))
     cfg = Config(
         input_pdf=clean_pdf_path,
         input_json=input_json,
@@ -1103,7 +1106,7 @@ def run(
         render_dpi=dpi,
         debug=debug,
         task_limit=limit,
-        max_runtime_seconds=timeout,
+        max_runtime_seconds=eff_timeout,
         annotations_json=annotations_json,
         use_knowledge=use_knowledge,
         use_prior=use_prior,
