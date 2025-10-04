@@ -78,9 +78,9 @@ class Config:
     input_pdf: Path
     input_json: Path
     output_dir: Path
-    render_dpi: int = 200
+    render_dpi: int = int(os.getenv("STAGE03_VISION_DPI", "150"))
     llm_model: str = field(default_factory=_env_vlm_model)
-    llm_concurrency: int = 5
+    llm_concurrency: int = int(os.getenv("STAGE03_CONCURRENCY", "1"))
     debug: bool = False
     task_limit: int = 0  # 0 = no limit
     max_runtime_seconds: int = 0  # 0 = no limit
@@ -146,7 +146,7 @@ def _retrieve_prior_decisions(header_text_norm: str, font_sig: str, limit: int =
 
 
 # --- Verify the User has selected a Multmodal (Vision) model
-async def verify_header_with_llm(image_b64: str, context_text: str, model: str) -> Dict[str, Any]:
+async def verify_header_with_llm(image_b64: str, context_text: str, model: str, *, item_timeout: int = 90) -> Dict[str, Any]:
     """Verify header using litellm_call (vision required) with strict JSON intent.
 
     Always sends an image; provider error will be raised to the caller.
@@ -180,8 +180,9 @@ async def verify_header_with_llm(image_b64: str, context_text: str, model: str) 
         except Exception:
             pass
     sid = os.getenv("LITELLM_SESSION_ID") or get_run_id()
+    # Enforce per-item timeout via litellm timeout param and an outer watchdog
     results = await litellm_call(
-        prompts=[{"model": model, "messages": messages}],
+        prompts=[{"model": model, "messages": messages, "kwargs": {"timeout": item_timeout}}],
         wrap_json=True,
         concurrency=1,
         desc="verify header",
@@ -943,10 +944,10 @@ def run(
     model: Annotated[
         Optional[str], typer.Option("--model", help="Name of the vision-capable LLM to use.")
     ] = None,
-    concurrency: Annotated[int, typer.Option("-c", help="Number of concurrent API calls.")] = 5,
+    concurrency: Annotated[int, typer.Option("-c", help="Number of concurrent API calls.")] = 1,
     dpi: Annotated[
         int, typer.Option("--dpi", help="Rendering resolution for context images.")
-    ] = 200,
+    ] = 150,
     debug: Annotated[
         bool, typer.Option("--debug", help="Enable verbose logging to a stage log file.")
     ] = False,
@@ -1185,8 +1186,8 @@ def debug_bundle(
         "data/results/pipeline", "-o", help="Parent directory for pipeline results."
     ),
     model: Optional[str] = typer.Option(None, "--model", help="LLM model to use (defaults to env)"),
-    concurrency: int = typer.Option(5, "-c", help="Concurrent LLM calls"),
-    dpi: int = typer.Option(200, "--dpi", help="Rendering DPI for context images"),
+    concurrency: int = typer.Option(1, "-c", help="Concurrent LLM calls"),
+    dpi: int = typer.Option(150, "--dpi", help="Rendering DPI for context images"),
     debug: bool = typer.Option(False, "--debug", help="Verbose logging"),
     limit: int = typer.Option(0, "--limit", help="Limit suspicious headers to verify (0=all)"),
     timeout: int = typer.Option(0, "--timeout", help="Overall timeout (0=no limit)"),
