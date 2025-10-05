@@ -442,11 +442,13 @@ async def litellm_call(
             pass
         return entry
 
+    _sanitize_litellm_callbacks()
     router = Router(
         model_list=[_router_entry(m) for m in unique_models],
         num_retries=num_retries,
         default_max_parallel_requests=default_max_parallel_requests,
     )
+    _sanitize_litellm_callbacks()
 
     try:
         # Streaming fast-path
@@ -808,3 +810,12 @@ if __name__ == "__main__":
             sys.argv = [argv[0], "main", *args]
         cli_app()
         raise SystemExit(0)
+# Defensive: sanitize excessive callback accumulation in long-lived runs
+def _sanitize_litellm_callbacks(max_allowed: int = 5):
+    try:
+        for attr in ("callbacks", "success_callback", "failure_callback", "input_callback", "service_callback"):
+            seq = getattr(_litellm, attr, None)
+            if isinstance(seq, list) and len(seq) > max_allowed:
+                del seq[:-max_allowed]
+    except Exception:
+        pass

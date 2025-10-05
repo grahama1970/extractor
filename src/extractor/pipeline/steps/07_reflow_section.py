@@ -1560,6 +1560,16 @@ async def reflow_section_with_llm(
                 "Stage 07: LLM returned invalid or unparsable JSON. Inspect response payloads and consider increasing STAGE07_MAX_TOKENS."
             )
 
+        # If model omitted wrapper but returned plausible block object, auto-wrap once
+        if isinstance(result, dict) and "reflowed_json" not in result and "blocks" in result and "title" in result:
+            result = {
+                "reflowed_json": result,
+                "ocr_corrections": {},
+                "improvements_made": "",
+                "summary": "",
+            }
+            parse_strategy = f"{parse_strategy}+auto_wrapper"
+
         # Enforce schema presence; do not accept wrappers or missing keys
         if SCHEMA_MODE == "reflow_json":
             if not (isinstance(result, dict) and result.get("reflowed_json")):
