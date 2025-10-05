@@ -406,7 +406,13 @@ async def litellm_call(
             actual_model = os.getenv("CHUTES_REMOTE_MODEL")
             if not actual_model:
                 parts = m.split("/", 2)
-                actual_model = parts[2] if len(parts) > 2 else m
+                # Prefer vendor/name pair for Chutes aggregator
+                if len(parts) > 2:
+                    vendor = parts[1]
+                    name = parts[2]
+                    actual_model = f"{vendor}/{name}"
+                else:
+                    actual_model = m
             params.update(
                 {
                     "api_key": key,
