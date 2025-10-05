@@ -845,6 +845,13 @@ async def process_pdf_pipeline(config: Config):
 
     # images are already saved during extraction
 
+    # Deterministic guard: cap concurrency and force temp=0
+    deterministic = os.getenv("PIPELINE_DETERMINISTIC", "0").lower() in {"1", "true", "yes", "y"}
+    if deterministic:
+        try:
+            config.llm_concurrency = 1
+        except Exception:
+            pass
     # Decide whether to call LLM (skip for curated if configured and no human notes)
     run_llm = True
     if curated_used and config.skip_llm_if_curated:
@@ -885,7 +892,7 @@ async def process_pdf_pipeline(config: Config):
                     "stream": False,
                 }
                 if "gpt-5" not in _model_l:
-                    params["temperature"] = 0.1
+                    params["temperature"] = 0.0 if deterministic else 0.1
                 items.append(params)
             except Exception as e:
                 logger.exception(f"Failed to build messages for {d.get('id')}: {e}")
@@ -1133,6 +1140,13 @@ async def process_pdf_pipeline(config: Config):
     except Exception:
         doc_id = Path(config.input_pdf).stem.lower()
 
+    # curated stats
+    try:
+        from collections import Counter
+        type_counts = Counter([str(a.get("type") or "").lower() for a in data])
+    except Exception:
+        type_counts = {}
+
     payload = {
         "timestamp": datetime.now().isoformat(),
         "run_id": run_id,
@@ -1144,6 +1158,7 @@ async def process_pdf_pipeline(config: Config):
         "source": ("ux_curated" if curated_used else "pdf_annotations"),
         "curated_mode": curated_used,
         "curated_schema_version": curated_schema_version,
+        "curated_stats": {"types": dict(type_counts)},
         "annotations": data,
         "errors_count": errors_count,
         "warnings_count": warnings_count,
