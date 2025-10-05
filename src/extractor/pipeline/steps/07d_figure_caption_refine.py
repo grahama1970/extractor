@@ -95,7 +95,7 @@ def run(
                 prompts.append({
                     "model": os.getenv("LITELLM_DEFAULT_MODEL") or os.getenv("LITELLM_VLM_MODEL") or "openai/zai-org/GLM-4.5-Air",
                     "messages": [
-                        {"role": "system", "content": [{"type": "text", "text": "Output ONLY a short caption; do not invent content."}]},
+                        {"role": "system", "content": [{"type": "text", "text": "Refine a concise (<=20 words) figure caption; preserve identifiers/units; DO NOT add invented claims or context. If existing caption is adequate, return it unchanged. Output ONLY JSON: {\\"caption\\": string}."}]},
                         {"role": "user", "content": [{"type": "text", "text": msg}]},
                     ],
                     "kwargs": {"temperature": 0, "top_p": 1, "timeout": 30}
@@ -123,7 +123,7 @@ def run(
                 if len(words) > 0 and (sum(1 for t in words if t in generic) / len(words)) > 0.4:
                     pass
             # hallucination blacklist: reject if newly introduces risky adjectives
-            blacklist = {"optimal", "novel", "proposed"}
+            blacklist = {"optimal", "novel", "proposed", "breakthrough", "state-of-the-art", "revolutionary", "innovative", "next-generation", "cutting-edge"}
             # we do not have original here; accept unless blacklist appears
             if any(w in words for w in blacklist):
                 pass  # keep as-is (it may be original), downstream can decide

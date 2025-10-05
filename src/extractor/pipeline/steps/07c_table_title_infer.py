@@ -45,6 +45,19 @@ def run(
             for t in s.get("tables", []):
                 if _weak_title(t.get("title")):
                     key = t.get("raw_table_id") or t.get("normalized_label") or f"tid_{id(t)}"
+                    # Mnemonic skip
+                    header_tokens = [str(c) for c in ((t.get("pandas_metrics") or {}).get("columns") or [])]
+                    norm_tokens = [h.strip().upper() for h in header_tokens if h]
+                    skip_mnemonic = os.getenv("TABLE_TITLE_SKIP_MNEMONIC", "1") in ("1","true","yes")
+                    mnemonic_ratio = float(os.getenv("TABLE_TITLE_MNEMONIC_RATIO", "0.8"))
+                    short_tokens = [tok for tok in norm_tokens if len(tok) <= 4]
+                    is_mnemonic = (
+                        (len(short_tokens) == len(norm_tokens) and len(norm_tokens) <= 8)
+                        or (len(short_tokens)/max(1,len(norm_tokens)) >= mnemonic_ratio)
+                    ) if norm_tokens else False
+                    if skip_mnemonic and is_mnemonic:
+                        tmap[key] = None
+                        continue
                     # If Stage 03 cue appears in header, skip inference (treat as externally labeled)
                     if cues and _table_has_label_cue(t, cues):
                         tmap[key] = (t.get("title") or "").strip()
@@ -67,8 +80,16 @@ def run(
                 density = float((t.get("pandas_metrics") or {}).get("data_density", 0) or 0)
                 min_density = float(os.getenv("TABLE_INFER_MIN_DENSITY", "0.35"))
                 header_tokens = [str(c) for c in ((t.get("pandas_metrics") or {}).get("columns") or [])]
+                norm_tokens = [h.strip().upper() for h in header_tokens if h]
                 avg_len = sum(len(x) for x in header_tokens) / max(1, len(header_tokens))
-                if density < min_density or avg_len < 3:
+                skip_mnemonic = os.getenv("TABLE_TITLE_SKIP_MNEMONIC", "1") in ("1","true","yes")
+                mnemonic_ratio = float(os.getenv("TABLE_TITLE_MNEMONIC_RATIO", "0.8"))
+                short_tokens = [tok for tok in norm_tokens if len(tok) <= 4]
+                is_mnemonic = (
+                    (len(short_tokens) == len(norm_tokens) and len(norm_tokens) <= 8)
+                    or (len(short_tokens)/max(1,len(norm_tokens)) >= mnemonic_ratio)
+                ) if norm_tokens else False
+                if density < min_density or avg_len < 3 or (skip_mnemonic and is_mnemonic):
                     continue
                 msg = (
                     "Infer a concise (<=12 words) factual title ONLY if obvious from columns/rows; do not invent domains or units.\n"

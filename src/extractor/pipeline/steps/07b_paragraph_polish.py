@@ -73,7 +73,7 @@ def run(
                 prompts.append({
                     "model": os.getenv("LITELLM_DEFAULT_MODEL") or os.getenv("LITELLM_VLM_MODEL") or "openai/zai-org/GLM-4.5-Air",
                     "messages": [
-                        {"role": "system", "content": [{"type": "text", "text": "You clean technical paragraphs without changing factual meaning. Fix soft-hyphen splits and spacing. Return ONLY the corrected text; do not rephrase or summarize."}]},
+                        {"role": "system", "content": [{"type": "text", "text": "Clean technical paragraphs: fix hyphen splits, spacing, minor casing only. Do NOT rephrase, summarize, add/remove concepts, reorder clauses, or change terminology. If no cleanup is needed, echo the original EXACTLY. Return ONLY JSON: {\"text\": string}."}]},
                         {"role": "user", "content": [{"type": "text", "text": f"Input paragraph (fix spacing/hyphenation only; preserve wording):\n\n{txt}"}]},
                     ],
                     "kwargs": {"temperature": 0, "top_p": 1, "timeout": 30}
