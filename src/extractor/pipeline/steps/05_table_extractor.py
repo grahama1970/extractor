@@ -608,10 +608,40 @@ def extract_tables_from_page(
         1 for info in page_tables.values() if info.get("quality_fallback")
     )
 
-    # Convert to output format: select exactly one best table per page
+    # Convert to output format: fuse candidates from multiple strategies
+    from extractor.pipeline.utils.table_fusion import TableCandidate, fuse_table_candidates
+    
     extracted_tables = []
     table_idx = 0
     if page_tables:
+        # Collect all candidates for this page
+        candidates = []
+        for bbox_key, table_info in page_tables.items():
+            table = table_info["table"]
+            df = table.df
+            
+            candidates.append(
+                TableCandidate(
+                    pandas_df=df.to_dict("records"),
+                    bbox=list(bbox_key) if bbox_key else [],
+                    page_index=page_num,
+                    strategy=table_info.get("strategy", "unknown"),
+                    score=float(table_info.get("score", 0.0) or 0.0),
+                    fragmentation_score=float(table_info.get("fragmentation", 0.0) or 0.0),
+                    camelot_metrics={
+                        "accuracy": table.accuracy,
+                        "whitespace": table.whitespace,
+                        "order": table.order,
+                    },
+                    pandas_metrics=generate_pandas_metrics(df),
+                )
+            )
+        
+        # Fuse candidates using table fusion module
+        fused_result = fuse_table_candidates(candidates)
+        
+        # For backward compatibility, reconstruct table object from fused result
+        # Use the first candidate's table object but with fused data
         best_key = min(
             page_tables.keys(),
             key=lambda k: (page_tables[k].get("fragmentation", 0), -float(page_tables[k]["score"] or 0.0)),
@@ -619,15 +649,19 @@ def extract_tables_from_page(
         table_info = page_tables[best_key]
         table = table_info["table"]
 
-        # Extract table image
-        bbox_tuple = getattr(table, "_bbox", None)
-        if not bbox_tuple and hasattr(table, "cells") and getattr(table, "cells"):
-            try:
-                xs = [c.x1 for c in table.cells] + [c.x2 for c in table.cells]
-                ys = [c.y1 for c in table.cells] + [c.y2 for c in table.cells]
-                bbox_tuple = (min(xs), min(ys), max(xs), max(ys))
-            except Exception:
-                bbox_tuple = None
+        # Extract table image from fused bbox
+        # Extract table image from fused bbox
+        bbox_tuple = tuple(fused_result["bbox"]) if fused_result["bbox"] else None
+        if not bbox_tuple:
+            # Fallback to original table bbox if fusion didn't provide one
+            bbox_tuple = getattr(table, "_bbox", None)
+            if not bbox_tuple and hasattr(table, "cells") and getattr(table, "cells"):
+                try:
+                    xs = [c.x1 for c in table.cells] + [c.x2 for c in table.cells]
+                    ys = [c.y1 for c in table.cells] + [c.y2 for c in table.cells]
+                    bbox_tuple = (min(xs), min(ys), max(xs), max(ys))
+                except Exception:
+                    bbox_tuple = None
         img_path = (
             extract_table_image(pdf_doc, page_num, bbox_tuple, output_dir, table_idx, diagnostics)
             if bbox_tuple
@@ -635,8 +669,11 @@ def extract_tables_from_page(
         )
 
         # Optionally coalesce repeated header rows mid-body before metrics
-        df = table.df
-        if TABLE_HEADER_COALESCE_ENABLED:
+        # Use fused pandas_df
+        df_records = fused_result["pandas_df"]
+        df = pd.DataFrame(df_records) if df_records else pd.DataFrame()
+        
+        if TABLE_HEADER_COALESCE_ENABLED and not df.empty:
             try:
                 df = coalesce_repeated_header_rows(df, TABLE_HEADER_REPEAT_MIN_MATCH)
             except Exception as e:
@@ -654,29 +691,30 @@ def extract_tables_from_page(
                 except Exception:
                     pass
 
-        df_clean = df.map(sanitize_cell)
-        fragmentation = fragmentation_score(df_clean)
+        df_clean = df.map(sanitize_cell) if not df.empty else df
+        fragmentation = fragmentation_score(df_clean) if not df_clean.empty else 0.0
 
-        # Build table data
+        # Build table data with fusion results
         table_data = {
             "page_number": page_num + 1,
             "page_index": page_num,
             "table_index": table_idx + 1,
-            "bbox": list(bbox_tuple) if bbox_tuple else [],
+            "bbox": list(bbox_tuple) if bbox_tuple else fused_result.get("bbox", []),
             "extraction_method": "camelot",
-            "strategy": table_info["strategy"],
+            "strategy": fused_result.get("merge_type", "single"),  # New: merge type
             "fragmentation_score": fragmentation,
-            "pandas_df_raw": df.to_dict("records"),
-            "pandas_df": df_clean.to_dict("records"),
-            "pandas_metrics": generate_pandas_metrics(df_clean),
-            "camelot_metrics": {
-                "accuracy": table.accuracy,
-                "whitespace": table.whitespace,
-                "order": table.order,
-            },
+            "pandas_df_raw": df.to_dict("records") if not df.empty else [],
+            "pandas_df": df_clean.to_dict("records") if not df_clean.empty else [],
+            "pandas_metrics": generate_pandas_metrics(df_clean) if not df_clean.empty else {"shape": [0, 0]},
+            "camelot_metrics": fused_result.get("camelot_metrics", {}),
+            # Backward compatibility: keep original fields
             "score": table_info["score"],
             "quality_fallback": bool(table_info.get("quality_fallback", False)),
             "strategy_history": table_info.get("history", []),
+            # New fusion fields
+            "merge_type": fused_result.get("merge_type", "single"),
+            "confidence": fused_result.get("confidence", {}),
+            "source_strategies": fused_result.get("source_strategies", []),
         }
 
         if img_path:
