@@ -517,9 +517,12 @@ async def process_pdf_pipeline(config: Config):
         raise RuntimeError("Stage 03 requires a vision-capable model. Set STAGE03_MODEL or LITELLM_VLM_MODEL.")
     # Evaluate guardrail
     total_candidates = len(tasks)
+    # Safe defaults to prevent NameError if env not set elsewhere
+    max_suspicious = int(os.getenv("STAGE03_MAX_SUSPICIOUS", "8"))
+    expected_headers = int(os.getenv("STAGE03_EXPECTED_HEADERS", "0"))
     threshold = max_suspicious
-    if expected_headers and expected_headers>0:
-        threshold = max(threshold, expected_headers*2)
+    if expected_headers and expected_headers > 0:
+        threshold = max(threshold, expected_headers * 2)
     if total_candidates > threshold:
         # Persist a guard artifact and exit without any LLM calls
         output_json_path = json_output_dir / "03_guard_raised.json"
@@ -1151,12 +1154,30 @@ def run(
         log_stage_event("03_suspicious_headers", "start", input_json=str(input_json))
     except Exception:
         pass
-    # Assumes a naming convention like '..._clean.pdf'
+    # Choose the clean PDF: prefer the Stage‑02 source if present
+    expected_clean_name = None
     try:
-        candidates = sorted(pdf_dir.glob("*_clean.pdf"))
-        clean_pdf_path = candidates[0]
-    except (StopIteration, IndexError):
-        raise typer.BadParameter(f"No '*_clean.pdf' found in --pdf-dir: {pdf_dir}")
+        with input_json.open() as f:
+            _s02 = json.load(f)
+        sp = _s02.get("source_pdf") or (_s02.get("source_files") or {}).get("sections")
+        if isinstance(sp, str) and sp.endswith("_clean.pdf"):
+            expected_clean_name = Path(sp).name
+    except Exception:
+        expected_clean_name = None
+    candidates = sorted(pdf_dir.glob("*_clean.pdf"))
+    if expected_clean_name:
+        matched = [p for p in candidates if p.name == expected_clean_name]
+        if matched:
+            clean_pdf_path = matched[0]
+        elif candidates:
+            clean_pdf_path = candidates[0]
+        else:
+            raise typer.BadParameter(f"No '*_clean.pdf' found in --pdf-dir: {pdf_dir}")
+    else:
+        if candidates:
+            clean_pdf_path = candidates[0]
+        else:
+            raise typer.BadParameter(f"No '*_clean.pdf' found in --pdf-dir: {pdf_dir}")
 
     if not input_json.exists():
         raise typer.BadParameter(f"Input JSON not found: {input_json}")

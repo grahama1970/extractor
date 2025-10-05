@@ -54,6 +54,8 @@ from extractor.pipeline.utils.model_params import (
 from extractor.pipeline.utils.vision import preflight_vision_support
 from extractor.pipeline.utils.text_utils import sanitize_text
 from extractor.pipeline.utils.unified_conversion import build_unified_document_from_reflow
+VISION_SELECTIVE = os.getenv("STAGE07_VISION_SELECTIVE", "0").lower() in ("1","true","yes")
+CANONICAL_ORDER = os.getenv("STAGE07_CANONICAL_ORDER", "0").lower() in ("1","true","yes")
 from extractor.core.schema.unified_document import SourceType
 from extractor.pipeline.utils.ann_index import build_ann_index, query_ann_index, load_ann_index
 from extractor.pipeline.utils.log_utils import sanitize_messages_for_return
@@ -544,7 +546,17 @@ async def reflow_section_with_llm(
         sec_b64 = None
         anns = []
         sec_b64 = None
-        if supports_vision and include_images:
+        # Selective gating: if enabled, skip building images when not necessary
+        selective_skip = False
+        if include_images and VISION_SELECTIVE:
+            try:
+                _tbls = section_data.get("tables") or []
+                _figs = section_data.get("figures") or []
+                if not _figs and not _tbls:
+                    selective_skip = True
+            except Exception:
+                selective_skip = False
+        if supports_vision and include_images and not selective_skip:
             # Section visual
             sec_b64 = get_section_image_b64(section_data, results_base_dir)
             if sec_b64:
@@ -2612,6 +2624,19 @@ def run(
 
     if unified_document_payload:
         final_output["unified_document"] = unified_document_payload
+    # Optional deterministic hash over sections
+    if CANONICAL_ORDER:
+        try:
+            import hashlib as _hh
+            h = _hh.sha256()
+            for s in sorted(processed_sections, key=lambda x: str(x.get("id"))):
+                rj = (s.get("reflowed_json") or {}) if isinstance(s, dict) else {}
+                title = (rj.get("title") or s.get("title") or "")[:80]
+                blk_ct = len((rj.get("blocks") or []))
+                h.update(f"{s.get('id')}|{title}|{blk_ct}".encode("utf-8"))
+            final_output["reflowed_sections_content_hash"] = h.hexdigest()
+        except Exception:
+            pass
 
     output_path = json_output_dir / "07_reflowed.json"
     with open(output_path, "w") as f:

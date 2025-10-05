@@ -672,6 +672,8 @@ def extract_tables_from_page(
             "pandas_df_raw": df.to_dict("records"),
             "pandas_df": df_clean.to_dict("records"),
             "pandas_metrics": generate_pandas_metrics(df_clean),
+            "row_count": int(df_clean.shape[0]),
+            "col_count": int(df_clean.shape[1]),
             "camelot_metrics": {
                 "accuracy": table.accuracy,
                 "whitespace": table.whitespace,

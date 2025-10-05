@@ -464,7 +464,13 @@ async def litellm_call(
     router_timeout = request_timeout if request_timeout is not None else (
         float(os.getenv("LITELLM_ROUTER_TIMEOUT", "45"))
     )
-    retry_after_param = float(os.getenv("LITELLM_RETRY_AFTER", "0")) or None
+    # Use a non-zero default floor for Router's internal retry_after to avoid
+    # litellm._calculate_retry_after(None) → TypeError in rare paths.
+    # Users can override via LITELLM_RETRY_AFTER; if unset, use 0.5s.
+    try:
+        retry_after_param = float(os.getenv("LITELLM_RETRY_AFTER", "0.5"))
+    except Exception:
+        retry_after_param = 0.5
 
     router = Router(
         model_list=[_router_entry(m) for m in unique_models],
@@ -476,6 +482,10 @@ async def litellm_call(
     _sanitize_litellm_callbacks()
 
     retry_after_floor = float(os.getenv("LITELLM_RETRY_AFTER_MIN", "0.5"))
+    try:
+        logger.debug(f"litellm_call: retry_after_floor={retry_after_floor}")
+    except Exception:
+        pass
 
     def _coerce_retry_after(val):
         try:

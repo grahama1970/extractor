@@ -5,6 +5,7 @@ import json
 import time
 from pathlib import Path
 from typing import Any, Dict
+import os
 
 PIPELINE_EVENTS_PATH = Path("data/results/pipeline/pipeline_events.log")
 
@@ -23,8 +24,10 @@ def log_stage_event(stage: str, phase: str, **fields: Any) -> None:
             "phase": phase,
         }
         record.update(fields)
+        line = json.dumps(record, ensure_ascii=False)
         with PIPELINE_EVENTS_PATH.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+            f.write(line + "\n")
+            if os.getenv("PIPELINE_EVENTS_FLUSH", "0").lower() in ("1","true","yes"):
+                f.flush()
     except Exception:
         pass
-

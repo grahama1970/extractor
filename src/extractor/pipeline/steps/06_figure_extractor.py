@@ -71,8 +71,19 @@ console = Console()
 
 # Make key parameters configurable via environment variables
 VERTICAL_PADDING_RATIO = float(os.getenv("FIGURE_VERTICAL_PADDING", "0.2"))
-# Use local model for simple image descriptions (2-3 sentences)
-VLM_MODEL = (os.getenv("LITELLM_VLM_MODEL") or "").strip()
+"""Stage 06 VLM model resolution"""
+VLM_MODEL = (
+    os.getenv("STAGE06_MODEL")
+    or os.getenv("LITELLM_VLM_MODEL")
+    or ""
+).strip()
+VLM_MODEL_LARGE = (os.getenv("LITELLM_LARGE_VLM_MODEL") or "").strip()
+VLM_MODEL_SMALL = (os.getenv("LITELLM_SMALL_VLM_MODEL") or "").strip()
+# Tiered timeouts and jitter
+VLM_SMALL_TIMEOUT = int(os.getenv("VLM_SMALL_TIMEOUT", "18"))
+VLM_MED_TIMEOUT   = int(os.getenv("VLM_MED_TIMEOUT", "28"))
+VLM_LARGE_TIMEOUT = int(os.getenv("VLM_LARGE_TIMEOUT", "40"))
+VLM_RETRY_JITTER_MAX = float(os.getenv("VLM_RETRY_JITTER_MAX", "0.25"))
 FIGURE_MAX_CONCURRENCY = int(os.getenv("FIGURE_MAX_CONCURRENCY", "4"))
 if FIGURE_MAX_CONCURRENCY < 1:
     FIGURE_MAX_CONCURRENCY = 1
@@ -81,8 +92,14 @@ if FIGURE_MAX_CONCURRENCY < 1:
 # --- Core Functions ---
 
 
-async def describe_image_with_llm(image_data: bytes, context: str = "") -> str:
-    """Describe an image via a single LiteLLM Chat call (Router.acompletion under the hood)."""
+async def describe_image_with_llm(
+    image_data: bytes,
+    context: str = "",
+    *,
+    model_override: str | None = None,
+    request_timeout: int | None = None,
+) -> str:
+    """Describe an image via LiteLLM; returns plain caption text. Honors model_override and timeout."""
     system_prompt = textwrap.dedent(
         """
         You are a helpful assistant that writes concise technical figure descriptions (2–3 sentences).
@@ -94,14 +111,14 @@ async def describe_image_with_llm(image_data: bytes, context: str = "") -> str:
         {"type": "text", "text": f"Context: {context[:2000]}"},
         {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
     ]
-    model = (os.getenv("LITELLM_VLM_MODEL") or VLM_MODEL or "").strip()
+    model = (model_override or os.getenv("LITELLM_VLM_MODEL") or VLM_MODEL or "").strip()
     params: Dict[str, Any] = {
         "model": model,
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_content},
         ],
-        "timeout": 30,
+        "timeout": int(request_timeout or int(os.getenv("STAGE06_TIMEOUT", "60"))),
     }
     if "gemini" not in (model or "").lower():
         params["max_tokens"] = 256
@@ -197,18 +214,44 @@ async def extract_and_describe_figure(
         if skip_descriptions:
             description = "Description skipped (offline)"
         else:
-            try:
-                description = await describe_image_with_llm(image_data, context)
-            except Exception as e:
-                logger.error(f"LLM description for {figure_id} failed after all retries: {e}")
+            import random
+            timeout_s = int(os.getenv("STAGE06_TIMEOUT", "120"))
+            max_retries = int(os.getenv("STAGE06_RETRIES", "1"))
+            # SMALL -> MED -> LARGE escalation
+            model_small = VLM_MODEL_SMALL
+            # Interpret VLM_MODEL as MED tier by default
+            model_med = (os.getenv("STAGE06_MODEL") or VLM_MODEL or "").strip()
+            model_large = VLM_MODEL_LARGE
+            tiered = [(model_small, VLM_SMALL_TIMEOUT), (model_med, VLM_MED_TIMEOUT), (model_large, VLM_LARGE_TIMEOUT)]
+            models = [(m,t) for m,t in tiered if m]
+            description = ""
+            last_err: Exception | None = None
+            for m, tier_to in models:
+                for attempt in range(max_retries + 1):
+                    try:
+                        cap = await describe_image_with_llm(
+                            image_data, context, model_override=m, request_timeout=tier_to or timeout_s
+                        )
+                        if cap and cap.strip():
+                            description = cap.strip()
+                            break
+                    except Exception as e:
+                        last_err = e
+                        try:
+                            await asyncio.sleep(1.0 + attempt + random.uniform(0.0, VLM_RETRY_JITTER_MAX))
+                        except Exception:
+                            pass
+                if description:
+                    break
+            if not description:
+                logger.error(
+                    f"LLM description for {figure_id} failed after all retries: {last_err}"
+                )
                 try:
-                    msg = str(e)
+                    msg = str(last_err) if last_err else "unknown"
                     code = "llm_description_failed"
                     low = msg.lower()
-                    if any(
-                        k in low
-                        for k in ["network", "connect", "connection", "readtimeout", "econn"]
-                    ):
+                    if any(k in low for k in ["network", "connect", "connection", "readtimeout", "econn"]):
                         code = "llm_network_error"
                     ev = make_event(
                         "06_figure_extractor", "error", code, msg, {"figure_id": figure_id}
@@ -217,7 +260,7 @@ async def extract_and_describe_figure(
                     figure_md_diags.append(ev)
                 except Exception:
                     figure_md_diags = []
-                description = f"Error: Failed to get description - {e}"
+                description = f"Error: Failed to get description - {last_err}"
 
         return {
             "figure_id": figure_id,
@@ -399,7 +442,6 @@ def run(
     t0 = time.monotonic()
     stage_start_ts = iso_now()
     resources = snapshot_resources("start")
-    import os
 
     sampler = (
         start_resource_sampler(float(os.getenv("SAMPLE_INTERVAL_SEC", "2")))
@@ -604,7 +646,6 @@ def debug_bundle(
     t0 = time.monotonic()
     stage_start_ts = iso_now()
     resources = snapshot_resources("start")
-    import os
 
     sampler = (
         start_resource_sampler(float(os.getenv("SAMPLE_INTERVAL_SEC", "2")))
