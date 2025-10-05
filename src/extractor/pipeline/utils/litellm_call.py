@@ -460,8 +460,9 @@ async def litellm_call(
 
     _sanitize_litellm_callbacks()
     # Router-level timeout (caps overall call, including retries)
+    # Keep Router timeout bounded to avoid perceived "hangs"
     router_timeout = request_timeout if request_timeout is not None else (
-        float(os.getenv("LITELLM_ROUTER_TIMEOUT", "600"))
+        float(os.getenv("LITELLM_ROUTER_TIMEOUT", "45"))
     )
     retry_after_param = float(os.getenv("LITELLM_RETRY_AFTER", "0")) or None
 

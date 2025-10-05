@@ -12,13 +12,20 @@ while [[ $# -gt 0 ]]; do
 done
 [[ -n "$MODEL" ]] || usage
 
-[[ "/.venv/bin" == *"$(python -c 'import sys; print(sys.executable)')"* ]] || {
-  echo "ERROR: Not in project venv. Run: source .venv/bin/activate && set -a && [ -f .env ] && source .env && set +a" >&2; exit 2; }
+EXE="$(python -c 'import sys; print(sys.executable)')"
+case "$EXE" in
+  *"/.venv/bin/"*|*"/.venv/bin/python"*) : ;; 
+  *) echo "ERROR: Not in project venv (sys.executable=$EXE). Run: source .venv/bin/activate && set -a && [ -f .env ] && source .env && set +a" >&2; exit 2;;
+esac
 
 : "${CHUTES_API_BASE:?Missing CHUTES_API_BASE}"; : "${CHUTES_API_KEY:?Missing CHUTES_API_KEY}"
 BASE="${CHUTES_API_BASE%/}"
+TIMEOUT="${CURL_TIMEOUT:-30}"
+PROVIDER="${CHUTES_PROVIDER:-openai}"
+echo "# curl ping base=$BASE model=$MODEL timeout=${TIMEOUT}s" >&2
 
-curl -sS -H "Authorization: Bearer $CHUTES_API_KEY" -H 'Content-Type: application/json' \
+curl -sS -m "$TIMEOUT" --connect-timeout 10 \
+  -H "Authorization: Bearer $CHUTES_API_KEY" \
+  -H 'Content-Type: application/json' \
   "$BASE/chat/completions" \
-  -d "{\"model\":\"$MODEL\",\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"$TEXT\"}]}],\"temperature\":0}" | jq .
-
+  -d "{\"model\":\"$MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"$TEXT\"}],\"temperature\":0,\"custom_llm_provider\":\"$PROVIDER\"}" | jq .
