@@ -195,6 +195,17 @@ def run(
         if h03:
             base = sec.get("content_hash") or ""
             sec["content_hash"] = hashlib.sha256((base + "|03:" + h03).encode("utf-8")).hexdigest()
+        # Capture prompt_source_objects: first accepted header object_id on the section's first page
+        try:
+            ps = int(sec_by_id[sid].get("page_start", 0))
+            objs = []
+            for h in headers_index.get(ps, []):
+                if h.get("is_header") and h.get("object_id"):
+                    objs.append(h.get("object_id"))
+            if objs:
+                sec["prompt_source_objects"] = objs[:1]
+        except Exception:
+            pass
 
     payload = {
         "timestamp": __import__("datetime").datetime.now().isoformat(),
@@ -208,4 +219,3 @@ def run(
 
 if __name__ == "__main__":
     app()
-

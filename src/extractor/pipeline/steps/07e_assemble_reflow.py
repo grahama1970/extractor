@@ -61,7 +61,8 @@ def run(
                 "rows": t.get("pandas_df") or [],
                 "confidence": {"status": "high" if (pm.get("data_density") or 0) >= 0.9 else "medium", "density": pm.get("data_density"), "source": "camelot+pandas"},
                 "image_refs": [t.get("table_image_path")] if t.get("table_image_path") else [],
-                "source": {"pages": [t.get("page_index")], "block_ids": [t.get("raw_table_id")]},
+                "normalized_label": t.get("normalized_label"),
+                "source": {"pages": [t.get("page_index")], "block_ids": [t.get("raw_table_id") or t.get("normalized_label")]},
                 "provenance": t.get("provenance") or {},
             })
         # Figures
@@ -74,6 +75,7 @@ def run(
                 "caption": cap,
                 "alt": cap or "Figure",
                 "image_ref": f.get("image_ref") or f.get("image_path"),
+                "normalized_label": f.get("normalized_label"),
                 "source": {"pages": [f.get("page")], "block_ids": [f.get("figure_id") or key]},
             })
 
@@ -118,4 +120,3 @@ def run(
 
 if __name__ == "__main__":
     app()
-
