@@ -2203,6 +2203,8 @@ def api_triage(object_type: str = "table", band: str | None = None, limit: int =
 
 RUN_STATUS_FILE = REPO_ROOT / "scripts" / "artifacts" / "pipeline_status.json"
 TRAIN_STATUS_FILE = REPO_ROOT / "scripts" / "artifacts" / "training_status.json"
+TRAIN_LOCK_FILE = REPO_ROOT / "training" / ".train_lock"
+TRAIN_APPROVALS_FILE = REPO_ROOT / "training" / "approvals.json"
 
 class _RunRequest(BaseModel):
     pdf_rel: str
@@ -2220,6 +2222,17 @@ def _run_pipeline_subprocess(pdf_rel: str, offline: bool) -> dict:
     status = {"status": "running", "pdf_rel": pdf_rel, "offline": offline, "started_at": started}
     _write_json(RUN_STATUS_FILE, status)
     try:
+        # serialize pipeline runs to reduce contention and resource spikes
+        plock = REPO_ROOT / "scripts" / "artifacts" / ".pipeline_lock"
+        if plock.exists():
+            status.update({"status": "busy", "message": "another run is active"})
+            _write_json(RUN_STATUS_FILE, status)
+            return status
+        try:
+            plock.parent.mkdir(parents=True, exist_ok=True)
+            plock.write_text(started)
+        except Exception:
+            pass
         results_dir = REPO_ROOT / "data" / "results" / "pipeline"
         results_dir.mkdir(parents=True, exist_ok=True)
         cmd = [
@@ -2251,6 +2264,11 @@ def _run_pipeline_subprocess(pdf_rel: str, offline: bool) -> dict:
             pass
     except Exception as e:
         status.update({"status": "failed", "error": str(e)})
+    finally:
+        try:
+            plock.unlink(missing_ok=True)  # type: ignore[arg-type]
+        except Exception:
+            pass
     _write_json(RUN_STATUS_FILE, status)
     return status
 
@@ -2259,6 +2277,14 @@ def _train_background() -> dict:
     status = {"status": "running", "started_at": started}
     _write_json(TRAIN_STATUS_FILE, status)
     try:
+        # Promotion/training lock to avoid races
+        TRAIN_LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
+        if TRAIN_LOCK_FILE.exists():
+            # Another training in progress
+            status.update({"status": "busy", "message": "training lock present"})
+            _write_json(TRAIN_STATUS_FILE, status)
+            return status
+        TRAIN_LOCK_FILE.write_text(started)
         # Export samples
         cmd1 = [sys.executable, str(REPO_ROOT / "training/scripts/export_training_samples.py")]
         # Train calibrator
@@ -2270,6 +2296,12 @@ def _train_background() -> dict:
         status.update({"status": "completed" if ok else "failed", "ended_at": ended, "rc_export": rc1, "rc_train": rc2})
     except Exception as e:
         status.update({"status": "failed", "error": str(e)})
+    finally:
+        try:
+            if TRAIN_LOCK_FILE.exists():
+                TRAIN_LOCK_FILE.unlink()
+        except Exception:
+            pass
     _write_json(TRAIN_STATUS_FILE, status)
     return status
 
@@ -2307,6 +2339,40 @@ def api_train_status():
         return {"status": "idle"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to read training status: {e}")
+
+class _TrainApproval(BaseModel):
+    version: str
+    approved_by: str | None = None
+
+@app.post("/api/train/approve")
+def api_train_approve(body: _TrainApproval):
+    try:
+        approvals = []
+        if TRAIN_APPROVALS_FILE.exists():
+            try:
+                approvals = json.loads(TRAIN_APPROVALS_FILE.read_text())
+                if not isinstance(approvals, list):
+                    approvals = []
+            except Exception:
+                approvals = []
+        entry = {
+            "version": body.version,
+            "approved_by": body.approved_by,
+            "approved_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        }
+        approvals.append(entry)
+        TRAIN_APPROVALS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        TRAIN_APPROVALS_FILE.write_text(json.dumps(approvals, indent=2))
+        # Reflect latest approval in training status for UI convenience
+        try:
+            status = json.loads(TRAIN_STATUS_FILE.read_text()) if TRAIN_STATUS_FILE.exists() else {}
+            status["last_approved_version"] = body.version
+            _write_json(TRAIN_STATUS_FILE, status)
+        except Exception:
+            pass
+        return {"ok": True, "approved": body.version, "path": str(TRAIN_APPROVALS_FILE)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to record approval: {e}")
 
 # -----------------------------
 # PDF upload → run orchestration (alpha)
@@ -2412,6 +2478,36 @@ def api_annotations(run_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Annotations failed: {e}")
 
+@app.get("/api/annotations/merged")
+def api_annotations_merged(run_id: str):
+    try:
+        base = api_annotations(run_id)
+        run_dir = RUNS_DIR / run_id
+        cur_path = run_dir / "curated.json"
+        if cur_path.exists():
+            try:
+                cur = json.loads(cur_path.read_text())
+            except Exception:
+                cur = {}
+            cur_secs = {str(x.get("id") or x.get("object_id") or ""): x for x in (cur.get("sections") or [])}
+            cur_tabs = {str(x.get("object_id") or x.get("id") or ""): x for x in (cur.get("tables") or [])}
+            cur_figs = {str(x.get("figure_id") or x.get("object_id") or x.get("id") or ""): x for x in (cur.get("figures") or [])}
+            for s in base.get("sections", []) or []:
+                sid = str(s.get("id") or "")
+                if sid and sid in cur_secs and cur_secs[sid].get("title"):
+                    s["title"] = cur_secs[sid].get("title")
+                for t in s.get("tables") or []:
+                    key = str(t.get("object_id") or "")
+                    if key and key in cur_tabs and (cur_tabs[key].get("bbox") or cur_tabs[key].get("rect")):
+                        t["bbox"] = cur_tabs[key].get("bbox") or cur_tabs[key].get("rect")
+                for f in s.get("figures") or []:
+                    key = str(f.get("figure_id") or f.get("object_id") or "")
+                    if key and key in cur_figs and (cur_figs[key].get("bbox") or cur_figs[key].get("rect")):
+                        f["bbox"] = cur_figs[key].get("bbox") or cur_figs[key].get("rect")
+        return {"ok": True, "data": base}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
 # -----------------------------
 # Save curated/blesed annotations (alpha)
 # -----------------------------
@@ -2448,14 +2544,15 @@ def api_export_arango(run_id: str, db: str = "extractor", url: str = "http://127
             "--db", db,
             "--url", url,
         ]
-        p = subprocess.run(cmd)
+        p = subprocess.run(cmd, capture_output=True, text=True)
+        summary_path = Path("arango_export") / f"{run_id}_summary.json"
         # Start background FAISS-KNN clustering + LLM-verified rationale if available
         try:
             subprocess.Popen([sys.executable, str(REPO_ROOT / "scripts/arango/faiss_cluster.py"), "--run-id", run_id, "--db", db, "--url", url])
             subprocess.Popen([sys.executable, str(REPO_ROOT / "scripts/arango/verify_rationale.py"), "--run-id", run_id, "--db", db, "--url", url])
         except Exception:
             pass
-        return {"ok": p.returncode == 0, "returncode": p.returncode}
+        return {"ok": p.returncode == 0, "returncode": p.returncode, "summary_path": str(summary_path) if summary_path.exists() else None, "stdout": p.stdout[-4000:] if p.stdout else None, "stderr": p.stderr[-4000:] if p.stderr else None}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Export failed: {e}")
 # Upload & runs directories (alpha)

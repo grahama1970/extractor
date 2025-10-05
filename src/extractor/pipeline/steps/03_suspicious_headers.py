@@ -195,8 +195,13 @@ async def verify_header_with_llm(image_b64: str, context_text: str, model: str, 
             pass
     sid = os.getenv("LITELLM_SESSION_ID") or get_run_id()
     # Enforce per-item timeout via litellm timeout param and an outer watchdog
+    # Deterministic: force temp=0 by passing per-item kwargs
+    det = os.getenv("PIPELINE_DETERMINISTIC", "0").lower() in {"1","true","yes","y"}
+    kwargs = {"timeout": item_timeout}
+    if det:
+        kwargs["temperature"] = 0
     results = await litellm_call(
-        prompts=[{"model": model, "messages": messages, "kwargs": {"timeout": item_timeout}}],
+        prompts=[{"model": model, "messages": messages, "kwargs": kwargs}],
         wrap_json=True,
         concurrency=1,
         desc="verify header",
@@ -1423,4 +1428,3 @@ def debug_bundle(
 
 if __name__ == "__main__":
     build_cli()()
-from loguru import logger

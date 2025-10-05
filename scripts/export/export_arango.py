@@ -92,6 +92,8 @@ def main():
     sections = load_json(ctx.stages / "04_section_builder" / "json_output" / "04_sections.json")
     tables = load_json(ctx.stages / "05_table_extractor" / "json_output" / "05_tables.json")
     figures = load_json(ctx.stages / "06_figure_extractor" / "json_output" / "06_figures.json")
+    # Optional curated overlay
+    curated = load_json(Path("data/runs") / ctx.run_id / "curated.json")
     # fallbacks
     doc_id = (
         sections.get("doc_id")
@@ -123,11 +125,16 @@ def main():
     else:
         col_docs.insert(doc_record)
 
-    # Upsert sections
+    # Build curated lookup maps by id/object_id
+    cur_sections = {str(x.get("id") or x.get("object_id") or ""): x for x in (curated.get("sections") or [])}
+    cur_tables   = {str(x.get("object_id") or x.get("id") or ""): x for x in (curated.get("tables") or [])}
+    cur_figures  = {str(x.get("figure_id") or x.get("object_id") or x.get("id") or ""): x for x in (curated.get("figures") or [])}
+
+    # Upsert sections (merge curated if match)
     sec_docs: List[Dict[str, Any]] = []
     for s in sections.get("sections", []):
         key = s.get("id") or f"sec_{s.get('level','0')}_{s.get('page',0)}_{len(sec_docs)+1}"
-        sec_docs.append({
+        out = {
             "_key": key,
             "doc_id": doc_id,
             "object_id": key,
@@ -135,35 +142,52 @@ def main():
             "level": s.get("level"),
             "page": s.get("page"),
             "bbox": s.get("bbox") or s.get("rect"),
-        })
+        }
+        if key in cur_sections:
+            cs = cur_sections[key]
+            out["title"] = cs.get("title", out["title"])
+            out["page"] = cs.get("page", out["page"])
+            out["bbox"] = cs.get("bbox") or cs.get("rect") or out["bbox"]
+        sec_docs.append(out)
     upsert_docs(col_secs, sec_docs, "_key")
 
     # Upsert tables
     tab_docs: List[Dict[str, Any]] = []
     for t in tables.get("tables", []):
         key = t.get("object_id") or f"table_p{t.get('page_index',0):03d}_t{t.get('table_index',0):02d}"
-        tab_docs.append({
+        out = {
             "_key": key,
             "doc_id": doc_id,
             "object_id": key,
             "page": t.get("page_index"),
             "bbox": t.get("bbox"),
             "rank_features": (t.get("fusion") or {}).get("rank_features"),
-        })
+        }
+        if key in cur_tables:
+            ct = cur_tables[key]
+            out["page"] = ct.get("page", out["page"])
+            out["bbox"] = ct.get("bbox") or ct.get("rect") or out["bbox"]
+        tab_docs.append(out)
     upsert_docs(col_tabs, tab_docs, "_key")
 
     # Upsert figures
     fig_docs: List[Dict[str, Any]] = []
     for f in figures.get("figures", []):
         key = f.get("figure_id") or f"fig_p{f.get('page',0):03d}_{len(fig_docs)+1:03d}"
-        fig_docs.append({
+        out = {
             "_key": key,
             "doc_id": doc_id,
             "object_id": key,
             "page": f.get("page"),
             "bbox": f.get("bbox"),
             "section_id": f.get("section_id"),
-        })
+        }
+        if key in cur_figures:
+            cf = cur_figures[key]
+            out["page"] = cf.get("page", out["page"])
+            out["bbox"] = cf.get("bbox") or cf.get("rect") or out["bbox"]
+            out["section_id"] = cf.get("section_id", out.get("section_id"))
+        fig_docs.append(out)
     upsert_docs(col_figs, fig_docs, "_key")
 
     # contains edges: document -> sections/tables/figures

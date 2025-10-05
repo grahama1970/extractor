@@ -53,6 +53,16 @@ async function loadAnnotations() {
   ps.textContent = JSON.stringify({ counts:{ sections:j.sections?.length||0, tables:j.tables?.length||0, figures:j.figures?.length||0 } }, null, 2);
 }
 
+async function loadMergedAnnotations() {
+  const ps = document.getElementById('pipeline-status');
+  const runId = (ps.textContent.match(/"run_id"\s*:\s*"([^"]+)"/) || [])[1];
+  if (!runId) { ps.textContent = 'No run_id found in status. Click Status first.'; return; }
+  const r = await fetch(`/api/annotations/merged?run_id=${encodeURIComponent(runId)}`);
+  const j = await r.json();
+  const data = j.data || {};
+  ps.textContent = JSON.stringify({ merged:true, counts:{ sections:data.sections?.length||0, tables:data.tables?.length||0, figures:data.figures?.length||0 } }, null, 2);
+}
+
 async function exportArango() {
   const ps = document.getElementById('pipeline-status');
   const runId = (ps.textContent.match(/"run_id"\s*:\s*"([^"]+)"/) || [])[1];
@@ -67,6 +77,7 @@ document.getElementById('btn-run-pipeline')?.addEventListener('click', runPipeli
 document.getElementById('btn-status')?.addEventListener('click', pipelineStatus);
 document.getElementById('btn-train')?.addEventListener('click', startTraining);
 document.getElementById('btn-load-annotations')?.addEventListener('click', loadAnnotations);
+document.getElementById('btn-load-merged')?.addEventListener('click', loadMergedAnnotations);
 document.getElementById('btn-export-arango')?.addEventListener('click', exportArango);
 
 // initial

@@ -1367,6 +1367,9 @@ async def reflow_section_with_llm(
                         }
                     else:
                         call_params["response_format"] = {"type": "json_object"}
+            # Deterministic guard: force temperature=0
+            if os.getenv("PIPELINE_DETERMINISTIC", "0").lower() in {"1","true","yes","y"}:
+                call_params.setdefault("temperature", 0)
             results = await litellm_call(
                 [call_params],
                 wrap_json=True,
@@ -2716,17 +2719,31 @@ def run(
     else:
 
         async def run_tasks():
-            tasks = [
-                reflow_section_with_llm(
-                    s,
-                    output_dir,
-                    include_images=include_images,
-                    allow_fallback=allow_fallback,
-                    llm_timeout=llm_timeout,
-                )
-                for s in sections_to_process
-            ]
-            return await tqdm_asyncio.gather(*tasks, desc="Reflowing Sections")
+            det = os.getenv("PIPELINE_DETERMINISTIC", "0").lower() in {"1","true","yes","y"}
+            if det:
+                results_local = []
+                for s in sections_to_process:
+                    r = await reflow_section_with_llm(
+                        s,
+                        output_dir,
+                        include_images=include_images,
+                        allow_fallback=allow_fallback,
+                        llm_timeout=llm_timeout,
+                    )
+                    results_local.append(r)
+                return results_local
+            else:
+                tasks = [
+                    reflow_section_with_llm(
+                        s,
+                        output_dir,
+                        include_images=include_images,
+                        allow_fallback=allow_fallback,
+                        llm_timeout=llm_timeout,
+                    )
+                    for s in sections_to_process
+                ]
+                return await tqdm_asyncio.gather(*tasks, desc="Reflowing Sections")
 
         processed_sections = asyncio.run(run_tasks())
     logger.debug(f"processed_sections_count={len(processed_sections)}")
@@ -2743,6 +2760,55 @@ def run(
             "07:summary sections=%d paragraphs=%d tables=%d figures=%d reflow_mode=%s",
             len(processed_sections), p_count, t_count, f_count, reflow_mode,
         )
+    except Exception:
+        pass
+
+    # Curated overlay merge (if data/runs/$RUN_ID/curated.json exists)
+    try:
+        rid = os.getenv("RUN_ID") or get_run_id()
+        cur_path = Path("data/runs") / rid / "curated.json"
+        if cur_path.exists():
+            try:
+                cur = json.loads(cur_path.read_text())
+            except Exception:
+                cur = {}
+            cur_secs = {str(x.get("id") or x.get("object_id") or ""): x for x in (cur.get("sections") or [])}
+            cur_tabs = {str(x.get("object_id") or x.get("id") or ""): x for x in (cur.get("tables") or [])}
+            cur_figs = {str(x.get("figure_id") or x.get("object_id") or x.get("id") or ""): x for x in (cur.get("figures") or [])}
+            for s in processed_sections:
+                sid = str(s.get("id") or "")
+                if sid and sid in cur_secs:
+                    cs = cur_secs[sid]
+                    if cs.get("title"):
+                        s["title"] = cs.get("title")
+                    if cs.get("bbox") or cs.get("rect"):
+                        s["bbox"] = cs.get("bbox") or cs.get("rect")
+                    md = s.setdefault("metadata", {})
+                    md.setdefault("curated_overrides", {})["section"] = {k: cs.get(k) for k in ("title","bbox","rect") if cs.get(k) is not None}
+                # Merge tables
+                for t in (s.get("tables") or []):
+                    key = str(t.get("object_id") or f"table_p{t.get('page_index',0):03d}_t{t.get('table_index',0):02d}")
+                    if key in cur_tabs:
+                        ct = cur_tabs[key]
+                        if ct.get("bbox") or ct.get("rect"):
+                            t["bbox"] = ct.get("bbox") or ct.get("rect")
+                        md = t.setdefault("metadata", {})
+                        md.setdefault("curated_overrides", {})["table"] = {k: ct.get(k) for k in ("bbox","rect") if ct.get(k) is not None}
+                # Merge figures
+                for f in (s.get("figures") or []):
+                    key = str(f.get("figure_id") or f.get("object_id") or "")
+                    if key and key in cur_figs:
+                        cf = cur_figs[key]
+                        if cf.get("bbox") or cf.get("rect"):
+                            f["bbox"] = cf.get("bbox") or cf.get("rect")
+                        if cf.get("section_id"):
+                            f["section_id"] = cf.get("section_id")
+                        md = f.setdefault("metadata", {})
+                        md.setdefault("curated_overrides", {})["figure"] = {k: cf.get(k) for k in ("bbox","rect","section_id") if cf.get(k) is not None}
+            try:
+                logger.info("07:curated_overlay_applied run_id=%s", rid)
+            except Exception:
+                pass
     except Exception:
         pass
 
@@ -2799,6 +2865,8 @@ def run(
     }
 
     unified_document_payload = None
+    curated_overlay_applied = False
+    curated_counts = {"sections": 0, "tables": 0, "figures": 0}
     try:
         # Try to thread the clean PDF path through to unified document for stable id
         pdf_file_path = None
@@ -2808,11 +2876,32 @@ def run(
                 pdf_file_path = _fdata.get("source_pdf")
         except Exception:
             pdf_file_path = None
+        # If we applied curated overlay, add marker in metadata
+        try:
+            rid = os.getenv("RUN_ID") or get_run_id()
+            if (Path("data/runs") / rid / "curated.json").exists():
+                curated_overlay_applied = True
+                try:
+                    curated_counts = {
+                        "sections": len([s for s in processed_sections if s.get("metadata", {}).get("curated_overrides")]),
+                        "tables": sum(1 for s in processed_sections for t in (s.get("tables") or []) if t.get("metadata", {}).get("curated_overrides")),
+                        "figures": sum(1 for s in processed_sections for f in (s.get("figures") or []) if f.get("metadata", {}).get("curated_overrides")),
+                    }
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
         unified_document = build_unified_document_from_reflow(
             sections=processed_sections,
             source_path=str(sections_json) if sections_json else None,
             source_type=SourceType.PDF,
-            document_metadata={"source_files": source_files, "reflow_mode": reflow_mode},
+            document_metadata={
+                "source_files": source_files,
+                "reflow_mode": reflow_mode,
+                "curated_overlay_applied": curated_overlay_applied,
+                "curated_overlay_counts": curated_counts,
+            },
             pdf_file_path=pdf_file_path,
         )
         unified_document_payload = unified_document.model_dump(by_alias=True, mode="json")

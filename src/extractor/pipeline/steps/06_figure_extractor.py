@@ -86,7 +86,10 @@ VLM_MED_TIMEOUT   = int(os.getenv("VLM_MED_TIMEOUT", "28"))
 VLM_LARGE_TIMEOUT = int(os.getenv("VLM_LARGE_TIMEOUT", "40"))
 VLM_RETRY_JITTER_MAX = float(os.getenv("VLM_RETRY_JITTER_MAX", "0.25"))
 FIGURE_MAX_CONCURRENCY = int(os.getenv("FIGURE_MAX_CONCURRENCY", "4"))
+deterministic = os.getenv("PIPELINE_DETERMINISTIC", "0").lower() in {"1","true","yes","y"}
 if FIGURE_MAX_CONCURRENCY < 1:
+    FIGURE_MAX_CONCURRENCY = 1
+if deterministic:
     FIGURE_MAX_CONCURRENCY = 1
 
 
@@ -123,8 +126,8 @@ async def describe_image_with_llm(
     }
     if "gemini" not in (model or "").lower():
         params["max_tokens"] = 256
-    # light temperature default
-    params["temperature"] = 0.2
+    # temperature default; force 0 in deterministic mode
+    params["temperature"] = 0.0 if deterministic else 0.2
     sid = os.getenv("LITELLM_SESSION_ID") or get_run_id()
     out = await litellm_call([params], desc="figure_description", session_id=sid, export="results")
     r = out[0] if out else None
