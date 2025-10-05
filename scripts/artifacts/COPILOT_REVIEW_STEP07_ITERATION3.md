@@ -43,10 +43,13 @@ Clarifying Questions for Reviewers
 
 Answers (proposed; please critique)
 - 07a continuity: Keep Dice/Jaccard at 0.75. Tighten default vertical gap to 360px (env override) and add a column‑count asymmetry guard (reject if abs(len(c1)-len(c2)) > 2). Implemented.
+- Added: require next table has at least CONTINUITY_MIN_NEXT_ROWS (default 2) body rows before merging to avoid boilerplate header repeats.
 - 07b polish: Retain “no rephrase” guidance and enforce via token delta guards. New env caps PARA_NEW_TOKEN_RATIO_MAX=0.15 and PARA_TOKEN_SHRINK_RATIO_MAX=0.40; revert to original paragraph if exceeded. Implemented (with existing length‑inflation cap).
 - 07c title inference: Keep density gate 0.35 and skip inference when header row avg token length < 3 (mnemonic‑style). Implemented.
+- Added: stronger mnemonic skip rule (short uppercase tokens) gated by TABLE_TITLE_SKIP_MNEMONIC=1.
 - 07d caption refine: Add blacklist {optimal, novel, proposed}; if newly introduced, discard refinement. Implemented (conservative guard; we do not currently track original per‑figure in this loop, so we conservatively allow downstream to decide when the blacklist appears but won’t embellish here).
 - 07f Arango: Keep fail‑closed by default; add ARANGO_FAIL_OPEN=1 to continue after logging (distinct from ARANGO_IGNORE_ERRORS which fully suppresses raising). Implemented.
+- Added: retries/backoff (ARANGO_RETRY_MAX, ARANGO_RETRY_BACKOFF_MS) and soft‑OK status codes (ARANGO_STATUS_SOFT_OK); optional waitForSync via ARANGO_WAIT_FOR_SYNC.
 
 Acceptance Focus
 - No false merges across sections (test_07a_no_false_merge.py guards this).

@@ -103,7 +103,11 @@ def run(
                 index.append((sid, key))
 
         if prompts:
-            out = __import__("asyncio").run(litellm_call(prompts, wrap_json=False, concurrency=min(4, int(os.getenv("STAGE07_CONCURRENCY", "4"))), desc="07d_caption"))
+            conc = min(4, int(os.getenv("STAGE07_CONCURRENCY", "4")))
+            global_cap = os.getenv("STAGE07_GLOBAL_CONCURRENCY")
+            if global_cap and global_cap.isdigit():
+                conc = min(conc, int(global_cap))
+            out = __import__("asyncio").run(litellm_call(prompts, wrap_json=False, concurrency=conc, desc="07d_caption"))
         else:
             out = []
         for i, (sid, key) in enumerate(index):
@@ -126,7 +130,8 @@ def run(
             captions.setdefault(sid, {})[key] = cleaned
 
     outp = out_dir / "07d_figure_caption_refine.json"
-    outp.write_text(json.dumps({"figure_captions": captions}, indent=2, ensure_ascii=False))
+    deterministic = DISABLE_LLM or not bool(captions)
+    outp.write_text(json.dumps({"figure_captions": captions, "deterministic": deterministic}, indent=2, ensure_ascii=False))
     logger.success(f"07d: wrote {outp}")
 
 

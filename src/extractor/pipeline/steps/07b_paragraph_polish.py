@@ -79,7 +79,11 @@ def run(
                     "kwargs": {"temperature": 0, "top_p": 1, "timeout": 30}
                 })
         if prompts:
-            out = __import__("asyncio").run(litellm_call(prompts, wrap_json=False, concurrency=min(4, int(os.getenv("STAGE07_CONCURRENCY", "4"))), desc="07b_polish"))
+            conc = min(4, int(os.getenv("STAGE07_CONCURRENCY", "4")))
+            global_cap = os.getenv("STAGE07_GLOBAL_CONCURRENCY")
+            if global_cap and global_cap.isdigit():
+                conc = min(conc, int(global_cap))
+            out = __import__("asyncio").run(litellm_call(prompts, wrap_json=False, concurrency=conc, desc="07b_polish"))
         else:
             out = []
         results = {}
@@ -117,7 +121,8 @@ def run(
             results.setdefault(sid, {})[pid] = cleaned
 
     outp = out_dir / "07b_paragraph_polish.json"
-    outp.write_text(json.dumps({"polish": results}, indent=2, ensure_ascii=False))
+    deterministic = DISABLE_LLM or not bool(results and any(results.get(s.get("id"), {}) for s in sections))
+    outp.write_text(json.dumps({"polish": results, "deterministic": deterministic}, indent=2, ensure_ascii=False))
     logger.success(f"07b: wrote {outp}")
 
 

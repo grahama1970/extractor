@@ -113,6 +113,7 @@ def _likely_continuation(
     top_page_y_cutoff = float(os.getenv("CONTINUITY_TOP_PAGE_Y_CUTOFF", "220"))
     min_cols = int(os.getenv("CONTINUITY_MIN_COLS_JACCARD", "3"))
     max_vertical_gap = float(os.getenv("CONTINUITY_MAX_VERTICAL_GAP", "360"))  # px tightened default
+    min_next_rows = int(os.getenv("CONTINUITY_MIN_NEXT_ROWS", "2"))
     lbl1 = prev_t.get("normalized_label")
     lbl2 = next_t.get("normalized_label")
     if lbl1 and lbl2 and lbl1 == lbl2:
@@ -133,6 +134,13 @@ def _likely_continuation(
     # Header row token similarity (Dice)
     prev_cols = list(c1)
     next_cols = list(c2)
+    # Guard: require minimum rows in the next table to avoid merging into tiny boilerplate headers
+    nxt_shape = (next_t.get("pandas_metrics") or {}).get("shape") or [0, 0]
+    try:
+        if int(nxt_shape[0]) < min_next_rows:
+            return False, "next_too_small"
+    except Exception:
+        pass
     if prev_cols and next_cols:
         d = _dice(_tokenize(prev_cols), _tokenize(next_cols))
         if d >= dice_threshold and _vertical_gap_ok(prev_t, next_t, max_vertical_gap):
@@ -317,6 +325,7 @@ def run(
         "timestamp": __import__("datetime").datetime.now().isoformat(),
         "status": "Completed",
         "sections": list(can_sections.values()),
+        "deterministic": True,
     }
     outp = json_dir / "07a_canonical.json"
     outp.write_text(json.dumps(payload, indent=2, ensure_ascii=False))

@@ -85,7 +85,11 @@ def run(
                 index.append((sid, key))
 
         if prompts:
-            out = __import__("asyncio").run(litellm_call(prompts, wrap_json=False, concurrency=min(4, int(os.getenv("STAGE07_CONCURRENCY", "4"))), desc="07c_table_title"))
+            conc = min(4, int(os.getenv("STAGE07_CONCURRENCY", "4")))
+            global_cap = os.getenv("STAGE07_GLOBAL_CONCURRENCY")
+            if global_cap and global_cap.isdigit():
+                conc = min(conc, int(global_cap))
+            out = __import__("asyncio").run(litellm_call(prompts, wrap_json=False, concurrency=conc, desc="07c_table_title"))
         else:
             out = []
         for i, (sid, key) in enumerate(index):
@@ -93,7 +97,8 @@ def run(
             titles.setdefault(sid, {})[key] = (content or "").strip()
 
     outp = out_dir / "07c_table_title_infer.json"
-    outp.write_text(json.dumps({"table_titles": titles}, indent=2, ensure_ascii=False))
+    deterministic = DISABLE_LLM or not bool(titles)
+    outp.write_text(json.dumps({"table_titles": titles, "deterministic": deterministic}, indent=2, ensure_ascii=False))
     logger.success(f"07c: wrote {outp}")
 
 
