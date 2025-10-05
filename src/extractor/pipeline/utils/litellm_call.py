@@ -128,7 +128,10 @@ class CallResult:
 # Provider-specific sanitization
 # -----------------------------------------------------------------------------
 def _sanitize_kwargs_for_provider(model: str, kwargs: Dict[str, _Any]) -> Dict[str, _Any]:
-    """Return kwargs unchanged — rely on litellm.drop_params for provider-specific cleanup."""
+    """Provider-agnostic defaults for determinism; provider cleanup still done by litellm."""
+    kwargs = dict(kwargs or {})
+    kwargs.setdefault("temperature", 0)
+    kwargs.setdefault("top_p", 1)
     return kwargs
 
 

@@ -514,8 +514,9 @@ async def reflow_section_with_llm(
             )
         )
 
-        # Build textual context
-        context_text = build_section_context_text(section_data)
+        # Build textual context and trim for primary attempt
+        context_text_full = build_section_context_text(section_data)
+        context_text = _trim_context(context_text_full, CONTEXT_TRIM_CHARS)
         try:
             # Optional context trim for initial warm-up with providers that can stall on very long first calls
             trim_env = os.getenv("STAGE07_TRIM_CHARS")
@@ -731,10 +732,15 @@ async def reflow_section_with_llm(
         # Limit context size for GPT-5 stability
         if "gpt-5" in (LLM_MODEL or "").lower():
             context_text = context_text[:3000]
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_content},
-        ]
+        # Build SYSTEM + USER (text first) + images after
+        sys_text = system_prompt if not os.getenv("STAGE07_FORCE_MINIMAL_CALL") else "You output ONLY JSON."
+        user_text_part = {
+            "role": "user",
+            "content": [{"type": "text", "text": build_user_guard_text(section_data, context_text)}],
+        }
+        if include_images and supports_vision and image_blocks:
+            user_text_part["content"].extend(image_blocks)
+        messages = [{"role": "system", "content": sys_text}, user_text_part]
 
         # Attach images for Chat Completions (data URL parts)
         if include_images:
@@ -1102,6 +1108,8 @@ async def reflow_section_with_llm(
                 "messages": messages,
                 **extras,
                 "timeout": llm_timeout,
+                "temperature": 0,
+                "top_p": 1,
             }
             # Reduce variability
             call_params["temperature"] = 0
@@ -1186,6 +1194,9 @@ async def reflow_section_with_llm(
                 pass
 
             # Run strict call via litellm_call without mutating global drop_params
+            # Prefer json_object response_format for OpenAI-compatible proxies (skip for Gemini unless forced)
+            if "gemini" not in (LLM_MODEL or "").lower():
+                call_params["response_format"] = {"type": "json_object"}
             results = await litellm_call(
                 [call_params],
                 wrap_json=True,
@@ -1220,6 +1231,43 @@ async def reflow_section_with_llm(
         except Exception:
             content = None
         if not isinstance(content, str) or not content.strip():
+            # Single retry: compact guard, trimmed text, images optionally disabled
+            try:
+                trimmed_retry_text = _trim_context(context_text_full, RETRY_TRIM_CHARS)
+                retry_text_part = {
+                    "role": "user",
+                    "content": [{"type": "text", "text": "(COMPACT RETRY) " + build_user_guard_text(section_data, trimmed_retry_text)}],
+                }
+                if include_images and supports_vision and image_blocks and not RETRY_DISABLE_IMAGES:
+                    retry_text_part["content"].extend(image_blocks[:1])
+                retry_messages = [
+                    {"role": "system", "content": PRIMARY_SYSTEM_PROMPT},
+                    retry_text_part,
+                ]
+                retry_params = {
+                    "model": LLM_MODEL,
+                    "messages": retry_messages,
+                    "timeout": llm_timeout,
+                    "temperature": 0,
+                    "top_p": 1,
+                    "cache": {"no-cache": True},
+                }
+                if "gemini" not in (LLM_MODEL or "").lower():
+                    retry_params["response_format"] = {"type": "json_object"}
+                retry_res = await litellm_call(
+                    [retry_params],
+                    wrap_json=True,
+                    concurrency=1,
+                    desc="Reflow Section (retry)",
+                    session_id=sid,
+                    export="results",
+                )
+                r_retry = retry_res[0] if retry_res else None
+                content_retry = r_retry.content if r_retry else ""
+                if isinstance(content_retry, str) and content_retry.strip():
+                    content = content_retry
+            except Exception:
+                pass
             # Attempt 2 (strict-compact): reduce context + simplified guard to improve provider reliability
             try:
                 # Build compact instruction
@@ -1766,6 +1814,7 @@ async def reflow_section_with_llm(
         try:
             md = out.setdefault("metadata", {})
             md["parse_strategy"] = parse_strategy
+            md["reflow_attempts"] = 1
         except Exception:
             pass
         return out
@@ -2789,3 +2838,51 @@ def build_reflow_request_messages(
             {"role": "system", "content": system_text},
             {"role": "user", "content": parts},
         ]
+# ---------------------------
+# Prompt & Retry Configuration
+# ---------------------------
+FIRST_TOKEN_FRACTION = float(os.getenv("STAGE07_FIRST_TOKEN_FRACTION", "0.7"))
+CONTEXT_TRIM_CHARS = int(os.getenv("STAGE07_CONTEXT_TRIM_CHARS", "8000"))
+RETRY_TRIM_CHARS = int(os.getenv("STAGE07_RETRY_TRIM_CHARS", "2000"))
+RETRY_DISABLE_IMAGES = os.getenv("STAGE07_RETRY_DISABLE_IMAGES", "1").lower() in {"1","true","yes","y"}
+
+PRIMARY_SYSTEM_PROMPT = (
+    "You are a strict JSON reflow engine.\n"
+    "Return exactly ONE JSON object with keys: reflowed_json, ocr_corrections, improvements_made, summary.\n"
+    "NO code fences, NO prose outside JSON, NO additional top-level keys.\n"
+    "Data integrity:\n"
+    "- Do NOT alter table cell text (only collapse internal whitespace).\n"
+    "- Preserve figure image_ref and concise caption.\n"
+    "reflowed_json.blocks only uses: heading, paragraph, list, table, figure.\n"
+    "Table block: {type:'table', title|null, columns[], rows[][], confidence{status,density,source}, image_refs?}\n"
+    "Figure block: {type:'figure', title|null, caption|null, image_ref:string}\n"
+    "Do not invent data not present in context."
+)
+
+def _trim_context(raw: str, limit: int) -> str:
+    if not raw:
+        return ""
+    return raw if len(raw) <= limit else raw[:limit] + " ..."
+
+def build_user_guard_text(section_meta: Dict[str, Any], truncated_text: str) -> str:
+    return (
+        "Return ONLY one JSON object. Required top-level keys: reflowed_json, ocr_corrections, "
+        "improvements_made, summary. Do not wrap in code fences.\n\n"
+        "Section Summary:\n"
+        f"title: \"{sanitize_text(section_meta.get('title','Untitled'))}\"\n"
+        f"pages: {section_meta.get('page_start')}-{section_meta.get('page_end')}\n"
+        f"tables: {len(section_meta.get('tables',[]))}\n"
+        f"figures: {len(section_meta.get('figures',[]))}\n\n"
+        "Source Text (truncated):\n"
+        f"{truncated_text}\n\n"
+        "JSON shape hints:\n"
+        "reflowed_json = { \"title\": string, \"blocks\": [] }\n"
+        "blocks = heading|paragraph|list|table|figure (ordered)\n"
+        "heading = { \"type\":\"heading\", \"text\": string }\n"
+        "paragraph = { \"type\":\"paragraph\", \"text\": string }\n"
+        "list = { \"type\":\"list\", \"style\":\"bulleted|numbered\", \"items\":[string,...] }\n"
+        "table = { \"type\":\"table\", \"title\":string|null, \"columns\":[string,...], \"rows\":[[string|number|null,...],...], "
+        "\"confidence\":{\"status\":\"high|medium|low\",\"density\":number|null,\"source\":\"camelot+pandas\"}, \"image_refs\":[string,...]? }\n"
+        "figure = { \"type\":\"figure\", \"title\":string|null, \"caption\":string|null, \"image_ref\":string }\n\n"
+        "Return ONLY the JSON object."
+    )
