@@ -54,6 +54,40 @@ from extractor.pipeline.utils.model_params import (
 from extractor.pipeline.utils.vision import preflight_vision_support
 from extractor.pipeline.utils.text_utils import sanitize_text
 from extractor.pipeline.utils.unified_conversion import build_unified_document_from_reflow
+# Ensure _trim_context is defined before any runtime use (some branches call it early)
+def _trim_context(raw: str, limit: int) -> str:
+    if not raw:
+        return ""
+    try:
+        return raw if len(raw) <= limit else raw[:limit] + " ..."
+    except Exception:
+        return str(raw)[:limit] + " ..."
+
+# Early defaults for trim constants to avoid NameError in early branches
+import os as _os
+try:
+    CONTEXT_TRIM_CHARS
+except NameError:  # pragma: no cover - define default if not yet declared
+    CONTEXT_TRIM_CHARS = int(_os.getenv("STAGE07_CONTEXT_TRIM_CHARS", "8000"))
+try:
+    RETRY_TRIM_CHARS
+except NameError:  # pragma: no cover
+    RETRY_TRIM_CHARS = int(_os.getenv("STAGE07_RETRY_TRIM_CHARS", "2000"))
+
+def build_user_guard_text(section_meta: Dict[str, Any], truncated_text: str) -> str:
+    """Early-safe fallback for guard text; real definition later may override."""
+    try:
+        from extractor.pipeline.utils.text_utils import sanitize_text as _sanitize
+    except Exception:
+        _sanitize = lambda s: s  # type: ignore
+    title = _sanitize(section_meta.get("title", "Untitled"))
+    page_start = section_meta.get("page_start")
+    page_end = section_meta.get("page_end")
+    return (
+        "Return ONLY one JSON object with keys: reflowed_json, ocr_corrections, improvements_made, summary.\n\n"
+        f"Section Summary:\ntitle: \"{title}\"\npages: {page_start}-{page_end}\n\n"
+        "Source Text (truncated):\n" + str(truncated_text)
+    )
 VISION_SELECTIVE = os.getenv("STAGE07_VISION_SELECTIVE", "0").lower() in ("1","true","yes")
 CANONICAL_ORDER = os.getenv("STAGE07_CANONICAL_ORDER", "0").lower() in ("1","true","yes")
 from extractor.core.schema.unified_document import SourceType
@@ -1620,15 +1654,30 @@ async def reflow_section_with_llm(
                 "Stage 07: LLM returned invalid or unparsable JSON. Inspect response payloads and consider increasing STAGE07_MAX_TOKENS."
             )
 
-        # If model omitted wrapper but returned plausible block object, auto-wrap once
-        if isinstance(result, dict) and "reflowed_json" not in result and "blocks" in result and "title" in result:
+        # If model omitted wrapper but returned plausible blocks, auto-wrap once
+        if isinstance(result, dict) and "reflowed_json" not in result and "blocks" in result:
+            rj = result
+            if "title" not in rj:
+                rj = {**rj, "title": section_data.get("title") or "Untitled"}
             result = {
-                "reflowed_json": result,
+                "reflowed_json": rj,
+                "ocr_corrections": result.get("ocr_corrections", {}),
+                "improvements_made": result.get("improvements_made", ""),
+                "summary": result.get("summary", ""),
+            }
+            parse_strategy = f"{parse_strategy}+auto_wrap_blocks"
+        elif isinstance(result, list):
+            # Rare: model returned an array of blocks directly
+            result = {
+                "reflowed_json": {
+                    "title": section_data.get("title") or "Untitled",
+                    "blocks": result,
+                },
                 "ocr_corrections": {},
                 "improvements_made": "",
                 "summary": "",
             }
-            parse_strategy = f"{parse_strategy}+auto_wrapper"
+            parse_strategy = f"{parse_strategy}+auto_wrap_list"
 
         # Enforce schema presence; do not accept wrappers or missing keys
         if SCHEMA_MODE == "reflow_json":
@@ -2322,6 +2371,20 @@ def run(
     Reflows document sections using multimodal context from previous stages.
     """
     console.print("[bold green]Starting Section Reflow (Stage 07)[/bold green]")
+    # Environment snapshot to diagnose hangs/misconfig (redacted keys)
+    try:
+        from extractor.pipeline.utils.env_debug import log_env_snapshot
+        log_env_snapshot(
+            "07_reflow_section",
+            {
+                "STAGE07_MODEL": os.getenv("STAGE07_MODEL"),
+                "STAGE07_TIMEOUT": os.getenv("STAGE07_TIMEOUT"),
+                "STAGE07_INCLUDE_FIGURES": os.getenv("STAGE07_INCLUDE_FIGURES"),
+                "MAX_CONCURRENT_LLM_CALLS": os.getenv("MAX_CONCURRENT_LLM_CALLS"),
+            },
+        )
+    except Exception:
+        pass
     try:
         logger.info(
             "07:start sections_json=%s tables_json=%s figures_json=%s annotations_json=%s model=%s timeout=%s include_images=%s skip_llm=%s",

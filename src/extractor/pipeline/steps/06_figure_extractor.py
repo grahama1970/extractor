@@ -18,6 +18,7 @@ except ImportError:
 import asyncio
 from pathlib import Path
 from loguru import logger
+from extractor.pipeline.utils.env_debug import log_env_snapshot
 import hashlib
 from extractor.pipeline.utils.pipeline_event_logger import log_stage_event
 import sys
@@ -349,6 +350,18 @@ def run(
 ):
     """Extracts figures, describes them, and associates them with sections."""
     console.print(f"[green]Extracting figures from: {stage_02_json.name}[/green]")
+    # Log environment snapshot for debugging hangs / provider config
+    try:
+        log_env_snapshot(
+            "06_figure_extractor",
+            {
+                "FIGURE_MAX_CONCURRENCY": os.getenv("FIGURE_MAX_CONCURRENCY", "4"),
+                "STAGE06_MODEL": os.getenv("STAGE06_MODEL"),
+                "LITELLM_VLM_MODEL": os.getenv("LITELLM_VLM_MODEL"),
+            },
+        )
+    except Exception:
+        pass
     try:
         log_stage_event("06_figure_extractor", "start", stage02=str(stage_02_json))
     except Exception:

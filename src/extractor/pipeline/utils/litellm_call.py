@@ -62,6 +62,14 @@ except ImportError:  # pragma: no cover
 logger.remove()
 _log_level = "DEBUG" if os.getenv("LITELLM_DEBUG", "").lower() in {"1","true","yes","y"} else "WARNING"
 logger.add(sys.stderr, level=_log_level)
+# File sink (persist per-run) for diagnosing provider hangs / retry behavior
+try:
+    from pathlib import Path as _P
+    _log_dir = _P("data/results/pipeline/logs")
+    _log_dir.mkdir(parents=True, exist_ok=True)
+    logger.add(str(_log_dir / "litellm_call.log"), level=_log_level, rotation="2 MB", retention="7 days")
+except Exception:
+    pass
 
 # Best-effort .env loading; no exceptions
 _ = load_dotenv(find_dotenv(usecwd=True) or None)
@@ -70,6 +78,14 @@ _ = load_dotenv(find_dotenv(usecwd=True) or None)
 if (os.getenv("CHUTES_API_BASE") and os.getenv("CHUTES_API_KEY")):
     os.environ.setdefault("OPENAI_BASE_URL", os.getenv("CHUTES_API_BASE", "https://llm.chutes.ai/v1"))
     os.environ.setdefault("OPENAI_API_KEY", os.getenv("CHUTES_API_KEY"))
+    try:
+        logger.info(
+            "litellm_call: bridging CHUTES->OPENAI base_url=%s key_present=%s",
+            os.getenv("OPENAI_BASE_URL"),
+            bool(os.getenv("OPENAI_API_KEY")),
+        )
+    except Exception:
+        pass
 
 
 DEFAULT_MODEL = (
@@ -346,6 +362,16 @@ async def litellm_call(
         prompts = [prompts]
 
     base_model = default_model or DEFAULT_MODEL
+    try:
+        logger.debug(
+            "litellm_call: start desc=%s prompts=%d base_model=%s max_parallel_default=%s",
+            desc,
+            len(prompts) if isinstance(prompts, list) else 1,
+            base_model,
+            DEFAULT_MAX_PARALLEL,
+        )
+    except Exception:
+        pass
     if attach_session_to_provider is None:
         attach_session_to_provider = DEFAULT_ATTACH_SESSION
 
@@ -472,9 +498,10 @@ async def litellm_call(
     except Exception:
         retry_after_param = 0.5
 
+    # Router: disable internal retries; we'll handle retries with tenacity for precise control
     router = Router(
         model_list=[_router_entry(m) for m in unique_models],
-        num_retries=num_retries,
+        num_retries=0,
         default_max_parallel_requests=default_max_parallel_requests,
         timeout=router_timeout,
         retry_after=retry_after_param,
@@ -543,65 +570,74 @@ async def litellm_call(
             prepared = await _prepare_messages_image_urls(messages, image_cache_dir=image_cache_dir)
             req = CallRequest(model=model, messages=_sanitize_messages_for_return(prepared), kwargs=kwargs or None)
             async with sem:
+                # Tenacity-backed retry logic
+                from tenacity import AsyncRetrying, retry_if_exception_type, stop_after_attempt, wait_exponential_jitter, before_sleep_log
+
+                class RetryableError(Exception):
+                    pass
+
+                async def _attempt_call(current_model: str):
+                    t0 = time.perf_counter() if 'time' in globals() else None
+                    resp = await router.acompletion(model=current_model, messages=prepared, **kwargs)
+                    if t0 is not None and os.getenv("ENABLE_WARM_START_METRICS", "0") in ("1","true","yes"):
+                        _ = (time.perf_counter() - t0) * 1000.0
+                    return resp
+
+                # how many retry attempts (env or default)
+                attempts_max = (num_retries if num_retries is not None else DEFAULT_NUM_RETRIES) or 0
+                current_model = model
                 tried_fallback = False
-                attempt_model = model
-                attempts = 0
-                while True:
-                    try:
-                        t0 = time.perf_counter() if 'time' in globals() else None
-                        async def _once():
-                            return await router.acompletion(model=attempt_model, messages=prepared, **kwargs)
-                        timeout_s = (kwargs.get("timeout") or request_timeout or 45) + 10
-                        resp = await asyncio.wait_for(_once(), timeout=timeout_s)
-                        if t0 is not None and os.getenv("ENABLE_WARM_START_METRICS", "0") in ("1","true","yes"):
-                            dt = (time.perf_counter() - t0) * 1000.0
-                            try:
-                                import statistics as _stats  # noqa
-                            except Exception:
-                                pass
-                        content = format_answer_with_logging(idx, resp, wrap_json, prompts[idx], logger)
-                        return CallResult(idx, req, resp, None, content)
-                    except BaseException as e:
-                        etype = type(e).__name__
-                        status_str = getattr(getattr(e, "response", None), "status_code", None)
-                        attempts += 1
-                        # 429 handling with Retry-After
-                        if status_str == 429:
-                            headers = getattr(getattr(e, "response", None), "headers", {}) or {}
-                            ra = headers.get("Retry-After") if isinstance(headers, dict) else None
-                            delay = _coerce_retry_after(ra)
-                            await asyncio.sleep(delay)
-                            if attempts <= (num_retries or 0):
-                                continue
-                            return CallResult(idx, req, None, e, None)
-                        fast_fail = (
-                            "AuthenticationError" in etype
-                            or "NotFound" in etype
-                            or status_str in (401, 403, 404)
-                        )
-                        if fast_fail and not tried_fallback:
-                            fb = os.getenv("LITELLM_LARGE_VLLM_MODEL") or os.getenv("LITELLM_LARGE_VLM_MODEL") or "openai/deepseek-ai/DeepSeek-V3-0324"
-                            if fb and fb != attempt_model:
-                                logger.warning(f"Model '{attempt_model}' failed with {etype}; retrying once with fallback '{fb}'.")
-                                attempt_model = fb
-                                tried_fallback = True
-                                # attempt to register fallback if not in router already
+
+                async for attempt in AsyncRetrying(
+                    retry=retry_if_exception_type(RetryableError),
+                    stop=stop_after_attempt(max(1, attempts_max + 1)),
+                    wait=wait_exponential_jitter(initial=0.5, max=10),
+                    before_sleep=before_sleep_log(logger, "WARNING"),
+                ):
+                    with attempt:
+                        try:
+                            timeout_s = (kwargs.get("timeout") or request_timeout or 45) + 10
+                            resp = await asyncio.wait_for(_attempt_call(current_model), timeout=timeout_s)
+                            content = format_answer_with_logging(idx, resp, wrap_json, prompts[idx], logger)
+                            return CallResult(idx, req, resp, None, content)
+                        except BaseException as e:
+                            etype = type(e).__name__
+                            status = getattr(getattr(e, "response", None), "status_code", None)
+                            # 429 with Retry-After → obey then retry
+                            if status == 429:
+                                headers = getattr(getattr(e, "response", None), "headers", {}) or {}
+                                ra = headers.get("Retry-After") if isinstance(headers, dict) else None
+                                delay = _coerce_retry_after(ra)
                                 try:
-                                    if all(fb != entry.get("model_name") for entry in getattr(router, "model_list", [])):
-                                        router.model_list.append(_router_entry(fb))
+                                    logger.warning("litellm_call: 429 retry-after=%s sleeping=%ss model=%s", ra, delay, current_model)
                                 except Exception:
                                     pass
-                                continue
-                        logger.exception("litellm_call task failed (idx=%s, model=%s fast_fail=%s)", idx, attempt_model, fast_fail)
-                        # Generic 5xx: limited retries with backoff
-                        try:
-                            if str(status_str).startswith("5") and attempts <= (num_retries or 0):
-                                await asyncio.sleep(1.0 * attempts)
-                                continue
-                        except Exception:
-                            pass
-                        content = format_answer_with_logging(idx, e, wrap_json, prompts[idx], logger)
-                        return CallResult(idx, req, None, e, content)
+                                await asyncio.sleep(delay)
+                                raise RetryableError(str(e))
+                            # fast-fails (auth/404) → try single fallback once; else propagate
+                            fast_fail = ("AuthenticationError" in etype or "NotFound" in etype or status in (401,403,404))
+                            if fast_fail and not tried_fallback:
+                                fb = os.getenv("LITELLM_LARGE_VLLM_MODEL") or os.getenv("LITELLM_LARGE_VLM_MODEL") or ""
+                                if fb and fb != current_model:
+                                    logger.warning("litellm_call: fast_fail on %s; retrying once with fallback %s", current_model, fb)
+                                    current_model = fb
+                                    tried_fallback = True
+                                    try:
+                                        if all(fb != entry.get("model_name") for entry in getattr(router, "model_list", [])):
+                                            router.model_list.append(_router_entry(fb))
+                                    except Exception:
+                                        pass
+                                    raise RetryableError(str(e))
+                            # 5xx/timeouts => retryable
+                            try:
+                                if str(status).startswith("5") or isinstance(e, (asyncio.TimeoutError,)):
+                                    raise RetryableError(str(e))
+                            except Exception:
+                                pass
+                            # Otherwise, return failure
+                            logger.exception("litellm_call task failed (idx=%s, model=%s)", idx, current_model)
+                            content = format_answer_with_logging(idx, e, wrap_json, prompts[idx], logger)
+                            return CallResult(idx, req, None, e, content)
 
         tasks: List[asyncio.Task[CallResult]] = []
         for model, payload in batches.items():

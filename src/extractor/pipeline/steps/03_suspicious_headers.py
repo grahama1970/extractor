@@ -1165,7 +1165,25 @@ def run(
     except Exception:
         expected_clean_name = None
     candidates = sorted(pdf_dir.glob("*_clean.pdf"))
-    if expected_clean_name:
+    # Prefer an exact basename match when possible to avoid picking the wrong document
+    preferred: Optional[Path] = None
+    try:
+        # If Stage 02 recorded the original source path, construct the expected clean name
+        with input_json.open() as f:
+            _s02 = json.load(f)
+        sp = _s02.get("source_pdf") or (_s02.get("source_files") or {}).get("sections")
+        if isinstance(sp, str) and sp:
+            base = Path(sp).stem + "_clean.pdf"
+            for p in candidates:
+                if p.name == base:
+                    preferred = p
+                    break
+    except Exception:
+        preferred = None
+
+    if preferred:
+        clean_pdf_path = preferred
+    elif expected_clean_name:
         matched = [p for p in candidates if p.name == expected_clean_name]
         if matched:
             clean_pdf_path = matched[0]
