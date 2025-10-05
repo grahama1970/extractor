@@ -95,7 +95,7 @@ def run(
                 prompts.append({
                     "model": os.getenv("LITELLM_DEFAULT_MODEL") or os.getenv("LITELLM_VLM_MODEL") or "openai/zai-org/GLM-4.5-Air",
                     "messages": [
-                        {"role": "system", "content": [{"type": "text", "text": "Refine a concise (<=20 words) figure caption; preserve identifiers/units; DO NOT add invented claims or context. If existing caption is adequate, return it unchanged. Output ONLY JSON: {\\"caption\\": string}."}]},
+                        {"role": "system", "content": [{"type": "text", "text": 'Refine a concise (<=20 words) figure caption; preserve identifiers/units; DO NOT add invented claims or context. If existing caption is adequate, return it unchanged. Output ONLY JSON: {"caption": string}.'}]},
                         {"role": "user", "content": [{"type": "text", "text": msg}]},
                     ],
                     "kwargs": {"temperature": 0, "top_p": 1, "timeout": 30}
@@ -103,16 +103,27 @@ def run(
                 index.append((sid, key))
 
         if prompts:
-            conc = min(4, int(os.getenv("STAGE07_CONCURRENCY", "4")))
+            conc = min(2, int(os.getenv("STAGE07_CONCURRENCY", "2")))
             global_cap = os.getenv("STAGE07_GLOBAL_CONCURRENCY")
             if global_cap and global_cap.isdigit():
                 conc = min(conc, int(global_cap))
-            out = __import__("asyncio").run(litellm_call(prompts, wrap_json=False, concurrency=conc, desc="07d_caption"))
+            req_timeout = float(os.getenv("STAGE07_REQUEST_TIMEOUT", "120"))
+            num_retries = int(os.getenv("STAGE07_NUM_RETRIES", "2"))
+            out = __import__("asyncio").run(litellm_call(
+                prompts,
+                wrap_json=False,
+                concurrency=conc,
+                desc="07d_caption",
+                request_timeout=req_timeout,
+                num_retries=num_retries,
+            ))
         else:
             out = []
         for i, (sid, key) in enumerate(index):
             content = out[i].content if i < len(out) and out[i] else ""
             cleaned = (content or "").strip()
+            if not cleaned:
+                raise SystemExit(f"07d: LLM returned empty caption for {sid}:{key}; aborting per failure policy")
             words = cleaned.lower().split()
             # placeholder/generic guards
             placeholder = {"figure", "img", "image"}

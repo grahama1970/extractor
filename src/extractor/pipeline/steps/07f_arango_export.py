@@ -28,7 +28,17 @@ except Exception as e:
     raise SystemExit("pip install requests required for 07f_arango_export")
 
 
-def main(reflow_json: Path, stage03_json: Path, doc_id: str, dry_run: bool = False):
+def main(
+    reflow_json: Path,
+    stage03_json: Path,
+    doc_id: str,
+    dry_run: bool = False,
+    cross_refs_json: Path | None = None,
+    requirements_json: Path | None = None,
+    entities_json: Path | None = None,
+    equations_json: Path | None = None,
+    deltas_json: Path | None = None,
+):
     reflow = json.loads(reflow_json.read_text())
     s03 = json.loads(stage03_json.read_text())
 
@@ -41,8 +51,17 @@ def main(reflow_json: Path, stage03_json: Path, doc_id: str, dry_run: bool = Fal
         user=os.getenv("ARANGO_USER", ""),
         password=os.getenv("ARANGO_PASSWORD", ""),
     )
+    extra_nodes, extra_edges = _load_semantic_layers(
+        doc_id=doc_id,
+        cross_refs_json=cross_refs_json,
+        requirements_json=requirements_json,
+        entities_json=entities_json,
+        equations_json=equations_json,
+        deltas_json=deltas_json,
+    )
     if dry_run:
         logger.info(f"[DRY RUN] Would upsert pdf_objects={len(pdf_objects)}, sections={len(sections_payload)}, blocks={len(blocks_payload)}")
+        logger.info(f"[DRY RUN] semantic nodes={sum(len(v) for v in (extra_nodes or {}).values())}, edges={sum(len(v) for v in (extra_edges or {}).values())}")
         return
     client.ensure_collections()
     client.upsert_batch("pdf_objects", pdf_objects)
@@ -50,7 +69,61 @@ def main(reflow_json: Path, stage03_json: Path, doc_id: str, dry_run: bool = Fal
     client.upsert_batch("blocks", blocks_payload)
     client.upsert_edges("section_to_pdf_object", section_edges)
     client.upsert_edges("block_to_pdf_object", block_edges)
+    # Semantic layer
+    for col, docs in (extra_nodes or {}).items():
+        client.upsert_batch(col, docs)
+    for ecol, edocs in (extra_edges or {}).items():
+        client.upsert_edges(ecol, edocs)
     logger.success("Arango export complete")
+
+def _load_json_safe(p: Path | None):
+    if not p or not p.exists():
+        return {}
+    try:
+        return json.loads(p.read_text())
+    except Exception:
+        return {}
+
+def _load_semantic_layers(*, doc_id: str, cross_refs_json: Path | None, requirements_json: Path | None, entities_json: Path | None, equations_json: Path | None, deltas_json: Path | None):
+    nodes: Dict[str, list] = {"requirements": [], "entities": [], "equations": [], "variables": [], "deltas": []}
+    edges: Dict[str, list] = {"references": [], "block_to_reference_target": [], "block_to_requirement": [], "entity_occurs_in": [], "variable_in_equation": []}
+    # Cross-refs
+    cref = _load_json_safe(cross_refs_json).get("references", [])
+    for r in cref:
+        sa = r.get("source_paragraph")
+        ta = r.get("target_anchor") or "missing"
+        edges["references"].append({"_from": f"blocks/blk::{doc_id}::{sa}", "_to": f"blocks/blk::{doc_id}::{ta}", "label": r.get("label"), "kind": r.get("kind")})
+    # Requirements
+    reqs = _load_json_safe(requirements_json).get("requirements", [])
+    for rq in reqs:
+        if rq.get("final_label") == "requirement":
+            key = rq.get("requirement_id")
+            nodes["requirements"].append({"_key": f"req::{doc_id}::{key}", "doc_id": doc_id, "requirement_id": key, "text": rq.get("text"), "section_id": rq.get("section_id"), "hash": rq.get("hash")})
+            edges["block_to_requirement"].append({"_from": f"blocks/blk::{doc_id}::{rq.get('anchor_id')}", "_to": f"requirements/req::{doc_id}::{key}"})
+    # Entities
+    ents = _load_json_safe(entities_json).get("entities", [])
+    for e in ents:
+        ek = e.get("entity_id", "ent::x::000").split("::")[-1]
+        nodes["entities"].append({"_key": f"ent::{doc_id}::{ek}", "doc_id": doc_id, "name": e.get("name"), "category": e.get("category")})
+        for occ in e.get("occurrences", []):
+            edges["entity_occurs_in"].append({"_from": f"entities/ent::{doc_id}::{ek}", "_to": f"blocks/blk::{doc_id}::{occ.get('anchor_id')}", "span": occ.get("span")})
+    # Equations & variables
+    eq_pack = _load_json_safe(equations_json)
+    for eq in eq_pack.get("equations", []):
+        ek = eq.get("equation_id", "eq::x").split("::")[-1]
+        nodes["equations"].append({"_key": f"eq::{doc_id}::{ek}", "doc_id": doc_id, "text": eq.get("text"), "section_id": eq.get("section_id")})
+    for var in eq_pack.get("variables", []):
+        vk = var.get("variable_id", "var::x").split("::")[-1]
+        nodes["variables"].append({"_key": f"var::{doc_id}::{vk}", "doc_id": doc_id, "symbol": var.get("symbol")})
+        for eqid in var.get("equations", []):
+            edges["variable_in_equation"].append({"_from": f"variables/var::{doc_id}::{vk}", "_to": f"equations/eq::{doc_id}::{eqid.split('::')[-1]}"})
+    # Deltas
+    dels = _load_json_safe(deltas_json).get("deltas", [])
+    for d in dels:
+        nodes["deltas"].append({"_key": f"delta::{doc_id}::{d.get('anchor_id')}-{d.get('change_type')}", "anchor_id": d.get("anchor_id"), "change_type": d.get("change_type"), "doc_id": doc_id})
+    nodes = {k: v for k, v in nodes.items() if v}
+    edges = {k: v for k, v in edges.items() if v}
+    return nodes, edges
 
 
 def _extract_pdf_objects(s03: dict, doc_id: str) -> List[Dict[str, Any]]:
@@ -186,6 +259,16 @@ if __name__ == "__main__":
     import typer
     t = typer.Typer()
     @t.command()
-    def run(reflow: Path = typer.Option(..., "--reflow"), stage03: Path = typer.Option(..., "--stage03"), doc_id: str = typer.Option(..., "--doc-id"), dry_run: bool = typer.Option(False, "--dry-run")):
-        main(reflow, stage03, doc_id, dry_run=dry_run)
+    def run(
+        reflow: Path = typer.Option(..., "--reflow"),
+        stage03: Path = typer.Option(..., "--stage03"),
+        doc_id: str = typer.Option(..., "--doc-id"),
+        dry_run: bool = typer.Option(False, "--dry-run"),
+        refs: Path = typer.Option(None, "--refs"),
+        requirements: Path = typer.Option(None, "--requirements"),
+        entities: Path = typer.Option(None, "--entities"),
+        equations: Path = typer.Option(None, "--equations"),
+        deltas: Path = typer.Option(None, "--deltas"),
+    ):
+        main(reflow, stage03, doc_id, dry_run=dry_run, cross_refs_json=refs, requirements_json=requirements, entities_json=entities, equations_json=equations, deltas_json=deltas)
     t()

@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import hashlib
 import os
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Iterable
 
@@ -250,7 +251,18 @@ def run(
             btype = b.get("block_type") or b.get("type")
             if btype and str(btype) == "SectionHeader":
                 continue
-            can_sections[s["id"]]["paragraphs"].append({"pid": f"p{len(can_sections[s['id']]['paragraphs'])+1}", "text": txt, "bbox": b.get("bbox"), "page": b.get("page", b.get("page_idx", 0))})
+            pid = f"p{len(can_sections[s['id']]['paragraphs'])+1}"
+            para = {
+                "pid": pid,
+                "text": txt,
+                "bbox": b.get("bbox"),
+                "page": b.get("page", b.get("page_idx", 0)),
+            }
+            # Stable paragraph anchor id
+            sid_local = s.get("id")
+            sig = f"{sid_local}|{pid}|{txt[:120]}"
+            para["anchor_id"] = "par::" + hashlib.sha256(sig.encode("utf-8", "ignore")).hexdigest()[:16]
+            can_sections[s["id"]]["paragraphs"].append(para)
 
     # Attach tables/figures
     for t in tables:
@@ -309,6 +321,24 @@ def run(
         if h03:
             base = sec.get("content_hash") or ""
             sec["content_hash"] = hashlib.sha256((base + "|03:" + h03).encode("utf-8")).hexdigest()
+        # Add anchor ids and table block hash
+        for t in sec.get("tables", []):
+            raw_id = t.get("raw_table_id") or t.get("tid") or str(id(t))
+            cols = (t.get("pandas_metrics") or {}).get("columns") or []
+            sig = f"{sid}|{raw_id}|{','.join(map(str, cols))}"
+            t["anchor_id"] = "tab::" + hashlib.sha256(sig.encode("utf-8", "ignore")).hexdigest()[:16]
+            try:
+                block_core = {
+                    "cols": cols,
+                    "rows": t.get("pandas_df") or t.get("rows") or [],
+                }
+                t["block_hash"] = hashlib.sha256(json.dumps(block_core, sort_keys=True, default=str).encode("utf-8", "ignore")).hexdigest()
+            except Exception:
+                pass
+        for f in sec.get("figures", []):
+            capcand = f.get("caption") or f.get("ai_description") or f.get("caption_candidate") or ""
+            sig = f"{sid}|{f.get('image_ref') or f.get('image_path')}|{capcand[:80]}"
+            f["anchor_id"] = "fig::" + hashlib.sha256(sig.encode("utf-8", "ignore")).hexdigest()[:16]
         # Capture prompt_source_objects: first accepted header object_id on the section's first page
         try:
             ps = int(sec_by_id[sid].get("page_start", 0))
@@ -326,6 +356,7 @@ def run(
         "status": "Completed",
         "sections": list(can_sections.values()),
         "deterministic": True,
+        "hash_component": "07a",
     }
     outp = json_dir / "07a_canonical.json"
     outp.write_text(json.dumps(payload, indent=2, ensure_ascii=False))

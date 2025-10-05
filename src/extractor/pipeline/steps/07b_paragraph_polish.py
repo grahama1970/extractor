@@ -79,11 +79,20 @@ def run(
                     "kwargs": {"temperature": 0, "top_p": 1, "timeout": 30}
                 })
         if prompts:
-            conc = min(4, int(os.getenv("STAGE07_CONCURRENCY", "4")))
+            conc = min(2, int(os.getenv("STAGE07_CONCURRENCY", "2")))
             global_cap = os.getenv("STAGE07_GLOBAL_CONCURRENCY")
             if global_cap and global_cap.isdigit():
                 conc = min(conc, int(global_cap))
-            out = __import__("asyncio").run(litellm_call(prompts, wrap_json=False, concurrency=conc, desc="07b_polish"))
+            req_timeout = float(os.getenv("STAGE07_REQUEST_TIMEOUT", "120"))
+            num_retries = int(os.getenv("STAGE07_NUM_RETRIES", "2"))
+            out = __import__("asyncio").run(litellm_call(
+                prompts,
+                wrap_json=False,
+                concurrency=conc,
+                desc="07b_polish",
+                request_timeout=req_timeout,
+                num_retries=num_retries,
+            ))
         else:
             out = []
         results = {}
@@ -92,6 +101,8 @@ def run(
         for i, (sid, pid) in enumerate(index):
             content = out[i].content if i < len(out) and out[i] else ""
             candidate = (content or "").strip()
+            if not candidate:
+                raise SystemExit(f"07b: LLM returned empty content for {sid}:{pid}; aborting per failure policy")
             try:
                 cap = int(float(os.getenv("PARA_LEN_INFLATION_CAP", "1.5")) * float(orig_len.get((sid, pid), len(candidate)) or 1))
                 if len(candidate) > cap:

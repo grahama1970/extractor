@@ -47,6 +47,9 @@ def run(
             blocks.append({
                 "type": "paragraph",
                 "text": pt,
+                "anchor_id": p.get("anchor_id"),
+                "bbox": p.get("bbox"),
+                "page_idx": p.get("page"),
                 "source": {"pages": [p.get("page")], "block_ids": [pid]},
             })
         # Tables
@@ -59,6 +62,8 @@ def run(
                 "title": title,
                 "columns": pm.get("columns") or [],
                 "rows": t.get("pandas_df") or [],
+                "anchor_id": t.get("anchor_id"),
+                "block_hash": t.get("block_hash"),
                 "confidence": {"status": "high" if (pm.get("data_density") or 0) >= 0.9 else "medium", "density": pm.get("data_density"), "source": "camelot+pandas"},
                 "image_refs": [t.get("table_image_path")] if t.get("table_image_path") else [],
                 "normalized_label": t.get("normalized_label"),
@@ -75,6 +80,7 @@ def run(
                 "caption": cap,
                 "alt": cap or "Figure",
                 "image_ref": f.get("image_ref") or f.get("image_path"),
+                "anchor_id": f.get("anchor_id"),
                 "normalized_label": f.get("normalized_label"),
                 "source": {"pages": [f.get("page")], "block_ids": [f.get("figure_id") or key]},
             })
@@ -108,6 +114,7 @@ def run(
         "status": "Completed",
         "section_count": len(out_sections),
         "reflowed_sections": out_sections,
+        "hash_component": "07e",
     }
     out_main = json_dir / "07e_reflowed.json"
     out_main.write_text(json.dumps(final, indent=2, ensure_ascii=False))

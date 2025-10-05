@@ -106,16 +106,28 @@ def run(
                 index.append((sid, key))
 
         if prompts:
-            conc = min(4, int(os.getenv("STAGE07_CONCURRENCY", "4")))
+            conc = min(2, int(os.getenv("STAGE07_CONCURRENCY", "2")))
             global_cap = os.getenv("STAGE07_GLOBAL_CONCURRENCY")
             if global_cap and global_cap.isdigit():
                 conc = min(conc, int(global_cap))
-            out = __import__("asyncio").run(litellm_call(prompts, wrap_json=False, concurrency=conc, desc="07c_table_title"))
+            req_timeout = float(os.getenv("STAGE07_REQUEST_TIMEOUT", "120"))
+            num_retries = int(os.getenv("STAGE07_NUM_RETRIES", "2"))
+            out = __import__("asyncio").run(litellm_call(
+                prompts,
+                wrap_json=False,
+                concurrency=conc,
+                desc="07c_table_title",
+                request_timeout=req_timeout,
+                num_retries=num_retries,
+            ))
         else:
             out = []
         for i, (sid, key) in enumerate(index):
             content = out[i].content if i < len(out) and out[i] else ""
-            titles.setdefault(sid, {})[key] = (content or "").strip()
+            cand = (content or "").strip()
+            if not cand:
+                raise SystemExit(f"07c: LLM returned empty title for {sid}:{key}; aborting per failure policy")
+            titles.setdefault(sid, {})[key] = cand
 
     outp = out_dir / "07c_table_title_infer.json"
     deterministic = DISABLE_LLM or not bool(titles)
