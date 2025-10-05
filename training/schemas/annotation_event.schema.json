@@ -26,7 +26,12 @@
       "properties": {
         "structure_correct": { "type": "boolean" },
         "cell_accuracy": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
-        "notes": { "type": ["string", "null"] }
+        "notes": { "type": ["string", "null"] },
+        "error_tags": {
+          "type": ["array", "null"],
+          "items": { "type": "string" },
+          "description": "Optional multi-label error tags (e.g., header_split, numeric_loss)."
+        }
       },
       "additionalProperties": true
     },
@@ -37,4 +42,3 @@
   },
   "additionalProperties": true
 }
-

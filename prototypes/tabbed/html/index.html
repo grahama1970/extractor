@@ -22,6 +22,22 @@
 
   <body>
     <div id="root"></div>
+    <section id="triage-panel" style="border:1px solid #ccc; padding:10px; margin:12px;">
+      <h2 style="margin:0 0 6px 0">Triage Queue (High Risk)</h2>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button id="refresh-triage">Refresh</button>
+        <label>Band:
+          <select id="triage-band">
+            <option value="high">high</option>
+            <option value="medium">medium</option>
+            <option value="low">low</option>
+            <option value="">(all)</option>
+          </select>
+        </label>
+      </div>
+      <div id="triage-items" style="display:flex;flex-direction:column;gap:6px;margin-top:8px;"></div>
+    </section>
     <script type="module" src="/src/main.tsx"></script>
+    <script type="module" src="/src/triage.js"></script>
   </body>
 </html>

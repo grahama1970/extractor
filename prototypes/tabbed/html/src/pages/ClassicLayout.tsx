@@ -28,7 +28,7 @@ import { ThumbnailStrip } from "@/components/ThumbnailStrip";
 import { PdfCanvas } from "@/components/PdfCanvas";
 import { loadPdf, type PdfDoc } from "@/lib/pdf";
 import { isDev } from "@/lib/env";
-import { DEFAULT_LABELS, loadLabels, saveLabel, type LabelDef } from "@/lib/labels";
+import { DEFAULT_LABELS, loadLabels, saveLabel, type LabelDef, submitLabel } from "@/lib/labels";
 
 // Types
 type Box = {
@@ -563,6 +563,33 @@ const ClassicLayout = () => {
             <Separator orientation="vertical" className="mx-2" />
             <Button data-testid="conflicts-tab" size="sm" variant="outline" onClick={()=> setConflictsOpen(v=>!v)}>Conflicts</Button>
             <Button data-testid="help-trigger" size="sm" variant="outline" title="Keyboard help (?)" onClick={()=> setShortcutsOpen(true)}>Help</Button>
+            <Button
+              data-testid="send-test-label"
+              size="sm"
+              variant="secondary"
+              onClick={async () => {
+                try {
+                  const r = await submitLabel({
+                    docId: (docRel || 'BHT_CV32A65X').replace(/\.pdf$/i, ''),
+                    objectType: 'table',
+                    objectId: 'table:p000:t01',
+                    structureCorrect: true,
+                    notes: 'quick-accept demo',
+                    pageIndices: [0],
+                  });
+                  // eslint-disable-next-line no-console
+                  console.log('submitLabel', r);
+                  toast("Submitted test label");
+                } catch (e) {
+                  // eslint-disable-next-line no-console
+                  console.error(e);
+                  toast("Failed to submit label");
+                }
+              }}
+              title="Send a demo label to the calibration endpoint"
+            >
+              Send Test Label
+            </Button>
             <Button data-testid="toggle-requirements" size="sm" variant="outline" onClick={()=> setReqOpen(v=>!v)}>Requirements</Button>
             <Separator orientation="vertical" className="mx-2" />
             {/* Interaction toolbar for scenarios */}

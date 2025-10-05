@@ -49,6 +49,7 @@ export type SubmitLabelParams = {
   structureCorrect: boolean;
   cellAccuracy?: number | null;
   notes?: string;
+  errorTags?: string[];
   pageIndices?: number[];
   originalPrediction?: Record<string, unknown>;
   userId?: string;
@@ -62,7 +63,8 @@ export async function submitLabel(params: SubmitLabelParams): Promise<{ status: 
     gold_label: {
       structure_correct: params.structureCorrect,
       cell_accuracy: params.cellAccuracy ?? null,
-      notes: params.notes ?? ''
+      notes: params.notes ?? '',
+      error_tags: params.errorTags && params.errorTags.length ? params.errorTags : null,
     },
     context: {
       page_indices: params.pageIndices ?? [],

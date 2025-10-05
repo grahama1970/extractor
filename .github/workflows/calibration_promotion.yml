@@ -1,0 +1,30 @@
+name: Calibration Promotion Decision
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ feat/**, main ]
+
+jobs:
+  promotion-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install scikit-learn
+      - name: Promotion decision
+        shell: bash
+        run: |
+          NEW=${NEW_METRICS:-training/models/table_calibrator/2025.10.0/metrics.json}
+          OLD=${OLD_METRICS:-training/baselines/table_calibrator/metrics.json}
+          if [[ ! -f "$NEW" ]]; then
+            echo "New metrics not found: $NEW (skip)"; exit 0; fi
+          if [[ ! -f "$OLD" ]]; then
+            echo "No previous metrics; PROMOTE=1"; exit 0; fi
+          python training/scripts/promotion_decision.py --new "$NEW" --old "$OLD" || true

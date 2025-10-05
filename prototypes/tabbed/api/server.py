@@ -2132,3 +2132,46 @@ def post_label(evt: _AnnotationEventIn):
     except Exception as e:
         return JSONResponse({"ok": False, "error": f"persist_failed: {e}"}, status_code=500)
     return {"ok": True, "event_id": event["event_id"]}
+
+# -----------------------------
+# Triage (ELS queues)
+# -----------------------------
+
+@app.get("/api/triage")
+def api_triage(object_type: str = "table", band: str | None = None, limit: int = 50):
+    """
+    Serve ELS-ranked triage items for review.
+    Currently supports object_type=table by reading the latest triage queue
+    at data/results/pipeline/triage_queue/tables.json. When missing, attempts
+    an on-the-fly computation from 05_tables.json.
+    """
+    try:
+        results_root = REPO_ROOT / "data" / "results" / "pipeline"
+        if object_type != "table":
+            return JSONResponse({"ok": False, "error": "unsupported_object_type"}, status_code=400)
+        qpath = results_root / "triage_queue" / "tables.json"
+        if not qpath.exists():
+            # Attempt local/quick computation
+            try:
+                import subprocess, sys as _sys
+                _ = subprocess.run([
+                    _sys.executable,
+                    str(REPO_ROOT / "scripts/triage/triage_scoring.py"),
+                ])
+            except Exception:
+                pass
+        items = []
+        if qpath.exists():
+            raw = json.loads(qpath.read_text())
+            if isinstance(raw, dict) and isinstance(raw.get("items"), list):
+                items = raw.get("items", [])
+            elif isinstance(raw, list):
+                # legacy format
+                items = raw
+        if band:
+            band = band.strip().lower()
+            items = [it for it in items if str(it.get("band","")) == band]
+        items = sorted(items, key=lambda x: float(x.get("els", 0.0)), reverse=True)[: max(1, min(500, int(limit)))]
+        return {"data": items, "meta": {"total": len(items), "band": band, "limit": int(limit)}}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)

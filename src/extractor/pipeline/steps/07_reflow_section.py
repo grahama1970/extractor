@@ -55,6 +55,7 @@ from extractor.pipeline.utils.vision import preflight_vision_support
 from extractor.pipeline.utils.text_utils import sanitize_text
 from extractor.pipeline.utils.unified_conversion import build_unified_document_from_reflow
 from extractor.pipeline.utils.numeric_auditor import audit_section_reflow
+from extractor.pipeline.utils.numeric_auditor import audit_section_reflow
 from extractor.pipeline.utils.confidence import compose_confidence
 # Ensure _trim_context is defined before any runtime use (some branches call it early)
 def _trim_context(raw: str, limit: int) -> str:
@@ -2742,6 +2743,37 @@ def run(
             "07:summary sections=%d paragraphs=%d tables=%d figures=%d reflow_mode=%s",
             len(processed_sections), p_count, t_count, f_count, reflow_mode,
         )
+    except Exception:
+        pass
+
+    # Numeric integrity audit per section (updates metadata.confidence.components)
+    try:
+        for s in processed_sections:
+            try:
+                orig_text = s.get("merged_text") or s.get("source_text") or s.get("raw_text") or ""
+                rj = s.get("reflowed_json") or {}
+                para_texts = []
+                for b in (rj.get("blocks") or []):
+                    if isinstance(b, dict) and b.get("type") == "paragraph":
+                        t = (b.get("text") or "").strip()
+                        if t:
+                            para_texts.append(t)
+                reflow_text = "\n\n".join(para_texts) if para_texts else (s.get("reflowed_text") or "")
+                if not (orig_text and reflow_text):
+                    continue
+                audit = audit_section_reflow(orig_text, reflow_text)
+                md = s.setdefault("metadata", {})
+                md["numeric_audit"] = audit
+                conf = md.get("confidence") or {}
+                comps = conf.get("components") or {}
+                if audit.get("recall") is not None:
+                    comps["numeric_recall"] = audit.get("recall")
+                if audit.get("precision") is not None:
+                    comps["numeric_precision"] = audit.get("precision")
+                conf["components"] = comps
+                md["confidence"] = conf
+            except Exception:
+                continue
     except Exception:
         pass
 
