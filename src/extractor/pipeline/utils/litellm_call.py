@@ -558,6 +558,9 @@ async def litellm_call(
         limit_client = concurrency or (DEFAULT_MAX_PARALLEL or 8)
         sem = asyncio.Semaphore(limit_client)
 
+        # Simple in-process circuit breaker per model
+        _cb_map: dict[str, dict[str, float | int]] = {}
+
         async def _call_one(
             idx: int, model: str, messages: List[Dict[str, _Any]], extra: Dict[str, _Any]
         ) -> CallResult:
@@ -572,6 +575,20 @@ async def litellm_call(
             async with sem:
                 # Tenacity-backed retry logic
                 from tenacity import AsyncRetrying, retry_if_exception_type, stop_after_attempt, wait_exponential_jitter, before_sleep_log
+                import random as _rand
+                # Pre-call jitter gate when concurrency >1
+                try:
+                    eff_c = limit_client
+                    if eff_c and eff_c > 1 and os.getenv("LLM_PRECALL_JITTER_DISABLE", "0").lower() not in ("1","true","yes"):
+                        jmin = int(os.getenv("LLM_PRECALL_JITTER_MIN_MS", "20"))
+                        jmax = int(os.getenv("LLM_PRECALL_JITTER_MAX_MS", "120"))
+                        det = os.getenv("PIPELINE_DETERMINISTIC", "0").lower() in ("1","true","yes","y")
+                        seed = (hash(model) ^ idx) & 0xFFFFFFFF
+                        rnd = _rand.Random(seed if det else None)
+                        delay_ms = rnd.randint(jmin, jmax)
+                        await asyncio.sleep(delay_ms / 1000.0)
+                except Exception:
+                    pass
 
                 class RetryableError(Exception):
                     pass
@@ -598,6 +615,13 @@ async def litellm_call(
                         try:
                             timeout_s = (kwargs.get("timeout") or request_timeout or 45) + 10
                             resp = await asyncio.wait_for(_attempt_call(current_model), timeout=timeout_s)
+                            # reset breaker on success
+                            try:
+                                _state = _cb_map.setdefault(current_model, {"fail": 0, "open_until": 0.0})
+                                _state["fail"] = 0
+                                _state["open_until"] = 0.0
+                            except Exception:
+                                pass
                             content = format_answer_with_logging(idx, resp, wrap_json, prompts[idx], logger)
                             return CallResult(idx, req, resp, None, content)
                         except BaseException as e:
@@ -613,6 +637,14 @@ async def litellm_call(
                                 except Exception:
                                     pass
                                 await asyncio.sleep(delay)
+                                # breaker accounting
+                                try:
+                                    _state = _cb_map.setdefault(current_model, {"fail": 0, "open_until": 0.0})
+                                    _state["fail"] = int(_state.get("fail", 0)) + 1
+                                    if _state["fail"] >= 5:
+                                        _state["open_until"] = time.time() + min(30.0, 15.0 * (2 ** (int(_state["fail"]) - 5)))
+                                except Exception:
+                                    pass
                                 raise RetryableError(str(e))
                             # fast-fails (auth/404) → try single fallback once; else propagate
                             fast_fail = ("AuthenticationError" in etype or "NotFound" in etype or status in (401,403,404))
@@ -631,6 +663,13 @@ async def litellm_call(
                             # 5xx/timeouts => retryable
                             try:
                                 if str(status).startswith("5") or isinstance(e, (asyncio.TimeoutError,)):
+                                    try:
+                                        _state = _cb_map.setdefault(current_model, {"fail": 0, "open_until": 0.0})
+                                        _state["fail"] = int(_state.get("fail", 0)) + 1
+                                        if _state["fail"] >= 5:
+                                            _state["open_until"] = time.time() + min(30.0, 15.0 * (2 ** (int(_state["fail"]) - 5)))
+                                    except Exception:
+                                        pass
                                     raise RetryableError(str(e))
                             except Exception:
                                 pass

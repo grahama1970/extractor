@@ -1695,13 +1695,14 @@ async def reflow_section_with_llm(
                     "reflow_status": "success",
                 }
             )
-            # Optional figure fallback for recovery scenarios only when explicitly enabled
+            # Optional figure placeholder for recovery scenarios (enabled by default)
             try:
                 figs = section_data.get("figures") or []
                 rj = out.get("reflowed_json") or {}
                 blocks = rj.get("blocks") or []
                 has_fig_block = any(isinstance(b, dict) and b.get("type") == "figure" for b in blocks)
-                if figs and not has_fig_block:
+                PLACEHOLDER_ON = os.getenv("STAGE07_FIGURE_PLACEHOLDER", "1").lower() in ("1","true","yes","y")
+                if PLACEHOLDER_ON and figs and not has_fig_block:
                     f0 = figs[0]
                     cap = (f0.get("ai_description") or "").strip() or None
                     imgp = f0.get("image_path") or None
@@ -1714,6 +1715,7 @@ async def reflow_section_with_llm(
                             "pages": [f0.get("page")] if f0.get("page") is not None else [],
                             "block_ids": [],
                         },
+                        "placeholder": True,
                     }
                     if f0.get("figure_id"):
                         fig_block["figure_id"] = f0.get("figure_id")
