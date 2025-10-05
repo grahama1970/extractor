@@ -6,6 +6,7 @@ Refactored POC with Typer CLI and easy debug mode for VS Code.
 
 import os
 import json
+import hashlib
 import base64
 import asyncio
 import textwrap
@@ -197,6 +198,7 @@ class Config:
     cache: bool = True  # Enable LiteLLM cache by default
     # Optional UX/Server curated annotations support
     ux_curated_json: Optional[Path] = None  # if provided, use/merge instead of PDF annots
+    skip_llm_if_curated: bool = True  # auto-skip LLM when curated boxes present and no human notes
 
 
 # DB export handled by stage 10 (arangodb_exporter).
@@ -761,12 +763,15 @@ async def process_pdf_pipeline(config: Config):
 
     # Prefer curated annotations from the UX when available, then fallback to PDF annotations
     curated_used = False
+    curated_schema_version: Optional[str] = None
     data: List[Dict[str, Any]] = []
 
     # 1) Explicit path passed via CLI/config
     if config.ux_curated_json and config.ux_curated_json.exists():
         try:
-            data = build_annots_from_curated(config.input_pdf, config, config.ux_curated_json)
+            data, curated_schema_version = build_annots_from_curated(
+                config.input_pdf, config, config.ux_curated_json
+            )
             curated_used = len(data) > 0
         except Exception as e:
             diagnostics.append(
@@ -787,7 +792,9 @@ async def process_pdf_pipeline(config: Config):
                 run_dir = Path("data/runs") / rid
                 candidate = run_dir / "curated.json"
                 if candidate.exists():
-                    data = build_annots_from_curated(config.input_pdf, config, candidate)
+                    data, curated_schema_version = build_annots_from_curated(
+                        config.input_pdf, config, candidate
+                    )
                     curated_used = len(data) > 0
                     diagnostics.append(
                         make_event(
@@ -838,67 +845,93 @@ async def process_pdf_pipeline(config: Config):
 
     # images are already saved during extraction
 
-    # Run LLM interpretation in a single batched call via litellm_call
+    # Decide whether to call LLM (skip for curated if configured and no human notes)
+    run_llm = True
+    if curated_used and config.skip_llm_if_curated:
+        try:
+            has_note = any((a.get("human_note") not in (None, "")) for a in data)
+            run_llm = has_note
+        except Exception:
+            run_llm = False
+
+    # Run LLM interpretation in a single batched call via litellm_call (optional)
     results = []
     t_llm_ms = 0
     items: List[Dict[str, Any]] = []
-    for d in data:
-        try:
-            # Build messages inline (developer-controlled images via --images flag)
-            if config.use_images and "image_path" in d:
-                with open(d["image_path"], "rb") as f:
-                    b64 = base64.b64encode(f.read()).decode()
-                user_content: Any = [
-                    {"type": "text", "text": build_context(d)},
-                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
-                ]
-            else:
-                user_content = build_context(d)
-            # Provider quirk: GPT-5 rejects temperature; omit it for gpt-5 models
-            _model_l = (config.llm_model or "").lower()
-            params = {
-                "model": config.llm_model,
-                "messages": [
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": user_content},
-                ],
-                "response_format": {"type": "json_object"},
-                "max_tokens": 1024,
-                "timeout": 30,
-                "stream": False,
-            }
-            if "gpt-5" not in _model_l:
-                params["temperature"] = 0.1
-            items.append(params)
-        except Exception as e:
-            logger.exception(f"Failed to build messages for {d.get('id')}: {e}")
-            d["interpretation"] = {"error": f"message_build_failed: {e}"}
+    if run_llm:
+        for d in data:
             try:
-                diagnostics.append(
-                    make_event(
-                        "01_annotation_processor",
-                        "error",
-                        "llm_message_build_failed",
-                        str(e),
-                        {"annotation_id": d.get("id"), "page": d.get("page")},
-                    )
-                )
-                errors_count += 1
-            except Exception:
-                pass
-            items.append(
-                {
+                # Build messages inline (developer-controlled images via --images flag)
+                if config.use_images and "image_path" in d:
+                    with open(d["image_path"], "rb") as f:
+                        b64 = base64.b64encode(f.read()).decode()
+                    user_content: Any = [
+                        {"type": "text", "text": build_context(d)},
+                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
+                    ]
+                else:
+                    user_content = build_context(d)
+                # Provider quirk: GPT-5 rejects temperature; omit it for gpt-5 models
+                _model_l = (config.llm_model or "").lower()
+                params = {
                     "model": config.llm_model,
-                    "messages": [{"role": "user", "content": "noop"}],
+                    "messages": [
+                        {"role": "system", "content": SYSTEM_PROMPT},
+                        {"role": "user", "content": user_content},
+                    ],
+                    "response_format": {"type": "json_object"},
+                    "max_tokens": 1024,
+                    "timeout": 30,
+                    "stream": False,
                 }
-            )
+                if "gpt-5" not in _model_l:
+                    params["temperature"] = 0.1
+                items.append(params)
+            except Exception as e:
+                logger.exception(f"Failed to build messages for {d.get('id')}: {e}")
+                d["interpretation"] = {"error": f"message_build_failed: {e}"}
+                try:
+                    diagnostics.append(
+                        make_event(
+                            "01_annotation_processor",
+                            "error",
+                            "llm_message_build_failed",
+                            str(e),
+                            {"annotation_id": d.get("id"), "page": d.get("page")},
+                        )
+                    )
+                    errors_count += 1
+                except Exception:
+                    pass
+                items.append(
+                    {
+                        "model": config.llm_model,
+                        "messages": [{"role": "user", "content": "noop"}],
+                    }
+                )
 
     try:
-        if config.max_runtime_seconds and config.max_runtime_seconds > 0:
-            t0 = time.monotonic()
-            sid = os.getenv("LITELLM_SESSION_ID") or get_run_id()
-            results = await asyncio.wait_for(
-                litellm_call(
+        if run_llm:
+            if config.max_runtime_seconds and config.max_runtime_seconds > 0:
+                t0 = time.monotonic()
+                sid = os.getenv("LITELLM_SESSION_ID") or get_run_id()
+                results = await asyncio.wait_for(
+                    litellm_call(
+                        items,
+                        concurrency=config.llm_concurrency,
+                        desc="Interpreting Annotations",
+                        session_id=sid,
+                        export="results",
+                        sanitize_data_urls=os.getenv("STAGE01_SANITIZE_DATA_URLS", "redact"),
+                        sanitize_truncate_chars=int(os.getenv("STAGE01_SANITIZE_CHARS", "48")),
+                    ),
+                    timeout=config.max_runtime_seconds,
+                )
+                t_llm_ms = int((time.monotonic() - t0) * 1000)
+            else:
+                t0 = time.monotonic()
+                sid = os.getenv("LITELLM_SESSION_ID") or get_run_id()
+                results = await litellm_call(
                     items,
                     concurrency=config.llm_concurrency,
                     desc="Interpreting Annotations",
@@ -906,23 +939,8 @@ async def process_pdf_pipeline(config: Config):
                     export="results",
                     sanitize_data_urls=os.getenv("STAGE01_SANITIZE_DATA_URLS", "redact"),
                     sanitize_truncate_chars=int(os.getenv("STAGE01_SANITIZE_CHARS", "48")),
-                ),
-                timeout=config.max_runtime_seconds,
-            )
-            t_llm_ms = int((time.monotonic() - t0) * 1000)
-        else:
-            t0 = time.monotonic()
-            sid = os.getenv("LITELLM_SESSION_ID") or get_run_id()
-            results = await litellm_call(
-                items,
-                concurrency=config.llm_concurrency,
-                desc="Interpreting Annotations",
-                session_id=sid,
-                export="results",
-                sanitize_data_urls=os.getenv("STAGE01_SANITIZE_DATA_URLS", "redact"),
-                sanitize_truncate_chars=int(os.getenv("STAGE01_SANITIZE_CHARS", "48")),
-            )
-            t_llm_ms = int((time.monotonic() - t0) * 1000)
+                )
+                t_llm_ms = int((time.monotonic() - t0) * 1000)
     except asyncio.TimeoutError as e:
         msg_info = classify_llm_error(e)
         try:
@@ -961,7 +979,10 @@ async def process_pdf_pipeline(config: Config):
         t_llm_ms = 0
 
     # Parse results back into annotations
-    if not results:
+    if not run_llm:
+        for d in data:
+            d["interpretation"] = {"skipped": True, "reason": "curated_llm_bypass"}
+    elif not results:
         # preserve shape when we timed out/failed: set empty interpretation
         for d in data:
             d["interpretation"] = {"error": "LLM call failed or timed out"}
@@ -1103,14 +1124,26 @@ async def process_pdf_pipeline(config: Config):
         "llm_batch_duration_ms": t_llm_ms,
     }
 
+    # stable doc_id (basename__sha256first8)
+    try:
+        _raw_pdf = Path(config.input_pdf).read_bytes()
+        _hash8 = hashlib.sha256(_raw_pdf).hexdigest()[:8]
+        _base = "".join(ch if ch.isalnum() else "_" for ch in Path(config.input_pdf).stem.lower()).strip("_")
+        doc_id = f"{_base}__{_hash8}"
+    except Exception:
+        doc_id = Path(config.input_pdf).stem.lower()
+
     payload = {
         "timestamp": datetime.now().isoformat(),
         "run_id": run_id,
+        "doc_id": doc_id,
         "source_pdf": str(config.input_pdf),
         "clean_pdf_path": clean_pdf_path,
         "status": "Completed",
         "annotation_count": len(data),
         "source": ("ux_curated" if curated_used else "pdf_annotations"),
+        "curated_mode": curated_used,
+        "curated_schema_version": curated_schema_version,
         "annotations": data,
         "errors_count": errors_count,
         "warnings_count": warnings_count,
@@ -1197,6 +1230,11 @@ def run(
         dir_okay=False,
         readable=False,
     ),
+    skip_llm_if_curated: bool = typer.Option(
+        True,
+        "--skip-llm-if-curated/--no-skip-llm-if-curated",
+        help="When curated boxes are provided and have no human notes, skip LLM calls (default: enabled)",
+    ),
 ):
     """Processes a PDF to extract and interpret annotations, saving to a structured output directory."""
 
@@ -1236,6 +1274,7 @@ def run(
         max_runtime_seconds=timeout,
         cache=cache,
         ux_curated_json=ux_curated_json,
+        skip_llm_if_curated=skip_llm_if_curated,
     )
     if debug:
         print(f"DEBUG: include_freetext = {cfg.include_freetext}")
@@ -1376,10 +1415,19 @@ def _ui_boxes_to_stage01_annotations(pdf: Path, boxes_by_page: Dict[Any, Any]) -
             by = b.get("y", b.get("top", 0.0))
             bw = b.get("w", b.get("width", 0.0))
             bh = b.get("h", b.get("height", 0.0))
-            x0 = max(0.0, min(w, float(bx) * w))
-            y0 = max(0.0, min(h, float(by) * h))
-            x1 = max(0.0, min(w, (float(bx) + float(bw)) * w))
-            y1 = max(0.0, min(h, (float(by) + float(bh)) * h))
+            # Heuristic: if any component > 2.0, treat inputs as absolute PDF coords
+            if any(
+                (isinstance(v, (int, float)) and float(v) > 2.0) for v in (bx, by, bw, bh)
+            ):
+                x0 = max(0.0, min(w, float(bx)))
+                y0 = max(0.0, min(h, float(by)))
+                x1 = max(0.0, min(w, float(bw)))
+                y1 = max(0.0, min(h, float(bh)))
+            else:
+                x0 = max(0.0, min(w, float(bx) * w))
+                y0 = max(0.0, min(h, float(by) * h))
+                x1 = max(0.0, min(w, (float(bx) + float(bw)) * w))
+                y1 = max(0.0, min(h, (float(by) + float(bh)) * h))
             pad_x = 0.1 * (x1 - x0)
             pad_y = 0.1 * (y1 - y0)
             ex0 = max(0.0, x0 - pad_x)
@@ -1393,6 +1441,10 @@ def _ui_boxes_to_stage01_annotations(pdf: Path, boxes_by_page: Dict[Any, Any]) -
                 a_type = "table_region"
             elif t == "figure":
                 a_type = "figure_region"
+            elif t == "caption":
+                a_type = "caption"
+            elif t == "equation":
+                a_type = "equation"
             else:
                 a_type = t or "region"
             out.append(
@@ -1408,17 +1460,22 @@ def _ui_boxes_to_stage01_annotations(pdf: Path, boxes_by_page: Dict[Any, Any]) -
     return out
 
 
-def build_annots_from_curated(input_pdf: Path, config: Config, curated_path: Path) -> List[Dict[str, Any]]:
+def build_annots_from_curated(
+    input_pdf: Path, config: Config, curated_path: Path
+) -> tuple[List[Dict[str, Any]], Optional[str]]:
     """Load curated JSON and produce fully enriched Stage‑01 annotations (with context + image)."""
     raw = json.loads(curated_path.read_text())
     norm = _normalize_curated_schema(raw)
+    schema_version: Optional[str] = None
+    if isinstance(raw, dict):
+        schema_version = raw.get("schema_version") or raw.get("version")
     # Get base records with page/original_rect/expanded_rect
     if "annotations" in norm:
         base_annots = norm["annotations"] or []
     else:
         base_annots = _ui_boxes_to_stage01_annotations(input_pdf, norm["boxes_by_page"])
     # Enrich like extract_annotations_data(), but driven by rects
-    return enrich_annots_from_rects(input_pdf, config, base_annots)
+    return enrich_annots_from_rects(input_pdf, config, base_annots), schema_version
 
 
 def enrich_annots_from_rects(

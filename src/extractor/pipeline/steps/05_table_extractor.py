@@ -55,7 +55,6 @@ from extractor.pipeline.utils.table_fusion import (
     TableCandidate,
     fuse_table_candidates,
 )
-import re
 from extractor.pipeline.utils.pipeline_event_logger import log_stage_event
 import hashlib
 
@@ -1405,7 +1404,7 @@ def run(
                 "p": t.get("page_index"),
                 "i": t.get("table_index"),
                 "shape": (t.get("pandas_metrics") or {}).get("shape"),
-                "frag": t.get("fragmentation_score"),
+                "frag": t.get("fragmentation_score") or t.get("fragmentation"),
             }
             h.update(json.dumps(core, sort_keys=True).encode("utf-8"))
         tables_hash = h.hexdigest()
@@ -1415,6 +1414,7 @@ def run(
         "timestamp": datetime.now().isoformat(),
         "source_json": str(input_json),
         "source_pdf": str(pdf_path),
+        "doc_id": None,  # populated below
         "status": "Completed",
         "table_count": len(filtered_tables),
         "tables": filtered_tables,
@@ -1435,6 +1435,17 @@ def run(
     console.print(
         f"✅ Table extraction complete. Saved {len(filtered_tables)} tables to: {output_path}"
     )
+
+    # Attach stable doc_id (basename__sha256first8) post-write for readers expecting it here too
+    try:
+        _raw = Path(pdf_path).read_bytes()
+        _h8 = hashlib.sha256(_raw).hexdigest()[:8]
+        _bn = "".join(ch if ch.isalnum() else "_" for ch in Path(pdf_path).stem.lower()).strip("_")
+        result["doc_id"] = f"{_bn}__{_h8}"
+        with open(output_path, "w") as f:
+            json.dump(result, f, indent=2, ensure_ascii=False)
+    except Exception:
+        pass
     try:
         log_stage_event("05_table_extractor", "end", tables=len(filtered_tables), content_hash=tables_hash, status="Completed")
     except Exception:
