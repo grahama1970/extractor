@@ -776,6 +776,19 @@ def extract_all_tables(
         pdf_doc = fitz.open(str(pdf_path))
     except Exception as e:
         logger.error(f"Failed to open PDF {pdf_path}: {e}")
+        # Emit a minimal failed artifact for determinism
+        try:
+            output_dir.mkdir(parents=True, exist_ok=True)
+            (output_dir / "05_tables_failed.json").write_text(
+                json.dumps({
+                    "timestamp": datetime.now().isoformat(),
+                    "status": "Failed",
+                    "error": f"open_pdf: {str(e)}",
+                    "source_pdf": str(pdf_path)
+                }, indent=2)
+            )
+        except Exception:
+            pass
         return []
 
     try:
@@ -1252,21 +1265,7 @@ def run(
         filtered_tables = sorted(filtered_tables, key=_k)
     except Exception:
         pass
-    try:
-        samples = stop_resource_sampler(sampler) if sampler else []
-        if samples:
-            resources.setdefault("resource_samples", samples)
-    except Exception:
-        pass
-    timings = build_stage_timings(stage_start_ts, t0)
-    try:
-        for _k, _v in strategy_summary.items():
-            att = int(_v.get("attempts", 0) or 0)
-            if att > 0:
-                _v["avg_duration_ms"] = int(_v.get("total_duration_ms", 0) / att)
-        timings["strategy_durations"] = strategy_summary
-    except Exception:
-        pass
+    # Deduplicated resource/timing aggregation
     try:
         samples = stop_resource_sampler(sampler) if sampler else []
         if samples:
@@ -1290,6 +1289,14 @@ def run(
         }
     }
 
+    # Deterministic ordering of output tables
+    try:
+        filtered_tables = sorted(
+            filtered_tables,
+            key=lambda t: (int(t.get("page_index", 0)), int(t.get("table_index", 0)))
+        )
+    except Exception:
+        pass
     result = {
         "timestamp": datetime.now().isoformat(),
         "source_json": str(input_json),

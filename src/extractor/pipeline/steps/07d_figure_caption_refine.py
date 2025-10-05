@@ -164,6 +164,7 @@ def run(
             min_tokens = int(os.getenv("FIGURE_CAPTION_MIN_TOKENS", "3"))
             if not _valid_caption((f.get("caption") or f.get("ai_description") or ""), cleaned, min_tokens):
                 cleaned = (f.get("caption") or f.get("ai_description") or "").strip()
+                captions.setdefault(sid, {})[f"{key}__meta"] = {"validation_reason": "invalid_or_generic"}
             captions.setdefault(sid, {})[key] = cleaned
 
     outp = out_dir / "07d_figure_caption_refine.json"

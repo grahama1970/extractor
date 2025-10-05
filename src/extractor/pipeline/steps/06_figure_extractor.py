@@ -304,32 +304,25 @@ def run(
 ):
     """Extracts figures, describes them, and associates them with sections."""
     console.print(f"[green]Extracting figures from: {stage_02_json.name}[/green]")
+    # Primary initialization (deduplicated)
     run_id = get_run_id()
-    diagnostics = []
+    diagnostics: list[dict] = []
     errors_count = 0
     warnings_count = 0
     import time
-
     t0 = time.monotonic()
     stage_start_ts = iso_now()
     resources = snapshot_resources("start")
-    import os
-
     sampler = (
         start_resource_sampler(float(os.getenv("SAMPLE_INTERVAL_SEC", "2")))
-        if os.getenv("ENABLE_RESOURCE_SAMPLING", "0").lower() in ("1", "true", "yes", "y")
+        if os.getenv("ENABLE_RESOURCE_SAMPLING", "0").lower() in ("1","true","yes","y")
         else None
     )
     try:
         if sampler and not gpu_metrics_available():
             diagnostics.append(
-                make_event(
-                    "06_figure_extractor",
-                    "info",
-                    "gpu_metrics_unavailable",
-                    "NVML not available; GPU metrics disabled",
-                    {},
-                )
+                make_event("06_figure_extractor","info","gpu_metrics_unavailable",
+                           "NVML not available; GPU metrics disabled", {})
             )
     except Exception:
         pass
@@ -416,9 +409,8 @@ def run(
     # build a stable map of figure_id -> source block
     fig_block_map = {f"figure_{i+1:03d}": b for i, b in enumerate(figure_blocks)}
     extracted_figures = asyncio.run(
-        process_figures_batch(
-            pdf_path, figure_blocks, image_output_dir, skip_descriptions=skip_descriptions
-        )
+        process_figures_batch(pdf_path, figure_blocks, image_output_dir,
+                              skip_descriptions=skip_descriptions)
     )
     # Ensure bbox/page present from the original blocks when available
     for fig in extracted_figures:
@@ -480,6 +472,13 @@ def run(
     except Exception:
         pass
     timings = build_stage_timings(stage_start_ts, t0)
+    # Deterministic ordering (page, figure_id)
+    try:
+        def _k(fig: dict):
+            return (int(fig.get("page", 0)), str(fig.get("figure_id","")))
+        extracted_figures = sorted(extracted_figures, key=_k)
+    except Exception:
+        pass
     result = {
         "timestamp": datetime.now().isoformat(),
         "source_json": str(stage_02_json),

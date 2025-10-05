@@ -154,14 +154,20 @@ def run(
             orig_toks = (orig_text or "").split()
             cand_toks = (candidate or "").split()
             cleaned = candidate
+            reason = None
             if orig_toks:
                 added = max(0, len(cand_toks) - len(orig_toks))
                 removed = max(0, len(orig_toks) - len(cand_toks))
                 if (added / len(orig_toks)) > max_new_ratio or (removed / len(orig_toks)) > max_shrink_ratio:
                     cleaned = orig_text
+                    reason = "token_delta_exceeds_limits"
                 elif not _valid_polish(orig_text, candidate, min_tokens):
                     cleaned = orig_text
+                    reason = "validation_fail"
             results.setdefault(sid, {})[pid] = cleaned
+            if reason:
+                # Add minimal meta alongside value without breaking existing consumers
+                results.setdefault(sid, {})[f"{pid}__meta"] = {"validation_reason": reason}
 
     outp = out_dir / "07b_paragraph_polish.json"
     deterministic = DISABLE_LLM or not bool(results and any(results.get(s.get("id"), {}) for s in sections))

@@ -487,11 +487,17 @@ async def litellm_call(
                 kwargs["timeout"] = request_timeout
             try:
                 prepared = await _prepare_messages_image_urls(msgs0, image_cache_dir=image_cache_dir)
-                resp_stream = await router.acompletion(model=model, messages=prepared, stream=True, **kwargs)
+                async def _stream_once():
+                    return await router.acompletion(model=model, messages=prepared, stream=True, **kwargs)
+                timeout_s = (kwargs.get("timeout") or request_timeout or 45) + 10
+                resp_stream = await asyncio.wait_for(_stream_once(), timeout=timeout_s)
                 content = await assemble_stream_text(resp_stream)
             except TypeError:
                 prepared = await _prepare_messages_image_urls(msgs0, image_cache_dir=image_cache_dir)
-                resp = await router.acompletion(model=model, messages=prepared, **kwargs)
+                async def _once():
+                    return await router.acompletion(model=model, messages=prepared, **kwargs)
+                timeout_s = (kwargs.get("timeout") or request_timeout or 45) + 10
+                resp = await asyncio.wait_for(_once(), timeout=timeout_s)
                 content = format_answer_with_logging(idx0, resp, wrap_json, prompts[idx0], logger)
             if export == "results":
                 req = CallRequest(model=model, messages=_sanitize_messages_for_return(msgs0), kwargs=kwargs or None)
@@ -520,7 +526,10 @@ async def litellm_call(
                 while True:
                     try:
                         t0 = time.perf_counter() if 'time' in globals() else None
-                        resp = await router.acompletion(model=attempt_model, messages=prepared, **kwargs)
+                        async def _once():
+                            return await router.acompletion(model=attempt_model, messages=prepared, **kwargs)
+                        timeout_s = (kwargs.get("timeout") or request_timeout or 45) + 10
+                        resp = await asyncio.wait_for(_once(), timeout=timeout_s)
                         if t0 is not None and os.getenv("ENABLE_WARM_START_METRICS", "0") in ("1","true","yes"):
                             dt = (time.perf_counter() - t0) * 1000.0
                             try:

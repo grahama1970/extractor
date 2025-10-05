@@ -149,7 +149,12 @@ def run(
             if len(cand.split()) > 12:
                 cand = " ".join(cand.split()[:12])
             min_tokens = int(os.getenv("TABLE_TITLE_MIN_TOKENS", "3"))
-            titles.setdefault(sid, {})[key] = cand if _valid_title(cand, min_tokens) else None
+            if _valid_title(cand, min_tokens):
+                titles.setdefault(sid, {})[key] = cand
+            else:
+                titles.setdefault(sid, {})[key] = None
+                # Attach a lightweight meta reason for auditability
+                titles.setdefault(sid, {})[f"{key}__meta"] = {"validation_reason": "invalid_or_generic"}
 
     outp = out_dir / "07c_table_title_infer.json"
     deterministic = DISABLE_LLM or not bool(titles)

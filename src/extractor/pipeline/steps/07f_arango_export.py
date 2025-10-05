@@ -97,7 +97,30 @@ def main(
     # Semantic layer
     for col, docs in (extra_nodes or {}).items():
         client.upsert_batch(col, docs)
+    # Strict validation for edge collections and namespaces (dev safety)
+    allowed_edge_cols = {
+        "references",
+        "block_to_reference_target",
+        "block_to_requirement",
+        "entity_occurs_in",
+        "variable_in_equation",
+    }
     for ecol, edocs in (extra_edges or {}).items():
+        if os.getenv("STRICT_KEY_NAMESPACE", "0").lower() in ("1","true","yes"):
+            if ecol not in allowed_edge_cols:
+                raise SystemExit(f"STRICT_KEY_NAMESPACE: disallowed edge collection '{ecol}'")
+            # Enforce that _from/_to have expected collection prefixes
+            for e in edocs:
+                frm = e.get("_from", "")
+                to = e.get("_to", "")
+                if not (isinstance(frm, str) and isinstance(to, str) and "/" in frm and "/" in to):
+                    raise SystemExit(f"STRICT_KEY_NAMESPACE: malformed edge endpoints for {ecol}: {e}")
+                # Ensure each endpoint starts with a whitelisted collection
+                from_col = frm.split("/", 1)[0]
+                to_col = to.split("/", 1)[0]
+                allowed_node_cols = {"sections", "blocks", "requirements", "entities", "variables", "equations"}
+                if from_col not in allowed_node_cols or to_col not in allowed_node_cols:
+                    raise SystemExit(f"STRICT_KEY_NAMESPACE: edge {ecol} has invalid endpoint collections: {from_col}->{to_col}")
         client.upsert_edges(ecol, edocs)
     logger.success("Arango export complete")
 
