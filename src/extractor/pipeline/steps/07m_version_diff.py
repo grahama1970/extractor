@@ -16,8 +16,8 @@ from loguru import logger
 app = typer.Typer(help="Version diff generator.")
 
 
-def block_sig(b: Dict[str, Any]) -> str:
-    core = {
+def block_sig_components(b: Dict[str, Any]) -> Dict[str, Any]:
+    return {
         "type": b.get("type"),
         "text": b.get("text") if b.get("type") == "paragraph" else None,
         "columns": b.get("columns") if b.get("type") == "table" else None,
@@ -28,7 +28,9 @@ def block_sig(b: Dict[str, Any]) -> str:
         else None,
         "caption": b.get("caption") if b.get("type") == "figure" else None,
     }
-    return hashlib.sha256(json.dumps(core, sort_keys=True).encode()).hexdigest()
+
+def block_sig(b: Dict[str, Any]) -> str:
+    return hashlib.sha256(json.dumps(block_sig_components(b), sort_keys=True).encode()).hexdigest()
 
 
 @app.command()
@@ -40,11 +42,13 @@ def run(
     old = json.loads(old_reflow_json.read_text())
     new = json.loads(new_reflow_json.read_text())
     old_index: Dict[str, str] = {}
+    old_components: Dict[str, Dict[str, Any]] = {}
     for s in old.get("reflowed_sections", old.get("sections", [])):
         for b in s.get("reflowed_json", {}).get("blocks", []):
             a = b.get("anchor_id")
             if a:
                 old_index[a] = block_sig(b)
+                old_components[a] = block_sig_components(b)
     deltas = []
     current_anchors = set()
     for s in new.get("reflowed_sections", new.get("sections", [])):
@@ -55,11 +59,24 @@ def run(
             current_anchors.add(a)
             sig = block_sig(b)
             if a not in old_index:
-                deltas.append({"anchor_id": a, "change_type": "added"})
+                deltas.append({"anchor_id": a, "change_type": "added", "changed_fields": []})
             elif old_index[a] != sig:
-                deltas.append({"anchor_id": a, "change_type": "modified"})
+                oldc = old_components.get(a, {})
+                newc = block_sig_components(b)
+                changed = []
+                if oldc.get("text") != newc.get("text"):
+                    changed.append("text_changed")
+                if oldc.get("columns") != newc.get("columns"):
+                    changed.append("columns_changed")
+                if oldc.get("rows_hash") != newc.get("rows_hash"):
+                    changed.append("rows_changed")
+                if oldc.get("caption") != newc.get("caption"):
+                    changed.append("caption_changed")
+                if not changed:
+                    changed.append("structure_changed")
+                deltas.append({"anchor_id": a, "change_type": "modified", "changed_fields": changed})
     for a in old_index.keys() - current_anchors:
-        deltas.append({"anchor_id": a, "change_type": "removed"})
+        deltas.append({"anchor_id": a, "change_type": "removed", "changed_fields": []})
     out_dir = output_dir / "07m_version_diff" / "json_output"
     out_dir.mkdir(parents=True, exist_ok=True)
     outp = out_dir / "07m_deltas.json"
@@ -69,4 +86,3 @@ def run(
 
 if __name__ == "__main__":
     app()
-

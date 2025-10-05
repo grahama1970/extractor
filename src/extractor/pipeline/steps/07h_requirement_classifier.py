@@ -59,7 +59,11 @@ def run(
             reqs.append(rec)
 
     # optional LLM confirmation for heuristic positives
-    if enable_llm and model and litellm_call:
+    if enable_llm:
+        llm_model = model or os.getenv("REQUIREMENTS_LLM_MODEL", "")
+        timeout_env = float(os.getenv("STAGE07H_TIMEOUT", os.getenv("STAGE07_REQUEST_TIMEOUT", "120")))
+        retries_env = int(os.getenv("STAGE07H_RETRIES", os.getenv("STAGE07_NUM_RETRIES", "2")))
+    if enable_llm and llm_model and litellm_call:
         prompts = []
         idx = []
         for i, r in enumerate(reqs):
@@ -74,7 +78,7 @@ def run(
                                 "content": [
                                     {
                                         "type": "text",
-                                        "text": "Classify the sentence: return JSON {\\"label\\": \\\"requirement|definition|other\\"}. Return 'requirement' only if it states a normative obligation or constraint.",
+                                        "text": "Classify requirement text. JSON only: {\\\"label\\\": \\\"requirement|definition|other\\\"}. Return 'requirement' ONLY if it states an obligation, constraint, or bound (modal verbs).",
                                     }
                                 ],
                             },
@@ -90,8 +94,8 @@ def run(
                     wrap_json=True,
                     concurrency=concurrency,
                     desc="07h_requirement_classifier",
-                    request_timeout=float(os.getenv("STAGE07_REQUEST_TIMEOUT", "120")),
-                    num_retries=int(os.getenv("STAGE07_NUM_RETRIES", "2")),
+                    request_timeout=timeout_env,
+                    num_retries=retries_env,
                 )
             )
             for j, irec in enumerate(idx):
@@ -127,4 +131,3 @@ def run(
 
 if __name__ == "__main__":
     app()
-

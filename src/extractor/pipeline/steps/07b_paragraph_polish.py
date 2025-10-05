@@ -73,7 +73,7 @@ def run(
                 prompts.append({
                     "model": os.getenv("LITELLM_DEFAULT_MODEL") or os.getenv("LITELLM_VLM_MODEL") or "openai/zai-org/GLM-4.5-Air",
                     "messages": [
-                        {"role": "system", "content": [{"type": "text", "text": "Clean technical paragraphs: fix hyphen splits, spacing, minor casing only. Do NOT rephrase, summarize, add/remove concepts, reorder clauses, or change terminology. If no cleanup is needed, echo the original EXACTLY. Return ONLY JSON: {\"text\": string}."}]},
+                        {"role": "system", "content": [{"type": "text", "text": "Normalize formatting ONLY (hyphen splits, spacing, trivial casing). Do NOT invent, paraphrase, merge, reorder, or drop technical tokens. If no fix needed, output original unchanged. Output ONLY JSON: {\\\"text\\\": string}."}]},
                         {"role": "user", "content": [{"type": "text", "text": f"Input paragraph (fix spacing/hyphenation only; preserve wording):\n\n{txt}"}]},
                     ],
                     "kwargs": {"temperature": 0, "top_p": 1, "timeout": 30}
@@ -83,8 +83,9 @@ def run(
             global_cap = os.getenv("STAGE07_GLOBAL_CONCURRENCY")
             if global_cap and global_cap.isdigit():
                 conc = min(conc, int(global_cap))
-            req_timeout = float(os.getenv("STAGE07_REQUEST_TIMEOUT", "120"))
-            num_retries = int(os.getenv("STAGE07_NUM_RETRIES", "2"))
+            # Per-stage override then global
+            req_timeout = float(os.getenv("STAGE07B_TIMEOUT", os.getenv("STAGE07_REQUEST_TIMEOUT", "120")))
+            num_retries = int(os.getenv("STAGE07B_RETRIES", os.getenv("STAGE07_NUM_RETRIES", "2")))
             out = __import__("asyncio").run(litellm_call(
                 prompts,
                 wrap_json=False,
@@ -98,6 +99,25 @@ def run(
         results = {}
         max_new_ratio = float(os.getenv("PARA_NEW_TOKEN_RATIO_MAX", "0.15"))
         max_shrink_ratio = float(os.getenv("PARA_TOKEN_SHRINK_RATIO_MAX", "0.40"))
+        # Simple acceptance validator
+        PLACEHOLDER_BAD = {"placeholder", "lorem", "dummy", "sample", "example"}
+        STOPWORDS = {"the", "a", "an", "of", "and", "or", "to", "in"}
+        def _valid_polish(original: str, candidate: str, min_tokens: int) -> bool:
+            if not candidate or not candidate.strip():
+                return False
+            toks = [t for t in candidate.split() if t.lower() not in STOPWORDS]
+            if len(toks) < min_tokens:
+                return False
+            if candidate.strip().upper() == candidate.strip() and len(candidate.split()) == 1:
+                return False
+            low = candidate.lower()
+            if any(b in low for b in PLACEHOLDER_BAD):
+                return False
+            if len(candidate) > len(original) * 3:
+                return False
+            return True
+
+        min_tokens = int(os.getenv("PARA_MIN_TOKENS", "3"))
         for i, (sid, pid) in enumerate(index):
             content = out[i].content if i < len(out) and out[i] else ""
             candidate = (content or "").strip()
@@ -128,6 +148,8 @@ def run(
                 added = max(0, len(cand_toks) - len(orig_toks))
                 removed = max(0, len(orig_toks) - len(cand_toks))
                 if (added / len(orig_toks)) > max_new_ratio or (removed / len(orig_toks)) > max_shrink_ratio:
+                    cleaned = orig_text
+                elif not _valid_polish(orig_text, candidate, min_tokens):
                     cleaned = orig_text
             results.setdefault(sid, {})[pid] = cleaned
 

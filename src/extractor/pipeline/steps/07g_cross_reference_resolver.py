@@ -39,10 +39,25 @@ def run(
     refs: List[Dict[str, Any]] = []
     # Build index of normalized labels to anchor ids
     label_index: Dict[str, str] = {}
+    section_index: Dict[str, str] = {}
+    section_anchor_index: Dict[str, str] = {}
     for s in data.get("reflowed_sections", data.get("sections", [])):
         for blk in s.get("reflowed_json", {}).get("blocks", []):
             if blk.get("type") in ("table", "figure") and blk.get("normalized_label"):
                 label_index[blk["normalized_label"]] = blk.get("anchor_id")
+        # section numbering in title → build section index + choose first paragraph anchor
+        title = (s.get("title") or "").strip()
+        m = re.match(r'^(\d+(?:[\.-]\d+)*)\b', title)
+        if m:
+            sec_key = normalize_label("section", m.group(1)).split('/',1)[1]
+            section_index[sec_key] = s.get("id") or s.get("section_id")
+            first_par = None
+            for blk in s.get("reflowed_json", {}).get("blocks", []):
+                if blk.get("type") == "paragraph" and blk.get("anchor_id"):
+                    first_par = blk.get("anchor_id")
+                    break
+            if first_par:
+                section_anchor_index[sec_key] = first_par
 
     for s in data.get("reflowed_sections", data.get("sections", [])):
         for blk in s.get("reflowed_json", {}).get("blocks", []):
@@ -54,12 +69,17 @@ def run(
                     raw_num = m.group(2) if kind in ("figure", "table", "section") else m.group(1)
                     lbl = normalize_label(kind, raw_num)
                     target_anchor = label_index.get(lbl)
+                    section_anchor = None
+                    if kind == "section":
+                        sec_key = lbl.split('/',1)[1]
+                        section_anchor = section_anchor_index.get(sec_key)
                     refs.append(
                         {
                             "source_paragraph": blk.get("anchor_id"),
                             "kind": kind,
                             "label": lbl,
                             "target_anchor": target_anchor,
+                            "target_section_anchor": section_anchor,
                             "span": [m.start(), m.end()],
                         }
                     )
@@ -74,4 +94,3 @@ def run(
 
 if __name__ == "__main__":
     app()
-

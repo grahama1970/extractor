@@ -107,8 +107,8 @@ def run(
             global_cap = os.getenv("STAGE07_GLOBAL_CONCURRENCY")
             if global_cap and global_cap.isdigit():
                 conc = min(conc, int(global_cap))
-            req_timeout = float(os.getenv("STAGE07_REQUEST_TIMEOUT", "120"))
-            num_retries = int(os.getenv("STAGE07_NUM_RETRIES", "2"))
+            req_timeout = float(os.getenv("STAGE07D_TIMEOUT", os.getenv("STAGE07_REQUEST_TIMEOUT", "120")))
+            num_retries = int(os.getenv("STAGE07D_RETRIES", os.getenv("STAGE07_NUM_RETRIES", "2")))
             out = __import__("asyncio").run(litellm_call(
                 prompts,
                 wrap_json=False,
@@ -119,6 +119,20 @@ def run(
             ))
         else:
             out = []
+        CAPTION_BAD = {"placeholder", "sample image", "example figure"}
+        def _valid_caption(orig: str, cand: str, min_tokens: int) -> bool:
+            if not cand or not cand.strip():
+                return False
+            toks = [w for w in cand.split() if w.isalpha()]
+            if len(toks) < min_tokens:
+                return False
+            low = cand.lower().strip()
+            if low in CAPTION_BAD:
+                return False
+            if len(cand) > len(orig) * 3:
+                return False
+            return True
+
         for i, (sid, key) in enumerate(index):
             content = out[i].content if i < len(out) and out[i] else ""
             cleaned = (content or "").strip()
@@ -138,6 +152,9 @@ def run(
             # we do not have original here; accept unless blacklist appears
             if any(w in words for w in blacklist):
                 pass  # keep as-is (it may be original), downstream can decide
+            min_tokens = int(os.getenv("FIGURE_CAPTION_MIN_TOKENS", "3"))
+            if not _valid_caption((f.get("caption") or f.get("ai_description") or ""), cleaned, min_tokens):
+                cleaned = (f.get("caption") or f.get("ai_description") or "").strip()
             captions.setdefault(sid, {})[key] = cleaned
 
     outp = out_dir / "07d_figure_caption_refine.json"

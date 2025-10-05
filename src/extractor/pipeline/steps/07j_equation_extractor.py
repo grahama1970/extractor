@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import re
 import hashlib
+import os
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -15,6 +16,16 @@ import typer
 from loguru import logger
 
 app = typer.Typer(help="Equation extractor")
+
+def _load_var_cfg():
+    path = os.getenv("EQUATION_CONFIG_JSON")
+    if not path:
+        return set(), set()
+    try:
+        data = json.loads(Path(path).read_text())
+        return set(data.get("symbol_whitelist", [])), set(data.get("symbol_blacklist", []))
+    except Exception:
+        return set(), set()
 
 MATH_SYMBOLS = set("=+−–*/^∑∏√≈≠≤≥<>±()[]{}|%")
 VAR_RE = re.compile(r"\b([A-Za-z][A-Za-z0-9_]*)\b")
@@ -35,6 +46,7 @@ def run(
     min_length: int = typer.Option(10, "--min-len"),
 ):
     doc = json.loads(reflow_json.read_text())
+    sym_wl, sym_bl = _load_var_cfg()
     equations: List[Dict[str, Any]] = []
     variables: Dict[str, set] = {}
     eq_counter = 1
@@ -50,6 +62,10 @@ def run(
                 for m in VAR_RE.finditer(text):
                     v = m.group(1)
                     if v.lower() in ("and", "or", "the", "of", "in", "for", "if", "not", "is"):
+                        continue
+                    if sym_wl and v not in sym_wl:
+                        continue
+                    if v in sym_bl:
                         continue
                     eq_vars.append(v)
                     variables.setdefault(v, set()).add(eq_id)
@@ -94,4 +110,3 @@ def run(
 
 if __name__ == "__main__":
     app()
-

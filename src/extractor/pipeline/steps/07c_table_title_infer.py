@@ -92,13 +92,13 @@ def run(
                 if density < min_density or avg_len < 3 or (skip_mnemonic and is_mnemonic):
                     continue
                 msg = (
-                    "Infer a concise (<=12 words) factual title ONLY if obvious from columns/rows; do not invent domains or units.\n"
+                    "Infer a concise factual table title (<=12 words) ONLY if columns/rows clearly justify it. Do NOT invent metrics, claims, units, or domain context. If unsure, return empty.\n"
                     f"Columns: {cols}\nSample rows: {rows}"
                 )
                 prompts.append({
                     "model": os.getenv("LITELLM_DEFAULT_MODEL") or os.getenv("LITELLM_VLM_MODEL") or "openai/zai-org/GLM-4.5-Air",
                     "messages": [
-                        {"role": "system", "content": [{"type": "text", "text": "Output ONLY a short title; if uncertain output an empty string. Never hallucinate measurements or domains."}]},
+                        {"role": "system", "content": [{"type": "text", "text": "Output ONLY JSON {\\\"title\\\": string|null}. If uncertain, return null. Never hallucinate measurements, performance, or domains."}]},
                         {"role": "user", "content": [{"type": "text", "text": msg}]},
                     ],
                     "kwargs": {"temperature": 0, "top_p": 1, "timeout": 30}
@@ -110,8 +110,8 @@ def run(
             global_cap = os.getenv("STAGE07_GLOBAL_CONCURRENCY")
             if global_cap and global_cap.isdigit():
                 conc = min(conc, int(global_cap))
-            req_timeout = float(os.getenv("STAGE07_REQUEST_TIMEOUT", "120"))
-            num_retries = int(os.getenv("STAGE07_NUM_RETRIES", "2"))
+            req_timeout = float(os.getenv("STAGE07C_TIMEOUT", os.getenv("STAGE07_REQUEST_TIMEOUT", "120")))
+            num_retries = int(os.getenv("STAGE07C_RETRIES", os.getenv("STAGE07_NUM_RETRIES", "2")))
             out = __import__("asyncio").run(litellm_call(
                 prompts,
                 wrap_json=False,
@@ -122,12 +122,25 @@ def run(
             ))
         else:
             out = []
+        BAD_TITLE = {"data table", "table", "results", "sample", "placeholder"}
+        def _valid_title(t: str, min_tokens: int) -> bool:
+            if not t:
+                return False
+            low = t.lower().strip()
+            if low in BAD_TITLE:
+                return False
+            toks = [w for w in low.split() if w.isalpha()]
+            return len(toks) >= min_tokens
+
         for i, (sid, key) in enumerate(index):
             content = out[i].content if i < len(out) and out[i] else ""
             cand = (content or "").strip()
             if not cand:
                 raise SystemExit(f"07c: LLM returned empty title for {sid}:{key}; aborting per failure policy")
-            titles.setdefault(sid, {})[key] = cand
+            if len(cand.split()) > 12:
+                cand = " ".join(cand.split()[:12])
+            min_tokens = int(os.getenv("TABLE_TITLE_MIN_TOKENS", "3"))
+            titles.setdefault(sid, {})[key] = cand if _valid_title(cand, min_tokens) else None
 
     outp = out_dir / "07c_table_title_infer.json"
     deterministic = DISABLE_LLM or not bool(titles)

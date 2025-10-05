@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import re
 import hashlib
+import os
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -15,6 +16,15 @@ import typer
 from loguru import logger
 
 app = typer.Typer(help="Entity extraction (signals/registers/fields).")
+
+def _load_cfg(path: str | None):
+    if not path:
+        return set(), set()
+    try:
+        data = json.loads(Path(path).read_text())
+        return set(data.get("whitelist", [])), set(data.get("blacklist", []))
+    except Exception:
+        return set(), set()
 
 SIGNAL_RE = re.compile(r"\b[A-Z][A-Z0-9_]{2,}\b")
 REGISTER_RE = re.compile(r"\b([A-Z][A-Z0-9_]{2,}_REG)\b")
@@ -36,6 +46,7 @@ def run(
     min_occurrences: int = typer.Option(2, "--min-occurrences"),
 ):
     doc = json.loads(reflow_json.read_text())
+    wl, bl = _load_cfg(os.getenv("ENTITY_CONFIG_JSON"))
     occurrences: Dict[str, List[Dict[str, Any]]] = {}
     for sec in doc.get("reflowed_sections", doc.get("sections", [])):
         for blk in sec.get("reflowed_json", {}).get("blocks", []):
@@ -46,6 +57,10 @@ def run(
                 tok = m.group(0)
                 cat = classify_token(tok)
                 if cat == "unknown":
+                    continue
+                if wl and tok not in wl:
+                    continue
+                if tok in bl:
                     continue
                 occurrences.setdefault(tok, []).append(
                     {
@@ -94,4 +109,3 @@ def run(
 
 if __name__ == "__main__":
     app()
-
