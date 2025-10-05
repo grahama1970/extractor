@@ -560,6 +560,8 @@ async def litellm_call(
 
         # Simple in-process circuit breaker per model
         _cb_map: dict[str, dict[str, float | int]] = {}
+        _cb_fail_threshold = int(os.getenv("LITELLM_BREAKER_FAILS", "5"))
+        _cb_open_cap = float(os.getenv("LITELLM_BREAKER_CAP_S", "30"))
 
         async def _call_one(
             idx: int, model: str, messages: List[Dict[str, _Any]], extra: Dict[str, _Any]
@@ -641,8 +643,10 @@ async def litellm_call(
                                 try:
                                     _state = _cb_map.setdefault(current_model, {"fail": 0, "open_until": 0.0})
                                     _state["fail"] = int(_state.get("fail", 0)) + 1
-                                    if _state["fail"] >= 5:
-                                        _state["open_until"] = time.time() + min(30.0, 15.0 * (2 ** (int(_state["fail"]) - 5)))
+                                    if _state["fail"] >= _cb_fail_threshold:
+                                        base = 15.0
+                                        exp = int(_state["fail"]) - _cb_fail_threshold
+                                        _state["open_until"] = time.time() + min(_cb_open_cap, base * (2 ** max(0, exp)))
                                 except Exception:
                                     pass
                                 raise RetryableError(str(e))
@@ -666,8 +670,10 @@ async def litellm_call(
                                     try:
                                         _state = _cb_map.setdefault(current_model, {"fail": 0, "open_until": 0.0})
                                         _state["fail"] = int(_state.get("fail", 0)) + 1
-                                        if _state["fail"] >= 5:
-                                            _state["open_until"] = time.time() + min(30.0, 15.0 * (2 ** (int(_state["fail"]) - 5)))
+                                        if _state["fail"] >= _cb_fail_threshold:
+                                            base = 15.0
+                                            exp = int(_state["fail"]) - _cb_fail_threshold
+                                            _state["open_until"] = time.time() + min(_cb_open_cap, base * (2 ** max(0, exp)))
                                     except Exception:
                                         pass
                                     raise RetryableError(str(e))

@@ -42,7 +42,9 @@ _PARA_SPLIT_RE = re.compile(r"\n\s*\n+")
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[\.!?])\s{1,}(?=[A-Z0-9])")
 
 # Soft guardrails for very long paragraphs; configurable via env
-DEFAULT_MAX_PARAGRAPH_CHARS = int(os.environ.get("UNIFIED_MAX_PARAGRAPH_CHARS", "3200"))
+# Slightly more aggressive default splitting to improve retrieval and downstream
+# processing; configurable via env. Was 3200 previously.
+DEFAULT_MAX_PARAGRAPH_CHARS = int(os.environ.get("UNIFIED_MAX_PARAGRAPH_CHARS", "2400"))
 
 
 def _next_block_id(counter: List[int], prefix: str) -> str:

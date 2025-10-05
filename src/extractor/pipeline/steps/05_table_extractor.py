@@ -51,6 +51,10 @@ from extractor.pipeline.utils.diagnostics import (
     build_stage_timings,
     gpu_metrics_available,
 )
+from extractor.pipeline.utils.table_fusion import (
+    TableCandidate,
+    fuse_table_candidates,
+)
 from extractor.pipeline.utils.pipeline_event_logger import log_stage_event
 import hashlib
 
@@ -140,6 +144,20 @@ FRAGMENTATION_RETRY_THRESHOLD = max(
 )
 FRAGMENTATION_IMPROVEMENT_MIN = max(
     1, int(os.getenv("TABLE_FRAGMENTATION_MIN_IMPROVEMENT", 1))
+)
+
+# Optional: pdfplumber candidates (off by default)
+TABLE_PDFPLUMBER_ENABLED = os.getenv("TABLE_PDFPLUMBER_ENABLED", "0").lower() in (
+    "1",
+    "true",
+    "yes",
+    "y",
+)
+TABLE_PDFPLUMBER_ONLY_ON_FLAGGED = os.getenv("TABLE_PDFPLUMBER_ONLY_ON_FLAGGED", "1").lower() in (
+    "1",
+    "true",
+    "yes",
+    "y",
 )
 
 # --- Core Functions ---
@@ -611,89 +629,119 @@ def extract_tables_from_page(
         1 for info in page_tables.values() if info.get("quality_fallback")
     )
 
-    # Convert to output format: select exactly one best table per page
-    extracted_tables = []
-    table_idx = 0
+    # Optionally add pdfplumber candidates for difficult pages or when enabled globally
+    def _maybe_add_pdfplumber_candidates():
+        if not TABLE_PDFPLUMBER_ENABLED:
+            return
+        if TABLE_PDFPLUMBER_ONLY_ON_FLAGGED and not (fallback_applied_for_page or not page_tables):
+            return
+        try:
+            import pdfplumber  # type: ignore
+        except Exception:
+            return
+        try:
+            with pdfplumber.open(str(pdf_path)) as _pp:
+                if page_num >= len(_pp.pages):
+                    return
+                p = _pp.pages[page_num]
+                # Use built-in table finder for bbox-aware candidates
+                found = p.find_tables() or []
+                for tbl in found:
+                    try:
+                        data = tbl.extract() or []
+                        if not data or len(data) < 2 or len(data[0]) < 2:
+                            continue
+                        df = pd.DataFrame(data[1:], columns=data[0])
+                        if df.empty:
+                            continue
+                        # score + fragmentation on sanitized copy
+                        df_clean = df.map(sanitize_cell)
+                        sc = score_table(df_clean)
+                        if sc == 0:
+                            continue
+                        frag = fragmentation_score(df_clean)
+                        bx = tbl.bbox  # (x0, top, x1, bottom) in PDF coords
+                        bbox_q = _quantize_bbox((float(bx[0]), float(bx[1]), float(bx[2]), float(bx[3])))
+                        # Dedup against existing by IoU
+                        skip = False
+                        for existing_key in list(page_tables.keys()):
+                            if _iou(bbox_q, existing_key) >= 0.90:
+                                skip = True
+                                break
+                        if skip:
+                            continue
+                        class _SimpleTable:
+                            def __init__(self, frame):
+                                self.df = frame
+                        page_tables[bbox_q] = {
+                            "table": _SimpleTable(df_clean),
+                            "score": float(sc),
+                            "strategy": "pdfplumber",
+                            "fragmentation": int(frag),
+                            "history": [{"strategy": "pdfplumber", "fragmentation": int(frag), "score": float(sc)}],
+                            "quality_fallback": True,
+                        }
+                    except Exception:
+                        continue
+        except Exception:
+            return
+
+    _maybe_add_pdfplumber_candidates()
+
+    # Convert to output via fusion: build candidates from all page_tables
+    extracted_tables: List[Dict[str, Any]] = []
     if page_tables:
-        best_key = min(
-            page_tables.keys(),
-            key=lambda k: (page_tables[k].get("fragmentation", 0), -float(page_tables[k]["score"] or 0.0)),
-        )
-        table_info = page_tables[best_key]
-        table = table_info["table"]
-
-        # Extract table image
-        bbox_tuple = getattr(table, "_bbox", None)
-        if not bbox_tuple and hasattr(table, "cells") and getattr(table, "cells"):
-            try:
-                xs = [c.x1 for c in table.cells] + [c.x2 for c in table.cells]
-                ys = [c.y1 for c in table.cells] + [c.y2 for c in table.cells]
-                bbox_tuple = (min(xs), min(ys), max(xs), max(ys))
-            except Exception:
-                bbox_tuple = None
-        img_path = (
-            extract_table_image(pdf_doc, page_num, bbox_tuple, output_dir, table_idx, diagnostics)
-            if bbox_tuple
-            else None
-        )
-
-        # Optionally coalesce repeated header rows mid-body before metrics
-        df = table.df
-        if TABLE_HEADER_COALESCE_ENABLED:
-            try:
-                df = coalesce_repeated_header_rows(df, TABLE_HEADER_REPEAT_MIN_MATCH)
-            except Exception as e:
-                logger.debug("Header coalesce failed; continuing")
+        candidates: List[TableCandidate] = []
+        for bbox_tuple, info in page_tables.items():
+            table = info["table"]
+            df = table.df
+            # Optional header coalesce before metrics
+            if TABLE_HEADER_COALESCE_ENABLED:
                 try:
-                    diagnostics.append(
-                        make_event(
-                            "05_table_extractor",
-                            "warning",
-                            "header_coalesce_failed",
-                            str(e),
-                            {"page_index": page_num, "table_idx": table_idx},
-                        )
-                    )
+                    df = coalesce_repeated_header_rows(df, TABLE_HEADER_REPEAT_MIN_MATCH)
                 except Exception:
                     pass
+            df_clean = df.map(sanitize_cell)
+            header_tokens = [str(x).strip() for x in df_clean.columns] if df_clean is not None else []
+            cand = TableCandidate(
+                strategy=info.get("strategy", "unknown"),
+                bbox=bbox_tuple,
+                df=df_clean.copy(),
+                raw_df=df.copy(),
+                fragmentation=int(info.get("fragmentation", 0) or 0),
+                score=float(info.get("score", 0.0) or 0.0),
+                page_index=page_num,
+                table_index=1,
+                header_row_tokens=header_tokens,
+                source_meta={"extraction_method": "camelot"},
+            )
+            candidates.append(cand)
 
-        df_clean = df.map(sanitize_cell)
-        fragmentation = fragmentation_score(df_clean)
-
-        # Build table data
-        table_data = {
-            "page_number": page_num + 1,
-            "page_index": page_num,
-            "table_index": table_idx + 1,
-            "bbox": list(bbox_tuple) if bbox_tuple else [],
-            "extraction_method": "camelot",
-            "strategy": table_info["strategy"],
-            "fragmentation_score": fragmentation,
-            "pandas_df_raw": df.to_dict("records"),
-            "pandas_df": df_clean.to_dict("records"),
-            "pandas_metrics": generate_pandas_metrics(df_clean),
-            "row_count": int(df_clean.shape[0]),
-            "col_count": int(df_clean.shape[1]),
-            "camelot_metrics": {
-                "accuracy": table.accuracy,
-                "whitespace": table.whitespace,
-                "order": table.order,
-            },
-            "score": table_info["score"],
-            "quality_fallback": bool(table_info.get("quality_fallback", False)),
-            "strategy_history": table_info.get("history", []),
-        }
-
-        if img_path:
-            # store path relative to results root (../.. from image_output)
+        fusion_res = fuse_table_candidates(candidates)
+        fused_table = fusion_res.table
+        if fused_table:
+            fused_table["table_index"] = 1
+            # Try to capture image for the fused bbox (optional)
             try:
-                table_data["table_image_path"] = str(
-                    Path(img_path).resolve().relative_to(output_dir.parent.parent.resolve())
-                )
+                img_path = extract_table_image(
+                    pdf_doc,
+                    page_num,
+                    tuple(fused_table.get("bbox") or []),
+                    output_dir,
+                    0,
+                    diagnostics,
+                    custom_name=f"page_{page_num+1}_table_1.png",
+                ) if fused_table.get("bbox") else None
+                if img_path:
+                    try:
+                        fused_table["table_image_path"] = str(
+                            Path(img_path).resolve().relative_to(output_dir.parent.parent.resolve())
+                        )
+                    except Exception:
+                        fused_table["table_image_path"] = img_path
             except Exception:
-                table_data["table_image_path"] = img_path
-
-        extracted_tables.append(table_data)
+                pass
+            extracted_tables.append(fused_table)
 
     return extracted_tables, best_strategy, strategy_durations, page_metrics
 

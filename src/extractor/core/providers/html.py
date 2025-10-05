@@ -194,13 +194,31 @@ class HTMLProvider:
         if not tables:
             return
         for idx, t in enumerate(tables, start=1):
+            # Try to extract columns from <thead> or first <tr>
+            cols: List[str] = []
+            try:
+                thead = t.find("thead")
+                if thead:
+                    ths = thead.find_all(["th", "td"])[:32]
+                    cols = [th.get_text(strip=True) for th in ths if th.get_text(strip=True)]
+                if not cols:
+                    first_tr = t.find("tr")
+                    if first_tr:
+                        ths = first_tr.find_all(["th", "td"])[:32]
+                        cols = [th.get_text(strip=True) for th in ths if th.get_text(strip=True)]
+            except Exception:
+                cols = []
             block = TableBlock(
                 id=f"html-table-{idx:04d}",
                 parent_id=None,
                 type=BlockType.TABLE,
-                content={"title": None, "pandas_metrics": {}, "image_path": None},
+                content={
+                    "title": None,
+                    "pandas_metrics": {"columns": cols, "shape": [0, len(cols)] if cols else [0, 0]},
+                    "image_path": None,
+                },
                 rows=0,
-                cols=0,
+                cols=len(cols) if cols else 0,
                 cells=[],
                 headers=None,
                 metadata=BlockMetadata(attributes={"source": "html_inline"}, confidence=0.5),

@@ -54,6 +54,8 @@ from extractor.pipeline.utils.model_params import (
 from extractor.pipeline.utils.vision import preflight_vision_support
 from extractor.pipeline.utils.text_utils import sanitize_text
 from extractor.pipeline.utils.unified_conversion import build_unified_document_from_reflow
+from extractor.pipeline.utils.numeric_auditor import audit_section_reflow
+from extractor.pipeline.utils.confidence import compose_confidence
 # Ensure _trim_context is defined before any runtime use (some branches call it early)
 def _trim_context(raw: str, limit: int) -> str:
     if not raw:
@@ -88,6 +90,114 @@ def build_user_guard_text(section_meta: Dict[str, Any], truncated_text: str) -> 
         f"Section Summary:\ntitle: \"{title}\"\npages: {page_start}-{page_end}\n\n"
         "Source Text (truncated):\n" + str(truncated_text)
     )
+
+
+def _strict_reflow_json_schema() -> Dict[str, Any]:
+    """JSON Schema for strict reflow responses.
+
+    Providers that support response_format=json_schema can validate against this.
+    Top-level required keys: reflowed_json, ocr_corrections, improvements_made, summary.
+    The blocks union includes: heading | paragraph | list | table | figure.
+    We set additionalProperties conservatively (stricter for table/figure; looser for paragraph/list).
+    """
+    block_common = {
+        "type": "object",
+        "properties": {
+            "type": {"type": "string"},
+        },
+        "required": ["type"],
+        "additionalProperties": True,
+    }
+    heading = {
+        "type": "object",
+        "properties": {
+            "type": {"const": "heading"},
+            "text": {"type": "string"},
+        },
+        "required": ["type", "text"],
+        "additionalProperties": True,
+    }
+    paragraph = {
+        "type": "object",
+        "properties": {
+            "type": {"const": "paragraph"},
+            "text": {"type": "string"},
+        },
+        "required": ["type", "text"],
+        "additionalProperties": True,
+    }
+    list_block = {
+        "type": "object",
+        "properties": {
+            "type": {"const": "list"},
+            "style": {"type": "string"},
+            "items": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["type", "items"],
+        "additionalProperties": True,
+    }
+    table_block = {
+        "type": "object",
+        "properties": {
+            "type": {"const": "table"},
+            "title": {"type": ["string", "null"]},
+            "columns": {"type": "array", "items": {"type": "string"}},
+            "rows": {
+                "type": "array",
+                "items": {
+                    "type": "array",
+                    "items": {"type": ["string", "number", "null"]},
+                },
+            },
+            "confidence": {
+                "type": "object",
+                "properties": {
+                    "status": {"type": "string"},
+                    "density": {"type": ["number", "null"]},
+                    "source": {"type": ["string", "null"]},
+                },
+                "additionalProperties": False,
+            },
+            "image_refs": {"type": ["array", "null"], "items": {"type": "string"}},
+        },
+        "required": ["type", "columns", "rows"],
+        "additionalProperties": False,
+    }
+    figure_block = {
+        "type": "object",
+        "properties": {
+            "type": {"const": "figure"},
+            "title": {"type": ["string", "null"]},
+            "caption": {"type": ["string", "null"]},
+            "image_ref": {"type": ["string", "null"]},
+        },
+        "required": ["type"],
+        "additionalProperties": False,
+    }
+    blocks_union = {
+        "oneOf": [heading, paragraph, list_block, table_block, figure_block, block_common]
+    }
+    return {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "reflow-schema@1",
+        "type": "object",
+        "properties": {
+            "reflowed_json": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "blocks": {"type": "array", "items": blocks_union},
+                },
+                "required": ["blocks"],
+                "additionalProperties": False,
+            },
+            "ocr_corrections": {"type": "object"},
+            "improvements_made": {"type": ["string", "object"]},
+            "summary": {"type": ["string", "object"]},
+        },
+        "required": ["reflowed_json", "ocr_corrections", "improvements_made", "summary"],
+        "additionalProperties": False,
+    }
 VISION_SELECTIVE = os.getenv("STAGE07_VISION_SELECTIVE", "0").lower() in ("1","true","yes")
 CANONICAL_ORDER = os.getenv("STAGE07_CANONICAL_ORDER", "0").lower() in ("1","true","yes")
 from extractor.core.schema.unified_document import SourceType
@@ -1240,9 +1350,22 @@ async def reflow_section_with_llm(
                 pass
 
             # Run strict call via litellm_call without mutating global drop_params
-            # Prefer json_object response_format for OpenAI-compatible proxies (skip for Gemini unless forced)
+            # Strict JSON default with optional json_schema preference
             if "gemini" not in (LLM_MODEL or "").lower():
-                call_params["response_format"] = {"type": "json_object"}
+                STRICT_DISABLE = os.getenv("STAGE07_STRICT_JSON_DISABLE", "0").lower() in ("1","true","yes","y")
+                STRICT_DEFAULT = os.getenv("STAGE07_STRICT_JSON_DEFAULT", "1").lower() in ("1","true","yes","y")
+                PREFER_SCHEMA = os.getenv("STAGE07_STRICT_JSON_SCHEMA", "0").lower() in ("1","true","yes","y")
+                if not STRICT_DISABLE and STRICT_DEFAULT:
+                    if PREFER_SCHEMA:
+                        call_params["response_format"] = {
+                            "type": "json_schema",
+                            "json_schema": {
+                                "name": "reflow_schema@1",
+                                "schema": _strict_reflow_json_schema(),
+                            },
+                        }
+                    else:
+                        call_params["response_format"] = {"type": "json_object"}
             results = await litellm_call(
                 [call_params],
                 wrap_json=True,
