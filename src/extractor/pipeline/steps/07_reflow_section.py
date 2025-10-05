@@ -2311,6 +2311,20 @@ def run(
     """
     console.print("[bold green]Starting Section Reflow (Stage 07)[/bold green]")
     try:
+        logger.info(
+            "07:start sections_json=%s tables_json=%s figures_json=%s annotations_json=%s model=%s timeout=%s include_images=%s skip_llm=%s",
+            sections_json,
+            tables_json,
+            figures_json,
+            annotations_json,
+            LLM_MODEL,
+            llm_timeout,
+            include_images,
+            skip_llm,
+        )
+    except Exception:
+        pass
+    try:
         api_base = (
             os.getenv("OPENAI_BASE_URL")
             or os.getenv("CHUTES_API_BASE")
@@ -2443,6 +2457,10 @@ def run(
 
     if not sections_to_process:
         console.print("[yellow]No sections found to process. Exiting.[/yellow]")
+        try:
+            logger.warning("07:no_sections_found")
+        except Exception:
+            pass
         return
 
     # Allow env override for skip_llm
@@ -2511,6 +2529,21 @@ def run(
 
         processed_sections = asyncio.run(run_tasks())
     logger.debug(f"processed_sections_count={len(processed_sections)}")
+    try:
+        # Quick per-subset counts: tables, figures, paragraphs
+        t_count = sum(len(s.get("tables") or []) for s in processed_sections)
+        f_count = sum(len(s.get("figures") or []) for s in processed_sections)
+        p_count = 0
+        for s in processed_sections:
+            rj = s.get("reflowed_json") or {}
+            blocks = rj.get("blocks") or []
+            p_count += sum(1 for b in blocks if b.get("type") == "paragraph")
+        logger.info(
+            "07:summary sections=%d paragraphs=%d tables=%d figures=%d reflow_mode=%s",
+            len(processed_sections), p_count, t_count, f_count, reflow_mode,
+        )
+    except Exception:
+        pass
 
     # --- Final Output ---
     # Attach resource samples
