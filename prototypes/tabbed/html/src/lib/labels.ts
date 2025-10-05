@@ -41,3 +41,44 @@ export function saveLabel(newLabel: LabelDef): { ok: boolean; reason?: string } 
   }
 }
 
+// --- Calibration MVP: submit label to backend ---
+export type SubmitLabelParams = {
+  docId: string;
+  objectType: 'table' | 'section' | 'figure' | 'equation' | 'entity';
+  objectId: string;
+  structureCorrect: boolean;
+  cellAccuracy?: number | null;
+  notes?: string;
+  pageIndices?: number[];
+  originalPrediction?: Record<string, unknown>;
+  userId?: string;
+};
+
+export async function submitLabel(params: SubmitLabelParams): Promise<{ status: string; event_id: string } | { ok: boolean; event_id?: string }>{
+  const payload = {
+    doc_id: params.docId,
+    object_type: params.objectType,
+    object_id: params.objectId,
+    gold_label: {
+      structure_correct: params.structureCorrect,
+      cell_accuracy: params.cellAccuracy ?? null,
+      notes: params.notes ?? ''
+    },
+    context: {
+      page_indices: params.pageIndices ?? [],
+      source_stage: '05_table_extractor'
+    },
+    original_prediction: params.originalPrediction ?? {},
+    user_id: params.userId ?? (typeof (window as any) !== 'undefined' && (window as any).CURRENT_USER) || 'internal'
+  };
+  const res = await fetch('/api/labels', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  if (!res.ok) {
+    // Keep legacy shape fallback
+    return { ok: false };
+  }
+  return res.json();
+}

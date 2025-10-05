@@ -2043,3 +2043,92 @@ def api_pipeline_latest_set(body: _LatestSet):
         return {"ok": True, "path": str(p)}
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+# -----------------------------
+# Annotation events (labels) — MVP
+# -----------------------------
+
+ANNOTATION_DIR = Path(os.environ.get("ANNOTATION_EVENTS_DIR", "annotation_events"))
+ANNOTATION_DIR.mkdir(parents=True, exist_ok=True)
+EVENT_FILE = ANNOTATION_DIR / "events.jsonl"
+
+class _FeatureSnapshot(BaseModel):
+    fragmentation: int | None = None
+    header_jaccard_max: float | None = None
+    numeric_stability: float | None = None
+    row_count: int | None = None
+    col_count: int | None = None
+    strategy_diversity: int | None = None
+    merge_type_header_body: int | None = None
+    foreign_numeric_ratio: float | None = None
+
+class _OriginalPrediction(BaseModel):
+    confidence: float | None = None
+    structure_prob: float | None = None
+    features_hash: str | None = None
+    feature_snapshot: _FeatureSnapshot | None = None
+
+class _GoldLabel(BaseModel):
+    structure_correct: bool
+    cell_accuracy: float | None = Field(default=None, ge=0, le=1)
+    notes: str | None = None
+
+class _ContextRef(BaseModel):
+    page_indices: list[int] | None = None
+    source_stage: str | None = None
+
+class _AnnotationEventIn(BaseModel):
+    doc_id: str
+    object_type: str
+    object_id: str
+    gold_label: _GoldLabel
+    context: _ContextRef | None = None
+    original_prediction: _OriginalPrediction | None = None
+    user_id: str | None = None
+
+def _hash_feature_snapshot(fs: _FeatureSnapshot | None) -> str | None:
+    if not fs:
+        return None
+    data = fs.model_dump()
+    try:
+        raw = json.dumps(data, sort_keys=True).encode()
+        import hashlib
+        return "sha256:" + hashlib.sha256(raw).hexdigest()
+    except Exception:
+        return None
+
+@app.post("/api/labels")
+def post_label(evt: _AnnotationEventIn):
+    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    event = {
+        "event_id": str(uuid.uuid4()),
+        "timestamp": now,
+        "doc_id": evt.doc_id,
+        "object_type": evt.object_type,
+        "object_id": evt.object_id,
+        "gold_label": evt.gold_label.model_dump(),
+        "context": evt.context.model_dump() if evt.context else {},
+        "user_id": evt.user_id or os.getenv("ANNOTATION_DEFAULT_USER", "unknown"),
+        "original_prediction": evt.original_prediction.model_dump() if evt.original_prediction else {},
+        "model_versions": {
+            "table_calibrator": os.getenv("TABLE_CALIBRATOR_VERSION"),
+            "extractor_commit": os.getenv("EXTRACTOR_GIT_COMMIT"),
+        },
+        "schema_version": "annotation_event@1.0.0",
+    }
+
+    op = event["original_prediction"]
+    if op and not op.get("features_hash"):
+        fs = op.get("feature_snapshot")
+        if fs:
+            try:
+                op["features_hash"] = _hash_feature_snapshot(_FeatureSnapshot(**fs))
+            except Exception:
+                pass
+
+    try:
+        with EVENT_FILE.open("a") as fh:
+            fh.write(json.dumps(event) + "\n")
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": f"persist_failed: {e}"}, status_code=500)
+    return {"ok": True, "event_id": event["event_id"]}

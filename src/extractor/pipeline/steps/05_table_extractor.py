@@ -721,6 +721,13 @@ def extract_tables_from_page(
         fused_table = fusion_res.table
         if fused_table:
             fused_table["table_index"] = 1
+            # Embed calibrator model version when available
+            try:
+                mv = os.getenv("TABLE_CALIBRATOR_VERSION")
+                if mv:
+                    fused_table.setdefault("confidence", {}).setdefault("model_versions", {})["table_calibrator"] = mv
+            except Exception:
+                pass
             # Try to capture image for the fused bbox (optional)
             try:
                 img_path = extract_table_image(
