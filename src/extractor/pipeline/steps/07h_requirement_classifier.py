@@ -109,6 +109,10 @@ def run(
                 reqs[irec]["final_label"] = lab
     for r in reqs:
         r.setdefault("final_label", r["heuristic"])
+    # add formal_status default and schema version
+    for r in reqs:
+        if r.get("final_label") == "requirement" and not r.get("formal_status"):
+            r["formal_status"] = "unproved"
     # Assign requirement ids
     counter = 1
     for r in reqs:
@@ -121,11 +125,12 @@ def run(
     out_dir = output_dir / "07h_requirement_classifier" / "json_output"
     out_dir.mkdir(parents=True, exist_ok=True)
     outp = out_dir / "07h_requirements.json"
-    outp.write_text(
-        json.dumps(
-            {"requirements": reqs, "deterministic": not enable_llm, "hash_component": "07h"}, indent=2
-        )
-    )
+    outp.write_text(json.dumps({
+        "schema_version": 1,
+        "requirements": reqs,
+        "deterministic": not enable_llm,
+        "hash_component": "07h"
+    }, indent=2))
     logger.success(f"07h: wrote {outp} (total={len(reqs)})")
 
 

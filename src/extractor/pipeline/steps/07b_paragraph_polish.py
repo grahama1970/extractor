@@ -10,6 +10,7 @@ import typer
 from loguru import logger
 
 from extractor.pipeline.utils.litellm_call import litellm_call
+from extractor.pipeline.utils.budget import check_and_update_budget
 
 
 app = typer.Typer(help="07b: Gated paragraph polish (temp=0).")
@@ -79,6 +80,8 @@ def run(
                     "kwargs": {"temperature": 0, "top_p": 1, "timeout": 30}
                 })
         if prompts:
+            # budget gate estimate before firing LLM
+            check_and_update_budget("07b", num_items=len(prompts))
             conc = min(2, int(os.getenv("STAGE07_CONCURRENCY", "2")))
             global_cap = os.getenv("STAGE07_GLOBAL_CONCURRENCY")
             if global_cap and global_cap.isdigit():

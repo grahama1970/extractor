@@ -262,6 +262,14 @@ def run(
             sid_local = s.get("id")
             sig = f"{sid_local}|{pid}|{txt[:120]}"
             para["anchor_id"] = "par::" + hashlib.sha256(sig.encode("utf-8", "ignore")).hexdigest()[:16]
+            # location signature for lineage (page:y0 rounded to 0.5pt)
+            try:
+                bb = para.get("bbox") or [0, 0, 0, 0]
+                y0 = float(bb[1])
+                y05 = round(y0 * 2) / 2.0
+                para["location_signature"] = f"{int(para.get('page') or 0)}:{y05:.1f}"
+            except Exception:
+                pass
             can_sections[s["id"]]["paragraphs"].append(para)
 
     # Attach tables/figures
@@ -314,6 +322,15 @@ def run(
             prov.setdefault("merged_from_sections", []).append(a["id"])
             prov.setdefault("merged_from_raw", []).append(moved.get("raw_table_id"))
             prov["continuation_reason"] = reason
+            # update page_span if table spans across pages
+            try:
+                ps = moved.get("page_span") or {"start": moved.get("page_index"), "end": moved.get("page_index")}
+                new_end = tb.get("page_index", ps.get("end"))
+                if isinstance(new_end, int):
+                    ps["end"] = max(int(ps.get("end") or new_end), int(new_end))
+                moved["page_span"] = ps
+            except Exception:
+                pass
 
     # Compute 03 annotations hash and fold into content_hash if available
     for sid, sec in can_sections.items():
@@ -321,7 +338,7 @@ def run(
         if h03:
             base = sec.get("content_hash") or ""
             sec["content_hash"] = hashlib.sha256((base + "|03:" + h03).encode("utf-8")).hexdigest()
-        # Add anchor ids and table block hash
+        # Add anchor ids and table/figure hashes and spans
         for t in sec.get("tables", []):
             raw_id = t.get("raw_table_id") or t.get("tid") or str(id(t))
             cols = (t.get("pandas_metrics") or {}).get("columns") or []
@@ -335,10 +352,28 @@ def run(
                 t["block_hash"] = hashlib.sha256(json.dumps(block_core, sort_keys=True, default=str).encode("utf-8", "ignore")).hexdigest()
             except Exception:
                 pass
+        
+            # location_signature and page_span
+            try:
+                bb = t.get("bbox") or [0, 0, 0, 0]
+                y0 = float(bb[1]); y05 = round(y0 * 2) / 2.0
+                t["location_signature"] = f"{int(t.get('page_index') or 0)}:{y05:.1f}"
+            except Exception:
+                pass
+            if "page_span" not in t:
+                t["page_span"] = {"start": t.get("page_index"), "end": t.get("page_index")}
         for f in sec.get("figures", []):
             capcand = f.get("caption") or f.get("ai_description") or f.get("caption_candidate") or ""
             sig = f"{sid}|{f.get('image_ref') or f.get('image_path')}|{capcand[:80]}"
             f["anchor_id"] = "fig::" + hashlib.sha256(sig.encode("utf-8", "ignore")).hexdigest()[:16]
+            try:
+                bb = f.get("bbox") or [0, 0, 0, 0]
+                y0 = float(bb[1]); y05 = round(y0 * 2) / 2.0
+                f["location_signature"] = f"{int(f.get('page') or 0)}:{y05:.1f}"
+            except Exception:
+                pass
+            if "page_span" not in f:
+                f["page_span"] = {"start": f.get("page"), "end": f.get("page")}
         # Capture prompt_source_objects: first accepted header object_id on the section's first page
         try:
             ps = int(sec_by_id[sid].get("page_start", 0))

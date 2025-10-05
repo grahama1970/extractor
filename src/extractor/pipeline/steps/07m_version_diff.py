@@ -9,6 +9,7 @@ import json
 import hashlib
 from pathlib import Path
 from typing import Any, Dict
+import re
 
 import typer
 from loguru import logger
@@ -31,6 +32,19 @@ def block_sig_components(b: Dict[str, Any]) -> Dict[str, Any]:
 
 def block_sig(b: Dict[str, Any]) -> str:
     return hashlib.sha256(json.dumps(block_sig_components(b), sort_keys=True).encode()).hexdigest()
+
+_punct_ws = re.compile(r"[\s\p{Punct}]+", re.UNICODE)
+
+def _normalize_text(s: str | None) -> str:
+    try:
+        import regex as _rx  # optional for \p{P} support
+        return _rx.sub(r"[\p{P}\p{Zs}]+", "", s or "")
+    except Exception:
+        return re.sub(r"[\W_]+", "", s or "")
+
+def _snippet(s: str | None, n: int = 40) -> str:
+    s = (s or "").replace("\n", " ").strip()
+    return s[:n]
 
 
 @app.command()
@@ -64,17 +78,26 @@ def run(
                 oldc = old_components.get(a, {})
                 newc = block_sig_components(b)
                 changed = []
-                if oldc.get("text") != newc.get("text"):
+                old_text = oldc.get("text")
+                new_text = newc.get("text")
+                if _normalize_text(old_text) != _normalize_text(new_text):
                     changed.append("text_changed")
                 if oldc.get("columns") != newc.get("columns"):
                     changed.append("columns_changed")
                 if oldc.get("rows_hash") != newc.get("rows_hash"):
                     changed.append("rows_changed")
-                if oldc.get("caption") != newc.get("caption"):
+                if _normalize_text(oldc.get("caption")) != _normalize_text(newc.get("caption")):
                     changed.append("caption_changed")
                 if not changed:
                     changed.append("structure_changed")
-                deltas.append({"anchor_id": a, "change_type": "modified", "changed_fields": changed})
+                entry = {"anchor_id": a, "change_type": "modified", "changed_fields": changed}
+                if "text_changed" in changed:
+                    entry["prev_snippet"] = _snippet(old_text)
+                    entry["new_snippet"] = _snippet(new_text)
+                if "caption_changed" in changed and not entry.get("prev_snippet"):
+                    entry["prev_snippet"] = _snippet(oldc.get("caption"))
+                    entry["new_snippet"] = _snippet(newc.get("caption"))
+                deltas.append(entry)
     for a in old_index.keys() - current_anchors:
         deltas.append({"anchor_id": a, "change_type": "removed", "changed_fields": []})
     out_dir = output_dir / "07m_version_diff" / "json_output"
