@@ -72,7 +72,7 @@ def run(
                 index.append((sid, pid))
                 orig_len[(sid, pid)] = len(txt)
                 prompts.append({
-                    "model": os.getenv("LITELLM_DEFAULT_MODEL") or os.getenv("LITELLM_VLM_MODEL") or "openai/zai-org/GLM-4.5-Air",
+                    "model": os.getenv("STAGE07B_MODEL") or os.getenv("LITELLM_DEFAULT_MODEL") or os.getenv("LITELLM_VLM_MODEL") or "openai/zai-org/GLM-4.5-Air",
                     "messages": [
                         {"role": "system", "content": [{"type": "text", "text": "Normalize formatting ONLY (hyphen splits, spacing, trivial casing). Do NOT invent, paraphrase, merge, reorder, or drop technical tokens. If no fix needed, output original unchanged. Output ONLY JSON: {\\\"text\\\": string}."}]},
                         {"role": "user", "content": [{"type": "text", "text": f"Input paragraph (fix spacing/hyphenation only; preserve wording):\n\n{txt}"}]},

@@ -94,7 +94,7 @@ def run(
                     f"Existing: {cap or ''}"
                 )
                 prompts.append({
-                    "model": os.getenv("LITELLM_DEFAULT_MODEL") or os.getenv("LITELLM_VLM_MODEL") or "openai/zai-org/GLM-4.5-Air",
+                    "model": os.getenv("STAGE07D_MODEL") or os.getenv("LITELLM_DEFAULT_MODEL") or os.getenv("LITELLM_VLM_MODEL") or "openai/zai-org/GLM-4.5-Air",
                     "messages": [
                         {"role": "system", "content": [{"type": "text", "text": 'Refine a concise (<=20 words) figure caption; preserve identifiers/units; DO NOT add invented claims or context. If existing caption is adequate, return it unchanged. Output ONLY JSON: {"caption": string}.'}]},
                         {"role": "user", "content": [{"type": "text", "text": msg}]},

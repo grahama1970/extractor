@@ -97,7 +97,7 @@ def run(
                     f"Columns: {cols}\nSample rows: {rows}"
                 )
                 prompts.append({
-                    "model": os.getenv("LITELLM_DEFAULT_MODEL") or os.getenv("LITELLM_VLM_MODEL") or "openai/zai-org/GLM-4.5-Air",
+                    "model": os.getenv("STAGE07C_MODEL") or os.getenv("LITELLM_DEFAULT_MODEL") or os.getenv("LITELLM_VLM_MODEL") or "openai/zai-org/GLM-4.5-Air",
                     "messages": [
                         {"role": "system", "content": [{"type": "text", "text": "Output ONLY JSON {\\\"title\\\": string|null}. If uncertain, return null. Never hallucinate measurements, performance, or domains."}]},
                         {"role": "user", "content": [{"type": "text", "text": msg}]},

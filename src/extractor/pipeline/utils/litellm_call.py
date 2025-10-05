@@ -25,6 +25,7 @@ import asyncio
 import json
 import os
 import sys
+import time
 from dataclasses import dataclass
 from typing import Any as _Any, Dict, List, Optional, Tuple
 
@@ -78,6 +79,12 @@ DEFAULT_MODEL = (
     or os.getenv("OLLAMA_DEFAULT_MODEL", "ollama/gemma3:12b")
 )
 MODEL = DEFAULT_MODEL  # compatibility alias expected by tests
+
+# Warm-start metrics config (opt-in)
+ENABLE_WARM_START_METRICS = os.getenv("ENABLE_WARM_START_METRICS", "0").lower() in {"1", "true", "yes"}
+WARM_FIRST_N = int(os.getenv("WARM_START_FIRST_N", "10"))
+WARM_METRICS_PATH = os.getenv("WARM_START_METRICS_PATH", "data/results/pipeline/metrics/warm_start_metrics.json")
+_warm_latencies: dict[str, list[float]] = {}
 
 # Drop unsupported provider params unless explicitly disabled
 _litellm.drop_params = os.getenv("LITELLM_DROP_PARAMS", "true").lower() in {"1", "true", "yes", "y"}
@@ -452,10 +459,18 @@ async def litellm_call(
         return entry
 
     _sanitize_litellm_callbacks()
+    # Router-level timeout (caps overall call, including retries)
+    router_timeout = request_timeout if request_timeout is not None else (
+        float(os.getenv("LITELLM_ROUTER_TIMEOUT", "600"))
+    )
+    retry_after_param = float(os.getenv("LITELLM_RETRY_AFTER", "0")) or None
+
     router = Router(
         model_list=[_router_entry(m) for m in unique_models],
         num_retries=num_retries,
         default_max_parallel_requests=default_max_parallel_requests,
+        timeout=router_timeout,
+        retry_after=retry_after_param,
     )
     _sanitize_litellm_callbacks()
 
@@ -588,6 +603,22 @@ async def litellm_call(
         # this function may run inside a long-lived loop (e.g., FastAPI) and shutting
         # it down causes subsequent run_in_executor calls to fail with "Executor shutdown".
         await _shutdown_router(router)
+        # Persist warm-start metrics (latest only)
+        if ENABLE_WARM_START_METRICS and _warm_latencies:
+            try:
+                from statistics import median
+                from pathlib import Path as _P
+                _P(WARM_METRICS_PATH).parent.mkdir(parents=True, exist_ok=True)
+                out = {"timestamp_started": __import__("datetime").datetime.utcnow().isoformat(), "models": {}}
+                for m, arr in _warm_latencies.items():
+                    arr2 = arr[:WARM_FIRST_N]
+                    arr2s = sorted(arr2)
+                    p50 = median(arr2s) if arr2s else 0
+                    p95 = arr2s[min(len(arr2s) - 1, int(len(arr2s) * 0.95))] if arr2s else 0
+                    out["models"][m] = {"first_10_latencies": arr2s, "p50_ms": p50, "p95_ms": p95}
+                _P(WARM_METRICS_PATH).write_text(json.dumps(out, indent=2))
+            except Exception:
+                pass
 
 # -----------------------------------------------------------------------------
 # Demo / CLI
