@@ -146,7 +146,8 @@ def run(
 
     outp = out_dir / "07c_table_title_infer.json"
     deterministic = DISABLE_LLM or not bool(titles)
-    outp.write_text(json.dumps({"table_titles": titles, "deterministic": deterministic}, indent=2, ensure_ascii=False))
+    model_used = os.getenv("STAGE07C_MODEL") or os.getenv("LITELLM_DEFAULT_MODEL") or os.getenv("LITELLM_VLM_MODEL")
+    outp.write_text(json.dumps({"table_titles": titles, "deterministic": deterministic, "model_used": model_used, "prompt_version": "1.0"}, indent=2, ensure_ascii=False))
     logger.success(f"07c: wrote {outp}")
 
 

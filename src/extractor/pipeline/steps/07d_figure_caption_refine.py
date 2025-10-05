@@ -161,7 +161,8 @@ def run(
 
     outp = out_dir / "07d_figure_caption_refine.json"
     deterministic = DISABLE_LLM or not bool(captions)
-    outp.write_text(json.dumps({"figure_captions": captions, "deterministic": deterministic}, indent=2, ensure_ascii=False))
+    model_used = os.getenv("STAGE07D_MODEL") or os.getenv("LITELLM_DEFAULT_MODEL") or os.getenv("LITELLM_VLM_MODEL")
+    outp.write_text(json.dumps({"figure_captions": captions, "deterministic": deterministic, "model_used": model_used, "prompt_version": "1.0"}, indent=2, ensure_ascii=False))
     logger.success(f"07d: wrote {outp}")
 
 

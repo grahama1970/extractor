@@ -158,7 +158,8 @@ def run(
 
     outp = out_dir / "07b_paragraph_polish.json"
     deterministic = DISABLE_LLM or not bool(results and any(results.get(s.get("id"), {}) for s in sections))
-    outp.write_text(json.dumps({"polish": results, "deterministic": deterministic}, indent=2, ensure_ascii=False))
+    model_used = os.getenv("STAGE07B_MODEL") or os.getenv("LITELLM_DEFAULT_MODEL") or os.getenv("LITELLM_VLM_MODEL")
+    outp.write_text(json.dumps({"polish": results, "deterministic": deterministic, "model_used": model_used, "prompt_version": "1.0"}, indent=2, ensure_ascii=False))
     logger.success(f"07b: wrote {outp}")
 
 

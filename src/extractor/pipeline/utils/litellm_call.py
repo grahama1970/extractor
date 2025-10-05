@@ -500,14 +500,35 @@ async def litellm_call(
             async with sem:
                 tried_fallback = False
                 attempt_model = model
+                attempts = 0
                 while True:
                     try:
+                        t0 = time.perf_counter() if 'time' in globals() else None
                         resp = await router.acompletion(model=attempt_model, messages=prepared, **kwargs)
+                        if t0 is not None and os.getenv("ENABLE_WARM_START_METRICS", "0") in ("1","true","yes"):
+                            dt = (time.perf_counter() - t0) * 1000.0
+                            try:
+                                import statistics as _stats  # noqa
+                            except Exception:
+                                pass
                         content = format_answer_with_logging(idx, resp, wrap_json, prompts[idx], logger)
                         return CallResult(idx, req, resp, None, content)
                     except BaseException as e:
                         etype = type(e).__name__
                         status_str = getattr(getattr(e, "response", None), "status_code", None)
+                        attempts += 1
+                        # 429 handling with Retry-After
+                        if status_str == 429:
+                            headers = getattr(getattr(e, "response", None), "headers", {}) or {}
+                            ra = headers.get("Retry-After") if isinstance(headers, dict) else None
+                            try:
+                                delay = float(ra) if ra else (1.0 if attempts == 1 else 2.0)
+                            except Exception:
+                                delay = 1.0 if attempts == 1 else 2.0
+                            await asyncio.sleep(delay)
+                            if attempts <= (num_retries or 0):
+                                continue
+                            return CallResult(idx, req, None, e, None)
                         fast_fail = (
                             "AuthenticationError" in etype
                             or "NotFound" in etype
@@ -527,6 +548,13 @@ async def litellm_call(
                                     pass
                                 continue
                         logger.exception("litellm_call task failed (idx=%s, model=%s fast_fail=%s)", idx, attempt_model, fast_fail)
+                        # Generic 5xx: limited retries with backoff
+                        try:
+                            if str(status_str).startswith("5") and attempts <= (num_retries or 0):
+                                await asyncio.sleep(1.0 * attempts)
+                                continue
+                        except Exception:
+                            pass
                         content = format_answer_with_logging(idx, e, wrap_json, prompts[idx], logger)
                         return CallResult(idx, req, None, e, content)
 

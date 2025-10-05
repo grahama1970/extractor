@@ -64,6 +64,31 @@ def main(
         logger.info(f"[DRY RUN] semantic nodes={sum(len(v) for v in (extra_nodes or {}).values())}, edges={sum(len(v) for v in (extra_edges or {}).values())}")
         return
     client.ensure_collections()
+    # Optional strict namespacing checks (dev only)
+    if os.getenv("STRICT_KEY_NAMESPACE", "0").lower() in ("1","true","yes"):
+        prefix_map = {
+            "pdf_objects": f"obj::{doc_id}::",
+            "sections": f"sec::{doc_id}::",
+            "blocks": f"blk::{doc_id}::",
+            "requirements": f"req::{doc_id}::",
+            "entities": f"ent::{doc_id}::",
+            "equations": f"eq::{doc_id}::",
+            "variables": f"var::{doc_id}::",
+            "deltas": f"delta::{doc_id}::",
+        }
+        def _check(col: str, docs: list[dict]):
+            pre = prefix_map.get(col)
+            if not pre:
+                return
+            for d in docs:
+                k = d.get("_key", "")
+                if not isinstance(k, str) or not k.startswith(pre):
+                    raise SystemExit(f"STRICT_KEY_NAMESPACE: {_key} invalid for {col}; expected prefix '{pre}'")
+        _check("pdf_objects", pdf_objects)
+        _check("sections", sections_payload)
+        _check("blocks", blocks_payload)
+        for col, docs in (extra_nodes or {}).items():
+            _check(col, docs)
     client.upsert_batch("pdf_objects", pdf_objects)
     client.upsert_batch("sections", sections_payload)
     client.upsert_batch("blocks", blocks_payload)
