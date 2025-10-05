@@ -1,0 +1,86 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+from typing import Any, Dict, List
+
+import typer
+from loguru import logger
+
+from extractor.pipeline.utils.litellm_call import litellm_call
+
+
+app = typer.Typer(help="07d: Refine figure captions when short/weak (gated).")
+
+DISABLE_LLM = os.getenv("STAGE07_DISABLE_LLM", "").lower() in {"1", "true", "yes", "y"}
+
+
+def _weak_caption(text: str | None) -> bool:
+    if not text:
+        return True
+    return len(text.strip()) < 40
+
+
+@app.command("run")
+def run(
+    canonical_json: Path = typer.Option(..., "--canonical", exists=True),
+    output_dir: Path = typer.Option(Path("data/results/pipeline"), "-o"),
+):
+    base = output_dir
+    out_dir = base / "07d_figure_caption_refine"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    payload = json.loads(canonical_json.read_text())
+    sections: List[Dict[str, Any]] = payload.get("sections", [])
+
+    captions: Dict[str, Dict[str, str]] = {}
+    if DISABLE_LLM:
+        for s in sections:
+            sid = s.get("id")
+            fmap: Dict[str, str] = {}
+            for f in s.get("figures", []):
+                cap = f.get("caption") or f.get("ai_description")
+                if _weak_caption(cap):
+                    fmap[f.get("figure_id") or f.get("image_ref") or f"fid_{id(f)}"] = (cap or "").strip()
+            captions[sid] = fmap
+    else:
+        prompts = []
+        index: List[tuple[str, str]] = []
+        for s in sections:
+            sid = s.get("id")
+            for f in s.get("figures", []):
+                cap = f.get("caption") or f.get("ai_description")
+                if not _weak_caption(cap):
+                    continue
+                key = f.get("figure_id") or f.get("image_ref") or f"fid_{id(f)}"
+                msg = (
+                    "Write a concise, factual caption for this figure. Keep it short, no invented data.\n"
+                    f"Existing: {cap or ''}"
+                )
+                prompts.append({
+                    "model": os.getenv("LITELLM_DEFAULT_MODEL") or os.getenv("LITELLM_VLM_MODEL") or "openai/zai-org/GLM-4.5-Air",
+                    "messages": [
+                        {"role": "system", "content": [{"type": "text", "text": "You output ONLY a short caption (no JSON)."}]},
+                        {"role": "user", "content": [{"type": "text", "text": msg}]},
+                    ],
+                    "kwargs": {"temperature": 0, "top_p": 1, "timeout": 30}
+                })
+                index.append((sid, key))
+
+        if prompts:
+            out = __import__("asyncio").run(litellm_call(prompts, wrap_json=False, concurrency=min(4, int(os.getenv("STAGE07_CONCURRENCY", "4"))), desc="07d_caption"))
+        else:
+            out = []
+        for i, (sid, key) in enumerate(index):
+            content = out[i].content if i < len(out) and out[i] else ""
+            captions.setdefault(sid, {})[key] = (content or "").strip()
+
+    outp = out_dir / "07d_figure_caption_refine.json"
+    outp.write_text(json.dumps({"figure_captions": captions}, indent=2, ensure_ascii=False))
+    logger.success(f"07d: wrote {outp}")
+
+
+if __name__ == "__main__":
+    app()
+
