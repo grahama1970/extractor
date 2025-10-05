@@ -83,15 +83,37 @@ def run(
         else:
             out = []
         results = {}
+        max_new_ratio = float(os.getenv("PARA_NEW_TOKEN_RATIO_MAX", "0.15"))
+        max_shrink_ratio = float(os.getenv("PARA_TOKEN_SHRINK_RATIO_MAX", "0.40"))
         for i, (sid, pid) in enumerate(index):
             content = out[i].content if i < len(out) and out[i] else ""
-            cleaned = (content or "").strip()
+            candidate = (content or "").strip()
             try:
-                cap = int(float(os.getenv("PARA_LEN_INFLATION_CAP", "1.5")) * float(orig_len.get((sid, pid), len(cleaned)) or 1))
-                if len(cleaned) > cap:
-                    cleaned = cleaned[:cap]
+                cap = int(float(os.getenv("PARA_LEN_INFLATION_CAP", "1.5")) * float(orig_len.get((sid, pid), len(candidate)) or 1))
+                if len(candidate) > cap:
+                    candidate = candidate[:cap]
             except Exception:
                 pass
+            # token delta guards
+            # Find original text from canonical payload (requires lookup)
+            orig_text = None
+            for s in sections:
+                if s.get("id") == sid:
+                    for p in s.get("paragraphs", []):
+                        if p.get("pid") == pid:
+                            orig_text = p.get("text", "")
+                            break
+                    break
+            if orig_text is None:
+                orig_text = candidate
+            orig_toks = (orig_text or "").split()
+            cand_toks = (candidate or "").split()
+            cleaned = candidate
+            if orig_toks:
+                added = max(0, len(cand_toks) - len(orig_toks))
+                removed = max(0, len(orig_toks) - len(cand_toks))
+                if (added / len(orig_toks)) > max_new_ratio or (removed / len(orig_toks)) > max_shrink_ratio:
+                    cleaned = orig_text
             results.setdefault(sid, {})[pid] = cleaned
 
     outp = out_dir / "07b_paragraph_polish.json"

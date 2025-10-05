@@ -112,7 +112,7 @@ def _likely_continuation(
     jaccard_threshold = float(os.getenv("CONTINUITY_JACCARD_THRESHOLD", "0.75"))
     top_page_y_cutoff = float(os.getenv("CONTINUITY_TOP_PAGE_Y_CUTOFF", "220"))
     min_cols = int(os.getenv("CONTINUITY_MIN_COLS_JACCARD", "3"))
-    max_vertical_gap = float(os.getenv("CONTINUITY_MAX_VERTICAL_GAP", "420"))  # px
+    max_vertical_gap = float(os.getenv("CONTINUITY_MAX_VERTICAL_GAP", "360"))  # px tightened default
     lbl1 = prev_t.get("normalized_label")
     lbl2 = next_t.get("normalized_label")
     if lbl1 and lbl2 and lbl1 == lbl2:
@@ -122,11 +122,13 @@ def _likely_continuation(
     _, c1 = _columns_signature(prev_t)
     _, c2 = _columns_signature(next_t)
     if c1 and c2 and len(c1) >= min_cols and len(c2) >= min_cols:
-        inter = len(set(c1) & set(c2))
-        denom = max(len(c1), len(c2)) or 1
-        if (inter / denom) >= jaccard_threshold:
-            if _vertical_gap_ok(prev_t, next_t, max_vertical_gap):
-                return True, "columns_jaccard"
+        # Asymmetry guard: skip if column counts diverge widely
+        if abs(len(c1) - len(c2)) <= 2:
+            inter = len(set(c1) & set(c2))
+            denom = max(len(c1), len(c2)) or 1
+            if (inter / denom) >= jaccard_threshold:
+                if _vertical_gap_ok(prev_t, next_t, max_vertical_gap):
+                    return True, "columns_jaccard"
 
     # Header row token similarity (Dice)
     prev_cols = list(c1)

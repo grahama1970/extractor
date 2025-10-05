@@ -174,7 +174,9 @@ class ArangoClient:
             logger.warning(f"Retrying {col} due to {r.status_code}: {r.text[:140]}")
             return self._post_with_retry(url, payload, col, attempt=1)
         msg = f"Upsert failed for {col}: {r.status_code} {r.text[:200]}"
-        if os.getenv("ARANGO_IGNORE_ERRORS", "0") in ("1", "true", "yes"):
+        fail_open = os.getenv("ARANGO_FAIL_OPEN", "0").lower() in ("1", "true", "yes")
+        ignore_all = os.getenv("ARANGO_IGNORE_ERRORS", "0").lower() in ("1", "true", "yes")
+        if ignore_all or fail_open:
             logger.error(msg)
             return
         raise RuntimeError(msg)

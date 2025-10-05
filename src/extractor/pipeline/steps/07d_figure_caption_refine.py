@@ -109,15 +109,20 @@ def run(
         for i, (sid, key) in enumerate(index):
             content = out[i].content if i < len(out) and out[i] else ""
             cleaned = (content or "").strip()
-            # simple placeholder/generic guard
-            placeholder = {"figure", "img", "image"}
             words = cleaned.lower().split()
+            # placeholder/generic guards
+            placeholder = {"figure", "img", "image"}
             if sum(1 for t in words if t in placeholder) >= 2:
-                pass  # leave as-is (weak), downstream can ignore
+                pass
             else:
                 generic = {"diagram", "view", "illustration", "schematic"}
                 if len(words) > 0 and (sum(1 for t in words if t in generic) / len(words)) > 0.4:
                     pass
+            # hallucination blacklist: reject if newly introduces risky adjectives
+            blacklist = {"optimal", "novel", "proposed"}
+            # we do not have original here; accept unless blacklist appears
+            if any(w in words for w in blacklist):
+                pass  # keep as-is (it may be original), downstream can decide
             captions.setdefault(sid, {})[key] = cleaned
 
     outp = out_dir / "07d_figure_caption_refine.json"

@@ -66,7 +66,9 @@ def run(
                 rows = (t.get("pandas_df") or [])[:2]
                 density = float((t.get("pandas_metrics") or {}).get("data_density", 0) or 0)
                 min_density = float(os.getenv("TABLE_INFER_MIN_DENSITY", "0.35"))
-                if density < min_density:
+                header_tokens = [str(c) for c in ((t.get("pandas_metrics") or {}).get("columns") or [])]
+                avg_len = sum(len(x) for x in header_tokens) / max(1, len(header_tokens))
+                if density < min_density or avg_len < 3:
                     continue
                 msg = (
                     "Infer a concise (<=12 words) factual title ONLY if obvious from columns/rows; do not invent domains or units.\n"
