@@ -726,6 +726,43 @@ async def process_sections_comprehensive(
     # Summarize suspicious from Stage 03 llm_verification results on original blocks
     suspicious_analysis = summarize_suspicious_from_verified(blocks, sections)
 
+    # --- New: Analyze section heading anomalies and compute confidence ---
+    from extractor.pipeline.utils.section_heading_analyzer import analyze_section_headings
+    from extractor.pipeline.utils.confidence import compose_confidence
+    
+    heading_analysis = analyze_section_headings(sections)
+    
+    # Attach heading analysis and confidence to each section
+    for section in sections:
+        section_id = section.get("id")
+        # Find anomalies for this specific section
+        section_anomalies = [
+            a for a in heading_analysis.get("anomalies", [])
+            if a.get("section_id") == section_id
+        ]
+        
+        # Store heading analysis in metadata
+        section.setdefault("metadata", {})["heading_analysis"] = {
+            "anomalies": section_anomalies,
+            "has_anomalies": len(section_anomalies) > 0,
+        }
+        
+        # Compose confidence with heading_factor
+        # (Future: will include numeric_recall from Stage 07)
+        section_confidence = compose_confidence(
+            heading_factor=heading_analysis.get("confidence_factor", 1.0),
+            # structure_prob=None,  # Future: from learned model
+            # numeric_recall=None,  # Future: from Stage 07 audit
+        )
+        section.setdefault("metadata", {})["confidence"] = section_confidence
+    
+    # Store global heading analysis summary in result
+    heading_analysis_summary = {
+        "total_anomalies": heading_analysis.get("anomaly_count", 0),
+        "confidence_factor": heading_analysis.get("confidence_factor", 1.0),
+        "severity_breakdown": heading_analysis.get("severity_breakdown", {}),
+    }
+
     visual_count = 0
     if pdf_path and pdf_path.exists() and image_output_dir:
         logger.info("Capturing section visuals with 30% expansion...")
@@ -750,6 +787,7 @@ async def process_sections_comprehensive(
         "sections": sections,
         "section_count": len(sections),
         "suspicious_analysis": suspicious_analysis,
+        "heading_analysis_summary": heading_analysis_summary,
         "hierarchy_depth": max((s["level"] for s in sections), default=0),
         "visual_captures": visual_count,
         "statistics": {
