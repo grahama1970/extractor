@@ -122,7 +122,7 @@ def _extract_first_json(raw: str) -> Tuple[Any, str]:
     return None, "scan_failed"
 
 
-def _build_messages(sec: Dict[str, Any], guard: str, max_chars: int) -> List[Dict[str, Any]]:
+def _build_messages(sec: Dict[str, Any], guard: str, max_chars: int, *, include_images: bool, results_base_dir: Path | None) -> List[Dict[str, Any]]:
     # Guard presets
     if guard == "strict":
         system = (
@@ -153,14 +153,39 @@ def _build_messages(sec: Dict[str, Any], guard: str, max_chars: int) -> List[Dic
         "table_count": len(sec.get("tables", [])),
         "figure_count": len(sec.get("figures", [])),
     }
+    # Text part first
+    user_parts: List[Dict[str, Any]] = [
+        {"type": "text", "text": guard_text + "\nContext:\n" + json.dumps(context, ensure_ascii=False) + "\n\nText:\n" + text}
+    ]
+    # Optional image parts (section image → up to 2 table crops → first figure)
+    if include_images and results_base_dir is not None:
+        try:
+            from extractor.pipeline.utils.image_io import (
+                get_section_image_b64,
+                get_table_image_b64,
+                get_figure_image_b64,
+            )
+            # Section image
+            b64 = get_section_image_b64(sec, results_base_dir)
+            if b64:
+                user_parts.append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}})
+            # Up to 2 tables
+            for t in (sec.get("tables") or [])[:2]:
+                tb64 = get_table_image_b64(t, results_base_dir)
+                if tb64:
+                    user_parts.append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{tb64}"}})
+            # First figure (optional)
+            figs = sec.get("figures") or []
+            if figs:
+                fb64 = get_figure_image_b64(figs[0], results_base_dir)
+                if fb64:
+                    user_parts.append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{fb64}"}})
+        except Exception:
+            pass
+
     return [
         {"role": "system", "content": [{"type": "text", "text": system}]},
-        {
-            "role": "user",
-            "content": [
-                {"type": "text", "text": guard_text + "\nContext:\n" + json.dumps(context, ensure_ascii=False) + "\n\nText:\n" + text},
-            ],
-        },
+        {"role": "user", "content": user_parts},
     ]
 
 
@@ -199,19 +224,34 @@ async def _try_one(model: str, messages: List[Dict[str, Any]], timeout: int) -> 
 
 async def _run(args) -> int:
     _bridge_env()
-    secs, tabs, figs = _read_inputs(Path(args.sections), Path(args.tables), Path(args.figures))
+    sections_path = Path(args.sections)
+    secs, tabs, figs = _read_inputs(sections_path, Path(args.tables), Path(args.figures))
     if not secs:
         print("No sections found", file=sys.stderr)
         return 2
     idx = max(0, min(args.index, len(secs) - 1))
     sec = secs[idx]
     sid = str(sec.get("id", f"section_{idx}"))
-    # minimal text fields if missing
+    # minimal text fields if missing; also attach tables/figures by section_id
     if not (sec.get("source_text") or sec.get("merged_text")):
         blocks = sec.get("blocks", []) or []
         parts = [(b.get("text") or "").strip() for b in blocks if (b.get("text") or "").strip()]
         sec["source_text"] = "\n".join(parts)
         sec["merged_text"] = " ".join(parts)
+
+    # Join tables/figures by section id
+    sid = sec.get("id")
+    if sid is not None:
+        by_sid_t = {}
+        for t in tabs:
+            if t.get("section_id") == sid:
+                by_sid_t.setdefault(sid, []).append(t)
+        by_sid_f = {}
+        for f in figs:
+            if f.get("section_id") == sid:
+                by_sid_f.setdefault(sid, []).append(f)
+        sec.setdefault("tables", by_sid_t.get(sid, []))
+        sec.setdefault("figures", by_sid_f.get(sid, []))
 
     models = [m.strip() for m in (args.models.split(",") if args.models else []) if m.strip()]
     if not models:
@@ -225,10 +265,17 @@ async def _run(args) -> int:
     root.mkdir(parents=True, exist_ok=True)
     summary: List[Dict[str, Any]] = []
 
+    # Compute results_base_dir for images: ascend to pipeline root (…/pipeline)
+    # Example sections path: data/results/pipeline/04_section_builder/json_output/04_sections.json
+    try:
+        results_base_dir = sections_path.parents[3]  # …/pipeline
+    except Exception:
+        results_base_dir = None
+
     for model in models:
         mslug = model.replace("/", "_")
         for guard in guards:
-            messages = _build_messages(sec, guard, args.max_chars)
+            messages = _build_messages(sec, guard, args.max_chars, include_images=args.include_images, results_base_dir=results_base_dir)
             content, err, parsed = await _try_one(model, messages, args.timeout)
             ok = bool(parsed and isinstance(parsed.get("parsed"), dict) and (
                 parsed["parsed"].get("reflowed_json")
@@ -294,4 +341,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-

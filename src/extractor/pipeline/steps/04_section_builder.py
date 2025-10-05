@@ -426,6 +426,43 @@ def build_sections_from_blocks(
         except Exception:
             section.setdefault("pages", [])
 
+    # Compute full section content hash (title + joined block texts) and decide if a layout image is helpful
+    try:
+        import hashlib as _hashlib
+        for s in sections:
+            md = s.setdefault("metadata", {})
+            # content hash
+            try:
+                txt_parts = []
+                for b in s.get("blocks", []) or []:
+                    t = b.get("text") or b.get("content") or ""
+                    if isinstance(t, str) and t.strip():
+                        txt_parts.append(t.strip())
+                basis = (s.get("title") or "") + "\n" + "\n".join(txt_parts)
+                md["section_content_hash"] = _hashlib.sha256(basis.encode("utf-8", "ignore")).hexdigest()
+            except Exception:
+                md["section_content_hash"] = None
+            # simple dispersion heuristic over x0 of block bboxes to gate section image usage
+            try:
+                xs: list[float] = []
+                for b in s.get("blocks", []) or []:
+                    bb = b.get("bbox")
+                    if isinstance(bb, list) and len(bb) >= 1:
+                        xs.append(float(bb[0]))
+                needs_image = False
+                if len(xs) >= 6:
+                    xs.sort()
+                    span = xs[-1] - xs[0]
+                    if span > 120:
+                        gaps = [xs[i + 1] - xs[i] for i in range(len(xs) - 1)]
+                        if gaps and max(gaps) > 0.35 * span:
+                            needs_image = True
+                md["needs_layout_image"] = needs_image
+            except Exception:
+                md["needs_layout_image"] = False
+    except Exception:
+        pass
+
     logger.info(f"Built {len(sections)} sections from {len(blocks)} blocks")
     return sections
 

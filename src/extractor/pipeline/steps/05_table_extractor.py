@@ -1188,6 +1188,30 @@ def run(
                 t['caption'] = cap
                 t['title'] = cap
 
+    # --- Assign stable raw_table_id and optional normalized_label (e.g., table/4-1) ---
+    try:
+        import re as _re2
+    except Exception:
+        _re2 = re  # type: ignore
+    for t in filtered_tables:
+        # raw id based on page + index
+        try:
+            t["raw_table_id"] = f"rawtbl_p{int(t.get('page_index',0))}_i{int(t.get('table_index',0))}"
+        except Exception:
+            t["raw_table_id"] = None
+        # normalized label from title/caption if present
+        try:
+            lbl_src = t.get("title") or t.get("caption") or ""
+            if isinstance(lbl_src, str) and lbl_src.strip():
+                norm = _re2.sub(r"[‐‑–—−]", "-", lbl_src.strip())
+                m = _re2.search(r"(?i)\btable\s+(\d+(?:[-\.]\d+)*)", norm)
+                if m:
+                    num = m.group(1)
+                    num_norm = _re2.sub(r"[.\-]+", "-", num)
+                    t["normalized_label"] = f"table/{num_norm.lower()}"
+        except Exception:
+            pass
+
     # --- De-duplicate header rows accidentally included in body ---
     try:
         import pandas as pd

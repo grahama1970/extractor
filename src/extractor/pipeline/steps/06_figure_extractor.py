@@ -439,6 +439,26 @@ def run(
                     figure["section_id"] = section.get("id", "unknown")
                     break
 
+    # --- Optional normalized figure label (Figure X-Y) from caption/AI description ---
+    try:
+        import re as _re3
+    except Exception:
+        _re3 = None  # type: ignore
+    if _re3 is not None:
+        for fig in extracted_figures:
+            try:
+                lbl_src = fig.get("caption") or fig.get("ai_description") or ""
+                if isinstance(lbl_src, str) and lbl_src.strip():
+                    import re
+                    norm = re.sub(r"[‐‑–—−]", "-", lbl_src)
+                    m = _re3.search(r"(?i)\bfig(?:ure)?\s+(\d+(?:[-\.]\d+)*)", norm)
+                    if m:
+                        num = m.group(1)
+                        num_norm = re.sub(r"[.\-]+", "-", num)
+                        fig["normalized_label"] = f"figure/{num_norm.lower()}"
+            except Exception:
+                pass
+
     # --- Final Payload and Output ---
     # Enforce deterministic ordering of figures for reproducibility
     try:
