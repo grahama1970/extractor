@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import hashlib
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Iterable
 
 import typer
 from loguru import logger
@@ -79,20 +79,80 @@ def _columns_signature(t: Dict[str, Any]) -> Tuple[int, Tuple[str, ...]]:
     return (len(cols_norm), cols_norm)
 
 
-def _likely_continuation(prev_t: Dict[str, Any], next_t: Dict[str, Any]) -> bool:
-    # Rule: same normalized_label OR ≥70% header token overlap
+def _tokenize(seq: Iterable[str]) -> List[str]:
+    out: List[str] = []
+    for s in seq or []:
+        if not s:
+            continue
+        for tok in str(s).strip().lower().split():
+            tok = tok.strip(".,:;()[]{}\"'`")
+            if len(tok) >= 2:
+                out.append(tok)
+    return out
+
+
+def _dice(a: List[str], b: List[str]) -> float:
+    if not a or not b:
+        return 0.0
+    A = set(a)
+    B = set(b)
+    inter = len(A & B)
+    return (2 * inter) / (len(A) + len(B))
+
+
+def _likely_continuation(
+    prev_t: Dict[str, Any],
+    next_t: Dict[str, Any],
+    headers_index: Dict[int, List[Dict[str, Any]]],
+    *,
+    dice_threshold: float = 0.70,
+    jaccard_threshold: float = 0.70,
+    top_page_y_cutoff: float = 220.0,
+) -> Tuple[bool, str]:
+    """Returns (is_continuation, reason)."""
     lbl1 = prev_t.get("normalized_label")
     lbl2 = next_t.get("normalized_label")
     if lbl1 and lbl2 and lbl1 == lbl2:
-        return True
-    # Fallback on columns similarity
+        return True, "label_match"
+
+    # Column set Jaccard overlap
     _, c1 = _columns_signature(prev_t)
     _, c2 = _columns_signature(next_t)
-    if not c1 or not c2:
-        return False
-    inter = len(set(c1) & set(c2))
-    denom = max(len(c1), len(c2)) or 1
-    return (inter / denom) >= 0.7
+    if c1 and c2:
+        inter = len(set(c1) & set(c2))
+        denom = max(len(c1), len(c2)) or 1
+        if (inter / denom) >= jaccard_threshold:
+            return True, "columns_jaccard"
+
+    # Header row token similarity (Dice)
+    prev_cols = list(c1)
+    next_cols = list(c2)
+    if prev_cols and next_cols:
+        d = _dice(_tokenize(prev_cols), _tokenize(next_cols))
+        if d >= dice_threshold:
+            return True, "header_dice"
+
+    # Stage 03 rejected header candidate at top of next table's page matching columns
+    page_idx = next_t.get("page_index")
+    if isinstance(page_idx, int) and page_idx in headers_index:
+        for hdr in headers_index.get(page_idx, []):
+            if hdr.get("is_header") is True:
+                continue
+            bb = hdr.get("bbox") or [0, 0, 0, 0]
+            try:
+                y0 = float(bb[1])
+            except Exception:
+                y0 = 9999.0
+            if y0 > top_page_y_cutoff:
+                continue
+            hdr_tokens = _tokenize([hdr.get("text") or ""])
+            col_tokens = _tokenize(prev_cols)
+            if hdr_tokens and col_tokens:
+                d2 = _dice(hdr_tokens, col_tokens)
+                if d2 >= dice_threshold:
+                    return True, "03_rejected_header_repeat"
+
+    return False, "no_match"
 
 
 @app.command("run")
@@ -171,6 +231,27 @@ def run(
         if sid in can_sections:
             can_sections[sid]["figures"].append(f)
 
+    # Build Stage 03 headers index if provided (accepted & rejected)
+    headers_index: Dict[int, List[Dict[str, Any]]] = {}
+    if verified03_json and verified03_json.exists():
+        try:
+            v3 = _load_json(verified03_json)
+            for b in v3.get("blocks", []):
+                p = b.get("page_idx")
+                if p is None:
+                    continue
+                lv = (b.get("llm_verification") or {}).get("result", {}) or {}
+                is_header = bool(lv.get("is_header", True))
+                headers_index.setdefault(int(p), []).append({
+                    "object_id": b.get("object_id"),
+                    "text": b.get("text"),
+                    "is_header": is_header,
+                    "bbox": b.get("bbox"),
+                    "page_idx": p,
+                })
+        except Exception as e:
+            logger.warning(f"07a: failed to build headers_index: {e}")
+
     # Continuity merge across adjacent sections: attach to later section when likely continuation
     ids = list(can_sections.keys())
     for i in range(len(ids) - 1):
@@ -181,13 +262,15 @@ def run(
         # naive: compare last of a with first of b
         ta = a["tables"][-1]
         tb = b["tables"][0]
-        if _likely_continuation(ta, tb):
+        cont, reason = _likely_continuation(ta, tb, headers_index)
+        if cont:
             # move ta into b and record provenance
             moved = a["tables"].pop()
             b["tables"] = [moved] + b["tables"]
             prov = tb.setdefault("provenance", {})
             prov.setdefault("merged_from_sections", []).append(a["id"])
             prov.setdefault("merged_from_raw", []).append(moved.get("raw_table_id"))
+            prov["continuation_reason"] = reason
 
     # Compute 03 annotations hash and fold into content_hash if available
     for sid, sec in can_sections.items():
