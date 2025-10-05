@@ -195,6 +195,8 @@ class Config:
     max_runtime_seconds: int = 0  # 0 = no overall timeout
     debug: bool = False
     cache: bool = True  # Enable LiteLLM cache by default
+    # Optional UX/Server curated annotations support
+    ux_curated_json: Optional[Path] = None  # if provided, use/merge instead of PDF annots
 
 
 # DB export handled by stage 10 (arangodb_exporter).
@@ -757,7 +759,59 @@ async def process_pdf_pipeline(config: Config):
     json_output_dir.mkdir(exist_ok=True)
     image_output_dir.mkdir(exist_ok=True)
 
-    data = extract_annotations_data(config.input_pdf, config)
+    # Prefer curated annotations from the UX when available, then fallback to PDF annotations
+    curated_used = False
+    data: List[Dict[str, Any]] = []
+
+    # 1) Explicit path passed via CLI/config
+    if config.ux_curated_json and config.ux_curated_json.exists():
+        try:
+            data = build_annots_from_curated(config.input_pdf, config, config.ux_curated_json)
+            curated_used = len(data) > 0
+        except Exception as e:
+            diagnostics.append(
+                make_event(
+                    "01_annotation_processor",
+                    "warning",
+                    "ux_curated_load_failed",
+                    str(e),
+                    {"path": str(config.ux_curated_json)},
+                )
+            )
+
+    # 2) Auto-discover curated path via RUN_ID if not explicitly provided
+    if not curated_used:
+        try:
+            rid = os.getenv("RUN_ID")
+            if rid:
+                run_dir = Path("data/runs") / rid
+                candidate = run_dir / "curated.json"
+                if candidate.exists():
+                    data = build_annots_from_curated(config.input_pdf, config, candidate)
+                    curated_used = len(data) > 0
+                    diagnostics.append(
+                        make_event(
+                            "01_annotation_processor",
+                            "info",
+                            "ux_curated_auto",
+                            "Loaded curated annotations from RUN_ID",
+                            {"run_id": rid, "count": len(data)},
+                        )
+                    )
+        except Exception as e:
+            diagnostics.append(
+                make_event(
+                    "01_annotation_processor",
+                    "warning",
+                    "ux_curated_auto_failed",
+                    str(e),
+                    {},
+                )
+            )
+
+    # 3) Fallback to extracting from embedded PDF annotations
+    if not curated_used:
+        data = extract_annotations_data(config.input_pdf, config)
     if config.limit_annotations and config.limit_annotations > 0:
         logger.info(f"Limiting annotations to first {config.limit_annotations} (for debugging)")
         data = data[: config.limit_annotations]
@@ -1056,6 +1110,7 @@ async def process_pdf_pipeline(config: Config):
         "clean_pdf_path": clean_pdf_path,
         "status": "Completed",
         "annotation_count": len(data),
+        "source": ("ux_curated" if curated_used else "pdf_annotations"),
         "annotations": data,
         "errors_count": errors_count,
         "warnings_count": warnings_count,
@@ -1133,6 +1188,15 @@ def run(
     cache: bool = typer.Option(
         True, "--cache/--no-cache", help="Enable LiteLLM cache (default: enabled)"
     ),
+    ux_curated_json: Optional[Path] = typer.Option(
+        None,
+        "--ux-curated-json",
+        help="Path to UX-curated annotations JSON (curated.json or Stage‑01 canonical)",
+        exists=False,
+        file_okay=True,
+        dir_okay=False,
+        readable=False,
+    ),
 ):
     """Processes a PDF to extract and interpret annotations, saving to a structured output directory."""
 
@@ -1171,6 +1235,7 @@ def run(
         limit_annotations=limit,
         max_runtime_seconds=timeout,
         cache=cache,
+        ux_curated_json=ux_curated_json,
     )
     if debug:
         print(f"DEBUG: include_freetext = {cfg.include_freetext}")
@@ -1261,3 +1326,194 @@ def debug_bundle(
 # ------------------------------------------------------------------
 if __name__ == "__main__":
     build_cli()()
+
+# ------------------------------------------------------------------
+# UX Curated annotations support
+# ------------------------------------------------------------------
+def _normalize_curated_schema(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Accepts multiple curated shapes and normalizes to either:
+      - { annotations: [ { page:int, original_rect:[x0,y0,x1,y1], expanded_rect:[...]? } ] }
+      - { boxes_by_page: { "1": [ { x:0..1,y:0..1,w:0..1,h:0..1,type?,instanceId? } ] } }
+    Returns a dict with one of these keys preserved. Raises on invalid.
+    """
+    if isinstance(raw, dict):
+        if isinstance(raw.get("annotations"), list):
+            return {"annotations": raw["annotations"]}
+        if isinstance(raw.get("boxes_by_page"), dict):
+            return {"boxes_by_page": raw["boxes_by_page"]}
+        # Some UIs store under a top-level payload
+        for k in ("payload", "data"):
+            v = raw.get(k)
+            if isinstance(v, dict):
+                return _normalize_curated_schema(v)
+    raise ValueError("Unsupported curated schema: expected annotations[] or boxes_by_page{}")
+
+
+def _ui_boxes_to_stage01_annotations(pdf: Path, boxes_by_page: Dict[Any, Any]) -> List[Dict[str, Any]]:
+    """Port of the server-side converter: normalized 0..1 boxes → PDF points + expanded rects.
+    Only returns minimal fields; feature enrichment happens later.
+    """
+    try:
+        doc = fitz.open(str(pdf))
+    except Exception as e:
+        raise RuntimeError(f"open_pdf_failed: {e}")
+    out: List[Dict[str, Any]] = []
+    for page_key, boxes in (boxes_by_page or {}).items():
+        try:
+            page_index = int(page_key)
+        except Exception:
+            page_index = int(str(page_key))
+        zero_based = max(0, page_index - 1)
+        if zero_based >= len(doc):
+            continue
+        p = doc[zero_based]
+        w = float(p.rect.width)
+        h = float(p.rect.height)
+        for b in boxes or []:
+            # tolerate dict or pydantic-ish
+            bx = b.get("x", b.get("left", 0.0))
+            by = b.get("y", b.get("top", 0.0))
+            bw = b.get("w", b.get("width", 0.0))
+            bh = b.get("h", b.get("height", 0.0))
+            x0 = max(0.0, min(w, float(bx) * w))
+            y0 = max(0.0, min(h, float(by) * h))
+            x1 = max(0.0, min(w, (float(bx) + float(bw)) * w))
+            y1 = max(0.0, min(h, (float(by) + float(bh)) * h))
+            pad_x = 0.1 * (x1 - x0)
+            pad_y = 0.1 * (y1 - y0)
+            ex0 = max(0.0, x0 - pad_x)
+            ey0 = max(0.0, y0 - pad_y)
+            ex1 = min(w, x1 + pad_x)
+            ey1 = min(h, y1 + pad_y)
+            t = (b.get("type") or "").strip().lower()
+            if t == "section":
+                a_type = "section_header"
+            elif t == "table":
+                a_type = "table_region"
+            elif t == "figure":
+                a_type = "figure_region"
+            else:
+                a_type = t or "region"
+            out.append(
+                {
+                    "id": b.get("instanceId") or b.get("id") or f"anno_{len(out)+1:04d}",
+                    "page": zero_based,
+                    "type": a_type,
+                    "original_rect": [x0, y0, x1, y1],
+                    "expanded_rect": [ex0, ey0, ex1, ey1],
+                }
+            )
+    doc.close()
+    return out
+
+
+def build_annots_from_curated(input_pdf: Path, config: Config, curated_path: Path) -> List[Dict[str, Any]]:
+    """Load curated JSON and produce fully enriched Stage‑01 annotations (with context + image)."""
+    raw = json.loads(curated_path.read_text())
+    norm = _normalize_curated_schema(raw)
+    # Get base records with page/original_rect/expanded_rect
+    if "annotations" in norm:
+        base_annots = norm["annotations"] or []
+    else:
+        base_annots = _ui_boxes_to_stage01_annotations(input_pdf, norm["boxes_by_page"])
+    # Enrich like extract_annotations_data(), but driven by rects
+    return enrich_annots_from_rects(input_pdf, config, base_annots)
+
+
+def enrich_annots_from_rects(
+    input_pdf: Path, config: Config, base_annots: List[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
+    try:
+        doc = fitz.open(str(input_pdf))
+    except Exception as e:
+        raise RuntimeError(f"open_pdf_failed: {e}")
+
+    image_dir = config.output_dir / "image_output"
+    image_dir.mkdir(parents=True, exist_ok=True)
+    # For each page, prefetch text dict once
+    page_text_cache: Dict[int, Dict[str, Any]] = {}
+    out: List[Dict[str, Any]] = []
+    for idx, a in enumerate(base_annots or []):
+        try:
+            pno = int(a.get("page", 0))
+            if pno < 0 or pno >= len(doc):
+                continue
+            page = doc[pno]
+            if pno not in page_text_cache:
+                page_text_cache[pno] = page.get_text("dict")  # type: ignore[attr-defined]
+            page_text_dict = page_text_cache[pno]
+            # Rects
+            o = a.get("original_rect") or a.get("bbox") or a.get("rect")
+            if not o or len(o) != 4:
+                continue
+            original_rect = fitz.Rect(o)
+            e = a.get("expanded_rect")
+            expanded_rect = (
+                (fitz.Rect(e) & page.rect) if (isinstance(e, (list, tuple)) and len(e) == 4) else _get_expanded_rect_like(original_rect, page, config)
+            )
+            # Context
+            context_blocks = _get_context_blocks(original_rect, expanded_rect, page_text_dict, config.context_blocks)
+            inside_blocks = context_blocks["inside"]
+            above_blocks = context_blocks["above"]
+            below_blocks = context_blocks["below"]
+            sizes_inside = _collect_font_sizes(inside_blocks)
+            sizes_above = _collect_font_sizes(above_blocks)
+            sizes_below = _collect_font_sizes(below_blocks)
+            avg_size_inside = (sum(sizes_inside) / len(sizes_inside)) if sizes_inside else None
+            avg_size_above = (sum(sizes_above) / len(sizes_above)) if sizes_above else None
+            avg_size_below = (sum(sizes_below) / len(sizes_below)) if sizes_below else None
+            bold_inside = _has_bold(inside_blocks)
+            align = _compute_alignment(page.rect, _union_bbox(inside_blocks))
+            spacing = _compute_spacing(original_rect, above_blocks, below_blocks)
+            # Render image crop
+            matrix = fitz.Matrix(config.render_dpi / 72, config.render_dpi / 72)
+            try:
+                pix = page.get_pixmap(matrix=matrix, clip=expanded_rect, annots=False)  # type: ignore[attr-defined]
+            except TypeError:
+                pix = page.get_pixmap(matrix=matrix, clip=expanded_rect)  # type: ignore[attr-defined]
+            img_path = image_dir / f"ux_annot_p{pno}_{idx+1:03d}.png"
+            pix.save(str(img_path))
+
+            out.append(
+                {
+                    "id": str(a.get("id") or f"ux_{pno}_{idx+1:03d}"),
+                    "page": pno,
+                    "type": a.get("type") or "region",
+                    "original_rect": [float(original_rect.x0), float(original_rect.y0), float(original_rect.x1), float(original_rect.y1)],
+                    "expanded_rect": [float(expanded_rect.x0), float(expanded_rect.y0), float(expanded_rect.x1), float(expanded_rect.y1)],
+                    "inside_blocks": inside_blocks,
+                    "above_blocks": above_blocks,
+                    "below_blocks": below_blocks,
+                    "image_path": str(img_path),
+                    "human_note": a.get("human_note"),
+                    "machine_note": a.get("machine_note"),
+                    "computed_features": {
+                        "avg_font_size_inside": avg_size_inside,
+                        "avg_font_size_above": avg_size_above,
+                        "avg_font_size_below": avg_size_below,
+                        "bold_detected_inside": bold_inside,
+                        "alignment": align,
+                        **spacing,
+                    },
+                }
+            )
+        except Exception:
+            continue
+    try:
+        doc.close()
+    except Exception:
+        pass
+    return out
+
+
+def _get_expanded_rect_like(current: fitz.Rect, page: fitz.Page, config: Config) -> fitz.Rect:
+    """Lightweight expansion used for curated annots lacking an explicit expanded_rect."""
+    # sym vertical expansion within page bounds
+    h = current.y1 - current.y0
+    extra = max(h * config.vertical_expansion_ratio, 40.0) / 2.0
+    y0 = max(0, current.y0 - extra)
+    y1 = min(page.rect.height, current.y1 + extra)
+    x0, x1 = (0, page.rect.width) if config.full_page_width else (current.x0, current.x1)
+    # respect nearby walls is skipped for curated flow for simplicity
+    return fitz.Rect(x0, y0, x1, y1)

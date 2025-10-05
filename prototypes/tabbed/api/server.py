@@ -25,7 +25,7 @@ import base64
 from typing import List, Dict, Any
 import sys
 
-from fastapi import FastAPI, BackgroundTasks, HTTPException
+from fastapi import FastAPI, BackgroundTasks, HTTPException, UploadFile, File
 from fastapi.responses import JSONResponse, FileResponse, HTMLResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 import json
@@ -2138,7 +2138,7 @@ def post_label(evt: _AnnotationEventIn):
 # -----------------------------
 
 @app.get("/api/triage")
-def api_triage(object_type: str = "table", band: str | None = None, limit: int = 50):
+def api_triage(object_type: str = "table", band: str | None = None, limit: int = 50, run_id: str | None = None):
     """
     Serve ELS-ranked triage items for review.
     Currently supports object_type=table by reading the latest triage queue
@@ -2146,18 +2146,33 @@ def api_triage(object_type: str = "table", band: str | None = None, limit: int =
     an on-the-fly computation from 05_tables.json.
     """
     try:
-        results_root = REPO_ROOT / "data" / "results" / "pipeline"
-        if object_type != "table":
+        results_root = (REPO_ROOT / "data" / "runs" / run_id / "triage") if run_id else (REPO_ROOT / "data" / "results" / "pipeline" / "triage_queue")
+        # support all object types
+        triage_map = {
+            "table": "tables.json",
+            "tables": "tables.json",
+            "section": "sections.json",
+            "sections": "sections.json",
+            "figure": "figures.json",
+            "figures": "figures.json",
+            "entity": "entities.json",
+            "entities": "entities.json",
+        }
+        fname = triage_map.get((object_type or "table").lower())
+        if not fname:
             return JSONResponse({"ok": False, "error": "unsupported_object_type"}, status_code=400)
-        qpath = results_root / "triage_queue" / "tables.json"
+        qpath = results_root / "triage_queue" / fname
         if not qpath.exists():
             # Attempt local/quick computation
             try:
                 import subprocess, sys as _sys
+                env = os.environ.copy()
+                if run_id:
+                    env["RUN_ID"] = run_id
                 _ = subprocess.run([
                     _sys.executable,
                     str(REPO_ROOT / "scripts/triage/triage_scoring.py"),
-                ])
+                ], env=env)
             except Exception:
                 pass
         items = []
@@ -2166,12 +2181,318 @@ def api_triage(object_type: str = "table", band: str | None = None, limit: int =
             if isinstance(raw, dict) and isinstance(raw.get("items"), list):
                 items = raw.get("items", [])
             elif isinstance(raw, list):
-                # legacy format
                 items = raw
         if band:
             band = band.strip().lower()
             items = [it for it in items if str(it.get("band","")) == band]
         items = sorted(items, key=lambda x: float(x.get("els", 0.0)), reverse=True)[: max(1, min(500, int(limit)))]
-        return {"data": items, "meta": {"total": len(items), "band": band, "limit": int(limit)}}
+        return {
+            "data": items,
+            "meta": {
+                "total": len(items),
+                "band": band,
+                "limit": int(limit),
+                "supported_types": ["table","section","figure","entity"],
+            },
+        }
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+# -----------------------------
+# Pipeline run + training status helpers
+# -----------------------------
+
+RUN_STATUS_FILE = REPO_ROOT / "scripts" / "artifacts" / "pipeline_status.json"
+TRAIN_STATUS_FILE = REPO_ROOT / "scripts" / "artifacts" / "training_status.json"
+
+class _RunRequest(BaseModel):
+    pdf_rel: str
+    offline: bool | None = True
+
+def _write_json(path: Path, obj: dict) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(obj, indent=2))
+    except Exception:
+        pass
+
+def _run_pipeline_subprocess(pdf_rel: str, offline: bool) -> dict:
+    started = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    status = {"status": "running", "pdf_rel": pdf_rel, "offline": offline, "started_at": started}
+    _write_json(RUN_STATUS_FILE, status)
+    try:
+        results_dir = REPO_ROOT / "data" / "results" / "pipeline"
+        results_dir.mkdir(parents=True, exist_ok=True)
+        cmd = [
+            sys.executable,
+            "-m",
+            "extractor.pipeline.run_all",
+            "--pdf",
+            str((REPO_ROOT / pdf_rel).resolve()),
+            "--results",
+            str(results_dir),
+        ]
+        if offline:
+            cmd.append("--offline")
+        env = os.environ.copy()
+        p = subprocess.run(cmd, env=env)
+        ended = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        ok = p.returncode == 0
+        status.update({
+            "status": "completed" if ok else "failed",
+            "ended_at": ended,
+            "results_dir": str(results_dir),
+            "returncode": p.returncode,
+        })
+        # Update latest pointer used elsewhere
+        try:
+            latest = REPO_ROOT / "scripts" / "artifacts" / "latest_results.json"
+            _write_json(latest, {"results_dir": str(results_dir)})
+        except Exception:
+            pass
+    except Exception as e:
+        status.update({"status": "failed", "error": str(e)})
+    _write_json(RUN_STATUS_FILE, status)
+    return status
+
+def _train_background() -> dict:
+    started = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    status = {"status": "running", "started_at": started}
+    _write_json(TRAIN_STATUS_FILE, status)
+    try:
+        # Export samples
+        cmd1 = [sys.executable, str(REPO_ROOT / "training/scripts/export_training_samples.py")]
+        # Train calibrator
+        cmd2 = [sys.executable, str(REPO_ROOT / "training/scripts/train_table_calibrator.py")]
+        rc1 = subprocess.run(cmd1).returncode
+        rc2 = subprocess.run(cmd2).returncode
+        ended = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        ok = (rc1 == 0 and rc2 == 0)
+        status.update({"status": "completed" if ok else "failed", "ended_at": ended, "rc_export": rc1, "rc_train": rc2})
+    except Exception as e:
+        status.update({"status": "failed", "error": str(e)})
+    _write_json(TRAIN_STATUS_FILE, status)
+    return status
+
+@app.post("/api/pipeline/run")
+def api_pipeline_run(body: _RunRequest, bg: BackgroundTasks):
+    try:
+        # Start background run
+        bg.add_task(_run_pipeline_subprocess, body.pdf_rel, bool(body.offline))
+        return {"ok": True, "started": True, "pdf_rel": body.pdf_rel}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to start pipeline: {e}")
+
+@app.get("/api/pipeline/status")
+def api_pipeline_status():
+    try:
+        if RUN_STATUS_FILE.exists():
+            return json.loads(RUN_STATUS_FILE.read_text())
+        return {"status": "idle"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read status: {e}")
+
+@app.post("/api/train/start")
+def api_train_start(bg: BackgroundTasks):
+    try:
+        bg.add_task(_train_background)
+        return {"ok": True, "started": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to start training: {e}")
+
+@app.get("/api/train/status")
+def api_train_status():
+    try:
+        if TRAIN_STATUS_FILE.exists():
+            return json.loads(TRAIN_STATUS_FILE.read_text())
+        return {"status": "idle"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read training status: {e}")
+
+# -----------------------------
+# PDF upload → run orchestration (alpha)
+# -----------------------------
+
+def _pdf_doc_id(path: Path) -> str:
+    try:
+        h = hashlib.sha256(path.read_bytes()).hexdigest()[:8]
+    except Exception:
+        h = "unknown"
+    base = path.stem.lower()
+    base_norm = "".join(ch if ch.isalnum() else "_" for ch in base).strip("_")
+    return f"{base_norm}__{h}"
+
+@app.post("/api/pdf")
+async def api_upload_pdf(background: BackgroundTasks, file: UploadFile = File(...)):
+    try:
+        dest = UPLOAD_DIR / file.filename
+        with dest.open("wb") as out:
+            shutil.copyfileobj(file.file, out)
+        doc_id = _pdf_doc_id(dest)
+        run_id = f"run_{int(time.time())}_{uuid.uuid4().hex[:6]}"
+        run_dir = RUNS_DIR / run_id
+        run_dir.mkdir(parents=True, exist_ok=True)
+        manifest = {
+            "doc_id": doc_id,
+            "run_id": run_id,
+            "pdf_path": str(dest),
+            "status": "queued",
+            "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        }
+        (run_dir / "manifest.json").write_text(json.dumps(manifest, indent=2))
+
+        def _task():
+            mpath = run_dir / "manifest.json"
+            manifest["status"] = "running"
+            mpath.write_text(json.dumps(manifest, indent=2))
+            env = os.environ.copy()
+            env["DOC_ID"] = doc_id
+            env["RUN_ID"] = run_id
+            stages_dir = run_dir / "stages"
+            stages_dir.mkdir(parents=True, exist_ok=True)
+            cmd = [
+                sys.executable,
+                "-m",
+                "extractor.pipeline.run_all",
+                "--pdf",
+                str(dest),
+                "--results",
+                str(stages_dir),
+                "--offline",
+            ]
+            try:
+                subprocess.run(cmd, check=True, env=env)
+                subprocess.run([sys.executable, str(REPO_ROOT / "scripts/triage/triage_scoring.py")], check=True, env=env)
+                manifest["status"] = "completed"
+            except Exception as e:
+                manifest["status"] = "error"
+                manifest["error"] = str(e)
+            manifest["finished_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            mpath.write_text(json.dumps(manifest, indent=2))
+
+        background.add_task(_task)
+        return {"ok": True, "doc_id": doc_id, "run_id": run_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Upload failed: {e}")
+
+@app.get("/api/run/status")
+def api_run_status(run_id: str):
+    try:
+        mpath = RUNS_DIR / run_id / "manifest.json"
+        if not mpath.exists():
+            return {"error": "run_not_found"}
+        return json.loads(mpath.read_text())
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Status failed: {e}")
+
+@app.get("/api/run/progress")
+def api_run_progress(run_id: str):
+    try:
+        return _progress_for_run(run_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Progress failed: {e}")
+
+@app.get("/api/annotations")
+def api_annotations(run_id: str):
+    try:
+        run_dir = RUNS_DIR / run_id
+        stages = run_dir / "stages"
+        def _load(p: Path):
+            try:
+                return json.loads(p.read_text())
+            except Exception:
+                return {}
+        sec = _load(stages / "04_section_builder" / "json_output" / "04_sections.json")
+        tab = _load(stages / "05_table_extractor" / "json_output" / "05_tables.json")
+        fig = _load(stages / "06_figure_extractor" / "json_output" / "06_figures.json")
+        return {
+            "sections": sec.get("sections", []),
+            "tables": tab.get("tables", []),
+            "figures": fig.get("figures", []),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Annotations failed: {e}")
+
+# -----------------------------
+# Save curated/blesed annotations (alpha)
+# -----------------------------
+
+class _CuratedPayload(BaseModel):
+    run_id: str
+    doc_id: str | None = None
+    sections: list[dict] | None = None
+    tables: list[dict] | None = None
+    figures: list[dict] | None = None
+    comments: list[dict] | None = None
+
+@app.post("/api/annotations/save")
+def api_annotations_save(body: _CuratedPayload):
+    try:
+        run_dir = RUNS_DIR / body.run_id
+        out = run_dir / "curated.json"
+        data = body.model_dump()
+        out.write_text(json.dumps(data, indent=2))
+        return {"ok": True, "path": str(out)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Save failed: {e}")
+
+@app.post("/api/export/arango")
+def api_export_arango(run_id: str, db: str = "extractor", url: str = "http://127.0.0.1:8529"):
+    try:
+        run_dir = RUNS_DIR / run_id
+        stages = run_dir / "stages"
+        cmd = [
+            sys.executable,
+            str(REPO_ROOT / "scripts/export/export_arango.py"),
+            "--run-id", run_id,
+            "--stages", str(stages),
+            "--db", db,
+            "--url", url,
+        ]
+        p = subprocess.run(cmd)
+        # Start background FAISS-KNN clustering + LLM-verified rationale if available
+        try:
+            subprocess.Popen([sys.executable, str(REPO_ROOT / "scripts/arango/faiss_cluster.py"), "--run-id", run_id, "--db", db, "--url", url])
+            subprocess.Popen([sys.executable, str(REPO_ROOT / "scripts/arango/verify_rationale.py"), "--run-id", run_id, "--db", db, "--url", url])
+        except Exception:
+            pass
+        return {"ok": p.returncode == 0, "returncode": p.returncode}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Export failed: {e}")
+# Upload & runs directories (alpha)
+UPLOAD_DIR = REPO_ROOT / "data" / "uploads"
+RUNS_DIR = REPO_ROOT / "data" / "runs"
+try:
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    RUNS_DIR.mkdir(parents=True, exist_ok=True)
+except Exception:
+    pass
+# -----------------------------
+# Progress computation helpers
+# -----------------------------
+
+STAGE_PATHS = [
+    ("01_annotation_processor", "json_output"),
+    ("02_marker_extractor", "json_output"),
+    ("03_suspicious_headers", "json_output"),
+    ("04_section_builder", "json_output/04_sections.json"),
+    ("05_table_extractor", "json_output/05_tables.json"),
+    ("06_figure_extractor", "json_output/06_figures.json"),
+    ("07_reflow_section", "json_output/07_reflowed.json"),
+]
+
+def _progress_for_run(run_id: str) -> dict:
+    run_dir = RUNS_DIR / run_id
+    stages = run_dir / "stages"
+    completed = 0
+    total = len(STAGE_PATHS)
+    details = []
+    for name, rel in STAGE_PATHS:
+        p = stages / name
+        if rel:
+            p = stages / name / rel
+        ok = p.exists()
+        if ok:
+            completed += 1
+        details.append({"stage": name, "present": ok, "path": str(p)})
+    percent = int((completed / total) * 100) if total else 0
+    return {"run_id": run_id, "percent": percent, "completed": completed, "total": total, "details": details}

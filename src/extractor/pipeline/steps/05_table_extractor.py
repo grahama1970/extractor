@@ -55,6 +55,7 @@ from extractor.pipeline.utils.table_fusion import (
     TableCandidate,
     fuse_table_candidates,
 )
+import re
 from extractor.pipeline.utils.pipeline_event_logger import log_stage_event
 import hashlib
 
@@ -689,6 +690,13 @@ def extract_tables_from_page(
     _maybe_add_pdfplumber_candidates()
 
     # Convert to output via fusion: build candidates from all page_tables
+    # Prepare page-level numeric tokens from original text (Phase 1 numeric recall mapping)
+    NUM_RE = re.compile(r"[+-]?(?:\d+\.\d+|\d+)")
+    try:
+        page_text_raw = pdf_doc[page_num].get_text("text")
+        page_original_nums = [m.group(0) for m in NUM_RE.finditer(page_text_raw or "")]
+    except Exception:
+        page_original_nums = []
     extracted_tables: List[Dict[str, Any]] = []
     if page_tables:
         candidates: List[TableCandidate] = []
@@ -746,6 +754,34 @@ def extract_tables_from_page(
                         )
                     except Exception:
                         fused_table["table_image_path"] = img_path
+            except Exception:
+                pass
+            # Compute simple numeric_recall and foreign_numeric_ratio at table level (Phase 1 mapping)
+            try:
+                def _extract_table_nums(tbl: Dict[str, Any]) -> List[str]:
+                    nums: List[str] = []
+                    for row in tbl.get("pandas_df", []):
+                        for cell in row.values():
+                            if cell is None:
+                                continue
+                            nums.extend([m.group(0) for m in NUM_RE.finditer(str(cell))])
+                    return nums
+                tnums = _extract_table_nums(fused_table)
+                if page_original_nums and tnums:
+                    shared = len(set(tnums) & set(page_original_nums))
+                    denom = len(set(page_original_nums))
+                    numeric_recall = round(shared / denom, 4) if denom > 0 else None
+                else:
+                    numeric_recall = None
+                foreign_numeric_ratio = None
+                if tnums:
+                    extras = len([n for n in set(tnums) if n not in set(page_original_nums)])
+                    foreign_numeric_ratio = round(extras / len(set(tnums)), 4)
+                rf = fused_table.setdefault("fusion", {}).setdefault("rank_features", {})
+                if numeric_recall is not None:
+                    rf["numeric_recall"] = numeric_recall
+                if foreign_numeric_ratio is not None:
+                    rf["foreign_numeric_ratio"] = foreign_numeric_ratio
             except Exception:
                 pass
             extracted_tables.append(fused_table)
