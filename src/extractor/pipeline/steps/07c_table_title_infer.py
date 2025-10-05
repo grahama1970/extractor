@@ -68,6 +68,8 @@ def run(
     else:
         prompts = []
         index: List[tuple[str, str]] = []
+        max_items = int(os.getenv("STAGE07_MAX_ITEMS", "0") or 0)
+        built = 0
         for s in sections:
             sid = s.get("id")
             for t in s.get("tables", []):
@@ -105,6 +107,11 @@ def run(
                     "kwargs": {"temperature": 0, "top_p": 1, "timeout": 30}
                 })
                 index.append((sid, key))
+                built += 1
+                if max_items and built >= max_items:
+                    break
+            if max_items and built >= max_items:
+                break
 
         if prompts:
             check_and_update_budget("07c", num_items=len(prompts))

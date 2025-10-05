@@ -60,6 +60,8 @@ def run(
         prompts = []
         index: List[tuple[str, str]] = []  # (sid, pid)
         orig_len: Dict[tuple[str, str], int] = {}
+        max_items = int(os.getenv("STAGE07_MAX_ITEMS", "0") or 0)
+        built = 0
         for s in sections:
             sid = s.get("id")
             for p in s.get("paragraphs", []):
@@ -79,6 +81,11 @@ def run(
                     ],
                     "kwargs": {"temperature": 0, "top_p": 1, "timeout": 30}
                 })
+                built += 1
+                if max_items and built >= max_items:
+                    break
+            if max_items and built >= max_items:
+                break
         if prompts:
             # budget gate estimate before firing LLM
             check_and_update_budget("07b", num_items=len(prompts))
