@@ -64,14 +64,18 @@ def run(
                 key = t.get("raw_table_id") or t.get("normalized_label") or f"tid_{id(t)}"
                 cols = (t.get("pandas_metrics") or {}).get("columns") or []
                 rows = (t.get("pandas_df") or [])[:2]
+                density = float((t.get("pandas_metrics") or {}).get("data_density", 0) or 0)
+                min_density = float(os.getenv("TABLE_INFER_MIN_DENSITY", "0.35"))
+                if density < min_density:
+                    continue
                 msg = (
-                    "Suggest a concise, factual title for this table; no invented data; one short sentence.\n"
+                    "Infer a concise (<=12 words) factual title ONLY if obvious from columns/rows; do not invent domains or units.\n"
                     f"Columns: {cols}\nSample rows: {rows}"
                 )
                 prompts.append({
                     "model": os.getenv("LITELLM_DEFAULT_MODEL") or os.getenv("LITELLM_VLM_MODEL") or "openai/zai-org/GLM-4.5-Air",
                     "messages": [
-                        {"role": "system", "content": [{"type": "text", "text": "You output ONLY a short title (no JSON)."}]},
+                        {"role": "system", "content": [{"type": "text", "text": "Output ONLY a short title; if uncertain output an empty string. Never hallucinate measurements or domains."}]},
                         {"role": "user", "content": [{"type": "text", "text": msg}]},
                     ],
                     "kwargs": {"temperature": 0, "top_p": 1, "timeout": 30}

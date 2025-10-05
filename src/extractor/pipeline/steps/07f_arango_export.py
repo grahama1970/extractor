@@ -129,26 +129,55 @@ class ArangoClient:
         return f"{self.url}/_db/{self.db}/_api/document/{col}"
 
     def ensure_collections(self):
-        # Minimal: assume collections exist or are managed externally
-        pass
+        required = [
+            ("pdf_objects", False),
+            ("sections", False),
+            ("blocks", False),
+            ("section_to_pdf_object", True),
+            ("block_to_pdf_object", True),
+        ]
+        for name, is_edge in required:
+            self._ensure_collection(name, is_edge)
+
+    def _ensure_collection(self, name: str, is_edge: bool):
+        meta_url = f"{self.url}/_db/{self.db}/_api/collection/{name}"
+        r = self.session.get(meta_url)
+        if r.status_code == 200:
+            return
+        payload = {"name": name}
+        if is_edge:
+            payload["type"] = 3
+        cr = self.session.post(f"{self.url}/_db/{self.db}/_api/collection", json=payload)
+        if not cr.ok:
+            raise RuntimeError(f"Failed to create collection {name}: {cr.text}")
 
     def upsert_batch(self, col: str, docs: List[Dict[str, Any]], chunk: int = 100):
         for i in range(0, len(docs), chunk):
             batch = docs[i:i+chunk]
             if not batch:
                 continue
-            r = self.session.post(self._col_url(col), json=batch, params={"overwrite": "true"})
-            if not r.ok:
-                logger.error(f"Upsert {col} failed: {r.text}")
+            self._post_with_retry(self._col_url(col), batch, col)
 
     def upsert_edges(self, col: str, edges: List[Dict[str, Any]], chunk: int = 200):
         for i in range(0, len(edges), chunk):
             batch = edges[i:i+chunk]
             if not batch:
                 continue
-            r = self.session.post(self._edge_url(col), json=batch, params={"overwrite": "true"})
-            if not r.ok:
-                logger.error(f"Edge upsert {col} failed: {r.text}")
+            self._post_with_retry(self._edge_url(col), batch, col)
+
+    def _post_with_retry(self, url: str, payload: Any, col: str, attempt: int = 0):
+        params = {"overwrite": "true"}
+        r = self.session.post(url, json=payload, params=params, timeout=30)
+        if r.ok:
+            return
+        if attempt == 0:
+            logger.warning(f"Retrying {col} due to {r.status_code}: {r.text[:140]}")
+            return self._post_with_retry(url, payload, col, attempt=1)
+        msg = f"Upsert failed for {col}: {r.status_code} {r.text[:200]}"
+        if os.getenv("ARANGO_IGNORE_ERRORS", "0") in ("1", "true", "yes"):
+            logger.error(msg)
+            return
+        raise RuntimeError(msg)
 
 
 if __name__ == "__main__":
@@ -158,4 +187,3 @@ if __name__ == "__main__":
     def run(reflow: Path = typer.Option(..., "--reflow"), stage03: Path = typer.Option(..., "--stage03"), doc_id: str = typer.Option(..., "--doc-id"), dry_run: bool = typer.Option(False, "--dry-run")):
         main(reflow, stage03, doc_id, dry_run=dry_run)
     t()
-

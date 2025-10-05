@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Iterable
 
@@ -104,12 +105,14 @@ def _likely_continuation(
     prev_t: Dict[str, Any],
     next_t: Dict[str, Any],
     headers_index: Dict[int, List[Dict[str, Any]]],
-    *,
-    dice_threshold: float = 0.70,
-    jaccard_threshold: float = 0.70,
-    top_page_y_cutoff: float = 220.0,
 ) -> Tuple[bool, str]:
     """Returns (is_continuation, reason)."""
+    # Thresholds (env tunable)
+    dice_threshold = float(os.getenv("CONTINUITY_DICE_THRESHOLD", "0.75"))
+    jaccard_threshold = float(os.getenv("CONTINUITY_JACCARD_THRESHOLD", "0.75"))
+    top_page_y_cutoff = float(os.getenv("CONTINUITY_TOP_PAGE_Y_CUTOFF", "220"))
+    min_cols = int(os.getenv("CONTINUITY_MIN_COLS_JACCARD", "3"))
+    max_vertical_gap = float(os.getenv("CONTINUITY_MAX_VERTICAL_GAP", "420"))  # px
     lbl1 = prev_t.get("normalized_label")
     lbl2 = next_t.get("normalized_label")
     if lbl1 and lbl2 and lbl1 == lbl2:
@@ -118,18 +121,19 @@ def _likely_continuation(
     # Column set Jaccard overlap
     _, c1 = _columns_signature(prev_t)
     _, c2 = _columns_signature(next_t)
-    if c1 and c2:
+    if c1 and c2 and len(c1) >= min_cols and len(c2) >= min_cols:
         inter = len(set(c1) & set(c2))
         denom = max(len(c1), len(c2)) or 1
         if (inter / denom) >= jaccard_threshold:
-            return True, "columns_jaccard"
+            if _vertical_gap_ok(prev_t, next_t, max_vertical_gap):
+                return True, "columns_jaccard"
 
     # Header row token similarity (Dice)
     prev_cols = list(c1)
     next_cols = list(c2)
     if prev_cols and next_cols:
         d = _dice(_tokenize(prev_cols), _tokenize(next_cols))
-        if d >= dice_threshold:
+        if d >= dice_threshold and _vertical_gap_ok(prev_t, next_t, max_vertical_gap):
             return True, "header_dice"
 
     # Stage 03 rejected header candidate at top of next table's page matching columns
@@ -149,10 +153,27 @@ def _likely_continuation(
             col_tokens = _tokenize(prev_cols)
             if hdr_tokens and col_tokens:
                 d2 = _dice(hdr_tokens, col_tokens)
-                if d2 >= dice_threshold:
+                if d2 >= dice_threshold and _vertical_gap_ok(prev_t, next_t, max_vertical_gap):
                     return True, "03_rejected_header_repeat"
 
     return False, "no_match"
+
+
+def _vertical_gap_ok(prev_t: Dict[str, Any], next_t: Dict[str, Any], limit: float) -> bool:
+    """
+    Estimate vertical gap using bottom of prev table bbox and top of next table bbox.
+    Fallback: if bbox missing, allow.
+    """
+    try:
+        pb = prev_t.get("bbox") or prev_t.get("table_bbox") or []
+        nb = next_t.get("bbox") or next_t.get("table_bbox") or []
+        if len(pb) < 4 or len(nb) < 4:
+            return True
+        prev_bottom = float(pb[3])
+        next_top = float(nb[1])
+        return (next_top - prev_bottom) <= limit
+    except Exception:
+        return True
 
 
 @app.command("run")

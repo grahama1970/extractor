@@ -58,6 +58,7 @@ def run(
     else:
         prompts = []
         index: List[tuple[str, str]] = []  # (sid, pid)
+        orig_len: Dict[tuple[str, str], int] = {}
         for s in sections:
             sid = s.get("id")
             for p in s.get("paragraphs", []):
@@ -68,11 +69,12 @@ def run(
                     continue
                 pid = p.get("pid")
                 index.append((sid, pid))
+                orig_len[(sid, pid)] = len(txt)
                 prompts.append({
                     "model": os.getenv("LITELLM_DEFAULT_MODEL") or os.getenv("LITELLM_VLM_MODEL") or "openai/zai-org/GLM-4.5-Air",
                     "messages": [
-                        {"role": "system", "content": [{"type": "text", "text": "You are a careful copy editor. Return ONLY corrected text (no JSON)."}]},
-                        {"role": "user", "content": [{"type": "text", "text": f"Fix broken hyphenation and excessive spaces; keep wording.\n\nText:\n{txt}"}]},
+                        {"role": "system", "content": [{"type": "text", "text": "You clean technical paragraphs without changing factual meaning. Fix soft-hyphen splits and spacing. Return ONLY the corrected text; do not rephrase or summarize."}]},
+                        {"role": "user", "content": [{"type": "text", "text": f"Input paragraph (fix spacing/hyphenation only; preserve wording):\n\n{txt}"}]},
                     ],
                     "kwargs": {"temperature": 0, "top_p": 1, "timeout": 30}
                 })
@@ -83,7 +85,14 @@ def run(
         results = {}
         for i, (sid, pid) in enumerate(index):
             content = out[i].content if i < len(out) and out[i] else ""
-            results.setdefault(sid, {})[pid] = (content or "").strip()
+            cleaned = (content or "").strip()
+            try:
+                cap = int(float(os.getenv("PARA_LEN_INFLATION_CAP", "1.5")) * float(orig_len.get((sid, pid), len(cleaned)) or 1))
+                if len(cleaned) > cap:
+                    cleaned = cleaned[:cap]
+            except Exception:
+                pass
+            results.setdefault(sid, {})[pid] = cleaned
 
     outp = out_dir / "07b_paragraph_polish.json"
     outp.write_text(json.dumps({"polish": results}, indent=2, ensure_ascii=False))
@@ -103,6 +112,8 @@ def _suppress_due_to_header(paragraph: Dict[str, Any], headers: List[Dict[str, A
         page_idx = paragraph.get("page_idx")
     except Exception:
         return False
+    mult = float(os.getenv("PARA_SUPPRESS_RADIUS_MULT", "1.0"))
+    base_radius = 60.0 * mult
     for h in headers:
         if h.get("page_idx") != page_idx:
             continue
@@ -111,7 +122,7 @@ def _suppress_due_to_header(paragraph: Dict[str, Any], headers: List[Dict[str, A
             hy_mid = (float(hb[1]) + float(hb[3])) / 2
         except Exception:
             continue
-        if abs(hy_mid - py_mid) <= 60:
+        if abs(hy_mid - py_mid) <= base_radius:
             return True
     # Header-like heuristic: very short Title Case line
     txt = paragraph.get("text") or ""

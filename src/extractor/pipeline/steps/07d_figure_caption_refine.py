@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import typer
 from loguru import logger
@@ -20,13 +20,15 @@ DISABLE_LLM = os.getenv("STAGE07_DISABLE_LLM", "").lower() in {"1", "true", "yes
 def _weak_caption(text: str | None) -> bool:
     if not text:
         return True
-    return len(text.strip()) < 40
+    max_len = int(os.getenv("FIGURE_REFINE_MAX_LEN", "48"))
+    return len(text.strip()) < max_len
 
 
 @app.command("run")
 def run(
     canonical_json: Path = typer.Option(..., "--canonical", exists=True),
     output_dir: Path = typer.Option(Path("data/results/pipeline"), "-o"),
+    verified03_json: Optional[Path] = typer.Option(None, "--verified03", help="Path to 03_verified_blocks.json"),
 ):
     base = output_dir
     out_dir = base / "07d_figure_caption_refine"
@@ -87,13 +89,13 @@ def run(
                 # else proceed to refine because caption short/weak
                 key = f.get("figure_id") or f.get("image_ref") or f"fid_{id(f)}"
                 msg = (
-                    "Write a concise, factual caption for this figure. Keep it short, no invented data.\n"
+                    "Refine to a concise (<=20 words) factual caption WITHOUT adding unobservable details. Preserve identifiers/units.\n"
                     f"Existing: {cap or ''}"
                 )
                 prompts.append({
                     "model": os.getenv("LITELLM_DEFAULT_MODEL") or os.getenv("LITELLM_VLM_MODEL") or "openai/zai-org/GLM-4.5-Air",
                     "messages": [
-                        {"role": "system", "content": [{"type": "text", "text": "You output ONLY a short caption (no JSON)."}]},
+                        {"role": "system", "content": [{"type": "text", "text": "Output ONLY a short caption; do not invent content."}]},
                         {"role": "user", "content": [{"type": "text", "text": msg}]},
                     ],
                     "kwargs": {"temperature": 0, "top_p": 1, "timeout": 30}
@@ -106,7 +108,17 @@ def run(
             out = []
         for i, (sid, key) in enumerate(index):
             content = out[i].content if i < len(out) and out[i] else ""
-            captions.setdefault(sid, {})[key] = (content or "").strip()
+            cleaned = (content or "").strip()
+            # simple placeholder/generic guard
+            placeholder = {"figure", "img", "image"}
+            words = cleaned.lower().split()
+            if sum(1 for t in words if t in placeholder) >= 2:
+                pass  # leave as-is (weak), downstream can ignore
+            else:
+                generic = {"diagram", "view", "illustration", "schematic"}
+                if len(words) > 0 and (sum(1 for t in words if t in generic) / len(words)) > 0.4:
+                    pass
+            captions.setdefault(sid, {})[key] = cleaned
 
     outp = out_dir / "07d_figure_caption_refine.json"
     outp.write_text(json.dumps({"figure_captions": captions}, indent=2, ensure_ascii=False))
