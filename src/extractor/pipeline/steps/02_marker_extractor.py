@@ -106,6 +106,10 @@ def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool
 
     # Create the PDF converter
     strict_mode = os.getenv("OFFLINE_PDF_PREDICTORS", "1").lower() in {"0", "false"}
+    try:
+        logger.info("02:start strict_mode=%s annotations_path=%s", strict_mode, annotations_path)
+    except Exception:
+        pass
     converter = PdfConverter(
         artifact_dict=models,
         config=config,
@@ -151,7 +155,7 @@ def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool
                     if hasattr(block, "raw_text"):
                         try:
                             block_dict["text"] = block.raw_text(document)
-                        except:
+                        except Exception:
                             block_dict["text"] = getattr(block, "text", "")
                     else:
                         block_dict["text"] = getattr(block, "text", "")
@@ -391,9 +395,10 @@ def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool
                     if block_dict.get("block_type") == "Table":
                         _t = (block_dict.get("text") or "").strip()
                         if _t:
-                            words=_t.split(); letters=[ch for ch in _t if ch.isalpha()];
-                            lower_ratio=(sum(ch.islower() for ch in letters)/len(letters)) if letters else 0.0
-                            has_term=_t.endswith(".") or _t.endswith(";") or _t.endswith("?")
+                            words = _t.split()
+                            letters = [ch for ch in _t if ch.isalpha()]
+                            lower_ratio = (sum(ch.islower() for ch in letters)/len(letters)) if letters else 0.0
+                            has_term = _t.endswith(".") or _t.endswith(";") or _t.endswith("?")
                             verbs={"is","are","was","were","be","been","being","has","have","had","can","could","should","may","might","will","shall","must","does","do","did"}
                             has_verb=any(w.lower().strip(",.;:!?") in verbs for w in words)
                             if (has_term or has_verb) and (len(words)>=4 or lower_ratio>=0.5):

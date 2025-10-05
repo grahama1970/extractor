@@ -36,6 +36,13 @@ def run(
     out_dir.mkdir(parents=True, exist_ok=True)
     payload = json.loads(canonical_json.read_text())
     sections: List[Dict[str, Any]] = payload.get("sections", [])
+    try:
+        logger.info(
+            "07c:start sections=%d disable_llm=%s",
+            len(sections), DISABLE_LLM,
+        )
+    except Exception:
+        pass
 
     titles: Dict[str, Dict[str, str]] = {}
     cues = _stage03_label_texts(verified03_json) if verified03_json else set()
@@ -129,6 +136,14 @@ def run(
                 request_timeout=req_timeout,
                 num_retries=num_retries,
             ))
+            try:
+                logger.info(
+                    "07c:llm fired items=%d conc=%d timeout=%.1f retries=%d model=%s",
+                    len(prompts), conc, req_timeout, num_retries,
+                    os.getenv("STAGE07C_MODEL") or os.getenv("LITELLM_DEFAULT_MODEL"),
+                )
+            except Exception:
+                pass
         else:
             out = []
         BAD_TITLE = {"data table", "table", "results", "sample", "placeholder"}
@@ -161,6 +176,11 @@ def run(
     model_used = os.getenv("STAGE07C_MODEL") or os.getenv("LITELLM_DEFAULT_MODEL") or os.getenv("LITELLM_VLM_MODEL")
     outp.write_text(json.dumps({"table_titles": titles, "deterministic": deterministic, "model_used": model_used, "prompt_version": "1.0"}, indent=2, ensure_ascii=False))
     logger.success(f"07c: wrote {outp}")
+    try:
+        total = sum(len(v) for v in titles.values())
+        logger.info("07c:summary titles=%d deterministic=%s", total, deterministic)
+    except Exception:
+        pass
 
 
 if __name__ == "__main__":

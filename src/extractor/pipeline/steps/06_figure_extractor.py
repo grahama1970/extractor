@@ -304,6 +304,15 @@ def run(
 ):
     """Extracts figures, describes them, and associates them with sections."""
     console.print(f"[green]Extracting figures from: {stage_02_json.name}[/green]")
+    try:
+        logger.info(
+            "06:start stage_02_json=%s skip_descriptions=%s FIGURE_MAX_CONCURRENCY=%s",
+            stage_02_json,
+            bool(skip_descriptions),
+            os.getenv("FIGURE_MAX_CONCURRENCY", "4"),
+        )
+    except Exception:
+        pass
     # Primary initialization (deduplicated)
     run_id = get_run_id()
     diagnostics: list[dict] = []
@@ -477,6 +486,15 @@ def run(
         def _k(fig: dict):
             return (int(fig.get("page", 0)), str(fig.get("figure_id","")))
         extracted_figures = sorted(extracted_figures, key=_k)
+    except Exception:
+        pass
+    try:
+        logger.info(
+            "06:summary figure_blocks=%d extracted=%d output_dir=%s",
+            len(figure_blocks),
+            len(extracted_figures),
+            image_output_dir,
+        )
     except Exception:
         pass
     result = {

@@ -42,6 +42,13 @@ def run(
     out_dir.mkdir(parents=True, exist_ok=True)
     payload = json.loads(canonical_json.read_text())
     sections: List[Dict[str, Any]] = payload.get("sections", [])
+    try:
+        logger.info(
+            "07b:start sections=%d PARA_NOISE_THRESHOLD=%.3f disable_llm=%s",
+            len(sections), PARA_NOISE_THRESHOLD, DISABLE_LLM,
+        )
+    except Exception:
+        pass
 
     results: Dict[str, Dict[str, str]] = {}
     headers = _load_stage03_headers(verified03_json) if verified03_json else []
@@ -104,6 +111,14 @@ def run(
                 request_timeout=req_timeout,
                 num_retries=num_retries,
             ))
+            try:
+                logger.info(
+                    "07b:llm fired items=%d conc=%d timeout=%.1f retries=%d model=%s",
+                    len(prompts), conc, req_timeout, num_retries,
+                    os.getenv("STAGE07B_MODEL") or os.getenv("LITELLM_DEFAULT_MODEL"),
+                )
+            except Exception:
+                pass
         else:
             out = []
         results = {}
@@ -174,6 +189,11 @@ def run(
     model_used = os.getenv("STAGE07B_MODEL") or os.getenv("LITELLM_DEFAULT_MODEL") or os.getenv("LITELLM_VLM_MODEL")
     outp.write_text(json.dumps({"polish": results, "deterministic": deterministic, "model_used": model_used, "prompt_version": "1.0"}, indent=2, ensure_ascii=False))
     logger.success(f"07b: wrote {outp}")
+    try:
+        total = sum(len(v) for v in results.values())
+        logger.info("07b:summary polished=%d deterministic=%s", total, deterministic)
+    except Exception:
+        pass
 
 
 if __name__ == "__main__":

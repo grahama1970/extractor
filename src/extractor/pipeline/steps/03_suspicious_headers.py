@@ -534,9 +534,9 @@ async def process_pdf_pipeline(config: Config):
         return
 
         if not tasks:
-        print("No suspicious headers found to verify.")
-        # Still save a result file for consistency
-        output_json_path = json_output_dir / "03_verified_blocks.json"
+            logger.info("03:no_suspicious_headers; writing empty verification result")
+            # Still save a result file for consistency
+            output_json_path = json_output_dir / "03_verified_blocks.json"
         marker_data["run_id"] = run_id
         # Derive counts from diagnostics severities
         try:
@@ -1357,3 +1357,4 @@ def debug_bundle(
 
 if __name__ == "__main__":
     build_cli()()
+from loguru import logger

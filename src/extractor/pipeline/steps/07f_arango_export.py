@@ -44,6 +44,19 @@ def main(
 
     pdf_objects = _extract_pdf_objects(s03, doc_id)
     sections_payload, blocks_payload, section_edges, block_edges = _extract_reflow(reflow, pdf_objects, doc_id)
+    try:
+        logger.info(
+            "07f:start doc_id=%s strict=%s pdf_objects=%d sections=%d blocks=%d edges(section=%d,block=%d)",
+            doc_id,
+            os.getenv("STRICT_KEY_NAMESPACE", "0"),
+            len(pdf_objects),
+            len(sections_payload),
+            len(blocks_payload),
+            len(section_edges),
+            len(block_edges),
+        )
+    except Exception:
+        pass
 
     client = ArangoClient(
         url=os.getenv("ARANGO_URL", "http://localhost:8529"),
@@ -122,6 +135,12 @@ def main(
                 if from_col not in allowed_node_cols or to_col not in allowed_node_cols:
                     raise SystemExit(f"STRICT_KEY_NAMESPACE: edge {ecol} has invalid endpoint collections: {from_col}->{to_col}")
         client.upsert_edges(ecol, edocs)
+    try:
+        total_nodes = sum(len(v) for v in (extra_nodes or {}).values()) + len(pdf_objects) + len(sections_payload) + len(blocks_payload)
+        total_edges = len(section_edges) + len(block_edges) + sum(len(v) for v in (extra_edges or {}).values())
+        logger.success("07f:exported nodes=%d edges=%d", total_nodes, total_edges)
+    except Exception:
+        pass
     logger.success("Arango export complete")
 
 def _load_json_safe(p: Path | None):

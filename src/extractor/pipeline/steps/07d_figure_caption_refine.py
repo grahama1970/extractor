@@ -36,6 +36,13 @@ def run(
     out_dir.mkdir(parents=True, exist_ok=True)
     payload = json.loads(canonical_json.read_text())
     sections: List[Dict[str, Any]] = payload.get("sections", [])
+    try:
+        logger.info(
+            "07d:start sections=%d disable_llm=%s",
+            len(sections), DISABLE_LLM,
+        )
+    except Exception:
+        pass
 
     captions: Dict[str, Dict[str, str]] = {}
     rejects: List[Dict[str, Any]] = []
@@ -126,6 +133,14 @@ def run(
                 request_timeout=req_timeout,
                 num_retries=num_retries,
             ))
+            try:
+                logger.info(
+                    "07d:llm fired items=%d conc=%d timeout=%.1f retries=%d model=%s",
+                    len(prompts), conc, req_timeout, num_retries,
+                    os.getenv("STAGE07D_MODEL") or os.getenv("LITELLM_DEFAULT_MODEL"),
+                )
+            except Exception:
+                pass
         else:
             out = []
         CAPTION_BAD = {"placeholder", "sample image", "example figure"}
@@ -172,6 +187,11 @@ def run(
     model_used = os.getenv("STAGE07D_MODEL") or os.getenv("LITELLM_DEFAULT_MODEL") or os.getenv("LITELLM_VLM_MODEL")
     outp.write_text(json.dumps({"figure_captions": captions, "deterministic": deterministic, "model_used": model_used, "prompt_version": "1.0"}, indent=2, ensure_ascii=False))
     logger.success(f"07d: wrote {outp}")
+    try:
+        total = sum(len(v) for v in captions.values())
+        logger.info("07d:summary captions=%d deterministic=%s", total, deterministic)
+    except Exception:
+        pass
 
 
 if __name__ == "__main__":

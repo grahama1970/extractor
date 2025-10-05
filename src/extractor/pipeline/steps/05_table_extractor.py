@@ -1320,6 +1320,16 @@ def run(
     console.print(
         f"✅ Table extraction complete. Saved {len(filtered_tables)} tables to: {output_path}"
     )
+    try:
+        pages = sorted({int(t.get("page_index", 0)) for t in filtered_tables})
+        logger.info(
+            "05:summary tables=%d pages=%d output_dir=%s",
+            len(filtered_tables),
+            len(pages),
+            json_output_dir,
+        )
+    except Exception:
+        pass
 
     # Deterministic summary for diff-based QA (main run)
     try:
