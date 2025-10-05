@@ -24,6 +24,8 @@ from datetime import datetime
 import fitz  # PyMuPDF
 import typer
 from loguru import logger
+import hashlib
+from extractor.pipeline.utils.pipeline_event_logger import log_stage_event
 
 from extractor.pipeline.utils.prompt_builder import build_llm_context
 from extractor.pipeline.utils.ann_index import query_ann_index
@@ -984,6 +986,23 @@ async def process_pdf_pipeline(config: Config):
 
     # Flatten the pages structure back to a simple list of blocks
     final_blocks = [block for page in marker_data["pages"] for block in page["blocks"]]
+    # Deterministic sorting and hash
+    try:
+        def _bt_rank(t: str) -> int:
+            order = {"SectionHeader": 0, "Text": 1, "ListItem": 2, "Table": 3, "Figure": 4}
+            return order.get(t or "", 9)
+        def _blk_key(b: dict):
+            bbox = b.get("bbox") or [0, 0, 0, 0]
+            y0 = float(bbox[1]) if isinstance(bbox, (list, tuple)) and len(bbox) >= 2 else 0.0
+            return (int(b.get("page_idx", b.get("page", 0))), _bt_rank(b.get("block_type")), y0)
+        final_blocks = sorted(final_blocks, key=_blk_key)
+        h = hashlib.sha256()
+        for b in final_blocks:
+            core = {"p": b.get("page_idx"), "t": b.get("block_type"), "txt": (b.get("text") or "")[:160]}
+            h.update(json.dumps(core, sort_keys=True, ensure_ascii=False).encode("utf-8"))
+        marker_data["verified_blocks_content_hash"] = h.hexdigest()
+    except Exception:
+        pass
     marker_data["blocks"] = final_blocks
     del marker_data["pages"]
 
@@ -1042,6 +1061,10 @@ async def process_pdf_pipeline(config: Config):
         json.dump(marker_data, f, indent=2)
 
     print(f"\nVerification complete. Updated JSON saved to: {output_json_path}")
+    try:
+        log_stage_event("03_suspicious_headers", "end", blocks=len(final_blocks), status="Completed")
+    except Exception:
+        pass
 
 
 # ------------------------------------------------------------------
@@ -1124,6 +1147,10 @@ def run(
     Finds and verifies suspicious section headers in a Marker JSON file using a multimodal LLM.
     """
     # Derive the clean PDF path from the pdf_dir
+    try:
+        log_stage_event("03_suspicious_headers", "start", input_json=str(input_json))
+    except Exception:
+        pass
     # Assumes a naming convention like '..._clean.pdf'
     try:
         candidates = sorted(pdf_dir.glob("*_clean.pdf"))

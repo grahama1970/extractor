@@ -187,7 +187,18 @@ def run(
     outp = out_dir / "07b_paragraph_polish.json"
     deterministic = DISABLE_LLM or not bool(results and any(results.get(s.get("id"), {}) for s in sections))
     model_used = os.getenv("STAGE07B_MODEL") or os.getenv("LITELLM_DEFAULT_MODEL") or os.getenv("LITELLM_VLM_MODEL")
-    outp.write_text(json.dumps({"polish": results, "deterministic": deterministic, "model_used": model_used, "prompt_version": "1.0"}, indent=2, ensure_ascii=False))
+    # Build centralized validation_meta while preserving existing pid__meta keys for back-compat
+    try:
+        validation_meta = {}
+        for sid, mp in (results or {}).items():
+            for k, v in list(mp.items()):
+                if k.endswith("__meta") and isinstance(v, dict) and "validation_reason" in v:
+                    pid = k.rsplit("__meta", 1)[0]
+                    validation_meta[pid] = {"validation_reason": v.get("validation_reason")}
+        payload = {"polish": results, "validation_meta": validation_meta, "deterministic": deterministic, "model_used": model_used, "prompt_version": "1.0"}
+    except Exception:
+        payload = {"polish": results, "deterministic": deterministic, "model_used": model_used, "prompt_version": "1.0"}
+    outp.write_text(json.dumps(payload, indent=2, ensure_ascii=False))
     logger.success(f"07b: wrote {outp}")
     try:
         total = sum(len(v) for v in results.values())

@@ -174,7 +174,20 @@ def run(
     outp = out_dir / "07c_table_title_infer.json"
     deterministic = DISABLE_LLM or not bool(titles)
     model_used = os.getenv("STAGE07C_MODEL") or os.getenv("LITELLM_DEFAULT_MODEL") or os.getenv("LITELLM_VLM_MODEL")
-    outp.write_text(json.dumps({"table_titles": titles, "deterministic": deterministic, "model_used": model_used, "prompt_version": "1.0"}, indent=2, ensure_ascii=False))
+    # Central validation_meta map (preserve existing *_meta keys if present)
+    try:
+        validation_meta = {}
+        for sid, mp in (titles or {}).items():
+            if not isinstance(mp, dict):
+                continue
+            for k, v in list(mp.items()):
+                if k.endswith("__meta") and isinstance(v, dict) and "validation_reason" in v:
+                    tid = k.rsplit("__meta", 1)[0]
+                    validation_meta[tid] = {"validation_reason": v.get("validation_reason")}
+        payload = {"table_titles": titles, "validation_meta": validation_meta, "deterministic": deterministic, "model_used": model_used, "prompt_version": "1.0"}
+    except Exception:
+        payload = {"table_titles": titles, "deterministic": deterministic, "model_used": model_used, "prompt_version": "1.0"}
+    outp.write_text(json.dumps(payload, indent=2, ensure_ascii=False))
     logger.success(f"07c: wrote {outp}")
     try:
         total = sum(len(v) for v in titles.values())

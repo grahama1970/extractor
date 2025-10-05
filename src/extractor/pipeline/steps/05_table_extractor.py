@@ -51,6 +51,8 @@ from extractor.pipeline.utils.diagnostics import (
     build_stage_timings,
     gpu_metrics_available,
 )
+from extractor.pipeline.utils.pipeline_event_logger import log_stage_event
+import hashlib
 
 # --- Initialization ---
 if not load_dotenv(find_dotenv()):
@@ -869,6 +871,10 @@ def run(
 ):
     """Extracts tables from the PDF and associates them with sections."""
     console.print(f"[green]Extracting tables based on sections in: {input_json.name}[/green]")
+    try:
+        log_stage_event("05_table_extractor", "start", input=str(input_json))
+    except Exception:
+        pass
     run_id = get_run_id()
     diagnostics = []
     errors_count = 0
@@ -1147,7 +1153,7 @@ def run(
                 diagnostics.append(
                     make_event(
                         "05_table_extractor",
-                        "warning",
+                        "debug",
                         "table_low_confidence",
                         "Filtered out low-confidence table",
                         {
@@ -1274,7 +1280,8 @@ def run(
         pass
     timings = build_stage_timings(stage_start_ts, t0)
     try:
-        for _k, _v in strategy_summary.items():
+        for _k in sorted(strategy_summary.keys()):
+            _v = strategy_summary[_k]
             att = int(_v.get("attempts", 0) or 0)
             if att > 0:
                 _v["avg_duration_ms"] = int(_v.get("total_duration_ms", 0) / att)
@@ -1297,6 +1304,20 @@ def run(
         )
     except Exception:
         pass
+    # Structural hash for quick diffs
+    try:
+        h = hashlib.sha256()
+        for t in filtered_tables:
+            core = {
+                "p": t.get("page_index"),
+                "i": t.get("table_index"),
+                "shape": (t.get("pandas_metrics") or {}).get("shape"),
+                "frag": t.get("fragmentation_score"),
+            }
+            h.update(json.dumps(core, sort_keys=True).encode("utf-8"))
+        tables_hash = h.hexdigest()
+    except Exception:
+        tables_hash = None
     result = {
         "timestamp": datetime.now().isoformat(),
         "source_json": str(input_json),
@@ -1311,6 +1332,7 @@ def run(
         "timings": timings,
         "resources": resources,
         "metrics": metrics_payload,
+        "tables_content_hash": tables_hash,
     }
 
     output_path = json_output_dir / "05_tables.json"
@@ -1320,6 +1342,10 @@ def run(
     console.print(
         f"✅ Table extraction complete. Saved {len(filtered_tables)} tables to: {output_path}"
     )
+    try:
+        log_stage_event("05_table_extractor", "end", tables=len(filtered_tables), content_hash=tables_hash, status="Completed")
+    except Exception:
+        pass
     try:
         pages = sorted({int(t.get("page_index", 0)) for t in filtered_tables})
         logger.info(

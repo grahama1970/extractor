@@ -475,6 +475,19 @@ async def litellm_call(
     )
     _sanitize_litellm_callbacks()
 
+    retry_after_floor = float(os.getenv("LITELLM_RETRY_AFTER_MIN", "0.5"))
+
+    def _coerce_retry_after(val):
+        try:
+            if val is None:
+                return retry_after_floor
+            v = float(val)
+            if v <= 0:
+                return retry_after_floor
+            return v
+        except Exception:
+            return retry_after_floor
+
     try:
         # Streaming fast-path
         if stream and len(processed) == 1 and not individuals and len(batches) == 1:
@@ -546,10 +559,7 @@ async def litellm_call(
                         if status_str == 429:
                             headers = getattr(getattr(e, "response", None), "headers", {}) or {}
                             ra = headers.get("Retry-After") if isinstance(headers, dict) else None
-                            try:
-                                delay = float(ra) if ra else (1.0 if attempts == 1 else 2.0)
-                            except Exception:
-                                delay = 1.0 if attempts == 1 else 2.0
+                            delay = _coerce_retry_after(ra)
                             await asyncio.sleep(delay)
                             if attempts <= (num_retries or 0):
                                 continue
@@ -604,6 +614,8 @@ async def litellm_call(
         ):
             results.append(await _)
         results.sort(key=lambda r: r.index)
+        if all(r.exception for r in results):
+            logger.warning(f"litellm_call: all {len(results)} tasks failed (desc={desc})")
         if export == "results":
             return results
         return [r.content or "" for r in results]

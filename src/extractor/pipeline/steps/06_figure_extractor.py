@@ -18,6 +18,8 @@ except ImportError:
 import asyncio
 from pathlib import Path
 from loguru import logger
+import hashlib
+from extractor.pipeline.utils.pipeline_event_logger import log_stage_event
 import sys
 from typing import List, Dict, Any, Optional
 import base64
@@ -305,6 +307,10 @@ def run(
     """Extracts figures, describes them, and associates them with sections."""
     console.print(f"[green]Extracting figures from: {stage_02_json.name}[/green]")
     try:
+        log_stage_event("06_figure_extractor", "start", stage02=str(stage_02_json))
+    except Exception:
+        pass
+    try:
         logger.info(
             "06:start stage_02_json=%s skip_descriptions=%s FIGURE_MAX_CONCURRENCY=%s",
             stage_02_json,
@@ -497,6 +503,15 @@ def run(
         )
     except Exception:
         pass
+    # Structural hash for quick diffs
+    try:
+        h = hashlib.sha256()
+        for f in extracted_figures:
+            core = {"id": f.get("figure_id"), "p": f.get("page"), "cap": (f.get("ai_description") or "")[:120]}
+            h.update(json.dumps(core, sort_keys=True, ensure_ascii=False).encode("utf-8"))
+        figures_hash = h.hexdigest()
+    except Exception:
+        figures_hash = None
     result = {
         "timestamp": datetime.now().isoformat(),
         "source_json": str(stage_02_json),
@@ -510,6 +525,7 @@ def run(
         "diagnostics": diagnostics,
         "timings": timings,
         "resources": resources,
+        "figures_content_hash": figures_hash,
     }
 
     output_path = json_output_dir / "06_figures.json"
@@ -519,6 +535,10 @@ def run(
     console.print(
         f"✅ Figure extraction complete. Saved {len(extracted_figures)} figures to: {output_path}"
     )
+    try:
+        log_stage_event("06_figure_extractor", "end", figures=len(extracted_figures), content_hash=figures_hash, status="Completed")
+    except Exception:
+        pass
 
     # Deterministic summary for quick diffing across runs
     try:

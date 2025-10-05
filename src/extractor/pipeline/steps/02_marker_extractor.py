@@ -19,6 +19,8 @@ import multiprocessing as mp
 import typer
 
 from loguru import logger
+import hashlib
+from extractor.pipeline.utils.pipeline_event_logger import log_stage_event
 from rich.console import Console
 import uuid
 
@@ -107,7 +109,7 @@ def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool
     # Create the PDF converter
     strict_mode = os.getenv("OFFLINE_PDF_PREDICTORS", "1").lower() in {"0", "false"}
     try:
-        logger.info("02:start strict_mode=%s annotations_path=%s", strict_mode, annotations_path)
+        logger.info("02:extract_blocks strict_mode=%s pdf=%s", strict_mode, pdf_path)
     except Exception:
         pass
     converter = PdfConverter(
@@ -501,6 +503,7 @@ def run(
 
     display_timeout = (f"{timeout}s" if timeout and timeout>0 else "no-limit")
     console.print(f"Extracting blocks from: {pdf_path.name} (timeout {display_timeout})")
+    log_stage_event("02_marker_extractor", "start", run_id=run_id, pdf=str(pdf_path))
     stage_start_ts = __import__("datetime").datetime.now().isoformat()
     t_stage0 = time.monotonic()
     start_time = time.time()
@@ -644,6 +647,28 @@ def run(
         "stage_duration_ms": int((time.monotonic() - t_stage0) * 1000),
         "extract_duration_ms": int(locals().get("extract_duration_ms", 0)),
     }
+    # Deterministic ordering & content hash
+    try:
+        def _blk_key(b):
+            txt = (b.get("text") or "")[:64]
+            h = hashlib.sha256(txt.encode("utf-8", "ignore")).hexdigest()[:8]
+            return (int(b.get("page_idx", 0)), str(b.get("block_type", "")), int(b.get("block_id", 0) or 0), h)
+        blocks = sorted(blocks, key=_blk_key)
+    except Exception:
+        pass
+    try:
+        hasher = hashlib.sha256()
+        for b in blocks:
+            core = {
+                "p": b.get("page_idx"),
+                "t": b.get("block_type"),
+                "id": b.get("block_id"),
+                "txt": (b.get("text") or "")[:200],
+            }
+            hasher.update(json.dumps(core, sort_keys=True, ensure_ascii=False).encode("utf-8"))
+        blocks_hash = hasher.hexdigest()
+    except Exception:
+        blocks_hash = None
     summary = {
         "timestamp": datetime.now().isoformat(),
         "run_id": run_id,
@@ -660,6 +685,7 @@ def run(
         "predictors_present": predictor_presence,
         "fallback_mode": fallback_mode,
         "predictor_mode": predictor_mode,
+        "blocks_content_hash": blocks_hash,
     }
 
     base = "02_marker_blocks"
@@ -671,7 +697,16 @@ def run(
             base = f"{base}_{safe}"
     out_path = json_output_dir / f"{base}.json"
     out_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False))
-    console.print(f"📄 Saved {len(blocks)} blocks to: {out_path}")
+    console.print(f"📄 Saved {len(blocks)} blocks to: {out_path} (deterministic ordering applied)")
+    log_stage_event(
+        "02_marker_extractor",
+        "end",
+        run_id=run_id,
+        blocks=len(blocks),
+        suspicious=len(suspicious_blocks),
+        content_hash=blocks_hash,
+        status="Completed",
+    )
     if suspicious_blocks:
         console.print(
             f"⚠️  Found {len(suspicious_blocks)} suspicious blocks for Stage 03 verification."

@@ -117,6 +117,9 @@ def main(
         "block_to_requirement",
         "entity_occurs_in",
         "variable_in_equation",
+        "deltas",
+        "requirement_deltas",
+        "cross_version_links",
     }
     for ecol, edocs in (extra_edges or {}).items():
         if os.getenv("STRICT_KEY_NAMESPACE", "0").lower() in ("1","true","yes"):
@@ -135,6 +138,11 @@ def main(
                 if from_col not in allowed_node_cols or to_col not in allowed_node_cols:
                     raise SystemExit(f"STRICT_KEY_NAMESPACE: edge {ecol} has invalid endpoint collections: {from_col}->{to_col}")
         client.upsert_edges(ecol, edocs)
+        if os.getenv("STRICT_KEY_NAMESPACE", "0").lower() in ("1","true","yes"):
+            import logging as _logging
+            _logging.getLogger(__name__).info(
+                "arango_export(strict): validated edge_col=%s count=%d", ecol, len(edocs)
+            )
     try:
         total_nodes = sum(len(v) for v in (extra_nodes or {}).values()) + len(pdf_objects) + len(sections_payload) + len(blocks_payload)
         total_edges = len(section_edges) + len(block_edges) + sum(len(v) for v in (extra_edges or {}).values())
