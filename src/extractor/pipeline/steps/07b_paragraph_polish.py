@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import typer
 from loguru import logger
@@ -34,6 +34,7 @@ def _noise_score(text: str) -> float:
 def run(
     canonical_json: Path = typer.Option(..., "--canonical", exists=True),
     output_dir: Path = typer.Option(Path("data/results/pipeline"), "-o"),
+    verified03_json: Optional[Path] = typer.Option(None, "--verified03", help="Path to 03_verified_blocks.json"),
 ):
     base = output_dir
     out_dir = base / "07b_paragraph_polish"
@@ -42,13 +43,16 @@ def run(
     sections: List[Dict[str, Any]] = payload.get("sections", [])
 
     results: Dict[str, Dict[str, str]] = {}
+    headers = _load_stage03_headers(verified03_json) if verified03_json else []
     if DISABLE_LLM:
         for s in sections:
             sid = s.get("id")
             m: Dict[str, str] = {}
             for p in s.get("paragraphs", []):
                 txt = p.get("text", "")
-                if _noise_score(txt) >= PARA_NOISE_THRESHOLD:
+                if _suppress_due_to_header(p, headers):
+                    m[p.get("pid")] = txt
+                elif _noise_score(txt) >= PARA_NOISE_THRESHOLD:
                     m[p.get("pid")] = txt  # identity polish under offline
             results[sid] = m
     else:
@@ -58,6 +62,8 @@ def run(
             sid = s.get("id")
             for p in s.get("paragraphs", []):
                 txt = p.get("text", "")
+                if _suppress_due_to_header(p, headers):
+                    continue
                 if _noise_score(txt) < PARA_NOISE_THRESHOLD:
                     continue
                 pid = p.get("pid")
@@ -87,3 +93,50 @@ def run(
 if __name__ == "__main__":
     app()
 
+# Helpers added for header suppression
+def _suppress_due_to_header(paragraph: Dict[str, Any], headers: List[Dict[str, Any]]) -> bool:
+    bb = paragraph.get("bbox")
+    if not bb:
+        return False
+    try:
+        py_mid = (float(bb[1]) + float(bb[3])) / 2
+        page_idx = paragraph.get("page_idx")
+    except Exception:
+        return False
+    for h in headers:
+        if h.get("page_idx") != page_idx:
+            continue
+        hb = h.get("bbox") or [0, 0, 0, 0]
+        try:
+            hy_mid = (float(hb[1]) + float(hb[3])) / 2
+        except Exception:
+            continue
+        if abs(hy_mid - py_mid) <= 60:
+            return True
+    # Header-like heuristic: very short Title Case line
+    txt = paragraph.get("text") or ""
+    words = txt.split()
+    if 0 < len(words) <= 5 and all(w[:1].isupper() for w in words if w):
+        return True
+    return False
+
+
+def _load_stage03_headers(path: Optional[Path]) -> List[Dict[str, Any]]:
+    if not path or not path.exists():
+        return []
+    try:
+        raw = json.loads(path.read_text())
+        out = []
+        for b in raw.get("blocks", []):
+            lv = b.get("llm_verification", {})
+            res = lv.get("result") if isinstance(lv, dict) else {}
+            if isinstance(res, dict):
+                out.append({
+                    "object_id": b.get("object_id"),
+                    "bbox": b.get("bbox"),
+                    "page_idx": b.get("page_idx"),
+                    "is_header": bool(res.get("is_header", True)),
+                })
+        return out
+    except Exception:
+        return []

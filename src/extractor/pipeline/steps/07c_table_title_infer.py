@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import typer
 from loguru import logger
@@ -28,6 +28,7 @@ def _weak_title(title: str | None) -> bool:
 def run(
     canonical_json: Path = typer.Option(..., "--canonical", exists=True),
     output_dir: Path = typer.Option(Path("data/results/pipeline"), "-o"),
+    verified03_json: Optional[Path] = typer.Option(None, "--verified03", help="Path to 03_verified_blocks.json"),
 ):
     base = output_dir
     out_dir = base / "07c_table_title_infer"
@@ -36,13 +37,19 @@ def run(
     sections: List[Dict[str, Any]] = payload.get("sections", [])
 
     titles: Dict[str, Dict[str, str]] = {}
+    cues = _stage03_label_texts(verified03_json) if verified03_json else set()
     if DISABLE_LLM:
         for s in sections:
             sid = s.get("id")
             tmap: Dict[str, str] = {}
             for t in s.get("tables", []):
                 if _weak_title(t.get("title")):
-                    tmap[t.get("raw_table_id") or t.get("normalized_label") or f"tid_{id(t)}"] = (t.get("title") or "").strip()
+                    key = t.get("raw_table_id") or t.get("normalized_label") or f"tid_{id(t)}"
+                    # If Stage 03 cue appears in header, skip inference (treat as externally labeled)
+                    if cues and _table_has_label_cue(t, cues):
+                        tmap[key] = (t.get("title") or "").strip()
+                    else:
+                        tmap[key] = (t.get("title") or "").strip()
             titles[sid] = tmap
     else:
         prompts = []
@@ -51,6 +58,8 @@ def run(
             sid = s.get("id")
             for t in s.get("tables", []):
                 if not _weak_title(t.get("title")):
+                    continue
+                if cues and _table_has_label_cue(t, cues):
                     continue
                 key = t.get("raw_table_id") or t.get("normalized_label") or f"tid_{id(t)}"
                 cols = (t.get("pandas_metrics") or {}).get("columns") or []
@@ -85,3 +94,23 @@ def run(
 if __name__ == "__main__":
     app()
 
+def _stage03_label_texts(path: Optional[Path]) -> set[str]:
+    out = set()
+    try:
+        if path and path.exists():
+            raw = json.loads(path.read_text())
+            for b in raw.get("blocks", []):
+                t = (b.get("text") or "").strip().lower()
+                if t.startswith("table ") or t.startswith("figure "):
+                    out.add(t)
+    except Exception:
+        pass
+    return out
+
+
+def _table_has_label_cue(t: dict, cues: set[str]) -> bool:
+    header = (t.get("pandas_metrics") or {}).get("columns") or []
+    if not header:
+        return False
+    line = " ".join(str(c) for c in header).lower()
+    return any(c in line for c in cues if len(c) > 4)
