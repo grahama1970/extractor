@@ -617,6 +617,17 @@ async def process_pdf_pipeline(config: Config):
     for idx, task in enumerate(tasks):
         try:
             target_block, above_block, below_block = task.get_context_blocks()
+            # Assign stable object_id and normalized_header_text for traceability and downstream joins
+            try:
+                target_block.setdefault("object_id", f"hdr_p{task.page_idx}_b{task.block_idx}")
+            except Exception:
+                pass
+            try:
+                norm_txt = _normalize_header_text(target_block.get("text") or "")
+                if norm_txt:
+                    target_block.setdefault("normalized_header_text", norm_txt)
+            except Exception:
+                pass
             # --- Heuristic guardrails BEFORE any LLM call ---
             # Demote common false positives early to reduce noise and cost.
             try:
