@@ -46,6 +46,7 @@ from extractor.pipeline.utils.diagnostics import (
     classify_llm_error,
     gpu_metrics_available,
 )
+from extractor.pipeline.utils.llm_stats import compute_llm_stats, write_llm_stats
 
 try:
     import psutil  # type: ignore
@@ -849,6 +850,13 @@ async def process_pdf_pipeline(config: Config):
             else:
                 results = await _do_batch()
             llm_batch_duration_ms = int((time.monotonic() - t_llm0) * 1000)
+            # Persist llm_stats.json for CI
+            try:
+                out_dir = config.output_dir / "03_suspicious_headers" / "json_output"
+                stats = compute_llm_stats(results, strict_json=True)
+                write_llm_stats("03", run_id, stats, out_dir)
+            except Exception:
+                pass
         except asyncio.TimeoutError as e:
             logger.error(f"Stage 03 model calls timed out after {config.max_runtime_seconds}s")
             info = classify_llm_error(e)

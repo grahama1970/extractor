@@ -44,6 +44,7 @@ from extractor.pipeline.utils.diagnostics import (
 # Use pipeline-local JSON utilities to avoid heavy core service deps during this stage
 from extractor.pipeline.utils.json_utils import clean_json_string
 from extractor.pipeline.utils.litellm_cache import initialize_litellm_cache
+from extractor.pipeline.utils.llm_stats import compute_llm_stats, write_llm_stats
 
 # ------------------------------------------------------------------
 # GLOBAL CONSTANTS
@@ -940,6 +941,13 @@ async def process_pdf_pipeline(config: Config):
                     "exception": None,
                 })
             t_llm_ms = int((time.monotonic() - t0) * 1000)
+            # Write llm_stats.json alongside stage outputs
+            try:
+                stage_dir = config.output_dir / "01_annotation_processor" / "json_output"
+                stats = compute_llm_stats(results, strict_json=True)
+                write_llm_stats("01", run_id, stats, stage_dir)
+            except Exception:
+                pass
     except asyncio.TimeoutError as e:
         msg_info = classify_llm_error(e)
         try:
