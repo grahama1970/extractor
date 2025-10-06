@@ -29,6 +29,8 @@ import argparse
 import asyncio
 from rich.console import Console
 from rich.table import Table
+from urllib import request as urlrequest
+from urllib.error import URLError, HTTPError
 
 from extractor.pipeline.utils.model_env import (
     resolve_text_small,
@@ -68,6 +70,49 @@ def _collect_default_models() -> Dict[str, str]:
     return {k: v for k, v in envs.items() if v and str(v).strip()}
 
 
+def _discover_ollama_models(api_base: Optional[str]) -> List[str]:
+    """Return a list of 'ollama/<tag>' aliases discovered on a local Ollama server.
+    Gracefully returns [] if server is not reachable.
+    """
+    base = (api_base or os.getenv("OLLAMA_API_BASE") or "http://127.0.0.1:11434").rstrip("/")
+    url = f"{base}/api/tags"
+    try:
+        with urlrequest.urlopen(url, timeout=1.5) as resp:  # type: ignore[arg-type]
+            data = json.loads(resp.read().decode("utf-8"))
+        models = data.get("models") or []
+        tags = []
+        for m in models:
+            tag = m.get("name") or m.get("model")
+            if tag:
+                tags.append(str(tag))
+        return [f"ollama/{t}" for t in tags]
+    except (URLError, HTTPError, TimeoutError, json.JSONDecodeError, Exception):
+        return []
+
+
+def _filter_student_candidates(aliases: List[str]) -> List[str]:
+    """Prefer small/medium 'student' sizes if present; otherwise pass through.
+    Keeps common candidates: qwen2.5 3B/7B, llama3.2 3B, mistral 7B, phi4 14b, granite3.3 8b, glm4 9b.
+    """
+    keep_substrings = [
+        "qwen2.5:3b",
+        "qwen2.5:7b",
+        "llama3.2:3b",
+        "mistral:7b",
+        "phi4:14b",
+        "granite3.3:8b",
+        "glm4:9b",
+        "glm4:latest",
+    ]
+    out: List[str] = []
+    for a in aliases:
+        low = a.lower()
+        if any(s in low for s in keep_substrings):
+            out.append(a)
+    # Fallback to original if nothing matched
+    return out or aliases
+
+
 @dataclass
 class EvalItem:
     label: str
@@ -82,8 +127,15 @@ class EvalItem:
 
 async def _call_json_scillm(model_alias: str, prompt: str, timeout: int = 45) -> Dict[str, Any]:
     """Call via SciLLM adapter and return parsed JSON content (raises on failure)."""
-    # Use remote id (strip provider prefix) for widest compatibility
+    # Provider routing
+    is_ollama = model_alias.startswith("ollama/")
     model_remote = model_alias.split("/", 1)[1] if "/" in model_alias else model_alias
+    provider = "ollama" if is_ollama else (os.getenv("CHUTES_PROVIDER") or "openai").strip() or "openai"
+    api_base = (
+        os.getenv("OLLAMA_API_BASE", "http://127.0.0.1:11434") if is_ollama
+        else os.getenv("CHUTES_API_BASE", "https://llm.chutes.ai/v1")
+    )
+    api_key = None if is_ollama else os.getenv("CHUTES_API_KEY")
     params = {
         "model": model_remote,
         "messages": [
@@ -91,14 +143,14 @@ async def _call_json_scillm(model_alias: str, prompt: str, timeout: int = 45) ->
             {"role": "user", "content": prompt},
         ],
         "timeout": timeout,
-        "api_key": _env("CHUTES_API_KEY"),
-        "api_base": _env("CHUTES_API_BASE", "https://llm.chutes.ai/v1"),
-        "custom_llm_provider": (_env("CHUTES_PROVIDER") or "openai").strip() or "openai",
+        "api_key": api_key,
+        "api_base": api_base,
+        "custom_llm_provider": provider,
         "kwargs": {
             "response_format": {"type": "json_object"},
-            "api_key": _env("CHUTES_API_KEY"),
-            "api_base": _env("CHUTES_API_BASE", "https://llm.chutes.ai/v1"),
-            "custom_llm_provider": (_env("CHUTES_PROVIDER") or "openai").strip() or "openai",
+            "api_key": api_key,
+            "api_base": api_base,
+            "custom_llm_provider": provider,
         },
     }
     results = await scillm_call([params], desc="chutes_eval")
@@ -114,16 +166,23 @@ async def _call_json_scillm(model_alias: str, prompt: str, timeout: int = 45) ->
 def _call_json_litellm(model_alias: str, prompt: str, timeout: int = 45) -> Dict[str, Any]:
     if litellm is None:
         raise RuntimeError("litellm not available for fallback")
+    is_ollama = model_alias.startswith("ollama/")
     model_remote = model_alias.split("/", 1)[1] if "/" in model_alias else model_alias
+    provider = "ollama" if is_ollama else (os.getenv("CHUTES_PROVIDER") or "openai").strip() or "openai"
+    api_base = (
+        os.getenv("OLLAMA_API_BASE", "http://127.0.0.1:11434") if is_ollama
+        else os.getenv("CHUTES_API_BASE", "https://llm.chutes.ai/v1")
+    )
+    api_key = None if is_ollama else os.getenv("CHUTES_API_KEY")
     resp = litellm.completion(
         model=model_remote,
         messages=[
             {"role": "system", "content": "You are a concise assistant."},
             {"role": "user", "content": prompt},
         ],
-        api_key=_env("CHUTES_API_KEY"),
-        api_base=_env("CHUTES_API_BASE", "https://llm.chutes.ai/v1"),
-        custom_llm_provider=(_env("CHUTES_PROVIDER") or "openai").strip() or "openai",
+        api_key=api_key,
+        api_base=api_base,
+        custom_llm_provider=provider,
         timeout=timeout,
         response_format={"type": "json_object"},
     )
@@ -165,12 +224,38 @@ def main(argv: Optional[List[str]] = None) -> int:
         action="store_false",
         help="Do not write artifacts (JSON/TSV)",
     )
+    parser.add_argument(
+        "--include-ollama",
+        action="store_true",
+        help="Also evaluate local Ollama models (via /api/tags).",
+    )
+    parser.add_argument(
+        "--ollama-base",
+        default=os.getenv("OLLAMA_API_BASE", "http://127.0.0.1:11434"),
+        help="Ollama API base URL (default: http://127.0.0.1:11434)",
+    )
+    parser.add_argument(
+        "--all-ollama",
+        action="store_true",
+        help="Include all discovered Ollama models instead of a curated student subset.",
+    )
     args = parser.parse_args(argv)
     """Evaluate a small set of Chutes models for quick health/latency."""
     # Build model list
     model_map = _collect_default_models()
     if args.models:
         model_map = {f"m{i+1}": m for i, m in enumerate(args.models)}
+
+    # Optionally include local Ollama tags
+    if args.include_ollama:
+        ollama_aliases = _discover_ollama_models(args.ollama_base)
+        if ollama_aliases:
+            if not args.all_ollama:
+                ollama_aliases = _filter_student_candidates(ollama_aliases)
+            # Append to the model_map with stable labels
+            start_index = len(model_map)
+            for i, alias in enumerate(ollama_aliases, start=1):
+                model_map[f"ollama_{start_index+i}"] = alias
 
     if not model_map:
         console.print("No models provided and no LITELLM_* defaults found.")
