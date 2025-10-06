@@ -42,9 +42,8 @@ import sys
 from types import ModuleType
 
 def _import_scillm_client() -> ModuleType:
-    """Import the SciLLM client (module name: litellm), honoring SCILLM_DEV_PATH.
-    If SCILLM_DEV_PATH or the default local path exists, prepend it to sys.path
-    so the local SciLLM checkout wins over any PyPI litellm.
+    """Import the SciLLM client (preferred module name: scillm), honoring SCILLM_DEV_PATH.
+    Falls back to litellm if needed. Prepends dev path to sys.path when set.
     """
     dev_path = os.getenv("SCILLM_DEV_PATH") or \
         "/home/graham/workspace/experiments/litellm"
@@ -54,10 +53,12 @@ def _import_scillm_client() -> ModuleType:
     except Exception:
         pass
     import importlib
-    try:
-        return importlib.import_module("litellm")
-    except Exception as exc:  # pragma: no cover
-        raise RuntimeError(f"SciLLM client import failed: {exc}")
+    for name in ("scillm", "litellm"):
+        try:
+            return importlib.import_module(name)
+        except Exception:
+            continue
+    raise RuntimeError("SciLLM client import failed (tried scillm, litellm)")
 
 
 console = Console()
@@ -150,8 +151,8 @@ async def _call_json_batch_via_router(
     """Use SciLLM Router.parallel_acompletions for a batch of model aliases.
     Returns entries aligned with aliases: {ok, data?, usage?, error?}.
     """
-    litellm = _import_scillm_client()
-    Router = getattr(litellm, "Router", None)
+    scillm = _import_scillm_client()
+    Router = getattr(scillm, "Router", None)
     if Router is None:
         raise RuntimeError("SciLLM Router not exported; please update SciLLM client")
     reqs = []
@@ -176,7 +177,23 @@ async def _call_json_batch_via_router(
             "timeout": timeout,
         })
     router = Router()
-    resps = await router.parallel_acompletions(reqs, max_concurrency=max_concurrency)
+    # Optional: TokenBucket throttling from contrib
+    bucket = None
+    try:
+        contrib = getattr(scillm, "contrib", None)
+        if contrib and hasattr(contrib, "batch"):
+            token_bucket_from_env = getattr(contrib.batch, "token_bucket_from_env", None)
+            if token_bucket_from_env:
+                bucket = token_bucket_from_env(name="evals")
+    except Exception:
+        bucket = None
+
+    if bucket:
+        # Gate the batch call; Router may still do its own retries
+        with bucket.acquire():
+            resps = await router.parallel_acompletions(reqs, max_concurrency=max_concurrency)
+    else:
+        resps = await router.parallel_acompletions(reqs, max_concurrency=max_concurrency)
     out: List[Dict[str, Any]] = []
     for r in resps:
         try:
@@ -361,6 +378,19 @@ def main(argv: Optional[List[str]] = None) -> int:
         )
     )
     elapsed = int((time.monotonic() - t0) * 1000)
+    # Optional JSONL checkpoint of raw batch results (scillm.contrib.batch)
+    cp = None
+    try:
+        scillm = _import_scillm_client()
+        contrib = getattr(scillm, "contrib", None)
+        if contrib and hasattr(contrib, "batch"):
+            JsonlCheckpoint = getattr(contrib.batch, "JsonlCheckpoint", None)
+            if JsonlCheckpoint:
+                cp_dir = _ensure_artifacts_dir()
+                cp = JsonlCheckpoint(str(cp_dir / "chutes_eval.jsonl"), id_key="label")
+    except Exception:
+        cp = None
+
     for i, label in enumerate(labels):
         alias = aliases[i]
         remote = _remote_from_alias(alias)
@@ -368,6 +398,19 @@ def main(argv: Optional[List[str]] = None) -> int:
         ok = bool(item.get("ok"))
         status = "ok" if ok else (f"error: {item.get('error','bad_json')}"[:160])
         usage = item.get("usage") or {}
+        if cp is not None:
+            try:
+                row = {
+                    "label": label,
+                    "alias": alias,
+                    "ok": ok,
+                    "status": status,
+                    "usage": usage,
+                    "ts": int(time.time()),
+                }
+                cp.append(row)
+            except Exception:
+                pass
         evals.append(
             EvalItem(
                 label=label,
