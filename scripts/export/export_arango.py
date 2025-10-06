@@ -204,6 +204,17 @@ def main():
     upsert_contains(edge_contains, doc_id, "tables", [d["_key"] for d in tab_docs])
     upsert_contains(edge_contains, doc_id, "figures", [d["_key"] for d in fig_docs])
 
+    # Export manifest (counts + quick hash)
+    try:
+        from hashlib import sha256 as _sha
+        hh = _sha()
+        for k in sorted([d["_key"] for d in sec_docs]): hh.update(f"S:{k}".encode())
+        for k in sorted([d["_key"] for d in tab_docs]): hh.update(f"T:{k}".encode())
+        for k in sorted([d["_key"] for d in fig_docs]): hh.update(f"F:{k}".encode())
+        content_hash = hh.hexdigest()
+    except Exception:
+        content_hash = None
+
     summary = {
         "ok": True,
         "url": ctx.url,
@@ -215,10 +226,12 @@ def main():
             "tables": len(tab_docs),
             "figures": len(fig_docs),
         },
+        "hash": content_hash,
     }
     out = Path("arango_export")
     out.mkdir(parents=True, exist_ok=True)
-    (out / f"{ctx.run_id}_summary.json").write_text(json.dumps(summary, indent=2))
+    manifest_path = out / f"{ctx.run_id}_summary.json"
+    manifest_path.write_text(json.dumps(summary, indent=2))
     print(json.dumps(summary))
     return 0
 
