@@ -29,7 +29,8 @@ except ImportError:
     raise
 import typer
 from loguru import logger
-from extractor.pipeline.utils.scillm_call import scillm_call
+import scillm
+from extractor.pipeline.utils.scillm_env import build_requests
 from extractor.pipeline.utils.model_env import resolve_model
 
 from extractor.pipeline.utils.diagnostics import (
@@ -918,29 +919,27 @@ async def process_pdf_pipeline(config: Config):
         if run_llm:
             sid = os.getenv("LITELLM_SESSION_ID") or get_run_id()
             t0 = time.monotonic()
+            # Convert to Router requests with provider fields; allow data URL sanitizer to remain upstream
+            det = os.getenv("PIPELINE_DETERMINISTIC", "0").lower() in {"1","true","yes","y"}
+            temp = 0.0 if det else None
+            reqs = build_requests(items, json_object=True, timeout=None, temperature=temp)
+            router = scillm.Router()
+            async def _do_call():
+                return await router.parallel_acompletions(reqs, max_concurrency=max(1, int(config.llm_concurrency)))
             if config.max_runtime_seconds and config.max_runtime_seconds > 0:
-                results = await asyncio.wait_for(
-                    scillm_call(
-                        items,
-                        concurrency=config.llm_concurrency,
-                        desc="Interpreting Annotations",
-                        session_id=sid,
-                        export="results",
-                        sanitize_data_urls=os.getenv("STAGE01_SANITIZE_DATA_URLS", "redact"),
-                        sanitize_truncate_chars=int(os.getenv("STAGE01_SANITIZE_CHARS", "48")),
-                    ),
-                    timeout=config.max_runtime_seconds,
-                )
+                resps = await asyncio.wait_for(_do_call(), timeout=config.max_runtime_seconds)
             else:
-                results = await scillm_call(
-                    items,
-                    concurrency=config.llm_concurrency,
-                    desc="Interpreting Annotations",
-                    session_id=sid,
-                    export="results",
-                    sanitize_data_urls=os.getenv("STAGE01_SANITIZE_DATA_URLS", "redact"),
-                    sanitize_truncate_chars=int(os.getenv("STAGE01_SANITIZE_CHARS", "48")),
-                )
+                resps = await _do_call()
+            # Wrap into minimal results-like list for downstream consumption
+            class _Res:  # minimal shim for existing parsing paths below
+                def __init__(self, request, response):
+                    self.request = type("Req", (), request) if isinstance(request, dict) else request
+                    try:
+                        self.content = response["choices"][0]["message"]["content"]
+                    except Exception:
+                        self.content = ""
+                    self.exception = None
+            results = [_Res(reqs[i], r) for i, r in enumerate(resps)]
             t_llm_ms = int((time.monotonic() - t0) * 1000)
     except asyncio.TimeoutError as e:
         msg_info = classify_llm_error(e)

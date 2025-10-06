@@ -43,7 +43,8 @@ from extractor.pipeline.utils.diagnostics import (
     build_stage_timings,
     gpu_metrics_available,
 )
-from extractor.pipeline.utils.scillm_call import scillm_call
+import scillm
+from extractor.pipeline.utils.scillm_env import build_requests
 from extractor.pipeline.utils.model_env import resolve_vlm_med, resolve_vlm_large, resolve_vlm_small
 from extractor.pipeline.utils.litellm_cache import initialize_litellm_cache
 
@@ -113,27 +114,22 @@ async def describe_image_with_llm(
         {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
     ]
     model = (model_override or VLM_MODEL or "").strip()
-    params: Dict[str, Any] = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_content},
-        ],
-        "timeout": int(request_timeout or int(os.getenv("STAGE06_TIMEOUT", "60"))),
-    }
-    if "gemini" not in (model or "").lower():
-        params["max_tokens"] = 256
-    # temperature default; force 0 in deterministic mode
-    params["temperature"] = 0.0 if deterministic else 0.2
-    sid = os.getenv("LITELLM_SESSION_ID") or get_run_id()
-    out = await scillm_call([params], desc="figure_description", session_id=sid, export="results")
-    r = out[0] if out else None
-    if r and isinstance(r.content, str) and r.content.strip():
-        try:
-            logger.info(f"figure_description: model={r.request.model} ok={r.exception is None}")
-        except Exception:
-            pass
-        return r.content.strip()
+    msgs = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_content},
+    ]
+    timeout_s = int(request_timeout or int(os.getenv("STAGE06_TIMEOUT", "60")))
+    temp = 0.0 if deterministic else 0.2
+    reqs = build_requests([{"model": model, "messages": msgs}], json_object=False, timeout=timeout_s, temperature=temp)
+    router = scillm.Router()
+    resps = await router.parallel_acompletions(reqs, max_concurrency=1)
+    r = resps[0] if resps else None
+    try:
+        content = r["choices"][0]["message"]["content"] if isinstance(r, dict) else ""
+    except Exception:
+        content = ""
+    if content and isinstance(content, str):
+        return content.strip()
     raise RuntimeError("VLM returned empty content for figure description")
 
 

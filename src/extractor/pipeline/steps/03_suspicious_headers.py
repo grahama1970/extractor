@@ -35,7 +35,8 @@ from extractor.pipeline.utils.annotations import (
     summarize_cues as _summarize_cues,
     load_relevant_rules as _load_relevant_rules,
 )
-from extractor.pipeline.utils.scillm_call import scillm_call
+import scillm
+from extractor.pipeline.utils.scillm_env import build_requests
 from extractor.pipeline.utils.diagnostics import (
     start_resource_sampler,
     stop_resource_sampler,
@@ -193,29 +194,17 @@ async def verify_header_with_llm(image_b64: str, context_text: str, model: str, 
             return {"is_header": hv.verdict == "accept", "reasoning": "; ".join(hv.reasons or [])}
         except Exception:
             pass
-    sid = os.getenv("LITELLM_SESSION_ID") or get_run_id()
-    # Enforce per-item timeout via litellm timeout param and an outer watchdog
-    # Deterministic: force temp=0 by passing per-item kwargs
+    # Router path with strict JSON
     det = os.getenv("PIPELINE_DETERMINISTIC", "0").lower() in {"1","true","yes","y"}
-    kwargs = {"timeout": item_timeout}
-    if det:
-        kwargs["temperature"] = 0
-    results = await scillm_call(
-        prompts=[{"model": model, "messages": messages, "kwargs": kwargs}],
-        wrap_json=True,
-        concurrency=1,
-        desc="verify header",
-        session_id=sid,
-        export="results",
-    )
-    r = results[0] if results else None
+    temp = 0.0 if det else None
+    reqs = build_requests([{"model": model, "messages": messages}], json_object=True, timeout=item_timeout, temperature=temp)
+    router = scillm.Router()
+    resps = await router.parallel_acompletions(reqs, max_concurrency=1)
+    r = resps[0] if resps else None
     try:
-        from loguru import logger as _logger
-        if r:
-            _logger.info(f"verify_header: model={r.request.model} ok={r.exception is None}")
+        answer = r["choices"][0]["message"]["content"] if isinstance(r, dict) else ""
     except Exception:
-        pass
-    answer = r.content if r else ""
+        answer = ""
     try:
         payload = json.loads(answer) if answer else {}
     except Exception:
@@ -849,19 +838,16 @@ async def process_pdf_pipeline(config: Config):
         )
         try:
             t_llm0 = time.monotonic()
-            sid = os.getenv("LITELLM_SESSION_ID") or run_id
-            coro = scillm_call(
-                prepared,
-                wrap_json=True,
-                concurrency=config.llm_concurrency,
-                desc="Verifying Headers",
-                session_id=sid,
-                request_timeout=config.item_timeout_seconds,
-            )
+            det = os.getenv("PIPELINE_DETERMINISTIC", "0").lower() in {"1","true","yes","y"}
+            temp = 0.0 if det else None
+            reqs = build_requests(prepared, json_object=True, timeout=config.item_timeout_seconds, temperature=temp)
+            router = scillm.Router()
+            async def _do_batch():
+                return await router.parallel_acompletions(reqs, max_concurrency=max(1, int(config.llm_concurrency)))
             if config.max_runtime_seconds and config.max_runtime_seconds > 0:
-                results = await asyncio.wait_for(coro, timeout=config.max_runtime_seconds)
+                results = await asyncio.wait_for(_do_batch(), timeout=config.max_runtime_seconds)
             else:
-                results = await coro
+                results = await _do_batch()
             llm_batch_duration_ms = int((time.monotonic() - t_llm0) * 1000)
         except asyncio.TimeoutError as e:
             logger.error(f"Stage 03 model calls timed out after {config.max_runtime_seconds}s")
@@ -880,7 +866,7 @@ async def process_pdf_pipeline(config: Config):
             except Exception:
                 pass
             results = [
-                json.dumps({"error": {"type": "Timeout", "message": info.get("message")}})
+                {"choices":[{"message":{"content": json.dumps({"error": {"type": "Timeout", "message": info.get("message")}})}}]}
             ] * len(prepared)
             _log_event("stage03.llm_batch_timeout", prepared=len(prepared), timeout_s=config.max_runtime_seconds or config.item_timeout_seconds)
         except Exception as e:

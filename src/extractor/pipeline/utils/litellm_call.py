@@ -34,6 +34,11 @@ try:
 except Exception:  # pragma: no cover
     import litellm as _litellm
 from dotenv import find_dotenv, load_dotenv
+from extractor.pipeline.utils.scillm_resolver import (
+    resolve_model as _resolve_model,
+    should_parallelize as _should_parallelize,
+    log_selection as _log_selection,
+)
 from loguru import logger
 from tqdm.asyncio import tqdm
 try:
@@ -94,6 +99,7 @@ if (os.getenv("CHUTES_API_BASE") and os.getenv("CHUTES_API_KEY")):
         pass
 
 
+# Default model from legacy LiteLLM envs; may be overridden by SciLLM resolver later in CLI entrypoints
 DEFAULT_MODEL = (
     os.getenv("LITELLM_DEFAULT_MODEL")
     or os.getenv("DEFAULT_LITELLM_MODEL")
@@ -425,6 +431,18 @@ async def litellm_call(
             batches.setdefault(model, []).append((idx, messages))
 
     unique_models = sorted({m for _, m, _, _ in processed})
+    # Merge SCILLM_ROUTER_MODELS (if set) to enable Router defaults without explicit --models
+    _router_models_env = os.getenv("SCILLM_ROUTER_MODELS", "").strip()
+    if _router_models_env:
+        try:
+            import json as _json
+            if _router_models_env.startswith("["):
+                _more = _json.loads(_router_models_env)
+            else:
+                _more = [s.strip() for s in _router_models_env.split(",") if s.strip()]
+            unique_models = sorted({*unique_models, *(_more or [])})
+        except Exception:
+            pass
 
     def _router_entry(m: str) -> dict:
         params: dict = {"model": m}
@@ -866,6 +884,35 @@ def build_cli():
 
         dmpr = max_parallel if max_parallel and max_parallel > 0 else None
         model_list_opt = [m.strip() for m in models.split(",")] if models else None
+
+        # Resolve model via SciLLM precedence unless the user passed a non-default value explicitly
+        _explicit_cli = model != DEFAULT_MODEL
+        if not _explicit_cli:
+            _m2, _src = _resolve_model(None)
+            if _m2:
+                try:
+                    logger.info(_log_selection(_m2, _src, bool(os.getenv("OPENAI_BASE_URL") or os.getenv("CHUTES_API_BASE")), None, None))
+                except Exception:
+                    pass
+                model = _m2
+        else:
+            try:
+                logger.info(_log_selection(model, "arg:preferred", bool(os.getenv("OPENAI_BASE_URL") or os.getenv("CHUTES_API_BASE")), None, None))
+            except Exception:
+                pass
+
+        # Auto-enable Router model list from env when requested (unless --models provided)
+        model_list_opt = [m.strip() for m in models.split(",")] if models else None
+        if (not model_list_opt) and _should_parallelize():
+            _raw = os.getenv("SCILLM_ROUTER_MODELS", "").strip()
+            try:
+                import json as _json
+                if _raw.startswith("["):
+                    model_list_opt = _json.loads(_raw)
+                else:
+                    model_list_opt = [s.strip() for s in _raw.split(",") if s.strip()]
+            except Exception:
+                model_list_opt = None
 
         results = asyncio.run(
             litellm_call(
