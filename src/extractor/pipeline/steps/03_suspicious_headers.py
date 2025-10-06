@@ -886,17 +886,19 @@ async def process_pdf_pipeline(config: Config):
             except Exception:
                 pass
             results = [
-                json.dumps({"error": {"type": type(e).__name__, "message": info.get("message")}})
+                {"choices":[{"message":{"content": json.dumps({"error": {"type": type(e).__name__, "message": info.get("message")}})}}]}
             ] * len(prepared)
             _log_event("stage03.llm_batch_error", prepared=len(prepared), error=str(e))
 
-        for ans in results:
+        for r in results:
             try:
+                ans = r["choices"][0]["message"]["content"] if isinstance(r, dict) else ""
                 llm_payloads.append(json.loads(ans) if ans else {})
             except Exception:
                 llm_stats["llm_parse_errors"] += 1
                 llm_stats["llm_errors"] += 1
-                llm_payloads.append({"error": {"type": "ParseError", "message": ans[:200]}})
+                preview = ans[:200] if isinstance(ans, str) else ""
+                llm_payloads.append({"error": {"type": "ParseError", "message": preview}})
 
     # 7) Apply results back to blocks — update types, suspicion fields, persist
     prep_idx = 0

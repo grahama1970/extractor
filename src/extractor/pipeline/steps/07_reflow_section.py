@@ -40,7 +40,7 @@ from extractor.pipeline.utils.diagnostics import (
     gpu_metrics_available,
 )
 from extractor.pipeline.utils.metrics_logger import log_metric
-from extractor.pipeline.utils.scillm_call import scillm_call
+# SciLLM client is imported directly where needed (Router/acompletion)
 from extractor.pipeline.utils.model_params import (
     build_chat_extras,
 )
