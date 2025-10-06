@@ -14,11 +14,13 @@ from __future__ import annotations
 
 from typing import Any, Iterable, List, Dict, Optional
 
-try:
-    # Prefer SciLLM import to ensure the module is present when needed
-    import scillm as _scillm  # noqa: F401
+try:  # Prefer SciLLM module name
+    import scillm as _scillm  # type: ignore  # noqa: F401
 except Exception:
-    _scillm = None  # type: ignore
+    try:  # Fallback: SciLLM distribution provides 'litellm' module name
+        import litellm as _scillm  # type: ignore  # noqa: F401
+    except Exception:
+        _scillm = None  # type: ignore
 
 
 # Re-exported result type (duck-typed in tests)
@@ -60,29 +62,44 @@ async def scillm_call(
     reqs = list(items or prompts or [])
     # Prefer Router.parallel_acompletions
     try:
-        from scillm import Router  # type: ignore
-        router = Router()
-        # router.parallel_acompletions signature may vary; pass through our batch
-        resps = await router.parallel_acompletions(reqs)
-        out: List[Result] = []
-        for i, r in enumerate(resps or []):
+        # If a Router class is exposed (SciLLM), prefer it; otherwise fall back.
+        Router = None
+        try:
+            from scillm import Router as _Router  # type: ignore
+            Router = _Router
+        except Exception:
             try:
-                content = r["choices"][0]["message"]["content"] if isinstance(r, dict) else getattr(r, "content", "")
+                from litellm import Router as _Router  # type: ignore
+                Router = _Router
             except Exception:
-                content = getattr(r, "content", "") or ""
-            out.append(Result(index=i, request=reqs[i], response=r, content=content, exception=None))
-        return out
+                Router = None
+        if Router is not None:
+            router = Router()
+            resps = await router.parallel_acompletions(reqs)  # type: ignore
+            out: List[Result] = []
+            for i, r in enumerate(resps or []):
+                try:
+                    content = r["choices"][0]["message"]["content"] if isinstance(r, dict) else getattr(r, "content", "")
+                except Exception:
+                    content = getattr(r, "content", "") or ""
+                out.append(Result(index=i, request=reqs[i], response=r, content=content, exception=None))
+            return out
     except Exception as e:
         # Fallback: sequential completion to avoid breaking pipelines
         out: List[Result] = []
+        # Attempt scillm first; otherwise litellm.
+        _s = None
         try:
             import scillm as _s  # type: ignore
         except Exception:
-            _s = None
+            try:
+                import litellm as _s  # type: ignore
+            except Exception:
+                _s = None
         for i, req in enumerate(reqs):
             try:
                 if _s is None:
-                    raise RuntimeError("scillm not available")
+                    raise RuntimeError("scillm/litellm not available")
                 model = req.get("model")
                 messages = req.get("messages")
                 kwargs2 = req.get("kwargs") or {}
