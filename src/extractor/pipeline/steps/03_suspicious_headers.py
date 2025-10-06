@@ -35,7 +35,7 @@ from extractor.pipeline.utils.annotations import (
     summarize_cues as _summarize_cues,
     load_relevant_rules as _load_relevant_rules,
 )
-from extractor.pipeline.utils.litellm_call import litellm_call
+from extractor.pipeline.utils.scillm_call import scillm_call
 from extractor.pipeline.utils.diagnostics import (
     start_resource_sampler,
     stop_resource_sampler,
@@ -200,7 +200,7 @@ async def verify_header_with_llm(image_b64: str, context_text: str, model: str, 
     kwargs = {"timeout": item_timeout}
     if det:
         kwargs["temperature"] = 0
-    results = await litellm_call(
+    results = await scillm_call(
         prompts=[{"model": model, "messages": messages, "kwargs": kwargs}],
         wrap_json=True,
         concurrency=1,
@@ -850,7 +850,7 @@ async def process_pdf_pipeline(config: Config):
         try:
             t_llm0 = time.monotonic()
             sid = os.getenv("LITELLM_SESSION_ID") or run_id
-            coro = litellm_call(
+            coro = scillm_call(
                 prepared,
                 wrap_json=True,
                 concurrency=config.llm_concurrency,

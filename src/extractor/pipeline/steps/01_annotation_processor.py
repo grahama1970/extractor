@@ -29,7 +29,8 @@ except ImportError:
     raise
 import typer
 from loguru import logger
-from extractor.pipeline.utils.litellm_call import litellm_call
+from extractor.pipeline.utils.scillm_call import scillm_call
+from extractor.pipeline.utils.model_env import resolve_model
 
 from extractor.pipeline.utils.diagnostics import (
     start_resource_sampler,
@@ -184,11 +185,7 @@ class Config:
     include_freetext: bool = field(default=False)
     use_images: bool = False
     render_dpi: int = 150
-    llm_model: str = field(
-        default_factory=lambda: os.getenv(
-            "LITELLM_DEFAULT_MODEL", os.getenv("DEFAULT_LITELLM_MODEL", "")
-        )
-    )
+    llm_model: str = field(default_factory=lambda: resolve_model("") or "")
     llm_concurrency: int = 5
     context_blocks: int = 2
     # Debugging controls
@@ -919,11 +916,11 @@ async def process_pdf_pipeline(config: Config):
 
     try:
         if run_llm:
+            sid = os.getenv("LITELLM_SESSION_ID") or get_run_id()
+            t0 = time.monotonic()
             if config.max_runtime_seconds and config.max_runtime_seconds > 0:
-                t0 = time.monotonic()
-                sid = os.getenv("LITELLM_SESSION_ID") or get_run_id()
                 results = await asyncio.wait_for(
-                    litellm_call(
+                    scillm_call(
                         items,
                         concurrency=config.llm_concurrency,
                         desc="Interpreting Annotations",
@@ -934,11 +931,8 @@ async def process_pdf_pipeline(config: Config):
                     ),
                     timeout=config.max_runtime_seconds,
                 )
-                t_llm_ms = int((time.monotonic() - t0) * 1000)
             else:
-                t0 = time.monotonic()
-                sid = os.getenv("LITELLM_SESSION_ID") or get_run_id()
-                results = await litellm_call(
+                results = await scillm_call(
                     items,
                     concurrency=config.llm_concurrency,
                     desc="Interpreting Annotations",
@@ -947,7 +941,7 @@ async def process_pdf_pipeline(config: Config):
                     sanitize_data_urls=os.getenv("STAGE01_SANITIZE_DATA_URLS", "redact"),
                     sanitize_truncate_chars=int(os.getenv("STAGE01_SANITIZE_CHARS", "48")),
                 )
-                t_llm_ms = int((time.monotonic() - t0) * 1000)
+            t_llm_ms = int((time.monotonic() - t0) * 1000)
     except asyncio.TimeoutError as e:
         msg_info = classify_llm_error(e)
         try:

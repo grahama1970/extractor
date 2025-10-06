@@ -43,7 +43,8 @@ from extractor.pipeline.utils.diagnostics import (
     build_stage_timings,
     gpu_metrics_available,
 )
-from extractor.pipeline.utils.litellm_call import litellm_call
+from extractor.pipeline.utils.scillm_call import scillm_call
+from extractor.pipeline.utils.model_env import resolve_vlm_med, resolve_vlm_large, resolve_vlm_small
 from extractor.pipeline.utils.litellm_cache import initialize_litellm_cache
 
 # --- Initialization & Configuration ---
@@ -73,13 +74,9 @@ console = Console()
 # Make key parameters configurable via environment variables
 VERTICAL_PADDING_RATIO = float(os.getenv("FIGURE_VERTICAL_PADDING", "0.2"))
 """Stage 06 VLM model resolution"""
-VLM_MODEL = (
-    os.getenv("STAGE06_MODEL")
-    or os.getenv("LITELLM_VLM_MODEL")
-    or ""
-).strip()
-VLM_MODEL_LARGE = (os.getenv("LITELLM_LARGE_VLM_MODEL") or "").strip()
-VLM_MODEL_SMALL = (os.getenv("LITELLM_SMALL_VLM_MODEL") or "").strip()
+VLM_MODEL = (os.getenv("STAGE06_MODEL") or resolve_vlm_med("") or "").strip()
+VLM_MODEL_LARGE = (resolve_vlm_large("") or "").strip()
+VLM_MODEL_SMALL = (resolve_vlm_small("") or "").strip()
 # Tiered timeouts and jitter
 VLM_SMALL_TIMEOUT = int(os.getenv("VLM_SMALL_TIMEOUT", "18"))
 VLM_MED_TIMEOUT   = int(os.getenv("VLM_MED_TIMEOUT", "28"))
@@ -115,7 +112,7 @@ async def describe_image_with_llm(
         {"type": "text", "text": f"Context: {context[:2000]}"},
         {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
     ]
-    model = (model_override or os.getenv("LITELLM_VLM_MODEL") or VLM_MODEL or "").strip()
+    model = (model_override or VLM_MODEL or "").strip()
     params: Dict[str, Any] = {
         "model": model,
         "messages": [
@@ -129,7 +126,7 @@ async def describe_image_with_llm(
     # temperature default; force 0 in deterministic mode
     params["temperature"] = 0.0 if deterministic else 0.2
     sid = os.getenv("LITELLM_SESSION_ID") or get_run_id()
-    out = await litellm_call([params], desc="figure_description", session_id=sid, export="results")
+    out = await scillm_call([params], desc="figure_description", session_id=sid, export="results")
     r = out[0] if out else None
     if r and isinstance(r.content, str) and r.content.strip():
         try:

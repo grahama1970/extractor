@@ -47,7 +47,7 @@ from extractor.pipeline.utils.diagnostics import (
     gpu_metrics_available,
 )
 from extractor.pipeline.utils.metrics_logger import log_metric
-from extractor.pipeline.utils.litellm_call import litellm_call
+from extractor.pipeline.utils.scillm_call import scillm_call
 from extractor.pipeline.utils.model_params import (
     build_chat_extras,
 )
@@ -55,8 +55,6 @@ from extractor.pipeline.utils.vision import preflight_vision_support
 from extractor.pipeline.utils.text_utils import sanitize_text
 from extractor.pipeline.utils.unified_conversion import build_unified_document_from_reflow
 from extractor.pipeline.utils.numeric_auditor import audit_section_reflow
-from extractor.pipeline.utils.numeric_auditor import audit_section_reflow
-from extractor.pipeline.utils.confidence import compose_confidence
 # Ensure _trim_context is defined before any runtime use (some branches call it early)
 def _trim_context(raw: str, limit: int) -> str:
     if not raw:
@@ -67,22 +65,22 @@ def _trim_context(raw: str, limit: int) -> str:
         return str(raw)[:limit] + " ..."
 
 # Early defaults for trim constants to avoid NameError in early branches
-import os as _os
 try:
     CONTEXT_TRIM_CHARS
 except NameError:  # pragma: no cover - define default if not yet declared
-    CONTEXT_TRIM_CHARS = int(_os.getenv("STAGE07_CONTEXT_TRIM_CHARS", "8000"))
+    CONTEXT_TRIM_CHARS = int(os.getenv("STAGE07_CONTEXT_TRIM_CHARS", "8000"))
 try:
     RETRY_TRIM_CHARS
 except NameError:  # pragma: no cover
-    RETRY_TRIM_CHARS = int(_os.getenv("STAGE07_RETRY_TRIM_CHARS", "2000"))
+    RETRY_TRIM_CHARS = int(os.getenv("STAGE07_RETRY_TRIM_CHARS", "2000"))
 
 def build_user_guard_text(section_meta: Dict[str, Any], truncated_text: str) -> str:
     """Early-safe fallback for guard text; real definition later may override."""
     try:
         from extractor.pipeline.utils.text_utils import sanitize_text as _sanitize
     except Exception:
-        _sanitize = lambda s: s  # type: ignore
+        def _sanitize(s: str) -> str:
+            return s  # type: ignore
     title = _sanitize(section_meta.get("title", "Untitled"))
     page_start = section_meta.get("page_start")
     page_end = section_meta.get("page_end")
@@ -817,9 +815,8 @@ async def reflow_section_with_llm(
         elif supports_vision and not include_images:
             user_content = [{"type": "text", "text": context_text}]
         else:
-            user_content = f"""{context_text}
-
-[Note: Images omitted because the selected model does not support vision]"""
+            # Images omitted branch – no extra content block needed here
+            image_blocks = []
 
         if SCHEMA_MODE == "reflow_json":
             system_prompt = dedent(
@@ -978,7 +975,7 @@ async def reflow_section_with_llm(
                     )
                 except Exception:
                     pass
-                res = await litellm_call(
+                res = await scillm_call(
                     [params_min], wrap_json=False, concurrency=1, desc="Reflow Section (forced-minimal)", session_id=sid, export="results"
                 )
                 rmin = res[0] if res else None
@@ -1370,7 +1367,7 @@ async def reflow_section_with_llm(
             # Deterministic guard: force temperature=0
             if os.getenv("PIPELINE_DETERMINISTIC", "0").lower() in {"1","true","yes","y"}:
                 call_params.setdefault("temperature", 0)
-            results = await litellm_call(
+            results = await scillm_call(
                 [call_params],
                 wrap_json=True,
                 concurrency=1,
@@ -1427,7 +1424,7 @@ async def reflow_section_with_llm(
                 }
                 if "gemini" not in (LLM_MODEL or "").lower():
                     retry_params["response_format"] = {"type": "json_object"}
-                retry_res = await litellm_call(
+                retry_res = await scillm_call(
                     [retry_params],
                     wrap_json=True,
                     concurrency=1,
@@ -1494,7 +1491,7 @@ async def reflow_section_with_llm(
                     )
                 except Exception:
                     pass
-                results2 = await litellm_call(
+                results2 = await scillm_call(
                     [call_params2], wrap_json=True, concurrency=1, desc="Reflow Section (strict-compact)", session_id=sid, export="results"
                 )
                 r2 = results2[0] if results2 else None
@@ -1657,7 +1654,7 @@ async def reflow_section_with_llm(
             try:
                 # Relaxed: same messages, no response_format extras
                 call_params = {"model": LLM_MODEL, "messages": messages, "timeout": llm_timeout}
-                results = await litellm_call(
+                results = await scillm_call(
                     [call_params],
                     wrap_json=False,
                     concurrency=1,
@@ -2241,9 +2238,10 @@ def consolidate_data(
                             try:
                                 hdr = pd.DataFrame(t1.get("pandas_df") or [])
                                 body = pd.DataFrame(t2.get("pandas_df") or [])
-                                def _collapse_ws_df(df: pd.DataFrame) -> pd.DataFrame:
-                                    fn = lambda v: _sanitize_table_cell(v) if not pd.isna(v) else ""
-                                    return df.apply(lambda col: col.map(fn))
+                    def _collapse_ws_df(df: pd.DataFrame) -> pd.DataFrame:
+                        def _fn(v):
+                            return _sanitize_table_cell(v) if not pd.isna(v) else ""
+                        return df.apply(lambda col: col.map(_fn))
                                 # Apply header row as column names if shape aligns
                                 if len(body.columns) == len(hdr.columns):
                                     _hdr_clean = _collapse_ws_df(hdr)
@@ -2268,9 +2266,10 @@ def consolidate_data(
                             try:
                                 df1 = pd.DataFrame(t1.get("pandas_df") or [])
                                 df2 = pd.DataFrame(t2.get("pandas_df") or [])
-                                def _collapse(df: pd.DataFrame) -> pd.DataFrame:
-                                    fn = lambda v: _sanitize_table_cell(v) if not pd.isna(v) else ""
-                                    return df.apply(lambda col: col.map(fn))
+                    def _collapse(df: pd.DataFrame) -> pd.DataFrame:
+                        def _fn(v):
+                            return _sanitize_table_cell(v) if not pd.isna(v) else ""
+                        return df.apply(lambda col: col.map(_fn))
                                 if len(df1.columns) == len(df2.columns):
                                     out = pd.concat([_collapse(df1), _collapse(df2)], ignore_index=True)
                                     t1["pandas_df"] = out.to_dict("records")
