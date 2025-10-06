@@ -1,0 +1,219 @@
+#!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.10"
+# dependencies = [
+#   "typer>=0.12.3",
+#   "rich>=13.7.1",
+#   "litellm>=1.51.0",
+# ]
+# ///
+"""
+Chutes.ai SOTA model evaluation (text-first, optional VLM).
+
+Uses OpenAI-compatible providers via litellm with your CHUTES_* env vars.
+Reads model aliases from LITELLM_* envs and normalizes to remote model ids.
+
+Outputs metrics JSON and a compact table under scripts/artifacts/evals/.
+"""
+from __future__ import annotations
+
+import json
+import os
+import time
+from dataclasses import dataclass, asdict
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+import argparse
+from rich.console import Console
+from rich.table import Table
+
+try:
+    import litellm  # type: ignore
+except Exception as exc:  # pragma: no cover
+    raise SystemExit(f"litellm import failed: {exc}")
+
+
+console = Console()
+
+
+def _env(name: str, default: Optional[str] = None) -> Optional[str]:
+    return os.getenv(name, default)
+
+
+def _remote_from_alias(alias: str) -> str:
+    """Drop the provider prefix like 'openai/<remote>' -> '<remote>'."""
+    if not alias:
+        return alias
+    return alias.split("/", 1)[1] if "/" in alias else alias
+
+
+def _collect_default_models() -> Dict[str, str]:
+    """Return a mapping label->alias from common LITELLM_* envs."""
+    envs = {
+        "default_text": _env("LITELLM_DEFAULT_TEXT_MODEL") or _env("LITELLM_DEFAULT_MODEL"),
+        "small_text": _env("LITELLM_SMALL_TEXT_MODEL"),
+        "med_text": _env("LITELLM_MED_TEXT_MODEL"),
+        "large_text": _env("LITELLM_LARGE_TEXT_MODEL"),
+    }
+    # Remove Nones/empties
+    return {k: v for k, v in envs.items() if v}
+
+
+@dataclass
+class EvalItem:
+    label: str
+    alias: str
+    remote: str
+    ok: bool
+    status: str
+    latency_ms: int
+    tokens_in: Optional[int] = None
+    tokens_out: Optional[int] = None
+
+
+def _call_json(model_remote: str, prompt: str, timeout: int = 45) -> Dict[str, Any]:
+    """Call provider and return parsed JSON content (raises on failure)."""
+    resp = litellm.completion(
+        model=model_remote,
+        messages=[
+            {"role": "system", "content": "You are a concise assistant."},
+            {"role": "user", "content": prompt},
+        ],
+        api_key=_env("CHUTES_API_KEY"),
+        api_base=_env("CHUTES_API_BASE", "https://llm.chutes.ai/v1"),
+        custom_llm_provider=(_env("CHUTES_PROVIDER") or "openai").strip() or "openai",
+        timeout=timeout,
+        response_format={"type": "json_object"},
+    )
+    try:
+        content = resp["choices"][0]["message"]["content"]
+    except Exception:
+        content = str(resp)
+    data = json.loads(content)
+    # Optional usage metrics
+    usage = resp.get("usage", {}) if isinstance(resp, dict) else {}
+    return {"data": data, "usage": usage}
+
+
+def _ensure_artifacts_dir() -> Path:
+    out_dir = Path("scripts/artifacts/evals")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    return out_dir
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    parser = argparse.ArgumentParser(description="Chutes model quick eval")
+    parser.add_argument(
+        "--model",
+        dest="models",
+        action="append",
+        help=(
+            "Explicit model alias (e.g., openai/deepseek-ai/DeepSeek-R1). "
+            "Repeat for multiple models. If omitted, uses LITELLM_* env defaults."
+        ),
+    )
+    parser.add_argument(
+        "--full",
+        dest="full",
+        action="store_true",
+        help="Run a tiny extra reasoning probe after sanity JSON (slower)",
+    )
+    parser.add_argument(
+        "--no-record",
+        dest="record",
+        action="store_false",
+        help="Do not write artifacts (JSON/TSV)",
+    )
+    args = parser.parse_args(argv)
+    """Evaluate a small set of Chutes models for quick health/latency."""
+    # Build model list
+    model_map = _collect_default_models()
+    if args.models:
+        model_map = {f"m{i+1}": m for i, m in enumerate(args.models)}
+
+    if not model_map:
+        console.print("No models provided and no LITELLM_* defaults found.")
+        return 2
+
+    console.print(f"Evaluating {len(model_map)} model(s) via Chutes…")
+    evals: List[EvalItem] = []
+
+    for label, alias in model_map.items():
+        remote = _remote_from_alias(alias)
+        t0 = time.monotonic()
+        try:
+            payload = _call_json(
+                model_remote=remote,
+                prompt='Return only {"ok": true, "model": "%s"} as JSON.'
+                % remote,
+            )
+            data = payload["data"]
+            usage = payload.get("usage") or {}
+            ok = bool(data.get("ok") is True)
+            status = "ok" if ok else "bad_json"
+            tokens_in = usage.get("prompt_tokens")
+            tokens_out = usage.get("completion_tokens")
+        except Exception as exc:  # network/provider/parse error
+            ok = False
+            status = f"error: {exc}"[:160]
+            tokens_in = None
+            tokens_out = None
+        latency_ms = int((time.monotonic() - t0) * 1000)
+        evals.append(
+            EvalItem(
+                label=label,
+                alias=alias,
+                remote=remote,
+                ok=ok,
+                status=status,
+                latency_ms=latency_ms,
+                tokens_in=tokens_in,
+                tokens_out=tokens_out,
+            )
+        )
+
+        if args.full and ok:
+            # Optional: add one short reasoning probe as JSON
+            try:
+                _ = _call_json(
+                    model_remote=remote,
+                    prompt=(
+                        "Solve: If a train leaves at 3pm and travels 60km/h for 90 minutes,"
+                        " return JSON {\"distance_km\": <number>} only."
+                    ),
+                )
+            except Exception:
+                pass
+
+    # Present table
+    table = Table(title="Chutes Model Eval (quick)")
+    for col in ("label", "alias", "remote", "ok", "latency_ms", "status"):
+        table.add_column(col)
+    for e in evals:
+        table.add_row(e.label, e.alias, e.remote, str(e.ok), str(e.latency_ms), e.status)
+    console.print(table)
+
+    if args.record:
+        out_dir = _ensure_artifacts_dir()
+        ts = time.strftime("%Y%m%d_%H%M%S")
+        json_path = out_dir / f"chutes_eval_{ts}.json"
+        json_path.write_text(json.dumps([asdict(e) for e in evals], indent=2))
+        # Lightweight CSV-like table
+        tsv_path = out_dir / f"chutes_eval_{ts}.tsv"
+        lines = [
+            "label	alias	remote	ok	latency_ms	status\n",
+        ]
+        for e in evals:
+            lines.append(
+                f"{e.label}\t{e.alias}\t{e.remote}\t{int(e.ok)}\t{e.latency_ms}\t{e.status}\n"
+            )
+        tsv_path.write_text("".join(lines))
+        console.print(f"Saved: {json_path}")
+        console.print(f"Saved: {tsv_path}")
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
