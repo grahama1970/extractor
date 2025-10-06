@@ -1,26 +1,26 @@
 #!/usr/bin/env python3
 """
-SciLLM Call — transitional thin async batch runner.
+SciLLM Call — async batch runner using the ScillM/LiteLLM client.
 
-Notes
-- This is a compatibility wrapper to allow replacing imports of
-  `extractor.pipeline.utils.litellm_call.litellm_call` with
-  `extractor.pipeline.utils.scillm_call.scillm_call` without touching
-  call sites yet.
-- Internally, it forwards to the existing implementation for now. We can
-  swap the internals to SciLLM Router-only once we retire litellm_call.
+Goals
+- Depend only on the ScillM distribution (which currently exposes the
+  `litellm` module name) — no legacy litellm_call usage.
+- Provide deterministic ordering and bounded concurrency without silently
+  falling back to unrelated adapters.
+- Return a minimal Result object with request/response/content/exception.
 """
 from __future__ import annotations
 
 from typing import Any, Iterable, List, Dict, Optional
+import asyncio
 
 try:  # Prefer SciLLM module name
-    import scillm as _scillm  # type: ignore  # noqa: F401
+    import scillm as _backend  # type: ignore  # noqa: F401
 except Exception:
-    try:  # Fallback: SciLLM distribution provides 'litellm' module name
-        import litellm as _scillm  # type: ignore  # noqa: F401
+    try:  # SciLLM distribution provides the 'litellm' module name
+        import litellm as _backend  # type: ignore  # noqa: F401
     except Exception:
-        _scillm = None  # type: ignore
+        _backend = None  # type: ignore
 
 
 # Re-exported result type (duck-typed in tests)
@@ -44,7 +44,7 @@ class Result:
 
 async def scillm_call(
     prompts: Iterable[Dict[str, Any]] | None = None,
-    concurrency: int = 1,
+    concurrency: int = 4,
     desc: str | None = None,
     session_id: str | None = None,
     export: str | None = None,
@@ -54,67 +54,43 @@ async def scillm_call(
     items: Iterable[Dict[str, Any]] | None = None,
     **kwargs: Any,
 ) -> List[Result]:
-    """Direct SciLLM Router parallel_acompletions with a conservative fallback.
+    """Run a batch of chat completions via ScillM/LiteLLM asynchronously.
 
-    Expects each prompt like: {"model": str, "messages": [...], "kwargs": {...}}
-    Returns a list of _Result with .index, .content, .request, .exception.
+    - Each item: {"model": str, "messages": [...], other OpenAI-compatible kwargs}
+    - Bounded by `concurrency` (>=1). Order preserved.
+    - No hidden fallback to legacy adapters; this uses the ScillM/LiteLLM client only.
     """
+    if _backend is None:
+        raise RuntimeError("ScillM/LiteLLM client not available")
     reqs = list(items or prompts or [])
-    # Prefer Router.parallel_acompletions
-    try:
-        # If a Router class is exposed (SciLLM), prefer it; otherwise fall back.
-        Router = None
+    if concurrency < 1:
+        concurrency = 1
+
+    sem = asyncio.Semaphore(concurrency)
+    out: List[Result] = [None] * len(reqs)  # type: ignore
+
+    async def _one(i: int, req: Dict[str, Any]):
+        model = req.get("model")
+        messages = req.get("messages") or []
+        # Merge pass-through kwargs from root + nested .kwargs if present
+        kw = {k: v for k, v in req.items() if k not in {"model", "messages"}}
+        if isinstance(req.get("kwargs"), dict):
+            kw.update(req["kwargs"])  # type: ignore[index]
         try:
-            from scillm import Router as _Router  # type: ignore
-            Router = _Router
-        except Exception:
-            try:
-                from litellm import Router as _Router  # type: ignore
-                Router = _Router
-            except Exception:
-                Router = None
-        if Router is not None:
-            router = Router()
-            resps = await router.parallel_acompletions(reqs)  # type: ignore
-            out: List[Result] = []
-            for i, r in enumerate(resps or []):
-                try:
-                    content = r["choices"][0]["message"]["content"] if isinstance(r, dict) else getattr(r, "content", "")
-                except Exception:
-                    content = getattr(r, "content", "") or ""
-                out.append(Result(index=i, request=reqs[i], response=r, content=content, exception=None))
-            return out
-    except Exception as e:
-        # Fallback: sequential completion to avoid breaking pipelines
-        out: List[Result] = []
-        # Attempt scillm first; otherwise litellm.
-        _s = None
-        try:
-            import scillm as _s  # type: ignore
-        except Exception:
-            try:
-                import litellm as _s  # type: ignore
-            except Exception:
-                _s = None
-        for i, req in enumerate(reqs):
-            try:
-                if _s is None:
-                    raise RuntimeError("scillm/litellm not available")
-                model = req.get("model")
-                messages = req.get("messages")
-                kwargs2 = req.get("kwargs") or {}
-                # Prefer async if scillm exposes it; else run in thread
-                if hasattr(_s, "acompletion"):
-                    r = await _s.acompletion(model=model, messages=messages, **kwargs2)  # type: ignore
+            async with sem:
+                if hasattr(_backend, "acompletion"):
+                    r = await _backend.acompletion(model=model, messages=messages, **kw)  # type: ignore
                 else:
-                    import asyncio
                     loop = asyncio.get_event_loop()
-                    r = await loop.run_in_executor(None, lambda: _s.completion(model=model, messages=messages, **kwargs2))  # type: ignore
-                try:
-                    content = r["choices"][0]["message"]["content"] if isinstance(r, dict) else getattr(r, "content", "")
-                except Exception:
-                    content = getattr(r, "content", "") or ""
-                out.append(Result(i, request=req, response=r, content=content, exception=None))
-            except Exception as ex:
-                out.append(Result(i, request=req, response=None, content="", exception=ex))
-        return out
+                    r = await loop.run_in_executor(None, lambda: _backend.completion(model=model, messages=messages, **kw))  # type: ignore
+            try:
+                content = r["choices"][0]["message"]["content"] if isinstance(r, dict) else getattr(r, "content", "")
+            except Exception:
+                content = getattr(r, "content", "") or ""
+            out[i] = Result(i, request=req, response=r, content=content, exception=None)
+        except Exception as ex:
+            out[i] = Result(i, request=req, response=None, content="", exception=ex)
+
+    await asyncio.gather(*[_one(i, req) for i, req in enumerate(reqs)])
+    # type: ignore[return-value]
+    return out  # type: ignore[return-value]
