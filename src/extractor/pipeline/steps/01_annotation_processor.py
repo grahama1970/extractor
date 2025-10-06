@@ -844,12 +844,9 @@ async def process_pdf_pipeline(config: Config):
     # images are already saved during extraction
 
     # Deterministic guard: cap concurrency and force temp=0
-    deterministic = os.getenv("PIPELINE_DETERMINISTIC", "0").lower() in {"1", "true", "yes", "y"}
+    deterministic = os.getenv("PIPELINE_DETERMINISTIC", "0").lower() in {"1","true","yes","y"}
     if deterministic:
-        try:
-            config.llm_concurrency = 1
-        except Exception:
-            pass
+        config.llm_concurrency = 1
     # Decide whether to call LLM (skip for curated if configured and no human notes)
     run_llm = True
     if curated_used and config.skip_llm_if_curated:
@@ -889,8 +886,9 @@ async def process_pdf_pipeline(config: Config):
                     "timeout": 30,
                     "stream": False,
                 }
-                if "gpt-5" not in _model_l:
-                    params["temperature"] = 0.0 if deterministic else 0.1
+                # Force deterministic temp=0; otherwise small baseline for non-gpt5
+                base_temp = 0.0 if deterministic else (0.0 if "gpt-5" in _model_l else 0.1)
+                params["temperature"] = base_temp
                 items.append(params)
             except Exception as e:
                 logger.exception(f"Failed to build messages for {d.get('id')}: {e}")
@@ -917,29 +915,30 @@ async def process_pdf_pipeline(config: Config):
 
     try:
         if run_llm:
-            sid = os.getenv("LITELLM_SESSION_ID") or get_run_id()
             t0 = time.monotonic()
             # Convert to Router requests with provider fields; allow data URL sanitizer to remain upstream
-            det = os.getenv("PIPELINE_DETERMINISTIC", "0").lower() in {"1","true","yes","y"}
-            temp = 0.0 if det else None
+            temp = 0.0 if deterministic else None
             reqs = build_requests(items, json_object=True, timeout=None, temperature=temp)
-            router = scillm.Router()
+            router = scillm.Router(deterministic=deterministic)
             async def _do_call():
                 return await router.parallel_acompletions(reqs, max_concurrency=max(1, int(config.llm_concurrency)))
-            if config.max_runtime_seconds and config.max_runtime_seconds > 0:
-                resps = await asyncio.wait_for(_do_call(), timeout=config.max_runtime_seconds)
-            else:
-                resps = await _do_call()
-            # Wrap into minimal results-like list for downstream consumption
-            class _Res:  # minimal shim for existing parsing paths below
-                def __init__(self, request, response):
-                    self.request = type("Req", (), request) if isinstance(request, dict) else request
-                    try:
-                        self.content = response["choices"][0]["message"]["content"]
-                    except Exception:
-                        self.content = ""
-                    self.exception = None
-            results = [_Res(reqs[i], r) for i, r in enumerate(resps)]
+            resps = await (asyncio.wait_for(_do_call(), timeout=config.max_runtime_seconds)
+                           if (config.max_runtime_seconds and config.max_runtime_seconds > 0)
+                           else _do_call())
+            # Normalize results into lightweight dicts with content
+            results = []
+            for i, r in enumerate(resps):
+                try:
+                    content = r["choices"][0]["message"]["content"] if isinstance(r, dict) else ""
+                except Exception:
+                    content = ""
+                results.append({
+                    "index": i,
+                    "request": reqs[i],
+                    "response": r,
+                    "content": content,
+                    "exception": None,
+                })
             t_llm_ms = int((time.monotonic() - t0) * 1000)
     except asyncio.TimeoutError as e:
         msg_info = classify_llm_error(e)
@@ -988,21 +987,19 @@ async def process_pdf_pipeline(config: Config):
             d["interpretation"] = {"error": "LLM call failed or timed out"}
     else:
         for r in results:
-            idx = r.index
+            idx = r.get("index")
             if not (0 <= idx < len(data)):
                 continue
             d = data[idx]
-            content_str = r.content or ""
+            content_str = r.get("content") or ""
             try:
                 try:
                     from loguru import logger as _logger
-                    _logger.info(
-                        f"stage01_interpret: model={getattr(getattr(r,'request',object()),'model',None)} ok={r.exception is None}"
-                    )
+                    _logger.info(f"stage01_interpret: model={r.get('request',{}).get('model')} ok={r.get('exception') is None}")
                 except Exception:
                     pass
                 if not isinstance(content_str, str) or not content_str.strip():
-                    d["interpretation"] = {"error": "Empty content from LLM"}
+                    d["interpretation"] = {"error": "empty_content"}
                     continue
                 cleaned = clean_json_string(content_str)
                 if isinstance(cleaned, dict):
@@ -1018,9 +1015,8 @@ async def process_pdf_pipeline(config: Config):
                     else:
                         d["interpretation"] = {"data": loaded}
                 except json.JSONDecodeError:
-                    logger.error(
-                        f"Invalid JSON for {d.get('id')}: {cleaned[:200]}..."
-                    )
+                    snippet = cleaned[:200]
+                    logger.error(f"Invalid JSON for {d.get('id')}: {snippet}...")
                     try:
                         diagnostics.append(
                             make_event(
@@ -1028,16 +1024,13 @@ async def process_pdf_pipeline(config: Config):
                                 "error",
                                 "llm_invalid_json",
                                 "Model returned invalid JSON",
-                                {"annotation_id": d.get("id")},
+                                {"annotation_id": d.get("id"), "snippet": snippet},
                             )
                         )
                         errors_count += 1
                     except Exception:
                         pass
-                    d["interpretation"] = {
-                        "error": "Invalid JSON response from LLM",
-                        "raw_response": cleaned,
-                    }
+                    d["interpretation"] = {"error": "invalid_json", "raw_len": len(cleaned), "raw_preview": snippet}
             except Exception as e:
                 logger.exception(
                     f"Failed to parse LLM response for {d.get('id')}: {e}"

@@ -48,6 +48,7 @@ from extractor.pipeline.utils.diagnostics import (
 )
 import scillm
 from extractor.pipeline.utils.scillm_env import build_requests
+import inspect
 
 # Import what we need from lean4_prover
 from dataclasses import dataclass
@@ -181,7 +182,44 @@ async def identify_requirements_in_section(
             """
             ).strip()
 
-            # Prefer provider JSON mode, via shared litellm_call wrapper for consistency with other stages
+            # Prefer SciLLM built-in "certainly" (Lean4) when available
+            certain = getattr(scillm, "certainly", None)
+            if certain is not None:
+                try:
+                    payload = {
+                        "task": "extract_requirements",
+                        "section": {
+                            "id": section.get("id"),
+                            "title": section.get("title"),
+                            "text": reflowed_text,
+                        },
+                        "tables": tables,
+                        "timeout": 120,
+                    }
+                    # Try common async entrypoints first
+                    for mname in ("aextract_requirements", "arun", "acall"):
+                        fn = getattr(certain, mname, None)
+                        if fn and inspect.iscoroutinefunction(fn):
+                            resp = await fn(payload)  # type: ignore[misc]
+                            if isinstance(resp, dict):
+                                reqs = cast(List[Dict[str, Any]], resp.get("requirements", []))
+                                cons = cast(List[Dict[str, Any]], resp.get("table_constraints", []))
+                                return reqs, cons
+                    # Fallback to sync entrypoints under the semaphore
+                    for mname in ("extract_requirements", "run", "call"):
+                        fn = getattr(certain, mname, None)
+                        if callable(fn):
+                            loop = asyncio.get_event_loop()
+                            resp = await loop.run_in_executor(None, lambda: fn(payload))
+                            if isinstance(resp, dict):
+                                reqs = cast(List[Dict[str, Any]], resp.get("requirements", []))
+                                cons = cast(List[Dict[str, Any]], resp.get("table_constraints", []))
+                                return reqs, cons
+                except Exception:
+                    # Gracefully fall back to Router JSON prompt below
+                    pass
+
+            # Fallback path: Router JSON prompt (provider-agnostic)
             params: Dict[str, Any] = {
                 "model": LEAN4_MODEL,
                 "messages": [
