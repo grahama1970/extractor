@@ -148,7 +148,9 @@ llm = [
   "openai>=1.65.2,<2",
   "anthropic>=0.56.0",
   "google-genai>=1.0.0,<2",
-  "litellm>=1.74.7",
+  # Prefer SciLLM fork if present; fall back to litellm. Install one.
+  "scillm>=0.1.0; python_version >= '3.10'",
+  "litellm>=1.74.7; extra != 'llm'",
 ]
 
 [project.urls]

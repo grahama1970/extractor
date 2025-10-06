@@ -33,7 +33,10 @@ Input/Output:
 # 4. Consult LESSONS_LEARNED.md about not breaking working code
 # ==============================================================================
 
-import litellm
+try:
+    import scillm as litellm  # type: ignore
+except Exception:  # pragma: no cover
+    import litellm  # type: ignore
 import os
 from typing import Tuple, Dict, Optional
 

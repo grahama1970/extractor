@@ -23,7 +23,10 @@ from io import BytesIO
 from pathlib import Path
 from typing import List, Optional, Annotated
 
-import litellm
+try:
+    import scillm as litellm  # SciLLM fork (preferred if available)
+except Exception:  # pragma: no cover
+    import litellm
 import PIL
 from pydantic import BaseModel
 from loguru import logger

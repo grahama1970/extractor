@@ -29,11 +29,17 @@ import time
 from dataclasses import dataclass
 from typing import Any as _Any, Dict, List, Optional, Tuple
 
-import litellm as _litellm
+try:
+    import scillm as _litellm  # SciLLM fork (preferred if available)
+except Exception:  # pragma: no cover
+    import litellm as _litellm
 from dotenv import find_dotenv, load_dotenv
 from loguru import logger
 from tqdm.asyncio import tqdm
-from litellm import Router
+try:
+    from scillm import Router  # type: ignore
+except Exception:  # pragma: no cover
+    from litellm import Router  # type: ignore
 _HAVE_PARALLEL_HELPERS = True  # for tests that monkeypatch this flag
 
 # Required project utilities — fail fast if missing
