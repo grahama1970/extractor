@@ -38,10 +38,26 @@ from extractor.pipeline.utils.model_env import (
     resolve_text_large,
     resolve_default,
 )
-try:
-    import litellm  # SciLLM client module name
-except Exception:
-    litellm = None  # type: ignore
+import sys
+from types import ModuleType
+
+def _import_scillm_client() -> ModuleType:
+    """Import the SciLLM client (module name: litellm), honoring SCILLM_DEV_PATH.
+    If SCILLM_DEV_PATH or the default local path exists, prepend it to sys.path
+    so the local SciLLM checkout wins over any PyPI litellm.
+    """
+    dev_path = os.getenv("SCILLM_DEV_PATH") or \
+        "/home/graham/workspace/experiments/litellm"
+    try:
+        if dev_path and os.path.isdir(dev_path) and dev_path not in sys.path:
+            sys.path.insert(0, dev_path)
+    except Exception:
+        pass
+    import importlib
+    try:
+        return importlib.import_module("litellm")
+    except Exception as exc:  # pragma: no cover
+        raise RuntimeError(f"SciLLM client import failed: {exc}")
 
 
 console = Console()
@@ -124,12 +140,63 @@ class EvalItem:
     tokens_out: Optional[int] = None
 
 
+async def _call_json_batch_via_router(
+    aliases: List[str],
+    prompt: str,
+    *,
+    timeout: int = 45,
+    max_concurrency: int = 8,
+) -> List[Dict[str, Any]]:
+    """Use SciLLM Router.parallel_acompletions for a batch of model aliases.
+    Returns entries aligned with aliases: {ok, data?, usage?, error?}.
+    """
+    litellm = _import_scillm_client()
+    Router = getattr(litellm, "Router", None)
+    if Router is None:
+        raise RuntimeError("SciLLM Router not exported; please update SciLLM client")
+    reqs = []
+    for model_alias in aliases:
+        is_ollama = model_alias.startswith("ollama/")
+        provider = "ollama" if is_ollama else (os.getenv("CHUTES_PROVIDER") or "openai").strip() or "openai"
+        api_base = (
+            os.getenv("OLLAMA_API_BASE", "http://127.0.0.1:11434") if is_ollama
+            else os.getenv("CHUTES_API_BASE", "https://llm.chutes.ai/v1")
+        )
+        api_key = None if is_ollama else os.getenv("CHUTES_API_KEY")
+        reqs.append({
+            "model": model_alias,
+            "messages": [
+                {"role": "system", "content": "You are a concise assistant."},
+                {"role": "user", "content": prompt},
+            ],
+            "response_format": {"type": "json_object"},
+            "api_key": api_key,
+            "api_base": api_base,
+            "custom_llm_provider": provider,
+            "timeout": timeout,
+        })
+    router = Router()
+    resps = await router.parallel_acompletions(reqs, max_concurrency=max_concurrency)
+    out: List[Dict[str, Any]] = []
+    for r in resps:
+        try:
+            content = r["choices"][0]["message"]["content"]
+            data = json.loads(content)
+            usage = r.get("usage", {}) if isinstance(r, dict) else {}
+            out.append({"ok": bool(data.get("ok") is True), "data": data, "usage": usage})
+        except Exception as exc:
+            out.append({"ok": False, "error": str(exc), "usage": {}})
+    return out
+
 async def _call_json_scillm_direct(model_alias: str, prompt: str, timeout: int = 45) -> Dict[str, Any]:
     """Call SciLLM (litellm module) directly and return parsed JSON."""
-    if litellm is None:
-        raise RuntimeError("SciLLM client (litellm) not available")
+    litellm = _import_scillm_client()
     is_ollama = model_alias.startswith("ollama/")
-    model_remote = model_alias.split("/", 1)[1] if "/" in model_alias else model_alias
+    # For Chutes/OpenAI-compatible routes, SciLLM accepts the full alias
+    # (e.g., openai/zai-org/GLM-4.5-Air). For Ollama, use the tag only.
+    model_remote = (
+        model_alias.split("/", 1)[1] if "/" in model_alias else model_alias
+    ) if not is_ollama else (model_alias.split("/", 1)[1] if "/" in model_alias else model_alias)
     provider = "ollama" if is_ollama else (os.getenv("CHUTES_PROVIDER") or "openai").strip() or "openai"
     api_base = (
         os.getenv("OLLAMA_API_BASE", "http://127.0.0.1:11434") if is_ollama
@@ -140,6 +207,7 @@ async def _call_json_scillm_direct(model_alias: str, prompt: str, timeout: int =
     # Some clients still read OPENAI_API_KEY from env; ensure it's present when using provider 'openai'
     if provider == "openai" and api_key:
         os.environ.setdefault("OPENAI_API_KEY", api_key)
+    # Use sync completion path — minimal surface, widely compatible
     loop = asyncio.get_event_loop()
     resp = await loop.run_in_executor(
         None,
@@ -163,6 +231,24 @@ async def _call_json_scillm_direct(model_alias: str, prompt: str, timeout: int =
     data = json.loads(content)
     usage = resp.get("usage", {}) if isinstance(resp, dict) else {}
     return {"data": data, "usage": usage}
+
+
+async def _acompletion_once(litellm_mod, model_remote: str, prompt: str, provider: str, api_base: str | None, api_key: str | None, timeout: int):
+    if provider == "openai" and api_key:
+        os.environ.setdefault("OPENAI_API_KEY", api_key)
+    return await litellm_mod.acompletion(
+        model=model_remote,
+        messages=[
+            {"role": "system", "content": "You are a concise assistant."},
+            {"role": "user", "content": prompt},
+        ],
+        response_format={"type": "json_object"},
+        timeout=timeout,
+        api_key=api_key,
+        base_url=api_base,
+        custom_llm_provider=provider,
+    )
+
 
 
 def _call_json_litellm(model_alias: str, prompt: str, timeout: int = 45) -> Dict[str, Any]:
@@ -263,31 +349,25 @@ def main(argv: Optional[List[str]] = None) -> int:
         console.print("No models provided and no LITELLM_* defaults found.")
         return 2
 
-    console.print(f"Evaluating {len(model_map)} model(s) via SciLLM/Chutes…")
+    console.print(f"Evaluating {len(model_map)} model(s) via SciLLM Router…")
     evals: List[EvalItem] = []
-
-    for label, alias in model_map.items():
+    labels = list(model_map.keys())
+    aliases = [model_map[k] for k in labels]
+    t0 = time.monotonic()
+    results = asyncio.run(
+        _call_json_batch_via_router(
+            aliases,
+            prompt='Return only {"ok": true} as JSON.',
+        )
+    )
+    elapsed = int((time.monotonic() - t0) * 1000)
+    for i, label in enumerate(labels):
+        alias = aliases[i]
         remote = _remote_from_alias(alias)
-        t0 = time.monotonic()
-        try:
-            payload = asyncio.run(
-                _call_json_scillm_direct(
-                    model_alias=alias,
-                    prompt='Return only {"ok": true, "model": "%s"} as JSON.' % alias,
-                )
-            )
-            data = payload["data"]
-            usage = payload.get("usage") or {}
-            ok = bool(data.get("ok") is True)
-            status = "ok" if ok else "bad_json"
-            tokens_in = usage.get("prompt_tokens")
-            tokens_out = usage.get("completion_tokens")
-        except Exception as exc:  # network/provider/parse error -> try litellm fallback once
-            ok = False
-            status = f"error: {exc}"[:160]
-            tokens_in = None
-            tokens_out = None
-        latency_ms = int((time.monotonic() - t0) * 1000)
+        item = results[i] if i < len(results) else {"ok": False, "error": "missing"}
+        ok = bool(item.get("ok"))
+        status = "ok" if ok else (f"error: {item.get('error','bad_json')}"[:160])
+        usage = item.get("usage") or {}
         evals.append(
             EvalItem(
                 label=label,
@@ -295,18 +375,18 @@ def main(argv: Optional[List[str]] = None) -> int:
                 remote=remote,
                 ok=ok,
                 status=status,
-                latency_ms=latency_ms,
-                tokens_in=tokens_in,
-                tokens_out=tokens_out,
+                latency_ms=elapsed,
+                tokens_in=usage.get("prompt_tokens"),
+                tokens_out=usage.get("completion_tokens"),
             )
         )
 
-        if args.full and ok:
+        if args.full and evals[-1].ok:
             # Optional: add one short reasoning probe as JSON
             try:
                 _ = asyncio.run(
-                    _call_json_scillm_direct(
-                        model_alias=alias,
+                    _call_json_batch_via_router(
+                        [alias],
                         prompt=(
                             "Solve: If a train leaves at 3pm and travels 60km/h for 90 minutes,"
                             " return JSON {\"distance_km\": <number>} only."
