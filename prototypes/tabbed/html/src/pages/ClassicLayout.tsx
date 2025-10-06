@@ -26,7 +26,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { ThumbnailRail } from "@/components/ThumbnailRail";
 import { ThumbnailStrip } from "@/components/ThumbnailStrip";
 import { PdfCanvas } from "@/components/PdfCanvas";
-import { loadPdf, type PdfDoc } from "@/lib/pdf";
+import { loadPdf, type PdfDoc, getPageSize } from "@/lib/pdf";
 import { isDev } from "@/lib/env";
 import { DEFAULT_LABELS, loadLabels, saveLabel, type LabelDef, submitLabel } from "@/lib/labels";
 
@@ -92,6 +92,7 @@ const ClassicLayout = () => {
   });
   const [pdfList, setPdfList] = useState<string[]>([]);
   const [docName, setDocName] = useState<string>(docRel);
+  const [runIdInput, setRunIdInput] = useState<string>("");
   // Save indicator (UI-only)
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
@@ -486,16 +487,70 @@ const ClassicLayout = () => {
     try { const obj = JSON.parse(jsonText); setJsonText(JSON.stringify(obj, null, 2)); } catch (_) {}
   };
 
+  // Overlay merged annotations from server for current doc
+  const overlayMerged = async () => {
+    try {
+      const rid = runIdInput.trim();
+      if (!rid) { toast("Enter run_id first (from Pipeline panel Status)"); return; }
+      const r = await fetch(`/api/annotations/merged?run_id=${encodeURIComponent(rid)}`);
+      const j = await r.json();
+      const data = j.data || {};
+      if (!doc) { toast("PDF not loaded yet"); return; }
+      const next: Record<number, Box[]> = { ...boxesByPage };
+      const addBox = (page: number, x0:number,y0:number,x1:number,y1:number, type:string, idHint?:string) => {
+        const p = Math.max(1, page + 1); // many stages are 0-based
+        const { width, height } = { width: 612, height: 792 };
+        // We'll attempt precise size if possible
+        getPageSize(doc, p).then(({width:w,height:h}) => {
+          const nx0 = Math.max(0, Math.min(1, x0 / w));
+          const ny0 = Math.max(0, Math.min(1, y0 / h));
+          const nx1 = Math.max(0, Math.min(1, x1 / w));
+          const ny1 = Math.max(0, Math.min(1, y1 / h));
+          const x = Math.min(nx0, nx1), y = Math.min(ny0, ny1);
+          const wN = Math.max(0.01, Math.abs(nx1 - nx0));
+          const hN = Math.max(0.01, Math.abs(ny1 - ny0));
+          const id = `${type.toLowerCase()}-${Math.random().toString(36).slice(2,7)}`;
+          const box: Box = { id, type, instanceId: idHint || id, x, y, w: wN, h: hN };
+          next[p] = [...(next[p] || []), box];
+          // Trigger once all queued promises settle — best effort
+          setBoxesByPage({ ...next });
+        });
+      };
+      // Sections
+      for (const s of (data.sections || [])) {
+        const bb = s.bbox || s.rect; const p = s.page ?? s.page_index ?? s.page_idx ?? 0;
+        if (Array.isArray(bb) && bb.length === 4) addBox(p, bb[0], bb[1], bb[2], bb[3], "Section", s.id);
+      }
+      // Tables
+      for (const t of (data.tables || [])) {
+        const bb = t.bbox || t.rect; const p = t.page_index ?? t.page ?? t.page_idx ?? 0;
+        if (Array.isArray(bb) && bb.length === 4) addBox(p, bb[0], bb[1], bb[2], bb[3], "Table", t.object_id);
+      }
+      // Figures
+      for (const f of (data.figures || [])) {
+        const bb = f.bbox || f.rect; const p = f.page ?? f.page_idx ?? 0;
+        if (Array.isArray(bb) && bb.length === 4) addBox(p, bb[0], bb[1], bb[2], bb[3], "Figure", f.figure_id || f.object_id);
+      }
+      toast("Merged overlay added (editable)");
+    } catch (e) {
+      console.error(e); toast("Failed to overlay merged annotations");
+    }
+  };
+
   return (
     <div className="h-screen bg-background overflow-hidden">
       {/* Header */}
-      <header className="h-16 border-b bg-card flex items-center px-6">
+      <header className="h-16 border-b bg-card flex items-center px-6 gap-3">
         <Link to="/" className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors">
           <ArrowLeft className="h-4 w-4" />
           Back to Prototypes
         </Link>
         <div className="flex-1 text-center">
           <h1 className="text-lg font-semibold">Classic Three-Panel Layout</h1>
+        </div>
+        <div className="flex items-center gap-2 min-w-[420px]">
+          <Input placeholder="run_id (from Pipeline Status)" value={runIdInput} onChange={(e)=>setRunIdInput(e.target.value)} />
+          <Button variant="outline" onClick={overlayMerged}><Sparkles className="h-4 w-4 mr-1"/>Overlay Merged</Button>
         </div>
       </header>
 
