@@ -15,10 +15,8 @@ from typing import Any, Dict, List
 import typer
 from loguru import logger
 
-try:
-    from extractor.pipeline.utils.litellm_call import litellm_call
-except Exception:
-    litellm_call = None
+import scillm
+from extractor.pipeline.utils.scillm_env import build_requests
 
 app = typer.Typer(help="Requirement classifier stage.")
 
@@ -63,7 +61,7 @@ def run(
         llm_model = model or os.getenv("REQUIREMENTS_LLM_MODEL", "")
         timeout_env = float(os.getenv("STAGE07H_TIMEOUT", os.getenv("STAGE07_REQUEST_TIMEOUT", "120")))
         retries_env = int(os.getenv("STAGE07H_RETRIES", os.getenv("STAGE07_NUM_RETRIES", "2")))
-    if enable_llm and llm_model and litellm_call:
+    if enable_llm and llm_model:
         prompts = []
         idx = []
         for i, r in enumerate(reqs):
@@ -88,20 +86,18 @@ def run(
                     }
                 )
         if prompts:
-            out = __import__("asyncio").run(
-                litellm_call(
-                    prompts,
-                    wrap_json=True,
-                    concurrency=concurrency,
-                    desc="07h_requirement_classifier",
-                    request_timeout=timeout_env,
-                    num_retries=retries_env,
-                )
-            )
+            import asyncio
+            reqs = build_requests(prompts, json_object=True, timeout=int(timeout_env))
+            router = scillm.Router()
+            out = asyncio.run(router.parallel_acompletions(reqs, max_concurrency=max(1, int(concurrency))))
             for j, irec in enumerate(idx):
                 lab = reqs[irec]["heuristic"]
                 try:
-                    data = json.loads(out[j].content or "{}")
+                    try:
+                        content = out[j]["choices"][0]["message"]["content"]
+                    except Exception:
+                        content = "{}"
+                    data = json.loads(content or "{}")
                     if data.get("label") in ("requirement", "definition", "other"):
                         lab = data["label"]
                 except Exception:

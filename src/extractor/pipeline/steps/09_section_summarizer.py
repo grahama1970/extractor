@@ -25,7 +25,8 @@ import typer
 from dotenv import load_dotenv, find_dotenv
 from extractor.pipeline.utils.litellm_cache import initialize_litellm_cache
 from extractor.pipeline.utils.diagnostics import get_run_id
-from extractor.pipeline.utils.litellm_call import litellm_call
+import scillm
+from extractor.pipeline.utils.scillm_env import build_requests
 from extractor.pipeline.utils.json_utils import clean_json_string
 from extractor.pipeline.utils.json_mode import JSON_SYSTEM_GUARD
 from tqdm import tqdm
@@ -143,17 +144,22 @@ async def summarize_section(
                 except Exception:
                     # Fall back to litellm_call path
                     sid = os.getenv("LITELLM_SESSION_ID") or get_run_id()
-                    out = await litellm_call(
-                        [params], concurrency=1, desc="summarize_section", session_id=sid, export="results"
-                    )
-                    content = out[0].content if out else ""
+                    router = scillm.Router()
+                    reqs = build_requests([params], json_object=False, timeout=request_timeout)
+                    resps = await router.parallel_acompletions(reqs, max_concurrency=1)
+                    try:
+                        content = resps[0]["choices"][0]["message"]["content"] if resps else ""
+                    except Exception:
+                        content = ""
                     result = clean_json_string(content, return_dict=True)
             else:
-                sid = os.getenv("LITELLM_SESSION_ID") or get_run_id()
-                out = await litellm_call(
-                    [params], concurrency=1, desc="summarize_section", session_id=sid, export="results"
-                )
-                content = out[0].content if out else ""
+                router = scillm.Router()
+                reqs = build_requests([params], json_object=False, timeout=request_timeout)
+                resps = await router.parallel_acompletions(reqs, max_concurrency=1)
+                try:
+                    content = resps[0]["choices"][0]["message"]["content"] if resps else ""
+                except Exception:
+                    content = ""
                 result = clean_json_string(content, return_dict=True)
             if strict_json and (not isinstance(result, dict) or "summary" not in result):
                 # Fail fast when strict JSON is requested
@@ -265,9 +271,13 @@ async def create_checkpoint_summary(
             params["response_format"] = {"type": "json_object"}
         if not is_gpt5:
             params["temperature"] = 0.3
-        sid = os.getenv("LITELLM_SESSION_ID") or get_run_id()
-        out = await litellm_call([params], concurrency=1, desc="checkpoint_summary", session_id=sid, export="results")
-        content = out[0].content if out else ""
+        router = scillm.Router()
+        reqs = build_requests([params], json_object=False, timeout=request_timeout)
+        resps = await router.parallel_acompletions(reqs, max_concurrency=1)
+        try:
+            content = resps[0]["choices"][0]["message"]["content"] if resps else ""
+        except Exception:
+            content = ""
         result = clean_json_string(content, return_dict=True)
 
         return {

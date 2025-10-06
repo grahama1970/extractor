@@ -31,7 +31,8 @@ import typer
 from dotenv import load_dotenv, find_dotenv
 from extractor.pipeline.utils.litellm_cache import initialize_litellm_cache
 from extractor.pipeline.utils.diagnostics import get_run_id
-from extractor.pipeline.utils.litellm_call import litellm_call
+import scillm
+from extractor.pipeline.utils.scillm_env import build_requests
 
 try:
     from arango import ArangoClient
@@ -530,16 +531,21 @@ async def _rationale_for_pair(text_a: str, text_b: str, model: str, max_tokens: 
             "timeout": 60,
         }
         params["temperature"] = 1.0 if "gpt-5" in (_mdl or "").lower() else 0.1
-        sid = os.getenv("LITELLM_SESSION_ID") or get_run_id()
-        out = await litellm_call([params], concurrency=1, desc="graph_rationale", session_id=sid, export="results")
-        r = out[0] if out else None
+        router = scillm.Router()
+        reqs = build_requests([params], json_object=False, timeout=60)
+        resps = await router.parallel_acompletions(reqs, max_concurrency=1)
+        r = resps[0] if resps else None
         try:
             from loguru import logger as _logger
             if r:
                 _logger.info(f"graph_rationale: model={r.request.model} ok={r.exception is None}")
         except Exception:
             pass
-        return (((r.content if r else "").strip()))[:600]
+        try:
+            content = r["choices"][0]["message"]["content"] if r else ""
+        except Exception:
+            content = ""
+        return (content.strip())[:600]
     except Exception:
         return ""
 

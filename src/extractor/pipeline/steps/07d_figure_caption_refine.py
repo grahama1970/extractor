@@ -9,7 +9,8 @@ from typing import Any, Dict, List, Optional
 import typer
 from loguru import logger
 
-from extractor.pipeline.utils.litellm_call import litellm_call
+import scillm
+from extractor.pipeline.utils.scillm_env import build_requests
 from extractor.pipeline.utils.budget import check_and_update_budget
 
 
@@ -125,14 +126,10 @@ def run(
                 conc = min(conc, int(global_cap))
             req_timeout = float(os.getenv("STAGE07D_TIMEOUT", os.getenv("STAGE07_REQUEST_TIMEOUT", "120")))
             num_retries = int(os.getenv("STAGE07D_RETRIES", os.getenv("STAGE07_NUM_RETRIES", "2")))
-            out = __import__("asyncio").run(litellm_call(
-                prompts,
-                wrap_json=False,
-                concurrency=conc,
-                desc="07d_caption",
-                request_timeout=req_timeout,
-                num_retries=num_retries,
-            ))
+            import asyncio
+            reqs = build_requests(prompts, json_object=False, timeout=int(req_timeout))
+            router = scillm.Router()
+            out = asyncio.run(router.parallel_acompletions(reqs, max_concurrency=conc))
             try:
                 logger.info(
                     "07d:llm fired items=%d conc=%d timeout=%.1f retries=%d model=%s",
@@ -158,7 +155,10 @@ def run(
             return True
 
         for i, (sid, key) in enumerate(index):
-            content = out[i].content if i < len(out) and out[i] else ""
+            try:
+                content = out[i]["choices"][0]["message"]["content"] if i < len(out) else ""
+            except Exception:
+                content = ""
             cleaned = (content or "").strip()
             if not cleaned:
                 raise SystemExit(f"07d: LLM returned empty caption for {sid}:{key}; aborting per failure policy")

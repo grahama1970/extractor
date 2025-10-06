@@ -9,7 +9,8 @@ from typing import Any, Dict, List, Optional
 import typer
 from loguru import logger
 
-from extractor.pipeline.utils.litellm_call import litellm_call
+import scillm
+from extractor.pipeline.utils.scillm_env import build_requests
 from extractor.pipeline.utils.budget import check_and_update_budget
 
 
@@ -103,14 +104,10 @@ def run(
             # Per-stage override then global
             req_timeout = float(os.getenv("STAGE07B_TIMEOUT", os.getenv("STAGE07_REQUEST_TIMEOUT", "120")))
             num_retries = int(os.getenv("STAGE07B_RETRIES", os.getenv("STAGE07_NUM_RETRIES", "2")))
-            out = __import__("asyncio").run(litellm_call(
-                prompts,
-                wrap_json=False,
-                concurrency=conc,
-                desc="07b_polish",
-                request_timeout=req_timeout,
-                num_retries=num_retries,
-            ))
+            import asyncio
+            reqs = build_requests(prompts, json_object=False, timeout=int(req_timeout))
+            router = scillm.Router()
+            out = asyncio.run(router.parallel_acompletions(reqs, max_concurrency=conc))
             try:
                 logger.info(
                     "07b:llm fired items=%d conc=%d timeout=%.1f retries=%d model=%s",
@@ -144,7 +141,10 @@ def run(
 
         min_tokens = int(os.getenv("PARA_MIN_TOKENS", "3"))
         for i, (sid, pid) in enumerate(index):
-            content = out[i].content if i < len(out) and out[i] else ""
+            try:
+                content = out[i]["choices"][0]["message"]["content"] if i < len(out) else ""
+            except Exception:
+                content = ""
             candidate = (content or "").strip()
             if not candidate:
                 raise SystemExit(f"07b: LLM returned empty content for {sid}:{pid}; aborting per failure policy")
