@@ -1469,24 +1469,28 @@ def run(
     # Deterministic summary for diff-based QA (main run)
     try:
         from extractor.pipeline.utils.mode import deterministic_mode  # lazy import
+        det_items = [
+            {
+                "page": int(t.get("page_index", 0)),
+                "y0": round(float((t.get("bbox") or [0, 0, 0, 0])[1]), 2) if t.get("bbox") else 0.0,
+                "x0": round(float((t.get("bbox") or [0, 0, 0, 0])[0]), 2) if t.get("bbox") else 0.0,
+                "table_index": int(t.get("table_index", 0)),
+            }
+            for t in filtered_tables
+        ]
+        import hashlib as _h
+        h = _h.sha256()
+        for it in det_items:
+            h.update(f"{it['page']},{it['y0']:.2f},{it['x0']:.2f},{it['table_index']}".encode())
         det = {
             "version": 1,
             "run_id": run_id,
             "deterministic": bool(deterministic_mode()),
             "count": len(filtered_tables),
-            "sorted": [
-                {
-                    "page": int(t.get("page_index", 0)),
-                    "y0": round(float((t.get("bbox") or [0, 0, 0, 0])[1]), 2) if t.get("bbox") else 0.0,
-                    "x0": round(float((t.get("bbox") or [0, 0, 0, 0])[0]), 2) if t.get("bbox") else 0.0,
-                    "table_index": int(t.get("table_index", 0)),
-                }
-                for t in filtered_tables
-            ],
+            "sorted": det_items,
+            "tables_content_hash": h.hexdigest(),
         }
-        (json_output_dir / "deterministic.json").write_text(
-            json.dumps(det, indent=2, ensure_ascii=False)
-        )
+        (json_output_dir / "deterministic.json").write_text(json.dumps(det, indent=2, ensure_ascii=False))
     except Exception:
         pass
 

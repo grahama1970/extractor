@@ -644,29 +644,29 @@ def run(
     # Deterministic summary for quick diffing across runs
     try:
         from extractor.pipeline.utils.mode import deterministic_mode  # lazy import
+        det_items = [
+            {
+                "figure_id": str(fig.get("figure_id")),
+                "page": int(fig.get("page", 0)),
+                "y0": round(float((fig.get("bbox") or [0, 0, 0, 0])[1]), 2) if fig.get("bbox") else 0.0,
+                "x0": round(float((fig.get("bbox") or [0, 0, 0, 0])[0]), 2) if fig.get("bbox") else 0.0,
+                "section_id": fig.get("section_id"),
+            }
+            for fig in extracted_figures
+        ]
+        import hashlib as _h
+        h = _h.sha256()
+        for it in det_items:
+            h.update(f"{it['figure_id']},{it['page']},{it['y0']:.2f},{it['x0']:.2f},{it.get('section_id')}".encode())
         det = {
             "version": 1,
             "run_id": run_id,
             "deterministic": bool(deterministic_mode()),
             "count": len(extracted_figures),
-            "sorted": [
-                {
-                    "figure_id": str(fig.get("figure_id")),
-                    "page": int(fig.get("page", 0)),
-                    "y0": round(float((fig.get("bbox") or [0, 0, 0, 0])[1]), 2)
-                    if fig.get("bbox")
-                    else 0.0,
-                    "x0": round(float((fig.get("bbox") or [0, 0, 0, 0])[0]), 2)
-                    if fig.get("bbox")
-                    else 0.0,
-                    "section_id": fig.get("section_id"),
-                }
-                for fig in extracted_figures
-            ],
+            "sorted": det_items,
+            "figures_content_hash": h.hexdigest(),
         }
-        (json_output_dir / "deterministic.json").write_text(
-            json.dumps(det, indent=2, ensure_ascii=False)
-        )
+        (json_output_dir / "deterministic.json").write_text(json.dumps(det, indent=2, ensure_ascii=False))
     except Exception:
         pass
 

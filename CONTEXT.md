@@ -1,126 +1,109 @@
-# Restart Context — Chrome DevTools MCP + Stage 05 QA Loop
+# Project Context — Pipeline Status (2025‑10‑07)
 
-Generated: 2025-10-02
-Location: /home/graham/workspace/experiments/extractor
+This note captures the exact state of the extractor pipeline after today’s work so we can resume smoothly tomorrow.
 
-This note captures exactly where we left off so you can restart the Codex CLI,
-let the chrome-devtools MCP server relaunch in headless mode, and pick up the
-verification loop without losing state.
+## Overview
+- End‑to‑end pipeline runs clean on `data/pdfs/BHT CV32A65X.pdf` with summary‑only Stage 07, strict predictors, skip export/graph.
+- Determinism hardened for tables/figures; Stage 02 strict fallback gated; Runner writes a richer `index.json` with `exit_status` and `git_rev`.
+- Stage 03 creates lightweight stats/meta and clamps concurrency in deterministic mode.
 
----
+## What Changed Today (key files)
+- Stage 02 strict gating + env snapshot
+  - `src/extractor/pipeline/steps/02_marker_extractor.py`
+    - Strict mode requires Marker internals (no fallback).
+    - Lenient mode allows PyMuPDF heuristic fallback and tags `origin: "fallback"`.
+    - Writes `02_env_snapshot.json` (imports, redacted env, git_rev, CUDA flags).
+- Deterministic summaries
+  - `src/extractor/pipeline/steps/05_table_extractor.py` → `tables_content_hash` in `deterministic.json`.
+  - `src/extractor/pipeline/steps/06_figure_extractor.py` → `figures_content_hash` in `deterministic.json`.
+- Suspicious headers (Stage 03)
+  - `src/extractor/pipeline/steps/03_suspicious_headers.py` → writes `03_stage_stats.json`, `03_llm_meta.json`; concurrency=1 when `PIPELINE_DETERMINISTIC=1`; guard when no candidates.
+- Runner (end‑to‑end)
+  - `src/extractor/pipeline/run_all.py` → clean‑PDF stem assertion (warn by default, strict with `RUN_ALL_STRICT_CLEAN=1`), richer `results/index.json` with `pipeline_version`, `git_rev`, `exit_status`, plus per‑stage outputs; `VALIDATE_STAGES` env filter for GS validation.
+- Exporter (Stage 10)
+  - `src/extractor/pipeline/steps/10_arangodb_exporter.py` → stable `doc_id` from PDF bytes: `<stem>__<sha8>` when file is accessible.
+- Dependency fixes (to keep Stage 02 import chain stable)
+  - `pyproject.toml` → added base deps: `urlextract>=1.9.0`, `strip_tags>=0.6`.
 
-## 1. One-Time Local Prep
+## How To Reproduce (today’s run)
+- Ensure venv and extras:
+  ```bash
+  uv sync --extra accurate --extra scillm-snapshot
+  ```
+- End‑to‑end (strict predictors, summary‑only Stage 07, skip export/graph):
+  ```bash
+  PYTHONPATH=src \
+  RUN_ALL_DEBUG=1 \
+  OFFLINE_PDF_PREDICTORS=0 \
+  uv run python -m extractor.pipeline.run_all \
+    --pdf "data/pdfs/BHT CV32A65X.pdf" \
+    --results data/results/pipeline \
+    --no-resume \
+    --summary-only07 \
+    --skip-proving08 \
+    --skip-export10 \
+    --skip-embeddings10 \
+    --skip-graph11
+  ```
+- Quick Stage‑02 strict only:
+  ```bash
+  CLEAN_PDF="data/results/pipeline/01_annotation_processor/BHT CV32A65X_clean.pdf" \
+  && PYTHONPATH=src OFFLINE_PDF_PREDICTORS=0 RUN_ALL_DEBUG=1 \
+  uv run python -m extractor.pipeline.steps.02_marker_extractor run \
+    "$CLEAN_PDF" --no-spawn --debug -o data/results/pipeline
+  ```
 
-1. Ensure a headless Chrome is running on port 9222:
-   ```bash
-   source ~/.zshrc && ch-headless
-   # or
-   /usr/bin/google-chrome \
-     --headless --disable-gpu \
-     --remote-debugging-port=9222 \
-     --user-data-dir=/tmp/chromium-mcp \
-     --disable-sync --disable-breakpad \
-     --no-sandbox --disable-dev-shm-usage --no-first-run \
-     >/tmp/chromium-mcp.log 2>&1 &
-   ```
-   - Check: `curl -fsS http://127.0.0.1:9222/json/version | jq`
-   - Browser log: `/tmp/chromium-mcp.log`
+## Where To Look (artifacts)
+- Index + final report
+  - `data/results/pipeline/index.json` (has `exit_status`, `git_rev`, outputs map)
+  - `data/results/pipeline/final_report.md`
+- Stage 02 (strict)
+  - JSON: `data/results/pipeline/02_marker_extractor/json_output/02_marker_blocks.json`
+  - Env snapshot: `data/results/pipeline/02_marker_extractor/02_env_snapshot.json`
+  - Log: `data/results/pipeline/02_marker_extractor/stage_02_marker.log`
+- Stage 03
+  - Verified: `data/results/pipeline/03_suspicious_headers/json_output/03_verified_blocks.json`
+  - Meta/Stats: `03_llm_meta.json`, `03_stage_stats.json`
+- Stage 05/06 deterministic summaries
+  - `data/results/pipeline/05_table_extractor/json_output/deterministic.json`
+  - `data/results/pipeline/06_figure_extractor/json_output/deterministic.json`
+- Stage 10/11 skip status (when skipped)
+  - `data/results/pipeline/10_arangodb_exporter/json_output/10_status.json`
+  - `data/results/pipeline/11_arango_create_graph/json_output/11_status.json`
 
-2. Restart the Codex CLI (or its chrome-devtools MCP task) so it uses the
-   updated config:
-   - `~/.codex/config.toml` now sets
-     `args = ["chrome-devtools-mcp@latest", "--headless", "--isolated", "--logFile", "/tmp/cdmcp.log"]`
-   - MCP log: `/tmp/cdmcp.log`
+## Current Defaults & Knobs
+- Determinism
+  - `PIPELINE_DETERMINISTIC=1` → clamps Stage‑03 concurrency to 1; deterministic tables/figures summaries.
+  - Stage‑06 jitter removed under deterministic; Stage‑05/06 hashes stable.
+- Strictness
+  - `OFFLINE_PDF_PREDICTORS=0|false` → Stage 02 requires Marker internals (no fallback).
+  - `RUN_ALL_STRICT_CLEAN=1` → fail if clean PDF stem doesn’t match input stem.
+- Validation (gold standards)
+  - `VALIDATE_STAGES="01,02,03,04,05"` to restrict GS checks to core stages in CI/dev.
+- Models / base URL precedence (set in env/.env)
+  - Use tenant‑valid slugs for `LITELLM_*` models.
 
----
+## Status: BHT CV32A65X.pdf (today)
+- Pipeline completed successfully.
+- Stage‑02 `predictors_present` all True; fallback not used.
+- Stage‑03 had 0 suspicious candidates (guard path wrote verified JSON).
+- `index.json.exit_status = "success"`.
 
-## 2. Post-Restart Verification
+## Open Follow‑Ups (nice‑to‑have)
+- Stage 03: enrich `03_llm_meta.json` with per‑alias failure taxonomy if desired.
+- Stage 07: push stable `doc_id` earlier in the reflow payload (Stage 10 already derives it from the PDF path/bytes).
+- Runner: optional CI guard to fail if deterministic content hashes drift for 05/06.
+- Fix unrelated indentation in `src/extractor/pipeline/cli_happy.py` (does not affect pipeline run).
 
-Run these once Codex is back:
-
-1. **MCP sanity** – in the CLI:
-   ```
-   chrome-devtools__list_pages
-   ```
-   Expect a list of targets instead of “Target closed”.
-
-2. **UX health gate for `/main`** (requires Vite dev server on 8080 and backend
-   on 8001):
-   ```bash
-   BROWSERLESS_DISCOVERY_URL=http://127.0.0.1:9222/json/version \
-   BASE_URL=http://127.0.0.1:8080/main \
-   node scripts/ux_check_cdp_auto.mjs
-   ```
-   - Artifacts land under `scripts/artifacts/ux_check_cdp_*.{png,log}`
-   - Pass criteria: no dev overlay, no console/page errors, no failed
-     document/script/stylesheet requests, `#root` mounted.
-   - If console shows 500s for `/api/pipeline/pdf-status`, start the FastAPI
-     backend (`python -m extractor.core.scripts.server --host 0.0.0.0 --port 8001`) or
-     guard the fetch in the frontend.
-
-3. **Optional network capture** (for any failing requests):
-   ```bash
-   BROWSERLESS_DISCOVERY_URL=http://127.0.0.1:9222/json/version \
-   BASE_URL=http://127.0.0.1:8080/main \
-   node scripts/diagnostics/cdp_network_capture.mjs
-   ```
-   Produces `scripts/artifacts/cdp_network_main_*.ndjson` for quick triage.
-
----
-
-## 3. Stage 05 QA on Large PDFs (Existing Outputs)
-
-Pipeline runs are stored under `data/results/pipeline_runs/`:
-- `design_doc/` → Design Documentation for CV32A65X architecture.pdf
-- `nvidia_ampere/` → nvidia-ampere-architecture-whitepaper.pdf
-- `astro_2507/` → 2507.00114v1_astrophysics.pdf
-
-Each directory contains Stage 01→05 outputs with the clean PDF copied to
-`tmp_pdf/` for deterministic provenance.
-
-Metrics summaries (Stage 05 quality-aware fallback) live in:
-- `scripts/artifacts/stage05_metrics_design_doc.json`
-- `scripts/artifacts/stage05_metrics_nvidia_ampere.json`
-- `scripts/artifacts/stage05_metrics_astro_2507.json`
-
-Annotated PDFs & PNGs (fallback pages only):
-- `scripts/artifacts/annotated_design_doc.pdf` (+ `_pages/`)
-- `scripts/artifacts/annotated_nvidia_ampere.pdf` (+ `_pages/`)
-- `scripts/artifacts/annotated_astro_2507.pdf` (+ `_pages/`)
-
-To regenerate for any PDF:
-```bash
-# Example for a new document
-slug=my_pdf_slug
-PDF=data/pdfs/<file>.pdf
-OUT=data/results/pipeline_runs/$slug
-rm -rf "$OUT" && mkdir -p "$OUT/tmp_pdf"
-python src/extractor/pipeline/steps/01_annotation_processor.py run "$PDF" -o "$OUT"
-CLEAN=$(jq -r .clean_pdf_path "$OUT/01_annotation_processor/json_output/01_annotations.json")
-cp "$CLEAN" "$OUT/tmp_pdf/"
-python src/extractor/pipeline/steps/02_marker_extractor.py run "$OUT/tmp_pdf/$(basename "$CLEAN")" -o "$OUT" --no-spawn
-python src/extractor/pipeline/steps/03_suspicious_headers.py run "$OUT/02_marker_extractor/json_output/02_marker_blocks.json" --pdf-dir "$OUT/tmp_pdf" -o "$OUT" --skip-llm
-python src/extractor/pipeline/steps/04_section_builder.py run "$OUT/03_suspicious_headers/json_output/03_verified_blocks.json" --pdf-dir "$OUT/tmp_pdf" -o "$OUT"
-python src/extractor/pipeline/steps/05_table_extractor.py run "$OUT/04_section_builder/json_output/04_sections.json" --pdf-dir "$OUT/tmp_pdf" -o "$OUT"
-uv run scripts/tools/pdf_annotate_from_pipeline.py \
-  --input-pdf "$OUT/01_annotation_processor/$(basename "$CLEAN")" \
-  --results "$OUT" \
-  --output scripts/artifacts/annotated_${slug}.pdf \
-  --fallback-only --export-pages
-```
+## Quick Troubleshooting
+- Stage 02 import errors
+  - Ensure single‑shot extras install:
+    ```bash
+    uv sync --extra accurate --extra scillm-snapshot
+    ```
+  - Check: `data/results/pipeline/02_marker_extractor/02_env_snapshot.json` → `imports_status` & `predictors_present`.
+- Clean PDF mismatch warning
+  - Set `RUN_ALL_STRICT_CLEAN=1` to enforce; otherwise Runner will warn but proceed.
 
 ---
-
-## 4. Outstanding Tasks
-
-- Bring the backend online (or guard the fetch) so `/api/pipeline/pdf-status`
-  no longer returns 500s, then rerun the `/main` gate and save clean artifacts.
-- Migrate remaining `tests/smoke/**` suites into `scenarios/` and leave
-  `tests/` for deterministic unit/integration tests.
-- Use the updated annotator when tweaking Stage 05 thresholds; fallback tables
-  are highlighted red and labelled with `frag=`, `s=`, and `fallback` markers.
-
----
-
-Once the CLI restarts, follow the checklist above and we can continue the loop
-without losing context.
+Last updated: 2025‑10‑07

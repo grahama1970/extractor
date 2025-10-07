@@ -63,6 +63,8 @@ dependencies = [
  "pdfplumber>=0.11.7",
  "ruff>=0.13.0",
  "camelot-py>=1.0.9",
+ "urlextract>=1.9.0",
+ "strip_tags>=0.6",
 ]
 [[project.authors]]
 name = "Graham Anderson"

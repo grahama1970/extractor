@@ -1448,6 +1448,7 @@ dependencies = [
     { name = "regex" },
     { name = "rich" },
     { name = "ruff" },
+    { name = "strip-tags" },
     { name = "structlog" },
     { name = "tenacity" },
     { name = "tqdm" },
@@ -1457,6 +1458,7 @@ dependencies = [
     { name = "tree-sitter-languages" },
     { name = "typer" },
     { name = "unidecode" },
+    { name = "urlextract" },
     { name = "xlsxwriter" },
 ]
 
@@ -1628,6 +1630,7 @@ requires-dist = [
     { name = "scillm", marker = "extra == 'scillm-snapshot'", git = "https://github.com/grahama1970/scillm?rev=7118d3fcde" },
     { name = "sentence-transformers", marker = "extra == 'accurate'", specifier = ">=5.0.0" },
     { name = "spacy", marker = "extra == 'accurate'", specifier = ">=3.8.7" },
+    { name = "strip-tags", specifier = ">=0.6" },
     { name = "strip-tags", marker = "extra == 'smokes'", specifier = ">=0.6" },
     { name = "structlog", specifier = ">=24.0.0" },
     { name = "surya-ocr", marker = "extra == 'accurate'", specifier = ">=0.14.5,<0.15.0" },
@@ -1644,6 +1647,7 @@ requires-dist = [
     { name = "typer", specifier = ">=0.16.0" },
     { name = "typer", marker = "extra == 'smokes'", specifier = ">=0.16.0" },
     { name = "unidecode", specifier = ">=1.4.0" },
+    { name = "urlextract", specifier = ">=1.9.0" },
     { name = "urlextract", marker = "extra == 'smokes'", specifier = ">=1.9.0" },
     { name = "uvicorn", marker = "extra == 'server'", specifier = ">=0.32.1" },
     { name = "weasyprint", marker = "extra == 'full'", specifier = "~=63.1" },

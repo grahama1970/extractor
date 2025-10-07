@@ -29,7 +29,11 @@ except ImportError:
     raise
 import typer
 from loguru import logger
-import scillm
+# Optional; Stage 01 does not require SciLLM at runtime. Guard import.
+try:
+    import scillm  # type: ignore
+except Exception:
+    scillm = None  # type: ignore
 from extractor.pipeline.utils.scillm_env import build_requests
 from extractor.pipeline.utils.model_env import resolve_model
 

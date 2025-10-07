@@ -63,6 +63,86 @@ console = Console()
 DEBUG = False
 
 
+def _safe_version(mod_name: str):
+    try:
+        mod = __import__(mod_name)
+        for attr in ("__version__", "version", "VERSION"):
+            v = getattr(mod, attr, None)
+            if v:
+                return str(v)
+    except Exception:
+        return None
+    return None
+
+
+def _write_env_snapshot(out_dir: Path, pdf_path: Path) -> None:
+    """Write a compact environment + imports snapshot for debugging Stage 02 regressions."""
+    try:
+        import sys, platform
+        keys = [
+            "OFFLINE_PDF_PREDICTORS",
+            "PYTHONPATH",
+            "LITELLM_DEFAULT_MODEL",
+            "LITELLM_VLM_MODEL",
+            "LITELLM_MED_VLM_MODEL",
+            "LITELLM_SMALL_VLM_MODEL",
+            "CHUTES_API_BASE",
+            "OPENAI_BASE_URL",
+        ]
+        env = {k: os.getenv(k) for k in keys if os.getenv(k) is not None}
+        imports = {
+            "fitz": _safe_version("fitz"),
+            "surya_ocr": _safe_version("surya_ocr"),
+            "torch": _safe_version("torch"),
+            "transformers": _safe_version("transformers"),
+            "spacy": _safe_version("spacy"),
+            "faiss": _safe_version("faiss"),
+            "litellm": _safe_version("litellm"),
+            "scillm": _safe_version("scillm"),
+        }
+        # Optional git rev
+        git_rev = None
+        try:
+            import subprocess as _sp
+            git_rev = (
+                _sp.check_output(["git", "rev-parse", "--short", "HEAD"], cwd=str(Path.cwd()))
+                .decode()
+                .strip()
+            )
+        except Exception:
+            pass
+
+        # Torch/CUDA snapshot
+        cuda = None
+        cuda_count = None
+        try:
+            import torch as _torch  # type: ignore
+            cuda = bool(getattr(_torch, "cuda", None) and _torch.cuda.is_available())
+            cuda_count = int(_torch.cuda.device_count()) if hasattr(_torch, "cuda") else 0
+        except Exception:
+            pass
+
+        payload = {
+            "timestamp": datetime.now().isoformat(),
+            "python": sys.version,
+            "platform": platform.platform(),
+            "executable": sys.executable,
+            "cwd": str(Path.cwd()),
+            "pdf": str(pdf_path),
+            "git_rev": git_rev,
+            "cuda_available": cuda,
+            "cuda_device_count": cuda_count,
+            "env": env,
+            "imports": imports,
+            "sys_path_head": sys.path[:10],
+        }
+        (out_dir / "02_env_snapshot.json").write_text(
+            json.dumps(payload, indent=2, ensure_ascii=False)
+        )
+    except Exception:
+        pass
+
+
 # --------------------------------------------------------------------------- #
 # Move multiprocessing worker to top-level for cross-platform compatibility (spawn/fork)
 def _worker(pdf_str: str, q: "mp.Queue[Dict[str, Any]]"):
@@ -80,14 +160,80 @@ def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool
     Since convert_single_pdf returns a MarkdownOutput object with markdown text,
     we need to access the converter directly to get the blocks.
     """
+    strict_mode = os.getenv("OFFLINE_PDF_PREDICTORS", "1").lower() in {"0", "false"}
     try:
         from extractor.core.converters.pdf import PdfConverter
         from extractor.core.models import create_model_dict
     except Exception as e:
-        raise RuntimeError(
-            "Marker internals unavailable. Ensure project-specific Marker modules are installed "
-            "(extractor.core.converters/pdf and extractor.core.models)."
-        ) from e
+        if strict_mode:
+            raise RuntimeError(
+                "Strict mode: Marker internals unavailable. Install project Marker modules "
+                "(extractor.core.converters.pdf / extractor.core.models) or set OFFLINE_PDF_PREDICTORS=1."
+            ) from e
+        # Lenient mode: allow heuristic fallback below
+        create_model_dict = None  # type: ignore
+        PdfConverter = None  # type: ignore
+
+    if PdfConverter is None:
+        # ---------------- Heuristic fallback path (lenient only) ----------------
+        try:
+            import fitz  # type: ignore
+            import re as re
+        except Exception as fe:
+            raise RuntimeError(
+                f"Fallback extractor requires PyMuPDF; import failed: {fe}"
+            ) from fe
+        doc = fitz.open(str(pdf_path))
+        blocks: List[Dict[str, Any]] = []
+        header_pattern = re.compile(r"^((\d+([\.\-]\d+){0,4})|([IVXLCDM]+))[\).]?\s+\S")
+        figure_pattern = re.compile(r"^(Figure|Fig\.?)\s+\d+", re.IGNORECASE)
+        table_like_split = re.compile(r"\s{2,}")
+        for page_idx, page in enumerate(doc):
+            raw = page.get_text("text")
+            if not raw:
+                continue
+            for line in raw.splitlines():
+                txt = line.strip()
+                if not txt:
+                    continue
+                block_type = "Text"
+                suspicious_header = False
+                if (header_pattern.match(txt)
+                        or (len(txt) <= 80 and txt.isupper() and len(txt.split()) <= 10)):
+                    block_type = "SectionHeader"
+                    suspicious_header = True
+                elif figure_pattern.match(txt):
+                    block_type = "Figure"
+                else:
+                    parts = table_like_split.split(txt)
+                    if len(parts) >= 3 and sum(len(p.strip()) > 0 for p in parts) >= 3:
+                        block_type = "Table"
+                b = {
+                    "block_type": block_type,
+                    "text": txt,
+                    "page_idx": page_idx,
+                    "page": page_idx,
+                    "bbox": [0.0, 0.0, 0.0, 0.0],
+                    "origin": _FALLBACK_ORIGIN,
+                }
+                if block_type == "SectionHeader" and suspicious_header:
+                    b["suspicious_header"] = True
+                    b["is_suspicious"] = True
+                    b["suspicious_reasons"] = ["fallback_header_detection"]
+                    b["suspicion_confidence"] = 0.85
+                blocks.append(b)
+        try:
+            doc.close()
+        except Exception:
+            pass
+        predictor_presence = {
+            "detection_model": False,
+            "layout_model": False,
+            "recognition_model": False,
+            "table_rec_model": False,
+            "texify_model": False,
+        }
+        return blocks, predictor_presence
 
     # Create model dictionary (predictors may be missing in offline mode)
     models = create_model_dict()
@@ -501,6 +647,9 @@ def run(
     except Exception:
         pass
 
+    # Write env/imports snapshot early for debugging setup regressions
+    _write_env_snapshot(stage_output_dir, pdf_path)
+
     display_timeout = (f"{timeout}s" if timeout and timeout>0 else "no-limit")
     console.print(f"Extracting blocks from: {pdf_path.name} (timeout {display_timeout})")
     log_stage_event("02_marker_extractor", "start", run_id=run_id, pdf=str(pdf_path))
@@ -752,10 +901,16 @@ def debug_bundle(
         raise typer.Exit(1)
 
     try:
-        blocks = extract_blocks(clean_pdf)
+        blk_tuple = extract_blocks(clean_pdf)
+        if isinstance(blk_tuple, tuple):
+            blocks, _presence = blk_tuple
+        else:
+            blocks = blk_tuple  # type: ignore
     except Exception as e:
         typer.secho(f"Extraction failed: {e}", fg=typer.colors.RED)
         raise typer.Exit(1)
+    # Snapshot for debug bundle run (predictor presence may be absent here)
+    _write_env_snapshot(stage_output_dir, predictor_presence=None, extra={"debug_bundle": True})
 
     suspicious_blocks = [b for b in blocks if b.get("is_suspicious")]
     _timings = {

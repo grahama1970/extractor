@@ -554,6 +554,38 @@ async def process_pdf_pipeline(config: Config):
         limited=config.task_limit if config.task_limit else 0,
         model=config.llm_model,
     )
+    # Persist basic stage stats early (updated again at end)
+    try:
+        stats_path = config.output_dir / "json_output" / "03_stage_stats.json"
+        with open(stats_path, "w") as sf:
+            json.dump({"total_candidates": len(tasks), "status": "Pending"}, sf, indent=2)
+    except Exception:
+        pass
+    # Early exit if there are no candidates; still produce a verified JSON for downstream
+    if not tasks:
+        logger.info("03:no_suspicious_headers; writing empty verification result")
+        output_json_path = json_output_dir / "03_verified_blocks.json"
+        marker_data["run_id"] = run_id
+        try:
+            _err = sum(1 for _d in (diagnostics or []) if str(_d.get("severity")) == "error")
+            _wrn = sum(1 for _d in (diagnostics or []) if str(_d.get("severity")) == "warning")
+        except Exception:
+            _err, _wrn = errors_count, warnings_count
+        marker_data["errors_count"] = _err
+        marker_data["warnings_count"] = _wrn
+        marker_data["diagnostics"] = diagnostics
+        with open(output_json_path, "w") as f:
+            json.dump(marker_data, f, indent=2)
+        # Update stats
+        try:
+            stats_path = config.output_dir / "json_output" / "03_stage_stats.json"
+            with open(stats_path, "w") as sf:
+                json.dump({"total_candidates": 0, "status": "NoCandidates"}, sf, indent=2)
+        except Exception:
+            pass
+        print(f"Saved unmodified data to: {output_json_path}")
+        pdf_doc.close()
+        return
     if tasks and not (config.llm_model and config.llm_model.strip()):
         raise RuntimeError("Stage 03 requires a vision-capable model. Set STAGE03_MODEL or LITELLM_VLM_MODEL.")
     # Evaluate guardrail
@@ -576,26 +608,6 @@ async def process_pdf_pipeline(config: Config):
         with open(output_json_path, "w") as f:
             json.dump(payload, f, indent=2)
         print(f"Guard raised; wrote {output_json_path}")
-        pdf_doc.close()
-        return
-
-        if not tasks:
-            logger.info("03:no_suspicious_headers; writing empty verification result")
-            # Still save a result file for consistency
-            output_json_path = json_output_dir / "03_verified_blocks.json"
-        marker_data["run_id"] = run_id
-        # Derive counts from diagnostics severities
-        try:
-            _err = sum(1 for _d in (diagnostics or []) if str(_d.get("severity")) == "error")
-            _wrn = sum(1 for _d in (diagnostics or []) if str(_d.get("severity")) == "warning")
-        except Exception:
-            _err, _wrn = errors_count, warnings_count
-        marker_data["errors_count"] = _err
-        marker_data["warnings_count"] = _wrn
-        marker_data["diagnostics"] = diagnostics
-        with open(output_json_path, "w") as f:
-            json.dump(marker_data, f, indent=2)
-        print(f"Saved unmodified data to: {output_json_path}")
         pdf_doc.close()
         return
 
@@ -1099,6 +1111,23 @@ async def process_pdf_pipeline(config: Config):
         _log_event("stage03.metrics_written", path=str(metrics_path), stats=llm_stats)
     except Exception as metrics_exc:
         _log_event("stage03.metrics_write_failed", error=str(metrics_exc))
+    # Lightweight LLM meta (model + concurrency + candidate counts)
+    try:
+        meta_path = json_output_dir / "03_llm_meta.json"
+        meta_payload = {
+            "model": config.llm_model,
+            "candidates": len(tasks),
+            "llm_requests": llm_stats.get("llm_requests", 0),
+            "llm_success": llm_stats.get("llm_success", 0),
+            "llm_errors": llm_stats.get("llm_errors", 0),
+            "llm_timeouts": llm_stats.get("llm_timeouts", 0),
+            "concurrency": int(config.llm_concurrency),
+            "timestamp": datetime.now().isoformat(),
+        }
+        with open(meta_path, "w") as mf:
+            json.dump(meta_payload, mf, indent=2)
+    except Exception:
+        pass
     try:
         samples = stop_resource_sampler(sampler) if sampler else []
         if samples:
@@ -1344,6 +1373,12 @@ def run(
         persist_headers=persist_headers,
         verify_all_headers=verify_all_headers,
     )
+    # Clamp concurrency if deterministic mode
+    try:
+        if os.getenv("PIPELINE_DETERMINISTIC", "0").lower() in {"1","true","yes","y"}:
+            cfg.llm_concurrency = 1
+    except Exception:
+        pass
     asyncio.run(process_pdf_pipeline(cfg))
 
 
@@ -1470,3 +1505,6 @@ def debug_bundle(
 
 if __name__ == "__main__":
     build_cli()()
+    # Clamp concurrency in deterministic mode
+    if os.getenv("PIPELINE_DETERMINISTIC", "0").lower() in {"1","true","yes","y"}:
+        concurrency = 1
