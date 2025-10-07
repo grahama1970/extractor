@@ -157,7 +157,7 @@ def _ensure_env(
 
 
 def build_cli() -> typer.Typer:
-    app = typer.Typer(help="Run all pipeline stages end-to-end")
+    app = typer.Typer(help="Run all pipeline stages end-to-end", invoke_without_command=True)
 
     def _preflight_strict() -> None:
         strict = os.getenv("OFFLINE_PDF_PREDICTORS", "1").lower() in {"0", "false"}
@@ -183,7 +183,7 @@ def build_cli() -> typer.Typer:
             console.print("[yellow]Hint: `uv sync --extra accurate`[/yellow]")
             raise typer.Exit(1)
 
-    @app.command()
+    @app.callback()
     def run(
         pdf: Path = typer.Option(
             ..., exists=True, file_okay=True, dir_okay=False, readable=True, help="Input PDF"
@@ -382,12 +382,11 @@ def build_cli() -> typer.Typer:
                 pass
 
     # End of internal helpers; return CLI app now.
-    
     return app
 
 
+# Clean module entrypoint: no import-time side effects
 if __name__ == "__main__":
-    # Enable direct execution: python -m extractor.pipeline.run_all --pdf ...
     build_cli()()
 
     # Stage 02
