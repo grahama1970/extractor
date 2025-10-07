@@ -33,7 +33,8 @@ def block_sig_components(b: Dict[str, Any]) -> Dict[str, Any]:
 def block_sig(b: Dict[str, Any]) -> str:
     return hashlib.sha256(json.dumps(block_sig_components(b), sort_keys=True).encode()).hexdigest()
 
-_punct_ws = re.compile(r"[\s\p{Punct}]+", re.UNICODE)
+# Fallback punctuation/whitespace pattern compatible with stdlib re
+_PUNCT_WS = re.compile(r"[\W_]+", re.UNICODE)
 
 def _normalize_text(s: str | None) -> str:
     try:

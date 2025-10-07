@@ -711,3 +711,28 @@ env-accurate:
 	@echo "Syncing environment with accurate extras (Torch + Surya + table_rec)"
 	uv sync --extra accurate
 	@echo "Done. Activate with: source .venv/bin/activate"
+# --- Dev helpers (venv / scillm / step checks) ---------------------------------
+.PHONY: scillm-dev-install steps-help llm-stats gate-llm-stats
+
+scillm-dev-install:
+	@echo "Installing SciLLM into venv (editable).";
+	@if [ -z "$(VIRTUAL_ENV)" ]; then echo "Please 'source .venv/bin/activate' first"; exit 1; fi;
+	@if [ -z "$(SCILLM_DEV_PATH)" ]; then \
+	  echo "SCILLM_DEV_PATH not set; defaulting to /home/graham/workspace/experiments/litellm"; \
+	  export SCILLM_DEV_PATH=/home/graham/workspace/experiments/litellm; \
+	fi; \
+	python -m pip install -e $$SCILLM_DEV_PATH
+
+steps-help:
+	@echo "Running --help across step scripts with PYTHONPATH=src";
+	@if [ -z "$(VIRTUAL_ENV)" ]; then echo "Please 'source .venv/bin/activate' first"; exit 1; fi;
+	PYTHONPATH=src \
+	python scripts/tools/steps_help.py
+
+llm-stats:
+	@echo "Aggregating llm_stats.json across stages";
+	uv run scripts/tools/llm_stats_collect.py collect
+
+gate-llm-stats:
+	@echo "Gating llm_stats_pipeline.json (strict)";
+	uv run scripts/tools/llm_stats_collect.py gate data/results/pipeline/llm_stats_pipeline.json --max-invalid 0 --max-fallback-rate 0.10

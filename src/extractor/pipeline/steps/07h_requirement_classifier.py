@@ -16,7 +16,7 @@ import typer
 from loguru import logger
 
 import scillm
-from extractor.pipeline.utils.scillm_env import build_requests
+from extractor.pipeline.utils.scillm_env import provider_fields_for_model
 
 app = typer.Typer(help="Requirement classifier stage.")
 
@@ -41,7 +41,7 @@ def run(
     concurrency: int = typer.Option(2, "--concurrency"),
 ):
     doc = json.loads(reflow_json.read_text())
-    reqs: List[Dict[str, Any]] = []
+    records: List[Dict[str, Any]] = []
     for sec in doc.get("reflowed_sections", doc.get("sections", [])):
         for blk in sec.get("reflowed_json", {}).get("blocks", []):
             if blk.get("type") != "paragraph":
@@ -54,7 +54,7 @@ def run(
                 "text": text,
                 "heuristic": hlabel,
             }
-            reqs.append(rec)
+            records.append(rec)
 
     # optional LLM confirmation for heuristic positives
     if enable_llm:
@@ -62,56 +62,81 @@ def run(
         timeout_env = float(os.getenv("STAGE07H_TIMEOUT", os.getenv("STAGE07_REQUEST_TIMEOUT", "120")))
         retries_env = int(os.getenv("STAGE07H_RETRIES", os.getenv("STAGE07_NUM_RETRIES", "2")))
     if enable_llm and llm_model:
-        prompts = []
-        idx = []
-        for i, r in enumerate(reqs):
-            if r["heuristic"] in ("requirement", "definition"):
-                idx.append(i)
-                prompts.append(
+        idx_map: List[int] = []
+        req_list: List[Dict[str, Any]] = []
+        prov = provider_fields_for_model(llm_model)
+        for i, rec in enumerate(records):
+            if rec["heuristic"] in ("requirement", "definition"):
+                idx_map.append(i)
+                req_list.append(
                     {
-                        "model": model,
+                        "model": llm_model,
                         "messages": [
                             {
                                 "role": "system",
                                 "content": [
                                     {
                                         "type": "text",
-                                        "text": "Classify requirement text. JSON only: {\\\"label\\\": \\\"requirement|definition|other\\\"}. Return 'requirement' ONLY if it states an obligation, constraint, or bound (modal verbs).",
+                                        "text": "You are a JSON generator. Return strictly valid JSON only. No prose or markdown.",
                                     }
                                 ],
                             },
-                            {"role": "user", "content": [{"type": "text", "text": r["text"][:2000]}]},
+                            {
+                                "role": "user",
+                                "content": [
+                                    {
+                                        "type": "text",
+                                        "text": (
+                                            "Classify requirement text. Respond in English."
+                                            " Return JSON: {\\\"label\\\": \\\"requirement|definition|other\\\"}."
+                                            " Return 'requirement' ONLY if it states an obligation, constraint, or bound.\n\nText: "
+                                            + (rec.get("text") or "")[:2000]
+                                        ),
+                                    }
+                                ],
+                            },
                         ],
-                        "kwargs": {"temperature": 0},
+                        "kwargs": {
+                            **prov,
+                            "response_mode": "schema_first",
+                            "json_schema": {
+                                "name": "reqLabel",
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {"label": {"type": "string", "enum": ["requirement", "definition", "other"]}},
+                                    "required": ["label"],
+                                },
+                            },
+                            "retry_enabled": True,
+                            "honor_retry_after": True,
+                            "timeout": int(timeout_env),
+                            "temperature": 0,
+                        },
                     }
                 )
-        if prompts:
+        if req_list:
             import asyncio
-            reqs = build_requests(prompts, json_object=True, timeout=int(timeout_env))
             router = scillm.Router()
-            out = asyncio.run(router.parallel_acompletions(reqs, max_concurrency=max(1, int(concurrency))))
-            for j, irec in enumerate(idx):
-                lab = reqs[irec]["heuristic"]
+            out = asyncio.run(router.parallel_acompletions(req_list, max_concurrency=max(1, int(concurrency))))
+            for j, irec in enumerate(idx_map):
+                lab = records[irec]["heuristic"]
                 try:
-                    try:
-                        content = out[j]["choices"][0]["message"]["content"]
-                    except Exception:
-                        content = "{}"
-                    data = json.loads(content or "{}")
+                    content = out[j].get("choices", [{}])[0].get("message", {}).get("content")  # type: ignore[index]
+                    data = json.loads(content or "{}") if isinstance(content, str) else {}
                     if data.get("label") in ("requirement", "definition", "other"):
                         lab = data["label"]
                 except Exception:
                     pass
-                reqs[irec]["final_label"] = lab
-    for r in reqs:
+                records[irec]["final_label"] = lab
+    for r in records:
         r.setdefault("final_label", r["heuristic"])
     # add formal_status default and schema version
-    for r in reqs:
+    for r in records:
         if r.get("final_label") == "requirement" and not r.get("formal_status"):
             r["formal_status"] = "unproved"
     # Assign requirement ids
     counter = 1
-    for r in reqs:
+    for r in records:
         if r["final_label"] == "requirement":
             rid = f"{r.get('section_id')}-R{counter:03d}"
             r["requirement_id"] = rid
@@ -123,7 +148,7 @@ def run(
     outp = out_dir / "07h_requirements.json"
     outp.write_text(json.dumps({
         "schema_version": 1,
-        "requirements": reqs,
+        "requirements": records,
         "deterministic": not enable_llm,
         "hash_component": "07h"
     }, indent=2))

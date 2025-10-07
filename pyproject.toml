@@ -62,6 +62,7 @@ dependencies = [
  # On Python >= 3.11 use faiss-cpu instead (see markers above)
  "pdfplumber>=0.11.7",
  "ruff>=0.13.0",
+ "camelot-py>=1.0.9",
 ]
 [[project.authors]]
 name = "Graham Anderson"
@@ -153,8 +154,14 @@ llm = [
 ]
 
 # Local SciLLM development extra (installs from your fork via file path)
-scillm-local = [
-  "scillm @ file:///home/graham/workspace/experiments/litellm",
+# scillm-local is disabled during snapshot testing to avoid URL conflicts
+# scillm-local = [
+#   "scillm @ file:///home/graham/workspace/experiments/litellm",
+# ]
+
+# Pin SciLLM fork (litellm) at a known commit with parallel meta + router fixes
+scillm-snapshot = [
+  "scillm @ git+https://github.com/grahama1970/scillm@7118d3fcde",
 ]
 
 [project.urls]

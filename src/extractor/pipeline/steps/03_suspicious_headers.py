@@ -36,7 +36,7 @@ from extractor.pipeline.utils.annotations import (
     load_relevant_rules as _load_relevant_rules,
 )
 import scillm
-from extractor.pipeline.utils.scillm_env import build_requests
+from extractor.pipeline.utils.scillm_env import build_requests, provider_fields_for_model
 from extractor.pipeline.utils.diagnostics import (
     start_resource_sampler,
     stop_resource_sampler,
@@ -195,27 +195,73 @@ async def verify_header_with_llm(image_b64: str, context_text: str, model: str, 
             return {"is_header": hv.verdict == "accept", "reasoning": "; ".join(hv.reasons or [])}
         except Exception:
             pass
-    # Router path with strict JSON
+    # Router path with schema-first JSON and per-alias fallback
     det = os.getenv("PIPELINE_DETERMINISTIC", "0").lower() in {"1","true","yes","y"}
-    temp = 0.0 if det else None
-    reqs = build_requests([{"model": model, "messages": messages}], json_object=True, timeout=item_timeout, temperature=temp)
-    router = scillm.Router()
-    resps = await router.parallel_acompletions(reqs, max_concurrency=1)
-    r = resps[0] if resps else None
-    try:
-        answer = r["choices"][0]["message"]["content"] if isinstance(r, dict) else ""
-    except Exception:
-        answer = ""
+    temp = 0.0 if det else 0
+    # Prefer larger, more reliable VLMs first; cost is equal on Chutes
+    aliases = [
+        os.getenv("LITELLM_LARGE_VLM_MODEL") or os.getenv("LITELLM_LARGE_VLLM_MODEL"),
+        os.getenv("LITELLM_MED_VLM_MODEL"),
+        os.getenv("LITELLM_SMALL_VLM_MODEL"),
+    ]
+    aliases = [a for a in aliases if a]
+    router = scillm.Router(deterministic=det)
+    answer = ""
+    meta: Dict[str, Any] = {}
+    for alias in aliases:
+        prov = provider_fields_for_model(alias)
+        req = {
+            "model": alias,
+            "messages": messages,
+            "kwargs": {
+                **prov,
+                "response_mode": "schema_first",
+                "json_schema": {
+                    "name": "verifyHeader",
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "is_header": {"type": "boolean"},
+                            "reasoning": {"type": "string"}
+                        },
+                        "required": ["is_header"]
+                    },
+                },
+                "retry_enabled": True,
+                "honor_retry_after": True,
+                "timeout": item_timeout,
+                "temperature": temp,
+            },
+        }
+        try:
+            resps = await router.parallel_acompletions([req], max_concurrency=1)
+        except Exception:
+            resps = []
+        r = resps[0] if resps else None
+        try:
+            if isinstance(r, dict):
+                from loguru import logger as _logger
+                _logger.info("stage03.llm.meta: %s", json.dumps(r.get("scillm_router", {}))[:200])
+        except Exception:
+            pass
+        if isinstance(r, dict):
+            meta = r.get("scillm_router", {}) or {}
+            try:
+                answer = r.get("choices", [{}])[0].get("message", {}).get("content") or ""
+            except Exception:
+                answer = ""
+        if isinstance(answer, str) and answer.strip():
+            break
+    # Parse JSON content
     try:
         payload = json.loads(answer) if answer else {}
-    except Exception:
-        payload = {"error": {"type": "ParseError", "message": answer[:200]}}
-    if isinstance(payload, dict) and payload.get("error"):
-        err = payload["error"]
-        raise RuntimeError(f"LLM error: {err.get('type')}: {err.get('message')}")
+    except Exception as e:
+        # If schema-first marked invalid_json but we have content, surface a structured error
+        raise RuntimeError(f"LLM invalid_json: {str(e)[:160]} :: {answer[:160]}")
     if not isinstance(payload, dict):
         payload = {"content": payload}
     payload = cast(Dict[str, Any], payload)
+    # Normalize fields
     payload["is_header"] = bool(payload.get("is_header", True))
     payload["reasoning"] = str(payload.get("reasoning", ""))
     return payload

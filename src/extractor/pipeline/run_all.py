@@ -381,72 +381,14 @@ def build_cli() -> typer.Typer:
             except Exception:
                 pass
 
-    # End of internal helpers; return CLI app now to avoid executing any module-level stage logic
+    # End of internal helpers; return CLI app now.
+    
     return app
 
-    # Stage 01 (or external annotations path)
-    anno_dir = results / "01_annotation_processor"
-    json_dir = anno_dir / "json_output"
-    stage01_outputs = [json_dir / "01_annotations.json"]
-    stage01_name = "01_annotation_processor"
-    stage01_done = resume and stage_completed(stage01_name, stage01_outputs)
-    if stage01_done:
-        console.print(f"[yellow]Skipping {stage01_name} (resume)\[/yellow]")
-    if annotations_json is not None and not stage01_done:
-        anno_dir.mkdir(parents=True, exist_ok=True)
-        json_dir.mkdir(exist_ok=True)
-        dest_anno = stage01_outputs[0]
-        try:
-            shutil.copyfile(str(annotations_json), str(dest_anno))
-        except Exception as e:
-            raise RuntimeError(f"Failed to stage annotations JSON: {e}")
-        if clean_pdf is not None:
-            staged_clean = anno_dir / f"{pdf.stem}_clean.pdf"
-            try:
-                shutil.copyfile(str(clean_pdf), str(staged_clean))
-            except Exception as e:
-                raise RuntimeError(f"Failed to stage clean PDF: {e}")
-            effective_clean_pdf = staged_clean
-        else:
-            staged_clean = anno_dir / f"{pdf.stem}_clean.pdf"
-            try:
-                shutil.copyfile(str(pdf), str(staged_clean))
-            except Exception as e:
-                raise RuntimeError(f"Failed to copy original PDF as clean: {e}")
-            effective_clean_pdf = staged_clean
-        if validate:
-            _validate_output("01", dest_anno)
-        record_stage(stage01_name, [stage01_outputs[0]])
-    elif annotations_json is None and not stage01_done:
-        _run(
-            [
-                sys.executable,
-                "src/extractor/pipeline/steps/01_annotation_processor.py",
-                "run",
-                str(pdf),
-                "-o",
-                str(results),
-            ],
-            env,
-            stage_name=stage01_name,
-        )
-        if validate:
-            _validate_output("01", stage01_outputs[0])
-        record_stage(stage01_name, [stage01_outputs[0]])
 
-    if stage01_done:
-        dest_anno = stage01_outputs[0]
-        clean_candidates = sorted(anno_dir.glob("*_clean.pdf"))
-        if not clean_candidates:
-            raise FileNotFoundError("No *_clean.pdf produced by Stage 01")
-        effective_clean_pdf = clean_candidates[0]
-    elif annotations_json is not None:
-        dest_anno = stage01_outputs[0]
-    else:
-        clean_candidates = sorted(anno_dir.glob("*_clean.pdf"))
-        if not clean_candidates:
-            raise FileNotFoundError("No *_clean.pdf produced by Stage 01")
-        effective_clean_pdf = clean_candidates[0]
+if __name__ == "__main__":
+    # Enable direct execution: python -m extractor.pipeline.run_all --pdf ...
+    build_cli()()
 
     # Stage 02
     stage02_name = "02_marker_extractor"
@@ -840,11 +782,3 @@ def build_cli() -> typer.Typer:
     )
 
     # end run()
-
-    # end run()
-
-    return app
-
-
-if __name__ == "__main__":
-    build_cli()()

@@ -29,14 +29,7 @@ except ImportError:
     raise
 import pandas as pd
 
-try:
-    from camelot import io as camelot_io
-except ImportError:
-    print(
-        "Camelot is required for Stage 05 (table extraction). Please install camelot-py.",
-        file=sys.stderr,
-    )
-    raise
+camelot_io = None  # lazy import
 import typer
 from dotenv import load_dotenv, find_dotenv
 from loguru import logger
@@ -262,7 +255,19 @@ def try_camelot_strategy(
 ) -> List[Any]:
     """Try a specific Camelot extraction strategy and record diagnostics on failure."""
     page_str = str(page_num + 1)  # Camelot uses 1-based page numbers
+    global camelot_io
     try:
+        if camelot_io is None:
+            try:
+                import camelot as camelot_mod  # type: ignore
+                camelot_io = camelot_mod
+            except Exception as _e:
+                # Try the backend import path if aliasing differs
+                try:
+                    from camelot import io as camelot_mod  # type: ignore
+                    camelot_io = camelot_mod
+                except Exception:
+                    raise RuntimeError(f"camelot import failed: {_e}")
         tables = camelot_io.read_pdf(  # type: ignore[attr-defined]
             str(pdf_path),
             pages=page_str,
@@ -1675,3 +1680,17 @@ def build_cli():
 
 if __name__ == "__main__":
     build_cli()()
+# Lazy-load camelot only when running actual extraction
+def _ensure_camelot() -> None:
+    global camelot_io
+    if camelot_io is not None:
+        return
+    try:
+        from camelot import io as _camelot_io  # type: ignore
+        camelot_io = _camelot_io
+    except Exception:
+        print(
+            "Camelot is required for Stage 05 (table extraction). Please install camelot-py.",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)

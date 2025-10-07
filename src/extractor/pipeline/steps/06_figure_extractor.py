@@ -44,7 +44,7 @@ from extractor.pipeline.utils.diagnostics import (
     gpu_metrics_available,
 )
 import scillm
-from extractor.pipeline.utils.scillm_env import build_requests
+from extractor.pipeline.utils.scillm_env import build_requests, provider_fields_for_model
 from extractor.pipeline.utils.model_env import resolve_vlm_med, resolve_vlm_large, resolve_vlm_small
 from extractor.pipeline.utils.litellm_cache import initialize_litellm_cache
 
@@ -120,17 +120,67 @@ async def describe_image_with_llm(
     ]
     timeout_s = int(request_timeout or int(os.getenv("STAGE06_TIMEOUT", "60")))
     temp = 0.0 if deterministic else 0.2
-    reqs = build_requests([{"model": model, "messages": msgs}], json_object=False, timeout=timeout_s, temperature=temp)
-    router = scillm.Router()
-    resps = await router.parallel_acompletions(reqs, max_concurrency=1)
-    r = resps[0] if resps else None
-    try:
-        content = r["choices"][0]["message"]["content"] if isinstance(r, dict) else ""
-    except Exception:
+    # Prefer larger, more reliable VLMs first; cost is equal on Chutes
+    aliases = [
+        os.getenv("LITELLM_LARGE_VLM_MODEL") or os.getenv("LITELLM_LARGE_VLLM_MODEL"),
+        os.getenv("LITELLM_MED_VLM_MODEL"),
+        os.getenv("LITELLM_SMALL_VLM_MODEL"),
+    ]
+    aliases = [a for a in aliases if a]
+    router = scillm.Router(deterministic=deterministic)
+    for alias in aliases:
+        # Prefer schema-first JSON with a simple caption schema, then fall back to raw text if needed.
+        prov = provider_fields_for_model(alias)
+        req = {
+            "model": alias,
+            "messages": msgs,
+            "kwargs": {
+                **prov,
+                "response_mode": "schema_first",
+                "json_schema": {
+                    "name": "captionSchema",
+                    "schema": {
+                        "type": "object",
+                        "properties": {"caption": {"type": "string"}},
+                        "required": ["caption"],
+                    },
+                },
+                "retry_enabled": True,
+                "honor_retry_after": True,
+                "timeout": timeout_s,
+                "temperature": temp,
+            },
+        }
+        try:
+            resps = await router.parallel_acompletions([req], max_concurrency=1)
+        except Exception:
+            resps = []
+        r = resps[0] if resps else None
+        try:
+            if isinstance(r, dict):
+                from loguru import logger as _logger
+                _logger.info("stage06.llm.meta: %s", json.dumps(r.get("scillm_router", {}))[:200])
+        except Exception:
+            pass
         content = ""
-    if content and isinstance(content, str):
-        return content.strip()
-    raise RuntimeError("VLM returned empty content for figure description")
+        if isinstance(r, dict):
+            try:
+                content = r.get("choices", [{}])[0].get("message", {}).get("content") or ""
+            except Exception:
+                content = ""
+        if content and isinstance(content, str) and content.strip():
+            # If schema-first returned JSON, parse and extract caption
+            cap = content.strip()
+            if cap.startswith("{"):
+                try:
+                    data = json.loads(cap)
+                    txt = data.get("caption")
+                    if isinstance(txt, str) and txt.strip():
+                        return txt.strip()
+                except Exception:
+                    pass
+            return cap
+    raise RuntimeError("VLM returned empty content for figure description (all aliases)")
 
 
 async def extract_and_describe_figure(
