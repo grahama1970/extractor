@@ -156,6 +156,32 @@ def _ensure_env(
             or e.get("DEFAULT_LITELLM_MODEL")
             or e.get("LITELLM_MODEL", "")
         )
+    # Thread / BLAS caps (tunable; prevent CPU oversubscription when GPU active)
+    e.setdefault("OMP_NUM_THREADS", os.getenv("OMP_NUM_THREADS", "4"))
+    e.setdefault("MKL_NUM_THREADS", os.getenv("MKL_NUM_THREADS", "4"))
+    e.setdefault("OPENBLAS_NUM_THREADS", os.getenv("OPENBLAS_NUM_THREADS", "4"))
+    e.setdefault("NUMEXPR_MAX_THREADS", os.getenv("NUMEXPR_MAX_THREADS", "4"))
+    e.setdefault("TORCH_NUM_THREADS", os.getenv("TORCH_NUM_THREADS", "8"))
+    # Stage‑02 GPU + batching defaults (safe if GPU absent → converter will handle)
+    e.setdefault("STAGE02_DEVICE", os.getenv("STAGE02_DEVICE", "cpu"))
+    e.setdefault("STAGE02_DETECTION_BATCH", os.getenv("STAGE02_DETECTION_BATCH", "4"))
+    e.setdefault("STAGE02_RECOGNITION_BATCH", os.getenv("STAGE02_RECOGNITION_BATCH", "6"))
+    e.setdefault("STAGE02_TABLE_BATCH", os.getenv("STAGE02_TABLE_BATCH", "4"))
+    e.setdefault("STAGE02_LAYOUT_BATCH", os.getenv("STAGE02_LAYOUT_BATCH", "4"))
+    e.setdefault("STAGE02_PAGE_WINDOW_SIZE", os.getenv("STAGE02_PAGE_WINDOW_SIZE", "0"))
+    e.setdefault("STAGE02_LARGE_PAGE_THRESHOLD", os.getenv("STAGE02_LARGE_PAGE_THRESHOLD", "1500000"))
+    e.setdefault("STAGE02_MEM_GUARD_RATIO", os.getenv("STAGE02_MEM_GUARD_RATIO", "0.85"))
+    e.setdefault("STAGE02_BUILD_WATCHDOG_SEC", os.getenv("STAGE02_BUILD_WATCHDOG_SEC", "900"))
+    e.setdefault("STAGE02_ENABLE_TEXIFY", os.getenv("STAGE02_ENABLE_TEXIFY", "auto"))
+    e.setdefault("STAGE02_TEXIFY_MIN_MATH_TOKENS", os.getenv("STAGE02_TEXIFY_MIN_MATH_TOKENS", "5"))
+    # Stage‑05 / 06 concurrency
+    e.setdefault("STAGE05_WORKERS", os.getenv("STAGE05_WORKERS", "8"))
+    e.setdefault("STAGE05_PAGE_IMAGE_CACHE", os.getenv("STAGE05_PAGE_IMAGE_CACHE", "1"))
+    e.setdefault("STAGE06_CONCURRENCY", os.getenv("STAGE06_CONCURRENCY", "4"))
+    e.setdefault("STAGE06_DESC", os.getenv("STAGE06_DESC", "0"))
+    e.setdefault("STAGE06_PAGE_IMAGE_CACHE", os.getenv("STAGE06_PAGE_IMAGE_CACHE", "1"))
+    # Stage-07r miner debug by default (writes stage log + error json on failure)
+    e.setdefault("STAGE07R_DEBUG", os.getenv("STAGE07R_DEBUG", "1"))
     return e
 
 
@@ -567,35 +593,70 @@ def run_pipeline(
     if resume and stage_completed(stage07_name, [reflow_json]):
         console.print(f"[yellow]Skipping {stage07_name} (resume)[/yellow]")
     else:
-        _run([
+        summary_only_flag = summary_only07 or (os.getenv("SUMMARY_ONLY07",""\
+).lower() in {"1","true","yes","y"}) or offline
+        cmd = [
             sys.executable,
-            "src/extractor/pipeline/steps/07_reflow_section.py",
-            "run",
+            "src/extractor/pipeline/steps/07_orchestrator.py",
             "--sections", str(sections_json),
             "--tables", str(tables_json),
             "--figures", str(figures_json),
-            "--timeout", os.getenv("STAGE07_TIMEOUT", "120"),
-            "--allow-fallback",
             "-o", str(results),
-            *( ["--summary-only"] if (summary_only07 or offline) else [] ),
-        ], env, stage07_name)
+        ]
+        if summary_only_flag:
+            cmd.append("--summary-only")
+        _run(cmd, env, stage07_name)
         if validate:
             _validate_output("07", reflow_json)
         record_stage(stage07_name, [reflow_json])
 
     # -------- Stage 07r (requirements miner) --------
-    if os.getenv("STAGE07_REQUIREMENTS_MINER", "1").lower() in {"1","true","yes","y"}:
+    # Skip invoking standalone miner if orchestrator's requirements plugin already wrote artifacts
+    req_artifact_existing = (results / "07_requirements_miner" / "json_output" / "07_requirements.json").exists()
+    if os.getenv("STAGE07_REQUIREMENTS_MINER", "1").lower() in {"1","true","yes","y"} and not req_artifact_existing:
         stage07r_name = "07_requirements_miner"
         req_json = results / stage07r_name / "json_output" / "07_requirements.json"
         if resume and stage_completed(stage07r_name, [req_json]):
             console.print(f"[yellow]Skipping {stage07r_name} (resume)[/yellow]")
         else:
-            _run([
-                sys.executable,
-                "src/extractor/pipeline/steps/07_requirements_miner.py",
-                str(reflow_json),
-                "-o", str(results),
-            ], env, stage07r_name)
+            # Fast preflight: ensure reflow output exists
+            if not reflow_json.exists():
+                (results / stage07r_name / "json_output").mkdir(parents=True, exist_ok=True)
+                (results / stage07r_name / "json_output" / "07_requirements_error.json").write_text(
+                    json.dumps({
+                        "ok": False,
+                        "error": "missing_reflow_input",
+                        "path": str(reflow_json),
+                        "hint": "Stage 07 (reflow) output not found; run 07 or set SUMMARY_ONLY07=1 to produce a minimal reflow file."
+                    }, indent=2)
+                )
+                raise RuntimeError(f"07r: missing reflow input: {reflow_json}")
+            # 07_requirements_miner is a Typer app (no subcommand in this build).
+            try:
+                _run([
+                    sys.executable,
+                    "src/extractor/pipeline/steps/07_requirements_miner.py",
+                    str(reflow_json),
+                    "-o", str(results),
+                    "--debug",
+                ], env, stage07r_name)
+            except Exception as miner_exc:
+                # Surface miner diagnostics to help pinpoint the cause immediately
+                try:
+                    err_json = results / stage07r_name / "json_output" / "07_requirements_error.json"
+                    if err_json.exists():
+                        console.print(f"[red]07r error artifact:[/red] {err_json}")
+                        try:
+                            payload = json.loads(err_json.read_text())
+                            console.print(json.dumps({k: payload.get(k) for k in ("error","exception","path","size")}, indent=2))
+                        except Exception:
+                            console.print(err_json.read_text()[:800])
+                    stage_log = results / stage07r_name / "stage_07_requirements_miner.log"
+                    if stage_log.exists():
+                        console.print(f"[yellow]07r log:[/yellow] {stage_log}")
+                except Exception:
+                    pass
+                raise miner_exc
             record_stage(stage07r_name, [req_json])
 
     # -------- Stage 08 (prover) --------

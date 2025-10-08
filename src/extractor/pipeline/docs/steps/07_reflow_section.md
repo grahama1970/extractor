@@ -1,46 +1,71 @@
-07 Reflow Section
+# Stage 07 – Reflow Section (Summary‑Only Baseline)
 
-Purpose
-- Reflow sections into clean Markdown using LLM with multimodal context.
-- Attach tables/figures and relevant annotations; optionally augment with ArangoDB hybrid search.
+Stage 07 produces a normalized reflowed representation of each section before downstream requirement mining (Stage 07r).
+This baseline implementation defaults to summary‑only mode (no LLM calls) for determinism and reliability.
 
-Inputs
-- Sections JSON (Stage 04), Tables JSON (Stage 05), Figures JSON (Stage 06), optional Stage 01 Annotations JSON.
+## Inputs
 
-Outputs
-- `07_reflow_section/json_output/07_reflowed.json`
+| Source Stage | File |
+|--------------|------|
+| Stage 04 | 04_section_builder/json_output/04_sections.json |
+| Stage 05 | 05_table_extractor/json_output/05_tables.json |
+| Stage 06 | 06_figure_extractor/json_output/06_figures.json |
 
-Key Behavior
-- Loads annotations by page; attaches on-page annotations to each section; ranks with local embeddings when available.
-- ArangoDB hybrid search: on-page annotations filtered by `page` AND `source_pdf` to avoid cross-document bleed; merges with on-page.
-- Propagates `source_pdf` from Stage 01 annotations to each section.
-- Tables: Performs header normalization and multi-page consolidation at the reflow layer. Specifically:
-  - Normalize header cells (remove embedded newlines `\n` and zero-width chars; trim/condense whitespace).
-  - Coalesce repeated header rows that appear mid-body across pages.
-  - When Stage 05 yields a header-only table on an earlier page and body rows on a later page, merge into a single logical table for the section.
-  - Optional deterministic columns: set `STAGE07_FORCE_TABLE_COLUMNS="Signal,IO,..."` to instruct the reflow prompt to use exact column names.
+## Output
 
-Implementation Notes (tricky parts)
-- Consolidation: Joins sections (S04), tables (S05), figures (S06) by `section_id`. Builds `source_text`/`merged_text` fallbacks.
-- Annotation attach: Collects candidates across `page_start..page_end`; optional semantic re-ranking via sentence-transformers.
-- Hybrid search: Queries Arango `annotations` by `page` and `source_pdf`, optionally augments via graph neighbors and merges/dedupes.
-- Images: Table/figure/section images loaded via path normalization with multiple fallback candidates.
-- Debug: `STAGE07_DEBUG` adds telemetry fields like `hybrid_status` to help inspect merge decisions.
+```
+07_reflow_section/
+  json_output/
+    07_reflowed.json        # { reflowed_sections: [...] }
+    07_reflow_error.json    # (only if consolidation failed)
+  stage_07_reflow.log       # JSON summary: counts, hash, summary_only flag
+```
 
-Header cleanup rationale
-- Stage 05 (Camelot) is intentionally conservative and does not rewrite header text (e.g., embedded newlines) or merge split tables.
-- Stage 07 is the correct layer to normalize header text and produce clean, user-facing column names because it has full section context
-  (including figures/annotations) and can make coherent, section-level decisions.
+Minimal schema (summary‑only):
 
-CLI (main)
-- `run --sections <s04.json> --tables <s05.json> --figures <s06.json> [--annotations <s01.json>] -o <results_dir> [--summary-only --include-images/--no-include-images --allow-fallback --bundle]`
+```json
+{
+  "reflowed_sections": [
+    {
+      "id": "S1",
+      "title": "Intro",
+      "blocks": [
+        { "type": "paragraph", "text": "System shall ..." }
+      ],
+      "tables": [ /* Stage 05 pass‑through (pandas_df/pandas_metrics) */ ],
+      "figures": [ /* Stage 06 pass‑through */ ],
+      "reflowed_text": "System shall ...",
+      "reflow_status": "summary_only"
+    }
+  ]
+}
+```
 
-Environment
-- VLM model (single source): `LITELLM_VLM_MODEL` (e.g., `openai/gpt-5-mini`).
-- Session + cache: `LITELLM_SESSION_ID` (logged + cache namespace), `LITELLM_ATTACH_SESSION` (default true).
-- Optional ArangoDB for hybrid search.
-Notes
-- Full mode includes images; `litellm_call` auto-routes GPT‑5 + images via OpenAI Responses API and normalizes output.
+## Environment Flags
 
-Downstream
-- Stage 10 flattens and exports reflowed content to `pdf_objects` in ArangoDB.
+| Variable | Effect |
+|----------|--------|
+| `SUMMARY_ONLY07=1` | Forces summary‑only mode (overrides CLI) |
+| `STAGE07_REQUIREMENTS_MINER=0` | Skips Stage 07r in run_all |
+| `STAGE07_DEBUG=1` | Adds quick_summary snippets to help QA |
+
+## Failure Modes & Artifacts
+
+| Condition | Artifact | Action |
+|-----------|----------|--------|
+| Missing / unreadable Stage 04/05/06 JSON | 07_reflow_error.json | Inspect paths; ensure upstream stages ran |
+| Empty sections array | 07_reflowed.json (empty list) | Allowed; 07r will emit empty requirements |
+| Post‑run file missing (in run_all) | run_all raises with details | Fix Stage 07 invocation or set SUMMARY_ONLY07=1 |
+
+## Rationale
+
+- Summary‑only path guarantees downstream 07r progress.
+- Deterministic hash enables QA diffing without LLM variance.
+- Schema normalization avoids silent misses in requirement mining.
+
+## Next Enhancements (Optional)
+
+1. Reintroduce LLM/VLM reflow behind `--enable-llm` or `STAGE07_ENABLE_LLM=1`.
+2. Add paragraph ordering heuristics for multi‑column PDFs.
+3. Integrate figure/table cross‑references.
+

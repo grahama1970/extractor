@@ -43,6 +43,7 @@ from extractor.pipeline.utils.diagnostics import (
     build_stage_timings,
     gpu_metrics_available,
 )
+from extractor.pipeline.utils.page_cache import get_cached_page_image, crop_from_cached
 import scillm
 from extractor.pipeline.utils.scillm_env import build_requests, provider_fields_for_model
 from extractor.pipeline.utils.model_env import resolve_vlm_med, resolve_vlm_large, resolve_vlm_small
@@ -89,6 +90,19 @@ if FIGURE_MAX_CONCURRENCY < 1:
     FIGURE_MAX_CONCURRENCY = 1
 if deterministic:
     FIGURE_MAX_CONCURRENCY = 1
+else:
+    # Adaptive override if Stage 02 config present and explicit not forced
+    if os.getenv("STAGE06_CONCURRENCY_EXPLICIT") is None:
+        try:
+            from pathlib import Path as _Path
+            import json as _json
+            acfg = _Path("data/results/pipeline/02_marker_extractor/json_output/02_adaptive_config.json")
+            if acfg.exists():
+                cfg = _json.loads(acfg.read_text()).get("config") or {}
+                fc = int(cfg.get("figure_concurrency") or FIGURE_MAX_CONCURRENCY)
+                FIGURE_MAX_CONCURRENCY = max(1, min(8, fc))
+        except Exception:
+            pass
 
 
 # --- Core Functions ---
@@ -237,9 +251,17 @@ async def extract_and_describe_figure(
                 min(page.rect.height, y1 + vertical_padding),
             ]
 
-            # Image extraction
-            pix = page.get_pixmap(matrix=fitz.Matrix(2, 2), clip=fitz.Rect(expanded_bbox))
-            image_data = pix.tobytes("png")
+            # Image extraction (cache → crop if enabled)
+            image_data = None
+            if os.getenv("STAGE06_PAGE_IMAGE_CACHE", "1").lower() in {"1","true","yes","y"}:
+                try:
+                    full = get_cached_page_image(pdf_path, page_num, 144, Path(os.getenv("STAGE06_PAGE_IMAGE_CACHE_ROOT", "data/results/page_cache")))
+                    image_data = crop_from_cached(full, page.rect.width, page.rect.height, expanded_bbox)
+                except Exception:
+                    image_data = None
+            if image_data is None:
+                pix = page.get_pixmap(matrix=fitz.Matrix(2, 2), clip=fitz.Rect(expanded_bbox))
+                image_data = pix.tobytes("png")
 
             # Save image
             img_path = output_dir / f"{figure_id}.png"

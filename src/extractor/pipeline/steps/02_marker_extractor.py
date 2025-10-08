@@ -173,8 +173,13 @@ def _write_env_snapshot(out_dir: Path, pdf_path: Path) -> None:
 # Move multiprocessing worker to top-level for cross-platform compatibility (spawn/fork)
 def _worker(pdf_str: str, q: "mp.Queue[Dict[str, Any]]"):
     try:
-        blocks_local, presence = extract_blocks(Path(pdf_str))
-        q.put({"ok": True, "blocks": blocks_local, "predictors": presence})
+        ret = extract_blocks(Path(pdf_str))
+        if isinstance(ret, tuple) and len(ret) == 3:
+            blocks_local, presence, adapt_meta = ret
+        else:  # backward compatibility
+            blocks_local, presence = ret  # type: ignore[misc]
+            adapt_meta = {}
+        q.put({"ok": True, "blocks": blocks_local, "predictors": presence, "adapt_meta": adapt_meta})
     except Exception as exc:
         # Persist a structured error for parent to pick up
         try:
@@ -200,7 +205,7 @@ def _worker(pdf_str: str, q: "mp.Queue[Dict[str, Any]]"):
         q.put({"ok": False, "error": str(exc)})
 
 
-def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool]]:
+def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool], Dict[str, Any]]:
     """
     Return the native JSON list of blocks produced by Marker.
 
@@ -228,12 +233,64 @@ def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool
         "texify_model": bool(models.get("texify_model")),
     }
 
-    # Create config as simple dict
+    # Threading / BLAS caps (CPU)
+    try:
+        os.environ.setdefault("OMP_NUM_THREADS", os.getenv("OMP_NUM_THREADS", "2"))
+        os.environ.setdefault("MKL_NUM_THREADS", os.getenv("MKL_NUM_THREADS", "1"))
+        import torch as _torch  # type: ignore
+        try:
+            _torch.set_num_threads(int(os.getenv("TORCH_NUM_THREADS", "2")))
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+    # Adaptive performance config (env overrides honored)
+    mem_guard_ratio = float(os.getenv("STAGE02_MEM_GUARD_RATIO", "0.85"))
+    try:
+        from extractor.pipeline.utils.adaptive_tuner import (
+            build_adaptive_config,
+            _nvml_gpu_telemetry,
+            _fallback_nvidia_smi,
+            start_gpu_sampler,
+        )
+        adaptive_cfg = build_adaptive_config(Path(os.getenv("STAGE02_ERROR_DIR", ".")), mem_guard_ratio=mem_guard_ratio)
+        device = getattr(adaptive_cfg, "device", os.getenv("STAGE02_DEVICE", "cpu"))
+        det_batch = int(os.getenv("STAGE02_DETECTION_BATCH", str(getattr(adaptive_cfg, "detection_batch", 4))))
+        rec_batch = int(os.getenv("STAGE02_RECOGNITION_BATCH", str(getattr(adaptive_cfg, "recognition_batch", 6))))
+        tbl_batch = int(os.getenv("STAGE02_TABLE_BATCH", str(getattr(adaptive_cfg, "table_batch", 4))))
+        lay_batch = int(os.getenv("STAGE02_LAYOUT_BATCH", str(getattr(adaptive_cfg, "layout_batch", 4))))
+    except Exception:
+        adaptive_cfg = None  # type: ignore
+        device = os.getenv("STAGE02_DEVICE", "cpu")
+        det_batch = int(os.getenv("STAGE02_DETECTION_BATCH", "4"))
+        rec_batch = int(os.getenv("STAGE02_RECOGNITION_BATCH", "6"))
+        tbl_batch = int(os.getenv("STAGE02_TABLE_BATCH", "4"))
+        lay_batch = int(os.getenv("STAGE02_LAYOUT_BATCH", "4"))
+
     config = {
-        "use_llm": False,  # Disable LLM for speed - suspicious detection in post-processing
-        "batch_multiplier": 1,
+        "use_llm": False,
         "disable_multiprocessing": True,
+        "device": device,
+        "detection_batch": det_batch,
+        "layout_batch": lay_batch,
+        "recognition_batch": rec_batch,
+        "table_batch": tbl_batch,
     }
+    # Preflight: reduce batch for large docs or when guard rails request it
+    try:
+        large_page_threshold = int(os.getenv("STAGE02_LARGE_PAGE_THRESHOLD", "80"))
+        if pdf_path.exists():
+            import fitz  # type: ignore
+            _doc = fitz.open(pdf_path)
+            page_count = len(_doc)
+            _doc.close()
+        else:
+            page_count = 0
+        if page_count >= large_page_threshold or os.getenv("STAGE02_REDUCED_BATCH") == "1":
+            config["batch_multiplier"] = 1  # keep minimal
+    except Exception:
+        pass
 
     # Create the PDF converter
     try:
@@ -241,6 +298,18 @@ def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool
     except Exception:
         pass
     try:
+        # Memory guard: reduce batch if high RSS detected
+        try:
+            if psutil is not None:
+                rss = psutil.Process().memory_info().rss
+                total = getattr(psutil, "virtual_memory")().total if hasattr(psutil, "virtual_memory") else None
+                guard_ratio = float(os.getenv("MEM_GUARD_RATIO", "0.7"))
+                if total and rss/total > guard_ratio:
+                    config["batch_multiplier"] = 1
+                    logger.warning("02: memory guard triggered (rss=%s, total=%s)", rss, total)
+        except Exception:
+            pass
+
         converter = PdfConverter(
             artifact_dict=models,
             config=config,
@@ -273,11 +342,85 @@ def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool
             pass
         raise
 
-    # Build the document (this creates and processes all blocks)
-    # Hardened with explicit diagnostics so DI/config errors are actionable.
+    # Build the document with optional watchdog and OOM retry
+    oom_retry = False
+    gpu_sampler = None
     try:
-        document = converter.build_document(str(pdf_path))
+        gpu_sampler = start_gpu_sampler(interval_sec=float(os.getenv("GPU_SAMPLER_INTERVAL_SEC", "0.8")))
+    except Exception:
+        gpu_sampler = None
+    def _build_document_inner():
+        return converter.build_document(str(pdf_path))
+    try:
+        wd = int(os.getenv("STAGE02_BUILD_WATCHDOG_SEC", "0"))
+        if wd > 0:
+            import signal
+            def _alarm(_signum, _frame):
+                raise TimeoutError(f"Stage 02 build watchdog exceeded {wd}s")
+            old = signal.signal(signal.SIGALRM, _alarm)
+            signal.alarm(wd)
+            try:
+                document = _build_document_inner()
+            finally:
+                signal.alarm(0)
+                signal.signal(signal.SIGALRM, old)
+        else:
+            document = _build_document_inner()
     except Exception as exc:
+        # Single OOM retry (CUDA): halve batches and retry once
+        is_oom = "out of memory" in str(exc).lower()
+        try:
+            import torch  # type: ignore
+            if not is_oom and isinstance(exc, RuntimeError):
+                is_oom = any(k in str(exc).lower() for k in ["cuda", "cublas"]) and ("out of memory" in str(exc).lower())
+        except Exception:
+            pass
+        if is_oom and str(device).startswith("cuda") and os.getenv("STAGE02_OOM_RETRIED") != "1":
+            os.environ["STAGE02_OOM_RETRIED"] = "1"
+            oom_retry = True
+            try:
+                # Halve batches and update config in place
+                for k in ("detection_batch", "layout_batch", "recognition_batch", "table_batch"):
+                    try:
+                        config[k] = max(1, int(config.get(k, 1)) // 2)
+                    except Exception:
+                        pass
+                document = _build_document_inner()
+            except Exception as exc2:
+                exc = exc2  # fall through to error writer below
+                
+        if not 'document' in locals():
+            # Write a rich error payload for faster triage (used by CI + batch runners)
+            try:
+                import traceback as _tb
+                err_payload = {
+                    "timestamp": datetime.now().isoformat(),
+                    "pdf": str(pdf_path),
+                    "error": str(exc),
+                    "traceback": _tb.format_exc(),
+                    "predictors_present": predictor_presence,
+                    "note": (
+                        "Stage 02 must use Marker internals only. "
+                        "No PyMuPDF/text heuristic fallback is allowed."
+                    ),
+                }
+                err_dir = (Path(os.getenv("STAGE02_ERROR_DIR", "")) or pdf_path.parent)
+                if not isinstance(err_dir, Path):
+                    err_dir = Path(str(err_dir))
+                try:
+                    err_dir.mkdir(parents=True, exist_ok=True)
+                except Exception:
+                    pass
+                (Path(err_dir) / "02_error.json").write_text(
+                    json.dumps(err_payload, indent=2, ensure_ascii=False)
+                )
+            except Exception:
+                pass
+            try:
+                logger.exception("Stage 02 build_document failed: %s", exc)
+            except Exception:
+                pass
+            raise
         # Write a rich error payload for faster triage (used by CI + batch runners)
         try:
             import traceback as _tb
@@ -607,7 +750,31 @@ def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool
     except Exception:
         pass
 
-    return blocks, predictor_presence
+    # End GPU util snapshot for adaptive history
+    end_gpu_util = None
+    peak_gpu_util = None
+    try:
+        # Prefer NVML; fallback to nvidia-smi
+        if 'adaptive_cfg' in locals() and adaptive_cfg is not None:
+            tel = _nvml_gpu_telemetry() if '_nvml_gpu_telemetry' in globals() else None
+            if not tel or not getattr(tel, 'present', False):
+                tel = _fallback_nvidia_smi() if '_fallback_nvidia_smi' in globals() else None
+            end_gpu_util = getattr(tel, 'memory_util', None) if tel else None
+        if gpu_sampler is not None:
+            try:
+                gpu_sampler.stop()
+                peak_gpu_util = gpu_sampler.peak()
+            except Exception:
+                pass
+    except Exception:
+        end_gpu_util = None
+
+    return blocks, predictor_presence, {
+        "oom_retry": bool(oom_retry),
+        "end_gpu_util": end_gpu_util,
+        "peak_gpu_util": peak_gpu_util,
+        "adaptive_cfg": adaptive_cfg,
+    }
 
 
 # --------------------------------------------------------------------------- #
@@ -734,11 +901,16 @@ def run(
     except Exception:
         pass
 
+    adapt_meta: Dict[str, Any] = {"oom_retry": False, "end_gpu_util": None, "adaptive_cfg": None}
     if no_spawn:
         # Inline execution (best for debugging)
         try:
             t_ex0 = time.monotonic()
-            blocks, predictor_presence = extract_blocks(pdf_path)
+            ret_inline = extract_blocks(pdf_path)
+            if isinstance(ret_inline, tuple) and len(ret_inline) == 3:
+                blocks, predictor_presence, adapt_meta = ret_inline
+            else:
+                blocks, predictor_presence = ret_inline  # type: ignore[misc]
             extract_duration_ms = int((time.monotonic() - t_ex0) * 1000)
         except Exception as e:
             logger.exception("Stage 02 failed during inline extraction")
@@ -806,6 +978,7 @@ def run(
 
         blocks = result["blocks"]
         predictor_presence = result.get("predictors", {})
+        adapt_meta = result.get("adapt_meta", adapt_meta)
 
     # Optional: force-tag all SectionHeader blocks as suspicious_header for Stage 03 testing
     if mark_all_headers_suspicious:
@@ -894,6 +1067,20 @@ def run(
     out_path = json_output_dir / f"{base}.json"
     out_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False))
     console.print(f"📄 Saved {len(blocks)} blocks to: {out_path} (deterministic ordering applied)")
+    # Finalize adaptive history if available
+    try:
+        from extractor.pipeline.utils.adaptive_tuner import finalize_adaptive_run
+        if adapt_meta and adapt_meta.get("adaptive_cfg") is not None:
+            finalize_adaptive_run(
+                stage_output_dir,
+                success=True,
+                oom_retry=bool(adapt_meta.get("oom_retry")),
+                cfg=adapt_meta.get("adaptive_cfg"),
+                gpu_end_util=adapt_meta.get("end_gpu_util"),
+                gpu_peak_util=adapt_meta.get("peak_gpu_util"),
+            )
+    except Exception:
+        pass
     log_stage_event(
         "02_marker_extractor",
         "end",

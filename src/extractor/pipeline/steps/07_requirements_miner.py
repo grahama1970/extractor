@@ -225,13 +225,55 @@ def run(
         logger.error("07r:bad_schema type={} keys_absent", type(data))
         raise typer.Exit(2)
 
-    sections = data.get("reflowed_sections") or []
-    if not isinstance(sections, list):
+    sections_raw = data.get("reflowed_sections") or data.get("sections") or []
+    if not isinstance(sections_raw, list):
         (out_dir / "07_requirements_error.json").write_text(json.dumps({"ok": False, "error": "missing_sections", "keys": list(data.keys())}, indent=2))
         logger.error("07r:missing_sections keys={}", list(data.keys()))
         raise typer.Exit(2)
 
-    logger.info("07r:sections count={} keys={}", len(sections), list(data.keys()))
+    # Normalize tolerant view of sections
+    sections: List[Dict[str, Any]] = []
+    malformed = 0
+    for s in sections_raw:
+        if not isinstance(s, dict):
+            malformed += 1
+            continue
+        sid = s.get("id") or s.get("section_id")
+        if not sid:
+            malformed += 1
+            continue
+        # Normalize blocks
+        bnorm = []
+        for b in s.get("blocks") or []:
+            if not isinstance(b, dict):
+                continue
+            btype = (b.get("type") or b.get("block_type") or "").lower()
+            txt = (b.get("text") or b.get("content") or "").strip()
+            if txt and btype in {"text","paragraph","listitem","list_item"}:
+                if "type" not in b:
+                    b["type"] = "paragraph" if btype in {"text","paragraph"} else "listitem"
+                if "text" not in b and b.get("content"):
+                    b["text"] = b.get("content")
+                bnorm.append(b)
+        s["blocks"] = bnorm
+        # Normalize tables minimal shape
+        tnorm = []
+        for t in s.get("tables") or []:
+            if not isinstance(t, dict):
+                continue
+            if t.get("pandas_df") is None and t.get("rows") and t.get("columns"):
+                rows = t.get("rows"); cols = t.get("columns")
+                if isinstance(rows, list) and isinstance(cols, list):
+                    pd_rows = []
+                    for r in rows:
+                        if isinstance(r, list):
+                            pd_rows.append({str(c): (r[i] if i < len(r) else "") for i, c in enumerate(cols)})
+                    t["pandas_df"] = pd_rows
+            tnorm.append(t)
+        s["tables"] = tnorm
+        sections.append(s)
+
+    logger.info("07r:sections count={} malformed={}", len(sections), malformed)
     candidates: List[Dict[str, Any]] = []
     errors = 0
     debug_snap: List[Dict[str, Any]] = []
@@ -269,13 +311,30 @@ def run(
             logger.exception("07r:section_iter_error idx={} exc={}", i, se)
 
     _assign_ids(candidates)
-    req_json = {"requirements": candidates, "errors_count": errors}
+    req_json = {
+        "requirements": candidates,
+        "errors_count": errors,
+        "meta": {
+            "sections_total": len(sections),
+            "sections_malformed": malformed,
+            "sections_with_blocks": sum(1 for s in sections if s.get("blocks")),
+            "sections_with_tables": sum(1 for s in sections if s.get("tables")),
+        },
+    }
     (out_dir / "07_requirements.json").write_text(json.dumps(req_json, indent=2))
     summary = _summarize(candidates)
-    (out_dir / "07_requirements_summary.json").write_text(json.dumps({**summary, "errors_count": errors, "sections": len(sections)}, indent=2))
+    summary.update(req_json.get("meta", {}))
+    (out_dir / "07_requirements_summary.json").write_text(json.dumps({**summary, "errors_count": errors}, indent=2))
     if debug_snap:
         (out_dir / "07_requirements_debug.json").write_text(json.dumps({"snap": debug_snap[-10:]}, indent=2))
-    typer.echo(json.dumps({"ok": True, "total": summary["total"], "errors": errors, "out": str(out_dir)}, indent=2))
+    typer.echo(json.dumps({
+        "ok": True,
+        "total": summary.get("total", 0),
+        "errors": errors,
+        "out": str(out_dir),
+        "sections_total": summary.get("sections_total"),
+        "sections_malformed": summary.get("sections_malformed"),
+    }, indent=2))
 
 
 if __name__ == "__main__":

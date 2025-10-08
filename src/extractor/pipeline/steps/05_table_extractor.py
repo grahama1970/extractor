@@ -19,6 +19,7 @@ import sys
 import json
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
+import concurrent.futures
 from datetime import datetime
 
 # Direct imports - fail fast
@@ -49,6 +50,7 @@ from extractor.pipeline.utils.table_fusion import (
     fuse_table_candidates,
 )
 from extractor.pipeline.utils.pipeline_event_logger import log_stage_event
+from extractor.pipeline.utils.page_cache import get_cached_page_image, crop_from_cached
 import hashlib
 
 # --- Initialization ---
@@ -88,6 +90,9 @@ CAMELOT_STRATEGIES = {
 VERTICAL_PADDING_RATIO = float(os.getenv("TABLE_VERTICAL_PADDING_RATIO", 0.30))
 HORIZONTAL_PADDING_RATIO = float(os.getenv("TABLE_HORIZONTAL_PADDING_RATIO", 0.07))
 PYMUPDF_DPI = int(os.getenv("TABLE_EXTRACTION_DPI", 200))
+TABLE_WORKERS_DEFAULT = int(os.getenv("STAGE05_WORKERS", "8"))
+PAGE_IMAGE_CACHE_ENABLED = os.getenv("STAGE05_PAGE_IMAGE_CACHE", "1").lower() in {"1", "true", "yes", "y"}
+PAGE_IMAGE_CACHE_ROOT = Path(os.getenv("STAGE05_PAGE_IMAGE_CACHE_ROOT", "data/results/page_cache"))
 
 # Stitching/overlap and filtering thresholds (env-configurable)
 TABLE_STITCH_MIN_HORIZONTAL_IOU = float(os.getenv("TABLE_STITCH_MIN_HORIZONTAL_IOU", 0.2))
@@ -330,17 +335,26 @@ def extract_table_image(
         rect_y1 = page_height - y1_padded
         bbox_rect = fitz.Rect(x1_padded, rect_y0, x2_padded, rect_y1)
 
-        # Render the cropped table and save without PIL roundtrip (faster, less memory)
-        pix = page.get_pixmap(clip=bbox_rect, dpi=PYMUPDF_DPI)
+        # Try to use cached page → crop via Pillow for speed
+        image_bytes = None
+        if PAGE_IMAGE_CACHE_ENABLED:
+            try:
+                pdf_path_for_cache = Path(getattr(page.parent, "name", ""))
+                if pdf_path_for_cache and pdf_path_for_cache.exists():
+                    full = get_cached_page_image(pdf_path_for_cache, page_num, PYMUPDF_DPI, PAGE_IMAGE_CACHE_ROOT)
+                    image_bytes = crop_from_cached(full, page_width, page_height, [x1_padded, rect_y0, x2_padded, rect_y1])
+            except Exception:
+                image_bytes = None
+
+        if image_bytes is None:
+            # Fallback to direct fitz clip render
+            pix = page.get_pixmap(clip=bbox_rect, dpi=PYMUPDF_DPI)
+            image_bytes = pix.tobytes("png")
+
         filename = custom_name or f"page_{page_num+1}_table_{table_idx+1}.png"
         img_path = output_dir / filename
-        try:
-            # Let PyMuPDF determine format from extension (PNG)
-            pix.save(str(img_path))
-        except Exception:
-            # Fallback to explicit PNG bytes
-            with open(img_path, "wb") as f:
-                f.write(pix.tobytes("png"))
+        with open(img_path, "wb") as f:
+            f.write(image_bytes)
 
         return str(img_path)
     except Exception as e:
@@ -855,10 +869,23 @@ def coalesce_repeated_header_rows(
         return df
 
 
+def _per_page_task(args: tuple) -> tuple[int, List[Dict[str, Any]], Optional[str], Dict[str, Any], Dict[str, Any]]:
+    (pdf_path, page_num, output_dir, last_good_strategy, diagnostics) = args
+    try:
+        doc = fitz.open(str(pdf_path))
+        tables, best_strategy, sdurs, page_metrics = extract_tables_from_page(
+            pdf_path, page_num, doc, output_dir, last_good_strategy, diagnostics
+        )
+        doc.close()
+        return page_num, tables, best_strategy, sdurs, page_metrics
+    except Exception:
+        return page_num, [], None, {}, {"retry_candidates": 0, "fallback_tables": 0, "fallback_applied": False}
+
+
 def extract_all_tables(
     pdf_path: Path, output_dir: Path, diagnostics: Optional[list] = None
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any], Dict[str, Any]]:
-    """Extract all tables from a PDF."""
+    """Extract all tables from a PDF (parallel-capable)."""
     all_tables: List[Dict[str, Any]] = []
     last_good_strategy = None
     strategy_summary: Dict[str, Dict[str, Any]] = {}
@@ -892,62 +919,92 @@ def extract_all_tables(
 
     try:
         total_pages = len(pdf_doc)
-        console.print(f"[cyan]Processing {total_pages} pages...[/cyan]")
+        # Determine workers: honor adaptive config if available unless explicitly set
+        try:
+            adaptive_cfg_path = output_dir.parent / "02_marker_extractor" / "json_output" / "02_adaptive_config.json"
+            if adaptive_cfg_path.exists() and os.getenv("STAGE05_WORKERS_EXPLICIT") is None:
+                _cfg = json.loads(adaptive_cfg_path.read_text()).get("config") or {}
+                workers = int(_cfg.get("table_workers") or TABLE_WORKERS_DEFAULT)
+            else:
+                workers = TABLE_WORKERS_DEFAULT
+        except Exception:
+            workers = TABLE_WORKERS_DEFAULT
 
-        for page_num in range(total_pages):
-            logger.info(f"Processing page {page_num + 1}/{total_pages}")
+        console.print(f"[cyan]Processing {total_pages} pages (parallel={workers>1})...[/cyan]")
 
-            tables, best_strategy, sdurs, page_metrics = extract_tables_from_page(
-                pdf_path, page_num, pdf_doc, output_dir, last_good_strategy, diagnostics
-            )
-
-            quality_summary["pages_processed"] += 1
-            if tables:
-                quality_summary["pages_with_tables"] += 1
-            if page_metrics.get("fallback_applied"):
-                quality_summary["pages_with_fallback"] += 1
-            quality_summary["tables_with_fallback"] += int(
-                page_metrics.get("fallback_tables", 0) or 0
-            )
-            quality_summary["retry_candidates"] += int(
-                page_metrics.get("retry_candidates", 0) or 0
-            )
-
-            if tables:
-                all_tables.extend(tables)
-            try:
-                for k, v in sdurs.items():
-                    entry = strategy_summary.setdefault(
-                        k,
-                        {
-                            "attempts": 0,
-                            "successes": 0,
-                            "failures": 0,
-                            "total_duration_ms": 0,
-                            "per_page_ms": {},
-                        },
-                    )
-                    cnt = int(v.get("count", 0) or 0)
-                    entry["attempts"] += cnt
-                    # Mark success if found>0 for this page
-                    found_map = v.get("found") or {}
-                    if isinstance(found_map, dict) and int(found_map.get(page_num, 0) or 0) > 0:
-                        entry["successes"] += 1
-                    else:
-                        entry["failures"] += 1
-                    dur = int(v.get("total_ms", 0) or 0)
-                    entry["total_duration_ms"] += dur
-                    # Approximate per_page_ms as average duration per attempt for this page
-                    per_attempt = int(dur / max(1, cnt)) if cnt else dur
-                    entry["per_page_ms"][str(page_num)] = per_attempt
-            except Exception:
-                # Per-page strategy timing aggregation failed; continue.
-                pass
-            # Record last good strategy outside the exception path so it updates on success.
-            if best_strategy:
-                last_good_strategy = best_strategy
-
-            console.print(f"  Page {page_num + 1}: Found {len(tables)} tables")
+        if workers > 1 and total_pages > 4:
+            tasks = [(pdf_path, i, output_dir, last_good_strategy, diagnostics) for i in range(total_pages)]
+            with concurrent.futures.ProcessPoolExecutor(max_workers=workers) as ex:
+                for page_num, tables, best_strategy, sdurs, page_metrics in ex.map(_per_page_task, tasks):
+                    logger.info(f"Processing page {page_num + 1}/{total_pages}")
+                    quality_summary["pages_processed"] += 1
+                    if tables:
+                        quality_summary["pages_with_tables"] += 1
+                    if page_metrics.get("fallback_applied"):
+                        quality_summary["pages_with_fallback"] += 1
+                    quality_summary["tables_with_fallback"] += int(page_metrics.get("fallback_tables", 0) or 0)
+                    quality_summary["retry_candidates"] += int(page_metrics.get("retry_candidates", 0) or 0)
+                    if tables:
+                        all_tables.extend(tables)
+                    try:
+                        for k, v in sdurs.items():
+                            entry = strategy_summary.setdefault(
+                                k,
+                                {"attempts": 0, "successes": 0, "failures": 0, "total_duration_ms": 0, "per_page_ms": {}},
+                            )
+                            cnt = int(v.get("count", 0) or 0)
+                            entry["attempts"] += cnt
+                            found_map = v.get("found") or {}
+                            if isinstance(found_map, dict) and int(found_map.get(page_num, 0) or 0) > 0:
+                                entry["successes"] += 1
+                            else:
+                                entry["failures"] += 1
+                            dur = int(v.get("total_ms", 0) or 0)
+                            entry["total_duration_ms"] += dur
+                            per_attempt = int(dur / max(1, cnt)) if cnt else dur
+                            entry["per_page_ms"][str(page_num)] = per_attempt
+                    except Exception:
+                        pass
+                    if best_strategy:
+                        last_good_strategy = best_strategy
+                    console.print(f"  Page {page_num + 1}: Found {len(tables)} tables")
+        else:
+            for page_num in range(total_pages):
+                logger.info(f"Processing page {page_num + 1}/{total_pages}")
+                tables, best_strategy, sdurs, page_metrics = extract_tables_from_page(
+                    pdf_path, page_num, pdf_doc, output_dir, last_good_strategy, diagnostics
+                )
+                quality_summary["pages_processed"] += 1
+                if tables:
+                    quality_summary["pages_with_tables"] += 1
+                if page_metrics.get("fallback_applied"):
+                    quality_summary["pages_with_fallback"] += 1
+                quality_summary["tables_with_fallback"] += int(page_metrics.get("fallback_tables", 0) or 0)
+                quality_summary["retry_candidates"] += int(page_metrics.get("retry_candidates", 0) or 0)
+                if tables:
+                    all_tables.extend(tables)
+                try:
+                    for k, v in sdurs.items():
+                        entry = strategy_summary.setdefault(
+                            k,
+                            {"attempts": 0, "successes": 0, "failures": 0, "total_duration_ms": 0, "per_page_ms": {}},
+                        )
+                        cnt = int(v.get("count", 0) or 0)
+                        entry["attempts"] += cnt
+                        found_map = v.get("found") or {}
+                        if isinstance(found_map, dict) and int(found_map.get(page_num, 0) or 0) > 0:
+                            entry["successes"] += 1
+                        else:
+                            entry["failures"] += 1
+                        dur = int(v.get("total_ms", 0) or 0)
+                        entry["total_duration_ms"] += dur
+                        per_attempt = int(dur / max(1, cnt)) if cnt else dur
+                        entry["per_page_ms"][str(page_num)] = per_attempt
+                except Exception:
+                    pass
+                if best_strategy:
+                    last_good_strategy = best_strategy
+                console.print(f"  Page {page_num + 1}: Found {len(tables)} tables")
 
     finally:
         pdf_doc.close()
