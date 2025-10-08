@@ -279,6 +279,37 @@ def run(
         "hash": state.deterministic_hash,
     }, indent=2))
 
+    # Deterministic sidecar for resume logic
+    try:
+        det_side = {
+            "hash": state.deterministic_hash,
+            "sections": len(state.sections),
+            "plugins": ordered_plugins,
+        }
+        (json_out / "deterministic.json").write_text(json.dumps(det_side, indent=2))
+    except Exception as e:
+        state.diagnostics.append({"phase": "deterministic_sidecar", "error": str(e)})
+
+    # Optional schema validation artifact
+    if os.getenv("STAGE07_VALIDATE", "0").lower() in {"1", "true", "yes", "y"}:
+        def _validate_sections_shape(state_: PipelineState) -> List[Dict[str, Any]]:
+            issues: List[Dict[str, Any]] = []
+            for idx, s in enumerate(state_.sections):
+                if "id" not in s:
+                    issues.append({"section_index": idx, "problem": "missing_id"})
+                if not isinstance(s.get("blocks"), list):
+                    issues.append({"section_index": idx, "problem": "blocks_not_list"})
+                for b_i, b in enumerate(s.get("blocks", [])):
+                    if not isinstance(b, dict):
+                        issues.append({"section_index": idx, "block_index": b_i, "problem": "block_not_dict"})
+                        continue
+                    if "text" not in b or "type" not in b:
+                        issues.append({"section_index": idx, "block_index": b_i, "problem": "missing_text_or_type"})
+            return issues
+
+        issues = _validate_sections_shape(state)
+        (json_out / "07_reflow_validate.json").write_text(json.dumps({"issues": issues, "count": len(issues)}, indent=2))
+
     console.print(f"[green]Stage 07 complete[/green] -> {out_path}")
 
 

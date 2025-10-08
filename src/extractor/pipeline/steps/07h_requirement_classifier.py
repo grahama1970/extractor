@@ -157,3 +157,4 @@ def run(
 
 if __name__ == "__main__":
     app()
+# DEPRECATED: replaced by requirements plugin (or standalone 07_requirements_miner.py).

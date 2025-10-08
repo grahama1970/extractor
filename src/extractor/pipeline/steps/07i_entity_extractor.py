@@ -109,3 +109,4 @@ def run(
 
 if __name__ == "__main__":
     app()
+# DEPRECATED (placeholder): entity extraction should become a plugin under orchestrator.

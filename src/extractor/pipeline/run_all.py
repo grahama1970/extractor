@@ -590,8 +590,19 @@ def run_pipeline(
     # -------- Stage 07 --------
     stage07_name = "07_reflow_section"
     reflow_json = results / stage07_name / "json_output" / "07_reflowed.json"
-    if resume and stage_completed(stage07_name, [reflow_json]):
-        console.print(f"[yellow]Skipping {stage07_name} (resume)[/yellow]")
+    manifest_file = results / stage07_name / "json_output" / "07_reflow_manifest.json"
+    det_file = results / stage07_name / "json_output" / "deterministic.json"
+    skip07 = False
+    if resume and stage_completed(stage07_name, [reflow_json]) and manifest_file.exists() and det_file.exists():
+        try:
+            mf = json.loads(manifest_file.read_text())
+            rf = json.loads(reflow_json.read_text())
+            if mf.get("hash") and mf.get("hash") == rf.get("deterministic_hash"):
+                skip07 = True
+        except Exception:
+            skip07 = False
+    if skip07:
+        console.print(f"[yellow]Skipping {stage07_name} (resume; hash verified)[/yellow]")
     else:
         summary_only_flag = summary_only07 or (os.getenv("SUMMARY_ONLY07",""\
 ).lower() in {"1","true","yes","y"}) or offline

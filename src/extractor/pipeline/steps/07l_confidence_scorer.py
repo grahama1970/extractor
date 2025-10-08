@@ -75,3 +75,4 @@ def run(
 
 if __name__ == "__main__":
     app()
+# DEPRECATED: confidence scoring (if needed) should be a deterministic plugin.

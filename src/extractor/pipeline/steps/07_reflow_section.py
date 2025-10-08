@@ -87,6 +87,8 @@ def run(
     timeout: int = typer.Option(120, "--timeout"),
     summary_only: bool = typer.Option(False, "--summary-only", help="Force summary-only output"),
 ):
+    if os.getenv("STAGE07_SHIM_WARN", "1").lower() in {"1","true","yes","y"}:
+        console.print("[yellow][deprecated] 07_reflow_section shim – prefer 07_orchestrator.py.[/yellow]")
     console.print("[bold green]Starting Section Reflow (Stage 07)[/bold green]")
     if SUMMARY_ONLY_ENV:
         summary_only = True

@@ -127,3 +127,5 @@ def run(
 
 if __name__ == "__main__":
     app()
+# DEPRECATED: superseded by 07_orchestrator.py (assembly handled centrally).
+# This module will be removed after confirmatory release. Do not extend.

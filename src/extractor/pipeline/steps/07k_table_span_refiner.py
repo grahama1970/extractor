@@ -57,4 +57,4 @@ def run(
 
 if __name__ == "__main__":
     app()
-
+# DEPRECATED: table span logic to be integrated into structural merge or plugin.

@@ -110,3 +110,4 @@ def run(
 
 if __name__ == "__main__":
     app()
+# DEPRECATED: use deterministic hashes + orchestrator manifest for diff/report.

@@ -259,3 +259,5 @@ def _load_stage03_headers(path: Optional[Path]) -> List[Dict[str, Any]]:
         return out
     except Exception:
         return []
+# DEPRECATED: superseded by 07_structural_pass.py and 07_orchestrator.py
+# This module will be removed after confirmatory release. Do not extend.

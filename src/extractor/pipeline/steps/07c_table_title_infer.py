@@ -219,3 +219,5 @@ def _table_has_label_cue(t: dict, cues: set[str]) -> bool:
         return False
     line = " ".join(str(c) for c in header).lower()
     return any(c in line for c in cues if len(c) > 4)
+# DEPRECATED: superseded by 07_orchestrator plugin 'table_titles'.
+# This module will be removed after confirmatory release. Do not extend.

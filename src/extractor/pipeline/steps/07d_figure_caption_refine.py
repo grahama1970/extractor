@@ -209,3 +209,5 @@ def run(
 
 if __name__ == "__main__":
     app()
+# DEPRECATED: superseded by 07_orchestrator plugin 'figure_captions'.
+# This module will be removed after confirmatory release. Do not extend.
