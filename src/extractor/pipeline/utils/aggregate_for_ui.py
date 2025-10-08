@@ -60,6 +60,23 @@ def build_ui_bundle(results_dir: Path, fail_soft: bool = True) -> None:
                 b["page"] = b.get("page_idx", b.get("page"))
                 b["type"] = b.get("block_type", b.get("type"))
                 b["mini_hash"] = _mini_hash(b)
+                # Flatten Stage 03 reasoning if present
+                try:
+                    if isinstance(b.get("llm_verification"), dict):
+                        res = b["llm_verification"].get("result") or {}
+                        if isinstance(res, dict):
+                            b["reasoning"] = res.get("reasoning")
+                            b["is_header_verified"] = res.get("is_header")
+                except Exception:
+                    pass
+                # Provide a decision key useful for UI mapping
+                try:
+                    b.setdefault(
+                        "decision_key",
+                        f"{b.get('page')}:{b.get('block_id') or b.get('id') or b['mini_hash']}",
+                    )
+                except Exception:
+                    pass
 
         doc_id = None
         if pdf_path:
@@ -84,10 +101,15 @@ def build_ui_bundle(results_dir: Path, fail_soft: bool = True) -> None:
                 "figures": str(figs_f) if figs_f.exists() else None,
                 "suspects": str(suspects_f) if suspects_f.exists() else None,
             },
+            "counts": {
+                "blocks": len(blocks),
+                "tables": len(tjs.get("tables", [])) if isinstance(tjs, dict) else 0,
+                "figures": len(fjs.get("figures", [])) if isinstance(fjs, dict) else 0,
+                "suspicious_total": (sus.get("suspicious_total") if isinstance(sus, dict) else None),
+            },
         }
         (out_dir / "blocks_full.json").write_text(json.dumps(bundle, indent=2, ensure_ascii=False))
     except Exception:
         if fail_soft:
             return
         raise
-
