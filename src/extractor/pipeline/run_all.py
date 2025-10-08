@@ -728,6 +728,15 @@ def run_pipeline(
             "results_dir": str(results),
         },
     )
+    # Optional: aggregate artifacts for the web UI bundle (non-fatal)
+    try:
+        from extractor.pipeline.utils.aggregate_for_ui import build_ui_bundle  # type: ignore
+        build_ui_bundle(results_dir=results, fail_soft=True)
+    except Exception as e:
+        try:
+            console.print(f"[yellow]UI aggregation skipped: {e}[/yellow]")
+        except Exception:
+            pass
 
     # ---------------- results/index.json writer ----------------
     try:
@@ -956,6 +965,7 @@ if __name__ == "__main__":
         record_stage(stage14_name, [p for p in [final_json, final_md] if p.exists()])
 
     print("\nAll stages completed. Final report:", results / "final_report.md")
+    print("PIPELINE_EXIT=0")
     # Surface Stage 02 fallback predictor mode if present
     try:
         s02_path = results / "02_marker_extractor" / "json_output" / "02_marker_blocks.json"
