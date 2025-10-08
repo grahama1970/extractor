@@ -118,7 +118,7 @@ def main(
                 [
                     "uv", "run", "--active", "python", "-m",
                     "extractor.pipeline.steps.02_marker_extractor", "run",
-                    str(clean_pdf), "-o", str(out_base),
+                    str(clean_pdf), "-o", str(out_base), "--no-spawn",
                 ],
                 env=env,
             )
