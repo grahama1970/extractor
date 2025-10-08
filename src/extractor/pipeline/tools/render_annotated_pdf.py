@@ -147,6 +147,48 @@ def _add_label(page: "fitz.Page", rect: "fitz.Rect", text: str, color: Tuple[flo
     return fta
 
 
+def _add_label_tab(
+    page: "fitz.Page",
+    rect: "fitz.Rect",
+    text: str,
+    color: Tuple[float, float, float],
+    *,
+    alpha: float = 0.2,
+):
+    """Draw a small tab overlapping the upper-right corner of the box.
+
+    Uses a FreeText annotation with background fill and optional opacity.
+    """
+    tab_h = 12.0
+    tab_w = max(56.0, min(120.0, len(text) * 4.2))
+    # Anchor to upper-right, overlapping box slightly
+    raw = fitz.Rect(rect.x1 - tab_w, rect.y0 - (tab_h / 2.0), rect.x1, rect.y0 + tab_h / 2.0)
+    tab_rect = _clamp_to_page(raw, page.rect)
+    if tab_rect is None:
+        return None
+    try:
+        fta = page.add_freetext_annot(tab_rect, text)
+    except AttributeError:
+        fta = page.addFreetextAnnot(tab_rect, text)
+    # Style: filled with type color; white text
+    try:
+        fta.set_colors(stroke=color, fill=color, text=(1, 1, 1))
+    except Exception:
+        try:
+            fta.setColors(stroke=color, fill=color)
+        except Exception:
+            pass
+    try:
+        if 0.0 <= alpha <= 1.0:
+            fta.set_opacity(alpha)
+    except Exception:
+        pass
+    try:
+        fta.update()
+    except Exception:
+        pass
+    return fta
+
 def _rect_from(obj: Dict[str, Any]) -> Optional["fitz.Rect"]:
     bb = obj.get("bbox") or obj.get("original_rect") or obj.get("expanded_rect")
     if not isinstance(bb, (list, tuple)) or len(bb) != 4:
@@ -238,7 +280,8 @@ def from_blocks(
             use_fill = color if style in {"fill", "both"} else None
             use_alpha = fill_alpha if style in {"fill", "both"} else 1.0
             _add_rect_annot(page, rect, color=color, width=1.2, fill=use_fill, alpha=use_alpha)
-            _add_label(page, rect, text=label, color=color)
+            # Default: tab label at upper-right for better visibility
+            _add_label_tab(page, rect, text=label, color=color, alpha=0.25)
 
         out.parent.mkdir(parents=True, exist_ok=True)
         doc.save(str(out))
@@ -276,7 +319,7 @@ def from_stage01(
             use_fill = color if style in {"fill", "both"} else None
             use_alpha = fill_alpha if style in {"fill", "both"} else 1.0
             _add_rect_annot(page, rect, color=color, width=1.2, fill=use_fill, alpha=use_alpha)
-            _add_label(page, rect, text=label, color=color)
+            _add_label_tab(page, rect, text=label, color=color, alpha=0.25)
 
         out.parent.mkdir(parents=True, exist_ok=True)
         doc.save(str(out))
