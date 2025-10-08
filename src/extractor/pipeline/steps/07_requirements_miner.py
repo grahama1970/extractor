@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
-Stage 07½ — Requirements Miner
+Stage 07½ — Requirements Miner (Standalone Fallback)
 
 Deterministic, offline‑friendly identification of requirement candidates after reflow (Stage 07).
 
 Inputs
-- 07_reflowed.json from Stage 07
+- 07_reflowed.json from the Stage 07 orchestrator (key: reflowed_sections).
+  If the orchestrator already executed the `requirements` plugin, this tool is optional.
 
 Outputs
 - 07_requirements.json (see docs/tasks/009_requirements_miner_and_workbench.md)
@@ -13,7 +14,7 @@ Outputs
 
 Notes
 - No LLM required. Optional assists can be added behind env toggles later.
-- Keeps the Happy Path single surface; run by run_all between 07 and 08.
+- Expects reflowed_sections[*].blocks[].text and tables[*].pandas_df for parity.
 """
 from __future__ import annotations
 
