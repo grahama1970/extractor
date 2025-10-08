@@ -47,29 +47,63 @@ except Exception as e:  # pragma: no cover
 
 app = typer.Typer(help="Render overlays for pipeline PDF objects into a viewable PDF")
 
+# ---------------- Palette & outline defaults ---------------- #
+_PALETTES: Dict[str, Dict[str, Tuple[float, float, float]]] = {
+    "default": {
+        "section": (0.95, 0.45, 0.10),
+        "table": (0.10, 0.60, 0.95),
+        "figure": (0.10, 0.80, 0.40),
+        "equation": (0.60, 0.10, 0.95),
+        "caption": (0.80, 0.50, 0.10),
+        "list": (0.90, 0.10, 0.40),
+        "footnote": (0.40, 0.40, 0.40),
+        "_default": (0.95, 0.10, 0.10),
+    },
+    "colorblind-safe": {
+        "section": (0.90, 0.60, 0.00),
+        "table": (0.00, 0.45, 0.70),
+        "figure": (0.00, 0.60, 0.50),
+        "equation": (0.80, 0.40, 0.00),
+        "caption": (0.35, 0.70, 0.90),
+        "list": (0.80, 0.60, 0.70),
+        "footnote": (0.60, 0.60, 0.60),
+        "_default": (0.00, 0.00, 0.00),
+    },
+}
+
+_OUTLINE_DEFAULTS: Dict[str, float] = {
+    "section": 1.4,
+    "table": 1.8,
+    "figure": 1.4,
+    "equation": 1.4,
+    "caption": 1.2,
+    "list": 1.2,
+    "footnote": 1.0,
+    "_default": 1.2,
+}
+
 
 # ---------------------------- helpers ---------------------------- #
 
 
-def _color_rgb(name: str) -> Tuple[float, float, float]:
-    """Simple color palette by logical block type names (case-insensitive)."""
+def _color_rgb(name: str, palette: Dict[str, Tuple[float, float, float]]) -> Tuple[float, float, float]:
+    """Lookup color from palette; fallback to '_default'."""
     n = (name or "").lower()
-    if any(k in n for k in ("section", "header")):
-        return (0.95, 0.45, 0.10)  # orange
+    if "section" in n or "header" in n:
+        return palette.get("section", palette["_default"])
     if "table" in n:
-        return (0.10, 0.60, 0.95)  # blue
+        return palette.get("table", palette["_default"])
     if "figure" in n or "image" in n:
-        return (0.10, 0.80, 0.40)  # green
+        return palette.get("figure", palette["_default"])
     if "equation" in n or "math" in n:
-        return (0.60, 0.10, 0.95)  # purple
+        return palette.get("equation", palette["_default"])
     if "caption" in n:
-        return (0.80, 0.50, 0.10)  # brown-ish
+        return palette.get("caption", palette["_default"])
     if "list" in n:
-        return (0.90, 0.10, 0.40)  # pink/red
+        return palette.get("list", palette["_default"])
     if "footnote" in n:
-        return (0.40, 0.40, 0.40)  # gray
-    # default
-    return (0.95, 0.10, 0.10)  # red
+        return palette.get("footnote", palette["_default"])
+    return palette["_default"]
 
 
 def _add_rect_annot(
@@ -109,14 +143,30 @@ def _add_rect_annot(
     return annot
 
 
-def _add_label(page: "fitz.Page", rect: "fitz.Rect", text: str, color: Tuple[float, float, float]):
+def _truncate(text: str, max_chars: int) -> str:
+    if len(text) <= max_chars:
+        return text
+    if max_chars <= 3:
+        return text[:max_chars]
+    return text[: max_chars - 3] + "..."
+
+
+def _add_label(
+    page: "fitz.Page",
+    rect: "fitz.Rect",
+    text: str,
+    color: Tuple[float, float, float],
+    *,
+    min_font_size: float,
+    max_width: float = 160.0,
+):
     # place label slightly above-left of the box; clamp within page bounds
     padding = 2.0
     label_h = 12.0
     raw_rect = fitz.Rect(
         rect.x0,
         rect.y0 - (label_h + padding),
-        rect.x0 + max(60.0, len(text) * 3.5),
+        rect.x0 + max(60.0, min(max_width, len(text) * 3.5)),
         rect.y0 - padding,
     )
     label_rect = _clamp_to_page(raw_rect, page.rect)
@@ -129,10 +179,11 @@ def _add_label(page: "fitz.Page", rect: "fitz.Rect", text: str, color: Tuple[flo
         )
         if label_rect is None:
             return None
+    label_text = _truncate(text, 48)
     try:
-        fta = page.add_freetext_annot(label_rect, text)
+        fta = page.add_freetext_annot(label_rect, label_text)
     except AttributeError:
-        fta = page.addFreetextAnnot(label_rect, text)
+        fta = page.addFreetextAnnot(label_rect, label_text)
     try:
         fta.set_colors(stroke=color, fill=(1, 1, 1))
     except Exception:
@@ -140,6 +191,22 @@ def _add_label(page: "fitz.Page", rect: "fitz.Rect", text: str, color: Tuple[flo
             fta.setColors(stroke=color, fill=(1, 1, 1))
         except Exception:
             pass
+    # Attempt adaptive font size to fit
+    try:
+        target_w = label_rect.width - 4
+        size = 10.0
+        est_w = len(label_text) * (size * 0.55)
+        while est_w > target_w and size > min_font_size:
+            size -= 0.5
+            est_w = len(label_text) * (size * 0.55)
+        if size < min_font_size:
+            size = min_font_size
+        try:
+            fta.set_font("helv", size=size)
+        except Exception:
+            pass
+    except Exception:
+        pass
     try:
         fta.update()
     except Exception:
@@ -166,10 +233,11 @@ def _add_label_tab(
     tab_rect = _clamp_to_page(raw, page.rect)
     if tab_rect is None:
         return None
+    label_text = _truncate(text, 48)
     try:
-        fta = page.add_freetext_annot(tab_rect, text)
+        fta = page.add_freetext_annot(tab_rect, label_text)
     except AttributeError:
-        fta = page.addFreetextAnnot(tab_rect, text)
+        fta = page.addFreetextAnnot(tab_rect, label_text)
     # Style: filled with type color; white text
     try:
         fta.set_colors(stroke=color, fill=color, text=(1, 1, 1))
@@ -285,6 +353,14 @@ def from_blocks(
         "--verify-dir",
         help="Optional Stage 05 verify dir; when set, add link annots for Table blocks to table_XXXX/view.html if exists.",
     ),
+    palette: str = typer.Option("default", "--palette", help="Color palette: default|colorblind-safe"),
+    legend: bool = typer.Option(False, "--legend/--no-legend", help="Render legend on page 1"),
+    min_font_size: float = typer.Option(7.0, "--min-font-size", help="Minimum label font size"),
+    outline_widths: Optional[str] = typer.Option(
+        None,
+        "--outline-widths",
+        help="Comma list type:width (e.g. table:2.0,section:1.5); overrides defaults",
+    ),
 ):
     """Render overlays from Stage 02 blocks JSON onto the PDF."""
     data = json.loads(blocks_json.read_text())
@@ -292,8 +368,27 @@ def from_blocks(
     if not isinstance(blocks, list):
         raise SystemExit("Invalid blocks JSON: expected {\"blocks\": [...]} at top level")
 
+    if palette not in _PALETTES:
+        raise SystemExit(f"Unknown palette '{palette}'. Choices: {', '.join(_PALETTES.keys())}")
+    pal = _PALETTES[palette]
+    # parse overrides
+    outline_overrides: Dict[str, float] = {}
+    if outline_widths:
+        for part in [p.strip() for p in outline_widths.split(",") if p.strip()]:
+            if ":" in part:
+                k, v = part.split(":", 1)
+                try:
+                    outline_overrides[k.strip().lower()] = float(v.strip())
+                except Exception:
+                    pass
+
     doc = fitz.open(str(pdf))
     with doc:
+        if legend and len(doc) > 0:
+            try:
+                _render_legend(doc[0], pal)
+            except Exception:
+                pass
         for b in blocks:
             rect0 = _rect_from(b)
             pno = _page_index(b)
@@ -304,13 +399,15 @@ def from_blocks(
             if rect is None or rect.width < min_width or rect.height < min_height:
                 continue
             label = _label_for(b, default_type_key=block_type_key)
-            color = _color_rgb(label)
+            color = _color_rgb(label, pal)
+            logical_type = (b.get(block_type_key) or "").lower()
+            ow = outline_overrides.get(logical_type, _OUTLINE_DEFAULTS.get(logical_type, _OUTLINE_DEFAULTS["_default"]))
             use_fill = color if style in {"fill", "both"} else None
             use_alpha = fill_alpha if style in {"fill", "both"} else 1.0
-            _add_rect_annot(page, rect, color=color, width=1.2, fill=use_fill, alpha=use_alpha)
+            _add_rect_annot(page, rect, color=color, width=ow, fill=use_fill, alpha=use_alpha)
             if not label_off:
                 if label_style == "free":
-                    _add_label(page, rect, text=label, color=color)
+                    _add_label(page, rect, text=label, color=color, min_font_size=min_font_size)
                 else:
                     _add_label_tab(page, rect, text=label, color=color, alpha=0.25)
             # Optional: link table to verify view.html
@@ -362,7 +459,7 @@ def from_stage01(
                 continue
             t = str(((a.get("interpretation") or {}).get("inferred_object") or {}).get("type") or a.get("type") or "region")
             label = f"{t}:{a.get('id','')}".rstrip(":")
-            color = _color_rgb(t)
+            color = _color_rgb(t, _PALETTES["default"])
             use_fill = color if style in {"fill", "both"} else None
             use_alpha = fill_alpha if style in {"fill", "both"} else 1.0
             _add_rect_annot(page, rect, color=color, width=1.2, fill=use_fill, alpha=use_alpha)
