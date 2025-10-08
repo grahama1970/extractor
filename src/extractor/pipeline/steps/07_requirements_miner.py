@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import typer
+from loguru import logger
 
 
 app = typer.Typer(add_completion=False, help="Identify requirement candidates after Stage 07.")
@@ -173,30 +174,109 @@ def _summarize(cands: List[Dict[str, Any]]) -> Dict[str, Any]:
 def run(
     reflowed_json: Path = typer.Argument(..., exists=True, readable=True, help="Path to 07_reflowed.json"),
     output_dir: Path = typer.Option(Path("data/results/pipeline"), "-o", help="Results root directory"),
+    debug: bool = typer.Option(False, "--debug", help="Enable verbose logging to a stage log file."),
 ):
-    out_dir = output_dir / "07_requirements_miner" / "json_output"
+    """Mine requirement candidates from Stage 07 output with robust debug logging.
+
+    Failure points are logged with rich context (section index/id, block summaries, counts)
+    to make debugging straightforward when a document deviates from expected schema.
+    """
+    stage_dir = output_dir / "07_requirements_miner"
+    out_dir = stage_dir / "json_output"
     out_dir.mkdir(parents=True, exist_ok=True)
-    data = json.loads(reflowed_json.read_text())
+
+    # Configure a dedicated log sink
+    try:
+        logger.remove()
+        logger.add(
+            str(stage_dir / "stage_07_requirements_miner.log"),
+            level="DEBUG" if debug or os.getenv("STAGE07R_DEBUG", "0").lower() in {"1","true","yes","y"} else "INFO",
+            enqueue=True,
+            backtrace=False,
+            diagnose=False,
+            rotation="1 week",
+            retention="14 days",
+        )
+    except Exception:
+        pass
+
+    logger.info("07r:start reflowed_json={} output_dir={} debug={}", reflowed_json, output_dir, debug)
+
+    # Load JSON with error capture
+    try:
+        raw_text = reflowed_json.read_text()
+        data = json.loads(raw_text)
+    except Exception as e:
+        err = {
+            "ok": False,
+            "error": "read_or_parse_failed",
+            "exception": str(e),
+            "path": str(reflowed_json),
+            "size": reflowed_json.stat().st_size if reflowed_json.exists() else None,
+            "head": raw_text[:500] if 'raw_text' in locals() else None,
+        }
+        (out_dir / "07_requirements_error.json").write_text(json.dumps(err, indent=2))
+        logger.exception("07r:failed to read/parse reflowed_json")
+        raise typer.Exit(2)
+
+    # Validate top-level structure
+    if not isinstance(data, dict):
+        (out_dir / "07_requirements_error.json").write_text(json.dumps({"ok": False, "error": "bad_schema", "type": str(type(data))}, indent=2))
+        logger.error("07r:bad_schema type={} keys_absent", type(data))
+        raise typer.Exit(2)
+
     sections = data.get("reflowed_sections") or []
+    if not isinstance(sections, list):
+        (out_dir / "07_requirements_error.json").write_text(json.dumps({"ok": False, "error": "missing_sections", "keys": list(data.keys())}, indent=2))
+        logger.error("07r:missing_sections keys={}", list(data.keys()))
+        raise typer.Exit(2)
+
+    logger.info("07r:sections count={} keys={}", len(sections), list(data.keys()))
     candidates: List[Dict[str, Any]] = []
-    for s in sections:
-        sec_id = s.get("id") or s.get("section_id") or None
-        # Paragraphs/blocks
-        for b in s.get("blocks") or []:
-            if str(b.get("block_type") or b.get("type") or "").lower() in {"text", "paragraph", "listitem"}:
-                candidates.extend(_mine_from_paragraph(b, sec_id))
-        # Tables
-        for t in s.get("tables") or []:
-            candidates.extend(_mine_from_table(t, sec_id))
+    errors = 0
+    debug_snap: List[Dict[str, Any]] = []
+    for i, s in enumerate(sections):
+        try:
+            sec_id = s.get("id") or s.get("section_id") or None
+            bcount = len(s.get("blocks") or [])
+            tcount = len(s.get("tables") or [])
+            if (i % 25) == 0:
+                logger.debug("07r:section idx={} id={} blocks={} tables={}", i, sec_id, bcount, tcount)
+            # Paragraphs/blocks
+            for b in s.get("blocks") or []:
+                try:
+                    btype = str(b.get("block_type") or b.get("type") or "").lower()
+                    if btype in {"text", "paragraph", "listitem"}:
+                        c = _mine_from_paragraph(b, sec_id)
+                        if c:
+                            candidates.extend(c)
+                except Exception as be:
+                    errors += 1
+                    logger.warning("07r:block_error idx={} sec_id={} exc={}", i, sec_id, be)
+            # Tables
+            for t in s.get("tables") or []:
+                try:
+                    c = _mine_from_table(t, sec_id)
+                    if c:
+                        candidates.extend(c)
+                except Exception as te:
+                    errors += 1
+                    logger.warning("07r:table_error idx={} sec_id={} exc={}", i, sec_id, te)
+            if (i % 50) == 0:
+                debug_snap.append({"section_idx": i, "section_id": sec_id, "blocks": bcount, "tables": tcount, "cand_so_far": len(candidates)})
+        except Exception as se:
+            errors += 1
+            logger.exception("07r:section_iter_error idx={} exc={}", i, se)
 
     _assign_ids(candidates)
-    req_json = {"requirements": candidates}
+    req_json = {"requirements": candidates, "errors_count": errors}
     (out_dir / "07_requirements.json").write_text(json.dumps(req_json, indent=2))
     summary = _summarize(candidates)
-    (out_dir / "07_requirements_summary.json").write_text(json.dumps(summary, indent=2))
-    typer.echo(json.dumps({"ok": True, "total": summary["total"], "out": str(out_dir)}, indent=2))
+    (out_dir / "07_requirements_summary.json").write_text(json.dumps({**summary, "errors_count": errors, "sections": len(sections)}, indent=2))
+    if debug_snap:
+        (out_dir / "07_requirements_debug.json").write_text(json.dumps({"snap": debug_snap[-10:]}, indent=2))
+    typer.echo(json.dumps({"ok": True, "total": summary["total"], "errors": errors, "out": str(out_dir)}, indent=2))
 
 
 if __name__ == "__main__":
     app()
-

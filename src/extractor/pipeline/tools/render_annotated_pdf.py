@@ -72,7 +72,15 @@ def _color_rgb(name: str) -> Tuple[float, float, float]:
     return (0.95, 0.10, 0.10)  # red
 
 
-def _add_rect_annot(page: "fitz.Page", rect: "fitz.Rect", color: Tuple[float, float, float], width: float = 1.0):
+def _add_rect_annot(
+    page: "fitz.Page",
+    rect: "fitz.Rect",
+    color: Tuple[float, float, float],
+    width: float = 1.0,
+    *,
+    fill: Optional[Tuple[float, float, float]] = None,
+    alpha: float = 1.0,
+):
     try:
         annot = page.add_rect_annot(rect)
     except AttributeError:  # older PyMuPDF
@@ -83,12 +91,17 @@ def _add_rect_annot(page: "fitz.Page", rect: "fitz.Rect", color: Tuple[float, fl
     except Exception:
         pass
     try:
-        annot.set_colors(stroke=color)
+        annot.set_colors(stroke=color, fill=fill)
     except Exception:
         try:
-            annot.setColors(stroke=color)
+            annot.setColors(stroke=color, fill=fill)
         except Exception:
             pass
+    try:
+        if 0.0 <= alpha <= 1.0:
+            annot.set_opacity(alpha)
+    except Exception:
+        pass
     try:
         annot.update()
     except Exception:
@@ -200,6 +213,8 @@ def from_blocks(
     block_type_key: str = typer.Option("block_type", help="Key for type label in blocks JSON"),
     min_width: float = typer.Option(6.0, help="Minimum box width to draw (pt)"),
     min_height: float = typer.Option(6.0, help="Minimum box height to draw (pt)"),
+    style: str = typer.Option("both", help="Annotation style: stroke|fill|both"),
+    fill_alpha: float = typer.Option(0.12, help="Fill opacity (0..1) when style includes fill"),
 ):
     """Render overlays from Stage 02 blocks JSON onto the PDF."""
     data = json.loads(blocks_json.read_text())
@@ -220,7 +235,9 @@ def from_blocks(
                 continue
             label = _label_for(b, default_type_key=block_type_key)
             color = _color_rgb(label)
-            _add_rect_annot(page, rect, color=color, width=1.2)
+            use_fill = color if style in {"fill", "both"} else None
+            use_alpha = fill_alpha if style in {"fill", "both"} else 1.0
+            _add_rect_annot(page, rect, color=color, width=1.2, fill=use_fill, alpha=use_alpha)
             _add_label(page, rect, text=label, color=color)
 
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -233,6 +250,8 @@ def from_stage01(
     pdf: Path = typer.Option(..., "--pdf", help="Input PDF (Stage 01 clean PDF)", exists=True, dir_okay=False),
     stage01_json: Path = typer.Option(..., "--stage01-json", help="01_annotations.json path", exists=True, dir_okay=False),
     out: Path = typer.Option(..., "--out", help="Output annotated PDF path"),
+    style: str = typer.Option("both", help="Annotation style: stroke|fill|both"),
+    fill_alpha: float = typer.Option(0.12, help="Fill opacity (0..1) when style includes fill"),
 ):
     """Render overlays from Stage 01 annotations JSON (original/expanded rects)."""
     data = json.loads(stage01_json.read_text())
@@ -254,7 +273,9 @@ def from_stage01(
             t = str(((a.get("interpretation") or {}).get("inferred_object") or {}).get("type") or a.get("type") or "region")
             label = f"{t}:{a.get('id','')}".rstrip(":")
             color = _color_rgb(t)
-            _add_rect_annot(page, rect, color=color, width=1.2)
+            use_fill = color if style in {"fill", "both"} else None
+            use_alpha = fill_alpha if style in {"fill", "both"} else 1.0
+            _add_rect_annot(page, rect, color=color, width=1.2, fill=use_fill, alpha=use_alpha)
             _add_label(page, rect, text=label, color=color)
 
         out.parent.mkdir(parents=True, exist_ok=True)
