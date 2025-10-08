@@ -86,6 +86,22 @@ def build_ui_bundle(results_dir: Path, fail_soft: bool = True) -> None:
 
         out_dir = rd / "ui"
         out_dir.mkdir(parents=True, exist_ok=True)
+
+        # Try to include/import PDF gold annotations
+        gold_f = out_dir / "gold_from_pdf.json"
+        if not gold_f.exists() and pdf_path and pdf_path.exists():
+            try:
+                from extractor.pipeline.tools.pdf_annot_import import import_pdf as _import_pdf  # type: ignore
+                _import_pdf(results_dir=rd, pdf_path=pdf_path)
+            except Exception:
+                pass
+        gold = {}
+        try:
+            if gold_f.exists():
+                gold = json.loads(gold_f.read_text()) or {}
+        except Exception:
+            gold = {}
+
         bundle = {
             "doc_id": doc_id,
             "generated_at": datetime.utcnow().isoformat(),
@@ -94,17 +110,20 @@ def build_ui_bundle(results_dir: Path, fail_soft: bool = True) -> None:
             "tables": tjs.get("tables", []) if isinstance(tjs, dict) else [],
             "figures": fjs.get("figures", []) if isinstance(fjs, dict) else [],
             "suspects": sus if isinstance(sus, dict) else {},
+            "gold": gold.get("items", []),
             "source": {
                 "stage02": str(stage02) if stage02.exists() else None,
                 "stage03": str(stage03) if stage03.exists() else None,
                 "tables": str(tables_f) if tables_f.exists() else None,
                 "figures": str(figs_f) if figs_f.exists() else None,
                 "suspects": str(suspects_f) if suspects_f.exists() else None,
+                "gold_from_pdf": str(gold_f) if gold_f.exists() else None,
             },
             "counts": {
                 "blocks": len(blocks),
                 "tables": len(tjs.get("tables", [])) if isinstance(tjs, dict) else 0,
                 "figures": len(fjs.get("figures", [])) if isinstance(fjs, dict) else 0,
+                "gold": int(gold.get("count") or 0),
                 "suspicious_total": (sus.get("suspicious_total") if isinstance(sus, dict) else None),
             },
         }

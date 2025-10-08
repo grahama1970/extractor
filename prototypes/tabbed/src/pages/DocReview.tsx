@@ -156,6 +156,13 @@ export const DocReview: React.FC<Props> = ({ bundleUrl, verifyDir }) => {
             </div>
           )}
         </div>
+        <div style={{marginTop:10}}>
+          <strong style={{fontSize:12}}>Gold (PDF Annotations)</strong><br/>
+          <label style={{fontSize:11}}>
+            <input type="checkbox" checked={showGold} onChange={e=>setShowGold(e.target.checked)} /> show gold overlay
+          </label>
+          <div style={{fontSize:11, marginTop:4}}>gold items: {(data as any).counts?.gold ?? ((data as any).gold?.length || 0)}</div>
+        </div>
         <hr/>
         <div>
           <strong style={{fontSize:12}}>Review</strong>
@@ -184,6 +191,9 @@ export const DocReview: React.FC<Props> = ({ bundleUrl, verifyDir }) => {
           diffMap={diffMode ? diff : null}
           diffMode={diffMode}
         />
+        {showGold && Array.isArray((data as any).gold) && (
+          <GoldOverlay items={(data as any).gold} page={page} />
+        )}
       </div>
       <div style={{width:360, borderLeft:'1px solid #ccc', display:'flex', flexDirection:'column'}}>
         <TableViewerPanel block={tableBlock} verifyBase={verifyDir} />

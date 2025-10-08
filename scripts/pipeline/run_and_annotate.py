@@ -123,7 +123,16 @@ def main(
                 env=env,
             )
             if rc != 0:
-                print(f"Stage 02 failed for {pdf} (rc={rc}); continuing to artifacts where possible…")
+                # Fail-fast: surface diagnostics and stop the batch
+                s02_dir = out_base / "02_marker_extractor"
+                err_json = s02_dir / "02_error.json"
+                log_path = s02_dir / "stage_02_marker.log"
+                print("\n[FATAL] Stage 02 failed.")
+                print(f"  PDF: {pdf}")
+                print(f"  Log: {log_path if log_path.exists() else '(missing)'}")
+                print(f"  Error JSON: {err_json if err_json.exists() else '(missing)'}")
+                print("  Hint: open the log and 02_error.json for the full traceback and predictor snapshot.")
+                raise SystemExit(1)
 
         # Locate artifacts
         stage01_dir = out_base / "01_annotation_processor"

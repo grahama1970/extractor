@@ -677,6 +677,11 @@ def run(
     json_output_dir = stage_output_dir / "json_output"
     stage_output_dir.mkdir(parents=True, exist_ok=True)
     json_output_dir.mkdir(exist_ok=True)
+    # Ensure all error payloads land under this stage dir
+    try:
+        os.environ["STAGE02_ERROR_DIR"] = str(stage_output_dir)
+    except Exception:
+        pass
     # Configure logging sink per stage run
     try:
         logger.remove()
