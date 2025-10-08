@@ -151,7 +151,9 @@ def main(
         if clean_pdf and blocks_json:
             ann_blocks_out = ann_dir / f"{slug}__blocks_annotated.pdf"
             ann_dir.mkdir(parents=True, exist_ok=True)
-            _run(
+            # If a verify_dir exists, pass it so Table overlays link to view.html
+            verify_dir = out_base / "05_table_extractor" / "verify"
+            args = [
                 [
                     "uv", "run", "--active",
                     "python",
@@ -165,7 +167,10 @@ def main(
                     "--out",
                     str(ann_blocks_out),
                     "--label-style", "tab",
-                ],
+                ]
+            if verify_dir.exists():
+                args[0] += ["--verify-dir", str(verify_dir)]
+            _run(args[0],
                 env=env,
             )
         if clean_pdf and stage01_json:

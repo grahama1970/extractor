@@ -84,6 +84,7 @@ def _write_env_snapshot(out_dir: Path, pdf_path: Path) -> None:
     """Write a compact environment + imports snapshot for debugging Stage 02 regressions."""
     try:
         import sys, platform
+        # Selective env snapshot with redaction of sensitive keys
         keys = [
             "OFFLINE_PDF_PREDICTORS",
             "PYTHONPATH",
@@ -94,7 +95,27 @@ def _write_env_snapshot(out_dir: Path, pdf_path: Path) -> None:
             "CHUTES_API_BASE",
             "OPENAI_BASE_URL",
         ]
-        env = {k: os.getenv(k) for k in keys if os.getenv(k) is not None}
+        redact_pat = (
+            "api_key",
+            "apikey",
+            "authorization",
+            "bearer",
+            "token",
+            "secret",
+            "password",
+            "access_key",
+            "private_key",
+            "client_secret",
+        )
+        env: Dict[str, Any] = {}
+        for k in keys:
+            v = os.getenv(k)
+            if v is None:
+                continue
+            if any(pat in k.lower() for pat in redact_pat):
+                env[k] = "<redacted>"
+            else:
+                env[k] = v
         imports = {
             "fitz": _safe_version("fitz"),
             "surya_ocr": _safe_version("surya_ocr"),
