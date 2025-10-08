@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """
 Stage-02: Extract native JSON blocks from a PDF using Marker
+
+Policy (2025-10-08):
+- No PyMuPDF/text heuristic fallback is permitted for Stage 02 extraction.
+- This stage MUST use Marker internals (PdfConverter + create_model_dict).
+- PyMuPDF is allowed only for annotation handling/visualization in other stages.
 """
 
 import json
@@ -160,80 +165,16 @@ def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool
     Since convert_single_pdf returns a MarkdownOutput object with markdown text,
     we need to access the converter directly to get the blocks.
     """
-    strict_mode = os.getenv("OFFLINE_PDF_PREDICTORS", "1").lower() in {"0", "false"}
+    # Enforce Marker-only extraction (no heuristics) regardless of env flags
     try:
         from extractor.core.converters.pdf import PdfConverter
         from extractor.core.models import create_model_dict
     except Exception as e:
-        if strict_mode:
-            raise RuntimeError(
-                "Strict mode: Marker internals unavailable. Install project Marker modules "
-                "(extractor.core.converters.pdf / extractor.core.models) or set OFFLINE_PDF_PREDICTORS=1."
-            ) from e
-        # Lenient mode: allow heuristic fallback below
-        create_model_dict = None  # type: ignore
-        PdfConverter = None  # type: ignore
-
-    if PdfConverter is None:
-        # ---------------- Heuristic fallback path (lenient only) ----------------
-        try:
-            import fitz  # type: ignore
-            import re as re
-        except Exception as fe:
-            raise RuntimeError(
-                f"Fallback extractor requires PyMuPDF; import failed: {fe}"
-            ) from fe
-        doc = fitz.open(str(pdf_path))
-        blocks: List[Dict[str, Any]] = []
-        header_pattern = re.compile(r"^((\d+([\.\-]\d+){0,4})|([IVXLCDM]+))[\).]?\s+\S")
-        figure_pattern = re.compile(r"^(Figure|Fig\.?)\s+\d+", re.IGNORECASE)
-        table_like_split = re.compile(r"\s{2,}")
-        for page_idx, page in enumerate(doc):
-            raw = page.get_text("text")
-            if not raw:
-                continue
-            for line in raw.splitlines():
-                txt = line.strip()
-                if not txt:
-                    continue
-                block_type = "Text"
-                suspicious_header = False
-                if (header_pattern.match(txt)
-                        or (len(txt) <= 80 and txt.isupper() and len(txt.split()) <= 10)):
-                    block_type = "SectionHeader"
-                    suspicious_header = True
-                elif figure_pattern.match(txt):
-                    block_type = "Figure"
-                else:
-                    parts = table_like_split.split(txt)
-                    if len(parts) >= 3 and sum(len(p.strip()) > 0 for p in parts) >= 3:
-                        block_type = "Table"
-                b = {
-                    "block_type": block_type,
-                    "text": txt,
-                    "page_idx": page_idx,
-                    "page": page_idx,
-                    "bbox": [0.0, 0.0, 0.0, 0.0],
-                    "origin": _FALLBACK_ORIGIN,
-                }
-                if block_type == "SectionHeader" and suspicious_header:
-                    b["suspicious_header"] = True
-                    b["is_suspicious"] = True
-                    b["suspicious_reasons"] = ["fallback_header_detection"]
-                    b["suspicion_confidence"] = 0.85
-                blocks.append(b)
-        try:
-            doc.close()
-        except Exception:
-            pass
-        predictor_presence = {
-            "detection_model": False,
-            "layout_model": False,
-            "recognition_model": False,
-            "table_rec_model": False,
-            "texify_model": False,
-        }
-        return blocks, predictor_presence
+        raise RuntimeError(
+            "Stage 02 requires Marker internals (PdfConverter + create_model_dict). "
+            "PyMuPDF/text heuristics are not allowed for extraction. Install extras: "
+            "`uv sync --extra accurate`."
+        ) from e
 
     # Create model dictionary (predictors may be missing in offline mode)
     models = create_model_dict()
@@ -253,9 +194,8 @@ def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool
     }
 
     # Create the PDF converter
-    strict_mode = os.getenv("OFFLINE_PDF_PREDICTORS", "1").lower() in {"0", "false"}
     try:
-        logger.info("02:extract_blocks strict_mode=%s pdf=%s", strict_mode, pdf_path)
+        logger.info("02:extract_blocks pdf=%s", pdf_path)
     except Exception:
         pass
     converter = PdfConverter(
@@ -594,26 +534,24 @@ def run(
     """
     Extracts text and layout blocks from a PDF using Marker and saves them to a structured output directory.
     """
-    # Strict-mode preflight: ensure predictors exist
+    # Preflight: predictors must exist (no fallback allowed)
     try:
-        strict = os.getenv("OFFLINE_PDF_PREDICTORS", "1").lower() in {"0", "false"}
-        if strict:
-            from extractor.core.models import create_model_dict
-            m = create_model_dict()
-            required = [
-                "detection_model",
-                "layout_model",
-                "ocr_error_model",
-                "recognition_model",
-                "table_rec_model",
-            ]
-            miss = [k for k in required if k not in m or m.get(k) is None]
-            if miss:
-                console.print("[red]Strict mode: missing predictors -> " + ", ".join(miss) + "[/red]")
-                console.print("[yellow]Hint: activate venv and run: `uv sync --extra accurate`[/yellow]")
-                raise typer.Exit(1)
+        from extractor.core.models import create_model_dict
+        m = create_model_dict()
+        required = [
+            "detection_model",
+            "layout_model",
+            "ocr_error_model",
+            "recognition_model",
+            "table_rec_model",
+        ]
+        miss = [k for k in required if k not in m or m.get(k) is None]
+        if miss:
+            console.print("[red]Missing predictors -> " + ", ".join(miss) + "[/red]")
+            console.print("[yellow]Hint: activate venv and run: `uv sync --extra accurate`[/yellow]")
+            raise typer.Exit(1)
     except Exception as _e:
-        console.print(f"[red]Strict preflight failed: {_e}[/red]")
+        console.print(f"[red]Preflight failed: {_e}[/red]")
         console.print("[yellow]Hint: `uv sync --extra accurate`[/yellow]")
         raise typer.Exit(1)
     run_id = uuid.uuid4().hex
@@ -766,14 +704,10 @@ def run(
             pass
 
     suspicious_blocks = [b for b in blocks if b.get("is_suspicious")]
-    # predictor mode flags
-    strict = os.getenv("OFFLINE_PDF_PREDICTORS", "1").lower() in {"0", "false"}
+    # predictor mode flags (Stage 02 is strict-only by policy)
     missing = [k for k, v in (predictor_presence or {}).items() if not v]
-    fallback_mode = (not strict) and bool(missing)
-    if strict:
-        predictor_mode = "strict_all_present"
-    else:
-        predictor_mode = "lenient_missing_predictors" if missing else "lenient_all_present"
+    fallback_mode = False
+    predictor_mode = "strict_missing_predictors" if missing else "strict_all_present"
 
     stage_end_ts = __import__("datetime").datetime.now().isoformat()
     try:
@@ -910,7 +844,7 @@ def debug_bundle(
         typer.secho(f"Extraction failed: {e}", fg=typer.colors.RED)
         raise typer.Exit(1)
     # Snapshot for debug bundle run (predictor presence may be absent here)
-    _write_env_snapshot(stage_output_dir, predictor_presence=None, extra={"debug_bundle": True})
+    _write_env_snapshot(stage_output_dir, clean_pdf)
 
     suspicious_blocks = [b for b in blocks if b.get("is_suspicious")]
     _timings = {
