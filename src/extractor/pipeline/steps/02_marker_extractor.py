@@ -743,7 +743,8 @@ def run(
         # Run extraction in a separate process so we can enforce a hard timeout
         # Worker moved to top-level to be picklable in 'spawn' start method environments (Windows/macOS).
         q: "mp.Queue[Dict[str, Any]]" = mp.Queue()
-        p = mp.Process(target=_worker, args=(str(pdf_path), q), daemon=True)
+        # Allow the worker to spawn internal workers if underlying libs require it
+        p = mp.Process(target=_worker, args=(str(pdf_path), q), daemon=False)
         t_ex0 = time.monotonic()
         p.start()
         p.join(None if (timeout is None or timeout<=0) else timeout)

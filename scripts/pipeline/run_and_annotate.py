@@ -168,6 +168,7 @@ def main(
                     str(ann_blocks_out),
                     "--label-style", "tab",
                 ]
+            ]
             if verify_dir.exists():
                 args[0] += ["--verify-dir", str(verify_dir)]
             _run(args[0],
