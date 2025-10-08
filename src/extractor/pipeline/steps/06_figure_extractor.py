@@ -18,6 +18,9 @@ except ImportError:
 import asyncio
 from pathlib import Path
 from loguru import logger
+from extractor.pipeline.utils.env_debug import log_env_snapshot
+import hashlib
+from extractor.pipeline.utils.pipeline_event_logger import log_stage_event
 import sys
 from typing import List, Dict, Any, Optional
 import base64
@@ -38,8 +41,11 @@ from extractor.pipeline.utils.diagnostics import (
     make_event,
     snapshot_resources,
     build_stage_timings,
+    gpu_metrics_available,
 )
-from extractor.pipeline.utils.litellm_call import litellm_call
+import scillm
+from extractor.pipeline.utils.scillm_env import build_requests, provider_fields_for_model
+from extractor.pipeline.utils.model_env import resolve_vlm_med, resolve_vlm_large, resolve_vlm_small
 from extractor.pipeline.utils.litellm_cache import initialize_litellm_cache
 
 # --- Initialization & Configuration ---
@@ -68,15 +74,34 @@ console = Console()
 
 # Make key parameters configurable via environment variables
 VERTICAL_PADDING_RATIO = float(os.getenv("FIGURE_VERTICAL_PADDING", "0.2"))
-# Use local model for simple image descriptions (2-3 sentences)
-VLM_MODEL = (os.getenv("LITELLM_VLM_MODEL") or "").strip()
+"""Stage 06 VLM model resolution"""
+VLM_MODEL = (os.getenv("STAGE06_MODEL") or resolve_vlm_med("") or "").strip()
+VLM_MODEL_LARGE = (resolve_vlm_large("") or "").strip()
+VLM_MODEL_SMALL = (resolve_vlm_small("") or "").strip()
+# Tiered timeouts and jitter
+VLM_SMALL_TIMEOUT = int(os.getenv("VLM_SMALL_TIMEOUT", "18"))
+VLM_MED_TIMEOUT   = int(os.getenv("VLM_MED_TIMEOUT", "28"))
+VLM_LARGE_TIMEOUT = int(os.getenv("VLM_LARGE_TIMEOUT", "40"))
+VLM_RETRY_JITTER_MAX = float(os.getenv("VLM_RETRY_JITTER_MAX", "0.25"))
+FIGURE_MAX_CONCURRENCY = int(os.getenv("FIGURE_MAX_CONCURRENCY", "4"))
+deterministic = os.getenv("PIPELINE_DETERMINISTIC", "0").lower() in {"1","true","yes","y"}
+if FIGURE_MAX_CONCURRENCY < 1:
+    FIGURE_MAX_CONCURRENCY = 1
+if deterministic:
+    FIGURE_MAX_CONCURRENCY = 1
 
 
 # --- Core Functions ---
 
 
-async def describe_image_with_llm(image_data: bytes, context: str = "") -> str:
-    """Describe an image via a single LiteLLM Chat call (Router.acompletion under the hood)."""
+async def describe_image_with_llm(
+    image_data: bytes,
+    context: str = "",
+    *,
+    model_override: str | None = None,
+    request_timeout: int | None = None,
+) -> str:
+    """Describe an image via LiteLLM; returns plain caption text. Honors model_override and timeout."""
     system_prompt = textwrap.dedent(
         """
         You are a helpful assistant that writes concise technical figure descriptions (2–3 sentences).
@@ -88,36 +113,83 @@ async def describe_image_with_llm(image_data: bytes, context: str = "") -> str:
         {"type": "text", "text": f"Context: {context[:2000]}"},
         {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
     ]
-    model = (os.getenv("LITELLM_VLM_MODEL") or VLM_MODEL or "").strip()
-    params: Dict[str, Any] = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_content},
-        ],
-        "timeout": 30,
-    }
-    if "gemini" not in (model or "").lower():
-        params["max_tokens"] = 256
-    # light temperature default
-    params["temperature"] = 0.2
-    sid = os.getenv("LITELLM_SESSION_ID") or get_run_id()
-    out = await litellm_call([params], desc="figure_description", session_id=sid, export="results")
-    r = out[0] if out else None
-    if r and isinstance(r.content, str) and r.content.strip():
+    model = (model_override or VLM_MODEL or "").strip()
+    msgs = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_content},
+    ]
+    timeout_s = int(request_timeout or int(os.getenv("STAGE06_TIMEOUT", "60")))
+    temp = 0.0 if deterministic else 0.2
+    # Prefer larger, more reliable VLMs first; cost is equal on Chutes
+    aliases = [
+        os.getenv("LITELLM_LARGE_VLM_MODEL") or os.getenv("LITELLM_LARGE_VLLM_MODEL"),
+        os.getenv("LITELLM_MED_VLM_MODEL"),
+        os.getenv("LITELLM_SMALL_VLM_MODEL"),
+    ]
+    aliases = [a for a in aliases if a]
+    router = scillm.Router(deterministic=deterministic)
+    for alias in aliases:
+        # Prefer schema-first JSON with a simple caption schema, then fall back to raw text if needed.
+        prov = provider_fields_for_model(alias)
+        req = {
+            "model": alias,
+            "messages": msgs,
+            "kwargs": {
+                **prov,
+                "response_mode": "schema_first",
+                "json_schema": {
+                    "name": "captionSchema",
+                    "schema": {
+                        "type": "object",
+                        "properties": {"caption": {"type": "string"}},
+                        "required": ["caption"],
+                    },
+                },
+                "retry_enabled": True,
+                "honor_retry_after": True,
+                "timeout": timeout_s,
+                "temperature": temp,
+            },
+        }
         try:
-            logger.info(f"figure_description: model={r.request.model} ok={r.exception is None}")
+            resps = await router.parallel_acompletions([req], max_concurrency=1)
+        except Exception:
+            resps = []
+        r = resps[0] if resps else None
+        try:
+            if isinstance(r, dict):
+                from loguru import logger as _logger
+                _logger.info("stage06.llm.meta: %s", json.dumps(r.get("scillm_router", {}))[:200])
         except Exception:
             pass
-        return r.content.strip()
-    raise RuntimeError("VLM returned empty content for figure description")
+        content = ""
+        if isinstance(r, dict):
+            try:
+                content = r.get("choices", [{}])[0].get("message", {}).get("content") or ""
+            except Exception:
+                content = ""
+        if content and isinstance(content, str) and content.strip():
+            # If schema-first returned JSON, parse and extract caption
+            cap = content.strip()
+            if cap.startswith("{"):
+                try:
+                    data = json.loads(cap)
+                    txt = data.get("caption")
+                    if isinstance(txt, str) and txt.strip():
+                        return txt.strip()
+                except Exception:
+                    pass
+            return cap
+    raise RuntimeError("VLM returned empty content for figure description (all aliases)")
 
 
 async def extract_and_describe_figure(
+    pdf_doc: Any,
     pdf_path: Path,
     block: Dict[str, Any],
     figure_id: str,
     output_dir: Path,
+    sem: asyncio.Semaphore,
     skip_descriptions: bool = False,
 ) -> Optional[Dict[str, Any]]:
     """Extract a single figure with padding and get its description."""
@@ -125,11 +197,10 @@ async def extract_and_describe_figure(
         page_num = block.get("page_idx", 0)
         bbox = block.get("bbox")
 
-        with fitz.open(str(pdf_path)) as pdf_doc:
+        async with sem:
             if page_num >= len(pdf_doc):
                 logger.error(f"Page {page_num} out of range for {figure_id}")
                 return None
-
             page = pdf_doc[page_num]
 
             # Bbox estimation logic
@@ -190,18 +261,44 @@ async def extract_and_describe_figure(
         if skip_descriptions:
             description = "Description skipped (offline)"
         else:
-            try:
-                description = await describe_image_with_llm(image_data, context)
-            except Exception as e:
-                logger.error(f"LLM description for {figure_id} failed after all retries: {e}")
+            import random
+            timeout_s = int(os.getenv("STAGE06_TIMEOUT", "120"))
+            max_retries = int(os.getenv("STAGE06_RETRIES", "1"))
+            # SMALL -> MED -> LARGE escalation
+            model_small = VLM_MODEL_SMALL
+            # Interpret VLM_MODEL as MED tier by default
+            model_med = (os.getenv("STAGE06_MODEL") or VLM_MODEL or "").strip()
+            model_large = VLM_MODEL_LARGE
+            tiered = [(model_small, VLM_SMALL_TIMEOUT), (model_med, VLM_MED_TIMEOUT), (model_large, VLM_LARGE_TIMEOUT)]
+            models = [(m,t) for m,t in tiered if m]
+            description = ""
+            last_err: Exception | None = None
+            for m, tier_to in models:
+                for attempt in range(max_retries + 1):
+                    try:
+                        cap = await describe_image_with_llm(
+                            image_data, context, model_override=m, request_timeout=tier_to or timeout_s
+                        )
+                        if cap and cap.strip():
+                            description = cap.strip()
+                            break
+                    except Exception as e:
+                        last_err = e
+                        try:
+                            await asyncio.sleep(1.0 + attempt + random.uniform(0.0, VLM_RETRY_JITTER_MAX))
+                        except Exception:
+                            pass
+                if description:
+                    break
+            if not description:
+                logger.error(
+                    f"LLM description for {figure_id} failed after all retries: {last_err}"
+                )
                 try:
-                    msg = str(e)
+                    msg = str(last_err) if last_err else "unknown"
                     code = "llm_description_failed"
                     low = msg.lower()
-                    if any(
-                        k in low
-                        for k in ["network", "connect", "connection", "readtimeout", "econn"]
-                    ):
+                    if any(k in low for k in ["network", "connect", "connection", "readtimeout", "econn"]):
                         code = "llm_network_error"
                     ev = make_event(
                         "06_figure_extractor", "error", code, msg, {"figure_id": figure_id}
@@ -210,7 +307,7 @@ async def extract_and_describe_figure(
                     figure_md_diags.append(ev)
                 except Exception:
                     figure_md_diags = []
-                description = f"Error: Failed to get description - {e}"
+                description = f"Error: Failed to get description - {last_err}"
 
         return {
             "figure_id": figure_id,
@@ -237,23 +334,44 @@ async def process_figures_batch(
     output_dir: Path,
     skip_descriptions: bool = False,
 ) -> List[Dict[str, Any]]:
-    """Process all figures concurrently with a progress bar."""
-    tasks = [
-        extract_and_describe_figure(
-            pdf_path, block, f"figure_{i+1:03d}", output_dir, skip_descriptions=skip_descriptions
-        )
-        for i, block in enumerate(figure_blocks)
-    ]
+    """Process figures with bounded concurrency; reuse a single open PDF."""
+    results: List[Dict[str, Any]] = []
+    sem = asyncio.Semaphore(FIGURE_MAX_CONCURRENCY)
+    try:
+        pdf_doc = fitz.open(str(pdf_path))
+    except Exception as e:
+        logger.error(f"Failed to open PDF for figures: {e}")
+        return results
 
-    results = []
-    logger.info(f"Processing {len(tasks)} figures concurrently...")
+    async def _one(i: int, block: Dict[str, Any]):
+        fid = f"figure_{i+1:03d}"
+        try:
+            return await extract_and_describe_figure(
+                pdf_doc,
+                pdf_path,
+                block,
+                fid,
+                output_dir,
+                sem,
+                skip_descriptions=skip_descriptions,
+            )
+        except Exception as ex:
+            logger.error(f"Figure task {fid} failed: {ex}")
+            return None
 
-    for f in tqdm_asyncio.as_completed(tasks, desc="Extracting and Describing Figures"):
-        result = await f
-        if result:
-            results.append(result)
-            logger.info(f"Completed {result['figure_id']}")
-
+    tasks = [_one(i, b) for i, b in enumerate(figure_blocks)]
+    logger.info(
+        f"Processing {len(tasks)} figures (max_concurrency={FIGURE_MAX_CONCURRENCY})..."
+    )
+    for f in tqdm_asyncio.as_completed(tasks, desc="Extracting+Describing"):
+        r = await f
+        if r:
+            results.append(r)
+            logger.info(f"Completed {r['figure_id']}")
+    try:
+        pdf_doc.close()
+    except Exception:
+        pass
     return results
 
 
@@ -278,32 +396,50 @@ def run(
 ):
     """Extracts figures, describes them, and associates them with sections."""
     console.print(f"[green]Extracting figures from: {stage_02_json.name}[/green]")
+    # Log environment snapshot for debugging hangs / provider config
+    try:
+        log_env_snapshot(
+            "06_figure_extractor",
+            {
+                "FIGURE_MAX_CONCURRENCY": os.getenv("FIGURE_MAX_CONCURRENCY", "4"),
+                "STAGE06_MODEL": os.getenv("STAGE06_MODEL"),
+                "LITELLM_VLM_MODEL": os.getenv("LITELLM_VLM_MODEL"),
+            },
+        )
+    except Exception:
+        pass
+    try:
+        log_stage_event("06_figure_extractor", "start", stage02=str(stage_02_json))
+    except Exception:
+        pass
+    try:
+        logger.info(
+            "06:start stage_02_json=%s skip_descriptions=%s FIGURE_MAX_CONCURRENCY=%s",
+            stage_02_json,
+            bool(skip_descriptions),
+            os.getenv("FIGURE_MAX_CONCURRENCY", "4"),
+        )
+    except Exception:
+        pass
+    # Primary initialization (deduplicated)
     run_id = get_run_id()
-    diagnostics = []
+    diagnostics: list[dict] = []
     errors_count = 0
     warnings_count = 0
     import time
-
     t0 = time.monotonic()
     stage_start_ts = iso_now()
     resources = snapshot_resources("start")
-    import os
-
     sampler = (
         start_resource_sampler(float(os.getenv("SAMPLE_INTERVAL_SEC", "2")))
-        if os.getenv("ENABLE_RESOURCE_SAMPLING", "0").lower() in ("1", "true", "yes", "y")
+        if os.getenv("ENABLE_RESOURCE_SAMPLING", "0").lower() in ("1","true","yes","y")
         else None
     )
     try:
         if sampler and not gpu_metrics_available():
             diagnostics.append(
-                make_event(
-                    "06_figure_extractor",
-                    "info",
-                    "gpu_metrics_unavailable",
-                    "NVML not available; GPU metrics disabled",
-                    {},
-                )
+                make_event("06_figure_extractor","info","gpu_metrics_unavailable",
+                           "NVML not available; GPU metrics disabled", {})
             )
     except Exception:
         pass
@@ -365,7 +501,6 @@ def run(
     t0 = time.monotonic()
     stage_start_ts = iso_now()
     resources = snapshot_resources("start")
-    import os
 
     sampler = (
         start_resource_sampler(float(os.getenv("SAMPLE_INTERVAL_SEC", "2")))
@@ -390,9 +525,8 @@ def run(
     # build a stable map of figure_id -> source block
     fig_block_map = {f"figure_{i+1:03d}": b for i, b in enumerate(figure_blocks)}
     extracted_figures = asyncio.run(
-        process_figures_batch(
-            pdf_path, figure_blocks, image_output_dir, skip_descriptions=skip_descriptions
-        )
+        process_figures_batch(pdf_path, figure_blocks, image_output_dir,
+                              skip_descriptions=skip_descriptions)
     )
     # Ensure bbox/page present from the original blocks when available
     for fig in extracted_figures:
@@ -413,7 +547,40 @@ def run(
                     figure["section_id"] = section.get("id", "unknown")
                     break
 
+    # --- Optional normalized figure label (Figure X-Y) from caption/AI description ---
+    try:
+        import re as _re3
+    except Exception:
+        _re3 = None  # type: ignore
+    if _re3 is not None:
+        for fig in extracted_figures:
+            try:
+                lbl_src = fig.get("caption") or fig.get("ai_description") or ""
+                if isinstance(lbl_src, str) and lbl_src.strip():
+                    import re
+                    norm = re.sub(r"[‐‑–—−]", "-", lbl_src)
+                    m = _re3.search(r"(?i)\bfig(?:ure)?\s+(\d+(?:[-\.]\d+)*)", norm)
+                    if m:
+                        num = m.group(1)
+                        num_norm = re.sub(r"[.\-]+", "-", num)
+                        fig["normalized_label"] = f"figure/{num_norm.lower()}"
+            except Exception:
+                pass
+
     # --- Final Payload and Output ---
+    # Enforce deterministic ordering of figures for reproducibility
+    try:
+        def _k(fig: Dict[str, Any]):
+            bx = fig.get("bbox") or [0, 0, 0, 0]
+            return (
+                int(fig.get("page", 0)),
+                float(bx[1]) if len(bx) >= 2 else 0.0,
+                float(bx[0]) if len(bx) >= 1 else 0.0,
+                str(fig.get("figure_id", "")),
+            )
+        extracted_figures = sorted(extracted_figures, key=_k)
+    except Exception:
+        pass
     try:
         samples = stop_resource_sampler(sampler) if sampler else []
         if samples:
@@ -421,6 +588,31 @@ def run(
     except Exception:
         pass
     timings = build_stage_timings(stage_start_ts, t0)
+    # Deterministic ordering (page, figure_id)
+    try:
+        def _k(fig: dict):
+            return (int(fig.get("page", 0)), str(fig.get("figure_id","")))
+        extracted_figures = sorted(extracted_figures, key=_k)
+    except Exception:
+        pass
+    try:
+        logger.info(
+            "06:summary figure_blocks=%d extracted=%d output_dir=%s",
+            len(figure_blocks),
+            len(extracted_figures),
+            image_output_dir,
+        )
+    except Exception:
+        pass
+    # Structural hash for quick diffs
+    try:
+        h = hashlib.sha256()
+        for f in extracted_figures:
+            core = {"id": f.get("figure_id"), "p": f.get("page"), "cap": (f.get("ai_description") or "")[:120]}
+            h.update(json.dumps(core, sort_keys=True, ensure_ascii=False).encode("utf-8"))
+        figures_hash = h.hexdigest()
+    except Exception:
+        figures_hash = None
     result = {
         "timestamp": datetime.now().isoformat(),
         "source_json": str(stage_02_json),
@@ -434,6 +626,7 @@ def run(
         "diagnostics": diagnostics,
         "timings": timings,
         "resources": resources,
+        "figures_content_hash": figures_hash,
     }
 
     output_path = json_output_dir / "06_figures.json"
@@ -443,6 +636,39 @@ def run(
     console.print(
         f"✅ Figure extraction complete. Saved {len(extracted_figures)} figures to: {output_path}"
     )
+    try:
+        log_stage_event("06_figure_extractor", "end", figures=len(extracted_figures), content_hash=figures_hash, status="Completed")
+    except Exception:
+        pass
+
+    # Deterministic summary for quick diffing across runs
+    try:
+        from extractor.pipeline.utils.mode import deterministic_mode  # lazy import
+        det_items = [
+            {
+                "figure_id": str(fig.get("figure_id")),
+                "page": int(fig.get("page", 0)),
+                "y0": round(float((fig.get("bbox") or [0, 0, 0, 0])[1]), 2) if fig.get("bbox") else 0.0,
+                "x0": round(float((fig.get("bbox") or [0, 0, 0, 0])[0]), 2) if fig.get("bbox") else 0.0,
+                "section_id": fig.get("section_id"),
+            }
+            for fig in extracted_figures
+        ]
+        import hashlib as _h
+        h = _h.sha256()
+        for it in det_items:
+            h.update(f"{it['figure_id']},{it['page']},{it['y0']:.2f},{it['x0']:.2f},{it.get('section_id')}".encode())
+        det = {
+            "version": 1,
+            "run_id": run_id,
+            "deterministic": bool(deterministic_mode()),
+            "count": len(extracted_figures),
+            "sorted": det_items,
+            "figures_content_hash": h.hexdigest(),
+        }
+        (json_output_dir / "deterministic.json").write_text(json.dumps(det, indent=2, ensure_ascii=False))
+    except Exception:
+        pass
 
 
 def debug_bundle(
@@ -479,7 +705,6 @@ def debug_bundle(
     t0 = time.monotonic()
     stage_start_ts = iso_now()
     resources = snapshot_resources("start")
-    import os
 
     sampler = (
         start_resource_sampler(float(os.getenv("SAMPLE_INTERVAL_SEC", "2")))

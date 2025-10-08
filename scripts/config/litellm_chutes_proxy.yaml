@@ -1,0 +1,23 @@
+model_list:
+  - model_name: deepseek-v3           # client-facing alias (use this in Stage 07)
+    litellm_params:
+      model: openai/deepseek-ai/DeepSeek-V3-0324
+      api_base: ${CHUTES_API_BASE:-https://llm.chutes.ai/v1}
+      api_key: ${CHUTES_API_KEY}
+      timeout: 180
+    model_info: { mode: chat }
+
+  # Optional second alias; uncomment if you want a non-DeepSeek choice via proxy
+  # - model_name: qwen-32b
+  #   litellm_params:
+  #     model: openai/Qwen/Qwen3-32B
+  #     api_base: ${CHUTES_API_BASE:-https://llm.chutes.ai/v1}
+  #     api_key: ${CHUTES_API_KEY}
+  #     timeout: 180
+  #   model_info: { mode: chat }
+
+general_settings:
+  background_health_checks: false      # prefer manual warm-up (enable later if desired)
+  health_check_interval: 300
+  health_check_details: true
+

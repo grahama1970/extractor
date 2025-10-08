@@ -89,6 +89,20 @@ class HTMLProvider:
         blocks = self._extract_blocks(soup)
         hierarchy = self._build_hierarchy(blocks)
 
+        # Add normalization/schema markers
+        if not metadata.format_metadata:
+            metadata.format_metadata = {}
+        fm = metadata.format_metadata
+        fm["schema_version"] = "1.0.0"
+        fm["normalization"] = list(set((fm.get("normalization") or []) + ["html_provider_v1"]))
+
+        # Inline placeholders (tables, images)
+        try:
+            self._append_table_placeholders(soup, blocks)
+            self._append_image_placeholders(filepath, soup, blocks)
+        except Exception:
+            logger.exception("HTML provider: placeholder extraction failed")
+
         doc = UnifiedDocument(
             id=self._generate_doc_id(filepath),
             source_type=SourceType.HTML,
@@ -174,6 +188,69 @@ class HTMLProvider:
         self._process_element(main_content, blocks)
 
         return blocks
+
+    def _append_table_placeholders(self, soup: BeautifulSoup, blocks: List[BaseBlock]) -> None:
+        tables = soup.find_all("table")
+        if not tables:
+            return
+        for idx, t in enumerate(tables, start=1):
+            # Try to extract columns from <thead> or first <tr>
+            cols: List[str] = []
+            try:
+                thead = t.find("thead")
+                if thead:
+                    ths = thead.find_all(["th", "td"])[:32]
+                    cols = [th.get_text(strip=True) for th in ths if th.get_text(strip=True)]
+                if not cols:
+                    first_tr = t.find("tr")
+                    if first_tr:
+                        ths = first_tr.find_all(["th", "td"])[:32]
+                        cols = [th.get_text(strip=True) for th in ths if th.get_text(strip=True)]
+            except Exception:
+                cols = []
+            block = TableBlock(
+                id=f"html-table-{idx:04d}",
+                parent_id=None,
+                type=BlockType.TABLE,
+                content={
+                    "title": None,
+                    "pandas_metrics": {"columns": cols, "shape": [0, len(cols)] if cols else [0, 0]},
+                    "image_path": None,
+                },
+                rows=0,
+                cols=len(cols) if cols else 0,
+                cells=[],
+                headers=None,
+                metadata=BlockMetadata(attributes={"source": "html_inline"}, confidence=0.5),
+            )
+            blocks.append(block)
+
+    def _append_image_placeholders(self, base_path: Path, soup: BeautifulSoup, blocks: List[BaseBlock]) -> None:
+        imgs = soup.find_all("img")
+        if not imgs:
+            return
+        for idx, im in enumerate(imgs, start=1):
+            src = im.get("src") or ""
+            alt = im.get("alt") or None
+            ihash = None
+            try:
+                if src and not src.startswith("data:"):
+                    p = (base_path.parent / src).resolve()
+                    if p.exists():
+                        with p.open("rb") as fh:
+                            chunk = fh.read(4096)
+                        h = hashlib.sha256(); h.update(chunk)
+                        ihash = h.hexdigest()
+            except Exception:
+                ihash = None
+            block = BaseBlock(
+                id=f"html-figure-{idx:04d}",
+                parent_id=None,
+                type=BlockType.FIGURE,
+                content={"title": None, "caption": alt, "image_path": src, "image_hash": ihash},
+                metadata=BlockMetadata(attributes={"source": "html_inline"}, confidence=0.5),
+            )
+            blocks.append(block)
 
     def _process_element(
         self,

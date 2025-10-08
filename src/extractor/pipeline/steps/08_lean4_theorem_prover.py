@@ -46,7 +46,9 @@ from extractor.pipeline.utils.diagnostics import (
     build_stage_timings,
     gpu_metrics_available,
 )
-from extractor.pipeline.utils.litellm_call import litellm_call
+import scillm
+from extractor.pipeline.utils.scillm_env import build_requests
+import inspect
 
 # Import what we need from lean4_prover
 from dataclasses import dataclass
@@ -180,7 +182,44 @@ async def identify_requirements_in_section(
             """
             ).strip()
 
-            # Prefer provider JSON mode, via shared litellm_call wrapper for consistency with other stages
+            # Prefer SciLLM built-in "certainly" (Lean4) when available
+            certain = getattr(scillm, "certainly", None)
+            if certain is not None:
+                try:
+                    payload = {
+                        "task": "extract_requirements",
+                        "section": {
+                            "id": section.get("id"),
+                            "title": section.get("title"),
+                            "text": reflowed_text,
+                        },
+                        "tables": tables,
+                        "timeout": 120,
+                    }
+                    # Try common async entrypoints first
+                    for mname in ("aextract_requirements", "arun", "acall"):
+                        fn = getattr(certain, mname, None)
+                        if fn and inspect.iscoroutinefunction(fn):
+                            resp = await fn(payload)  # type: ignore[misc]
+                            if isinstance(resp, dict):
+                                reqs = cast(List[Dict[str, Any]], resp.get("requirements", []))
+                                cons = cast(List[Dict[str, Any]], resp.get("table_constraints", []))
+                                return reqs, cons
+                    # Fallback to sync entrypoints under the semaphore
+                    for mname in ("extract_requirements", "run", "call"):
+                        fn = getattr(certain, mname, None)
+                        if callable(fn):
+                            loop = asyncio.get_event_loop()
+                            resp = await loop.run_in_executor(None, lambda: fn(payload))
+                            if isinstance(resp, dict):
+                                reqs = cast(List[Dict[str, Any]], resp.get("requirements", []))
+                                cons = cast(List[Dict[str, Any]], resp.get("table_constraints", []))
+                                return reqs, cons
+                except Exception:
+                    # Gracefully fall back to Router JSON prompt below
+                    pass
+
+            # Fallback path: Router JSON prompt (provider-agnostic)
             params: Dict[str, Any] = {
                 "model": LEAN4_MODEL,
                 "messages": [
@@ -193,47 +232,13 @@ async def identify_requirements_in_section(
             }
             if "gpt-5" not in (LEAN4_MODEL or "").lower():
                 params["temperature"] = 0.1
-            sid = os.getenv("LITELLM_SESSION_ID") or get_run_id()
-            results = await litellm_call(
-                [params],
-                wrap_json=False,
-                concurrency=1,
-                desc="Extract Requirements",
-                session_id=sid,
-                export="results",
-            )
-            r0 = results[0] if results else None
+            router = scillm.Router()
+            reqs = build_requests([params], json_object=True, timeout=120)
+            resps = await router.parallel_acompletions(reqs, max_concurrency=1)
             try:
-                from loguru import logger as _logger
-                if r0:
-                    _logger.info(f"lean4_requirements: model={r0.request.model} ok={r0.exception is None}")
+                content: Optional[str] = resps[0]["choices"][0]["message"]["content"] if resps else None
             except Exception:
-                pass
-            response = r0.content if r0 else ""
-            # Normalize response object/dict
-            content: Optional[str] = None
-            if isinstance(response, dict):
-                try:
-                    ch = response.get("choices") or []
-                    if ch:
-                        msg = ch[0].get("message") or {}
-                        content = msg.get("content")
-                except Exception:
-                    content = None
-            else:
-                ch_obj = getattr(response, "choices", None)
-                if ch_obj:
-                    try:
-                        ch0 = ch_obj[0]
-                        msg = getattr(ch0, "message", None)
-                        if msg is not None and getattr(msg, "content", None) is not None:
-                            content = msg.content  # type: ignore[attr-defined]
-                        else:
-                            txt = getattr(ch0, "text", None)
-                            if isinstance(txt, str):
-                                content = txt
-                    except Exception:
-                        content = None
+                content = None
             if not isinstance(content, str) or not content.strip():
                 logger.warning(
                     "Requirement extraction returned empty content; defaulting to empty lists."

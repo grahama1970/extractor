@@ -1,12 +1,10 @@
-import os
-import pytest
+from pathlib import Path
+import sys
 
-def pytest_ignore_collect(path, config):
-    p = str(path)
-    root = str(config.rootpath)
-    # Ignore legacy smokes and archived tests; live checks belong to scenarios/
-    if p.startswith(root + '/tests/smoke'):
-        return True
-    if p.startswith(root + '/tests/.archive'):
-        return True
-    return False
+
+# Ensure 'src' is importable for tests that import 'extractor.*'
+ROOT = Path(__file__).resolve().parents[1]
+SRC = ROOT / "src"
+if str(SRC) not in sys.path:
+    sys.path.insert(0, str(SRC))
+

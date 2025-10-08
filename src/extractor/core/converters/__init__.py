@@ -23,7 +23,8 @@ Example Usage:
 """
 
 import inspect
-from typing import Optional, List, Type
+import os
+from typing import Optional, List, Type, get_origin, get_args
 
 from pydantic import BaseModel
 
@@ -46,31 +47,79 @@ class BaseConverter:
         raise NotImplementedError
 
     def resolve_dependencies(self, cls):
-        init_signature = inspect.signature(cls.__init__)
-        parameters = init_signature.parameters
+        """Robust dependency resolver.
 
-        resolved_kwargs = {}
-        for param_name, param in parameters.items():
-            if param_name == "self":
-                continue
-            elif param_name == "config":
-                resolved_kwargs[param_name] = self.config
-            elif param_name == "llm_service":
-                resolved_kwargs[param_name] = self.llm_service
-            elif param.name in self.artifact_dict:
-                resolved_kwargs[param_name] = self.artifact_dict[param_name]
-            elif param.default != inspect.Parameter.empty:
-                resolved_kwargs[param_name] = param.default
-            elif param.kind == inspect.Parameter.VAR_KEYWORD:  # **kwargs
-                # Skip **kwargs parameters, they'll be handled by empty dict
-                continue
-            elif param.kind == inspect.Parameter.VAR_POSITIONAL:  # *args
-                # Skip *args parameters, they'll be handled by empty tuple
-                continue
-            else:
-                raise ValueError(f"Cannot resolve dependency for parameter: {param_name}")
+        - Pass through artifact_dict values even if None (for optional params).
+        - Consider parameter optional if it has a default or Optional/Union[..., None] annotation.
+        - Hard-fail only for required params missing from artifact_dict.
+        - On failure, print debug info when CONVERTER_DEBUG is set or config enables diagnostics.
+        """
+        sig = inspect.signature(cls.__init__)
+        params = sig.parameters
+        resolved = {}
+        missing_required: List[str] = []
+        artifact = getattr(self, "artifact_dict", {}) or {}
+        artifact_keys = set(artifact.keys())
 
-        return cls(**resolved_kwargs)
+        def _is_optional(p: inspect.Parameter) -> bool:
+            if p.default != inspect.Parameter.empty:
+                return True
+            ann = p.annotation
+            if ann is inspect._empty:
+                return False
+            origin = get_origin(ann)
+            # Optional[T]
+            if origin is Optional:
+                return True
+            # Union[..., None]
+            if origin is not None:
+                args = get_args(ann)
+                if any(a is type(None) for a in args):
+                    return True
+            return False
+
+        for name, p in params.items():
+            if name == "self":
+                continue
+            if name == "config":
+                resolved[name] = self.config
+                continue
+            if name == "llm_service":
+                resolved[name] = self.llm_service
+                continue
+            if name in artifact_keys:
+                # Honor provided artifact value (even None for optional params)
+                resolved[name] = artifact.get(name)
+                continue
+            if p.kind in (inspect.Parameter.VAR_KEYWORD, inspect.Parameter.VAR_POSITIONAL):
+                continue
+            if p.default != inspect.Parameter.empty:
+                resolved[name] = p.default
+                continue
+            if _is_optional(p):
+                resolved[name] = None
+                continue
+            # Required and missing
+            missing_required.append(name)
+
+        if missing_required:
+            debug = False
+            try:
+                debug = bool(os.getenv("CONVERTER_DEBUG")) or bool(getattr(self, "config", {}) or {}).get(
+                    "diagnostics_debug", False
+                )
+            except Exception:
+                debug = False
+            if debug:
+                print(
+                    f"[converter.resolve_dependencies] Missing for {cls.__name__}: {missing_required}; "
+                    f"artifact keys={sorted(artifact_keys)}"
+                )
+            raise ValueError(
+                f"Cannot resolve dependency for parameter(s): {', '.join(missing_required)} (class={cls.__name__})"
+            )
+
+        return cls(**resolved)
 
     def initialize_processors(
         self, processor_cls_lst: List[Type[BaseProcessor]]

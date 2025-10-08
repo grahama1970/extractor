@@ -1,0 +1,4 @@
+label	alias	remote	ok	latency_ms	status
+m1	openai/zai-org/GLM-4.5-Air	zai-org/GLM-4.5-Air	1	6048	ok
+m2	openai/zai-org/GLM-4.6-turbo	zai-org/GLM-4.6-turbo	0	137912	error: litellm.Timeout: APITimeoutError - Request timed out. Error_str: Request timed out.
+m3	openai/deepseek-ai/DeepSeek-R1	deepseek-ai/DeepSeek-R1	1	3398	ok

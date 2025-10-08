@@ -1,3 +1,5 @@
+import os
+import re
 import warnings
 from typing import Annotated, Dict, List
 
@@ -53,7 +55,6 @@ class SectionHeaderProcessor(BaseProcessor):
         heading_ranges = self.bucket_headings(flat_line_heights)
 
         for page in document.pages:
-            # Iterate children to grab all section headers
             for block in page.children:
                 if block.block_type not in self.block_types:
                     continue
@@ -63,9 +64,13 @@ class SectionHeaderProcessor(BaseProcessor):
                         if block_height >= min_height * self.height_tolerance:
                             block.heading_level = idx + 1
                             break
-
                 if block.heading_level is None:
                     block.heading_level = self.default_level
+                score = self._header_score(block, document)
+                try:
+                    setattr(block, "header_score", score)
+                except Exception:
+                    pass
 
     def bucket_headings(self, line_heights: List[float], num_levels=4):
         if len(line_heights) <= self.level_count:
@@ -106,3 +111,103 @@ class SectionHeaderProcessor(BaseProcessor):
         heading_ranges = sorted(heading_ranges, reverse=True)
 
         return heading_ranges
+
+
+    # ----------------------- helpers -----------------------
+    def _text(self, block, document: Document) -> str:
+        try:
+            if hasattr(block, "raw_text"):
+                t = block.raw_text(document)
+            else:
+                t = getattr(block, "text", "")
+            return (t or "").strip()
+        except Exception:
+            return (getattr(block, "text", "") or "").strip()
+
+    def _numbering_depth(self, t: str) -> int:
+        t = (t or "").strip()
+        if re.match(r"^\d+(?:[.\-]\d+)*(?:[.)])?\s+\S", t):
+            core = t.split()[0]
+            parts = re.split(r"[.\-]", re.sub(r"[.)]$", "", core))
+            return max(1, len([p for p in parts if p]))
+        if re.match(r"^[IVXLCDM]+[.)]?\s+\S", t):
+            return 1
+        return 0
+
+    def _is_all_caps(self, t: str) -> bool:
+        letters = [ch for ch in t if ch.isalpha()]
+        if not letters:
+            return False
+        return all(ch.isupper() for ch in letters)
+
+    def _is_bold(self, block, document: Document) -> bool:
+        try:
+            spans = block.contained_blocks(document, (BlockTypes.Span,))
+            if spans:
+                s0 = spans[0]
+                formats = getattr(s0, "formats", []) or []
+                if "bold" in formats:
+                    return True
+                fw = getattr(s0, "font_weight", None)
+                if fw is not None:
+                    try:
+                        if float(fw) >= 600:
+                            return True
+                    except Exception:
+                        pass
+                fname = getattr(s0, "font", "") or ""
+                if "bold" in fname.lower():
+                    return True
+        except Exception:
+            pass
+        return False
+
+    def _looks_sentence(self, t: str) -> bool:
+        t = (t or "").strip()
+        if not t:
+            return False
+        if re.match(r"^\d+(?:[.\-]\d+)*(?:[.)])?\s+\S", t) or re.match(r"^[IVXLCDM]+[.)]?\s+\S", t):
+            return False
+        words = t.split()
+        letters = [ch for ch in t if ch.isalpha()]
+        lower_ratio = (sum(ch.islower() for ch in letters) / len(letters)) if letters else 0.0
+        has_terminal = t.endswith('.') or t.endswith(';') or t.endswith('?')
+        common_verbs = {"is","are","was","were","be","been","being","has","have","had","can","could","should","may","might","will","shall","must","does","do","did"}
+        has_verb = any(w.lower().strip(',.;:!?') in common_verbs for w in words)
+        score = 0
+        if has_terminal:
+            score += 1
+        if len(words) >= 6:
+            score += 1
+        if lower_ratio >= 0.5:
+            score += 1
+        if has_verb:
+            score += 1
+        return score >= 2
+
+    def _header_score(self, block, document: Document) -> float:
+        t = self._text(block, document)
+        if not t:
+            return 0.0
+        score = 0.0
+        depth = self._numbering_depth(t)
+        if depth >= 1:
+            score += 0.35
+            if depth >= 2:
+                score += 0.10
+        if self._is_all_caps(t):
+            score += 0.25
+        if self._is_bold(block, document):
+            score += 0.15
+        try:
+            if getattr(block, "polygon", None) and getattr(block.polygon, "bbox", None):
+                _, y0, _, _ = block.polygon.bbox
+                if y0 <= 100:
+                    score += 0.10
+        except Exception:
+            pass
+        if t.endswith(':') and self._is_bold(block, document):
+            score -= 0.30
+        if self._looks_sentence(t):
+            score -= 0.40
+        return max(0.0, min(1.0, score))

@@ -21,6 +21,7 @@ from __future__ import annotations
 import hashlib
 import re
 from collections import defaultdict
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -38,6 +39,12 @@ from extractor.core.schema.unified_document import (
 
 
 _PARA_SPLIT_RE = re.compile(r"\n\s*\n+")
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[\.!?])\s{1,}(?=[A-Z0-9])")
+
+# Soft guardrails for very long paragraphs; configurable via env
+# Slightly more aggressive default splitting to improve retrieval and downstream
+# processing; configurable via env. Was 3200 previously.
+DEFAULT_MAX_PARAGRAPH_CHARS = int(os.environ.get("UNIFIED_MAX_PARAGRAPH_CHARS", "2400"))
 
 
 def _next_block_id(counter: List[int], prefix: str) -> str:
@@ -72,8 +79,35 @@ def _default_document_title(source_path: Optional[str], sections: Sequence[Dict[
 
 
 def _hash_source(source_path: Optional[str], fallback: str = "document") -> str:
+    """
+    Legacy path-based hash (md5 of path or fallback).
+    Retained for backward compatibility when a stable file hash
+    cannot be computed.
+    """
     basis = source_path or fallback
     return hashlib.md5(basis.encode("utf-8")).hexdigest()
+
+
+def _stable_file_hash(path: Optional[str]) -> Optional[str]:
+    """
+    Return a stable SHA256(file_bytes + size) hex digest for the clean PDF
+    (or other source). Returns None if file unreadable or path is None.
+    Designed for deterministic UnifiedDocument IDs across machines.
+    """
+    if not path:
+        return None
+    p = Path(path)
+    if not p.exists() or not p.is_file():
+        return None
+    try:
+        data = p.read_bytes()
+        size = p.stat().st_size
+        h = hashlib.sha256()
+        h.update(size.to_bytes(8, "little"))
+        h.update(data)
+        return h.hexdigest()
+    except Exception:
+        return None
 
 
 def _paragraphs_from_text(text: str) -> List[str]:
@@ -81,6 +115,33 @@ def _paragraphs_from_text(text: str) -> List[str]:
         return []
     candidates = _PARA_SPLIT_RE.split(text)
     return [segment.strip() for segment in candidates if segment.strip()]
+
+
+def _maybe_split_overlong(paragraph: str) -> List[str]:
+    """Split extremely long paragraphs on sentence boundaries to assist downstream consumers.
+
+    The intent is not to reflow aggressively, only to avoid pathological single-block payloads.
+    """
+    if not isinstance(paragraph, str) or len(paragraph) <= DEFAULT_MAX_PARAGRAPH_CHARS:
+        return [paragraph]
+    parts = _SENTENCE_SPLIT_RE.split(paragraph)
+    out: List[str] = []
+    buf: List[str] = []
+    total = 0
+    for s in parts:
+        s = (s or "").strip()
+        if not s:
+            continue
+        if total + len(s) > DEFAULT_MAX_PARAGRAPH_CHARS and buf:
+            out.append(" ".join(buf).strip())
+            buf = [s]
+            total = len(s)
+        else:
+            buf.append(s)
+            total += len(s)
+    if buf:
+        out.append(" ".join(buf).strip())
+    return out or [paragraph]
 
 
 def _table_from_section(
@@ -202,10 +263,26 @@ def _figure_block_from_section(
         },
     )
 
+    # Best-effort small content hash to allow dedupe without loading full file
+    image_path = figure.get("image_path")
+    img_hash = None
+    try:
+        if image_path:
+            p = Path(image_path)
+            if p.exists() and p.is_file():
+                with p.open("rb") as fh:
+                    chunk = fh.read(4096)
+                h = hashlib.sha256()
+                h.update(chunk)
+                img_hash = h.hexdigest()
+    except Exception:
+        img_hash = None
+
     content = {
         "title": figure.get("title"),
         "caption": figure.get("ai_description") or figure.get("caption"),
-        "image_path": figure.get("image_path"),
+        "image_path": image_path,
+        "image_hash": img_hash,
         "metadata": figure.get("metadata") or {},
     }
 
@@ -225,6 +302,7 @@ def build_unified_document_from_reflow(
     source_type: Optional[str | SourceType] = None,
     document_metadata: Optional[Dict[str, Any]] = None,
     document_title: Optional[str] = None,
+    pdf_file_path: Optional[str] = None,
 ) -> UnifiedDocument:
     """Convert Stage 07 ``reflowed_sections`` into a :class:`UnifiedDocument`.
 
@@ -244,18 +322,34 @@ def build_unified_document_from_reflow(
     """
 
     source_type_enum = _normalise_source_type(source_type)
+    normalization_notes: List[str] = []
     title = document_title or _default_document_title(source_path, sections)
-    document_id = _hash_source(source_path, fallback=title)
+    file_hash = _stable_file_hash(pdf_file_path or source_path)
+    if file_hash:
+        document_id = file_hash
+    else:
+        document_id = _hash_source(source_path, fallback=title)
 
     metadata = DocumentMetadata(
         title=title,
         format_metadata={
             "file_type": source_type_enum.value,
             "source_path": source_path,
+            "stable_file_hash": file_hash,
+            "id_basis": "file_hash" if file_hash else "path_hash",
+            "schema_version": "1.0.0",
         },
     )
     if document_metadata:
         metadata.format_metadata.update(document_metadata)
+    # Optional: mark deterministic mode for downstream consumers
+    try:
+        from extractor.pipeline.utils.mode import deterministic_mode
+
+        if deterministic_mode():
+            metadata.format_metadata["deterministic"] = True
+    except Exception:
+        pass
 
     block_counter = [0]
     blocks: List[BaseBlock] = []
@@ -285,6 +379,19 @@ def build_unified_document_from_reflow(
 
     stack: List[Tuple[int, HierarchyNode, str]] = [(0, root_node, root_block_id)]
     full_text_parts: List[str] = []
+
+    # Optional deterministic ordering safeguard on sections
+    try:
+        sections = sorted(
+            list(sections),
+            key=lambda s: (
+                int((s or {}).get("page_start") or 0),
+                int((s or {}).get("level") or 0),
+                str((s or {}).get("id") or ""),
+            ),
+        )
+    except Exception:
+        normalization_notes.append("section_order_fallback")
 
     for section in sections:
         if not isinstance(section, dict):
@@ -387,9 +494,48 @@ def build_unified_document_from_reflow(
             children_lookup[heading_block_id].append(para_block_id)
             full_text_parts.append(paragraph)
 
+        # Secondary segmentation for extremely long paragraphs
+        added_after_split: List[BaseBlock] = []
+        for b in list(blocks):
+            if (
+                b.parent_id == heading_block_id
+                and b.type == BlockType.PARAGRAPH
+                and isinstance(b.content, str)
+                and len(b.content) > DEFAULT_MAX_PARAGRAPH_CHARS
+            ):
+                segments = _maybe_split_overlong(b.content)
+                if len(segments) > 1:
+                    normalization_notes.append("paragraph_split")
+                    b.content = segments[0]
+                    for seg in segments[1:]:
+                        nb = BaseBlock(
+                            id=_next_block_id(block_counter, "para"),
+                            parent_id=heading_block_id,
+                            type=BlockType.PARAGRAPH,
+                            content=seg,
+                            metadata=b.metadata,
+                        )
+                        added_after_split.append(nb)
+                        children_lookup[heading_block_id].append(nb.id)
+                        full_text_parts.append(seg)
+        if added_after_split:
+            blocks.extend(added_after_split)
+
         # Tables
         tables = section.get("tables") or []
         if isinstance(tables, list):
+            # Defensive sort for determinism (env toggle allows disable)
+            if os.environ.get("UNIFIED_SORT_TABLES", "1").lower() in ("1","true","yes","y"):
+                try:
+                    tables = sorted(
+                        tables,
+                        key=lambda t: (
+                            int((t or {}).get("page_number") or (t or {}).get("page_index") or (section.get("page_start") or 0)),
+                            int((t or {}).get("table_index") or 0),
+                        ),
+                    )
+                except Exception:
+                    pass
             for table in tables:
                 if not isinstance(table, dict):
                     continue
@@ -422,6 +568,15 @@ def build_unified_document_from_reflow(
         block.children_ids = children_lookup.get(block.id, [])
 
     full_text = "\n\n".join(full_text_parts) if full_text_parts else None
+
+    if normalization_notes:
+        try:
+            fm = metadata.format_metadata or {}
+            notes = list(set((fm.get("normalization") or []) + normalization_notes))
+            fm["normalization"] = notes
+            metadata.format_metadata = fm
+        except Exception:
+            pass
 
     return UnifiedDocument(
         id=document_id,

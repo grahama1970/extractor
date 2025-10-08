@@ -66,14 +66,22 @@ def create_model_dict() -> Dict[str, Any]:
     """
     # Provide dummies for all predictors used by builders/processors
     artifacts: Dict[str, Any] = {"texify_model": _DummyTexifyModel()}
-    # Try real Surya predictors first
+    # Try real Surya predictors first (support both 'surya' and 'surya_ocr' namespaces)
     try:
-        from surya.detection import DetectionPredictor  # type: ignore
-        from surya.ocr_error import OCRErrorPredictor  # type: ignore
-        from surya.layout import LayoutPredictor  # type: ignore
-        from surya.recognition import RecognitionPredictor  # type: ignore
-        from surya.table_rec import TableRecPredictor  # type: ignore
+        try:
+            from surya.detection import DetectionPredictor  # type: ignore
+            from surya.ocr_error import OCRErrorPredictor  # type: ignore
+            from surya.layout import LayoutPredictor  # type: ignore
+            from surya.recognition import RecognitionPredictor  # type: ignore
+            from surya.table_rec import TableRecPredictor  # type: ignore
+        except Exception:
+            from surya_ocr.detection import DetectionPredictor  # type: ignore
+            from surya_ocr.ocr_error import OCRErrorPredictor  # type: ignore
+            from surya_ocr.layout import LayoutPredictor  # type: ignore
+            from surya_ocr.recognition import RecognitionPredictor  # type: ignore
+            from surya_ocr.table_rec import TableRecPredictor  # type: ignore
 
+        # Provide full predictor set (inline_detection_model intentionally None; still passed explicitly)
         artifacts.update(
             {
                 "detection_model": DetectionPredictor(),
@@ -88,9 +96,14 @@ def create_model_dict() -> Dict[str, Any]:
     except Exception:
         # Fall back to minimal dummies; pipeline can still proceed in offline mode
         try:
-            from surya.detection import DetectionPredictor  # type: ignore
-            from surya.ocr_error import OCRErrorPredictor  # type: ignore
-            from surya.layout import LayoutPredictor  # type: ignore
+            try:
+                from surya.detection import DetectionPredictor  # type: ignore
+                from surya.ocr_error import OCRErrorPredictor  # type: ignore
+                from surya.layout import LayoutPredictor  # type: ignore
+            except Exception:
+                from surya_ocr.detection import DetectionPredictor  # type: ignore
+                from surya_ocr.ocr_error import OCRErrorPredictor  # type: ignore
+                from surya_ocr.layout import LayoutPredictor  # type: ignore
             artifacts.update(
                 {
                     "detection_model": DetectionPredictor(),

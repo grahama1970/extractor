@@ -14,6 +14,7 @@ Key Features:
 """
 
 import os
+import re
 import sys
 import json
 from pathlib import Path
@@ -28,14 +29,7 @@ except ImportError:
     raise
 import pandas as pd
 
-try:
-    from camelot import io as camelot_io
-except ImportError:
-    print(
-        "Camelot is required for Stage 05 (table extraction). Please install camelot-py.",
-        file=sys.stderr,
-    )
-    raise
+camelot_io = None  # lazy import
 import typer
 from dotenv import load_dotenv, find_dotenv
 from loguru import logger
@@ -50,6 +44,12 @@ from extractor.pipeline.utils.diagnostics import (
     build_stage_timings,
     gpu_metrics_available,
 )
+from extractor.pipeline.utils.table_fusion import (
+    TableCandidate,
+    fuse_table_candidates,
+)
+from extractor.pipeline.utils.pipeline_event_logger import log_stage_event
+import hashlib
 
 # --- Initialization ---
 if not load_dotenv(find_dotenv()):
@@ -137,6 +137,20 @@ FRAGMENTATION_RETRY_THRESHOLD = max(
 )
 FRAGMENTATION_IMPROVEMENT_MIN = max(
     1, int(os.getenv("TABLE_FRAGMENTATION_MIN_IMPROVEMENT", 1))
+)
+
+# Optional: pdfplumber candidates (off by default)
+TABLE_PDFPLUMBER_ENABLED = os.getenv("TABLE_PDFPLUMBER_ENABLED", "0").lower() in (
+    "1",
+    "true",
+    "yes",
+    "y",
+)
+TABLE_PDFPLUMBER_ONLY_ON_FLAGGED = os.getenv("TABLE_PDFPLUMBER_ONLY_ON_FLAGGED", "1").lower() in (
+    "1",
+    "true",
+    "yes",
+    "y",
 )
 
 # --- Core Functions ---
@@ -241,7 +255,19 @@ def try_camelot_strategy(
 ) -> List[Any]:
     """Try a specific Camelot extraction strategy and record diagnostics on failure."""
     page_str = str(page_num + 1)  # Camelot uses 1-based page numbers
+    global camelot_io
     try:
+        if camelot_io is None:
+            try:
+                import camelot as camelot_mod  # type: ignore
+                camelot_io = camelot_mod
+            except Exception as _e:
+                # Try the backend import path if aliasing differs
+                try:
+                    from camelot import io as camelot_mod  # type: ignore
+                    camelot_io = camelot_mod
+                except Exception:
+                    raise RuntimeError(f"camelot import failed: {_e}")
         tables = camelot_io.read_pdf(  # type: ignore[attr-defined]
             str(pdf_path),
             pages=page_str,
@@ -608,87 +634,161 @@ def extract_tables_from_page(
         1 for info in page_tables.values() if info.get("quality_fallback")
     )
 
-    # Convert to output format: select exactly one best table per page
-    extracted_tables = []
-    table_idx = 0
+    # Optionally add pdfplumber candidates for difficult pages or when enabled globally
+    def _maybe_add_pdfplumber_candidates():
+        if not TABLE_PDFPLUMBER_ENABLED:
+            return
+        if TABLE_PDFPLUMBER_ONLY_ON_FLAGGED and not (fallback_applied_for_page or not page_tables):
+            return
+        try:
+            import pdfplumber  # type: ignore
+        except Exception:
+            return
+        try:
+            with pdfplumber.open(str(pdf_path)) as _pp:
+                if page_num >= len(_pp.pages):
+                    return
+                p = _pp.pages[page_num]
+                # Use built-in table finder for bbox-aware candidates
+                found = p.find_tables() or []
+                for tbl in found:
+                    try:
+                        data = tbl.extract() or []
+                        if not data or len(data) < 2 or len(data[0]) < 2:
+                            continue
+                        df = pd.DataFrame(data[1:], columns=data[0])
+                        if df.empty:
+                            continue
+                        # score + fragmentation on sanitized copy
+                        df_clean = df.map(sanitize_cell)
+                        sc = score_table(df_clean)
+                        if sc == 0:
+                            continue
+                        frag = fragmentation_score(df_clean)
+                        bx = tbl.bbox  # (x0, top, x1, bottom) in PDF coords
+                        bbox_q = _quantize_bbox((float(bx[0]), float(bx[1]), float(bx[2]), float(bx[3])))
+                        # Dedup against existing by IoU
+                        skip = False
+                        for existing_key in list(page_tables.keys()):
+                            if _iou(bbox_q, existing_key) >= 0.90:
+                                skip = True
+                                break
+                        if skip:
+                            continue
+                        class _SimpleTable:
+                            def __init__(self, frame):
+                                self.df = frame
+                        page_tables[bbox_q] = {
+                            "table": _SimpleTable(df_clean),
+                            "score": float(sc),
+                            "strategy": "pdfplumber",
+                            "fragmentation": int(frag),
+                            "history": [{"strategy": "pdfplumber", "fragmentation": int(frag), "score": float(sc)}],
+                            "quality_fallback": True,
+                        }
+                    except Exception:
+                        continue
+        except Exception:
+            return
+
+    _maybe_add_pdfplumber_candidates()
+
+    # Convert to output via fusion: build candidates from all page_tables
+    # Prepare page-level numeric tokens from original text (Phase 1 numeric recall mapping)
+    NUM_RE = re.compile(r"[+-]?(?:\d+\.\d+|\d+)")
+    try:
+        page_text_raw = pdf_doc[page_num].get_text("text")
+        page_original_nums = [m.group(0) for m in NUM_RE.finditer(page_text_raw or "")]
+    except Exception:
+        page_original_nums = []
+    extracted_tables: List[Dict[str, Any]] = []
     if page_tables:
-        best_key = min(
-            page_tables.keys(),
-            key=lambda k: (page_tables[k].get("fragmentation", 0), -float(page_tables[k]["score"] or 0.0)),
-        )
-        table_info = page_tables[best_key]
-        table = table_info["table"]
-
-        # Extract table image
-        bbox_tuple = getattr(table, "_bbox", None)
-        if not bbox_tuple and hasattr(table, "cells") and getattr(table, "cells"):
-            try:
-                xs = [c.x1 for c in table.cells] + [c.x2 for c in table.cells]
-                ys = [c.y1 for c in table.cells] + [c.y2 for c in table.cells]
-                bbox_tuple = (min(xs), min(ys), max(xs), max(ys))
-            except Exception:
-                bbox_tuple = None
-        img_path = (
-            extract_table_image(pdf_doc, page_num, bbox_tuple, output_dir, table_idx, diagnostics)
-            if bbox_tuple
-            else None
-        )
-
-        # Optionally coalesce repeated header rows mid-body before metrics
-        df = table.df
-        if TABLE_HEADER_COALESCE_ENABLED:
-            try:
-                df = coalesce_repeated_header_rows(df, TABLE_HEADER_REPEAT_MIN_MATCH)
-            except Exception as e:
-                logger.debug("Header coalesce failed; continuing")
+        candidates: List[TableCandidate] = []
+        for bbox_tuple, info in page_tables.items():
+            table = info["table"]
+            df = table.df
+            # Optional header coalesce before metrics
+            if TABLE_HEADER_COALESCE_ENABLED:
                 try:
-                    diagnostics.append(
-                        make_event(
-                            "05_table_extractor",
-                            "warning",
-                            "header_coalesce_failed",
-                            str(e),
-                            {"page_index": page_num, "table_idx": table_idx},
-                        )
-                    )
+                    df = coalesce_repeated_header_rows(df, TABLE_HEADER_REPEAT_MIN_MATCH)
                 except Exception:
                     pass
+            df_clean = df.map(sanitize_cell)
+            header_tokens = [str(x).strip() for x in df_clean.columns] if df_clean is not None else []
+            cand = TableCandidate(
+                strategy=info.get("strategy", "unknown"),
+                bbox=bbox_tuple,
+                df=df_clean.copy(),
+                raw_df=df.copy(),
+                fragmentation=int(info.get("fragmentation", 0) or 0),
+                score=float(info.get("score", 0.0) or 0.0),
+                page_index=page_num,
+                table_index=1,
+                header_row_tokens=header_tokens,
+                source_meta={"extraction_method": "camelot"},
+            )
+            candidates.append(cand)
 
-        df_clean = df.map(sanitize_cell)
-        fragmentation = fragmentation_score(df_clean)
-
-        # Build table data
-        table_data = {
-            "page_number": page_num + 1,
-            "page_index": page_num,
-            "table_index": table_idx + 1,
-            "bbox": list(bbox_tuple) if bbox_tuple else [],
-            "extraction_method": "camelot",
-            "strategy": table_info["strategy"],
-            "fragmentation_score": fragmentation,
-            "pandas_df_raw": df.to_dict("records"),
-            "pandas_df": df_clean.to_dict("records"),
-            "pandas_metrics": generate_pandas_metrics(df_clean),
-            "camelot_metrics": {
-                "accuracy": table.accuracy,
-                "whitespace": table.whitespace,
-                "order": table.order,
-            },
-            "score": table_info["score"],
-            "quality_fallback": bool(table_info.get("quality_fallback", False)),
-            "strategy_history": table_info.get("history", []),
-        }
-
-        if img_path:
-            # store path relative to results root (../.. from image_output)
+        fusion_res = fuse_table_candidates(candidates)
+        fused_table = fusion_res.table
+        if fused_table:
+            fused_table["table_index"] = 1
+            # Embed calibrator model version when available
             try:
-                table_data["table_image_path"] = str(
-                    Path(img_path).resolve().relative_to(output_dir.parent.parent.resolve())
-                )
+                mv = os.getenv("TABLE_CALIBRATOR_VERSION")
+                if mv:
+                    fused_table.setdefault("confidence", {}).setdefault("model_versions", {})["table_calibrator"] = mv
             except Exception:
-                table_data["table_image_path"] = img_path
-
-        extracted_tables.append(table_data)
+                pass
+            # Try to capture image for the fused bbox (optional)
+            try:
+                img_path = extract_table_image(
+                    pdf_doc,
+                    page_num,
+                    tuple(fused_table.get("bbox") or []),
+                    output_dir,
+                    0,
+                    diagnostics,
+                    custom_name=f"page_{page_num+1}_table_1.png",
+                ) if fused_table.get("bbox") else None
+                if img_path:
+                    try:
+                        fused_table["table_image_path"] = str(
+                            Path(img_path).resolve().relative_to(output_dir.parent.parent.resolve())
+                        )
+                    except Exception:
+                        fused_table["table_image_path"] = img_path
+            except Exception:
+                pass
+            # Compute simple numeric_recall and foreign_numeric_ratio at table level (Phase 1 mapping)
+            try:
+                def _extract_table_nums(tbl: Dict[str, Any]) -> List[str]:
+                    nums: List[str] = []
+                    for row in tbl.get("pandas_df", []):
+                        for cell in row.values():
+                            if cell is None:
+                                continue
+                            nums.extend([m.group(0) for m in NUM_RE.finditer(str(cell))])
+                    return nums
+                tnums = _extract_table_nums(fused_table)
+                if page_original_nums and tnums:
+                    shared = len(set(tnums) & set(page_original_nums))
+                    denom = len(set(page_original_nums))
+                    numeric_recall = round(shared / denom, 4) if denom > 0 else None
+                else:
+                    numeric_recall = None
+                foreign_numeric_ratio = None
+                if tnums:
+                    extras = len([n for n in set(tnums) if n not in set(page_original_nums)])
+                    foreign_numeric_ratio = round(extras / len(set(tnums)), 4)
+                rf = fused_table.setdefault("fusion", {}).setdefault("rank_features", {})
+                if numeric_recall is not None:
+                    rf["numeric_recall"] = numeric_recall
+                if foreign_numeric_ratio is not None:
+                    rf["foreign_numeric_ratio"] = foreign_numeric_ratio
+            except Exception:
+                pass
+            extracted_tables.append(fused_table)
 
     return extracted_tables, best_strategy, strategy_durations, page_metrics
 
@@ -775,6 +875,19 @@ def extract_all_tables(
         pdf_doc = fitz.open(str(pdf_path))
     except Exception as e:
         logger.error(f"Failed to open PDF {pdf_path}: {e}")
+        # Emit a minimal failed artifact for determinism
+        try:
+            output_dir.mkdir(parents=True, exist_ok=True)
+            (output_dir / "05_tables_failed.json").write_text(
+                json.dumps({
+                    "timestamp": datetime.now().isoformat(),
+                    "status": "Failed",
+                    "error": f"open_pdf: {str(e)}",
+                    "source_pdf": str(pdf_path)
+                }, indent=2)
+            )
+        except Exception:
+            pass
         return []
 
     try:
@@ -855,6 +968,10 @@ def run(
 ):
     """Extracts tables from the PDF and associates them with sections."""
     console.print(f"[green]Extracting tables based on sections in: {input_json.name}[/green]")
+    try:
+        log_stage_event("05_table_extractor", "start", input=str(input_json))
+    except Exception:
+        pass
     run_id = get_run_id()
     diagnostics = []
     errors_count = 0
@@ -1133,7 +1250,7 @@ def run(
                 diagnostics.append(
                     make_event(
                         "05_table_extractor",
-                        "warning",
+                        "debug",
                         "table_low_confidence",
                         "Filtered out low-confidence table",
                         {
@@ -1187,6 +1304,30 @@ def run(
                 t['caption'] = cap
                 t['title'] = cap
 
+    # --- Assign stable raw_table_id and optional normalized_label (e.g., table/4-1) ---
+    try:
+        import re as _re2
+    except Exception:
+        _re2 = re  # type: ignore
+    for t in filtered_tables:
+        # raw id based on page + index
+        try:
+            t["raw_table_id"] = f"rawtbl_p{int(t.get('page_index',0))}_i{int(t.get('table_index',0))}"
+        except Exception:
+            t["raw_table_id"] = None
+        # normalized label from title/caption if present
+        try:
+            lbl_src = t.get("title") or t.get("caption") or ""
+            if isinstance(lbl_src, str) and lbl_src.strip():
+                norm = _re2.sub(r"[‐‑–—−]", "-", lbl_src.strip())
+                m = _re2.search(r"(?i)\btable\s+(\d+(?:[-\.]\d+)*)", norm)
+                if m:
+                    num = m.group(1)
+                    num_norm = _re2.sub(r"[.\-]+", "-", num)
+                    t["normalized_label"] = f"table/{num_norm.lower()}"
+        except Exception:
+            pass
+
     # --- De-duplicate header rows accidentally included in body ---
     try:
         import pandas as pd
@@ -1215,6 +1356,19 @@ def run(
                 continue
 
     # --- Final Payload and Output ---
+    # Enforce deterministic ordering of tables for downstream reproducibility
+    try:
+        def _k(t: Dict[str, Any]):
+            bx = t.get("bbox") or [0, 0, 0, 0]
+            return (
+                int(t.get("page_index", 0)),
+                float(bx[1]) if len(bx) >= 2 else 0.0,
+                float(bx[0]) if len(bx) >= 1 else 0.0,
+            )
+        filtered_tables = sorted(filtered_tables, key=_k)
+    except Exception:
+        pass
+    # Deduplicated resource/timing aggregation
     try:
         samples = stop_resource_sampler(sampler) if sampler else []
         if samples:
@@ -1223,22 +1377,8 @@ def run(
         pass
     timings = build_stage_timings(stage_start_ts, t0)
     try:
-        for _k, _v in strategy_summary.items():
-            att = int(_v.get("attempts", 0) or 0)
-            if att > 0:
-                _v["avg_duration_ms"] = int(_v.get("total_duration_ms", 0) / att)
-        timings["strategy_durations"] = strategy_summary
-    except Exception:
-        pass
-    try:
-        samples = stop_resource_sampler(sampler) if sampler else []
-        if samples:
-            resources.setdefault("resource_samples", samples)
-    except Exception:
-        pass
-    timings = build_stage_timings(stage_start_ts, t0)
-    try:
-        for _k, _v in strategy_summary.items():
+        for _k in sorted(strategy_summary.keys()):
+            _v = strategy_summary[_k]
             att = int(_v.get("attempts", 0) or 0)
             if att > 0:
                 _v["avg_duration_ms"] = int(_v.get("total_duration_ms", 0) / att)
@@ -1253,10 +1393,33 @@ def run(
         }
     }
 
+    # Deterministic ordering of output tables
+    try:
+        filtered_tables = sorted(
+            filtered_tables,
+            key=lambda t: (int(t.get("page_index", 0)), int(t.get("table_index", 0)))
+        )
+    except Exception:
+        pass
+    # Structural hash for quick diffs
+    try:
+        h = hashlib.sha256()
+        for t in filtered_tables:
+            core = {
+                "p": t.get("page_index"),
+                "i": t.get("table_index"),
+                "shape": (t.get("pandas_metrics") or {}).get("shape"),
+                "frag": t.get("fragmentation_score") or t.get("fragmentation"),
+            }
+            h.update(json.dumps(core, sort_keys=True).encode("utf-8"))
+        tables_hash = h.hexdigest()
+    except Exception:
+        tables_hash = None
     result = {
         "timestamp": datetime.now().isoformat(),
         "source_json": str(input_json),
         "source_pdf": str(pdf_path),
+        "doc_id": None,  # populated below
         "status": "Completed",
         "table_count": len(filtered_tables),
         "tables": filtered_tables,
@@ -1267,6 +1430,7 @@ def run(
         "timings": timings,
         "resources": resources,
         "metrics": metrics_payload,
+        "tables_content_hash": tables_hash,
     }
 
     output_path = json_output_dir / "05_tables.json"
@@ -1276,6 +1440,59 @@ def run(
     console.print(
         f"✅ Table extraction complete. Saved {len(filtered_tables)} tables to: {output_path}"
     )
+
+    # Attach stable doc_id (basename__sha256first8) post-write for readers expecting it here too
+    try:
+        _raw = Path(pdf_path).read_bytes()
+        _h8 = hashlib.sha256(_raw).hexdigest()[:8]
+        _bn = "".join(ch if ch.isalnum() else "_" for ch in Path(pdf_path).stem.lower()).strip("_")
+        result["doc_id"] = f"{_bn}__{_h8}"
+        with open(output_path, "w") as f:
+            json.dump(result, f, indent=2, ensure_ascii=False)
+    except Exception:
+        pass
+    try:
+        log_stage_event("05_table_extractor", "end", tables=len(filtered_tables), content_hash=tables_hash, status="Completed")
+    except Exception:
+        pass
+    try:
+        pages = sorted({int(t.get("page_index", 0)) for t in filtered_tables})
+        logger.info(
+            "05:summary tables=%d pages=%d output_dir=%s",
+            len(filtered_tables),
+            len(pages),
+            json_output_dir,
+        )
+    except Exception:
+        pass
+
+    # Deterministic summary for diff-based QA (main run)
+    try:
+        from extractor.pipeline.utils.mode import deterministic_mode  # lazy import
+        det_items = [
+            {
+                "page": int(t.get("page_index", 0)),
+                "y0": round(float((t.get("bbox") or [0, 0, 0, 0])[1]), 2) if t.get("bbox") else 0.0,
+                "x0": round(float((t.get("bbox") or [0, 0, 0, 0])[0]), 2) if t.get("bbox") else 0.0,
+                "table_index": int(t.get("table_index", 0)),
+            }
+            for t in filtered_tables
+        ]
+        import hashlib as _h
+        h = _h.sha256()
+        for it in det_items:
+            h.update(f"{it['page']},{it['y0']:.2f},{it['x0']:.2f},{it['table_index']}".encode())
+        det = {
+            "version": 1,
+            "run_id": run_id,
+            "deterministic": bool(deterministic_mode()),
+            "count": len(filtered_tables),
+            "sorted": det_items,
+            "tables_content_hash": h.hexdigest(),
+        }
+        (json_output_dir / "deterministic.json").write_text(json.dumps(det, indent=2, ensure_ascii=False))
+    except Exception:
+        pass
 
 
 def debug_bundle(
@@ -1434,6 +1651,27 @@ def debug_bundle(
         json.dump(result, f, indent=2, ensure_ascii=False)
     console.print(f"[green]Debug bundle: saved {len(filtered_tables)} tables to {output_path}")
 
+    # Deterministic summary for quick diffing across runs
+    try:
+        det = {
+            "count": len(filtered_tables),
+            "sorted": [
+                {
+                    "page": int(t.get("page_index", 0)),
+                    "y0": float((t.get("bbox") or [0, 0, 0, 0])[1]) if t.get("bbox") else 0.0,
+                    "x0": float((t.get("bbox") or [0, 0, 0, 0])[0]) if t.get("bbox") else 0.0,
+                    "table_index": int(t.get("table_index", 0)),
+                    "image": t.get("table_image_path"),
+                }
+                for t in filtered_tables
+            ],
+        }
+        (json_output_dir / "deterministic.json").write_text(
+            json.dumps(det, indent=2, ensure_ascii=False)
+        )
+    except Exception:
+        pass
+
 
 def build_cli():
     import typer as _typer
@@ -1446,3 +1684,17 @@ def build_cli():
 
 if __name__ == "__main__":
     build_cli()()
+# Lazy-load camelot only when running actual extraction
+def _ensure_camelot() -> None:
+    global camelot_io
+    if camelot_io is not None:
+        return
+    try:
+        from camelot import io as _camelot_io  # type: ignore
+        camelot_io = _camelot_io
+    except Exception:
+        print(
+            "Camelot is required for Stage 05 (table extraction). Please install camelot-py.",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)

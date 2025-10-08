@@ -11,7 +11,8 @@ try:
 except Exception:
     _HAS_PIL = False
 
-from extractor.pipeline.utils.litellm_call import litellm_call
+import scillm
+from extractor.pipeline.utils.scillm_env import build_requests
 
 # Tiny 1x1 transparent PNG
 _TINY_PNG_B64 = (
@@ -108,29 +109,27 @@ async def preflight_vision_support(model: str, timeout_sec: int = 10) -> bool:
                 else image_part
             ),
         ]
-        params = {
-            "model": model,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": content_parts,
-                }
-            ],
-            "max_tokens": 32,
-            "timeout": timeout_sec,
-            "stream": False,
-        }
-        # We don't need parsed JSON, just a successful roundtrip
-        ret = await litellm_call([params], wrap_json=False, concurrency=1, desc="Vision Preflight", export="results")
-        r0 = ret[0] if ret else None
+        reqs = build_requests([
+            {
+                "model": model,
+                "messages": [{"role": "user", "content": content_parts}],
+            }
+        ], json_object=False, timeout=timeout_sec)
+        router = scillm.Router()
+        resps = await router.parallel_acompletions(reqs, max_concurrency=1)
+        r0 = resps[0] if resps else None
         try:
             from loguru import logger as _logger
-            if r0:
-                _logger.info(f"vision_preflight: model={r0.request.model} ok={r0.exception is None}")
+            if r0 and isinstance(r0, dict):
+                _logger.info("vision_preflight: ok=%s", True)
         except Exception:
             pass
-        # Consider an empty response as failure (some providers return empty on unsupported input)
-        if not r0 or not isinstance(r0.content, str) or not r0.content.strip():
+        # Consider an empty response as failure
+        try:
+            content = r0["choices"][0]["message"]["content"] if isinstance(r0, dict) else ""
+        except Exception:
+            content = ""
+        if not content or not isinstance(content, str) or not content.strip():
             raise RuntimeError("vision_preflight_empty_response")
         set_cached_vision_support(model, True)
         return True

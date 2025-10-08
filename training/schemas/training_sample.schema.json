@@ -1,0 +1,32 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "TrainingSample",
+  "type": "object",
+  "required": [
+    "sample_id",
+    "object_type",
+    "target",
+    "features",
+    "source_event_ids"
+  ],
+  "properties": {
+    "sample_id": { "type": "string" },
+    "object_type": {
+      "type": "string",
+      "enum": ["table", "section", "figure", "equation", "entity"]
+    },
+    "target": { "type": "integer", "minimum": 0, "maximum": 1 },
+    "aux_targets": { "type": "object" },
+    "features": { "type": "object" },
+    "doc_metadata": { "type": "object" },
+    "model_versions": { "type": "object" },
+    "features_hash": { "type": ["string", "null"] },
+    "source_event_ids": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1
+    }
+  },
+  "additionalProperties": true
+}
+
