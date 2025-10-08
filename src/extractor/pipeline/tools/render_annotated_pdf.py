@@ -189,6 +189,23 @@ def _add_label_tab(
         pass
     return fta
 
+
+def _add_link_annotation(page: "fitz.Page", rect: "fitz.Rect", target: Path) -> None:
+    """Add a link annotation pointing to an external target (file:// URI).
+
+    Uses insert_link when available; falls back silently if unsupported.
+    """
+    try:
+        uri = target.resolve().as_uri()
+        try:
+            # Modern API
+            page.insert_link({"from": rect, "uri": uri})
+        except Exception:
+            # Alternate API
+            page.add_link(rect=rect, uri=uri)  # type: ignore[attr-defined]
+    except Exception:
+        return
+
 def _rect_from(obj: Dict[str, Any]) -> Optional["fitz.Rect"]:
     bb = obj.get("bbox") or obj.get("original_rect") or obj.get("expanded_rect")
     if not isinstance(bb, (list, tuple)) or len(bb) != 4:
@@ -263,6 +280,11 @@ def from_blocks(
     label_off: bool = typer.Option(
         False, "--label-off/--label-on", help="Disable labels entirely"
     ),
+    verify_dir: Optional[Path] = typer.Option(
+        None,
+        "--verify-dir",
+        help="Optional Stage 05 verify dir; when set, add link annots for Table blocks to table_XXXX/view.html if exists.",
+    ),
 ):
     """Render overlays from Stage 02 blocks JSON onto the PDF."""
     data = json.loads(blocks_json.read_text())
@@ -291,6 +313,16 @@ def from_blocks(
                     _add_label(page, rect, text=label, color=color)
                 else:
                     _add_label_tab(page, rect, text=label, color=color, alpha=0.25)
+            # Optional: link table to verify view.html
+            try:
+                if verify_dir and isinstance(b.get("block_type"), str) and b.get("block_type").lower() == "table":
+                    tid = b.get("raw_table_id") or b.get("table_id")
+                    if isinstance(tid, str):
+                        candidate = verify_dir / tid.replace("rawtbl_", "table_") / "view.html"
+                        if candidate.exists():
+                            _add_link_annotation(page, rect, candidate)
+            except Exception:
+                pass
 
         out.parent.mkdir(parents=True, exist_ok=True)
         doc.save(str(out))

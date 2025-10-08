@@ -81,6 +81,7 @@ def create_model_dict() -> Dict[str, Any]:
             from surya_ocr.recognition import RecognitionPredictor  # type: ignore
             from surya_ocr.table_rec import TableRecPredictor  # type: ignore
 
+        # Provide full predictor set (inline_detection_model intentionally None; still passed explicitly)
         artifacts.update(
             {
                 "detection_model": DetectionPredictor(),

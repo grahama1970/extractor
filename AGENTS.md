@@ -426,6 +426,28 @@ References
 - If Marker predictors are unavailable or fail preflight, Stage‑02 must fail fast with a clear error. Do not silently degrade or substitute extractors.
 - Code, docs, and scripts must reflect this policy; any relaxation requires explicit user approval and a documented rationale.
 
+## Stage‑02 Acceptance (CI)
+
+Fail immediately if any of the following is true for a processed PDF:
+- `02_marker_extractor/02_error.json` exists, or
+- `02_marker_extractor/json_output/02_marker_blocks.json` is missing.
+
+Strict prototypes batch (local):
+
+```bash
+source .venv/bin/activate
+uv sync --extra accurate --extra scillm-snapshot
+OFFLINE_PDF_PREDICTORS=0 \
+uv run --active scripts/pipeline/run_and_annotate.py \
+  --glob "prototypes/tabbed/pdfs/*.pdf" \
+  --limit 0 --driver stages
+```
+
+Artifacts per document slug:
+- Annotated PDFs: `data/results/pipeline_multi/<slug>/annotated/*.pdf`
+- Table verify viewer: `data/results/pipeline_multi/<slug>/05_table_extractor/verify/index.html`
+- Self‑assessment: `data/results/pipeline_multi/<slug>/suspects.json`
+
 ---
 
 ## LLM Provider Sanity Check

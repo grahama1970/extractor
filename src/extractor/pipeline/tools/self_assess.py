@@ -67,6 +67,7 @@ def generate(
         help="Base results dir for a single PDF (e.g., data/results/pipeline_multi/<slug>)",
     ),
     out: Optional[Path] = typer.Option(None, "--out", help="Explicit output path for suspects.json"),
+    verify_dir: Optional[Path] = typer.Option(None, "--verify-dir", help="Optional table verification root (link view.html)"),
 ):
     s01 = base_dir / "01_annotation_processor" / "json_output" / "01_annotations.json"
     s02 = base_dir / "02_marker_extractor" / "json_output" / "02_marker_blocks.json"
@@ -89,6 +90,16 @@ def generate(
     blocks = (blks or {}).get("blocks", []) if isinstance(blks, dict) else []
     blk_count = len(blocks)
     susp_blocks = [b for b in blocks if isinstance(b, dict) and b.get("is_suspicious")]
+    coverage_ratio = round((blk_count / ann_count), 4) if ann_count else 0.0
+    suspicious_preview = [
+        {
+            "page": b.get("page_idx"),
+            "block_type": b.get("block_type"),
+            "id": b.get("block_id") or b.get("id"),
+            "text_snip": (b.get("text") or "")[:120],
+        }
+        for b in susp_blocks[:12]
+    ]
 
     # High-level counters and simple mismatches
     if blk_count == 0:
@@ -129,6 +140,26 @@ def generate(
                     block_id=b.get("block_id"),
                 )
             )
+    # Build table preview pointers
+    tables_preview: List[Dict[str, Any]] = []
+    try:
+        tables_json = (base_dir / "05_table_extractor" / "json_output" / "05_tables.json")
+        tdata = _load_json(tables_json) or {}
+        for t in (tdata.get("tables") or [])[:12]:
+            entry: Dict[str, Any] = {
+                "raw_table_id": t.get("raw_table_id"),
+                "page": t.get("page_index"),
+                "shape": (t.get("pandas_metrics") or {}).get("shape"),
+            }
+            tid = t.get("raw_table_id")
+            vroot = verify_dir or v05
+            if tid and vroot and vroot.exists():
+                candidate = vroot / str(tid).replace("rawtbl_", "table_") / "view.html"
+                if candidate.exists():
+                    entry["view_html"] = str(candidate)
+            tables_preview.append(entry)
+    except Exception:
+        pass
 
     # Write suspects.json
     payload = {
@@ -139,6 +170,10 @@ def generate(
             "stage02_suspicious_blocks": len(susp_blocks),
             "table_views": len(views),
         },
+        "coverage_ratio": coverage_ratio,
+        "suspicious_preview": suspicious_preview,
+        "tables_preview": tables_preview,
+        "stage02_empty": blk_count == 0,
         "suspects": [asdict(s) for s in suspects],
     }
     out_path = out or (base_dir / "suspects.json")
@@ -148,4 +183,3 @@ def generate(
 
 if __name__ == "__main__":  # pragma: no cover
     app()
-
