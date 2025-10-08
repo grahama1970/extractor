@@ -147,6 +147,43 @@ def build_ui_bundle(results_dir: Path, fail_soft: bool = True) -> None:
             "table_coverage": None,
             "gold_imported": False,
         }
+
+        # Derive suspicious ratio & warnings (non-fatal)
+        try:
+            suspicious_total = bundle["counts"].get("suspicious_total")
+            total_blocks = bundle["counts"].get("blocks") or 0
+            suspicious_ratio = (
+                (suspicious_total / total_blocks)
+                if (suspicious_total is not None and total_blocks)
+                else None
+            )
+            bundle["counts"]["suspicious_ratio"] = suspicious_ratio
+        except Exception:
+            suspicious_ratio = None
+        warnings = {}
+        if bundle.get("table_coverage") is not None:
+            try:
+                tc = float(bundle["table_coverage"])  # type: ignore
+                if tc < 0.9 and (bundle["counts"].get("tables") or 0) >= 3:
+                    warnings["low_table_coverage"] = round(tc, 4)
+            except Exception:
+                pass
+        try:
+            if suspicious_ratio is not None and suspicious_ratio > 0.25:
+                warnings["high_suspicious_ratio"] = round(suspicious_ratio, 4)
+        except Exception:
+            pass
+        if warnings:
+            bundle["warnings"] = warnings
+        # Optional concise log line for triage
+        try:
+            print(
+                f"[aggregate_for_ui] doc={doc_id} blocks={bundle['counts']['blocks']} "
+                f"susp_ratio={(round(suspicious_ratio,4) if suspicious_ratio is not None else 'na')} "
+                f"table_cov={(round(bundle['table_coverage'],4) if bundle['table_coverage'] is not None else 'na')}"
+            )
+        except Exception:
+            pass
         # Table coverage heuristic
         try:
             verify_root = rd / "05_table_extractor" / "verify"
