@@ -1,21 +1,27 @@
 """
 Structural Pass (Stage 07 Core)
-==============================
+===============================
 
 Deterministic, offline transformation:
   - Load Stage 04 sections, Stage 05 tables, Stage 06 figures, optional annotations.
   - Merge raw text blocks into paragraph blocks (hard-wrap to a max char budget).
   - Normalize table shapes (ensure pandas_df list[dict] when rows/columns present).
+  - (Optional) Score & merge obvious multi-page / fragmented tables (configurable modes).
   - Attach figures pass-through.
-  - Provide a stable reflowed_text per section and basic metrics.
+  - Provide stable reflowed_text + section/table hashes & merge diagnostics.
 
-Outputs a dict consumed by the Stage 07 orchestrator.
+Env Flags:
+  STAGE07_MAX_PARAGRAPH_CHARS          (int, default 800)
+  STAGE07_TABLE_MERGE_MODE             off|strict|assist|llm (default strict)
+  STAGE07_TABLE_MERGE_HARD             float (default 0.75)
+  STAGE07_TABLE_MERGE_SOFT             float (default 0.45)
+  STAGE07_TABLE_MERGE_MAX_ROWS         int (default 10000)
+
+Outputs: dict consumed by orchestrator.
 """
 
 from __future__ import annotations
-import os
-import json
-import hashlib
+import os, json, hashlib, math
 from pathlib import Path
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -108,6 +114,152 @@ def _canonicalize_table(table: Dict[str, Any]) -> Dict[str, Any]:
             table["pandas_df"] = pd_rows
     return table
 
+# ---------------- Table Merge Scoring ----------------
+
+def _table_header_similarity(t1: Dict[str, Any], t2: Dict[str, Any]) -> float:
+    import re
+    cols1 = (t1.get("pandas_metrics") or {}).get("columns") or t1.get("columns") or []
+    cols2 = (t2.get("pandas_metrics") or {}).get("columns") or t2.get("columns") or []
+    if not cols1 or not cols2:
+        return 0.0
+    n1 = {re.sub(r"\s+", " ", str(c)).lower() for c in cols1 if c}
+    n2 = {re.sub(r"\s+", " ", str(c)).lower() for c in cols2 if c}
+    inter = len(n1 & n2)
+    union = len(n1 | n2)
+    return float(inter / union) if union else 0.0
+
+def _table_iou_x(t1: Dict[str, Any], t2: Dict[str, Any]) -> float:
+    try:
+        ax0, _, ax1, _ = t1.get("bbox", [0,0,0,0])
+        bx0, _, bx1, _ = t2.get("bbox", [0,0,0,0])
+        inter = max(0.0, min(ax1, bx1) - max(ax0, bx0))
+        uni = max(ax1, bx1) - min(ax0, bx0)
+        return inter / uni if uni > 0 else 0.0
+    except Exception:
+        return 0.0
+
+def _rows_cols(t: Dict[str, Any]) -> tuple[int,int]:
+    pm = t.get("pandas_metrics") or {}
+    shape = pm.get("shape") or [0,0]
+    try:
+        return int(shape[0] or 0), int(shape[1] or 0)
+    except Exception:
+        return 0,0
+
+def _page_index(t: Dict[str, Any]) -> int:
+    try:
+        return int(t.get("page_index", t.get("page", 0)) or 0)
+    except Exception:
+        return 0
+
+def _score_pair(t1: Dict[str, Any], t2: Dict[str, Any]) -> tuple[float, Dict[str, Any]]:
+    p1, p2 = _page_index(t1), _page_index(t2)
+    page_delta = p2 - p1
+    r1, c1 = _rows_cols(t1)
+    r2, c2 = _rows_cols(t2)
+    header_sim = _table_header_similarity(t1, t2)
+    iou_x = _table_iou_x(t1, t2)
+    role_score = 0.0
+    if (r1 <= 2 and r2 >= 2) or (r2 <= 2 and r1 >= 2):
+        role_score = 1.0
+    elif r1 >= 2 and r2 >= 2:
+        role_score = 0.6
+    page_prox = 1.0 if p1 == p2 else (0.5 if page_delta == 1 else 0.0)
+    score = (
+        0.40 * header_sim +
+        0.25 * iou_x +
+        0.20 * page_prox +
+        0.15 * role_score
+    )
+    features = {
+        "page_delta": page_delta,
+        "header_similarity": round(header_sim,4),
+        "iou_x": round(iou_x,4),
+        "row_pattern_score": role_score,
+        "r1": r1, "r2": r2, "c1": c1, "c2": c2
+    }
+    return round(score,4), features
+
+def _merge_tables_scored(section_id: str,
+                         tables: List[Dict[str, Any]],
+                         mode: str,
+                         hard: float,
+                         soft: float,
+                         max_rows_cap: int) -> tuple[List[Dict[str, Any]], List[Dict[str,Any]], List[Dict[str,Any]]]:
+    """
+    Returns (final_tables, auto_merged_records, candidate_records)
+      auto_merged_records: scored pairs actually merged (strict mode)
+      candidate_records  : ambiguous pairs (score in [soft, hard)) or auto merges (for auditing)
+    Modes:
+      off    : no scoring / merging
+      strict : merge if score>=hard, mark ambiguous for soft<=score<hard
+      assist : never merge, collect ambiguous (soft<=score)
+      llm    : same as assist; later plugin adjudicates
+    """
+    if len(tables) <= 1 or mode == "off":
+        return tables, [], []
+    # Sort by page, then table_index
+    def _key(t): return (_page_index(t), int(t.get("table_index",0) or 0))
+    working = sorted(tables, key=_key)
+    auto_merged: List[Dict[str, Any]] = []
+    candidates: List[Dict[str, Any]] = []
+    i = 0
+    while i < len(working) - 1:
+        t1, t2 = working[i], working[i+1]
+        score, feats = _score_pair(t1, t2)
+        decision = "reject"
+        if score >= hard:
+            decision = "auto_merge" if mode == "strict" else "ambiguous"
+        elif score >= soft:
+            decision = "ambiguous"
+        record = {
+            "section_id": section_id,
+            "t1_index": i,
+            "t2_index": i+1,
+            "score": score,
+            "decision": decision,
+            "features": feats,
+            "orig_table_index_t1": t1.get("table_index"),
+            "orig_table_index_t2": t2.get("table_index"),
+        }
+        if decision in {"auto_merge","ambiguous"}:
+            candidates.append(record)
+        if decision == "auto_merge":
+            # Attempt merge
+            r1, c1 = _rows_cols(t1)
+            r2, c2 = _rows_cols(t2)
+            df1 = t1.get("pandas_df") or []
+            df2 = t2.get("pandas_df") or []
+            if c1 == c2 and c1 > 0:
+                if (r1 <= 2 and r2 >= 2) and df1 and df2:
+                    # header adoption case
+                    if isinstance(df1[0], dict) and isinstance(df2[0], dict):
+                        hdr_vals = list(df1[0].values())
+                        body_keys = list(df2[0].keys())
+                        if len(body_keys) == len(hdr_vals):
+                            new_cols = [str(v).strip() or f"col_{j}" for j,v in enumerate(hdr_vals)]
+                            new_body = []
+                            for row in df2:
+                                new_body.append({new_cols[idx]: row.get(body_keys[idx], "") for idx in range(len(new_cols))})
+                            t2["pandas_df"] = new_body
+                            t2.setdefault("pandas_metrics", {})["columns"] = new_cols
+                            auto_merged.append(record | {"merge_type":"header_body"})
+                            working.pop(i)  # drop header fragment, stay at same index
+                            continue
+                # body/body concat
+                if r1 >= 2 and r2 >= 2 and df1 and df2 and isinstance(df1[0], dict) and isinstance(df2[0], dict):
+                    keys1 = list(df1[0].keys()); keys2 = list(df2[0].keys())
+                    if keys1 == keys2:
+                        merged_rows = df1 + df2
+                        if len(merged_rows) <= max_rows_cap:
+                            t1["pandas_df"] = merged_rows
+                            t1.setdefault("pandas_metrics", {})["shape"] = [len(merged_rows), len(keys1)]
+                            auto_merged.append(record | {"merge_type":"body_body"})
+                            working.pop(i+1)
+                            continue
+        i += 1
+    return working, auto_merged, candidates
+
 
 def build_structural_reflow(
     *,
@@ -152,15 +304,55 @@ def build_structural_reflow(
         reflow_text = " ".join(p.get("text") for p in paras)
         total_chars_raw += len(raw_text)
         total_chars_reflow += len(reflow_text)
+        raw_tables = tables_by_sec.get(str(sid), [])
+        merge_mode = os.getenv("STAGE07_TABLE_MERGE_MODE", "strict").lower()
+        hard = float(os.getenv("STAGE07_TABLE_MERGE_HARD", "0.75"))
+        soft = float(os.getenv("STAGE07_TABLE_MERGE_SOFT", "0.45"))
+        max_rows_cap = int(os.getenv("STAGE07_TABLE_MERGE_MAX_ROWS", "10000"))
+        merged_tables, auto_records, cand_records = _merge_tables_scored(
+            str(sid), raw_tables, merge_mode, hard, soft, max_rows_cap
+        )
+        # Hash tables & enrich metadata
+        finalized_tables: List[Dict[str, Any]] = []
+        for t in merged_tables:
+            cols = (t.get("pandas_metrics") or {}).get("columns") or t.get("columns") or []
+            # preview hash (first 3 rows)
+            preview = []
+            for r in (t.get("pandas_df") or [])[:3]:
+                if isinstance(r, dict):
+                    preview.append([str(r.get(c,"")) for c in cols])
+            th = hashlib.sha256(json.dumps({"c": cols, "p": preview}, ensure_ascii=False).encode("utf-8")).hexdigest()
+            page_idx = _page_index(t)
+            t["page_span"] = [page_idx]
+            t["row_count"], t["col_count"] = len(t.get("pandas_df") or []), len(cols)
+            t["table_id"] = f"table/{page_idx}-{page_idx}-{th[:8]}"
+            t["table_hash"] = th
+            finalized_tables.append(t)
         out_sec = {
             "id": sid,
             "title": sec.get("title") or sec.get("display_title") or "Untitled",
             "blocks": paras,
-            "tables": tables_by_sec.get(str(sid), []),
+            "tables": finalized_tables,
             "figures": figures_by_sec.get(str(sid), []),
             "reflowed_text": reflow_text,
             "reflow_status": "structural_only" if summary_only else "structural_base",
+            "table_merge": {
+                "mode": merge_mode,
+                "auto_merged": auto_records,
+                "candidates": cand_records,
+                "thresholds": {"hard": hard, "soft": soft},
+            }
         }
+        # Section hash
+        try:
+            sh = hashlib.sha256()
+            for p in paras:
+                sh.update((p.get("text") or "").encode("utf-8","ignore"))
+            for t in finalized_tables:
+                sh.update((t.get("table_id") or "").encode("utf-8"))
+            out_sec["section_hash"] = sh.hexdigest()
+        except Exception:
+            out_sec["section_hash"] = None
         processed.append(out_sec)
 
     h = hashlib.sha256()
@@ -180,4 +372,3 @@ def build_structural_reflow(
         "run_id": datetime.now().strftime("%Y%m%d%H%M%S"),
         "hash": h.hexdigest(),
     }
-

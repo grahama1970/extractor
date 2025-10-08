@@ -50,11 +50,18 @@ class PipelineState:
 
 PluginFn = Callable[[PipelineState, Dict[str, Any]], PipelineState]
 PLUGIN_REGISTRY: Dict[str, PluginFn] = {}
+PLUGIN_VERSIONS: Dict[str, str] = {}
 
 
 def plugin(name: str):
     def _wrap(fn: PluginFn) -> PluginFn:
         PLUGIN_REGISTRY[name] = fn
+        # fingerprint (hash of source) for manifest reproducibility
+        try:
+            import inspect, hashlib as _h
+            PLUGIN_VERSIONS[name] = _h.sha256(inspect.getsource(fn).encode("utf-8")).hexdigest()[:8]
+        except Exception:
+            PLUGIN_VERSIONS[name] = "na"
         return fn
     return _wrap
 
@@ -206,6 +213,7 @@ def run(
     annotations: Optional[Path] = typer.Option(None, "--annotations", exists=True),
     output_dir: Path = typer.Option(Path("data/results/pipeline"), "-o"),
     summary_only: bool = typer.Option(False, "--summary-only"),
+    plugins: Optional[str] = typer.Option(None, "--plugins", help="Comma list overrides STAGE07_PLUGINS"),
 ):
     start_ts = time.monotonic()
     summary_only = summary_only or (os.getenv("SUMMARY_ONLY07", "").lower() in ("1", "true", "yes", "y"))
@@ -231,13 +239,18 @@ def run(
         run_id=struct_res.get("run_id", ""),
     )
 
-    plugin_env = os.getenv("STAGE07_PLUGINS", "").strip()
+    plugin_env = (plugins or os.getenv("STAGE07_PLUGINS", "")).strip()
     ordered_plugins: List[str] = []
     if not summary_only:
         if plugin_env:
             ordered_plugins = [p.strip() for p in plugin_env.split(",") if p.strip()]
         else:
-            ordered_plugins = ["table_titles", "figure_captions"]
+            # default minimal plugin chain
+            ordered_plugins = ["table_titles", "figure_captions", "cross_refs"]
+        # Insert LLM adjudicator if merge mode == llm and plugin not already listed
+        merge_mode = os.getenv("STAGE07_TABLE_MERGE_MODE","strict").lower()
+        if merge_mode == "llm" and "llm_table_merge_adjudicator" not in ordered_plugins:
+            ordered_plugins.append("llm_table_merge_adjudicator")
         if os.getenv("STAGE07_ENABLE_REQUIREMENTS", "1").lower() in {"1", "true", "yes", "y"} and "requirements" not in ordered_plugins:
             ordered_plugins.append("requirements")
 
@@ -269,6 +282,7 @@ def run(
         "hash": state.deterministic_hash,
         "summary_only": summary_only,
         "generated_at": datetime.now().isoformat(),
+        "plugin_versions": {p: PLUGIN_VERSIONS.get(p) for p in ordered_plugins},
     }
     (json_out / "07_reflow_manifest.json").write_text(json.dumps(manifest, indent=2))
 
@@ -308,7 +322,13 @@ def run(
             return issues
 
         issues = _validate_sections_shape(state)
-        (json_out / "07_reflow_validate.json").write_text(json.dumps({"issues": issues, "count": len(issues)}, indent=2))
+        plugin_timings = [d for d in state.diagnostics if d.get("plugin") and "elapsed_ms" in d]
+        (json_out / "07_reflow_validate.json").write_text(json.dumps({
+            "issues": issues,
+            "count": len(issues),
+            "plugin_versions": {p: PLUGIN_VERSIONS.get(p) for p in ordered_plugins},
+            "plugin_timings": plugin_timings,
+        }, indent=2))
 
     console.print(f"[green]Stage 07 complete[/green] -> {out_path}")
 
@@ -319,3 +339,19 @@ def build_cli():
 
 if __name__ == "__main__":
     app()
+@plugin("cross_refs")
+def plugin_cross_refs(state: PipelineState, ctx: Dict[str, Any]) -> PipelineState:
+    import re
+    tbl_pat = re.compile(r"\bTable\s+(\d+[-\.]?\d*)", re.IGNORECASE)
+    fig_pat = re.compile(r"\bFigure\s+(\d+[-\.]?\d*)", re.IGNORECASE)
+    for sec in state.sections:
+        refs = {"table":0, "figure":0}
+        for blk in sec.get("blocks", []):
+            if not isinstance(blk, dict):
+                continue
+            txt = (blk.get("text") or "")[:4000]
+            refs["table"] += len(tbl_pat.findall(txt))
+            refs["figure"] += len(fig_pat.findall(txt))
+        sec["cross_refs"] = refs
+    state.diagnostics.append({"plugin":"cross_refs","status":"ok"})
+    return state
