@@ -155,6 +155,27 @@ def _worker(pdf_str: str, q: "mp.Queue[Dict[str, Any]]"):
         blocks_local, presence = extract_blocks(Path(pdf_str))
         q.put({"ok": True, "blocks": blocks_local, "predictors": presence})
     except Exception as exc:
+        # Persist a structured error for parent to pick up
+        try:
+            import traceback as _tb
+            pdf_path = Path(pdf_str)
+            err_dir = Path(os.getenv("STAGE02_ERROR_DIR", str(pdf_path.parent)))
+            err_dir.mkdir(parents=True, exist_ok=True)
+            (err_dir / "02_error.json").write_text(
+                json.dumps(
+                    {
+                        "timestamp": datetime.now().isoformat(),
+                        "pdf": str(pdf_path),
+                        "error": str(exc),
+                        "where": "worker",
+                        "traceback": _tb.format_exc(),
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+            )
+        except Exception:
+            pass
         q.put({"ok": False, "error": str(exc)})
 
 
@@ -198,13 +219,78 @@ def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool
         logger.info("02:extract_blocks pdf=%s", pdf_path)
     except Exception:
         pass
-    converter = PdfConverter(
-        artifact_dict=models,
-        config=config,
-    )
+    try:
+        converter = PdfConverter(
+            artifact_dict=models,
+            config=config,
+        )
+    except Exception as exc:
+        try:
+            import traceback as _tb
+            err_payload = {
+                "timestamp": datetime.now().isoformat(),
+                "pdf": str(pdf_path),
+                "error": str(exc),
+                "where": "PdfConverter.__init__",
+                "traceback": _tb.format_exc(),
+                "predictors_present": predictor_presence,
+                "note": (
+                    "Stage 02 must use Marker internals only. "
+                    "No PyMuPDF/text heuristic fallback is allowed."
+                ),
+            }
+            err_dir = Path(os.getenv("STAGE02_ERROR_DIR", str(pdf_path.parent)))
+            err_dir.mkdir(parents=True, exist_ok=True)
+            (err_dir / "02_error.json").write_text(
+                json.dumps(err_payload, indent=2, ensure_ascii=False)
+            )
+        except Exception:
+            pass
+        try:
+            logger.exception("Stage 02 PdfConverter init failed: %s", exc)
+        except Exception:
+            pass
+        raise
 
     # Build the document (this creates and processes all blocks)
-    document = converter.build_document(str(pdf_path))
+    # Hardened with explicit diagnostics so DI/config errors are actionable.
+    try:
+        document = converter.build_document(str(pdf_path))
+    except Exception as exc:
+        # Write a rich error payload for faster triage (used by CI + batch runners)
+        try:
+            import traceback as _tb
+            err_payload = {
+                "timestamp": datetime.now().isoformat(),
+                "pdf": str(pdf_path),
+                "error": str(exc),
+                "traceback": _tb.format_exc(),
+                "predictors_present": predictor_presence,
+                "note": (
+                    "Stage 02 must use Marker internals only. "
+                    "No PyMuPDF/text heuristic fallback is allowed."
+                ),
+            }
+            # Default to pipeline results if available, else alongside the PDF
+            err_dir = (Path(os.getenv("STAGE02_ERROR_DIR", "")) or pdf_path.parent)
+            if not isinstance(err_dir, Path):
+                err_dir = Path(str(err_dir))
+            # Prefer stage output dir when run() sets it; otherwise create sibling
+            try:
+                err_dir.mkdir(parents=True, exist_ok=True)
+            except Exception:
+                pass
+            (Path(err_dir) / "02_error.json").write_text(
+                json.dumps(err_payload, indent=2, ensure_ascii=False)
+            )
+        except Exception:
+            pass
+        # Mirror to logger with backtrace
+        try:
+            logger.exception("Stage 02 build_document failed: %s", exc)
+        except Exception:
+            pass
+        raise
 
     # Optional: open PyMuPDF for span color extraction
     fitz_doc = None

@@ -50,11 +50,10 @@ def _slug(stem: str) -> str:
     return "".join(ch.lower() if ch.isalnum() else "_" for ch in stem).strip("_")
 
 
-def _run(cmd: List[str], env: Optional[dict] = None) -> None:
+def _run(cmd: List[str], env: Optional[dict] = None) -> int:
     print("+", " ".join(shlex.quote(c) for c in cmd))
     proc = subprocess.run(cmd, env=env)
-    if proc.returncode != 0:
-        raise SystemExit(proc.returncode)
+    return int(proc.returncode)
 
 
 @app.command()
@@ -63,6 +62,7 @@ def main(
     limit: int = typer.Option(3, help="Max PDFs to process (0=all)"),
     driver: str = typer.Option("stages", help="Driver: 'stages' (01→02) or 'run_all'", case_sensitive=False),
     # Stage 02 is strict-only by policy; env is forced accordingly
+    verify_tables: bool = typer.Option(True, help="Generate table verification bundles when tables exist"),
 ):
     pdfs = sorted(Path(p) for p in glob.glob(glob_pattern))
     if limit and len(pdfs) > limit:
@@ -97,7 +97,7 @@ def main(
             )
         else:
             # Strict Stage‑01 → Stage‑02
-            _run(
+            rc = _run(
                 [
                     "uv", "run", "--active", "python", "-m",
                     "extractor.pipeline.steps.01_annotation_processor", "run",
@@ -105,11 +105,16 @@ def main(
                 ],
                 env=env,
             )
+            if rc != 0:
+                print(f"Stage 01 failed for {pdf} (rc={rc}); continuing...")
+                # Continue to next PDF
+                results.append(RunResult(stem=stem, base=out_base, clean_pdf=None, blocks_json=None, stage01_json=None, ann_blocks_out=None, ann_stage01_out=None))
+                continue
             clean_candidates = sorted((out_base / "01_annotation_processor").glob("*_clean.pdf"))
             if not clean_candidates:
                 raise SystemExit(f"No clean PDF from Stage 01 for {pdf}")
             clean_pdf = clean_candidates[0]
-            _run(
+            rc = _run(
                 [
                     "uv", "run", "--active", "python", "-m",
                     "extractor.pipeline.steps.02_marker_extractor", "run",
@@ -117,6 +122,8 @@ def main(
                 ],
                 env=env,
             )
+            if rc != 0:
+                print(f"Stage 02 failed for {pdf} (rc={rc}); continuing to artifacts where possible…")
 
         # Locate artifacts
         stage01_dir = out_base / "01_annotation_processor"
@@ -133,6 +140,9 @@ def main(
         stage01_json = stage01_dir / "json_output" / "01_annotations.json"
         if not stage01_json.exists():
             stage01_json = None
+        tables_json = out_base / "05_table_extractor" / "json_output" / "05_tables.json"
+        if not tables_json.exists():
+            tables_json = None
 
         # Render annotated PDFs where possible
         ann_dir = out_base / "annotated"
@@ -154,6 +164,7 @@ def main(
                     str(blocks_json),
                     "--out",
                     str(ann_blocks_out),
+                    "--label-style", "tab",
                 ],
                 env=env,
             )
@@ -173,9 +184,31 @@ def main(
                     str(stage01_json),
                     "--out",
                     str(ann_stage01_out),
+                    "--label-style", "tab",
                 ],
                 env=env,
             )
+
+        # Table verification bundle
+        if verify_tables and clean_pdf and tables_json:
+            verify_dir = out_base / "05_table_extractor" / "verify"
+            _run(
+                [
+                    "uv", "run", "--active",
+                    "python", "-m", "extractor.pipeline.tools.table_verify",
+                    str(clean_pdf), str(tables_json), "-o", str(verify_dir),
+                ],
+                env=env,
+            )
+
+        # Self-assessment (best-effort)
+        try:
+            _run([
+                "uv", "run", "--active", "python", "-m",
+                "extractor.pipeline.tools.self_assess", str(out_base)
+            ], env=env)
+        except Exception:
+            pass
 
         results.append(
             RunResult(

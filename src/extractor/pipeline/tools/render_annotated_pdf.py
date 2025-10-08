@@ -257,6 +257,12 @@ def from_blocks(
     min_height: float = typer.Option(6.0, help="Minimum box height to draw (pt)"),
     style: str = typer.Option("both", help="Annotation style: stroke|fill|both"),
     fill_alpha: float = typer.Option(0.12, help="Fill opacity (0..1) when style includes fill"),
+    label_style: str = typer.Option(
+        "tab", help="Label style: tab|free"
+    ),
+    label_off: bool = typer.Option(
+        False, "--label-off/--label-on", help="Disable labels entirely"
+    ),
 ):
     """Render overlays from Stage 02 blocks JSON onto the PDF."""
     data = json.loads(blocks_json.read_text())
@@ -280,8 +286,11 @@ def from_blocks(
             use_fill = color if style in {"fill", "both"} else None
             use_alpha = fill_alpha if style in {"fill", "both"} else 1.0
             _add_rect_annot(page, rect, color=color, width=1.2, fill=use_fill, alpha=use_alpha)
-            # Default: tab label at upper-right for better visibility
-            _add_label_tab(page, rect, text=label, color=color, alpha=0.25)
+            if not label_off:
+                if label_style == "free":
+                    _add_label(page, rect, text=label, color=color)
+                else:
+                    _add_label_tab(page, rect, text=label, color=color, alpha=0.25)
 
         out.parent.mkdir(parents=True, exist_ok=True)
         doc.save(str(out))
@@ -295,6 +304,12 @@ def from_stage01(
     out: Path = typer.Option(..., "--out", help="Output annotated PDF path"),
     style: str = typer.Option("both", help="Annotation style: stroke|fill|both"),
     fill_alpha: float = typer.Option(0.12, help="Fill opacity (0..1) when style includes fill"),
+    label_style: str = typer.Option(
+        "tab", help="Label style: tab|free"
+    ),
+    label_off: bool = typer.Option(
+        False, "--label-off/--label-on", help="Disable labels entirely"
+    ),
 ):
     """Render overlays from Stage 01 annotations JSON (original/expanded rects)."""
     data = json.loads(stage01_json.read_text())
@@ -319,7 +334,11 @@ def from_stage01(
             use_fill = color if style in {"fill", "both"} else None
             use_alpha = fill_alpha if style in {"fill", "both"} else 1.0
             _add_rect_annot(page, rect, color=color, width=1.2, fill=use_fill, alpha=use_alpha)
-            _add_label_tab(page, rect, text=label, color=color, alpha=0.25)
+            if not label_off:
+                if label_style == "free":
+                    _add_label(page, rect, text=label, color=color)
+                else:
+                    _add_label_tab(page, rect, text=label, color=color, alpha=0.25)
 
         out.parent.mkdir(parents=True, exist_ok=True)
         doc.save(str(out))
