@@ -2165,7 +2165,7 @@ def run(
         False, "--summary-only", help="Emit merged_text snapshot without LLM calls."
     ),
     include_images: bool = typer.Option(
-        True, "--include-images/--no-include-images", help="Include images in LLM input"
+        False, "--include-images/--no-include-images", help="Include images in LLM input (default off for simple profile)"
     ),
     allow_fallback: bool = typer.Option(
         False,
@@ -2213,6 +2213,16 @@ def run(
                     {},
                 )
             )
+    except Exception:
+        pass
+
+    # --- Profile toggles (simple profile defaults) ---
+    try:
+        simple = os.getenv("PROFILE_SIMPLE", "").lower() in ("1", "true", "yes", "y")
+        if simple:
+            include_images = False
+            # ensure downstream helpers do not attach extra images by default
+            os.environ.setdefault("STAGE07_MAX_IMAGES", "0")
     except Exception:
         pass
 
