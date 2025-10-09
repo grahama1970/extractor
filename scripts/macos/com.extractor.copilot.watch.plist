@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.extractor.copilot.watch</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/open</string>
+    <string>-a</string>
+    <string>/Users/robert/automation/CopilotRunner.app</string>
+  </array>
+
+  <key>WatchPaths</key>
+  <array>
+    <string>/Users/robert/automation/copilot_prompt.txt</string>
+  </array>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/robert/automation/copilot_watch.out</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/robert/automation/copilot_watch.err</string>
+</dict>
+</plist>
