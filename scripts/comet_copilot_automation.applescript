@@ -2,144 +2,128 @@
 -- Usage (via osascript):
 --   osascript scripts/comet_copilot_automation.applescript "<prompt>" "Github Copilot" 30 "<optional_webhook_url>"
 
-on run argv
-    if (count of argv) < 1 then return "missing prompt"
-    set promptText to item 1 of argv
-    -- Support large prompts via file indirection: if arg starts with "FILE::", read from that POSIX path
+-- Revised run: ignore argv; use prompt/flags files under ~/automation
+global automationDir, promptFile, responseFile, doneFlag, errorFlag, tabFile
+
+on run
+    set homePOSIX to POSIX path of (path to home folder)
+    set automationDir to homePOSIX & "automation/"
+    set promptFile to automationDir & "copilot_prompt.txt"
+    set responseFile to automationDir & "copilot_response.txt"
+    set doneFlag to automationDir & "copilot_done.flag"
+    set errorFlag to automationDir & "copilot_error.flag"
+    set tabFile to automationDir & "copilot_tab.txt"
+
     try
-        if promptText starts with "FILE::" then
-            set fp to (text 7 thru -1 of promptText)
-            set f to POSIX file fp
-            set promptText to (read f)
-        end if
-    end try
-    set tabSub to "Github Copilot"
-    if (count of argv) ≥ 2 then set tabSub to item 2 of argv
-    set waitSec to 25
-    if (count of argv) ≥ 3 then try
-        set waitSec to (item 3 of argv) as integer
-    end try
-    set webhook to ""
-    if (count of argv) ≥ 4 then set webhook to item 4 of argv
+        do shell script "mkdir -p " & quoted form of automationDir & " ; rm -f " & quoted form of doneFlag & " " & quoted form of errorFlag & " " & quoted form of responseFile
 
+        set promptText to my readTextFile(promptFile)
+        if promptText is "" then error "Prompt file is empty: " & promptFile number -1703
+
+        set targetTab to "Github Copilot"
+        try
+            set maybeTab to my readTextFile(tabFile)
+            if (maybeTab as text) is not "" then set targetTab to (maybeTab as text)
+        end try
+
+        my focusCometTab(targetTab)
+        my injectPromptAndSubmit(promptText)
+        delay 0.2
+        tell application "System Events"
+            tell process "Comet"
+                keystroke "a" using {command down}
+                keystroke "c" using {command down}
+            end tell
+        end tell
+        set theResponse to (the clipboard as text)
+        my writeTextFile(responseFile, theResponse)
+        do shell script "printf '%s' " & quoted form of ("ok " & (do shell script "date -u +%FT%TZ")) & " > " & quoted form of doneFlag
+    on error errMsg number errNum
+        my writeTextFile(errorFlag, "Error " & errNum & ": " & errMsg)
+    end try
+end run
+
+-- helpers
+on readTextFile(p)
+    try
+        set f to POSIX file p
+        set h to open for access f
+        set t to read h as «class utf8»
+        close access h
+        return t
+    on error e number n
+        try
+            close access p
+        end try
+        error "Cannot read file: " & p & " (" & e & ")" number n
+    end try
+end readTextFile
+
+on writeTextFile(p, t)
+    set f to POSIX file p
+    set h to open for access f with write permission
+    set eof of h to 0
+    write t to h as «class utf8»
+    close access h
+end writeTextFile
+
+on focusCometTab(tabName)
     tell application "Comet" to activate
-    delay 0.3
-
     tell application "System Events"
-        if not (exists process "Comet") then return "Comet not running"
+        if not (exists process "Comet") then error "Comet not running" number -128
         tell process "Comet"
             set frontmost to true
             delay 0.2
-
-            my focus_tab_by_name(tabSub)
-            delay 0.2
-
-            if my paste_into_active(promptText) is false then
+            set win to front window
+            set tabElems to {}
+            try
+                set tabElems to (every UI element of win whose role description contains "tab")
+            end try
+            if (count of tabElems) is 0 then
                 try
-                    my paste_into_text_area(window 1, promptText)
+                    set tabElems to (every button of win whose role description contains "tab")
                 end try
             end if
-
-            -- submit
-            key code 36 -- Return
-
-            -- wait for response (best-effort; time-based)
-            my wait_seconds(waitSec)
-
-            -- copy response (best-effort): select-all + copy
-            keystroke "a" using {command down}
-            delay 0.1
-            keystroke "c" using {command down}
+            if (count of tabElems) > 0 then
+                repeat with te in tabElems
+                    try
+                        if (name of te as text) is equal to tabName then
+                            click te
+                            exit repeat
+                        end if
+                    end try
+                end repeat
+            end if
         end tell
     end tell
+end focusCometTab
 
-    if webhook is not "" then
-        try
-            set payload to do shell script "python3 - <<'PY'\nimport json,subprocess\nclip = subprocess.check_output(['pbpaste']).decode('utf-8','ignore')\nprint(json.dumps({'text': clip}))\nPY"
-            do shell script "curl -sS -X POST -H 'Content-Type: application/json' --data-binary @- " & quoted form of webhook & " <<'JSON'\n" & payload & "\nJSON"
-        end try
-    end if
-end run
-
-on wait_seconds(n)
-    try
-        delay n
-    end try
-end wait_seconds
-
-on paste_into_active(txt)
-    try
-        tell application "System Events" to keystroke "a" using {command down}
-        delay 0.05
-        set the clipboard to txt
-        tell application "System Events" to keystroke "v" using {command down}
-        return true
-    on error
-        return false
-    end try
-end paste_into_active
-
-on paste_into_text_area(win, txt)
-    tell application "System Events"
-        try
-            set tas to (every text area of win)
-        on error
-            set tas to {}
-        end try
-        repeat with ta in tas
-            try
-                set value of ta to txt
-                exit repeat
-            end try
-        end repeat
-    end tell
-end paste_into_text_area
-
-on focus_tab_by_name(targetSub)
+on injectPromptAndSubmit(promptText)
     tell application "System Events"
         tell process "Comet"
-            -- try tab group first
+            set frontmost to true
+            set win to front window
+            set targetTextArea to missing value
             try
-                ignoring case
-                    if (exists (tab group 1 of window 1)) then
-                        set tabs to (every radio button of tab group 1 of window 1 whose name contains targetSub)
-                        if (count of tabs) > 0 then
-                            click item 1 of tabs
-                            return
-                        end if
-                    end if
-                end ignoring
+                set targetTextArea to first UI element of win whose role is "AXTextArea"
             end try
-            -- try buttons
-            try
-                ignoring case
-                    set btns to (every button of window 1 whose name contains targetSub)
-                    if (count of btns) > 0 then
-                        click item 1 of btns
-                        return
-                    end if
-                end ignoring
-            end try
-            -- deep search and fallback cycling
-            set hit to my find_element_by_name(window 1, targetSub)
-            if hit is not missing value then
+            if targetTextArea is not missing value then
                 try
-                    click hit
-                    return
+                    set value of targetTextArea to promptText
+                on error
+                    set the clipboard to promptText
+                    keystroke "a" using {command down}
+                    keystroke "v" using {command down}
                 end try
+            else
+                set the clipboard to promptText
+                keystroke "a" using {command down}
+                keystroke "v" using {command down}
             end if
-            repeat 12 times
-                keystroke (ASCII character 29) using {command down, option down}
-                delay 0.25
-                ignoring case
-                    try
-                        if (name of window 1) contains targetSub then exit repeat
-                    end try
-                end ignoring
-            end repeat
+            key code 36
         end tell
     end tell
-end focus_tab_by_name
+end injectPromptAndSubmit
 
 on find_element_by_name(container, targetStr)
     tell application "System Events"
