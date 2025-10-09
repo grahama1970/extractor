@@ -13,10 +13,12 @@ if [[ -z "$REMOTE_HOST" || -z "$REMOTE_USER" ]]; then
 fi
 
 PLIST_LOCAL="scripts/macos/com.extractor.copilot.watch.plist"
-PLIST_REMOTE="\$HOME/Library/LaunchAgents/com.extractor.copilot.watch.plist"
+
+echo "[install] Ensuring LaunchAgents directory exists…"
+ssh ${SSH_OPTS} -tt "${REMOTE_USER}@${REMOTE_HOST}" 'mkdir -p "$HOME/Library/LaunchAgents"' </dev/null
 
 echo "[install] Copying LaunchAgent plist…"
-scp ${SSH_OPTS} -q "${PLIST_LOCAL}" "${REMOTE_USER}@${REMOTE_HOST}:Library/LaunchAgents/com.extractor.copilot.watch.plist"
+scp ${SSH_OPTS} -q "${PLIST_LOCAL}" "${REMOTE_USER}@${REMOTE_HOST}:~/Library/LaunchAgents/com.extractor.copilot.watch.plist"
 
 echo "[install] Loading agent (user domain)…"
 ssh ${SSH_OPTS} -tt "${REMOTE_USER}@${REMOTE_HOST}" \
@@ -24,4 +26,3 @@ ssh ${SSH_OPTS} -tt "${REMOTE_USER}@${REMOTE_HOST}" \
    launchctl load -w "$HOME/Library/LaunchAgents/com.extractor.copilot.watch.plist" || true'
 
 echo "[install] Done. To verify, touch the watched file: \n  printf %s Test > $HOME/automation/copilot_prompt.txt"
-

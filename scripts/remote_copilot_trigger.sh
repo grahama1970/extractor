@@ -57,6 +57,9 @@ else
 fi
 printf "%s" "$TAB_NAME" | ssh $SSH_OPTS -tt "$REMOTE_USER@$REMOTE_HOST" 'cat > "$HOME/automation/copilot_tab.txt"'
 
+# Touch to ensure WatchPaths notices change
+ssh $SSH_OPTS -tt "$REMOTE_USER@$REMOTE_HOST" 'touch "$HOME/automation/copilot_prompt.txt"' || true
+
 # Run it with arguments on the remote Mac
 # Note: we carefully quote arguments to preserve spaces
 echo "[remote] Launching CopilotRunner.app…" >&2

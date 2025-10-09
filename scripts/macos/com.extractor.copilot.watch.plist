@@ -7,9 +7,8 @@
 
   <key>ProgramArguments</key>
   <array>
-    <string>/usr/bin/open</string>
-    <string>-a</string>
-    <string>/Users/robert/automation/CopilotRunner.app</string>
+    <string>/usr/bin/osascript</string>
+    <string>/Users/robert/automation/comet_copilot_automation.applescript</string>
   </array>
 
   <key>WatchPaths</key>
