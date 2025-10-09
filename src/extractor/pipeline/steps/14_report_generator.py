@@ -345,6 +345,30 @@ def generate_content_summary(results: Dict[str, Any]) -> Dict[str, Any]:
 
     return content
 
+def _safe_json(path: Path) -> Dict[str, Any]:
+    try:
+        return json.loads(path.read_text())
+    except Exception:
+        return {}
+
+def _optional_metrics(results_dir: Path) -> Dict[str, Any]:
+    m = {}
+    try:
+        r07 = _safe_json(results_dir / "07_reflow_section" / "json_output" / "07_reflowed.json")
+        secs = r07.get("reflowed_sections") or r07.get("sections") or []
+        m["sketch_present_sections"] = sum(1 for s in secs if s.get("sketch_present") or s.get("layout_sketch"))
+        m["total_sections"] = len(secs)
+    except Exception:
+        pass
+    try:
+        r05 = _safe_json(results_dir / "05_table_extractor" / "json_output" / "05_tables.json")
+        tbls = r05.get("tables") or []
+        m["tables_with_llm_assist"] = sum(1 for t in tbls if t.get("llm_assist"))
+        m["total_tables"] = len(tbls)
+    except Exception:
+        pass
+    return m
+
 
 def generate_markdown_report(
     results: Dict[str, Any], stats: Dict[str, Any], content: Dict[str, Any]
@@ -541,6 +565,14 @@ async def generate_comprehensive_report(
             "description": "Comprehensive pipeline report including ArangoDB export status",
         },
     }
+
+    # Attach optional simple metrics (sketch/assist) before saving
+    try:
+        simple_metrics = _optional_metrics(output_dir)
+        if simple_metrics:
+            report.setdefault("optional_metrics", {}).update(simple_metrics)
+    except Exception:
+        pass
 
     # Save JSON reports
     # 1) Stage-specific canonical location for gold validation

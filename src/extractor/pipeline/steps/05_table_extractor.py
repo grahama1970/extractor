@@ -50,6 +50,8 @@ from extractor.pipeline.utils.diagnostics import (
     build_stage_timings,
     gpu_metrics_available,
 )
+from extractor.pipeline.utils.litellm_call import litellm_call
+
 
 # --- Initialization ---
 if not load_dotenv(find_dotenv()):
@@ -140,6 +142,110 @@ FRAGMENTATION_IMPROVEMENT_MIN = max(
 )
 
 # --- Core Functions ---
+
+def _stable_table_hash(table: Dict[str, Any]) -> str:
+    import hashlib
+    h = hashlib.sha256()
+    payload = {
+        "bbox": table.get("bbox"),
+        "cols": table.get("columns") or table.get("header") or [],
+        "shape": (table.get("pandas_metrics") or {}).get("shape") or [],
+    }
+    h.update(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8"))
+    return h.hexdigest()
+
+def _should_assist(table: Dict[str, Any]) -> bool:
+    pm = table.get("pandas_metrics") or {}
+    density = float(pm.get("data_density") or 0.0)
+    frag = int(table.get("fragmentation_score") or 0)
+    camel = table.get("camelot_metrics") or {}
+    acc = float(camel.get("accuracy") or 0.0) / 100.0
+    if frag >= int(os.getenv("TABLE_LLM_ASSIST_FRAG_MIN", "4")):
+        return True
+    if density <= float(os.getenv("TABLE_LLM_ASSIST_DENSITY_MAX", "0.25")):
+        return True
+    if acc and acc <= float(os.getenv("TABLE_LLM_ASSIST_ACCURACY_MAX", "0.55")):
+        return True
+    return False
+
+def _headers_from_table(t: Dict[str, Any]) -> List[str]:
+    if t.get("header"):
+        return [str(x) for x in t["header"]]
+    if t.get("columns"):
+        return [str(x) for x in t["columns"]]
+    rows = t.get("rows") or []
+    return [str(x) for x in (rows[0] if rows else [])]
+
+def _apply_headers(t: Dict[str, Any], headers: List[str]) -> None:
+    n = len(headers)
+    if t.get("header") and isinstance(t["header"], list) and len(t["header"]) == n:
+        t["header"] = headers
+    elif t.get("columns") and isinstance(t["columns"], list) and len(t["columns"]) == n:
+        t["columns"] = headers
+
+def _attach_llm_assist_headers(result: Dict[str, Any], stage_dir: Path) -> None:
+    sidecar = stage_dir / "05_tables_llm_assist.json"
+    try:
+        side_data = json.loads(sidecar.read_text()) if sidecar.exists() else {}
+    except Exception:
+        side_data = {}
+
+    model = os.getenv("TABLE_LLM_ASSIST_MODEL", os.getenv("LITELLM_MODEL", "gpt-4o-mini"))
+    tables = result.get("tables") or []
+    updated = 0
+    for t in tables:
+        try:
+            if not _should_assist(t):
+                continue
+            headers_in = _headers_from_table(t)
+            if not headers_in:
+                continue
+            table_hash = _stable_table_hash(t)
+            cache_key = f"assist:{table_hash}:{model}"
+            cached = side_data.get(cache_key)
+            if cached and isinstance(cached.get("headers"), list) and len(cached["headers"]) == len(headers_in):
+                t["llm_assist"] = {"model": model, "patch": cached}
+                _apply_headers(t, cached["headers"])
+                updated += 1
+                continue
+            # Build strict JSON prompt
+            system = (
+                "You are a strict normalizer for table column headers.\n"
+                "Rules: Do not invent, add, or reorder columns.\n"
+                "Return JSON: {\"headers\": [..]} with the same length as input.\n"
+            )
+            user = json.dumps({"headers_input": headers_in}, ensure_ascii=False)
+            params = {
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": [{"type": "text", "text": user}]},
+                ],
+                "temperature": 0,
+                "timeout": int(os.getenv("TABLE_LLM_ASSIST_TIMEOUT", "30")),
+                "max_tokens": int(os.getenv("TABLE_LLM_ASSIST_MAX_TOKENS", "256")),
+            }
+            resp = litellm_call([params], wrap_json=True, concurrency=1, desc="table_header_assist", export="results")
+            patch = resp[0].json if resp and getattr(resp[0], "json", None) else None
+            if not isinstance(patch, dict):
+                continue
+            new_headers = patch.get("headers")
+            if not isinstance(new_headers, list) or len(new_headers) != len(headers_in):
+                continue
+            # normalize whitespace
+            new_headers = [" ".join(str(h).split()) for h in new_headers]
+            t["llm_assist"] = {"model": model, "patch": {"headers": new_headers}}
+            _apply_headers(t, new_headers)
+            side_data[cache_key] = {"headers": new_headers}
+            updated += 1
+        except Exception:
+            continue
+
+    try:
+        if updated:
+            sidecar.write_text(json.dumps(side_data, ensure_ascii=False, indent=2))
+    except Exception:
+        pass
 
 
 def generate_pandas_metrics(df: pd.DataFrame) -> Dict[str, Any]:
@@ -1429,6 +1535,21 @@ def debug_bundle(
         "resources": resources,
         "metrics": metrics_payload,
     }
+    # Optional: LLM assist for headers (opt-in, deterministic schema)
+    try:
+        if os.getenv("TABLE_LLM_ASSIST", "0").lower() in ("1", "true", "yes", "y"):
+            _attach_llm_assist_headers(result, stage_output_dir)
+    except Exception as _assist_e:
+        diagnostics.append(
+            make_event(
+                "05_table_extractor",
+                "warning",
+                "llm_assist_failed",
+                str(_assist_e),
+                {},
+            )
+        )
+
     output_path = json_output_dir / "05_tables.json"
     with open(output_path, "w") as f:
         json.dump(result, f, indent=2, ensure_ascii=False)
