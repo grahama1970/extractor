@@ -5,6 +5,14 @@
 on run argv
     if (count of argv) < 1 then return "missing prompt"
     set promptText to item 1 of argv
+    -- Support large prompts via file indirection: if arg starts with "FILE::", read from that POSIX path
+    try
+        if promptText starts with "FILE::" then
+            set fp to (text 7 thru -1 of promptText)
+            set f to POSIX file fp
+            set promptText to (read f)
+        end if
+    end try
     set tabSub to "Github Copilot"
     if (count of argv) ≥ 2 then set tabSub to item 2 of argv
     set waitSec to 25
@@ -151,11 +159,10 @@ on find_element_by_name(container, targetStr)
                 if nm contains targetStr then
                     set isTabLike to false
                     try
-                        set rd to (role description of el) as text
+                        set isTabLike to ((role description of el as text) contains "tab")
                     on error
-                        set rd to ""
+                        -- keep default false
                     end try
-                    if rd contains "tab" then set isTabLike to true
                     try
                         if class of el is radio button then set isTabLike to true
                     end try
@@ -174,4 +181,3 @@ on find_element_by_name(container, targetStr)
         return preferred
     end tell
 end find_element_by_name
-
