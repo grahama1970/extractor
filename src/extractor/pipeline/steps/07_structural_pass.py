@@ -21,7 +21,7 @@ Outputs: dict consumed by orchestrator.
 """
 
 from __future__ import annotations
-import os, json, hashlib, math
+import os, json, hashlib, math, statistics
 from pathlib import Path
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -56,6 +56,10 @@ def _split_preserving_words(text: str, max_chars: int) -> List[str]:
 
 
 def _merge_text_blocks(blocks: List[Dict[str, Any]], max_para_chars: int) -> List[Dict[str, Any]]:
+    """
+    Existing naive merge (single flow) – used as fallback when multi-column
+    reordering is not triggered.
+    """
     paras: List[Dict[str, Any]] = []
     buf: List[str] = []
     pages: List[int] = []
@@ -208,10 +212,52 @@ def _merge_tables_scored(section_id: str,
         t1, t2 = working[i], working[i+1]
         score, feats = _score_pair(t1, t2)
         decision = "reject"
-        if score >= hard:
-            decision = "auto_merge" if mode == "strict" else "ambiguous"
-        elif score >= soft:
-            decision = "ambiguous"
+        # Safeguards: reject quickly if page gap >1 or column count mismatch
+        r1,c1 = _rows_cols(t1); r2,c2 = _rows_cols(t2)
+        if feats["page_delta"] > 1 or c1 != c2 or c1 < 1:
+            decision = "reject"
+        # Cap extreme row difference (heuristic)
+        elif max(r1,r2) > 0 and min(r1,r2) == 0:
+            decision = "reject"
+        else:
+            if score >= hard:
+                decision = "auto_merge" if mode == "strict" else "ambiguous"
+            elif score >= soft:
+                decision = "ambiguous"
+
+        # STRICT GUARDS (optional) — add negative features to further suppress false merges
+        if os.getenv("STAGE07_TABLE_MERGE_STRICT_GUARDS","1").lower() in {"1","true","yes","y"}:
+            try:
+                # Vertical gap penalty (if bboxes present)
+                y_gap_penalty = 0.0
+                b1 = t1.get("bbox"); b2 = t2.get("bbox")
+                if isinstance(b1, list) and isinstance(b2, list) and len(b1) == 4 and len(b2) == 4:
+                    # y0,y1 notion depends on coordinate space; assume bbox=[x0,y0,x1,y1] top<bottom
+                    top2 = b2[1]; bottom1 = b1[3]
+                    gap = max(0.0, top2 - bottom1)
+                    page_height = max(1.0, (b1[3]-b1[1]) + (b2[3]-b2[1]))  # crude surrogate
+                    if gap / page_height > 0.30:
+                        y_gap_penalty = 0.20
+                # Row disparity penalty
+                disparity_penalty = 0.0
+                if max(r1,r2) > 0 and min(r1,r2)/max(r1,r2) < 0.05:
+                    disparity_penalty = 0.15
+                # Too many short/generic column names (already accounted partially)
+                generic_penalty = 0.0
+                short_cols = 0
+                cols = (t1.get("pandas_metrics") or {}).get("columns") or t1.get("columns") or []
+                for c in cols:
+                    if isinstance(c,str) and len(c.strip()) <= 3:
+                        short_cols += 1
+                if cols and short_cols/len(cols) > 0.6:
+                    generic_penalty = 0.10
+                total_penalty = y_gap_penalty + disparity_penalty + generic_penalty
+                if decision != "reject" and total_penalty >= 0.25:
+                    # downgrade
+                    decision = "ambiguous" if decision == "auto_merge" else "reject"
+                    feats["strict_guard_penalty"] = round(total_penalty,3)
+            except Exception:
+                pass
         record = {
             "section_id": section_id,
             "t1_index": i,
@@ -228,6 +274,12 @@ def _merge_tables_scored(section_id: str,
             # Attempt merge
             r1, c1 = _rows_cols(t1)
             r2, c2 = _rows_cols(t2)
+            # Per-document cap (avoid cascade if heuristic goes wrong)
+            max_auto = int(os.getenv("STAGE07_TABLE_MERGE_MAX_AUTO","20"))
+            if len([m for m in auto_merged if m.get("merge_type")]) >= max_auto:
+                decision = "ambiguous"
+                i += 1
+                continue
             df1 = t1.get("pandas_df") or []
             df2 = t2.get("pandas_df") or []
             if c1 == c2 and c1 > 0:
@@ -259,6 +311,57 @@ def _merge_tables_scored(section_id: str,
                             continue
         i += 1
     return working, auto_merged, candidates
+
+# ---------------- Multi-Column Ordering (Heuristic) ----------------
+
+def _reorder_blocks_multicolumn(blocks: List[Dict[str,Any]]) -> tuple[List[Dict[str,Any]], bool]:
+    """
+    Detect & reorder multi-column layout by clustering x0 values.
+    Non-destructive: returns (possibly reordered_blocks, multi_column_detected).
+    Criteria:
+      - At least 2 clusters of x0 with separation > X threshold.
+      - Each cluster has >= MIN_BLOCKS (default 2).
+    Reordering: columns left->right; within each column sort by y0 ascending.
+    """
+    MIN_BLOCKS = 2
+    if not blocks:
+        return blocks, False
+    # Collect candidate textual blocks with bbox
+    coords = []
+    for b in blocks:
+        bb = b.get("bbox")
+        if isinstance(bb,list) and len(bb)==4:
+            coords.append((bb[0], bb[1], b))
+    if len(coords) < 4:
+        return blocks, False
+    # Simple gap clustering
+    gap_threshold = float(os.getenv("STAGE07_MULTICOLUMN_X_GAP","40"))
+    clusters: List[List[tuple]] = []
+    current: List[tuple] = []
+    prev_x = None
+    for trip in sorted(coords, key=lambda t: t[0]):
+        x = trip[0]
+        if prev_x is None or abs(x - prev_x) <= gap_threshold:
+            current.append(trip)
+        else:
+            clusters.append(current); current = [trip]
+        prev_x = x
+    if current:
+        clusters.append(current)
+    # Filter trivial clusters
+    clusters = [c for c in clusters if len(c) >= MIN_BLOCKS]
+    if len(clusters) < 2:
+        return blocks, False
+    # Reorder: left->right clusters, inside each by y
+    ordered = []
+    for col in sorted(clusters, key=lambda cl: min(t[0] for t in cl)):
+        col_sorted = sorted(col, key=lambda t: t[1])
+        ordered.extend([t[2] for t in col_sorted])
+    # Add any blocks lacking bbox or excluded
+    idset = {id(b) for b in ordered}
+    trailing = [b for b in blocks if id(b) not in idset]
+    ordered.extend(trailing)
+    return ordered, True
 
 
 def build_structural_reflow(
@@ -299,6 +402,12 @@ def build_structural_reflow(
             continue
         sid = sec.get("id") or sec.get("section_id") or f"sec_{len(processed)}"
         blocks = sec.get("blocks", [])
+        multi_ordered = False
+        if os.getenv("STAGE07_ENABLE_MULTICOLUMN","1").lower() in {"1","true","yes","y"}:
+            try:
+                blocks, multi_ordered = _reorder_blocks_multicolumn(blocks)
+            except Exception:
+                multi_ordered = False
         paras = _merge_text_blocks(blocks, max_para_chars)
         raw_text = " ".join((b.get("text") or "").strip() for b in blocks if (b.get("text") or "").strip())
         reflow_text = " ".join(p.get("text") for p in paras)
@@ -343,6 +452,8 @@ def build_structural_reflow(
                 "thresholds": {"hard": hard, "soft": soft},
             }
         }
+        if multi_ordered:
+            out_sec["multi_column_hint"] = True
         # Section hash
         try:
             sh = hashlib.sha256()

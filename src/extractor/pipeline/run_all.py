@@ -31,17 +31,47 @@ import typer
 from rich.console import Console
 
 from extractor.pipeline.utils.metrics_logger import log_metric
+try:
+    import psutil
+    _PSUTIL = True
+except Exception:
+    _PSUTIL = False
 from extractor.pipeline.tools.reqif_export import export_reqif
 from extractor.pipeline.utils.mode import deterministic_mode, init_deterministic_seeds
 
 console = Console()
 
 
+STAGE_METRICS: list[dict[str, Any]] = []
+
+def _rss_mb() -> float:
+    if _PSUTIL:
+        try:
+            return psutil.Process().memory_info().rss / (1024 * 1024)
+        except Exception:
+            return 0.0
+    try:
+        with open("/proc/self/statm") as f:
+            pages = int(f.read().split()[1])
+            return pages * (os.sysconf("SC_PAGE_SIZE") / (1024 * 1024))
+    except Exception:
+        return 0.0
+
+
 def _run(cmd: list[str], env: dict[str, str], stage_name: str) -> None:
     start = time.monotonic()
+    rss_before = _rss_mb()
     try:
         proc = subprocess.run(cmd, env=env)
         duration_ms = int((time.monotonic() - start) * 1000)
+        rss_after = _rss_mb()
+        STAGE_METRICS.append({
+            "stage": stage_name,
+            "duration_ms": duration_ms,
+            "rss_before_mb": round(rss_before, 2),
+            "rss_after_mb": round(rss_after, 2),
+            "rss_delta_mb": round(rss_after - rss_before, 2),
+        })
         if proc.returncode != 0:
             log_metric(
                 stage_name,
@@ -64,6 +94,15 @@ def _run(cmd: list[str], env: dict[str, str], stage_name: str) -> None:
     except Exception as exc:
         if "duration_ms" not in locals():
             duration_ms = int((time.monotonic() - start) * 1000)
+            rss_after = _rss_mb()
+            STAGE_METRICS.append({
+                "stage": stage_name,
+                "duration_ms": duration_ms,
+                "rss_before_mb": round(rss_before, 2),
+                "rss_after_mb": round(rss_after, 2),
+                "rss_delta_mb": round(rss_after - rss_before, 2),
+                "error": str(exc),
+            })
             log_metric(
                 stage_name,
                 {
@@ -592,13 +631,28 @@ def run_pipeline(
     reflow_json = results / stage07_name / "json_output" / "07_reflowed.json"
     manifest_file = results / stage07_name / "json_output" / "07_reflow_manifest.json"
     det_file = results / stage07_name / "json_output" / "deterministic.json"
+    resume_token = results / stage07_name / "json_output" / "07_resume_token.json"
     skip07 = False
-    if resume and stage_completed(stage07_name, [reflow_json]) and manifest_file.exists() and det_file.exists():
+    if resume and stage_completed(stage07_name, [reflow_json]) and manifest_file.exists() and det_file.exists() and resume_token.exists():
         try:
             mf = json.loads(manifest_file.read_text())
             rf = json.loads(reflow_json.read_text())
-            if mf.get("hash") and mf.get("hash") == rf.get("deterministic_hash"):
-                skip07 = True
+            det = json.loads(det_file.read_text())
+            rt = json.loads(resume_token.read_text())
+            hash_ok = (mf.get("hash") == rf.get("deterministic_hash") == det.get("hash") == rt.get("hash"))
+            plugin_env = os.getenv("STAGE07_PLUGINS","" ).strip()
+            env_plugins = [p.strip() for p in plugin_env.split(",") if p.strip()] if plugin_env else mf.get("plugins", [])
+            plugins_ok = env_plugins == mf.get("plugins", [])
+            versions_ok = rt.get("plugin_versions") == det.get("plugin_versions", rt.get("plugin_versions"))
+            # mtime sanity: manifest <= reflow <= resume token, tolerating small skew
+            mt_reflow = reflow_json.stat().st_mtime
+            mt_manifest = manifest_file.stat().st_mtime
+            mt_det = det_file.stat().st_mtime
+            mt_token = resume_token.stat().st_mtime
+            mtime_ok = (mt_manifest <= mt_reflow <= mt_token) or (abs(mt_reflow - mt_manifest) < 2)
+            skip07 = hash_ok and plugins_ok and versions_ok and mtime_ok
+            if not skip07:
+                console.print(f"[yellow]Stage 07 resume mismatch (hash_ok={hash_ok}, plugins_ok={plugins_ok}, versions_ok={versions_ok}, mtime_ok={mtime_ok}) → re-running[/yellow]")
         except Exception:
             skip07 = False
     if skip07:
@@ -868,6 +922,16 @@ def run_pipeline(
 
     # Final friendly line
     print("\nAll stages completed. Final report:", final_md)
+    # Aggregate stage metrics summary
+    try:
+        summary = {
+            "generated_at": datetime.now().isoformat(),
+            "total_duration_ms": int((time.monotonic() - pipeline_start) * 1000),
+            "stage_metrics": STAGE_METRICS,
+        }
+        (results / "run_all_summary.json").write_text(json.dumps(summary, indent=2))
+    except Exception:
+        pass
 
 
 if __name__ == "__main__":
@@ -1058,5 +1122,16 @@ if __name__ == "__main__":
             "results_dir": str(results),
         },
     )
+
+    # Aggregate stage metrics summary
+    try:
+        summary = {
+            "generated_at": datetime.now().isoformat(),
+            "total_duration_ms": int((time.monotonic() - pipeline_start) * 1000),
+            "stage_metrics": STAGE_METRICS,
+        }
+        (results / "run_all_summary.json").write_text(json.dumps(summary, indent=2))
+    except Exception:
+        pass
 
     # end run()

@@ -299,10 +299,29 @@ def run(
             "hash": state.deterministic_hash,
             "sections": len(state.sections),
             "plugins": ordered_plugins,
+            "plugin_versions": {p: PLUGIN_VERSIONS.get(p) for p in ordered_plugins},
         }
         (json_out / "deterministic.json").write_text(json.dumps(det_side, indent=2))
     except Exception as e:
         state.diagnostics.append({"phase": "deterministic_sidecar", "error": str(e)})
+
+    # Resume token (hash + plugins + versions + artifact sizes)
+    try:
+        sizes = {}
+        for fn in ["07_reflowed.json", "07_reflow_manifest.json", "deterministic.json"]:
+            fp = json_out / fn
+            if fp.exists():
+                sizes[fn] = fp.stat().st_size
+        resume_token = {
+            "hash": state.deterministic_hash,
+            "plugins": ordered_plugins,
+            "plugin_versions": {p: PLUGIN_VERSIONS.get(p) for p in ordered_plugins},
+            "sizes": sizes,
+            "generated_at": datetime.now().isoformat(),
+        }
+        (json_out / "07_resume_token.json").write_text(json.dumps(resume_token, indent=2))
+    except Exception as e:
+        state.diagnostics.append({"phase": "resume_token", "error": str(e)})
 
     # Optional schema validation artifact
     if os.getenv("STAGE07_VALIDATE", "0").lower() in {"1", "true", "yes", "y"}:
@@ -319,6 +338,20 @@ def run(
                         continue
                     if "text" not in b or "type" not in b:
                         issues.append({"section_index": idx, "block_index": b_i, "problem": "missing_text_or_type"})
+                # Table schema checks
+                for t_i, t in enumerate(s.get("tables", [])):
+                    if not isinstance(t, dict):
+                        issues.append({"section_index": idx, "table_index": t_i, "problem": "table_not_dict"})
+                        continue
+                    req_table = ["table_id", "table_hash", "row_count", "col_count", "page_span", "pandas_df"]
+                    miss_t = [k for k in req_table if k not in t]
+                    if miss_t:
+                        issues.append({
+                            "section_index": idx,
+                            "table_index": t_i,
+                            "problem": "missing_table_keys",
+                            "missing": miss_t,
+                        })
             return issues
 
         issues = _validate_sections_shape(state)
@@ -329,6 +362,8 @@ def run(
             "plugin_versions": {p: PLUGIN_VERSIONS.get(p) for p in ordered_plugins},
             "plugin_timings": plugin_timings,
         }, indent=2))
+        if issues:
+            (json_out / "07_reflow_schema_issues.json").write_text(json.dumps({"issues": issues}, indent=2))
 
     console.print(f"[green]Stage 07 complete[/green] -> {out_path}")
 
