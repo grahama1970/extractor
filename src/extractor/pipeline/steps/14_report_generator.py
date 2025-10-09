@@ -66,7 +66,7 @@ import sys
 import json
 import asyncio
 from pathlib import Path
-from typing import Dict, Optional, Any, Tuple
+from typing import Dict, Optional, Any, Tuple, List
 from datetime import datetime
 import hashlib
 
@@ -159,6 +159,41 @@ def load_results(pipeline_dir: Path) -> Dict[str, Any]:
     return results
 
 
+def _has_valid_ai_description(fig: Dict[str, Any]) -> bool:
+    """Return True when a figure has a non-error AI description."""
+    desc = (fig.get("ai_description") or "").strip()
+    if not desc:
+        return False
+    lower = desc.lower()
+    return not lower.startswith("error:")
+
+
+def _count_ocr_corrections(section: Dict[str, Any]) -> int:
+    """Count OCR corrections recorded on a reflowed section."""
+    corrections = section.get("ocr_corrections")
+    if isinstance(corrections, dict):
+        total = 0
+        for value in corrections.values():
+            if isinstance(value, (list, tuple, set)):
+                total += len(value)
+            elif value:
+                total += 1
+        return total
+    if isinstance(corrections, (list, tuple, set)):
+        return len(corrections)
+    if isinstance(corrections, int):
+        return corrections
+    return 0
+
+
+def _table_method_counts(tables: List[Dict[str, Any]]) -> Dict[str, int]:
+    counts: Dict[str, int] = {}
+    for table in tables:
+        method = str(table.get("extraction_method") or "unknown").lower()
+        counts[method] = counts.get(method, 0) + 1
+    return counts
+
+
 def calculate_pipeline_statistics(results: Dict[str, Any]) -> Dict[str, Any]:
     """Calculate overall pipeline statistics and stage durations."""
     a01 = results.get("01_annotation_processor", {})
@@ -195,21 +230,17 @@ def calculate_pipeline_statistics(results: Dict[str, Any]) -> Dict[str, Any]:
             "pandas_parseable": a05.get("table_count", 0),
             "extraction_methods": {},
             "average_quality": 0,
-            "camelot_success_rate": 1.0 if a05.get("table_count", 0) else 0.0,
+            "camelot_success_rate": 0.0,
         },
         "images": {
             "total": a06.get("figure_count", 0),
-            "with_descriptions": sum(1 for f in a06.get("figures", []) if f.get("ai_description")),
+            "with_descriptions": 0,
             "types": {"figure": a06.get("figure_count", 0)},
         },
         "reflow": {
-            "sections_reflowed": sum(
-                1 for s in a07.get("reflowed_sections", []) if s.get("reflow_status") == "success"
-            ),
+            "sections_reflowed": 0,
             "tables_merged": 0,
-            "ocr_corrections": sum(
-                len((s.get("ocr_corrections") or {})) for s in a07.get("reflowed_sections", [])
-            ),
+            "ocr_corrections": 0,
         },
         "arangodb": {
             "export_successful": True if a10 else False,
@@ -220,6 +251,61 @@ def calculate_pipeline_statistics(results: Dict[str, Any]) -> Dict[str, Any]:
         },
         "rtm": {"link_count": 0},
     }
+
+    # --- Table metrics enrichment ---
+    tables_data = a05.get("tables", []) if isinstance(a05.get("tables"), list) else []
+    if tables_data:
+        stats["tables"]["total_extracted"] = len(tables_data)
+        stats["tables"]["pandas_parseable"] = sum(
+            1 for table in tables_data if isinstance(table.get("pandas_df"), list)
+        )
+        method_counts = _table_method_counts(tables_data)
+        if method_counts:
+            stats["tables"]["extraction_methods"] = method_counts
+            camelot_tables = sum(count for name, count in method_counts.items() if "camelot" in name)
+            if stats["tables"]["total_extracted"]:
+                stats["tables"]["camelot_success_rate"] = camelot_tables / stats["tables"]["total_extracted"]
+        qualities = []
+        for table in tables_data:
+            frag = table.get("fragmentation_score")
+            if isinstance(frag, (int, float)):
+                qualities.append(1.0 / (1.0 + max(frag, 0)))
+        if qualities:
+            stats["tables"]["average_quality"] = sum(qualities) / len(qualities)
+
+    # --- Figure metrics enrichment ---
+    figures_data = a06.get("figures", []) if isinstance(a06.get("figures"), list) else []
+    if figures_data:
+        stats["images"]["with_descriptions"] = sum(
+            1 for fig in figures_data if _has_valid_ai_description(fig)
+        )
+
+    # --- Reflow metrics enrichment ---
+    reflow_sections = a07.get("reflowed_sections", []) if isinstance(a07.get("reflowed_sections"), list) else []
+
+    def _reflow_success(section: Dict[str, Any]) -> bool:
+        status = str(section.get("reflow_status") or "").lower()
+        if status in {"failed", "skipped", "skipped_missing"}:
+            return False
+        if (section.get("reflowed_text") or "").strip():
+            return True
+        return bool(section.get("blocks"))
+
+    if reflow_sections:
+        stats["reflow"]["sections_reflowed"] = sum(1 for sec in reflow_sections if _reflow_success(sec))
+        stats["reflow"]["tables_merged"] = sum(
+            len(((sec.get("table_merge") or {}).get("auto_merged") or [])) for sec in reflow_sections
+        )
+        stats["reflow"]["ocr_corrections"] = sum(_count_ocr_corrections(sec) for sec in reflow_sections)
+
+    # --- Graph metrics enrichment ---
+    a11 = results.get("11_arango_create_graph", {}) or {}
+    try:
+        edges_created = int(a11.get("edges_created") or 0)
+    except Exception:
+        edges_created = 0
+    if edges_created:
+        stats["arangodb"]["relationships_created"] = edges_created
 
     # Calculate quality score
     quality_factors = []
@@ -289,57 +375,83 @@ def calculate_pipeline_statistics(results: Dict[str, Any]) -> Dict[str, Any]:
 def generate_content_summary(results: Dict[str, Any]) -> Dict[str, Any]:
     """Generate summary of extracted content."""
 
-    # Get cleaned sections from Stage 07 (reflow)
-    sections = results.get("07_reflow_section", {}).get("reflowed_sections", [])
+    reflow_results = results.get("07_reflow_section", {}) or {}
+    sections = reflow_results.get("reflowed_sections", []) if isinstance(reflow_results.get("reflowed_sections"), list) else []
+    base_sections = results.get("04_section_builder", {}).get("sections", [])
+    section_meta: Dict[str, Dict[str, Any]] = {}
+    for meta in base_sections or []:
+        if isinstance(meta, dict):
+            sid = meta.get("id") or meta.get("section_id")
+            if sid is not None:
+                section_meta[str(sid)] = meta
 
-    # Build content hierarchy
     content = {"document_structure": [], "tables": [], "images": [], "key_sections": []}
 
-    # Process sections
+    section_title_map: Dict[str, str] = {}
     for section in sections:
+        if not isinstance(section, dict):
+            continue
+        section_id = section.get("id") or section.get("section_id")
+        section_id_str = str(section_id) if section_id is not None else ""
+        base = section_meta.get(section_id_str, {})
+        level = section.get("level") or base.get("level") or 1
+        tables = section.get("tables") or section.get("merged_tables") or []
+        text_blocks = section.get("blocks") or section.get("text_chunks") or []
+        if isinstance(text_blocks, list):
+            text_chunk_count = len(text_blocks)
+        else:
+            text_chunk_count = 0
+        status = str(section.get("reflow_status") or "").lower()
+        reflowed_flag = status not in {"failed", "skipped", "skipped_missing"}
         section_info = {
-            "title": section.get("title", "Untitled"),
-            "level": section.get("level", 1),
-            "reflowed": section.get("reflowed", False),
-            "text_chunks": len(section.get("text_chunks", [])),
-            "tables": len(section.get("merged_tables", [])),
-            "ocr_fixes": len(section.get("ocr_corrections", {})),
+            "title": section.get("title", base.get("title", "Untitled")),
+            "level": level,
+            "reflowed": reflowed_flag,
+            "text_chunks": text_chunk_count,
+            "tables": len(tables) if isinstance(tables, list) else 0,
+            "ocr_fixes": _count_ocr_corrections(section),
         }
-
         content["document_structure"].append(section_info)
+        if section_info["title"]:
+            key = section_id_str or section_info["title"]
+            section_title_map[key] = section_info["title"]
+        if level == 1 and section_info["title"]:
+            if section_info["title"] not in content["key_sections"]:
+                content["key_sections"].append(section_info["title"])
 
-        # Extract key sections (level 1)
-        if section.get("level") == 1:
-            content["key_sections"].append(section.get("title"))
+        if isinstance(tables, list):
+            for table in tables:
+                if not isinstance(table, dict):
+                    continue
+                pandas_shape = (table.get("pandas_metrics") or {}).get("shape") or [0, 0]
+                rows = table.get("row_count") or (pandas_shape[0] if isinstance(pandas_shape, list) and pandas_shape else 0)
+                cols = table.get("col_count") or (pandas_shape[1] if isinstance(pandas_shape, list) and len(pandas_shape) > 1 else 0)
+                table_title = table.get("title") or table.get("table_id") or "Table"
+                content["tables"].append(
+                    {
+                        "section": section_info["title"],
+                        "title": table_title,
+                        "rows": rows or 0,
+                        "columns": cols or 0,
+                    }
+                )
 
-        # Extract table info
-        for i, table in enumerate(section.get("merged_tables", [])):
-            table_titles = section.get("table_titles", [])
-            table_info = {
-                "section": section.get("title"),
-                "title": table_titles[i] if i < len(table_titles) else f"Table {i+1}",
-                "rows": table.get("rows", 0),
-                "columns": table.get("columns", 0),
-            }
-            content["tables"].append(table_info)
-
-    # Add image summaries
-    images = results.get("06_figure_extractor", {}).get("figures", [])
-    for img in images:
-        if img.get("ai_description"):
+    figures = results.get("06_figure_extractor", {}).get("figures", [])
+    if isinstance(figures, list):
+        for fig in figures:
+            if not isinstance(fig, dict) or not _has_valid_ai_description(fig):
+                continue
+            section_label = section_title_map.get(str(fig.get("section_id"))) or section_meta.get(str(fig.get("section_id")), {}).get("title")
+            caption = (fig.get("caption") or "").strip()
+            if not caption:
+                caption = (fig.get("ai_description") or "").strip()
+            if caption:
+                caption = caption if len(caption) <= 80 else caption[:77] + "..."
             content["images"].append(
                 {
-                    "section": img.get("section_title"),
-                    "type": (
-                        img.get("llm_description", "").split("Type:")[1].split("|")[0].strip()
-                        if "Type:" in img.get("llm_description", "")
-                        else "Unknown"
-                    ),
-                    "caption": (
-                        img.get("caption", "")[:50] + "..."
-                        if len(img.get("caption", "")) > 50
-                        else img.get("caption", "")
-                    ),
+                    "section": section_label,
+                    "type": "figure",
+                    "caption": caption,
                 }
             )
 
