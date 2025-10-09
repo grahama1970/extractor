@@ -38,6 +38,7 @@ try:
 except Exception:
     pass
 from extractor.core.schema import BlockTypes
+import subprocess
 from extractor.pipeline.utils.diagnostics import (
     start_resource_sampler,
     stop_resource_sampler,
@@ -71,6 +72,24 @@ def _worker(pdf_str: str, q: "mp.Queue[Dict[str, Any]]"):
         q.put({"ok": False, "error": str(exc)})
 
 
+def _fallback_simple_extract(pdf_path: Path, out_json: Path) -> List[Dict[str, Any]]:
+    """Fallback: call the bundled simple_marker_extract to produce blocks JSON."""
+    out_json.parent.mkdir(parents=True, exist_ok=True)
+    cmd = [
+        os.environ.get("PYTHON", "python"),
+        "-m",
+        "extractor.core.scripts.simple_marker_extract",
+        str(pdf_path),
+        str(out_json),
+    ]
+    try:
+        subprocess.run(cmd, check=True)
+        data = json.loads(out_json.read_text())
+        return data.get("blocks") or []
+    except Exception as e:
+        raise RuntimeError(f"Fallback simple extraction failed: {e}")
+
+
 def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool]]:
     """
     Return the native JSON list of blocks produced by Marker.
@@ -82,6 +101,11 @@ def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool
         from extractor.core.converters.pdf import PdfConverter
         from extractor.core.models import create_model_dict
     except Exception as e:
+        # If imports fail, attempt simple fallback if allowed
+        if os.getenv("STAGE02_ALLOW_SIMPLE", "1").lower() in ("1", "true", "yes", "y"):
+            tmp = Path(os.getenv("STAGE02_TMP", "/tmp")) / f"marker_simple_{uuid.uuid4().hex}.json"
+            blocks = _fallback_simple_extract(pdf_path, tmp)
+            return blocks, {}
         raise RuntimeError(
             "Marker internals unavailable. Ensure project-specific Marker modules are installed "
             "(extractor.core.converters/pdf and extractor.core.models)."
@@ -112,7 +136,15 @@ def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool
     )
 
     # Build the document (this creates and processes all blocks)
-    document = converter.build_document(str(pdf_path))
+    try:
+        document = converter.build_document(str(pdf_path))
+    except Exception as e:
+        # If predictor presence is weak and fallback is allowed, try simple extractor
+        if os.getenv("STAGE02_ALLOW_SIMPLE", "1").lower() in ("1", "true", "yes", "y"):
+            tmp = Path(os.getenv("STAGE02_TMP", "/tmp")) / f"marker_simple_{uuid.uuid4().hex}.json"
+            blocks = _fallback_simple_extract(pdf_path, tmp)
+            return blocks, predictor_presence
+        raise
 
     # Optional: open PyMuPDF for span color extraction
     fitz_doc = None
