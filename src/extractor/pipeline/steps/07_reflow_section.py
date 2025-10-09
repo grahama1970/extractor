@@ -204,6 +204,21 @@ def build_section_context_text(section: Dict[str, Any]) -> str:
     page_start = section.get("page_start")
     page_end = section.get("page_end")
     lines.append(f"Section: {title} (level {level}) pages {page_start}–{page_end}")
+    # If a deterministic layout sketch is present, include a compact summary
+    try:
+        sk = section.get("layout_sketch") or {}
+        if sk:
+            grid = sk.get("grid", 12)
+            elems = sk.get("elements") or []
+            text_n = sum(1 for e in elems if e.get("kind") == "text")
+            table_n = sum(1 for e in elems if e.get("kind") == "table")
+            figure_n = sum(1 for e in elems if e.get("kind") == "figure")
+            qs = (sk.get("quick_summary") or "").strip()
+            lines.append(f"LayoutSketch: grid={grid} text={text_n} tables={table_n} figures={figure_n}")
+            if qs:
+                lines.append(f"SketchSummary: {qs}")
+    except Exception:
+        pass
     # Include a concise JSON-like section summary to ground the LLM
     sec_num = section.get("metadata", {}).get("section_number") or section.get("section_number")
     sec_hash = section.get("metadata", {}).get("section_hash") or section.get("section_hash")
@@ -2248,6 +2263,31 @@ def run(
     sections_to_process = consolidate_data(
         sections_json, tables_json, figures_json, annotations_json
     )
+    # Attach layout sketches if available (06b step)
+    try:
+        sketches_path = output_dir / "06b_layout_sketcher" / "json_output" / "06b_layout_sketch.json"
+        if sketches_path.exists():
+            sk_map = json.loads(sketches_path.read_text()).get("sections", {})
+            sk_count = 0
+            for s in sections_to_process:
+                sid = str(s.get("id"))
+                sk = sk_map.get(sid)
+                if sk:
+                    s["layout_sketch"] = sk
+                    sk_count += 1
+            diagnostics.append(
+                make_event(
+                    "07_reflow_section",
+                    "info",
+                    "layout_sketch_attached",
+                    f"Attached sketches for {sk_count} sections",
+                    {},
+                )
+            )
+    except Exception as _e:
+        diagnostics.append(
+            make_event("07_reflow_section", "warning", "layout_sketch_missing", str(_e), {})
+        )
 
     # Optional: load or build FAISS index from Stage 01 annotations for similar text lookup
     ann_index = None
@@ -2342,7 +2382,7 @@ def run(
             processed_sections.append(sec_out)
     else:
 
-        async def run_tasks():
+        async def run_tasks_first():
             tasks = [
                 reflow_section_with_llm(
                     s,
@@ -2353,9 +2393,45 @@ def run(
                 )
                 for s in sections_to_process
             ]
-            return await tqdm_asyncio.gather(*tasks, desc="Reflowing Sections")
+            return await tqdm_asyncio.gather(*tasks, desc="Reflowing Sections (text-first)")
 
-        processed_sections = asyncio.run(run_tasks())
+        processed_sections = asyncio.run(run_tasks_first())
+
+        # Optional single-image retry when first pass is empty/invalid
+        try:
+            want_retry = os.getenv("STAGE07_SINGLE_IMAGE_RETRY", "1").lower() in ("1", "true", "yes", "y")
+        except Exception:
+            want_retry = True
+        if want_retry:
+            def _needs_retry(sec: Dict[str, Any]) -> bool:
+                txt = (sec.get("reflowed_text") or "").strip()
+                return len(txt) == 0
+
+            if any(_needs_retry(ps) for ps in processed_sections):
+                # Limit images to 1 and disable section/figure images for retry
+                os.environ["STAGE07_MAX_IMAGES"] = "1"
+                os.environ["ATTACH_SECTION_IMAGE"] = "0"
+                os.environ["STAGE07_INCLUDE_FIGURES"] = "0"
+
+                async def run_tasks_retry():
+                    tasks = []
+                    for idx, s in enumerate(sections_to_process):
+                        if _needs_retry(processed_sections[idx]):
+                            tasks.append(
+                                reflow_section_with_llm(
+                                    s,
+                                    output_dir,
+                                    include_images=True,
+                                    allow_fallback=allow_fallback,
+                                    llm_timeout=llm_timeout,
+                                )
+                            )
+                        else:
+                            # keep previous output
+                            tasks.append(asyncio.sleep(0.0, result=processed_sections[idx]))
+                    return await tqdm_asyncio.gather(*tasks, desc="Reflowing Sections (single-image retry)")
+
+                processed_sections = asyncio.run(run_tasks_retry())
     logger.debug(f"processed_sections_count={len(processed_sections)}")
 
     # --- Final Output ---
