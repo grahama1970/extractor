@@ -253,3 +253,8 @@ deprecated/
 /repos/
 /logs/
 /tmp/
+/artifacts/
+/memory/
+prototypes/tabbed/pdfs/
+prototypes/tabbed/screenshots/
+/screenshots/
