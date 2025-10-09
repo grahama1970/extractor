@@ -32,6 +32,7 @@ class SuspiciousHeaderFixer(BaseProcessor):
     # -----------------------------------------------------------------
     # Legitimate section titles that should *never* be demoted or flagged
     HEADER_WHITELIST: set[str] = {
+        "Formal Requirements",
         "Introduction",
         "Conclusion",
         "Discussion",
@@ -69,8 +70,9 @@ class SuspiciousHeaderFixer(BaseProcessor):
 
     # Strong patterns that indicate a legitimate header
     HEADER_PATTERNS = [
-        r"^\d+(?:\d+)*\s+\S+.*$",  # e.g., "1. Introduction", "2.1 Methods"
-        r"^[A-Z][A-Z0-9\s\-/&]+$",  # ALL-CAPS, e.g., "SYSTEM OVERVIEW"
+        r"^\d+(?:[.\-]\d+)*(?:[.)])?\s+\S.*$",   # 1, 1.1, 2-3, 3(a), 4.1.2."
+        r"^[IVXLCDM]+[.)]?\s+\S.*$",                # Roman numerals I., II, IV)"
+        r"^[A-Z][A-Z0-9\s\-/&]+$",                  # ALL-CAPS, e.g., SYSTEM OVERVIEW
     ]
 
     # -----------------------------------------------------------------
@@ -93,10 +95,13 @@ class SuspiciousHeaderFixer(BaseProcessor):
         for page in document.pages:
             # Operate on a copy of the children list to allow safe in-place modification
             children_list = list(page.children)
+            # Promote confident numeric/roman outlines to headers (before demotions)
+            self._promote_confident_headers(children_list, document)
             fixes += self._fix_split_headers(children_list, document, fitz_doc)
             fixes += self._demote_improper_headers_with_doc(children_list, document)
             flags += self._flag_suspicious_headers(children_list)
             fixes += self._merge_orphaned_tables(children_list)
+            fixes += self._demote_sentence_like_tables(children_list)
             # Update the page's children with the modified list
             page.children = children_list
 
@@ -152,6 +157,30 @@ class SuspiciousHeaderFixer(BaseProcessor):
             i += 1
         return count
 
+
+    def _promote_confident_headers(self, blocks: List[Block], document: Document) -> None:
+        import re as _re
+        def is_outline(txt: str) -> bool:
+            t=(txt or '').strip()
+            return bool(_re.match(r'^\d+(?:[.\-](?:\d+|[A-Za-z]+))*[.)]?\s+\S', t) or _re.match(r'^[IVXLCDM]+[.)]?\s+\S', t))
+        for b in blocks:
+            if b.block_type != BlockTypes.Text:
+                continue
+            t=(getattr(b,'text','') or '').strip()
+            if not t:
+                continue
+            if not is_outline(t):
+                continue
+            # do not promote labels or sentences
+            try:
+                if t.endswith(':') and self._is_bold(b, document):
+                    continue
+            except Exception:
+                pass
+            if self._looks_sentence(t):
+                continue
+            b.block_type = BlockTypes.SectionHeader
+
     def _demote_improper_headers_with_doc(self, blocks: List[Block], document: Document) -> int:
         """Demote SectionHeader blocks unless whitelisted or pattern-matched."""
         count = 0
@@ -181,6 +210,21 @@ class SuspiciousHeaderFixer(BaseProcessor):
             # If we have text, check if it's a confident header
             if text and self._is_confident_header(b):
                 continue
+            # Demote sentence-like lines (not headers)
+            if text and self._looks_sentence(text):
+                b.block_type = BlockTypes.Text
+                count += 1
+                continue
+
+            # Rule: Bold text ending with a colon is NOT a section header
+            try:
+                if text.endswith(":") and self._is_bold(b, document):
+                    b.block_type = BlockTypes.Text
+                    count += 1
+                    continue
+            except Exception:
+                pass
+
 
             # Check for obvious non-headers
             if text:
@@ -225,13 +269,16 @@ class SuspiciousHeaderFixer(BaseProcessor):
                         BlockTypes.Figure,
                         BlockTypes.Table,
                     }:
-                        is_suspicious = True
-                        reasons.append("preceded_by_header_figure_or_table")
+                        # Exempt stacked headings when both look like legitimate headers
+                        if not (prev_block.block_type == BlockTypes.SectionHeader and self._is_confident_header(prev_block) and self._is_confident_header(block)):
+                            is_suspicious = True
+                            reasons.append("preceded_by_header_figure_or_table")
 
                 # Rule 2: Header text ends in a period (but not ...), suggesting a sentence.
                 if text.endswith(".") and not text.endswith(".."):
-                    is_suspicious = True
-                    reasons.append("ends_with_period")
+                    if not any(__import__("re").fullmatch(p, text) for p in self.HEADER_PATTERNS):
+                        is_suspicious = True
+                        reasons.append("ends_with_period")
 
                 # Rule 3: The header is all lowercase. Very unusual for a section title.
                 if text and text.islower():
@@ -247,6 +294,82 @@ class SuspiciousHeaderFixer(BaseProcessor):
                         metadata={"patterns": reasons},
                     )
                     count += 1
+        return count
+
+
+    def _demote_sentence_like_tables(self, blocks: List[Block]) -> int:
+        """Demote tables that are clearly sentence-like text (not real tables)."""
+        count = 0
+        for b in blocks:
+            if b.block_type != BlockTypes.Table:
+                continue
+            t = (getattr(b, "text", "") or "").strip()
+            try:
+                if t and self._looks_sentence(t):
+                    b.block_type = BlockTypes.Text
+                    count += 1
+            except Exception:
+                pass
+        return count
+
+    def _table_sanity_score(self, t: str) -> float:
+        """Cheap score: lines/structure vs sentence-like patterns.
+        Returns 0..1; lower means likely not a real table.
+        """
+        try:
+            raw = (t or '').strip()
+            if not raw:
+                return 0.0
+            lines = [ln.strip() for ln in raw.splitlines() if ln.strip()]
+            nlines = len(lines)
+            # structural hints
+            sep_mark = sum(1 for ln in lines if ('|' in ln) or (ln.count('  ')>=2))
+            numeric_mark = sum(1 for ln in lines if any(ch.isdigit() for ch in ln))
+            # sentence-like penalty on first line
+            first = lines[0] if lines else raw
+            def looks_sentence(u: str) -> bool:
+                import re as _re
+                words = u.split()
+                letters = [ch for ch in u if ch.isalpha()]
+                lower_ratio = (sum(ch.islower() for ch in letters)/len(letters)) if letters else 0.0
+                has_term = u.endswith('.') or u.endswith(';') or u.endswith('?')
+                verbs = {'is','are','was','were','be','been','being','has','have','had','can','could','should','may','might','will','shall','must','does','do','did'}
+                has_verb = any(w.lower().strip(',.;:!?') in verbs for w in words)
+                return (has_term or has_verb) and (len(words)>=4 or lower_ratio>=0.5)
+            pen = 0.0
+            if looks_sentence(first): pen += 0.6
+            if nlines<=1: pen += 0.2
+            # structure score
+            struct = 0.0
+            if nlines>=2: struct += 0.3
+            if sep_mark>=1: struct += 0.3
+            if numeric_mark>=2: struct += 0.2
+            # final
+            sc = max(0.0, min(1.0, struct - pen + 0.5))
+            return sc
+        except Exception:
+            return 0.0
+
+    def _demote_sentence_like_tables(self, blocks: List[Block]) -> int:
+        """Demote tables that are clearly sentence-like or fail sanity score."""
+        count = 0
+        import os
+        try:
+            thr = float(os.getenv('STAGE02_TABLE_SCORE_MIN','0.6'))
+        except Exception:
+            thr = 0.6
+        for b in blocks:
+            if b.block_type != BlockTypes.Table:
+                continue
+            t = (getattr(b, 'text', '') or '').strip()
+            try:
+                if t:
+                    score = self._table_sanity_score(t)
+                    if score < thr:
+                        b.block_type = BlockTypes.Text
+                        count += 1
+            except Exception:
+                pass
         return count
 
     def _merge_orphaned_tables(self, blocks: List[Block]) -> int:
@@ -286,6 +409,31 @@ class SuspiciousHeaderFixer(BaseProcessor):
     # -----------------------------------------------------------------
     # Helper methods
     # -----------------------------------------------------------------
+    def _is_bold(self, b: Block, document: Document, fitz_doc=None) -> bool:
+        try:
+            spans = b.contained_blocks(document, (BlockTypes.Span,))
+            if spans:
+                s0 = spans[0]
+                formats = getattr(s0, "formats", []) or []
+                if "bold" in formats:
+                    return True
+                # Some providers expose font_weight or font name containing 'Bold'
+                fw = getattr(s0, "font_weight", None)
+                if fw is not None:
+                    try:
+                        if float(fw) >= 600:
+                            return True
+                    except Exception:
+                        pass
+                fname = getattr(s0, "font", "") or ""
+                if "bold" in fname.lower():
+                    return True
+        except Exception:
+            pass
+        # Fallback via PyMuPDF if available (best-effort)
+        # Not strictly required; return False by default
+        return False
+
     def _is_confident_header(self, b: Block) -> bool:
         """Checks if a block is a high-confidence header based on text content."""
         txt = getattr(b, "text", "").strip()
@@ -308,6 +456,57 @@ class SuspiciousHeaderFixer(BaseProcessor):
             return True
 
         return False
+
+    def _looks_sentence(self, txt: str) -> bool:
+        """Heuristic: a sentence-like line is not a section header.
+        Avoid heavyweight deps; use light cues and optional NLTK when available.
+        """
+        if not txt:
+            return False
+        t = (txt or '').strip()
+        # If it already matches confident header patterns, it's not a sentence here
+        import re as _re
+        for p in self.HEADER_PATTERNS:
+            try:
+                if _re.fullmatch(p, t):
+                    return False
+            except Exception:
+                pass
+        # Quick cues: terminal punctuation, length, lowercase ratio
+        if t.endswith('.') or t.endswith(';') or t.endswith('?'):
+            pass_mark = True
+        else:
+            pass_mark = False
+        words = t.split()
+        if len(words) >= 6:
+            pass_mark = True or pass_mark
+        # proportion of lowercase letters
+        letters = [ch for ch in t if ch.isalpha()]
+        lower_ratio = (sum(ch.islower() for ch in letters)/len(letters)) if letters else 0.0
+        if lower_ratio >= 0.5:
+            lower_mark = True
+        else:
+            lower_mark = False
+        # verb cue list (cheap)
+        VERBS = {'is','are','was','were','be','been','being','has','have','had','can','could','should','may','might','will','shall','must','does','do','did'}
+        verb_mark = any(w.lower().strip(',.;:!?') in VERBS for w in words)
+        # Optional NLTK sentence tokenizer
+        try:
+            import nltk
+            try:
+                nltk.data.find('tokenizers/punkt')
+            except LookupError:
+                nltk.download('punkt', quiet=True)
+            sents = nltk.tokenize.sent_tokenize(t)
+            if len(sents) >= 1 and (sents[0].endswith('.') or len(sents[0].split()) >= 6):
+                punkt_mark = True
+            else:
+                punkt_mark = False
+        except Exception:
+            punkt_mark = False
+        score = sum([1 if pass_mark else 0, 1 if lower_mark else 0, 1 if verb_mark else 0, 1 if punkt_mark else 0])
+        return score >= 2
+
 
     def _same_font(self, a: Block, b: Block, document: Document, fitz_doc=None) -> bool:
         """Compare first-span font sizes of two blocks.

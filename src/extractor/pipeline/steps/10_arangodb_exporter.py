@@ -377,8 +377,18 @@ def flatten_document_to_pdf_objects(
         or unified_document.metadata.title
         or unified_document.id
     )
-    # Stable doc_id derived from source_pdf or source_path
-    doc_id = hashlib.md5(str(source_pdf).encode()).hexdigest() if source_pdf else hashlib.md5((unified_document.id or "doc").encode()).hexdigest()
+    # Stable doc_id: prefer SHA256 over actual file bytes when path exists; else hash the string
+    try:
+        sp = Path(str(source_pdf)) if source_pdf else None
+        if sp and sp.exists() and sp.is_file():
+            raw = sp.read_bytes()
+            sha = hashlib.sha256(raw).hexdigest()[:8]
+            stem = "".join(ch if ch.isalnum() else "_" for ch in sp.stem.lower()).strip("_")
+            doc_id = f"{stem}__{sha}"
+        else:
+            doc_id = hashlib.md5(str(source_pdf).encode()).hexdigest() if source_pdf else hashlib.md5((unified_document.id or "doc").encode()).hexdigest()
+    except Exception:
+        doc_id = hashlib.md5((str(source_pdf) if source_pdf else (unified_document.id or "doc")).encode()).hexdigest()
     doc_set_id, revision_id = _derive_doc_set_and_revision(source_pdf or unified_document.id)
 
     ordered_objects: List[Dict[str, Any]] = []

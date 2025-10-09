@@ -588,7 +588,6 @@ dependencies = [
     { name = "google-auth-httplib2" },
     { name = "google-auth-oauthlib" },
     { name = "json-repair" },
-    { name = "litellm" },
     { name = "loguru" },
     { name = "matplotlib" },
     { name = "mcp" },
@@ -607,6 +606,7 @@ dependencies = [
     { name = "rfc3987" },
     { name = "rich" },
     { name = "scikit-learn" },
+    { name = "scillm" },
     { name = "seaborn" },
     { name = "sentence-transformers" },
     { name = "strip-tags" },
@@ -637,7 +637,7 @@ requires-dist = [
     { name = "google-auth-oauthlib", specifier = ">=1.2.2" },
     { name = "ipython", marker = "extra == 'dev'", specifier = ">=8.16.0" },
     { name = "json-repair", specifier = ">=0.48.0" },
-    { name = "litellm", specifier = ">=1.75.0" },
+    { name = "litellm", marker = "extra == 'dev'", specifier = ">=1.75.0" },
     { name = "loguru", specifier = ">=0.7.2" },
     { name = "matplotlib", specifier = ">=3.8.0" },
     { name = "mcp", specifier = ">=1.12.3" },
@@ -660,6 +660,7 @@ requires-dist = [
     { name = "rich", specifier = ">=13.0.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.1.0" },
     { name = "scikit-learn", specifier = ">=1.3.0" },
+    { name = "scillm", specifier = ">=1.77.2" },
     { name = "seaborn", specifier = ">=0.13.0" },
     { name = "sentence-transformers", specifier = ">=2.2.0" },
     { name = "strip-tags", specifier = ">=0.6" },
@@ -1407,6 +1408,7 @@ dependencies = [
     { name = "asyncio" },
     { name = "backoff" },
     { name = "beautifulsoup4" },
+    { name = "camelot-py" },
     { name = "claude-test-reporter" },
     { name = "click" },
     { name = "defusedxml" },
@@ -1446,6 +1448,7 @@ dependencies = [
     { name = "regex" },
     { name = "rich" },
     { name = "ruff" },
+    { name = "strip-tags" },
     { name = "structlog" },
     { name = "tenacity" },
     { name = "tqdm" },
@@ -1455,6 +1458,7 @@ dependencies = [
     { name = "tree-sitter-languages" },
     { name = "typer" },
     { name = "unidecode" },
+    { name = "urlextract" },
     { name = "xlsxwriter" },
 ]
 
@@ -1493,6 +1497,9 @@ llm = [
 ]
 prover = [
     { name = "certainly" },
+]
+scillm-snapshot = [
+    { name = "scillm" },
 ]
 server = [
     { name = "fastapi" },
@@ -1550,6 +1557,7 @@ requires-dist = [
     { name = "asyncio", specifier = ">=3.4.3,<4" },
     { name = "backoff", specifier = ">=2.2.1" },
     { name = "beautifulsoup4", specifier = ">=4.13.4" },
+    { name = "camelot-py", specifier = ">=1.0.9" },
     { name = "camelot-py", marker = "extra == 'accurate'", specifier = ">=1.0.9" },
     { name = "camelot-py", marker = "extra == 'smokes'", specifier = ">=1.0.9" },
     { name = "certainly", marker = "extra == 'prover'", directory = "../lean4" },
@@ -1619,8 +1627,10 @@ requires-dist = [
     { name = "regex", specifier = ">=2024.4.28,<2025" },
     { name = "rich", specifier = ">=13.0.0" },
     { name = "ruff", specifier = ">=0.13.0" },
+    { name = "scillm", marker = "extra == 'scillm-snapshot'", git = "https://github.com/grahama1970/scillm?rev=7118d3fcde" },
     { name = "sentence-transformers", marker = "extra == 'accurate'", specifier = ">=5.0.0" },
     { name = "spacy", marker = "extra == 'accurate'", specifier = ">=3.8.7" },
+    { name = "strip-tags", specifier = ">=0.6" },
     { name = "strip-tags", marker = "extra == 'smokes'", specifier = ">=0.6" },
     { name = "structlog", specifier = ">=24.0.0" },
     { name = "surya-ocr", marker = "extra == 'accurate'", specifier = ">=0.14.5,<0.15.0" },
@@ -1637,12 +1647,13 @@ requires-dist = [
     { name = "typer", specifier = ">=0.16.0" },
     { name = "typer", marker = "extra == 'smokes'", specifier = ">=0.16.0" },
     { name = "unidecode", specifier = ">=1.4.0" },
+    { name = "urlextract", specifier = ">=1.9.0" },
     { name = "urlextract", marker = "extra == 'smokes'", specifier = ">=1.9.0" },
     { name = "uvicorn", marker = "extra == 'server'", specifier = ">=0.32.1" },
     { name = "weasyprint", marker = "extra == 'full'", specifier = "~=63.1" },
     { name = "xlsxwriter", specifier = ">=3.2.0,!=3.2.3" },
 ]
-provides-extras = ["full", "smokes", "lessons", "prover", "accurate", "server", "llm"]
+provides-extras = ["full", "smokes", "lessons", "prover", "accurate", "server", "llm", "scillm-snapshot"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -2118,8 +2129,10 @@ dependencies = [
     { name = "nltk" },
     { name = "pymupdf" },
     { name = "python-arango" },
+    { name = "python-dotenv" },
     { name = "requests" },
     { name = "spacy" },
+    { name = "tenacity" },
     { name = "typer" },
 ]
 
@@ -2128,19 +2141,22 @@ requires-dist = [
     { name = "faiss-cpu", marker = "extra == 'faiss'", specifier = ">=1.7.2" },
     { name = "faiss-gpu", marker = "extra == 'faiss-gpu'", specifier = "==1.7.2" },
     { name = "httpx", marker = "extra == 'service'", specifier = ">=0.28.0" },
-    { name = "litellm", marker = "extra == 'llm'" },
+    { name = "litellm", marker = "extra == 'llm'", specifier = ">=1.77.2" },
     { name = "nltk", specifier = ">=3.9.1" },
     { name = "pymupdf", specifier = ">=1.26.4" },
     { name = "python-arango", specifier = ">=8.2.0" },
+    { name = "python-dotenv", specifier = ">=1.1.1" },
     { name = "requests", specifier = ">=2.32.0" },
+    { name = "scillm", marker = "extra == 'scillm'", directory = "../litellm" },
     { name = "sentence-transformers", marker = "extra == 'faiss'", specifier = ">=5.1.0" },
     { name = "sentence-transformers", marker = "extra == 'faiss-gpu'", specifier = ">=5.1.0" },
     { name = "spacy", specifier = ">=3.8.7" },
+    { name = "tenacity", specifier = ">=9.1.2" },
     { name = "tree-sitter", marker = "extra == 'code'", specifier = ">=0.20,<0.22" },
     { name = "tree-sitter-languages", marker = "extra == 'code'", specifier = ">=1.10,<2.0" },
     { name = "typer", specifier = ">=0.12" },
 ]
-provides-extras = ["faiss", "faiss-gpu", "service", "code", "llm"]
+provides-extras = ["faiss", "faiss-gpu", "service", "code", "llm", "scillm"]
 
 [[package]]
 name = "greenlet"
@@ -2667,11 +2683,11 @@ wheels = [
 
 [[package]]
 name = "json-repair"
-version = "0.49.0"
+version = "0.52.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/9f/db/5e6671347db8a55a52aec330017b7d2f0c4d49ac4b374018a912619dd2ee/json_repair-0.49.0.tar.gz", hash = "sha256:6a57563384da509c231a27bd87503eeaf5964f38d11a2b5ac808fe91431e1e61", size = 35108, upload-time = "2025-08-10T08:39:14.892Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/f3/63/2c3c3c8cc1c28a0a20a9ab0eff5439c989ce3cc5956d8a4c7cf1eae0a06e/json_repair-0.52.0.tar.gz", hash = "sha256:0eee59cb3145b462b0734d4cf3246b797686caa669d52eee8dd30e09ea6d7876", size = 35384, upload-time = "2025-10-05T17:18:12.387Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/2c/2a/d307b12ece7e3c82bade236b02621219310bb87ebd06ff9b6e3185bac7b8/json_repair-0.49.0-py3-none-any.whl", hash = "sha256:84b39814689d6b48c403f1fe6abdae976b64ffe2dc0ba5ad61a199bd23354391", size = 26549, upload-time = "2025-08-10T08:39:13.627Z" },
+    { url = "https://files.pythonhosted.org/packages/c6/7f/3a4e456da9a0f9ac54d9842ed51e96960826a98456f0826a9b3e808713c4/json_repair-0.52.0-py3-none-any.whl", hash = "sha256:c783069906a456f62e2a553fbef32a420a4745ff943e2014411728edcc7bf60a", size = 26350, upload-time = "2025-10-05T17:18:10.859Z" },
 ]
 
 [[package]]
@@ -3232,6 +3248,12 @@ sdist = { url = "https://files.pythonhosted.org/packages/79/b6/466e71db127950fb8
 wheels = [
     { url = "https://files.pythonhosted.org/packages/4e/0b/942cb7278d6caad79343ad2ddd636ed204a47909b969d19114a3097f5aa3/lxml_html_clean-0.4.2-py3-none-any.whl", hash = "sha256:74ccfba277adcfea87a1e9294f47dd86b05d65b4da7c5b07966e3d5f3be8a505", size = 14184, upload-time = "2025-04-09T11:33:57.988Z" },
 ]
+
+[[package]]
+name = "madoka"
+version = "0.7.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/da/eb/95288b1c4aa541eb296a6271e3f8c7ece03b78923ac47dbe95d2287d9f5e/madoka-0.7.1.tar.gz", hash = "sha256:e258baa84fc0a3764365993b8bf5e1b065383a6ca8c9f862fb3e3e709843fae7", size = 81413, upload-time = "2019-02-10T18:38:01.382Z" }
 
 [[package]]
 name = "mammoth"
@@ -4468,6 +4490,18 @@ wheels = [
 ]
 
 [[package]]
+name = "pondpond"
+version = "1.4.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "madoka" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/a6/9b/8411458ca8ce8b5b9b135e4a19823f1caf958ca9985883db104323492982/pondpond-1.4.1.tar.gz", hash = "sha256:8afa34b869d1434d21dd2ec12644abc3b1733fcda8fcf355300338a13a79bb7b", size = 15237, upload-time = "2024-03-01T07:08:06.756Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c4/d4/f18d6985157cc68f76469480182cbee2a03a45858456955acf57f9dcbb4c/pondpond-1.4.1-py3-none-any.whl", hash = "sha256:641028ead4e8018ca6de1220c660ddd6d6fbf62a60e72f410655dd0451d82880", size = 14498, upload-time = "2024-03-01T07:08:04.63Z" },
+]
+
+[[package]]
 name = "pre-commit"
 version = "4.2.0"
 source = { registry = "https://pypi.org/simple" }
@@ -5149,11 +5183,11 @@ wheels = [
 
 [[package]]
 name = "python-dotenv"
-version = "1.1.0"
+version = "1.1.1"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/88/2c/7bb1416c5620485aa793f2de31d3df393d3686aa8a8506d11e10e13c5baf/python_dotenv-1.1.0.tar.gz", hash = "sha256:41f90bc6f5f177fb41f53e87666db362025010eb28f60a01c9143bfa33a2b2d5", size = 39920, upload-time = "2025-03-25T10:14:56.835Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/f6/b0/4bc07ccd3572a2f9df7e6782f52b0c6c90dcbb803ac4a167702d7d0dfe1e/python_dotenv-1.1.1.tar.gz", hash = "sha256:a8a6399716257f45be6a007360200409fce5cda2661e3dec71d23dc15f6189ab", size = 41978, upload-time = "2025-06-24T04:21:07.341Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/1e/18/98a99ad95133c6a6e2005fe89faedf294a748bd5dc803008059409ac9b1e/python_dotenv-1.1.0-py3-none-any.whl", hash = "sha256:d7c01d9e2293916c18baf562d95698754b0dbbb5e74d457c45d4f6561fb9d55d", size = 20256, upload-time = "2025-03-25T10:14:55.034Z" },
+    { url = "https://files.pythonhosted.org/packages/5f/ed/539768cf28c661b5b068d66d96a2f155c4971a5d55684a514c1a0e0dec2f/python_dotenv-1.1.1-py3-none-any.whl", hash = "sha256:31f23644fe2602f88ff55e1f5c79ba497e01224ee7737937930c448e4d0e24dc", size = 20556, upload-time = "2025-06-24T04:21:06.073Z" },
 ]
 
 [[package]]
@@ -5814,6 +5848,28 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/d0/0c/9c3715393343f04232f9d81fe540eb3831d0b4ec351135a145855295110f/scikit_learn-1.7.0-cp313-cp313t-macosx_12_0_arm64.whl", hash = "sha256:0521cb460426c56fee7e07f9365b0f45ec8ca7b2d696534ac98bfb85e7ae4775", size = 11325286, upload-time = "2025-06-05T22:02:39.739Z" },
     { url = "https://files.pythonhosted.org/packages/64/e0/42282ad3dd70b7c1a5f65c412ac3841f6543502a8d6263cae7b466612dc9/scikit_learn-1.7.0-cp313-cp313t-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:317ca9f83acbde2883bd6bb27116a741bfcb371369706b4f9973cf30e9a03b0d", size = 12380865, upload-time = "2025-06-05T22:02:42.137Z" },
     { url = "https://files.pythonhosted.org/packages/4e/d0/3ef4ab2c6be4aa910445cd09c5ef0b44512e3de2cfb2112a88bb647d2cf7/scikit_learn-1.7.0-cp313-cp313t-win_amd64.whl", hash = "sha256:126c09740a6f016e815ab985b21e3a0656835414521c81fc1a8da78b679bdb75", size = 11549609, upload-time = "2025-06-05T22:02:44.483Z" },
+]
+
+[[package]]
+name = "scillm"
+version = "1.77.2"
+source = { git = "https://github.com/grahama1970/scillm?rev=7118d3fcde#7118d3fcdebfb4479bb0d998930712389ed7ebb7" }
+dependencies = [
+    { name = "aiohttp" },
+    { name = "click" },
+    { name = "fastuuid" },
+    { name = "httpx" },
+    { name = "importlib-metadata" },
+    { name = "jinja2" },
+    { name = "json-repair" },
+    { name = "jsonschema" },
+    { name = "openai" },
+    { name = "pondpond" },
+    { name = "pydantic" },
+    { name = "pytest-html" },
+    { name = "python-dotenv" },
+    { name = "tiktoken" },
+    { name = "tokenizers" },
 ]
 
 [[package]]

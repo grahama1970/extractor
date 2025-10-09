@@ -62,6 +62,9 @@ dependencies = [
  # On Python >= 3.11 use faiss-cpu instead (see markers above)
  "pdfplumber>=0.11.7",
  "ruff>=0.13.0",
+ "camelot-py>=1.0.9",
+ "urlextract>=1.9.0",
+ "strip_tags>=0.6",
 ]
 [[project.authors]]
 name = "Graham Anderson"
@@ -148,7 +151,19 @@ llm = [
   "openai>=1.65.2,<2",
   "anthropic>=0.56.0",
   "google-genai>=1.0.0,<2",
+  # Default to upstream litellm; opt into local SciLLM via the scillm-local extra.
   "litellm>=1.74.7",
+]
+
+# Local SciLLM development extra (installs from your fork via file path)
+# scillm-local is disabled during snapshot testing to avoid URL conflicts
+# scillm-local = [
+#   "scillm @ file:///home/graham/workspace/experiments/litellm",
+# ]
+
+# Pin SciLLM fork (litellm) at a known commit with parallel meta + router fixes
+scillm-snapshot = [
+  "scillm @ git+https://github.com/grahama1970/scillm@7118d3fcde",
 ]
 
 [project.urls]

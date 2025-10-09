@@ -5,7 +5,8 @@ from typing import Any, Dict
 
 from tenacity import retry, stop_after_attempt, wait_exponential
 
-from extractor.pipeline.utils.litellm_call import litellm_call
+import scillm
+from extractor.pipeline.utils.scillm_env import build_requests
 
 
 SYSTEM_PROMPT = (
@@ -34,13 +35,13 @@ async def verify_header_with_llm(image_b64: str, context_text: str, model: str) 
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": user_content},
     ]
-    results = await litellm_call(
-        prompts=[{"model": model, "messages": messages}],
-        wrap_json=True,
-        concurrency=1,
-        desc="verify header",
-    )
-    answer = results[0] if results else ""
+    reqs = build_requests([{"model": model, "messages": messages}], json_object=True, timeout=30)
+    router = scillm.Router()
+    resps = await router.parallel_acompletions(reqs, max_concurrency=1)
+    try:
+        answer = resps[0]["choices"][0]["message"]["content"] if resps else ""
+    except Exception:
+        answer = ""
     try:
         payload = json.loads(answer) if answer else {}
     except Exception:

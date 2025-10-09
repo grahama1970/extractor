@@ -42,10 +42,18 @@ class MarkdownProvider:
         text = filepath.read_text(encoding="utf-8", errors="ignore")
 
         blocks: List[BaseBlock] = []
+        # Root heading for consistent hierarchy across formats
+        root_block = BaseBlock(
+            id="md-root-000001",
+            type=BlockType.HEADING,
+            content=filepath.stem,
+            metadata=BlockMetadata(attributes={"level": 0, "role": "document_root"}, confidence=1.0),
+        )
+        blocks.append(root_block)
         # Track the current list (pending items) to emit LIST + LISTITEM together
         pending_items: List[tuple[str, int]] = []
         current_list_type: Optional[str] = None  # "ul" or "ol"
-        last_heading_id: Optional[str] = None
+        last_heading_id: Optional[str] = root_block.id
 
         def flush_list():
             nonlocal pending_items, current_list_type
@@ -100,11 +108,23 @@ class MarkdownProvider:
                 continue
             # paragraph
             flush_list()
+            wrapped = line.strip()
+            if not wrapped:
+                continue
+            # Merge very short lines into previous paragraph to reduce fragmentation
+            if (
+                blocks
+                and blocks[-1].type == BlockType.PARAGRAPH
+                and isinstance(blocks[-1].content, str)
+                and len(wrapped) < int(os.environ.get("MD_PARA_MERGE_MIN", "40"))
+            ):
+                blocks[-1].content = f"{blocks[-1].content} {wrapped}".strip()
+                continue
             blocks.append(
                 BaseBlock(
                     id=self._next_id(),
                     type=BlockType.PARAGRAPH,
-                    content=line.strip(),
+                    content=wrapped,
                     metadata=BlockMetadata(attributes={}, confidence=1.0),
                 )
             )
@@ -112,7 +132,14 @@ class MarkdownProvider:
         flush_list()
 
         hierarchy = self._build_hierarchy(blocks)
-        meta = DocumentMetadata(title=filepath.stem, format_metadata={"file_type": "markdown"})
+        meta = DocumentMetadata(
+            title=filepath.stem,
+            format_metadata={
+                "file_type": "markdown",
+                "schema_version": "1.0.0",
+                "normalization": ["root_heading_added", "paragraph_merge_short"],
+            },
+        )
         return UnifiedDocument(
             id=self._doc_id(filepath),
             source_type=SourceType.MD,
@@ -135,7 +162,16 @@ class MarkdownProvider:
         heads = [b for b in blocks if b.type == BlockType.HEADING]
         if not heads:
             return None
-        root = HierarchyNode(id="root", title="Document", level=0, block_id="root", children=[])
+        # Use first heading as the root node reference
+        root = HierarchyNode(
+            id="md-root",
+            title="Document",
+            level=0,
+            block_id=heads[0].id,
+            children=[],
+            parent_id=None,
+            breadcrumb=[],
+        )
         stack: List[HierarchyNode] = [root]
         for b in heads:
             lvl = 1

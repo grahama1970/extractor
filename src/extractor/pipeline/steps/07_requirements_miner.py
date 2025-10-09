@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
-Stage 07½ — Requirements Miner
+Stage 07½ — Requirements Miner (Standalone Fallback)
 
 Deterministic, offline‑friendly identification of requirement candidates after reflow (Stage 07).
 
 Inputs
-- 07_reflowed.json from Stage 07
+- 07_reflowed.json from the Stage 07 orchestrator (key: reflowed_sections).
+  If the orchestrator already executed the `requirements` plugin, this tool is optional.
 
 Outputs
 - 07_requirements.json (see docs/tasks/009_requirements_miner_and_workbench.md)
@@ -13,7 +14,7 @@ Outputs
 
 Notes
 - No LLM required. Optional assists can be added behind env toggles later.
-- Keeps the Happy Path single surface; run by run_all between 07 and 08.
+- Expects reflowed_sections[*].blocks[].text and tables[*].pandas_df for parity.
 """
 from __future__ import annotations
 
@@ -25,6 +26,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import typer
+from loguru import logger
 
 
 app = typer.Typer(add_completion=False, help="Identify requirement candidates after Stage 07.")
@@ -173,30 +175,168 @@ def _summarize(cands: List[Dict[str, Any]]) -> Dict[str, Any]:
 def run(
     reflowed_json: Path = typer.Argument(..., exists=True, readable=True, help="Path to 07_reflowed.json"),
     output_dir: Path = typer.Option(Path("data/results/pipeline"), "-o", help="Results root directory"),
+    debug: bool = typer.Option(False, "--debug", help="Enable verbose logging to a stage log file."),
 ):
-    out_dir = output_dir / "07_requirements_miner" / "json_output"
+    """Mine requirement candidates from Stage 07 output with robust debug logging.
+
+    Failure points are logged with rich context (section index/id, block summaries, counts)
+    to make debugging straightforward when a document deviates from expected schema.
+    """
+    stage_dir = output_dir / "07_requirements_miner"
+    out_dir = stage_dir / "json_output"
     out_dir.mkdir(parents=True, exist_ok=True)
-    data = json.loads(reflowed_json.read_text())
-    sections = data.get("reflowed_sections") or []
-    candidates: List[Dict[str, Any]] = []
-    for s in sections:
-        sec_id = s.get("id") or s.get("section_id") or None
-        # Paragraphs/blocks
+
+    # Configure a dedicated log sink
+    try:
+        logger.remove()
+        logger.add(
+            str(stage_dir / "stage_07_requirements_miner.log"),
+            level="DEBUG" if debug or os.getenv("STAGE07R_DEBUG", "0").lower() in {"1","true","yes","y"} else "INFO",
+            enqueue=True,
+            backtrace=False,
+            diagnose=False,
+            rotation="1 week",
+            retention="14 days",
+        )
+    except Exception:
+        pass
+
+    logger.info("07r:start reflowed_json={} output_dir={} debug={}", reflowed_json, output_dir, debug)
+
+    # Load JSON with error capture
+    try:
+        raw_text = reflowed_json.read_text()
+        data = json.loads(raw_text)
+    except Exception as e:
+        err = {
+            "ok": False,
+            "error": "read_or_parse_failed",
+            "exception": str(e),
+            "path": str(reflowed_json),
+            "size": reflowed_json.stat().st_size if reflowed_json.exists() else None,
+            "head": raw_text[:500] if 'raw_text' in locals() else None,
+        }
+        (out_dir / "07_requirements_error.json").write_text(json.dumps(err, indent=2))
+        logger.exception("07r:failed to read/parse reflowed_json")
+        raise typer.Exit(2)
+
+    # Validate top-level structure
+    if not isinstance(data, dict):
+        (out_dir / "07_requirements_error.json").write_text(json.dumps({"ok": False, "error": "bad_schema", "type": str(type(data))}, indent=2))
+        logger.error("07r:bad_schema type={} keys_absent", type(data))
+        raise typer.Exit(2)
+
+    sections_raw = data.get("reflowed_sections") or data.get("sections") or []
+    if not isinstance(sections_raw, list):
+        (out_dir / "07_requirements_error.json").write_text(json.dumps({"ok": False, "error": "missing_sections", "keys": list(data.keys())}, indent=2))
+        logger.error("07r:missing_sections keys={}", list(data.keys()))
+        raise typer.Exit(2)
+
+    # Normalize tolerant view of sections
+    sections: List[Dict[str, Any]] = []
+    malformed = 0
+    for s in sections_raw:
+        if not isinstance(s, dict):
+            malformed += 1
+            continue
+        sid = s.get("id") or s.get("section_id")
+        if not sid:
+            malformed += 1
+            continue
+        # Normalize blocks
+        bnorm = []
         for b in s.get("blocks") or []:
-            if str(b.get("block_type") or b.get("type") or "").lower() in {"text", "paragraph", "listitem"}:
-                candidates.extend(_mine_from_paragraph(b, sec_id))
-        # Tables
+            if not isinstance(b, dict):
+                continue
+            btype = (b.get("type") or b.get("block_type") or "").lower()
+            txt = (b.get("text") or b.get("content") or "").strip()
+            if txt and btype in {"text","paragraph","listitem","list_item"}:
+                if "type" not in b:
+                    b["type"] = "paragraph" if btype in {"text","paragraph"} else "listitem"
+                if "text" not in b and b.get("content"):
+                    b["text"] = b.get("content")
+                bnorm.append(b)
+        s["blocks"] = bnorm
+        # Normalize tables minimal shape
+        tnorm = []
         for t in s.get("tables") or []:
-            candidates.extend(_mine_from_table(t, sec_id))
+            if not isinstance(t, dict):
+                continue
+            if t.get("pandas_df") is None and t.get("rows") and t.get("columns"):
+                rows = t.get("rows"); cols = t.get("columns")
+                if isinstance(rows, list) and isinstance(cols, list):
+                    pd_rows = []
+                    for r in rows:
+                        if isinstance(r, list):
+                            pd_rows.append({str(c): (r[i] if i < len(r) else "") for i, c in enumerate(cols)})
+                    t["pandas_df"] = pd_rows
+            tnorm.append(t)
+        s["tables"] = tnorm
+        sections.append(s)
+
+    logger.info("07r:sections count={} malformed={}", len(sections), malformed)
+    candidates: List[Dict[str, Any]] = []
+    errors = 0
+    debug_snap: List[Dict[str, Any]] = []
+    for i, s in enumerate(sections):
+        try:
+            sec_id = s.get("id") or s.get("section_id") or None
+            bcount = len(s.get("blocks") or [])
+            tcount = len(s.get("tables") or [])
+            if (i % 25) == 0:
+                logger.debug("07r:section idx={} id={} blocks={} tables={}", i, sec_id, bcount, tcount)
+            # Paragraphs/blocks
+            for b in s.get("blocks") or []:
+                try:
+                    btype = str(b.get("block_type") or b.get("type") or "").lower()
+                    if btype in {"text", "paragraph", "listitem"}:
+                        c = _mine_from_paragraph(b, sec_id)
+                        if c:
+                            candidates.extend(c)
+                except Exception as be:
+                    errors += 1
+                    logger.warning("07r:block_error idx={} sec_id={} exc={}", i, sec_id, be)
+            # Tables
+            for t in s.get("tables") or []:
+                try:
+                    c = _mine_from_table(t, sec_id)
+                    if c:
+                        candidates.extend(c)
+                except Exception as te:
+                    errors += 1
+                    logger.warning("07r:table_error idx={} sec_id={} exc={}", i, sec_id, te)
+            if (i % 50) == 0:
+                debug_snap.append({"section_idx": i, "section_id": sec_id, "blocks": bcount, "tables": tcount, "cand_so_far": len(candidates)})
+        except Exception as se:
+            errors += 1
+            logger.exception("07r:section_iter_error idx={} exc={}", i, se)
 
     _assign_ids(candidates)
-    req_json = {"requirements": candidates}
+    req_json = {
+        "requirements": candidates,
+        "errors_count": errors,
+        "meta": {
+            "sections_total": len(sections),
+            "sections_malformed": malformed,
+            "sections_with_blocks": sum(1 for s in sections if s.get("blocks")),
+            "sections_with_tables": sum(1 for s in sections if s.get("tables")),
+        },
+    }
     (out_dir / "07_requirements.json").write_text(json.dumps(req_json, indent=2))
     summary = _summarize(candidates)
-    (out_dir / "07_requirements_summary.json").write_text(json.dumps(summary, indent=2))
-    typer.echo(json.dumps({"ok": True, "total": summary["total"], "out": str(out_dir)}, indent=2))
+    summary.update(req_json.get("meta", {}))
+    (out_dir / "07_requirements_summary.json").write_text(json.dumps({**summary, "errors_count": errors}, indent=2))
+    if debug_snap:
+        (out_dir / "07_requirements_debug.json").write_text(json.dumps({"snap": debug_snap[-10:]}, indent=2))
+    typer.echo(json.dumps({
+        "ok": True,
+        "total": summary.get("total", 0),
+        "errors": errors,
+        "out": str(out_dir),
+        "sections_total": summary.get("sections_total"),
+        "sections_malformed": summary.get("sections_malformed"),
+    }, indent=2))
 
 
 if __name__ == "__main__":
     app()
-

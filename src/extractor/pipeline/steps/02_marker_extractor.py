@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """
 Stage-02: Extract native JSON blocks from a PDF using Marker
+
+Policy (2025-10-08):
+- No PyMuPDF/text heuristic fallback is permitted for Stage 02 extraction.
+- This stage MUST use Marker internals (PdfConverter + create_model_dict).
+- PyMuPDF is allowed only for annotation handling/visualization in other stages.
 """
 
 import json
@@ -19,6 +24,8 @@ import multiprocessing as mp
 import typer
 
 from loguru import logger
+import hashlib
+from extractor.pipeline.utils.pipeline_event_logger import log_stage_event
 from rich.console import Console
 import uuid
 
@@ -61,30 +68,159 @@ console = Console()
 DEBUG = False
 
 
+def _safe_version(mod_name: str):
+    try:
+        mod = __import__(mod_name)
+        for attr in ("__version__", "version", "VERSION"):
+            v = getattr(mod, attr, None)
+            if v:
+                return str(v)
+    except Exception:
+        return None
+    return None
+
+
+def _write_env_snapshot(out_dir: Path, pdf_path: Path) -> None:
+    """Write a compact environment + imports snapshot for debugging Stage 02 regressions."""
+    try:
+        import sys, platform
+        # Selective env snapshot with redaction of sensitive keys
+        keys = [
+            "OFFLINE_PDF_PREDICTORS",
+            "PYTHONPATH",
+            "LITELLM_DEFAULT_MODEL",
+            "LITELLM_VLM_MODEL",
+            "LITELLM_MED_VLM_MODEL",
+            "LITELLM_SMALL_VLM_MODEL",
+            "CHUTES_API_BASE",
+            "OPENAI_BASE_URL",
+        ]
+        redact_pat = (
+            "api_key",
+            "apikey",
+            "authorization",
+            "bearer",
+            "token",
+            "secret",
+            "password",
+            "access_key",
+            "private_key",
+            "client_secret",
+        )
+        env: Dict[str, Any] = {}
+        for k in keys:
+            v = os.getenv(k)
+            if v is None:
+                continue
+            if any(pat in k.lower() for pat in redact_pat):
+                env[k] = "<redacted>"
+            else:
+                env[k] = v
+        imports = {
+            "fitz": _safe_version("fitz"),
+            "surya_ocr": _safe_version("surya_ocr"),
+            "torch": _safe_version("torch"),
+            "transformers": _safe_version("transformers"),
+            "spacy": _safe_version("spacy"),
+            "faiss": _safe_version("faiss"),
+            "litellm": _safe_version("litellm"),
+            "scillm": _safe_version("scillm"),
+        }
+        # Optional git rev
+        git_rev = None
+        try:
+            import subprocess as _sp
+            git_rev = (
+                _sp.check_output(["git", "rev-parse", "--short", "HEAD"], cwd=str(Path.cwd()))
+                .decode()
+                .strip()
+            )
+        except Exception:
+            pass
+
+        # Torch/CUDA snapshot
+        cuda = None
+        cuda_count = None
+        try:
+            import torch as _torch  # type: ignore
+            cuda = bool(getattr(_torch, "cuda", None) and _torch.cuda.is_available())
+            cuda_count = int(_torch.cuda.device_count()) if hasattr(_torch, "cuda") else 0
+        except Exception:
+            pass
+
+        payload = {
+            "timestamp": datetime.now().isoformat(),
+            "python": sys.version,
+            "platform": platform.platform(),
+            "executable": sys.executable,
+            "cwd": str(Path.cwd()),
+            "pdf": str(pdf_path),
+            "git_rev": git_rev,
+            "cuda_available": cuda,
+            "cuda_device_count": cuda_count,
+            "env": env,
+            "imports": imports,
+            "sys_path_head": sys.path[:10],
+        }
+        (out_dir / "02_env_snapshot.json").write_text(
+            json.dumps(payload, indent=2, ensure_ascii=False)
+        )
+    except Exception:
+        pass
+
+
 # --------------------------------------------------------------------------- #
 # Move multiprocessing worker to top-level for cross-platform compatibility (spawn/fork)
 def _worker(pdf_str: str, q: "mp.Queue[Dict[str, Any]]"):
     try:
-        blocks_local, presence = extract_blocks(Path(pdf_str))
-        q.put({"ok": True, "blocks": blocks_local, "predictors": presence})
+        ret = extract_blocks(Path(pdf_str))
+        if isinstance(ret, tuple) and len(ret) == 3:
+            blocks_local, presence, adapt_meta = ret
+        else:  # backward compatibility
+            blocks_local, presence = ret  # type: ignore[misc]
+            adapt_meta = {}
+        q.put({"ok": True, "blocks": blocks_local, "predictors": presence, "adapt_meta": adapt_meta})
     except Exception as exc:
+        # Persist a structured error for parent to pick up
+        try:
+            import traceback as _tb
+            pdf_path = Path(pdf_str)
+            err_dir = Path(os.getenv("STAGE02_ERROR_DIR", str(pdf_path.parent)))
+            err_dir.mkdir(parents=True, exist_ok=True)
+            (err_dir / "02_error.json").write_text(
+                json.dumps(
+                    {
+                        "timestamp": datetime.now().isoformat(),
+                        "pdf": str(pdf_path),
+                        "error": str(exc),
+                        "where": "worker",
+                        "traceback": _tb.format_exc(),
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+            )
+        except Exception:
+            pass
         q.put({"ok": False, "error": str(exc)})
 
 
-def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool]]:
+def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool], Dict[str, Any]]:
     """
     Return the native JSON list of blocks produced by Marker.
 
     Since convert_single_pdf returns a MarkdownOutput object with markdown text,
     we need to access the converter directly to get the blocks.
     """
+    # Enforce Marker-only extraction (no heuristics) regardless of env flags
     try:
         from extractor.core.converters.pdf import PdfConverter
         from extractor.core.models import create_model_dict
     except Exception as e:
         raise RuntimeError(
-            "Marker internals unavailable. Ensure project-specific Marker modules are installed "
-            "(extractor.core.converters/pdf and extractor.core.models)."
+            "Stage 02 requires Marker internals (PdfConverter + create_model_dict). "
+            "PyMuPDF/text heuristics are not allowed for extraction. Install extras: "
+            "`uv sync --extra accurate`."
         ) from e
 
     # Create model dictionary (predictors may be missing in offline mode)
@@ -97,22 +233,228 @@ def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool
         "texify_model": bool(models.get("texify_model")),
     }
 
-    # Create config as simple dict
+    # Threading / BLAS caps (CPU)
+    try:
+        os.environ.setdefault("OMP_NUM_THREADS", os.getenv("OMP_NUM_THREADS", "2"))
+        os.environ.setdefault("MKL_NUM_THREADS", os.getenv("MKL_NUM_THREADS", "1"))
+        import torch as _torch  # type: ignore
+        try:
+            _torch.set_num_threads(int(os.getenv("TORCH_NUM_THREADS", "2")))
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+    # Adaptive performance config (env overrides honored)
+    mem_guard_ratio = float(os.getenv("STAGE02_MEM_GUARD_RATIO", "0.85"))
+    try:
+        from extractor.pipeline.utils.adaptive_tuner import (
+            build_adaptive_config,
+            _nvml_gpu_telemetry,
+            _fallback_nvidia_smi,
+            start_gpu_sampler,
+        )
+        adaptive_cfg = build_adaptive_config(Path(os.getenv("STAGE02_ERROR_DIR", ".")), mem_guard_ratio=mem_guard_ratio)
+        device = getattr(adaptive_cfg, "device", os.getenv("STAGE02_DEVICE", "cpu"))
+        det_batch = int(os.getenv("STAGE02_DETECTION_BATCH", str(getattr(adaptive_cfg, "detection_batch", 4))))
+        rec_batch = int(os.getenv("STAGE02_RECOGNITION_BATCH", str(getattr(adaptive_cfg, "recognition_batch", 6))))
+        tbl_batch = int(os.getenv("STAGE02_TABLE_BATCH", str(getattr(adaptive_cfg, "table_batch", 4))))
+        lay_batch = int(os.getenv("STAGE02_LAYOUT_BATCH", str(getattr(adaptive_cfg, "layout_batch", 4))))
+    except Exception:
+        adaptive_cfg = None  # type: ignore
+        device = os.getenv("STAGE02_DEVICE", "cpu")
+        det_batch = int(os.getenv("STAGE02_DETECTION_BATCH", "4"))
+        rec_batch = int(os.getenv("STAGE02_RECOGNITION_BATCH", "6"))
+        tbl_batch = int(os.getenv("STAGE02_TABLE_BATCH", "4"))
+        lay_batch = int(os.getenv("STAGE02_LAYOUT_BATCH", "4"))
+
     config = {
-        "use_llm": False,  # Disable LLM for speed - suspicious detection in post-processing
-        "batch_multiplier": 1,
+        "use_llm": False,
         "disable_multiprocessing": True,
+        "device": device,
+        "detection_batch": det_batch,
+        "layout_batch": lay_batch,
+        "recognition_batch": rec_batch,
+        "table_batch": tbl_batch,
     }
+    # Preflight: reduce batch for large docs or when guard rails request it
+    try:
+        large_page_threshold = int(os.getenv("STAGE02_LARGE_PAGE_THRESHOLD", "80"))
+        if pdf_path.exists():
+            import fitz  # type: ignore
+            _doc = fitz.open(pdf_path)
+            page_count = len(_doc)
+            _doc.close()
+        else:
+            page_count = 0
+        if page_count >= large_page_threshold or os.getenv("STAGE02_REDUCED_BATCH") == "1":
+            config["batch_multiplier"] = 1  # keep minimal
+    except Exception:
+        pass
 
     # Create the PDF converter
-    strict_mode = os.getenv("OFFLINE_PDF_PREDICTORS", "1").lower() in {"0", "false"}
-    converter = PdfConverter(
-        artifact_dict=models,
-        config=config,
-    )
+    try:
+        logger.info("02:extract_blocks pdf=%s", pdf_path)
+    except Exception:
+        pass
+    try:
+        # Memory guard: reduce batch if high RSS detected
+        try:
+            if psutil is not None:
+                rss = psutil.Process().memory_info().rss
+                total = getattr(psutil, "virtual_memory")().total if hasattr(psutil, "virtual_memory") else None
+                guard_ratio = float(os.getenv("MEM_GUARD_RATIO", "0.7"))
+                if total and rss/total > guard_ratio:
+                    config["batch_multiplier"] = 1
+                    logger.warning("02: memory guard triggered (rss=%s, total=%s)", rss, total)
+        except Exception:
+            pass
 
-    # Build the document (this creates and processes all blocks)
-    document = converter.build_document(str(pdf_path))
+        converter = PdfConverter(
+            artifact_dict=models,
+            config=config,
+        )
+    except Exception as exc:
+        try:
+            import traceback as _tb
+            err_payload = {
+                "timestamp": datetime.now().isoformat(),
+                "pdf": str(pdf_path),
+                "error": str(exc),
+                "where": "PdfConverter.__init__",
+                "traceback": _tb.format_exc(),
+                "predictors_present": predictor_presence,
+                "note": (
+                    "Stage 02 must use Marker internals only. "
+                    "No PyMuPDF/text heuristic fallback is allowed."
+                ),
+            }
+            err_dir = Path(os.getenv("STAGE02_ERROR_DIR", str(pdf_path.parent)))
+            err_dir.mkdir(parents=True, exist_ok=True)
+            (err_dir / "02_error.json").write_text(
+                json.dumps(err_payload, indent=2, ensure_ascii=False)
+            )
+        except Exception:
+            pass
+        try:
+            logger.exception("Stage 02 PdfConverter init failed: %s", exc)
+        except Exception:
+            pass
+        raise
+
+    # Build the document with optional watchdog and OOM retry
+    oom_retry = False
+    gpu_sampler = None
+    try:
+        gpu_sampler = start_gpu_sampler(interval_sec=float(os.getenv("GPU_SAMPLER_INTERVAL_SEC", "0.8")))
+    except Exception:
+        gpu_sampler = None
+    def _build_document_inner():
+        return converter.build_document(str(pdf_path))
+    try:
+        wd = int(os.getenv("STAGE02_BUILD_WATCHDOG_SEC", "0"))
+        if wd > 0:
+            import signal
+            def _alarm(_signum, _frame):
+                raise TimeoutError(f"Stage 02 build watchdog exceeded {wd}s")
+            old = signal.signal(signal.SIGALRM, _alarm)
+            signal.alarm(wd)
+            try:
+                document = _build_document_inner()
+            finally:
+                signal.alarm(0)
+                signal.signal(signal.SIGALRM, old)
+        else:
+            document = _build_document_inner()
+    except Exception as exc:
+        # Single OOM retry (CUDA): halve batches and retry once
+        is_oom = "out of memory" in str(exc).lower()
+        try:
+            import torch  # type: ignore
+            if not is_oom and isinstance(exc, RuntimeError):
+                is_oom = any(k in str(exc).lower() for k in ["cuda", "cublas"]) and ("out of memory" in str(exc).lower())
+        except Exception:
+            pass
+        if is_oom and str(device).startswith("cuda") and os.getenv("STAGE02_OOM_RETRIED") != "1":
+            os.environ["STAGE02_OOM_RETRIED"] = "1"
+            oom_retry = True
+            try:
+                # Halve batches and update config in place
+                for k in ("detection_batch", "layout_batch", "recognition_batch", "table_batch"):
+                    try:
+                        config[k] = max(1, int(config.get(k, 1)) // 2)
+                    except Exception:
+                        pass
+                document = _build_document_inner()
+            except Exception as exc2:
+                exc = exc2  # fall through to error writer below
+                
+        if not 'document' in locals():
+            # Write a rich error payload for faster triage (used by CI + batch runners)
+            try:
+                import traceback as _tb
+                err_payload = {
+                    "timestamp": datetime.now().isoformat(),
+                    "pdf": str(pdf_path),
+                    "error": str(exc),
+                    "traceback": _tb.format_exc(),
+                    "predictors_present": predictor_presence,
+                    "note": (
+                        "Stage 02 must use Marker internals only. "
+                        "No PyMuPDF/text heuristic fallback is allowed."
+                    ),
+                }
+                err_dir = (Path(os.getenv("STAGE02_ERROR_DIR", "")) or pdf_path.parent)
+                if not isinstance(err_dir, Path):
+                    err_dir = Path(str(err_dir))
+                try:
+                    err_dir.mkdir(parents=True, exist_ok=True)
+                except Exception:
+                    pass
+                (Path(err_dir) / "02_error.json").write_text(
+                    json.dumps(err_payload, indent=2, ensure_ascii=False)
+                )
+            except Exception:
+                pass
+            try:
+                logger.exception("Stage 02 build_document failed: %s", exc)
+            except Exception:
+                pass
+            raise
+        # Write a rich error payload for faster triage (used by CI + batch runners)
+        try:
+            import traceback as _tb
+            err_payload = {
+                "timestamp": datetime.now().isoformat(),
+                "pdf": str(pdf_path),
+                "error": str(exc),
+                "traceback": _tb.format_exc(),
+                "predictors_present": predictor_presence,
+                "note": (
+                    "Stage 02 must use Marker internals only. "
+                    "No PyMuPDF/text heuristic fallback is allowed."
+                ),
+            }
+            # Default to pipeline results if available, else alongside the PDF
+            err_dir = (Path(os.getenv("STAGE02_ERROR_DIR", "")) or pdf_path.parent)
+            if not isinstance(err_dir, Path):
+                err_dir = Path(str(err_dir))
+            # Prefer stage output dir when run() sets it; otherwise create sibling
+            try:
+                err_dir.mkdir(parents=True, exist_ok=True)
+            except Exception:
+                pass
+            (Path(err_dir) / "02_error.json").write_text(
+                json.dumps(err_payload, indent=2, ensure_ascii=False)
+            )
+        except Exception:
+            pass
+        # Mirror to logger with backtrace
+        try:
+            logger.exception("Stage 02 build_document failed: %s", exc)
+        except Exception:
+            pass
+        raise
 
     # Optional: open PyMuPDF for span color extraction
     fitz_doc = None
@@ -151,10 +493,40 @@ def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool
                     if hasattr(block, "raw_text"):
                         try:
                             block_dict["text"] = block.raw_text(document)
-                        except:
+                        except Exception:
                             block_dict["text"] = getattr(block, "text", "")
                     else:
                         block_dict["text"] = getattr(block, "text", "")
+
+                    # Capture the block bbox (if available) so overlays align with real content
+                    try:
+                        if getattr(block, "polygon", None) is not None and getattr(block.polygon, "bbox", None):
+                            x0, y0, x1, y1 = block.polygon.bbox
+                            block_dict["bbox"] = [float(x0), float(y0), float(x1), float(y1)]
+                    except Exception:
+                        pass
+
+                    # Split inline header + body if present, e.g., "1.1 Title. Body text ..."
+                    try:
+                        if (
+                            block_dict["block_type"] == "SectionHeader"
+                            and isinstance(block_dict.get("text"), str)
+                        ):
+                            import re as _re
+                            t = block_dict["text"].strip()
+                            m = _re.match(r"^(?P<prefix>(?:\d+(?:[.\-](?:\d+|[A-Za-z]+))*|[IVXLCDM]+))[.)]?\s+(?P<title>[^.].*?)(?:\.|$)\s*(?P<body>.+)?$", t)
+                            if m and m.group("body") and len(m.group("body").split()) >= 3:
+                                header_text = f"{m.group('prefix')} {m.group('title').strip()}"
+                                header_entry = dict(block_dict)
+                                header_entry["text"] = header_text
+                                blocks.append(header_entry)
+                                body_entry = dict(block_dict)
+                                body_entry["block_type"] = "Text"
+                                body_entry["text"] = m.group("body").strip()
+                                blocks.append(body_entry)
+                                continue
+                    except Exception:
+                        pass
 
                     # Add first span font information if available
                     try:
@@ -356,6 +728,19 @@ def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool
                             block_dict["id"] = str(block.id)
                     except Exception:
                         pass
+                    import re as _re
+                    # Demote sentence-like table blocks to Paragraph
+                    if block_dict.get("block_type") == "Table":
+                        _t = (block_dict.get("text") or "").strip()
+                        if _t:
+                            words = _t.split()
+                            letters = [ch for ch in _t if ch.isalpha()]
+                            lower_ratio = (sum(ch.islower() for ch in letters)/len(letters)) if letters else 0.0
+                            has_term = _t.endswith(".") or _t.endswith(";") or _t.endswith("?")
+                            verbs={"is","are","was","were","be","been","being","has","have","had","can","could","should","may","might","will","shall","must","does","do","did"}
+                            has_verb=any(w.lower().strip(",.;:!?") in verbs for w in words)
+                            if (has_term or has_verb) and (len(words)>=4 or lower_ratio>=0.5):
+                                block_dict["block_type"] = "Text"
                     blocks.append(block_dict)
 
     # Close PyMuPDF if used
@@ -365,7 +750,31 @@ def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool
     except Exception:
         pass
 
-    return blocks, predictor_presence
+    # End GPU util snapshot for adaptive history
+    end_gpu_util = None
+    peak_gpu_util = None
+    try:
+        # Prefer NVML; fallback to nvidia-smi
+        if 'adaptive_cfg' in locals() and adaptive_cfg is not None:
+            tel = _nvml_gpu_telemetry() if '_nvml_gpu_telemetry' in globals() else None
+            if not tel or not getattr(tel, 'present', False):
+                tel = _fallback_nvidia_smi() if '_fallback_nvidia_smi' in globals() else None
+            end_gpu_util = getattr(tel, 'memory_util', None) if tel else None
+        if gpu_sampler is not None:
+            try:
+                gpu_sampler.stop()
+                peak_gpu_util = gpu_sampler.peak()
+            except Exception:
+                pass
+    except Exception:
+        end_gpu_util = None
+
+    return blocks, predictor_presence, {
+        "oom_retry": bool(oom_retry),
+        "end_gpu_util": end_gpu_util,
+        "peak_gpu_util": peak_gpu_util,
+        "adaptive_cfg": adaptive_cfg,
+    }
 
 
 # --------------------------------------------------------------------------- #
@@ -399,26 +808,24 @@ def run(
     """
     Extracts text and layout blocks from a PDF using Marker and saves them to a structured output directory.
     """
-    # Strict-mode preflight: ensure predictors exist
+    # Preflight: predictors must exist (no fallback allowed)
     try:
-        strict = os.getenv("OFFLINE_PDF_PREDICTORS", "1").lower() in {"0", "false"}
-        if strict:
-            from extractor.core.models import create_model_dict
-            m = create_model_dict()
-            required = [
-                "detection_model",
-                "layout_model",
-                "ocr_error_model",
-                "recognition_model",
-                "table_rec_model",
-            ]
-            miss = [k for k in required if k not in m or m.get(k) is None]
-            if miss:
-                console.print("[red]Strict mode: missing predictors -> " + ", ".join(miss) + "[/red]")
-                console.print("[yellow]Hint: activate venv and run: `uv sync --extra accurate`[/yellow]")
-                raise typer.Exit(1)
+        from extractor.core.models import create_model_dict
+        m = create_model_dict()
+        required = [
+            "detection_model",
+            "layout_model",
+            "ocr_error_model",
+            "recognition_model",
+            "table_rec_model",
+        ]
+        miss = [k for k in required if k not in m or m.get(k) is None]
+        if miss:
+            console.print("[red]Missing predictors -> " + ", ".join(miss) + "[/red]")
+            console.print("[yellow]Hint: activate venv and run: `uv sync --extra accurate`[/yellow]")
+            raise typer.Exit(1)
     except Exception as _e:
-        console.print(f"[red]Strict preflight failed: {_e}[/red]")
+        console.print(f"[red]Preflight failed: {_e}[/red]")
         console.print("[yellow]Hint: `uv sync --extra accurate`[/yellow]")
         raise typer.Exit(1)
     run_id = uuid.uuid4().hex
@@ -437,6 +844,11 @@ def run(
     json_output_dir = stage_output_dir / "json_output"
     stage_output_dir.mkdir(parents=True, exist_ok=True)
     json_output_dir.mkdir(exist_ok=True)
+    # Ensure all error payloads land under this stage dir
+    try:
+        os.environ["STAGE02_ERROR_DIR"] = str(stage_output_dir)
+    except Exception:
+        pass
     # Configure logging sink per stage run
     try:
         logger.remove()
@@ -452,7 +864,12 @@ def run(
     except Exception:
         pass
 
-    console.print(f"Extracting blocks from: {pdf_path.name} (timeout {timeout}s)")
+    # Write env/imports snapshot early for debugging setup regressions
+    _write_env_snapshot(stage_output_dir, pdf_path)
+
+    display_timeout = (f"{timeout}s" if timeout and timeout>0 else "no-limit")
+    console.print(f"Extracting blocks from: {pdf_path.name} (timeout {display_timeout})")
+    log_stage_event("02_marker_extractor", "start", run_id=run_id, pdf=str(pdf_path))
     stage_start_ts = __import__("datetime").datetime.now().isoformat()
     t_stage0 = time.monotonic()
     start_time = time.time()
@@ -484,11 +901,16 @@ def run(
     except Exception:
         pass
 
+    adapt_meta: Dict[str, Any] = {"oom_retry": False, "end_gpu_util": None, "adaptive_cfg": None}
     if no_spawn:
         # Inline execution (best for debugging)
         try:
             t_ex0 = time.monotonic()
-            blocks, predictor_presence = extract_blocks(pdf_path)
+            ret_inline = extract_blocks(pdf_path)
+            if isinstance(ret_inline, tuple) and len(ret_inline) == 3:
+                blocks, predictor_presence, adapt_meta = ret_inline
+            else:
+                blocks, predictor_presence = ret_inline  # type: ignore[misc]
             extract_duration_ms = int((time.monotonic() - t_ex0) * 1000)
         except Exception as e:
             logger.exception("Stage 02 failed during inline extraction")
@@ -498,10 +920,11 @@ def run(
         # Run extraction in a separate process so we can enforce a hard timeout
         # Worker moved to top-level to be picklable in 'spawn' start method environments (Windows/macOS).
         q: "mp.Queue[Dict[str, Any]]" = mp.Queue()
-        p = mp.Process(target=_worker, args=(str(pdf_path), q), daemon=True)
+        # Allow the worker to spawn internal workers if underlying libs require it
+        p = mp.Process(target=_worker, args=(str(pdf_path), q), daemon=False)
         t_ex0 = time.monotonic()
         p.start()
-        p.join(timeout)
+        p.join(None if (timeout is None or timeout<=0) else timeout)
 
         if p.is_alive():
             console.print(
@@ -513,7 +936,7 @@ def run(
                         "02_marker_extractor",
                         "error",
                         "extractor_timeout",
-                        f"Timed out after {timeout}s",
+                        "Timed out (no explicit limit)",
                         {"pdf_path": str(pdf_path), "timeout": timeout},
                     )
                 )
@@ -555,6 +978,7 @@ def run(
 
         blocks = result["blocks"]
         predictor_presence = result.get("predictors", {})
+        adapt_meta = result.get("adapt_meta", adapt_meta)
 
     # Optional: force-tag all SectionHeader blocks as suspicious_header for Stage 03 testing
     if mark_all_headers_suspicious:
@@ -566,14 +990,10 @@ def run(
             pass
 
     suspicious_blocks = [b for b in blocks if b.get("is_suspicious")]
-    # predictor mode flags
-    strict = os.getenv("OFFLINE_PDF_PREDICTORS", "1").lower() in {"0", "false"}
+    # predictor mode flags (Stage 02 is strict-only by policy)
     missing = [k for k, v in (predictor_presence or {}).items() if not v]
-    fallback_mode = (not strict) and bool(missing)
-    if strict:
-        predictor_mode = "strict_all_present"
-    else:
-        predictor_mode = "lenient_missing_predictors" if missing else "lenient_all_present"
+    fallback_mode = False
+    predictor_mode = "strict_missing_predictors" if missing else "strict_all_present"
 
     stage_end_ts = __import__("datetime").datetime.now().isoformat()
     try:
@@ -596,6 +1016,28 @@ def run(
         "stage_duration_ms": int((time.monotonic() - t_stage0) * 1000),
         "extract_duration_ms": int(locals().get("extract_duration_ms", 0)),
     }
+    # Deterministic ordering & content hash
+    try:
+        def _blk_key(b):
+            txt = (b.get("text") or "")[:64]
+            h = hashlib.sha256(txt.encode("utf-8", "ignore")).hexdigest()[:8]
+            return (int(b.get("page_idx", 0)), str(b.get("block_type", "")), int(b.get("block_id", 0) or 0), h)
+        blocks = sorted(blocks, key=_blk_key)
+    except Exception:
+        pass
+    try:
+        hasher = hashlib.sha256()
+        for b in blocks:
+            core = {
+                "p": b.get("page_idx"),
+                "t": b.get("block_type"),
+                "id": b.get("block_id"),
+                "txt": (b.get("text") or "")[:200],
+            }
+            hasher.update(json.dumps(core, sort_keys=True, ensure_ascii=False).encode("utf-8"))
+        blocks_hash = hasher.hexdigest()
+    except Exception:
+        blocks_hash = None
     summary = {
         "timestamp": datetime.now().isoformat(),
         "run_id": run_id,
@@ -612,6 +1054,7 @@ def run(
         "predictors_present": predictor_presence,
         "fallback_mode": fallback_mode,
         "predictor_mode": predictor_mode,
+        "blocks_content_hash": blocks_hash,
     }
 
     base = "02_marker_blocks"
@@ -623,7 +1066,30 @@ def run(
             base = f"{base}_{safe}"
     out_path = json_output_dir / f"{base}.json"
     out_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False))
-    console.print(f"📄 Saved {len(blocks)} blocks to: {out_path}")
+    console.print(f"📄 Saved {len(blocks)} blocks to: {out_path} (deterministic ordering applied)")
+    # Finalize adaptive history if available
+    try:
+        from extractor.pipeline.utils.adaptive_tuner import finalize_adaptive_run
+        if adapt_meta and adapt_meta.get("adaptive_cfg") is not None:
+            finalize_adaptive_run(
+                stage_output_dir,
+                success=True,
+                oom_retry=bool(adapt_meta.get("oom_retry")),
+                cfg=adapt_meta.get("adaptive_cfg"),
+                gpu_end_util=adapt_meta.get("end_gpu_util"),
+                gpu_peak_util=adapt_meta.get("peak_gpu_util"),
+            )
+    except Exception:
+        pass
+    log_stage_event(
+        "02_marker_extractor",
+        "end",
+        run_id=run_id,
+        blocks=len(blocks),
+        suspicious=len(suspicious_blocks),
+        content_hash=blocks_hash,
+        status="Completed",
+    )
     if suspicious_blocks:
         console.print(
             f"⚠️  Found {len(suspicious_blocks)} suspicious blocks for Stage 03 verification."
@@ -669,10 +1135,16 @@ def debug_bundle(
         raise typer.Exit(1)
 
     try:
-        blocks = extract_blocks(clean_pdf)
+        blk_tuple = extract_blocks(clean_pdf)
+        if isinstance(blk_tuple, tuple):
+            blocks, _presence = blk_tuple
+        else:
+            blocks = blk_tuple  # type: ignore
     except Exception as e:
         typer.secho(f"Extraction failed: {e}", fg=typer.colors.RED)
         raise typer.Exit(1)
+    # Snapshot for debug bundle run (predictor presence may be absent here)
+    _write_env_snapshot(stage_output_dir, clean_pdf)
 
     suspicious_blocks = [b for b in blocks if b.get("is_suspicious")]
     _timings = {

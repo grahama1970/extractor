@@ -47,6 +47,8 @@ from extractor.pipeline.utils.diagnostics import (
     get_run_id,
     gpu_metrics_available,
 )
+from extractor.pipeline.utils.section_heading_analyzer import analyze_sections
+from extractor.pipeline.utils.confidence import compose_confidence
 
 # (removed unused report utils import)
 
@@ -426,6 +428,43 @@ def build_sections_from_blocks(
         except Exception:
             section.setdefault("pages", [])
 
+    # Compute full section content hash (title + joined block texts) and decide if a layout image is helpful
+    try:
+        import hashlib as _hashlib
+        for s in sections:
+            md = s.setdefault("metadata", {})
+            # content hash
+            try:
+                txt_parts = []
+                for b in s.get("blocks", []) or []:
+                    t = b.get("text") or b.get("content") or ""
+                    if isinstance(t, str) and t.strip():
+                        txt_parts.append(t.strip())
+                basis = (s.get("title") or "") + "\n" + "\n".join(txt_parts)
+                md["section_content_hash"] = _hashlib.sha256(basis.encode("utf-8", "ignore")).hexdigest()
+            except Exception:
+                md["section_content_hash"] = None
+            # simple dispersion heuristic over x0 of block bboxes to gate section image usage
+            try:
+                xs: list[float] = []
+                for b in s.get("blocks", []) or []:
+                    bb = b.get("bbox")
+                    if isinstance(bb, list) and len(bb) >= 1:
+                        xs.append(float(bb[0]))
+                needs_image = False
+                if len(xs) >= 6:
+                    xs.sort()
+                    span = xs[-1] - xs[0]
+                    if span > 120:
+                        gaps = [xs[i + 1] - xs[i] for i in range(len(xs) - 1)]
+                        if gaps and max(gaps) > 0.35 * span:
+                            needs_image = True
+                md["needs_layout_image"] = needs_image
+            except Exception:
+                md["needs_layout_image"] = False
+    except Exception:
+        pass
+
     logger.info(f"Built {len(sections)} sections from {len(blocks)} blocks")
     return sections
 
@@ -726,6 +765,42 @@ async def process_sections_comprehensive(
     # Summarize suspicious from Stage 03 llm_verification results on original blocks
     suspicious_analysis = summarize_suspicious_from_verified(blocks, sections)
 
+    # ---- Heading anomaly analysis and preliminary confidence ----
+    try:
+        heading_analysis = analyze_sections(sections)
+        section_conf_map = heading_analysis.get("sections", {})
+        for s in sections:
+            sid = s.get("id")
+            hinfo = section_conf_map.get(sid, {})
+            s.setdefault("metadata", {}).setdefault(
+                "heading_analysis",
+                {
+                    "anomalies": hinfo.get("anomalies", []),
+                    "confidence_factor": hinfo.get("confidence_factor"),
+                },
+            )
+        for s in sections:
+            sid = s.get("id")
+            hinfo = section_conf_map.get(sid, {})
+            heading_factor = hinfo.get("confidence_factor")
+            # Aggregate table structure probabilities inside the section (if already present)
+            table_probs = []
+            for t in s.get("tables", []):
+                tp = (t.get("confidence") or {}).get("structure_prob")
+                if isinstance(tp, (int, float)):
+                    table_probs.append(float(tp))
+            structure_prob = sum(table_probs) / len(table_probs) if table_probs else None
+            confidence_obj = compose_confidence(
+                structure_prob=structure_prob,
+                heading_factor=heading_factor,
+                numeric_recall=None,
+                hallucination_factor=None,
+                extra_flags=hinfo.get("anomalies") or [],
+            )
+            s.setdefault("metadata", {})["confidence"] = confidence_obj
+    except Exception:
+        pass
+
     visual_count = 0
     if pdf_path and pdf_path.exists() and image_output_dir:
         logger.info("Capturing section visuals with 30% expansion...")
@@ -750,6 +825,8 @@ async def process_sections_comprehensive(
         "sections": sections,
         "section_count": len(sections),
         "suspicious_analysis": suspicious_analysis,
+        # Optional summary of heading anomalies for quick QA
+        "heading_analysis_summary": (heading_analysis.get("global") if 'heading_analysis' in locals() else {}),
         "hierarchy_depth": max((s["level"] for s in sections), default=0),
         "visual_captures": visual_count,
         "statistics": {

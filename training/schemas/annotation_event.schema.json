@@ -1,0 +1,44 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AnnotationEvent",
+  "type": "object",
+  "required": [
+    "event_id",
+    "timestamp",
+    "doc_id",
+    "object_type",
+    "object_id",
+    "gold_label"
+  ],
+  "properties": {
+    "event_id": { "type": "string" },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "user_id": { "type": "string" },
+    "doc_id": { "type": "string" },
+    "object_type": {
+      "type": "string",
+      "enum": ["table", "section", "figure", "equation", "entity"]
+    },
+    "object_id": { "type": "string" },
+    "gold_label": {
+      "type": "object",
+      "required": ["structure_correct"],
+      "properties": {
+        "structure_correct": { "type": "boolean" },
+        "cell_accuracy": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "notes": { "type": ["string", "null"] },
+        "error_tags": {
+          "type": ["array", "null"],
+          "items": { "type": "string" },
+          "description": "Optional multi-label error tags (e.g., header_split, numeric_loss)."
+        }
+      },
+      "additionalProperties": true
+    },
+    "context": { "type": "object" },
+    "original_prediction": { "type": "object" },
+    "model_versions": { "type": "object" },
+    "schema_version": { "type": "string" }
+  },
+  "additionalProperties": true
+}

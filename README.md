@@ -78,6 +78,28 @@ sections, path = extract_sections("data/input/pipeline/BHT_CV32A65X_marked.pdf")
 print(f"Sections: {len(sections)} at {path}")
 ```
 
+### SPARTA Ingest (Local refs → chunks)
+
+If you have a SPARTA workspace with `sparta_stix_enriched_local.json` and local
+resources under `resources_downloaded/`, you can produce lightweight chunks for
+retrieval/training without heavy dependencies:
+
+CLI:
+```bash
+PYTHONPATH=src python -m extractor.pipeline.sparta_ingest run \
+  --sparta-root /home/graham/workspace/experiments/sparta/sparta_complete \
+  --outdir data/author/sparta_chunks --chunk-chars 3000 --overlap 300
+```
+
+Notes:
+- Reads text from HTML/TXT; skips PDFs/images by default (use the full pipeline for PDFs).
+- Output: `data/author/sparta_chunks/sparta_chunks.jsonl` with fields
+  `{object_id, source_path, chunk_index, text, original_url}`.
+
+Install tips:
+- For the unified pipeline (accurate mode), install extras: `uv pip install -e .[accurate]`.
+- For minimal SPARTA ingest, no extra dependencies are required.
+
 ### Basic Usage
 ```bash
 # Extract any document with automatic format detection
@@ -694,3 +716,45 @@ Artifacts (logs + screenshots) are saved to `scripts/artifacts/`.
 
 - `pipeline-happy` and `pipeline-run-all` remain available but are considered aliases. Prefer the unified `python -m src.cli extract` surface.
 - Heavy dependencies (torch/transformers/spaCy/FAISS/opencv/camelot/ocr) are optional in the `accurate` extra; the default install stays lean for CI and fast iteration.
+# Extractor
+
+Extractor is a multi‑format document pipeline that normalizes PDFs and structured inputs (HTML, Markdown, and more) into a unified data model suitable for downstream summarization, search, and graph export.
+
+This branch focuses on production‑grade reliability (rate‑limits, strict JSON), determinism, and schema consistency.
+
+## Highlights
+
+- PDF pipeline (01→14): annotations → blocks → VLM header verify → sections → tables → figures → LLM/VLM reflow → …
+- Structured providers: HTML and Markdown emit `UnifiedDocument` directly for fast‑path ingestion
+- Strict JSON by default for Stage 07 with fallback tolerant parsing
+- Tenacity‑backed retries (honors Retry‑After; 5xx/timeouts), in‑process circuit breaker, and optional pre‑call jitter
+- Deterministic ordering and content hashes for tables/figures; paragraph splitting controls
+
+## Quick Start
+
+See QUICK_START.md for a concise, copy‑paste‑ready set of commands for running the pipeline strictly or with tolerant fallback.
+
+## Features
+
+See FEATURES.md for a detailed feature matrix (reliability, formats, schema, toggles).
+
+## Environment
+
+Set up venv and .env before running any step:
+
+```bash
+source .venv/bin/activate && set -a && source .env && set +a
+export PYTHONPATH=$(pwd)/src
+```
+
+Key envs (selected):
+
+- CHUTES_API_BASE=/v1, CHUTES_API_KEY
+- LITELLM_VLM_MODEL (SMALL/MED/LARGE via your .env)
+- Stage 07 strict JSON defaults: `STAGE07_STRICT_JSON_DEFAULT=1`, optional `STAGE07_STRICT_JSON_SCHEMA=1`
+- Paragraph split cap: `UNIFIED_MAX_PARAGRAPH_CHARS` (default 2400)
+- Circuit breaker caps: `LITELLM_BREAKER_FAILS` (default 5), `LITELLM_BREAKER_CAP_S` (default 30)
+
+## Contributing
+
+Please read the Copilot review request under `scripts/artifacts/COPILOT_REVIEW_EXTRACTOR_FULL_YYYY-MM-DD.md` for current focus areas.

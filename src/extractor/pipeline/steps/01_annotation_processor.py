@@ -6,6 +6,7 @@ Refactored POC with Typer CLI and easy debug mode for VS Code.
 
 import os
 import json
+import hashlib
 import base64
 import asyncio
 import textwrap
@@ -28,7 +29,13 @@ except ImportError:
     raise
 import typer
 from loguru import logger
-from extractor.pipeline.utils.litellm_call import litellm_call
+# Optional; Stage 01 does not require SciLLM at runtime. Guard import.
+try:
+    import scillm  # type: ignore
+except Exception:
+    scillm = None  # type: ignore
+from extractor.pipeline.utils.scillm_env import build_requests
+from extractor.pipeline.utils.model_env import resolve_model
 
 from extractor.pipeline.utils.diagnostics import (
     start_resource_sampler,
@@ -41,6 +48,7 @@ from extractor.pipeline.utils.diagnostics import (
 # Use pipeline-local JSON utilities to avoid heavy core service deps during this stage
 from extractor.pipeline.utils.json_utils import clean_json_string
 from extractor.pipeline.utils.litellm_cache import initialize_litellm_cache
+from extractor.pipeline.utils.llm_stats import compute_llm_stats, write_llm_stats
 
 # ------------------------------------------------------------------
 # GLOBAL CONSTANTS
@@ -183,11 +191,7 @@ class Config:
     include_freetext: bool = field(default=False)
     use_images: bool = False
     render_dpi: int = 150
-    llm_model: str = field(
-        default_factory=lambda: os.getenv(
-            "LITELLM_DEFAULT_MODEL", os.getenv("DEFAULT_LITELLM_MODEL", "")
-        )
-    )
+    llm_model: str = field(default_factory=lambda: resolve_model("") or "")
     llm_concurrency: int = 5
     context_blocks: int = 2
     # Debugging controls
@@ -195,6 +199,9 @@ class Config:
     max_runtime_seconds: int = 0  # 0 = no overall timeout
     debug: bool = False
     cache: bool = True  # Enable LiteLLM cache by default
+    # Optional UX/Server curated annotations support
+    ux_curated_json: Optional[Path] = None  # if provided, use/merge instead of PDF annots
+    skip_llm_if_curated: bool = True  # auto-skip LLM when curated boxes present and no human notes
 
 
 # DB export handled by stage 10 (arangodb_exporter).
@@ -757,7 +764,64 @@ async def process_pdf_pipeline(config: Config):
     json_output_dir.mkdir(exist_ok=True)
     image_output_dir.mkdir(exist_ok=True)
 
-    data = extract_annotations_data(config.input_pdf, config)
+    # Prefer curated annotations from the UX when available, then fallback to PDF annotations
+    curated_used = False
+    curated_schema_version: Optional[str] = None
+    data: List[Dict[str, Any]] = []
+
+    # 1) Explicit path passed via CLI/config
+    if config.ux_curated_json and config.ux_curated_json.exists():
+        try:
+            data, curated_schema_version = build_annots_from_curated(
+                config.input_pdf, config, config.ux_curated_json
+            )
+            curated_used = len(data) > 0
+        except Exception as e:
+            diagnostics.append(
+                make_event(
+                    "01_annotation_processor",
+                    "warning",
+                    "ux_curated_load_failed",
+                    str(e),
+                    {"path": str(config.ux_curated_json)},
+                )
+            )
+
+    # 2) Auto-discover curated path via RUN_ID if not explicitly provided
+    if not curated_used:
+        try:
+            rid = os.getenv("RUN_ID")
+            if rid:
+                run_dir = Path("data/runs") / rid
+                candidate = run_dir / "curated.json"
+                if candidate.exists():
+                    data, curated_schema_version = build_annots_from_curated(
+                        config.input_pdf, config, candidate
+                    )
+                    curated_used = len(data) > 0
+                    diagnostics.append(
+                        make_event(
+                            "01_annotation_processor",
+                            "info",
+                            "ux_curated_auto",
+                            "Loaded curated annotations from RUN_ID",
+                            {"run_id": rid, "count": len(data)},
+                        )
+                    )
+        except Exception as e:
+            diagnostics.append(
+                make_event(
+                    "01_annotation_processor",
+                    "warning",
+                    "ux_curated_auto_failed",
+                    str(e),
+                    {},
+                )
+            )
+
+    # 3) Fallback to extracting from embedded PDF annotations
+    if not curated_used:
+        data = extract_annotations_data(config.input_pdf, config)
     if config.limit_annotations and config.limit_annotations > 0:
         logger.info(f"Limiting annotations to first {config.limit_annotations} (for debugging)")
         data = data[: config.limit_annotations]
@@ -784,91 +848,110 @@ async def process_pdf_pipeline(config: Config):
 
     # images are already saved during extraction
 
-    # Run LLM interpretation in a single batched call via litellm_call
+    # Deterministic guard: cap concurrency and force temp=0
+    deterministic = os.getenv("PIPELINE_DETERMINISTIC", "0").lower() in {"1","true","yes","y"}
+    if deterministic:
+        config.llm_concurrency = 1
+    # Decide whether to call LLM (skip for curated if configured and no human notes)
+    run_llm = True
+    if curated_used and config.skip_llm_if_curated:
+        try:
+            has_note = any((a.get("human_note") not in (None, "")) for a in data)
+            run_llm = has_note
+        except Exception:
+            run_llm = False
+
+    # Run LLM interpretation in a single batched call via litellm_call (optional)
     results = []
     t_llm_ms = 0
     items: List[Dict[str, Any]] = []
-    for d in data:
-        try:
-            # Build messages inline (developer-controlled images via --images flag)
-            if config.use_images and "image_path" in d:
-                with open(d["image_path"], "rb") as f:
-                    b64 = base64.b64encode(f.read()).decode()
-                user_content: Any = [
-                    {"type": "text", "text": build_context(d)},
-                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
-                ]
-            else:
-                user_content = build_context(d)
-            # Provider quirk: GPT-5 rejects temperature; omit it for gpt-5 models
-            _model_l = (config.llm_model or "").lower()
-            params = {
-                "model": config.llm_model,
-                "messages": [
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": user_content},
-                ],
-                "response_format": {"type": "json_object"},
-                "max_tokens": 1024,
-                "timeout": 30,
-                "stream": False,
-            }
-            if "gpt-5" not in _model_l:
-                params["temperature"] = 0.1
-            items.append(params)
-        except Exception as e:
-            logger.exception(f"Failed to build messages for {d.get('id')}: {e}")
-            d["interpretation"] = {"error": f"message_build_failed: {e}"}
+    if run_llm:
+        for d in data:
             try:
-                diagnostics.append(
-                    make_event(
-                        "01_annotation_processor",
-                        "error",
-                        "llm_message_build_failed",
-                        str(e),
-                        {"annotation_id": d.get("id"), "page": d.get("page")},
-                    )
-                )
-                errors_count += 1
-            except Exception:
-                pass
-            items.append(
-                {
+                # Build messages inline (developer-controlled images via --images flag)
+                if config.use_images and "image_path" in d:
+                    with open(d["image_path"], "rb") as f:
+                        b64 = base64.b64encode(f.read()).decode()
+                    user_content: Any = [
+                        {"type": "text", "text": build_context(d)},
+                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
+                    ]
+                else:
+                    user_content = build_context(d)
+                # Provider quirk: GPT-5 rejects temperature; omit it for gpt-5 models
+                _model_l = (config.llm_model or "").lower()
+                params = {
                     "model": config.llm_model,
-                    "messages": [{"role": "user", "content": "noop"}],
+                    "messages": [
+                        {"role": "system", "content": SYSTEM_PROMPT},
+                        {"role": "user", "content": user_content},
+                    ],
+                    "response_format": {"type": "json_object"},
+                    "max_tokens": 1024,
+                    "timeout": 30,
+                    "stream": False,
                 }
-            )
+                # Force deterministic temp=0; otherwise small baseline for non-gpt5
+                base_temp = 0.0 if deterministic else (0.0 if "gpt-5" in _model_l else 0.1)
+                params["temperature"] = base_temp
+                items.append(params)
+            except Exception as e:
+                logger.exception(f"Failed to build messages for {d.get('id')}: {e}")
+                d["interpretation"] = {"error": f"message_build_failed: {e}"}
+                try:
+                    diagnostics.append(
+                        make_event(
+                            "01_annotation_processor",
+                            "error",
+                            "llm_message_build_failed",
+                            str(e),
+                            {"annotation_id": d.get("id"), "page": d.get("page")},
+                        )
+                    )
+                    errors_count += 1
+                except Exception:
+                    pass
+                items.append(
+                    {
+                        "model": config.llm_model,
+                        "messages": [{"role": "user", "content": "noop"}],
+                    }
+                )
 
     try:
-        if config.max_runtime_seconds and config.max_runtime_seconds > 0:
+        if run_llm:
             t0 = time.monotonic()
-            sid = os.getenv("LITELLM_SESSION_ID") or get_run_id()
-            results = await asyncio.wait_for(
-                litellm_call(
-                    items,
-                    concurrency=config.llm_concurrency,
-                    desc="Interpreting Annotations",
-                    session_id=sid,
-                    export="results",
-                    sanitize_data_urls=os.getenv("STAGE01_SANITIZE_DATA_URLS", "redact"),
-                    sanitize_truncate_chars=int(os.getenv("STAGE01_SANITIZE_CHARS", "48")),
-                ),
-                timeout=config.max_runtime_seconds,
-            )
+            # Convert to Router requests with provider fields; allow data URL sanitizer to remain upstream
+            temp = 0.0 if deterministic else None
+            reqs = build_requests(items, json_object=True, timeout=None, temperature=temp)
+            router = scillm.Router(deterministic=deterministic)
+            async def _do_call():
+                return await router.parallel_acompletions(reqs, max_concurrency=max(1, int(config.llm_concurrency)))
+            resps = await (asyncio.wait_for(_do_call(), timeout=config.max_runtime_seconds)
+                           if (config.max_runtime_seconds and config.max_runtime_seconds > 0)
+                           else _do_call())
+            # Normalize results into lightweight dicts with content
+            results = []
+            for i, r in enumerate(resps):
+                try:
+                    content = r["choices"][0]["message"]["content"] if isinstance(r, dict) else ""
+                except Exception:
+                    content = ""
+                results.append({
+                    "index": i,
+                    "request": reqs[i],
+                    "response": r,
+                    "content": content,
+                    "exception": None,
+                })
             t_llm_ms = int((time.monotonic() - t0) * 1000)
-        else:
-            t0 = time.monotonic()
-            sid = os.getenv("LITELLM_SESSION_ID") or get_run_id()
-            results = await litellm_call(
-                items,
-                concurrency=config.llm_concurrency,
-                desc="Interpreting Annotations",
-                session_id=sid,
-                export="results",
-                sanitize_data_urls=os.getenv("STAGE01_SANITIZE_DATA_URLS", "redact"),
-                sanitize_truncate_chars=int(os.getenv("STAGE01_SANITIZE_CHARS", "48")),
-            )
-            t_llm_ms = int((time.monotonic() - t0) * 1000)
+            # Write llm_stats.json alongside stage outputs
+            try:
+                stage_dir = config.output_dir / "01_annotation_processor" / "json_output"
+                stats = compute_llm_stats(results, strict_json=True)
+                write_llm_stats("01", run_id, stats, stage_dir)
+            except Exception:
+                pass
     except asyncio.TimeoutError as e:
         msg_info = classify_llm_error(e)
         try:
@@ -907,27 +990,28 @@ async def process_pdf_pipeline(config: Config):
         t_llm_ms = 0
 
     # Parse results back into annotations
-    if not results:
+    if not run_llm:
+        for d in data:
+            d["interpretation"] = {"skipped": True, "reason": "curated_llm_bypass"}
+    elif not results:
         # preserve shape when we timed out/failed: set empty interpretation
         for d in data:
             d["interpretation"] = {"error": "LLM call failed or timed out"}
     else:
         for r in results:
-            idx = r.index
+            idx = r.get("index")
             if not (0 <= idx < len(data)):
                 continue
             d = data[idx]
-            content_str = r.content or ""
+            content_str = r.get("content") or ""
             try:
                 try:
                     from loguru import logger as _logger
-                    _logger.info(
-                        f"stage01_interpret: model={getattr(getattr(r,'request',object()),'model',None)} ok={r.exception is None}"
-                    )
+                    _logger.info(f"stage01_interpret: model={r.get('request',{}).get('model')} ok={r.get('exception') is None}")
                 except Exception:
                     pass
                 if not isinstance(content_str, str) or not content_str.strip():
-                    d["interpretation"] = {"error": "Empty content from LLM"}
+                    d["interpretation"] = {"error": "empty_content"}
                     continue
                 cleaned = clean_json_string(content_str)
                 if isinstance(cleaned, dict):
@@ -943,9 +1027,8 @@ async def process_pdf_pipeline(config: Config):
                     else:
                         d["interpretation"] = {"data": loaded}
                 except json.JSONDecodeError:
-                    logger.error(
-                        f"Invalid JSON for {d.get('id')}: {cleaned[:200]}..."
-                    )
+                    snippet = cleaned[:200]
+                    logger.error(f"Invalid JSON for {d.get('id')}: {snippet}...")
                     try:
                         diagnostics.append(
                             make_event(
@@ -953,16 +1036,13 @@ async def process_pdf_pipeline(config: Config):
                                 "error",
                                 "llm_invalid_json",
                                 "Model returned invalid JSON",
-                                {"annotation_id": d.get("id")},
+                                {"annotation_id": d.get("id"), "snippet": snippet},
                             )
                         )
                         errors_count += 1
                     except Exception:
                         pass
-                    d["interpretation"] = {
-                        "error": "Invalid JSON response from LLM",
-                        "raw_response": cleaned,
-                    }
+                    d["interpretation"] = {"error": "invalid_json", "raw_len": len(cleaned), "raw_preview": snippet}
             except Exception as e:
                 logger.exception(
                     f"Failed to parse LLM response for {d.get('id')}: {e}"
@@ -1049,13 +1129,34 @@ async def process_pdf_pipeline(config: Config):
         "llm_batch_duration_ms": t_llm_ms,
     }
 
+    # stable doc_id (basename__sha256first8)
+    try:
+        _raw_pdf = Path(config.input_pdf).read_bytes()
+        _hash8 = hashlib.sha256(_raw_pdf).hexdigest()[:8]
+        _base = "".join(ch if ch.isalnum() else "_" for ch in Path(config.input_pdf).stem.lower()).strip("_")
+        doc_id = f"{_base}__{_hash8}"
+    except Exception:
+        doc_id = Path(config.input_pdf).stem.lower()
+
+    # curated stats
+    try:
+        from collections import Counter
+        type_counts = Counter([str(a.get("type") or "").lower() for a in data])
+    except Exception:
+        type_counts = {}
+
     payload = {
         "timestamp": datetime.now().isoformat(),
         "run_id": run_id,
+        "doc_id": doc_id,
         "source_pdf": str(config.input_pdf),
         "clean_pdf_path": clean_pdf_path,
         "status": "Completed",
         "annotation_count": len(data),
+        "source": ("ux_curated" if curated_used else "pdf_annotations"),
+        "curated_mode": curated_used,
+        "curated_schema_version": curated_schema_version,
+        "curated_stats": {"types": dict(type_counts)},
         "annotations": data,
         "errors_count": errors_count,
         "warnings_count": warnings_count,
@@ -1133,6 +1234,20 @@ def run(
     cache: bool = typer.Option(
         True, "--cache/--no-cache", help="Enable LiteLLM cache (default: enabled)"
     ),
+    ux_curated_json: Optional[Path] = typer.Option(
+        None,
+        "--ux-curated-json",
+        help="Path to UX-curated annotations JSON (curated.json or Stage‑01 canonical)",
+        exists=False,
+        file_okay=True,
+        dir_okay=False,
+        readable=False,
+    ),
+    skip_llm_if_curated: bool = typer.Option(
+        True,
+        "--skip-llm-if-curated/--no-skip-llm-if-curated",
+        help="When curated boxes are provided and have no human notes, skip LLM calls (default: enabled)",
+    ),
 ):
     """Processes a PDF to extract and interpret annotations, saving to a structured output directory."""
 
@@ -1171,6 +1286,8 @@ def run(
         limit_annotations=limit,
         max_runtime_seconds=timeout,
         cache=cache,
+        ux_curated_json=ux_curated_json,
+        skip_llm_if_curated=skip_llm_if_curated,
     )
     if debug:
         print(f"DEBUG: include_freetext = {cfg.include_freetext}")
@@ -1261,3 +1378,212 @@ def debug_bundle(
 # ------------------------------------------------------------------
 if __name__ == "__main__":
     build_cli()()
+
+# ------------------------------------------------------------------
+# UX Curated annotations support
+# ------------------------------------------------------------------
+def _normalize_curated_schema(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Accepts multiple curated shapes and normalizes to either:
+      - { annotations: [ { page:int, original_rect:[x0,y0,x1,y1], expanded_rect:[...]? } ] }
+      - { boxes_by_page: { "1": [ { x:0..1,y:0..1,w:0..1,h:0..1,type?,instanceId? } ] } }
+    Returns a dict with one of these keys preserved. Raises on invalid.
+    """
+    if isinstance(raw, dict):
+        if isinstance(raw.get("annotations"), list):
+            return {"annotations": raw["annotations"]}
+        if isinstance(raw.get("boxes_by_page"), dict):
+            return {"boxes_by_page": raw["boxes_by_page"]}
+        # Some UIs store under a top-level payload
+        for k in ("payload", "data"):
+            v = raw.get(k)
+            if isinstance(v, dict):
+                return _normalize_curated_schema(v)
+    raise ValueError("Unsupported curated schema: expected annotations[] or boxes_by_page{}")
+
+
+def _ui_boxes_to_stage01_annotations(pdf: Path, boxes_by_page: Dict[Any, Any]) -> List[Dict[str, Any]]:
+    """Port of the server-side converter: normalized 0..1 boxes → PDF points + expanded rects.
+    Only returns minimal fields; feature enrichment happens later.
+    """
+    try:
+        doc = fitz.open(str(pdf))
+    except Exception as e:
+        raise RuntimeError(f"open_pdf_failed: {e}")
+    out: List[Dict[str, Any]] = []
+    for page_key, boxes in (boxes_by_page or {}).items():
+        try:
+            page_index = int(page_key)
+        except Exception:
+            page_index = int(str(page_key))
+        zero_based = max(0, page_index - 1)
+        if zero_based >= len(doc):
+            continue
+        p = doc[zero_based]
+        w = float(p.rect.width)
+        h = float(p.rect.height)
+        for b in boxes or []:
+            # tolerate dict or pydantic-ish
+            bx = b.get("x", b.get("left", 0.0))
+            by = b.get("y", b.get("top", 0.0))
+            bw = b.get("w", b.get("width", 0.0))
+            bh = b.get("h", b.get("height", 0.0))
+            # Heuristic: if any component > 2.0, treat inputs as absolute PDF coords
+            if any(
+                (isinstance(v, (int, float)) and float(v) > 2.0) for v in (bx, by, bw, bh)
+            ):
+                x0 = max(0.0, min(w, float(bx)))
+                y0 = max(0.0, min(h, float(by)))
+                x1 = max(0.0, min(w, float(bw)))
+                y1 = max(0.0, min(h, float(bh)))
+            else:
+                x0 = max(0.0, min(w, float(bx) * w))
+                y0 = max(0.0, min(h, float(by) * h))
+                x1 = max(0.0, min(w, (float(bx) + float(bw)) * w))
+                y1 = max(0.0, min(h, (float(by) + float(bh)) * h))
+            pad_x = 0.1 * (x1 - x0)
+            pad_y = 0.1 * (y1 - y0)
+            ex0 = max(0.0, x0 - pad_x)
+            ey0 = max(0.0, y0 - pad_y)
+            ex1 = min(w, x1 + pad_x)
+            ey1 = min(h, y1 + pad_y)
+            t = (b.get("type") or "").strip().lower()
+            if t == "section":
+                a_type = "section_header"
+            elif t == "table":
+                a_type = "table_region"
+            elif t == "figure":
+                a_type = "figure_region"
+            elif t == "caption":
+                a_type = "caption"
+            elif t == "equation":
+                a_type = "equation"
+            else:
+                a_type = t or "region"
+            out.append(
+                {
+                    "id": b.get("instanceId") or b.get("id") or f"anno_{len(out)+1:04d}",
+                    "page": zero_based,
+                    "type": a_type,
+                    "original_rect": [x0, y0, x1, y1],
+                    "expanded_rect": [ex0, ey0, ex1, ey1],
+                }
+            )
+    doc.close()
+    return out
+
+
+def build_annots_from_curated(
+    input_pdf: Path, config: Config, curated_path: Path
+) -> tuple[List[Dict[str, Any]], Optional[str]]:
+    """Load curated JSON and produce fully enriched Stage‑01 annotations (with context + image)."""
+    raw = json.loads(curated_path.read_text())
+    norm = _normalize_curated_schema(raw)
+    schema_version: Optional[str] = None
+    if isinstance(raw, dict):
+        schema_version = raw.get("schema_version") or raw.get("version")
+    # Get base records with page/original_rect/expanded_rect
+    if "annotations" in norm:
+        base_annots = norm["annotations"] or []
+    else:
+        base_annots = _ui_boxes_to_stage01_annotations(input_pdf, norm["boxes_by_page"])
+    # Enrich like extract_annotations_data(), but driven by rects
+    return enrich_annots_from_rects(input_pdf, config, base_annots), schema_version
+
+
+def enrich_annots_from_rects(
+    input_pdf: Path, config: Config, base_annots: List[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
+    try:
+        doc = fitz.open(str(input_pdf))
+    except Exception as e:
+        raise RuntimeError(f"open_pdf_failed: {e}")
+
+    image_dir = config.output_dir / "image_output"
+    image_dir.mkdir(parents=True, exist_ok=True)
+    # For each page, prefetch text dict once
+    page_text_cache: Dict[int, Dict[str, Any]] = {}
+    out: List[Dict[str, Any]] = []
+    for idx, a in enumerate(base_annots or []):
+        try:
+            pno = int(a.get("page", 0))
+            if pno < 0 or pno >= len(doc):
+                continue
+            page = doc[pno]
+            if pno not in page_text_cache:
+                page_text_cache[pno] = page.get_text("dict")  # type: ignore[attr-defined]
+            page_text_dict = page_text_cache[pno]
+            # Rects
+            o = a.get("original_rect") or a.get("bbox") or a.get("rect")
+            if not o or len(o) != 4:
+                continue
+            original_rect = fitz.Rect(o)
+            e = a.get("expanded_rect")
+            expanded_rect = (
+                (fitz.Rect(e) & page.rect) if (isinstance(e, (list, tuple)) and len(e) == 4) else _get_expanded_rect_like(original_rect, page, config)
+            )
+            # Context
+            context_blocks = _get_context_blocks(original_rect, expanded_rect, page_text_dict, config.context_blocks)
+            inside_blocks = context_blocks["inside"]
+            above_blocks = context_blocks["above"]
+            below_blocks = context_blocks["below"]
+            sizes_inside = _collect_font_sizes(inside_blocks)
+            sizes_above = _collect_font_sizes(above_blocks)
+            sizes_below = _collect_font_sizes(below_blocks)
+            avg_size_inside = (sum(sizes_inside) / len(sizes_inside)) if sizes_inside else None
+            avg_size_above = (sum(sizes_above) / len(sizes_above)) if sizes_above else None
+            avg_size_below = (sum(sizes_below) / len(sizes_below)) if sizes_below else None
+            bold_inside = _has_bold(inside_blocks)
+            align = _compute_alignment(page.rect, _union_bbox(inside_blocks))
+            spacing = _compute_spacing(original_rect, above_blocks, below_blocks)
+            # Render image crop
+            matrix = fitz.Matrix(config.render_dpi / 72, config.render_dpi / 72)
+            try:
+                pix = page.get_pixmap(matrix=matrix, clip=expanded_rect, annots=False)  # type: ignore[attr-defined]
+            except TypeError:
+                pix = page.get_pixmap(matrix=matrix, clip=expanded_rect)  # type: ignore[attr-defined]
+            img_path = image_dir / f"ux_annot_p{pno}_{idx+1:03d}.png"
+            pix.save(str(img_path))
+
+            out.append(
+                {
+                    "id": str(a.get("id") or f"ux_{pno}_{idx+1:03d}"),
+                    "page": pno,
+                    "type": a.get("type") or "region",
+                    "original_rect": [float(original_rect.x0), float(original_rect.y0), float(original_rect.x1), float(original_rect.y1)],
+                    "expanded_rect": [float(expanded_rect.x0), float(expanded_rect.y0), float(expanded_rect.x1), float(expanded_rect.y1)],
+                    "inside_blocks": inside_blocks,
+                    "above_blocks": above_blocks,
+                    "below_blocks": below_blocks,
+                    "image_path": str(img_path),
+                    "human_note": a.get("human_note"),
+                    "machine_note": a.get("machine_note"),
+                    "computed_features": {
+                        "avg_font_size_inside": avg_size_inside,
+                        "avg_font_size_above": avg_size_above,
+                        "avg_font_size_below": avg_size_below,
+                        "bold_detected_inside": bold_inside,
+                        "alignment": align,
+                        **spacing,
+                    },
+                }
+            )
+        except Exception:
+            continue
+    try:
+        doc.close()
+    except Exception:
+        pass
+    return out
+
+
+def _get_expanded_rect_like(current: fitz.Rect, page: fitz.Page, config: Config) -> fitz.Rect:
+    """Lightweight expansion used for curated annots lacking an explicit expanded_rect."""
+    # sym vertical expansion within page bounds
+    h = current.y1 - current.y0
+    extra = max(h * config.vertical_expansion_ratio, 40.0) / 2.0
+    y0 = max(0, current.y0 - extra)
+    y1 = min(page.rect.height, current.y1 + extra)
+    x0, x1 = (0, page.rect.width) if config.full_page_width else (current.x0, current.x1)
+    # respect nearby walls is skipped for curated flow for simplicity
+    return fitz.Rect(x0, y0, x1, y1)
