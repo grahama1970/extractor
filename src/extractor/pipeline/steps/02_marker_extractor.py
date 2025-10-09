@@ -146,19 +146,8 @@ def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool
             return blocks, predictor_presence
         raise
 
-    # Optional: open PyMuPDF for span color extraction
+    # Color enrichment via PyMuPDF is disabled to comply with Stage‑02 policy
     fitz_doc = None
-    try:
-        import fitz  # type: ignore
-
-        try:
-            fitz_doc = fitz.open(str(pdf_path))
-        except Exception:
-            fitz_doc = None
-    except Exception:
-        fitz_doc = None
-    # Cache PyMuPDF page text once per page to avoid repeated parsing
-    page_text_cache: Dict[int, Any] = {}
 
     blocks: List[Dict[str, Any]] = []
     for page in document.pages:
