@@ -580,6 +580,13 @@ async def process_pdf_pipeline(config: Config):
         return
 
     print(f"Found {len(tasks)} suspicious headers. Starting verification...")
+    # Log batch-level effective model + extras once
+    try:
+        eff_model = normalize_model_alias(config.llm_model)
+        eff_extras = build_chat_extras(eff_model)
+        logger.info(f"stage03.batch: effective_model={eff_model} extras_keys={list(eff_extras.keys())}")
+    except Exception:
+        pass
     try:
         diagnostics.append(
             make_event(
@@ -823,11 +830,19 @@ async def process_pdf_pipeline(config: Config):
                     ],
                 },
             ]
+            # Inject normalized model id + provider/json extras per prepared item
+            try:
+                _m_eff = normalize_model_alias(config.llm_model)
+                _extras = build_chat_extras(_m_eff)
+            except Exception:
+                _m_eff = config.llm_model
+                _extras = {}
             prepared.append(
                 {
-                    "model": config.llm_model,
+                    "model": _m_eff,
                     "messages": messages,
                     "response_format": {"type": "json_object"},
+                    "kwargs": _extras,
                 }
             )
             task_refs.append(task)

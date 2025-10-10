@@ -1472,8 +1472,41 @@ async def reflow_section_with_llm(
         if not isinstance(content, str) or not content.strip():
             # Attempt 3: Relaxed mode (no response_format). Parse free-form via clean_json_string downstream.
             try:
-                # Relaxed: same messages, no response_format extras
-                call_params = {"model": LLM_MODEL, "messages": messages, "timeout": llm_timeout}
+                # Retry 2 shaping: brief backoff + trimmed context + no images + lower max_tokens
+                try:
+                    _backoff_ms = int(os.getenv("STAGE07_RETRY2_BACKOFF_MS", "300"))
+                except Exception:
+                    _backoff_ms = 300
+                await asyncio.sleep(max(0, _backoff_ms) / 1000.0)
+
+                try:
+                    _trim = int(os.getenv("STAGE07_RETRY2_TRIM_CHARS", "1200"))
+                except Exception:
+                    _trim = 1200
+                _guard3 = (
+                    "Return ONLY a JSON object with keys: reflowed_json, ocr_corrections, "
+                    "improvements_made, summary. No code fences. reflowed_json.blocks must be valid and _ordered."
+                )
+                user_parts3 = [{"type": "text", "text": f"{_guard3}\n\n{context_text[:_trim]}"}]
+                messages3 = [
+                    {"role": "system", "content": "You output ONLY compact JSON."},
+                    {"role": "user", "content": user_parts3},
+                ]
+
+                call_params = {"model": LLM_MODEL, "messages": messages3, "timeout": llm_timeout, **extras}
+                # lower temperature and cap tokens when supported
+                call_params["temperature"] = 0
+                call_params["cache"] = {"no-cache": True}
+                try:
+                    _retry2_cap = int(os.getenv("STAGE07_RETRY2_MAX_TOKENS", "1536"))
+                except Exception:
+                    _retry2_cap = 1536
+                try:
+                    if "gemini" not in (LLM_MODEL or "").lower():
+                        call_params["max_tokens"] = min(int(call_params.get("max_tokens") or STAGE07_MAX_TOKENS), _retry2_cap)
+                except Exception:
+                    pass
+
                 results = await litellm_call(
                     [call_params],
                     wrap_json=False,
@@ -1491,9 +1524,7 @@ async def reflow_section_with_llm(
                 except Exception:
                     pass
                 try:
-                    (
-                        logs_dir / f"response_relaxed_{section_data.get('id','section')}.json"
-                    ).write_text(
+                    (logs_dir / f"response_relaxed_{section_data.get('id','section')}.json").write_text(
                         json.dumps(resp2, default=str, indent=2)
                         if isinstance(resp2, dict)
                         else str(resp2)
@@ -1512,13 +1543,15 @@ async def reflow_section_with_llm(
         # Parse/repair JSON robustly
         try:
             parsed = clean_json_string(content, return_dict=True)
+            # Optional: prune unexpected top-level keys for strictness (default ON)
+            try:
+                if os.getenv("STAGE07_PRUNE_TOPLEVEL_KEYS", "1").lower() in ("1", "true", "yes", "y"):
+                    _allowed = {"reflowed_json", "ocr_corrections", "improvements_made", "summary"}
+                    parsed = restrict_top_level_keys(parsed, _allowed)
+            except Exception:
+                pass
             if isinstance(parsed, dict):
-                # Prune any unexpected top-level keys to enforce strictness
-                try:
-                    allowed = {"reflowed_json", "ocr_corrections", "improvements_made", "summary"}
-                    result = restrict_top_level_keys(parsed, allowed)
-                except Exception:
-                    result = parsed
+                result = parsed
             elif isinstance(parsed, list):
                 # If the model returned a top-level list, try using the first object
                 result = (
