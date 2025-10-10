@@ -75,6 +75,7 @@ MAX_FIGURES_PER_DOC = int(os.getenv("FIGURE_MAX_PER_DOC", "12"))
 MAX_FIGURES_PER_SECTION = int(os.getenv("FIGURE_MAX_PER_SECTION", "3"))
 FIGURE_DESC_ENABLED = os.getenv("FIGURE_DESC", "1").lower() in {"1","true","yes"}
 FIGURE_MIN_AREA = int(os.getenv("FIGURE_MIN_AREA_PX", "5000"))
+DEFAULT_VLM = os.getenv("DEFAULT_VLM", "Qwen/Qwen2.5-VL-32B-Instruct").strip()
 
 
 # --- Core Functions ---
@@ -111,13 +112,17 @@ async def describe_image_with_llm(image_data: bytes, context: str = "") -> str:
             timeout=25,
             max_tokens=256,
             temperature=0.2,
+            custom_llm_provider="openai",
         )
         content = None
         try:
             content = resp["choices"][0]["message"]["content"]
         except Exception:
             content = getattr(getattr(resp, "choices", [None])[0], "message", {}).get("content") if hasattr(resp, "choices") else None
-        return (content or "").strip()
+        desc = (content or "").strip()
+        if not desc:
+            logger.error(f"figure_description.empty_output model={model}")
+        return desc
     except Exception as e:
         logger.warning(f"Figure description failed (model={model}): {e}")
         return ""

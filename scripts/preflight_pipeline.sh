@@ -29,7 +29,13 @@ case "${FIGURE_DESC,,}" in
       echo "CHUTES_API_BASE must end with /v1 (e.g., https://api.chutes.ai/v1)" >&2
       exit 2
     fi
-    echo "CHUTES env OK (figure descriptions enabled)" ;;
+    echo "CHUTES env OK (figure descriptions enabled)"
+    echo "Checking CHUTES /models connectivity..."
+    if ! curl -sSf -H "Authorization: Bearer ${CHUTES_API_KEY}" "${CHUTES_API_BASE}/models" >/dev/null; then
+      echo "CHUTES /models check failed. Verify CHUTES_API_BASE and CHUTES_API_KEY." >&2
+      exit 2
+    fi
+    echo "CHUTES /models reachable" ;;
   *)
     echo "CHUTES env not required (FIGURE_DESC=${FIGURE_DESC})" ;;
 esac
