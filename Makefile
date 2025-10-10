@@ -711,3 +711,28 @@ env-accurate:
 	@echo "Syncing environment with accurate extras (Torch + Surya + table_rec)"
 	uv sync --extra accurate
 	@echo "Done. Activate with: source .venv/bin/activate"
+	@echo "  make run-ci PDF=... OUT=...     # deterministic profile: no LLM, summary-only07, skip 10/11"
+	@echo "  make run-prod PDF=... OUT=...   # production profile: 03/06/07 LLMs ON with hardening"
+# --- Profiles: CI (deterministic) and PROD (LLMs on) ---
+.PHONY: run-ci run-prod
+run-ci:
+	@if [ -z "$(PDF)" ] || [ -z "$(OUT)" ]; then \
+	  echo "Usage: make run-ci PDF=path/to/file.pdf OUT=data/results/pipeline_ci"; exit 1; fi
+	PROFILE=ci \
+	STAGE07_MINIMAL_JSON=1 STAGE07_FORCE_SCHEMA_HINT=1 \
+	python -m extractor.pipeline.run_all \
+	  --pdf "$(PDF)" \
+	  --results "$(OUT)" \
+	  --offline --skip-llm03 --skip-descriptions06 --summary-only07 \
+	  --skip-export10 --skip-embeddings10 --skip-graph11 --prove08
+
+run-prod:
+	@if [ -z "$(PDF)" ] || [ -z "$(OUT)" ]; then \
+	  echo "Usage: make run-prod PDF=path/to/file.pdf OUT=data/results/pipeline_prod"; exit 1; fi
+	PROFILE=prod \
+	STAGE07_MINIMAL_JSON=1 STAGE07_FORCE_SCHEMA_HINT=1 STAGE07_PRUNE_TOPLEVEL_KEYS=1 \
+	python -m extractor.pipeline.run_all \
+	  --pdf "$(PDF)" \
+	  --results "$(OUT)" \
+	  --no-offline --no-skip-llm03 --no-skip-descriptions06 --full07 \
+	  --skip-export10 --skip-embeddings10 --skip-graph11 --skip-proving08
