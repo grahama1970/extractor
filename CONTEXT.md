@@ -1,32 +1,48 @@
-# Current Context — Extractor Pipeline (2025-10-09)
+# Current Context — Extractor Pipeline (2025-10-10)
 
 Repo: /home/graham/workspace/experiments/extractor
-Focus: Stabilize pipeline on 2‑page PDF: prototypes/tabbed/pdfs/BHT CV32A65X.pdf
+Branch: feat/walking-skeleton-pipeline (pushed)
+Focus: Working “walking skeleton” pipeline on 2‑page PDF: prototypes/tabbed/pdfs/BHT CV32A65X.pdf
 
-Decisions today
-- Color enrichment moved to Stage 03 (suspicious headers) as opt‑in: STAGE03_COLOR_ENRICH=1
-- Stage 04 keeps a skip-if-present color enrichment to avoid duplication (STAGE04_COLOR_ENRICH=1)
-- .gitignore tightened (artifacts/, data/, memory/, screenshots/, tabbed pdfs/screenshots)
+What landed today
+- New branch feat/walking-skeleton-pipeline
+- .gitignore tightened (data/results/, artifacts/, memory/, screenshots/, tabbed pdfs/screenshots)
+- Stage 06 caps figures per doc via FIGURE_MAX_PER_DOC (default 12)
+- Stage 06c PDF annotator added (draws boxes for sections/tables/figures)
+- Scripts:
+  - scripts/preflight_pipeline.sh (Ghostscript, PyMuPDF, Camelot, CHUTES env)
+  - scripts/run_walking_skeleton.sh (01→14 minimal flow)
 
 Key files touched
-- src/extractor/pipeline/steps/03_suspicious_headers.py
-  * Added optional color enrichment for target/above/below blocks via PyMuPDF span color
-  * Prompt context already surfaces first_span_font.color_bucket when present
-- src/extractor/pipeline/steps/04_section_builder.py
-  * Added color enrichment utility, but now skips if Stage 03 already set color
-- .gitignore updated to exclude heavy artifacts and local data
+- src/extractor/pipeline/steps/06_figure_extractor.py: cap total figures processed per doc
+- src/extractor/pipeline/steps/06c_pdf_annotator.py: new deterministic annotator
+- scripts/preflight_pipeline.sh: environment/tooling preflight
+- scripts/run_walking_skeleton.sh: orchestrates walking-skeleton run
+- .gitignore: excludes heavy local outputs
 
 Intent
 - Keep Stage 02 strictly Marker-only (policy intact)
-- Use Stage 03’s vision context to improve header verification with real color signals
-- Keep Stage 04 purely structural/visual capture; no duplicate color work when Stage 03 provided it
+- Keep Stage 07 deterministic by default (images off via env); rely on existing strict JSON path
+- Preserve Stage 05 LLM header-assist for low-confidence tables (length-preserving)
 
-Immediate next actions
-1) Run pipeline iteratively on BHT CV32A65X.pdf (Stages 02→03→04→05→06b→07→14)
-2) If Stage 02 missing models, set OFFLINE_PDF_PREDICTORS=0 and correct Marker env; no PyMuPDF fallback allowed in Stage 02
-3) Ensure .env LLM routing works for Stage 03 (vision) and Stage 07 (text/VLM) via LiteLLM
+How to run (walking skeleton)
+```bash
+source .venv/bin/activate && set -a && [ -f .env ] && source .env && set +a
+CHUTES_API_BASE=$CHUTES_API_BASE CHUTES_API_KEY=$CHUTES_API_KEY \
+scripts/run_walking_skeleton.sh \
+  "prototypes/tabbed/pdfs/BHT CV32A65X.pdf" \
+  "data/results/pipeline"
+```
+
+Environment notes
+- Set CHUTES_API_BASE and CHUTES_API_KEY (mapped to OPENAI_* automatically)
+- Control figure load with FIGURE_MAX_PER_DOC (default 12)
+- Stage 07 defaults: STAGE07_ATTACH_SECTION_IMAGE=0, STAGE07_INCLUDE_FIGURES=0 in the skeleton script
+
+Review plan
+- Open PR from feat/walking-skeleton-pipeline
+- Ask Copilot/CodeRabbit for comprehensive review of src/extractor/pipeline/steps (focus on 05/06/07/10/14 and new 06c)
 
 Copilot/Code Review plan
 - After green local run, open a feature branch and push
 - Prepare review prompt with context, scenarios, questions, and request unified diffs
-
