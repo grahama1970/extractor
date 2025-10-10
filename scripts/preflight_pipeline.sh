@@ -20,7 +20,7 @@ sys.exit(0 if ok else 3)
 PY
 
 # Only require CHUTES/OpenAI when figure descriptions (or any LLM) are explicitly enabled
-FIGURE_DESC="${FIGURE_DESC:-1}"
+FIGURE_DESC="${FIGURE_DESC:-0}"
 case "${FIGURE_DESC,,}" in
   1|true|yes)
     : "${CHUTES_API_BASE:?Set CHUTES_API_BASE for VLM figure descriptions}" >/dev/null

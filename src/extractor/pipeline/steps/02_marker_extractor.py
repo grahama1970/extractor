@@ -690,7 +690,7 @@ def debug_bundle(
         raise typer.Exit(1)
 
     try:
-        blocks = extract_blocks(clean_pdf)
+        blocks, _predictors = extract_blocks(clean_pdf)
     except Exception as e:
         typer.secho(f"Extraction failed: {e}", fg=typer.colors.RED)
         raise typer.Exit(1)
