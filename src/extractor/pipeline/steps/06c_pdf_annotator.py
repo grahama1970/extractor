@@ -22,7 +22,7 @@ except Exception as e:  # pragma: no cover
     raise RuntimeError("PyMuPDF (fitz) is required for 06c_pdf_annotator") from e
 
 
-app = typer.Typer(help="Overlay section/table/figure boxes on a PDF (deterministic)")
+app = typer.Typer(help="Overlay section/table/figure/knowledge-chunk boxes on a PDF (deterministic)")
 
 
 def _safe_get_bbox(obj: Dict[str, Any]) -> Optional[List[float]]:
@@ -41,6 +41,9 @@ def run(
     sections_json: Path = typer.Option(..., "--sections", exists=True, help="Stage 04 sections JSON"),
     tables_json: Path = typer.Option(..., "--tables", exists=True, help="Stage 05 tables JSON"),
     figures_json: Path = typer.Option(..., "--figures", exists=True, help="Stage 06 figures JSON"),
+    # Optional: knowledge chunks from Stage 07 and block lookup from Stage 02
+    reflowed_json: Optional[Path] = typer.Option(None, "--reflowed", exists=True, help="Stage 07 reflowed JSON (optional)"),
+    blocks02_json: Optional[Path] = typer.Option(None, "--blocks02", exists=True, help="Stage 02 marker blocks JSON (optional; used to map chunk source block_ids to page/bbox)"),
     output_dir: Path = typer.Option("data/results/pipeline", "-o", help="Results root"),
 ):
     stage_dir = output_dir / "06c_pdf_annotator"
@@ -52,6 +55,30 @@ def run(
     sections = (json.loads(sections_json.read_text(encoding="utf-8")).get("sections") or [])
     tables = (json.loads(tables_json.read_text(encoding="utf-8")).get("tables") or [])
     figures = (json.loads(figures_json.read_text(encoding="utf-8")).get("figures") or [])
+    reflowed_sections = []
+    if reflowed_json is not None:
+        try:
+            rj = json.loads(reflowed_json.read_text(encoding="utf-8"))
+            reflowed_sections = rj.get("reflowed_sections") or rj.get("sections") or []
+        except Exception as e:
+            logger.warning(f"Failed to read reflowed JSON: {e}")
+    # Build block lookup for Stage 02 blocks: id -> (page, bbox)
+    block_lookup = {}
+    if blocks02_json is not None:
+        try:
+            b02 = json.loads(blocks02_json.read_text(encoding="utf-8"))
+            blist = b02.get("blocks") or []
+            for b in blist:
+                try:
+                    bid = b.get("id") or b.get("block_id")
+                    bb = _safe_get_bbox(b)
+                    pg = b.get("page") if b.get("page") is not None else b.get("page_idx")
+                    if bid is not None and bb is not None and pg is not None:
+                        block_lookup[str(bid)] = (int(pg), [float(bb[0]), float(bb[1]), float(bb[2]), float(bb[3])])
+                except Exception:
+                    continue
+        except Exception as e:
+            logger.warning(f"Failed to read blocks02 JSON: {e}")
 
     # Annotate
     doc = fitz.open(str(pdf_path))
@@ -73,8 +100,9 @@ def run(
             logger.warning(f"Skipping overlay (kind={kind}): invalid bbox {bbox}")
             return
         rect = fitz.Rect(min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1)) & page.rect
-        color = (0, 1, 0) if kind == "section" else (1, 0, 0) if kind == "table" else (0, 0, 1)
-        page.draw_rect(rect, color=color, width=0.8, fill=None, overlay=True)
+        # Colors: section=green, table=red, figure=blue, chunk=orange
+        color = (0, 1, 0) if kind == "section" else (1, 0, 0) if kind == "table" else (0, 0, 1) if kind == "figure" else (1, 0.5, 0)
+        page.draw_rect(rect, color=color, width=1.0, fill=None, overlay=True)
         overlays.append({"page": _pg, "bbox": [rect.x0, rect.y0, rect.x1, rect.y1], "kind": kind, **payload})
 
     for s in sections:
@@ -94,6 +122,34 @@ def run(
         bb = _safe_get_bbox(f)
         if bb is not None and pg >= 0:
             _add(pg, bb, "figure", {"figure_id": f.get("figure_id")})
+
+    # Knowledge chunks (from Stage 07 reflowed sections):
+    # For each block with source.block_ids, union the underlying Stage 02 block bboxes per page.
+    if reflowed_sections and block_lookup:
+        for sec in reflowed_sections:
+            for blk in (sec.get("reflowed_json", {}).get("blocks") or []):
+                try:
+                    src = blk.get("source") or {}
+                    bids = src.get("block_ids") or []
+                    if not bids:
+                        continue
+                    # Group bboxes by page, then draw union per page for visibility
+                    per_page: Dict[int, List[List[float]]] = {}
+                    for bid in bids:
+                        t = block_lookup.get(str(bid))
+                        if not t:
+                            continue
+                        pg, bb = t
+                        per_page.setdefault(pg, []).append(bb)
+                    for pg, bbs in per_page.items():
+                        # Union as the rect covering all bbs
+                        x0 = min(bb[0] for bb in bbs)
+                        y0 = min(bb[1] for bb in bbs)
+                        x1 = max(bb[2] for bb in bbs)
+                        y1 = max(bb[3] for bb in bbs)
+                        _add(pg, [x0, y0, x1, y1], "chunk", {"block_ids_count": len(bbs)})
+                except Exception:
+                    continue
 
     # Save outputs
     annotated_pdf = stage_dir / "annotated.pdf"

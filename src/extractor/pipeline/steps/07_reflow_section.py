@@ -1262,8 +1262,8 @@ async def reflow_section_with_llm(
             try:
                 # Build compact instruction
                 compact_guard = (
-                    "Return ONLY a JSON object with keys: reflowed_json, ocr_corrections, improvements_made, summary. "
-                    "No code fences. reflowed_json.blocks must be valid and _ordered."
+                    "Return ONLY a minified JSON object with keys: reflowed_json, ocr_corrections, improvements_made, summary. "
+                    "No markdown, no code fences, no trailing commas. reflowed_json.blocks must be valid and _ordered."
                 )
                 compact_user = f"{compact_guard}\n\n{context_text[:1500]}"
                 user_parts2 = [{"type": "text", "text": compact_user}]
@@ -1484,8 +1484,9 @@ async def reflow_section_with_llm(
                 except Exception:
                     _trim = 1200
                 _guard3 = (
-                    "Return ONLY a JSON object with keys: reflowed_json, ocr_corrections, "
-                    "improvements_made, summary. No code fences. reflowed_json.blocks must be valid and _ordered."
+                    "Return ONLY a minified JSON object with keys: reflowed_json, ocr_corrections, "
+                    "improvements_made, summary. No markdown, no code fences, no trailing commas. "
+                    "reflowed_json.blocks must be valid and _ordered."
                 )
                 user_parts3 = [{"type": "text", "text": f"{_guard3}\n\n{context_text[:_trim]}"}]
                 messages3 = [

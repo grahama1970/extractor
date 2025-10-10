@@ -255,8 +255,13 @@ async def verify_header_with_llm(image_b64: str, context_text: str, model: str, 
     model_norm = normalize_model_alias(model)
     extras = build_chat_extras(model_norm)
     # Enforce per-item timeout via litellm timeout param and an outer watchdog
+    # Cap tokens for this tiny JSON to prevent rare over-generation
+    try:
+        _verify_cap = int(os.getenv("STAGE03_VERIFY_MAX_TOKENS", "256"))
+    except Exception:
+        _verify_cap = 256
     results = await litellm_call(
-        prompts=[{"model": model_norm, "messages": messages, "kwargs": {**extras, "timeout": item_timeout}}],
+        prompts=[{"model": model_norm, "messages": messages, "kwargs": {**extras, "timeout": item_timeout, "max_tokens": _verify_cap}}],
         wrap_json=True,
         concurrency=1,
         desc="verify header",
