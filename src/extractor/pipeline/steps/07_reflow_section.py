@@ -28,7 +28,7 @@ from loguru import logger
 from rich.console import Console
 from tqdm.asyncio import tqdm_asyncio
 
-from extractor.pipeline.utils.json_utils import clean_json_string
+from extractor.pipeline.utils.json_utils import clean_json_string, restrict_top_level_keys
 from extractor.pipeline.utils.litellm_response_utils import extract_content
 from extractor.pipeline.utils.image_io import (
     get_section_image_b64,
@@ -994,9 +994,25 @@ async def reflow_section_with_llm(
                     "\nKeys: reflowed_json(object), ocr_corrections(object), "
                     "improvements_made(string), summary(string)."
                 )
-            user_text = (
-                f"Return ONLY valid JSON.{schema_hint}\n\n{context_text}" if _is_gemini(LLM_MODEL) else f"Return ONLY valid JSON.\n\n{context_text}"
-            )
+            else:
+                # For non‑Gemini models (e.g., Qwen‑VL), optionally include an explicit minimal skeleton
+                _force_schema_hint = os.getenv("STAGE07_FORCE_SCHEMA_HINT", "1").lower() in ("1", "true", "yes", "y")
+                if _force_schema_hint:
+                    schema_hint = (
+                        "\nTop-level object MUST be exactly: {"
+                        "\"reflowed_json\": object, \"ocr_corrections\": object, "
+                        "\"improvements_made\": string, \"summary\": string }. "
+                        "Inside reflowed_json: { \"title\": string, \"blocks\": array }. "
+                        "Each block is one of: "
+                        "paragraph {type=\"paragraph\", text}, "
+                        "list {type=\"list\", items:string[]}, "
+                        "table {type=\"table\", columns:string[], rows:(string|number|null)[][]}, "
+                        "figure {type=\"figure\", image_ref, caption, title|null}. "
+                        "Do not add extra top-level keys."
+                    )
+                else:
+                    schema_hint = ""
+            user_text = f"Return ONLY valid JSON.{schema_hint}\n\n{context_text}"
             user_parts = [{"type": "text", "text": user_text}]
             if include_images and supports_vision and _converted:
                 user_parts.extend(_converted)
@@ -1497,7 +1513,12 @@ async def reflow_section_with_llm(
         try:
             parsed = clean_json_string(content, return_dict=True)
             if isinstance(parsed, dict):
-                result = parsed
+                # Prune any unexpected top-level keys to enforce strictness
+                try:
+                    allowed = {"reflowed_json", "ocr_corrections", "improvements_made", "summary"}
+                    result = restrict_top_level_keys(parsed, allowed)
+                except Exception:
+                    result = parsed
             elif isinstance(parsed, list):
                 # If the model returned a top-level list, try using the first object
                 result = (

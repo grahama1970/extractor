@@ -95,6 +95,8 @@ async def preflight_vision_support(model: str, timeout_sec: int = 10) -> bool:
                     "image_url": {"url": f"data:image/png;base64,{_TINY_PNG_B64}"},
                 }
 
+        # Provider flavor for content parts
+        is_gemini = "gemini" in (model or "").lower()
         # Gemini expects input_text/input_image parts; others accept text/image_url
         content_parts = [
             (

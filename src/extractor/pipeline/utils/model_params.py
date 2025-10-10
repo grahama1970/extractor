@@ -35,20 +35,22 @@ def build_chat_messages(
 def build_chat_extras(model_name: str) -> Dict[str, Any]:
     """Return extra kwargs for litellm.acompletion calls.
 
-    We keep this minimal and standardized. Include response_format only for OpenAI models;
-    other providers will ignore unsupported params, but we avoid sending it to be safe.
+    Standardize provider knobs so JSON mode is honored across OpenAI-compatible gateways.
+    - Set custom_llm_provider to "openai" by default so response_format works when routed.
+    - For non-Gemini, request JSON object responses.
+    - For Gemini, prefer response_mime_type JSON.
     """
     name = (model_name or "").lower()
     extras: Dict[str, Any] = {}
-    if name.startswith("openai/"):
+    # Default to OpenAI-compatible to avoid provider ambiguity and enable response_format
+    extras["custom_llm_provider"] = "openai"
+    if "gemini" not in name:
         extras["response_format"] = {"type": "json_object"}
-    # Gemini: prefer JSON-only responses using response_mime_type
-    if "gemini" in name:
+    else:
         # Provider-specific GenerationConfig for Google Gemini
         extras["generation_config"] = {
             "response_mime_type": "application/json",
             # Allow generous output length for structured blocks
             "max_output_tokens": 2048,
         }
-    # No temperature by default, avoid tiny max tokens
     return extras

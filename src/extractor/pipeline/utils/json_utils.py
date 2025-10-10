@@ -120,28 +120,38 @@ def parse_json(content: str, logger=None) -> Union[dict, list, str]:
     Returns:
     Union[dict, list, str]: Parsed JSON as a dict or list, or the original string if parsing fails.
     """
+    # Choose a safe logger (param may be None)
+    _log = logger if logger is not None else globals().get("logger")
     try:
         parsed_content = json.loads(content)
-        logger.debug("Successfully parsed JSON response directly")
+        if _log:
+            _log.debug("Successfully parsed JSON response directly")
         return parsed_content
     except json.JSONDecodeError as e:
-        logger.warning(f"Direct JSON parsing failed: {e}")
+        if _log:
+            _log.warning(f"Direct JSON parsing failed: {e}")
     try:
+        # Try to extract a JSON object/array region; allow DOTALL and be forgiving.
         json_match = re.search("(\\[.*\\]|\\{.*\\})", content, re.DOTALL)
         if json_match:
             content = json_match.group(1)
         repaired_json = repair_json(content, return_objects=True)
         if isinstance(repaired_json, (dict, list)):
-            logger.info("Successfully repaired and validated JSON response")
+            if _log:
+                _log.info("Successfully repaired and validated JSON response")
             return repaired_json
         parsed_content = json.loads(repaired_json)
-        logger.debug("Successfully validated JSON response")
+        if _log:
+            _log.debug("Successfully validated JSON response")
         return parsed_content
     except json.JSONDecodeError as e:
-        logger.error(f"JSON decode error after repair attempt: {e}")
+        if _log:
+            _log.error(f"JSON decode error after repair attempt: {e}")
     except Exception as e:
-        logger.error(f"Failed to parse JSON response: {e}")
-    logger.debug(f"Returning original content as string: {content}")
+        if _log:
+            _log.error(f"Failed to parse JSON response: {e}")
+    if _log:
+        _log.debug(f"Returning original content as string: {content}")
     return content
 
 
@@ -163,6 +173,7 @@ def clean_json_string(
     elif isinstance(content, str) and return_dict is False:
         return content
     elif isinstance(content, str) and return_dict is True:
+        _log = globals().get("logger")
         # Check if the string contains the word 'json' (a common feature of LLM responses)
         # and try to extract JSON content if it does
         if "json" in content.lower():
@@ -171,33 +182,48 @@ def clean_json_string(
             if matches:
                 # Use the first match as the JSON content
                 json_content = matches[0].strip()
-                logger.debug(
-                    f"Extracted JSON content from markdown code block: {json_content[:100]}..."
-                )
+                if _log:
+                    _log.debug(
+                        f"Extracted JSON content from markdown code block: {json_content[:100]}..."
+                    )
                 try:
                     return json.loads(json_content)
                 except json.JSONDecodeError:
-                    logger.debug(
-                        "Failed to parse extracted content as JSON, falling back to parse_json"
-                    )
-                    parsed_content = parse_json(json_content, logger)
+                    if _log:
+                        _log.debug(
+                            "Failed to parse extracted content as JSON, falling back to parse_json"
+                        )
+                    parsed_content = parse_json(json_content, _log)
                     return (
                         parsed_content if isinstance(parsed_content, (dict, list)) else json_content
                     )
 
         # Default behavior if no JSON was extracted from code blocks
-        parsed_content = parse_json(content, logger)
+        parsed_content = parse_json(content, _log)
         if return_dict and isinstance(parsed_content, str):
             try:
                 return json.loads(parsed_content)
             except Exception as e:
-                logger.error(
-                    f"Failed to convert parsed content to dict/list: {e}\nFailed content: {type(parsed_content)}: {parsed_content}"
-                )
+                if _log:
+                    _log.error(
+                        f"Failed to convert parsed content to dict/list: {e}\nFailed content: {type(parsed_content)}: {parsed_content}"
+                    )
                 return parsed_content
         return parsed_content
-    logger.info(f"Returning original content: {content}")
+    _log = globals().get("logger")
+    if _log:
+        _log.info(f"Returning original content: {content}")
     return content
+
+
+def restrict_top_level_keys(obj: Union[dict, list], allowed: set[str]) -> Union[dict, list]:
+    """
+    Return a copy of obj with only allowed top-level keys if obj is a dict.
+    Lists are returned unchanged.
+    """
+    if isinstance(obj, dict):
+        return {k: v for k, v in obj.items() if k in allowed}
+    return obj
 
 
 def json_to_markdown(data, level=1, title_case=True):

@@ -33,7 +33,8 @@ from extractor.pipeline.utils.annotations import (
     summarize_cues as _summarize_cues,
     load_relevant_rules as _load_relevant_rules,
 )
-from extractor.pipeline.utils.litellm_call import litellm_call
+from extractor.pipeline.utils.litellm_call import litellm_call, normalize_model_alias
+from extractor.pipeline.utils.model_params import build_chat_extras
 from extractor.pipeline.utils.diagnostics import (
     start_resource_sampler,
     stop_resource_sampler,
@@ -250,9 +251,12 @@ async def verify_header_with_llm(image_b64: str, context_text: str, model: str, 
         except Exception:
             pass
     sid = os.getenv("LITELLM_SESSION_ID") or get_run_id()
+    # Normalize model id and build provider extras (ensures JSON mode where supported)
+    model_norm = normalize_model_alias(model)
+    extras = build_chat_extras(model_norm)
     # Enforce per-item timeout via litellm timeout param and an outer watchdog
     results = await litellm_call(
-        prompts=[{"model": model, "messages": messages, "kwargs": {"timeout": item_timeout}}],
+        prompts=[{"model": model_norm, "messages": messages, "kwargs": {**extras, "timeout": item_timeout}}],
         wrap_json=True,
         concurrency=1,
         desc="verify header",

@@ -136,6 +136,8 @@ def normalize_model_alias(model: Optional[str]) -> str:
         return "zai-org/GLM-4.5-Air"
     if low in {"qwen-vl-large", "qwen2.5-vl-72b"}:
         return "Qwen/Qwen2.5-VL-72B-Instruct"
+    if low in {"qwen3-vl-235b", "qwen3-vl-235b-instruct", "qwen-vl-235b"}:
+        return "Qwen/Qwen3-VL-235B-Instruct"
     if low in {"mistral-vl-small"}:
         return "chutesai/Mistral-Small-3.1-24B-Instruct-2503"
     # id_map mapping for openai/<id>
