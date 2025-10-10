@@ -488,6 +488,8 @@ async def litellm_call(
       - "truncate":         keep head/tail of base64 with '... (bytes≈N, sha256=...)'
       - "none":             keep the original base64 (not recommended for logs)
     """
+    # Ensure OpenAI-compatible env vars are populated from CHUTES_* if present
+    _env_map_openai_like()
     # --- local helpers --------------------------------------------------------
     import hashlib
 
