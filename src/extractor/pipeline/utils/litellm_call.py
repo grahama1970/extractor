@@ -28,12 +28,16 @@ import sys
 from dataclasses import dataclass
 from typing import Any as _Any, Dict, List, Optional, Tuple
 
+# SciLLM is a forked distribution that installs as/over litellm; import litellm API
 import litellm as _litellm
+from litellm import Router
 from dotenv import find_dotenv, load_dotenv
 from loguru import logger
 from tqdm.asyncio import tqdm
-from litellm import Router
 _HAVE_PARALLEL_HELPERS = True  # for tests that monkeypatch this flag
+from pathlib import Path
+import time
+import urllib.request
 
 # Required project utilities — fail fast if missing
 from extractor.pipeline.utils.litellm_image_utils import (
@@ -64,6 +68,191 @@ logger.add(sys.stderr, level=_log_level)
 
 # Best-effort .env loading; no exceptions
 _ = load_dotenv(find_dotenv(usecwd=True) or None)
+
+# Map Chutes → OpenAI-compatible env if present (lets OpenAI provider hit Chutes base)
+try:
+    if os.getenv("CHUTES_API_KEY") and os.getenv("CHUTES_API_BASE"):
+        # Only set if OPENAI_* not already set
+        os.environ.setdefault("OPENAI_API_KEY", os.environ["CHUTES_API_KEY"])  # point OpenAI client to Chutes key
+        os.environ.setdefault("OPENAI_API_BASE", os.environ["CHUTES_API_BASE"])  # point base to Chutes endpoint
+except Exception:
+    pass
+
+# -----------------------------------------------------------------------------
+# SciLLM/Chutes routing hardening helpers
+# -----------------------------------------------------------------------------
+
+_INPROC_CACHE: Dict[str, _Any] = {}
+_CACHE_TTL_SEC = 300
+
+def require_scillm_env() -> None:
+    """Ensure OPENAI_* env are populated from CHUTES_* if present; fail fast if missing."""
+    ch_base = os.getenv("CHUTES_API_BASE")
+    ch_key = os.getenv("CHUTES_API_KEY")
+    if ch_base and not (os.getenv("OPENAI_BASE_URL") or os.getenv("OPENAI_API_BASE")):
+        os.environ["OPENAI_BASE_URL"] = ch_base.rstrip("/")
+        os.environ["OPENAI_API_BASE"] = ch_base.rstrip("/")
+    if ch_key and not os.getenv("OPENAI_API_KEY"):
+        os.environ["OPENAI_API_KEY"] = ch_key
+    base = (os.getenv("OPENAI_BASE_URL") or os.getenv("OPENAI_API_BASE") or "").strip()
+    key = (os.getenv("OPENAI_API_KEY") or "").strip()
+    if not base or not key:
+        raise EnvironmentError(
+            "SciLLM/Chutes env missing: set CHUTES_API_BASE and CHUTES_API_KEY (or OPENAI_BASE_URL/OPENAI_API_BASE and OPENAI_API_KEY)."
+        )
+
+def _load_id_map(path: str = ".artifacts/chutes/id_map.json") -> Dict[str, str]:
+    now = time.time()
+    ck = f"idmap::{path}"
+    ent = _INPROC_CACHE.get(ck)
+    if ent and now - ent.get("t", 0) < _CACHE_TTL_SEC:
+        return ent.get("data", {})
+    data: Dict[str, str] = {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+            if isinstance(raw, dict):
+                data = {str(k): str(v) for k, v in raw.items()}
+    except Exception:
+        data = {}
+    _INPROC_CACHE[ck] = {"t": now, "data": data}
+    return data
+
+def normalize_model_alias(model: Optional[str]) -> str:
+    """Normalize friendly/alias model ids; support 'openai/<id>' via id_map.json."""
+    require_scillm_env()
+    if not model:
+        return os.getenv("LITELLM_DEFAULT_MODEL") or os.getenv("DEFAULT_LITELLM_MODEL") or "zai-org/GLM-4.5-Air"
+    m = model.strip()
+    low = m.lower()
+    # Friendly aliases
+    if low in {"text-default", "default-text", "glm-4.5-air"}:
+        return "zai-org/GLM-4.5-Air"
+    if low in {"qwen-vl-large", "qwen2.5-vl-72b"}:
+        return "Qwen/Qwen2.5-VL-72B-Instruct"
+    if low in {"mistral-vl-small"}:
+        return "chutesai/Mistral-Small-3.1-24B-Instruct-2503"
+    # id_map mapping for openai/<id>
+    id_map = _load_id_map()
+    if m in id_map:
+        return id_map[m]
+    if m.startswith("openai/"):
+        return m.split("/", 1)[1]
+    return m
+
+def _apply_timeouts_kwargs(kwargs: Dict[str, _Any]) -> Dict[str, _Any]:
+    kw = dict(kwargs or {})
+    kw.setdefault("request_timeout", 25)
+    kw.setdefault("timeout", 25)
+    kw.setdefault("max_retries", 1)
+    return kw
+
+# -----------------------------------------------------------------------------
+# Model catalog + alias normalization (SciLLM/Chutes integration)
+# -----------------------------------------------------------------------------
+
+_STATE_DIR = Path(os.path.expanduser("~/.local/state/devops-agent"))
+_STATE_DIR.mkdir(parents=True, exist_ok=True)
+_MODELS_CACHE = _STATE_DIR / "models_cache.json"
+
+_ALIAS_MAP = {
+    # Approved canonical aliases from DevOps
+    "deepseek/deepseek-r1": "deepseek-ai/DeepSeek-R1",
+    "deepseek/deepseek-v3.1-terminus": "deepseek-ai/DeepSeek-V3.1-Terminus",
+    "mistral-small": "chutesai/Mistral-Small-3.1-24B-Instruct-2503",
+    "glm-4.6-turbo": "zai-org/GLM-4.6-turbo",
+}
+
+def _env_map_openai_like() -> None:
+    """Ensure OPENAI_* env are populated from CHUTES_* if present."""
+    try:
+        base = os.getenv("CHUTES_API_BASE") or os.getenv("OPENAI_BASE_URL") or os.getenv("OPENAI_API_BASE")
+        key = os.getenv("CHUTES_API_KEY") or os.getenv("OPENAI_API_KEY")
+        if base:
+            os.environ.setdefault("OPENAI_BASE_URL", base)
+            os.environ.setdefault("OPENAI_API_BASE", base)
+        if key:
+            os.environ.setdefault("OPENAI_API_KEY", key)
+    except Exception:
+        pass
+
+def list_models(ttl_sec: int = 600) -> List[str]:
+    """Fetch provider model IDs with a small on-disk cache."""
+    _env_map_openai_like()
+    now = time.time()
+    if _MODELS_CACHE.exists():
+        try:
+            obj = json.loads(_MODELS_CACHE.read_text(encoding="utf-8"))
+            if now - float(obj.get("ts", 0)) <= ttl_sec:
+                ids = obj.get("ids") or []
+                return [str(x) for x in ids]
+        except Exception:
+            pass
+    base = os.environ.get("OPENAI_BASE_URL") or os.environ.get("OPENAI_API_BASE")
+    key = os.environ.get("OPENAI_API_KEY")
+    if not base or not key:
+        return []
+    try:
+        req = urllib.request.Request(
+            f"{base.rstrip('/')}/models", headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        ids = [x.get("id") for x in (data.get("data") or []) if x.get("id")]
+        try:
+            _MODELS_CACHE.write_text(json.dumps({"ts": now, "ids": ids}), encoding="utf-8")
+        except Exception:
+            pass
+        return [str(x) for x in ids]
+    except Exception:
+        return []
+
+def normalize_model_id(model: str, *, ttl_sec: int = 600) -> str:
+    """Normalize known aliases and strip vendor prefixes like openai/.
+
+    If the normalized form isn't found, return the input sans 'openai/' prefix.
+    """
+    mid = (model or "").strip()
+    if mid.lower().startswith("openai/"):
+        mid = mid.split("/", 1)[1]
+    key = mid.lower()
+    if key in _ALIAS_MAP:
+        return _ALIAS_MAP[key]
+    # best-effort: exact or contains match from catalog
+    ids = list_models(ttl_sec=ttl_sec)
+    if ids:
+        for m in ids:
+            if key == str(m).lower():
+                return m
+        for m in ids:
+            if key in str(m).lower():
+                return m
+    return mid
+
+def completion_simple(model: str, messages: List[Dict[str, str]], **kwargs) -> _Any:
+    """Direct litellm.completion call with normalization and JSON mode.
+
+    This bypasses Router deployment health for simple sanity probes.
+    """
+    _env_map_openai_like()
+    nm = normalize_model_id(model)
+    # Ensure json_object unless caller overrides
+    kwargs.setdefault("response_format", {"type": "json_object"})
+    # Route through OpenAI-compatible provider base when using CHUTES
+    kwargs.setdefault("custom_llm_provider", "openai")
+    kwargs.setdefault("timeout", 30)
+    try:
+        return _litellm.completion(model=nm, messages=messages, **kwargs)
+    except Exception as e:
+        # Surface a minimal error shape similar to OpenAI
+        return {"error": {"type": type(e).__name__, "message": str(e)}}
+
+def completion(model: str, messages: List[Dict[str, _Any]], **kwargs) -> _Any:
+    """Public wrapper used by steps: normalize alias, ensure env, and apply timeouts."""
+    require_scillm_env()
+    mdl = normalize_model_alias(model)
+    safe = _apply_timeouts_kwargs(kwargs)
+    return completion_simple(mdl, messages, **safe)
 
 DEFAULT_MODEL = (
     os.getenv("LITELLM_DEFAULT_MODEL")
