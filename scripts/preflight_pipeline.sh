@@ -25,6 +25,10 @@ case "${FIGURE_DESC,,}" in
   1|true|yes)
     : "${CHUTES_API_BASE:?Set CHUTES_API_BASE for VLM figure descriptions}" >/dev/null
     : "${CHUTES_API_KEY:?Set CHUTES_API_KEY for VLM figure descriptions}" >/dev/null
+    if [[ "${CHUTES_API_BASE}" != *"/v1" ]]; then
+      echo "CHUTES_API_BASE must end with /v1 (e.g., https://api.chutes.ai/v1)" >&2
+      exit 2
+    fi
     echo "CHUTES env OK (figure descriptions enabled)" ;;
   *)
     echo "CHUTES env not required (FIGURE_DESC=${FIGURE_DESC})" ;;

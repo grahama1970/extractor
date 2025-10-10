@@ -39,7 +39,8 @@ from extractor.pipeline.utils.diagnostics import (
     snapshot_resources,
     build_stage_timings,
 )
-from extractor.pipeline.utils.litellm_call import litellm_call
+from extractor.pipeline.utils.litellm_call import require_scillm_env, normalize_model_alias
+import litellm
 from extractor.pipeline.utils.litellm_cache import initialize_litellm_cache
 
 # --- Initialization & Configuration ---
@@ -92,29 +93,34 @@ async def describe_image_with_llm(image_data: bytes, context: str = "") -> str:
         {"type": "text", "text": f"Context: {context[:2000]}"},
         {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
     ]
-    model = (os.getenv("LITELLM_VLM_MODEL") or VLM_MODEL or "").strip()
-    params: Dict[str, Any] = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_content},
-        ],
-        "timeout": 30,
-    }
-    if "gemini" not in (model or "").lower():
-        params["max_tokens"] = 256
-    # light temperature default
-    params["temperature"] = 0.2
-    sid = os.getenv("LITELLM_SESSION_ID") or get_run_id()
-    out = await litellm_call([params], desc="figure_description", session_id=sid, export="results")
-    r = out[0] if out else None
-    if r and isinstance(r.content, str) and r.content.strip():
+    require_scillm_env()
+    # Prefer explicit VLM model, then MED VLM, then DEFAULT_VLM constant
+    raw_model = (
+        os.getenv("LITELLM_VLM_MODEL")
+        or os.getenv("LITELLM_MED_VLM_MODEL")
+        or DEFAULT_VLM
+    ).strip()
+    model = normalize_model_alias(raw_model)
+    try:
+        resp = await litellm.acompletion(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_content},
+            ],
+            timeout=25,
+            max_tokens=256,
+            temperature=0.2,
+        )
+        content = None
         try:
-            logger.info(f"figure_description: model={r.request.model} ok={r.exception is None}")
+            content = resp["choices"][0]["message"]["content"]
         except Exception:
-            pass
-        return r.content.strip()
-    raise RuntimeError("VLM returned empty content for figure description")
+            content = getattr(getattr(resp, "choices", [None])[0], "message", {}).get("content") if hasattr(resp, "choices") else None
+        return (content or "").strip()
+    except Exception as e:
+        logger.warning(f"Figure description failed (model={model}): {e}")
+        return ""
 
 
 async def extract_and_describe_figure(
@@ -202,6 +208,10 @@ async def extract_and_describe_figure(
         else:
             try:
                 description = await describe_image_with_llm(image_data, context)
+                if (description or '').strip():
+                    logger.info(f"figure_description.ok id={figure_id} model={(os.getenv('LITELLM_VLM_MODEL') or os.getenv('LITELLM_MED_VLM_MODEL') or '').strip()} len={len(description)}")
+                else:
+                    logger.warning(f"figure_description.empty id={figure_id}")
             except Exception as e:
                 logger.error(f"LLM description for {figure_id} failed after all retries: {e}")
                 try:

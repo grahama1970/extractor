@@ -89,9 +89,15 @@ def require_scillm_env() -> None:
     """Ensure OPENAI_* env are populated from CHUTES_* if present; fail fast if missing."""
     ch_base = os.getenv("CHUTES_API_BASE")
     ch_key = os.getenv("CHUTES_API_KEY")
+    # Normalize CHUTES base to include /v1 for OpenAI-compatible routes
+    if ch_base:
+        base_norm = ch_base.rstrip("/")
+        if not base_norm.endswith("/v1"):
+            base_norm = base_norm + "/v1"
+        ch_base = base_norm
     if ch_base and not (os.getenv("OPENAI_BASE_URL") or os.getenv("OPENAI_API_BASE")):
-        os.environ["OPENAI_BASE_URL"] = ch_base.rstrip("/")
-        os.environ["OPENAI_API_BASE"] = ch_base.rstrip("/")
+        os.environ["OPENAI_BASE_URL"] = ch_base
+        os.environ["OPENAI_API_BASE"] = ch_base
     if ch_key and not os.getenv("OPENAI_API_KEY"):
         os.environ["OPENAI_API_KEY"] = ch_key
     base = (os.getenv("OPENAI_BASE_URL") or os.getenv("OPENAI_API_BASE") or "").strip()
