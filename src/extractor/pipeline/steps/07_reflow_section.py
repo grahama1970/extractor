@@ -109,8 +109,14 @@ from extractor.pipeline.utils.embeddings import ensure_embedder as _ensure_embed
 # Configuration from environment variables
 # Use Ollama for free testing, or set LITELLM_VLM_MODEL env var for other providers
 # Use GPT-5 for reflow by default; can override via env
-# Default to Gemini Flash for multimodal reflow; override via LITELLM_VLM_MODEL
-LLM_MODEL = os.getenv("LITELLM_VLM_MODEL", "gemini/gemini-2.5-flash")
+# Default to Gemini Flash for multimodal reflow.
+# Stage 07 now prefers a dedicated override via `STAGE07_VLM_MODEL` and
+# falls back to the shared `LITELLM_VLM_MODEL` (used by Stage 06), then the default.
+LLM_MODEL = (
+    os.getenv("STAGE07_VLM_MODEL")
+    or os.getenv("LITELLM_VLM_MODEL")
+    or "gemini/gemini-2.5-flash"
+)
 MAX_CONCURRENT_CALLS = int(os.getenv("MAX_CONCURRENT_LLM_CALLS", 3))
 LLM_SEMAPHORE = asyncio.Semaphore(MAX_CONCURRENT_CALLS)
 SEMANTIC_TOP_K = int(os.getenv("SEMANTIC_ANNOTATION_TOP_K", 5))
@@ -980,7 +986,7 @@ async def reflow_section_with_llm(
 
             # Build messages with a system role for all providers (including Gemini)
             # Guard goes at the start of the user content to improve JSON adherence for providers that ignore system
-            # Include a JSON schema hint inline for Gemini-like providers
+            # Include an inline schema hint for providers (Qwen, etc.) that follow user content more strictly.
             schema_hint = ""
             if _is_gemini(LLM_MODEL):
                 # Avoid referencing _json_schema before it is defined; provide a compact keys hint instead.

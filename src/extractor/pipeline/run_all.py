@@ -15,7 +15,8 @@ Usage
     --lean4-cli "python /home/graham/workspace/experiments/lean4/src/lean4_prover/cli_mini.py"
 
 Notes
-- LITELLM_VLM_MODEL is the single source for VLM (e.g., openai/gpt-5-mini)
+- Stage 07 can use a dedicated vision model via `STAGE07_VLM_MODEL`.
+  Otherwise it falls back to `LITELLM_VLM_MODEL` (shared with Stage 06).
 - LITELLM_ATTACH_SESSION defaults to true; cache is namespaced by session id
 """
 from __future__ import annotations
