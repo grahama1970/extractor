@@ -64,6 +64,9 @@ console = Console()
 # Visuals
 MAX_VISUAL_PAGES_DEFAULT = int(os.getenv("MAX_VISUAL_PAGES", "2"))
 
+# Optional color enrichment for headers (first-span color via PyMuPDF)
+STAGE04_COLOR_ENRICH = os.getenv("STAGE04_COLOR_ENRICH", "1").lower() in {"1", "true", "yes", "y"}
+
 # Font analysis thresholds
 LARGE_FONT_THRESHOLD = 14.0
 SMALL_FONT_THRESHOLD = 8.0
@@ -80,6 +83,114 @@ SECTION_NUMBER_PATTERNS = [
     r"^\([ivxlcdm]+\)",  # (i) (ii)
     r"^\d+\)",  # 1)
 ]
+
+# ================================
+# COLOR ENRICHMENT UTILITIES
+# ================================
+
+def _rgb_to_hex(rgb: Tuple[float, float, float]) -> str:
+    try:
+        r, g, b = rgb
+        r = int(max(0, min(255, round(r * (255 if r <= 1 else 1)))))
+        g = int(max(0, min(255, round(g * (255 if g <= 1 else 1)))))
+        b = int(max(0, min(255, round(b * (255 if b <= 1 else 1)))))
+        return f"#{r:02x}{g:02x}{b:02x}"
+    except Exception:
+        return "#000000"
+
+def _bucket_color(hex_str: str) -> str:
+    try:
+        h = hex_str.lstrip('#')
+        r = int(h[0:2], 16); g = int(h[2:4], 16); b = int(h[4:6], 16)
+        if r < 30 and g < 30 and b < 30:
+            return "black"
+        if r > 200 and g > 200 and b > 200:
+            return "white"
+        if r > g and r > b:
+            return "red"
+        if g > r and g > b:
+            return "green"
+        if b > r and b > g:
+            return "blue"
+        return "gray"
+    except Exception:
+        return "unknown"
+
+def _enrich_header_colors(pdf_path: Path, sections: List[Dict[str, Any]]) -> None:
+    """For each section, attach first-span fill color inferred from the header block bbox.
+
+    Writes into the first block of the section under `first_span_font.color_*` and mirrors a
+    compact summary onto section.metadata.header_color_* for downstream use.
+    """
+    try:
+        doc = fitz.open(str(pdf_path))
+    except Exception:
+        return
+
+    for s in sections:
+        if not s.get("blocks"):
+            continue
+        hdr = s["blocks"][0]
+        fsf_existing = hdr.get("first_span_font") or {}
+        if fsf_existing.get("color_hex") or fsf_existing.get("color_bucket"):
+            # Already enriched upstream (e.g., Stage 03) — skip recompute
+            continue
+        page_idx = int(hdr.get("page", hdr.get("page_idx", s.get("page_start", 0))))
+        if page_idx < 0 or page_idx >= len(doc):
+            continue
+        bbox = hdr.get("bbox") or s.get("bbox")
+        if not bbox:
+            continue
+        try:
+            page = doc[page_idx]
+            td = page.get_text("dict")
+            hx0, hy0, hx1, hy1 = bbox
+            found_rgb = None
+            # Walk spans to find the first span intersecting the header bbox
+            for blk in td.get("blocks", []):
+                for line in blk.get("lines", []):
+                    for span in line.get("spans", []):
+                        sb = span.get("bbox")
+                        if not sb:
+                            continue
+                        sx0, sy0, sx1, sy1 = sb
+                        if not (sx1 < hx0 or sx0 > hx1 or sy1 < hy0 or sy0 > hy1):
+                            col = span.get("color")
+                            if isinstance(col, (list, tuple)) and len(col) >= 3:
+                                found_rgb = (float(col[0]), float(col[1]), float(col[2]))
+                            elif isinstance(col, (int, float)):
+                                # PyMuPDF older: color as int 0xRRGGBB
+                                v = int(col)
+                                found_rgb = ((v >> 16) & 255, (v >> 8) & 255, v & 255)
+                            # Stop at the first matching span
+                            break
+                    if found_rgb:
+                        break
+                if found_rgb:
+                    break
+
+            if found_rgb is None:
+                continue
+            # Normalize to 0..255 ints for RGB if needed
+            if all(0.0 <= c <= 1.0 for c in found_rgb):
+                rgb255 = (int(found_rgb[0] * 255), int(found_rgb[1] * 255), int(found_rgb[2] * 255))
+            else:
+                rgb255 = tuple(int(c) for c in found_rgb)
+            hexv = f"#{rgb255[0]:02x}{rgb255[1]:02x}{rgb255[2]:02x}"
+            bucket = _bucket_color(hexv)
+
+            fsf = hdr.setdefault("first_span_font", {})
+            fsf["color_rgb"] = list(rgb255)
+            fsf["color_hex"] = hexv
+            fsf["color_bucket"] = bucket
+            s.setdefault("metadata", {})["header_color_hex"] = hexv
+            s["metadata"]["header_color_bucket"] = bucket
+        except Exception:
+            continue
+    try:
+        doc.close()
+    except Exception:
+        pass
 
 # ============================================
 # SOPHISTICATED HEADER DETECTION FUNCTIONS
@@ -693,6 +804,13 @@ async def process_sections_comprehensive(
     """Process blocks into sections with comprehensive validation and enhanced visuals."""
 
     sections = build_sections_from_blocks(blocks, fallback_heuristics=fallback_heuristics)
+
+    # --- Optional: enrich header color from the PDF (first span only)
+    if STAGE04_COLOR_ENRICH and pdf_path and pdf_path.exists():
+        try:
+            _enrich_header_colors(pdf_path, sections)
+        except Exception as e:
+            logger.warning(f"STAGE04_COLOR_ENRICH failed: {e}")
 
     # --- Normalization: demote wrapper-like headings to ensure clean top-levels (offline-friendly)
     # Goal for BHT fixture: exactly two top-level sections; demote

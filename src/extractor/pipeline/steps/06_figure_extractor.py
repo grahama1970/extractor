@@ -70,6 +70,7 @@ console = Console()
 VERTICAL_PADDING_RATIO = float(os.getenv("FIGURE_VERTICAL_PADDING", "0.2"))
 # Use local model for simple image descriptions (2-3 sentences)
 VLM_MODEL = (os.getenv("LITELLM_VLM_MODEL") or "").strip()
+MAX_FIGURES_PER_DOC = int(os.getenv("FIGURE_MAX_PER_DOC", "12"))
 
 
 # --- Core Functions ---
@@ -238,6 +239,10 @@ async def process_figures_batch(
     skip_descriptions: bool = False,
 ) -> List[Dict[str, Any]]:
     """Process all figures concurrently with a progress bar."""
+    # Optional: cap the number of figures processed to keep runs deterministic/fast
+    if MAX_FIGURES_PER_DOC and isinstance(figure_blocks, list):
+        figure_blocks = figure_blocks[:MAX_FIGURES_PER_DOC]
+
     tasks = [
         extract_and_describe_figure(
             pdf_path, block, f"figure_{i+1:03d}", output_dir, skip_descriptions=skip_descriptions

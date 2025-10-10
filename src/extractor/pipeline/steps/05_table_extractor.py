@@ -996,14 +996,18 @@ def run(
         console.print(f"[red]Input JSON not found: {input_json}[/red]")
         raise typer.Exit(1)
 
-    try:
-        pdf_path = next(pdf_dir.glob("*_clean.pdf"))
-    except StopIteration:
-        console.print(f"[red]No '*_clean.pdf' found in --pdf-dir: {pdf_dir}[/red]")
-        raise typer.Exit(1)
-
     with open(input_json, "r") as f:
         sections_data = json.load(f)
+    # Prefer an explicit source PDF recorded by the upstream stage
+    clean_pdf = sections_data.get("source_pdf") or sections_data.get("clean_pdf")
+    if clean_pdf:
+        pdf_path = Path(clean_pdf)
+    else:
+        try:
+            pdf_path = next(pdf_dir.glob("*_clean.pdf"))
+        except StopIteration:
+            console.print(f"[red]No '*_clean.pdf' found in --pdf-dir: {pdf_dir}[/red]")
+            raise typer.Exit(1)
     sections = sections_data.get("sections", [])
 
     # --- Directory Setup ---

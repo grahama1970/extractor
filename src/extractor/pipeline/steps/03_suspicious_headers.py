@@ -54,6 +54,75 @@ import time
 
 
 # ------------------------------------------------------------------
+# OPTIONAL COLOR ENRICHMENT (first-span color)
+# ------------------------------------------------------------------
+STAGE03_COLOR_ENRICH = os.getenv("STAGE03_COLOR_ENRICH", "1").lower() in {"1", "true", "yes", "y"}
+
+def _bucket_color_hex(hex_str: str) -> str:
+    try:
+        h = hex_str.lstrip('#')
+        r = int(h[0:2], 16); g = int(h[2:4], 16); b = int(h[4:6], 16)
+        if r < 30 and g < 30 and b < 30:
+            return "black"
+        if r > 200 and g > 200 and b > 200:
+            return "white"
+        if r > g and r > b:
+            return "red"
+        if g > r and g > b:
+            return "green"
+        if b > r and b > g:
+            return "blue"
+        return "gray"
+    except Exception:
+        return "unknown"
+
+def _ensure_first_span_color(page: fitz.Page, block: Dict[str, Any]) -> None:
+    """Populate block.first_span_font.color_{hex,bucket,rgb} if missing, using span intersect."""
+    try:
+        fsf = block.setdefault("first_span_font", {}) if isinstance(block.get("first_span_font"), dict) else block.setdefault("first_span_font", {})
+        if fsf.get("color_hex") or fsf.get("color_bucket"):
+            return
+        bb = block.get("bbox")
+        if not bb:
+            return
+        x0, y0, x1, y1 = bb
+        td = page.get_text("dict")
+        found = None
+        for blk in td.get("blocks", []):
+            for line in blk.get("lines", []):
+                for span in line.get("spans", []):
+                    sb = span.get("bbox")
+                    if not sb:
+                        continue
+                    sx0, sy0, sx1, sy1 = sb
+                    if not (sx1 < x0 or sx0 > x1 or sy1 < y0 or sy0 > y1):
+                        col = span.get("color")
+                        if isinstance(col, (list, tuple)) and len(col) >= 3:
+                            r, g, b = col[0], col[1], col[2]
+                            # Normalize if 0..1
+                            if 0.0 <= r <= 1.0 and 0.0 <= g <= 1.0 and 0.0 <= b <= 1.0:
+                                r, g, b = int(r*255), int(g*255), int(b*255)
+                            else:
+                                r, g, b = int(r), int(g), int(b)
+                            found = (r, g, b)
+                        elif isinstance(col, (int, float)):
+                            v = int(col)
+                            found = ((v >> 16) & 255, (v >> 8) & 255, v & 255)
+                        break
+                if found:
+                    break
+            if found:
+                break
+        if not found:
+            return
+        hexv = f"#{found[0]:02x}{found[1]:02x}{found[2]:02x}"
+        fsf["color_rgb"] = list(found)
+        fsf["color_hex"] = hexv
+        fsf["color_bucket"] = _bucket_color_hex(hexv)
+    except Exception:
+        return
+
+# ------------------------------------------------------------------
 # CONFIGURATION
 # ------------------------------------------------------------------
 def build_cli():
@@ -570,6 +639,16 @@ async def process_pdf_pipeline(config: Config):
     for idx, task in enumerate(tasks):
         try:
             target_block, above_block, below_block = task.get_context_blocks()
+            # Opportunistic color enrichment for the three context blocks
+            if STAGE03_COLOR_ENRICH:
+                try:
+                    _ensure_first_span_color(task.page_obj, target_block)
+                    if above_block and int(above_block.get("page", task.page_idx)) == task.page_idx:
+                        _ensure_first_span_color(task.page_obj, above_block)
+                    if below_block and int(below_block.get("page", task.page_idx)) == task.page_idx:
+                        _ensure_first_span_color(task.page_obj, below_block)
+                except Exception:
+                    pass
             # --- Heuristic guardrails BEFORE any LLM call ---
             # Demote common false positives early to reduce noise and cost.
             try:
