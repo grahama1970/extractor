@@ -16,12 +16,18 @@ python src/extractor/pipeline/steps/04_section_builder.py run "$OUT_DIR/03_suspi
 python src/extractor/pipeline/steps/05_table_extractor.py run "$OUT_DIR/04_section_builder/json_output/04_sections.json" --pdf-dir "$OUT_DIR/01_annotation_processor" -o "$OUT_DIR"
 
 # Figures: safe caps; set FIGURE_MAX_PER_DOC to keep small
-FIGURE_MAX_PER_DOC=${FIGURE_MAX_PER_DOC:-12} \
+FIGURE_MAX_PER_DOC=${FIGURE_MAX_PER_DOC:-12}
+FIGURE_DESC=${FIGURE_DESC:-0}
+DESC_FLAG="--skip-descriptions"
+case "${FIGURE_DESC,,}" in
+  1|true|yes) DESC_FLAG="";;
+ esac
 python src/extractor/pipeline/steps/06_figure_extractor.py run \
   "$OUT_DIR/02_marker_extractor/json_output/02_marker_blocks.json" \
   --sections "$OUT_DIR/04_section_builder/json_output/04_sections.json" \
   --pdf-dir "$OUT_DIR/01_annotation_processor" \
-  -o "$OUT_DIR"
+  -o "$OUT_DIR" \
+  ${DESC_FLAG}
 
 BASE_NAME=$(basename "$PDF_PATH")
 CLEAN_NAME="${BASE_NAME%.pdf}_clean.pdf"
