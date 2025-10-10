@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import typer
+from loguru import logger
 
 try:
     import fitz  # PyMuPDF
@@ -57,13 +58,24 @@ def run(
     overlays: List[Dict[str, Any]] = []
 
     def _add(page_idx: int, bbox: List[float], kind: str, payload: Dict[str, Any]) -> None:
-        if page_idx < 0 or page_idx >= len(doc):
+        # Accept 0-based and 1-based page indices; clamp into range
+        _pg = int(page_idx)
+        if _pg >= len(doc) and _pg - 1 >= 0 and _pg - 1 < len(doc):
+            _pg = _pg - 1
+        if _pg < 0 or _pg >= len(doc):
+            logger.warning(f"Skipping overlay (kind={kind}): out-of-range page {page_idx}")
             return
-        page = doc[page_idx]
-        rect = fitz.Rect(*bbox)
+        page = doc[_pg]
+        # Normalize bbox values and clamp to page rect
+        try:
+            x0, y0, x1, y1 = [float(v) for v in bbox]
+        except Exception:
+            logger.warning(f"Skipping overlay (kind={kind}): invalid bbox {bbox}")
+            return
+        rect = fitz.Rect(min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1)) & page.rect
         color = (0, 1, 0) if kind == "section" else (1, 0, 0) if kind == "table" else (0, 0, 1)
         page.draw_rect(rect, color=color, width=0.8, fill=None, overlay=True)
-        overlays.append({"page": page_idx, "bbox": list(bbox), "kind": kind, **payload})
+        overlays.append({"page": _pg, "bbox": [rect.x0, rect.y0, rect.x1, rect.y1], "kind": kind, **payload})
 
     for s in sections:
         pg0 = int(s.get("page_start") or s.get("page_idx") or -1)
@@ -96,4 +108,3 @@ def run(
 
 if __name__ == "__main__":
     app()
-

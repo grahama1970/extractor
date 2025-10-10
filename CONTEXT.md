@@ -27,17 +27,16 @@ Intent
 
 How to run (walking skeleton)
 ```bash
-source .venv/bin/activate && set -a && [ -f .env ] && source .env && set +a
-CHUTES_API_BASE=$CHUTES_API_BASE CHUTES_API_KEY=$CHUTES_API_KEY \
-scripts/run_walking_skeleton.sh \
-  "prototypes/tabbed/pdfs/BHT CV32A65X.pdf" \
-  "data/results/pipeline"
+source .venv/bin/activate
+set -a && [ -f .env ] && source .env && set +a
+bash scripts/preflight_pipeline.sh
+bash scripts/run_walking_skeleton.sh "data/input/pipeline/BHT_CV32A65X_with_requirements.pdf" "data/results/pipeline"
 ```
 
 Environment notes
-- Set CHUTES_API_BASE and CHUTES_API_KEY (mapped to OPENAI_* automatically)
-- Control figure load with FIGURE_MAX_PER_DOC (default 12)
-- Stage 07 defaults: STAGE07_ATTACH_SECTION_IMAGE=0, STAGE07_INCLUDE_FIGURES=0 in the skeleton script
+- CHUTES_API_BASE and CHUTES_API_KEY are only required when you enable figure descriptions (FIGURE_DESC=1).
+- Control figure load with FIGURE_MAX_PER_DOC (default 12), FIGURE_MAX_PER_SECTION (default 3), FIGURE_MIN_AREA_PX (default 5000).
+- Stage 07 defaults keep reflow deterministic (summary/minimal). The script sets STAGE07 flags for you.
 
 Review plan
 - Open PR from feat/walking-skeleton-pipeline

@@ -19,8 +19,14 @@ print("Python deps OK" if ok else "Python deps missing")
 sys.exit(0 if ok else 3)
 PY
 
-: "${CHUTES_API_BASE:?Set CHUTES_API_BASE}" >/dev/null
-: "${CHUTES_API_KEY:?Set CHUTES_API_KEY}" >/dev/null
-echo "CHUTES env OK"
+# Only require CHUTES/OpenAI when figure descriptions (or any LLM) are explicitly enabled
+FIGURE_DESC="${FIGURE_DESC:-1}"
+case "${FIGURE_DESC,,}" in
+  1|true|yes)
+    : "${CHUTES_API_BASE:?Set CHUTES_API_BASE for VLM figure descriptions}" >/dev/null
+    : "${CHUTES_API_KEY:?Set CHUTES_API_KEY for VLM figure descriptions}" >/dev/null
+    echo "CHUTES env OK (figure descriptions enabled)" ;;
+  *)
+    echo "CHUTES env not required (FIGURE_DESC=${FIGURE_DESC})" ;;
+esac
 echo "== Preflight OK =="
-

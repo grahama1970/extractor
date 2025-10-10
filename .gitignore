@@ -205,6 +205,10 @@ artifacts/
 benchmarks/
 memory/
 scripts/artifacts/
+data/results/pipeline/
+**/_annotated.pdf
+**/image_output/
+**/json_output/*.tmp.json
 **/__pycache__/
 **/.pytest_cache/
 *.log

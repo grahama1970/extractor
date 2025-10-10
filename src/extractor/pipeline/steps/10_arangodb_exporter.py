@@ -80,6 +80,10 @@ EMBEDDING_MODEL: Optional[object] = None
 
 def _ensure_embedder():
     global EMBEDDING_MODEL
+    # Deterministic path: allow disabling heavy model loads via env (CI/walking skeleton)
+    if os.getenv("EMBEDDINGS_DISABLE", "1").lower() in {"1","true","yes"}:
+        logger.info("Embeddings disabled via EMBEDDINGS_DISABLE; skipping model load")
+        return None
     if EMBEDDING_MODEL is None:
         try:
             logger.info(f"Loading embedding model: {EMBEDDING_MODEL_NAME}")
