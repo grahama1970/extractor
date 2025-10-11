@@ -528,18 +528,11 @@ def from_run(
                         rect = None
                 if rect is None:
                     continue
-                # Basic heuristic filters to avoid paragraph-as-table and absurd boxes
-                page_rect = doc[pno].rect
-                pa = float(page_rect.width * page_rect.height) or 1.0
-                ra = float(rect.width * rect.height)
-                if ra / pa > 0.85:  # skip near-full-page boxes
-                    continue
+                # Render-only: no page-area heuristics here; rely on Stage 05 filtering
                 shp = t.get('pandas_metrics', {}).get('shape') or []
                 rows = int(shp[0]) if len(shp) > 0 and str(shp[0]).isdigit() else None
                 cols = int(shp[1]) if len(shp) > 1 and str(shp[1]).isdigit() else None
-                if cols is not None and cols <= 1:
-                    # Skip 1-column tables (often false positives over paragraphs)
-                    continue
+                # Allow 1-column tables; downstream can decide if they are paragraphs
                 # Label: Table RxC for clarity
                 label = f"Table {shp[0] if len(shp)>0 else '?'}x{shp[1] if len(shp)>1 else '?'}"
                 color = _color_rgb('table')
@@ -594,48 +587,7 @@ def from_run(
                 _add_note(doc[pno], rect, label, color)
                 _add_freetext_bold(doc[pno], rect, label, color=(0, 0, 0), fontsize=8.5)
                 legends.setdefault(pno, []).append(label)
-        elif include_figures:
-            # Fallback: no Stage 06 figures; derive from page images for rough placement
-            for pno in range(len(doc)):
-                try:
-                    imgs = doc[pno].get_images(full=True)
-                except Exception:
-                    imgs = []
-                if not imgs:
-                    continue
-                try:
-                    rects = doc[pno].get_image_rects(imgs[0][0])
-                except Exception:
-                    rects = []
-                if not rects:
-                    continue
-                rect0 = rects[0] & doc[pno].rect
-                # Expand by figure_expand
-                try:
-                    cx = (rect0.x0 + rect0.x1) / 2.0
-                    cy = (rect0.y0 + rect0.y1) / 2.0
-                    w = rect0.width * (1.0 + figure_expand)
-                    h = rect0.height * (1.0 + figure_expand)
-                    rect = _clamp_to_page(fitz.Rect(cx - w/2.0, cy - h/2.0, cx + w/2.0, cy + h/2.0), doc[pno].rect)
-                except Exception:
-                    rect = rect0
-                if rect is None:
-                    continue
-                label = "Figure"
-                color = _color_rgb('figure')
-                ann = _add_rect_annot(doc[pno], rect, color=color, width=0.8, fill=color, alpha=max(0.0, min(1.0, fill_alpha)))
-                _draw_rect_overlay(doc[pno], rect, color, fill=True, fill_alpha=fill_alpha, width=0.8)
-                try:
-                    if ann is not None:
-                        try:
-                            ann.set_info(content=label); ann.set_info(subject=label); ann.set_info(title=label)
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
-                _add_note(doc[pno], rect, label, color)
-                _add_freetext_bold(doc[pno], rect, label, color=(0, 0, 0), fontsize=8.5)
-                legends.setdefault(pno, []).append(label)
+        # No fallback figures: render only Stage 06 output
 
         # Text groups (Stage 02 blocks)
         if include_text_groups and j02 and isinstance(j02.get('blocks'), list):

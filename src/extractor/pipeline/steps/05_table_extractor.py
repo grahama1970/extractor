@@ -297,6 +297,57 @@ def _demote_table_headers_to_text(result: Dict[str, Any]) -> None:
         result["demoted_text_blocks"] = demoted
 
 
+def _extract_table_text_for_heuristics(t: Dict[str, Any]) -> str:
+    src = t.get("pandas_df_raw") or t.get("pandas_df")
+    cells = []
+    if isinstance(src, list):
+        for r in src:
+            if isinstance(r, dict):
+                cells.extend([str(v).strip() for v in r.values()])
+            elif isinstance(r, list):
+                cells.extend([str(v).strip() for v in r])
+    elif isinstance(src, dict):
+        for r in src.values():
+            if isinstance(r, list):
+                cells.extend([str(v).strip() for v in r])
+    text = " ".join([c for c in cells if c])
+    return " ".join(text.split())
+
+
+def _demote_sentence_like_single_row_tables(result: Dict[str, Any]) -> None:
+    """Demote obvious single-row sentence-like tables to text blocks.
+
+    Heuristic: rows==1 and the joined cell text looks like a sentence
+    (>=6 words and ends with . ! or ? or has typical sentence punctuation).
+    """
+    if os.getenv("STAGE05_DEMOTE_SENTENCE_ROW", "1").lower() not in {"1","true","yes","y"}:
+        return
+    import re
+    tables = list(result.get("tables") or [])
+    keep: List[Dict[str, Any]] = []
+    demoted: List[Dict[str, Any]] = result.get("demoted_text_blocks", []) or []
+    for t in tables:
+        pm = (t.get("pandas_metrics") or {}).get("shape") or []
+        rows = int(pm[0]) if len(pm) > 0 and str(pm[0]).isdigit() else None
+        if rows != 1:
+            keep.append(t)
+            continue
+        txt = _extract_table_text_for_heuristics(t)
+        words = len(txt.split())
+        looks_sentence = words >= 6 and bool(re.search(r"[\.!?]\s*$", txt))
+        if looks_sentence:
+            try:
+                p = int(t.get("page_index") if t.get("page_index") is not None else int(t.get("page_number", 1)) - 1)
+            except Exception:
+                p = 0
+            demoted.append({"page_idx": p, "bbox": t.get("bbox") or [], "text": txt, "reason": "sentence_like_single_row"})
+        else:
+            keep.append(t)
+    result["tables"] = keep
+    if demoted:
+        result["demoted_text_blocks"] = demoted
+
+
 def generate_pandas_metrics(df: pd.DataFrame) -> Dict[str, Any]:
     """Generate comprehensive metrics from a DataFrame for analysis."""
     if df.empty:
@@ -1426,6 +1477,7 @@ def run(
     }
     # Emit demoted text blocks so Stage 04 can merge heuristics
     _demote_table_headers_to_text(result)
+    _demote_sentence_like_single_row_tables(result)
 
     output_path = json_output_dir / "05_tables.json"
     with open(output_path, "w") as f:
