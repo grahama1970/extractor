@@ -38,6 +38,17 @@ def _safe_load(p: Path) -> Optional[dict]:
     except Exception:
         return None
 
+def _camelot_to_fitz_bbox(bbox: List[float], page_rect: 'fitz.Rect') -> Optional[List[float]]:
+    """Convert Camelot bbox (origin bottom-left) to PyMuPDF coords (origin top-left)."""
+    try:
+        x0, y0, x1, y1 = [float(v) for v in bbox]
+        page_h = float(page_rect.height)
+        y0_f = page_h - y1
+        y1_f = page_h - y0
+        return [x0, y0_f, x1, y1_f]
+    except Exception:
+        return None
+
 
 def _put_box(
     page: fitz.Page,
@@ -74,6 +85,9 @@ def _put_box(
             # Optional small free-text label to mimic previous overlay labeling
             if text and not tag_only:
                 label_rect = fitz.Rect(rect.x0 + 1, rect.y0 - 10, rect.x0 + 260, rect.y0 + 2)
+                label_rect = label_rect & page.rect
+                if label_rect.is_empty:
+                    label_rect = fitz.Rect(rect.x0 + 2, rect.y0 + 2, rect.x0 + 72, rect.y0 + 12)
                 ft = page.add_freetext_annot(
                     label_rect,
                     text,
@@ -83,6 +97,10 @@ def _put_box(
                 ft.set_colors(stroke=color, fill=None, text=color)
                 # Make the free text transparent background
                 ft.set_border(width=0.0)
+                try:
+                    ft.set_opacity(0.25)
+                except Exception:
+                    pass
                 ft.update()
             elif text and tag_only:
                 tag_rect = fitz.Rect(rect.x0 + 2, rect.y0 + 2, rect.x0 + 72, rect.y0 + 12)
@@ -342,9 +360,12 @@ def main(
             label = ' '.join(tag_parts) + f' (p{page_num})'
             if tables_as == 'box':
                 legends.setdefault(page_idx, []).append(label)
+                _bbox_conv = _camelot_to_fitz_bbox(bbox, doc[page_idx].rect) if bbox else None
+                if not _bbox_conv:
+                    continue
                 _put_box(
                     doc[page_idx],
-                    bbox,
+                    _bbox_conv,
                     color,
                     None if no_labels else label,
                     lw=lw,
@@ -356,9 +377,12 @@ def main(
                 # Draw a small tag only to avoid clutter; details go to sidecar
                 tag = f'T#{k}'
                 legends.setdefault(page_idx, []).append(label)
+                _bbox_conv = _camelot_to_fitz_bbox(bbox, doc[page_idx].rect) if bbox else None
+                if not _bbox_conv:
+                    continue
                 _put_box(
                     doc[page_idx],
-                    bbox,
+                    _bbox_conv,
                     color,
                     tag,
                     lw=lw,

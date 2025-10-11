@@ -155,7 +155,9 @@ annotate-from-results:
 	uv run python -m extractor.pipeline.tools.render_annotated_pdf from-run \
 	  --pdf "$(PDF)" \
 	  --run-dir "$(RUN_DIR)" \
-	  --export-pages
+	  --export-pages \
+	  $$( [ -n "$(PAGES)" ] && echo --pages "$(PAGES)" || true ) \
+	  $$( [ -n "$(LEGEND)" ] && echo --legend || true )
 	@echo "[annotate-from-results] Done"
 
 .PHONY: smoke-annot-exist

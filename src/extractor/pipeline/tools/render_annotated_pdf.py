@@ -109,6 +109,7 @@ def _add_label_tab(
     color: Tuple[float, float, float],
     *,
     alpha: float = 0.25,
+    fontsize: float = 6.5,
 ):
     tab_h = 12.0
     tab_w = max(56.0, min(120.0, len(text) * 4.2))
@@ -117,9 +118,15 @@ def _add_label_tab(
     if tab_rect is None:
         return None
     try:
-        fta = page.add_freetext_annot(tab_rect, text)
+        try:
+            fta = page.add_freetext_annot(tab_rect, text, fontsize=max(5.0, float(fontsize)))
+        except TypeError:
+            fta = page.add_freetext_annot(tab_rect, text)
     except AttributeError:
-        fta = page.addFreetextAnnot(tab_rect, text)
+        try:
+            fta = page.addFreetextAnnot(tab_rect, text, fontsize=max(5.0, float(fontsize)))
+        except Exception:
+            fta = page.addFreetextAnnot(tab_rect, text)
     try:
         fta.set_colors(stroke=color, fill=color, text=(1, 1, 1))
     except Exception:
@@ -127,6 +134,10 @@ def _add_label_tab(
             fta.setColors(stroke=color, fill=color)
         except Exception:
             pass
+    try:
+        fta.set_border(width=0.0)
+    except Exception:
+        pass
     try:
         fta.set_opacity(alpha)
     except Exception:
@@ -201,6 +212,34 @@ def _rect_from_camelot(bb: Iterable[float], page_rect: "fitz.Rect") -> Optional[
         return None
 
 
+def _parse_pages(pages: str, total_pages: int) -> Optional[set[int]]:
+    if not pages:
+        return None
+    out: set[int] = set()
+    for chunk in pages.split(','):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        if '-' in chunk:
+            a,b = chunk.split('-',1)
+            try:
+                start = int(a); end = int(b)
+            except ValueError:
+                continue
+            if start > end:
+                start,end = end,start
+            for n in range(start, end+1):
+                if 1 <= n <= total_pages:
+                    out.add(n-1)
+        else:
+            try:
+                n = int(chunk)
+            except ValueError:
+                continue
+            if 1 <= n <= total_pages:
+                out.add(n-1)
+    return out or None
+
 @app.command()
 def from_run(
     pdf: Path = typer.Option(..., "--pdf", help="Input Stage 01 clean PDF", exists=True, dir_okay=False),
@@ -210,9 +249,11 @@ def from_run(
     include_tables: bool = typer.Option(True, help="Include Stage 05 tables"),
     include_figures: bool = typer.Option(True, help="Include Stage 06 figures"),
     include_text_groups: bool = typer.Option(True, help="Include Stage 02 text groups"),
-    style: str = typer.Option("stroke", help="Annotation style: stroke|fill|both"),
-    fill_alpha: float = typer.Option(0.10, help="Fill opacity (0..1) when style includes fill"),
+    style: str = typer.Option("stroke", help="Annotation style: stroke|fill|both (sections honor this)"),
+    fill_alpha: float = typer.Option(0.05, help="Fill opacity (0..1). Used for non-section layers and for sections when style includes fill"),
     export_pages: bool = typer.Option(True, help="Also export annotated pages as PNGs next to output"),
+    pages: str = typer.Option('', help="Limit PNG export to these pages (1-indexed, e.g. '1,3,10-12'). Does not affect the PDF annotations."),
+    legend: bool = typer.Option(False, help="Write per-page legend markdown files alongside the annotated PDF"),
 ):
     """Annotate sections, tables, figures, and text groups from a run directory."""
     # Resolve JSON paths
@@ -239,6 +280,7 @@ def from_run(
 
     doc = fitz.open(str(pdf))
     with doc:
+        legends: Dict[int, List[str]] = {}
         # Sections (Stage 04)
         if include_sections and j04 and isinstance(j04.get('sections'), list):
             for s in j04['sections']:
@@ -254,7 +296,8 @@ def from_run(
                 color = _color_rgb('section')
                 use_fill = color if style in {"fill", "both"} else None
                 _add_rect_annot(doc[pno], rect, color=color, width=1.2, fill=use_fill, alpha=fill_alpha if use_fill else 1.0)
-                _add_label_tab(doc[pno], rect, label, color)
+                _add_label_tab(doc[pno], rect, label, color, alpha=0.25, fontsize=6.5)
+                legends.setdefault(pno, []).append(label)
 
         # Tables (Stage 05)
         if include_tables and j05 and isinstance(j05.get('tables'), list):
@@ -273,8 +316,9 @@ def from_run(
                 label = f"table:{shp[0] if len(shp)>0 else '?'}x{shp[1] if len(shp)>1 else '?'}"
                 color = _color_rgb('table')
                 # Requirement: colored boxes with ~95% transparency (i.e., 5% opacity)
-                _add_rect_annot(doc[pno], rect, color=color, width=0.8, fill=color, alpha=0.05)
-                _add_label_tab(doc[pno], rect, label, color)
+                _add_rect_annot(doc[pno], rect, color=color, width=0.8, fill=color, alpha=max(0.0, min(1.0, fill_alpha)))
+                _add_label_tab(doc[pno], rect, label, color, alpha=0.25, fontsize=6.5)
+                legends.setdefault(pno, []).append(label)
 
         # Figures (Stage 06)
         if include_figures and j06 and isinstance(j06.get('figures'), list):
@@ -291,8 +335,9 @@ def from_run(
                     continue
                 label = "figure"
                 color = _color_rgb('figure')
-                _add_rect_annot(doc[pno], rect, color=color, width=0.8, fill=color, alpha=0.05)
-                _add_label_tab(doc[pno], rect, label, color)
+                _add_rect_annot(doc[pno], rect, color=color, width=0.8, fill=color, alpha=max(0.0, min(1.0, fill_alpha)))
+                _add_label_tab(doc[pno], rect, label, color, alpha=0.25, fontsize=6.5)
+                legends.setdefault(pno, []).append(label)
 
         # Text groups (Stage 02 blocks)
         if include_text_groups and j02 and isinstance(j02.get('blocks'), list):
@@ -309,19 +354,37 @@ def from_run(
                     continue
                 label = 'textgroup'
                 color = (0.45, 0.45, 0.45)
-                _add_rect_annot(doc[pno], rect, color=color, width=0.8, fill=color, alpha=0.05)
-                _add_label_tab(doc[pno], rect, label, color)
+                _add_rect_annot(doc[pno], rect, color=color, width=0.8, fill=color, alpha=max(0.0, min(1.0, fill_alpha)))
+                _add_label_tab(doc[pno], rect, label, color, alpha=0.25, fontsize=6.5)
+                legends.setdefault(pno, []).append(label)
 
         out.parent.mkdir(parents=True, exist_ok=True)
         doc.save(str(out))
+
+    # Optional per-page legend sidecar
+    if legend:
+        try:
+            side_root = out.parent / (out.stem + '_ann')
+            side_root.mkdir(parents=True, exist_ok=True)
+            for pno, items in legends.items():
+                (side_root / f'page_{pno+1}_legend.md').write_text('\n'.join(f'- {it}' for it in items), encoding='utf-8')
+        except Exception:
+            pass
 
     if export_pages:
         try:
             d = out.parent / (out.stem + '_pages')
             d.mkdir(parents=True, exist_ok=True)
             doc = fitz.open(str(out))
-            for i in range(len(doc)):
-                pm = doc[i].get_pixmap(dpi=144, annots=True)
+            allowed = _parse_pages(pages, len(doc))
+            page_indices = range(len(doc)) if allowed is None else sorted(allowed)
+            for i in page_indices:
+                if not (0 <= i < len(doc)):
+                    continue
+                try:
+                    pm = doc[i].get_pixmap(dpi=144, annots=True)
+                except TypeError:
+                    pm = doc[i].get_pixmap(dpi=144)
                 (d / f'page_{i+1}.png').write_bytes(pm.tobytes('png'))
         except Exception:
             pass
