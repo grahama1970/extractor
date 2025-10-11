@@ -1,47 +1,68 @@
-# Current Context — Extractor Pipeline (2025-10-10)
+Context: Pipeline Hardening (Step 07 focus)
+Date: 2025-10-11
 
-Repo: /home/graham/workspace/experiments/extractor
-Branch: feat/walking-skeleton-pipeline (pushed)
-Focus: Working “walking skeleton” pipeline on 2‑page PDF: prototypes/tabbed/pdfs/BHT CV32A65X.pdf
+Scope
+- Harden Stage 07 (reflow) JSON discipline and determinism without removing LLM usage.
+- Keep low-confidence table image assists (Stage 05→07) and vision preflight.
+- Maintain strict JSON on first/compact passes; allow repair only as a gated fallback.
 
-What landed today
-- New branch feat/walking-skeleton-pipeline
-- .gitignore tightened (data/results/, artifacts/, memory/, screenshots/, tabbed pdfs/screenshots)
-- Stage 06 caps figures per doc via FIGURE_MAX_PER_DOC (default 12)
-- Stage 06c PDF annotator added (draws boxes for sections/tables/figures)
-- Scripts:
-  - scripts/preflight_pipeline.sh (Ghostscript, PyMuPDF, Camelot, CHUTES env)
-  - scripts/run_walking_skeleton.sh (01→14 minimal flow)
+Key Changes
+- Added strict JSON utilities
+  - `src/extractor/pipeline/utils/json_utils.py`:
+    - `STRICT_JSON_GUARD`: single-sourced guard text for prompts.
+    - `parse_json_strict(text)`: requires a single JSON object/array; forbids NaN/Infinity; no repair.
 
-Key files touched
-- src/extractor/pipeline/steps/06_figure_extractor.py: cap total figures processed per doc
-- src/extractor/pipeline/steps/06c_pdf_annotator.py: new deterministic annotator
-- scripts/preflight_pipeline.sh: environment/tooling preflight
-- scripts/run_walking_skeleton.sh: orchestrates walking-skeleton run
-- .gitignore: excludes heavy local outputs
+- Stage 07 tightening
+  - `src/extractor/pipeline/steps/07_reflow_section.py`:
+    - Uses `STRICT_JSON_GUARD` in system prompt (compact and full).
+    - Adds `stop=["```"]` for non‑Gemini providers on strict/compact/relaxed attempts.
+    - Parses strict responses via `parse_json_strict` first; if `STAGE07_STRICT_PARSE_ONLY=1`, fail fast; else falls back to `clean_json_string`.
 
-Intent
-- Keep Stage 02 strictly Marker-only (policy intact)
-- Keep Stage 07 deterministic by default (images off via env); rely on existing strict JSON path
-- Preserve Stage 05 LLM header-assist for low-confidence tables (length-preserving)
+- Tests
+  - `tests/pipeline/test_json_strict.py`: unit tests for strict parser and guard text.
+  - Updated `tests/conftest.py` to prepend `src/` to `sys.path` so local code is tested.
 
-How to run (walking skeleton)
-```bash
-source .venv/bin/activate
-set -a && [ -f .env ] && source .env && set +a
-bash scripts/preflight_pipeline.sh
-bash scripts/run_walking_skeleton.sh "data/input/pipeline/BHT_CV32A65X_with_requirements.pdf" "data/results/pipeline"
-```
+- Hygiene
+  - Expanded `.gitignore` with heavy local outputs: `artifacts/`, `scripts/artifacts/`, `benchmarks/`, `data/`, `memory/`, `screenshots/`, `prototypes/tabbed/screenshots/`, `prototypes/tabbed/pdfs/`, plus caches.
 
-Environment notes
-- CHUTES_API_BASE and CHUTES_API_KEY are only required when you enable figure descriptions (FIGURE_DESC=1).
-- Control figure load with FIGURE_MAX_PER_DOC (default 12), FIGURE_MAX_PER_SECTION (default 3), FIGURE_MIN_AREA_PX (default 5000).
-- Stage 07 defaults keep reflow deterministic (summary/minimal). The script sets STAGE07 flags for you.
+What remains the same
+- Stage 07 still supports image attachments for low‑confidence tables and optional figures (env‑gated).
+- scillm adapter path remains available via `USE_LLM_ADAPTER=1`.
+- No removal of LLM calls: Stage 05 images feed 07 when confidence is low.
 
-Review plan
-- Open PR from feat/walking-skeleton-pipeline
-- Ask Copilot/CodeRabbit for comprehensive review of src/extractor/pipeline/steps (focus on 05/06/07/10/14 and new 06c)
+How to run quick verification
+- Unit test:
+  ```bash
+  source .venv/bin/activate || true
+  pytest -q tests/pipeline/test_json_strict.py
+  ```
 
-Copilot/Code Review plan
-- After green local run, open a feature branch and push
-- Prepare review prompt with context, scenarios, questions, and request unified diffs
+- Minimal pipeline slice (example):
+  ```bash
+  PDF="prototypes/tabbed/pdfs/BHT CV32A65X.pdf" \
+  OUT="data/results/pipeline_mvp/BHT_CV32A65X" \
+  LITELLM_VLM_MODEL="gemini/gemini-2.5-flash" \
+  STAGE07_STRICT_PARSE_ONLY=0 \
+  python src/extractor/pipeline/steps/01_annotation_processor.py run "$PDF" -o "$OUT" && \
+  python src/extractor/pipeline/steps/02_marker_extractor.py run "$OUT/tmp_pdf/$(basename "${PDF%.*}")_clean.pdf" -o "$OUT" --no-spawn && \
+  python src/extractor/pipeline/steps/04_section_builder.py run "$OUT/03_suspicious_headers/json_output/03_verified_blocks.json" --pdf-dir "$OUT/tmp_pdf" -o "$OUT" && \
+  python src/extractor/pipeline/steps/05_table_extractor.py run "$OUT/04_section_builder/json_output/04_sections.json" --pdf-dir "$OUT/tmp_pdf" -o "$OUT" && \
+  python src/extractor/pipeline/steps/06_figure_extractor.py run "$OUT/03_suspicious_headers/json_output/03_verified_blocks.json" --sections "$OUT/04_section_builder/json_output/04_sections.json" --pdf-dir "$OUT/tmp_pdf" -o "$OUT" && \
+  python src/extractor/pipeline/steps/07_reflow_section.py run --sections "$OUT/04_section_builder/json_output/04_sections.json" --tables "$OUT/05_table_extractor/json_output/05_tables.json" --figures "$OUT/06_figure_extractor/json_output/06_figures.json" -o "$OUT"
+  ```
+
+Notes for Copilot/CodeRabbit
+- This branch keeps JSON/prompt hardening small and testable. The next step is to request a review focusing on:
+  - Strict JSON discipline in Stage 07, stop tokens, and determinism knobs.
+  - Whether `STRICT_JSON_GUARD` should be shared with Stage 03/09 for consistency.
+  - Suggestions for trimming the relaxed fallback while keeping reliability.
+
+Env flags of interest
+- `STAGE07_VLM_MODEL`: model id (falls back to `LITELLM_VLM_MODEL`).
+- `STAGE07_IMAGE_PROMPT_MAX_TOKENS` (default 1792) / `STAGE07_MAX_TOKENS`.
+- `STAGE07_STRICT_PARSE_ONLY` (0|1): if 1, forbid repair fallback.
+- `STAGE07_INCLUDE_FIGURES` (0|1), `STAGE07_ATTACH_SECTION_IMAGE` (0|1).
+- `USE_LLM_ADAPTER` (0|1): route through scillm adapter.
+
+Owner
+- Graham; pipeline steps under `src/extractor/pipeline/steps`.

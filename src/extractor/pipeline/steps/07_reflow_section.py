@@ -28,7 +28,12 @@ from loguru import logger
 from rich.console import Console
 from tqdm.asyncio import tqdm_asyncio
 
-from extractor.pipeline.utils.json_utils import clean_json_string, restrict_top_level_keys
+from extractor.pipeline.utils.json_utils import (
+    clean_json_string,
+    restrict_top_level_keys,
+    parse_json_strict,
+    STRICT_JSON_GUARD,
+)
 from extractor.pipeline.utils.litellm_response_utils import extract_content
 from extractor.pipeline.utils.image_io import (
     get_section_image_b64,
@@ -969,17 +974,12 @@ async def reflow_section_with_llm(
             # Prompt: compact vs full. Compact can help providers that stall on overly prescriptive prompts.
             _compact = os.getenv("STAGE07_COMPACT_PROMPT", "").lower() in ("1", "true", "yes", "y")
             if _compact:
-                system_text = (
-                    "You output ONLY minified JSON. No markdown, no code fences, no comments or explanations, "
-                    "no trailing commas, no NaN/Infinity. No prose."
-                    f"\n{PROMPT_STRICT_REQUIREMENTS}"
-                )
+                system_text = f"{STRICT_JSON_GUARD}\n{PROMPT_STRICT_REQUIREMENTS}"
             else:
                 system_text = (
-                    "You are a strict JSON generator. Return ONLY minified JSON. "
-                    "No markdown, no code fences, no comments or explanations, no trailing commas, no NaN/Infinity. "
-                    "You respond with exactly one JSON object conforming to the schema. Do not include any explanations, prose, or extra keys."
-                    f"\n{PROMPT_STRICT_REQUIREMENTS}"
+                    f"You are a strict JSON generator. {STRICT_JSON_GUARD} "
+                    "You respond with exactly one JSON object conforming to the schema. Do not include any explanations, prose, or extra keys.\n"
+                    f"{PROMPT_STRICT_REQUIREMENTS}"
                 )
 
             def _is_gemini(m: str) -> bool:
@@ -1148,6 +1148,12 @@ async def reflow_section_with_llm(
                     }
             else:
                 call_params["response_format"] = {"type": "json_object"}
+            # Add stop fence for non-Gemini providers to avoid spillover
+            try:
+                if "gemini" not in (LLM_MODEL or "").lower():
+                    call_params["stop"] = ["```"]
+            except Exception:
+                pass
             # Instrumentation: write request summary now that messages exist
             try:
                 logs_dir = results_base_dir / "07_reflow_section" / "logs"
@@ -1204,14 +1210,14 @@ async def reflow_section_with_llm(
                 pass
 
             # Run strict call via litellm_call without mutating global drop_params
-            results = await litellm_call(
-                [call_params],
-                wrap_json=True,
-                concurrency=1,
-                desc="Reflow Section",
-                session_id=sid,
-                export="results",
-            )
+                results = await litellm_call(
+                    [call_params],
+                    wrap_json=True,
+                    concurrency=1,
+                    desc="Reflow Section",
+                    session_id=sid,
+                    export="results",
+                )
             r0 = results[0] if results else None
             try:
                 from loguru import logger as _logger
@@ -1276,6 +1282,12 @@ async def reflow_section_with_llm(
                         }
                 else:
                     call_params2["response_format"] = {"type": "json_object"}
+                # Stop fence for non-Gemini providers
+                try:
+                    if "gemini" not in (LLM_MODEL or "").lower():
+                        call_params2["stop"] = ["```"]
+                except Exception:
+                    pass
                 # Log sanitized compact request for debugging
                 try:
                     logs_dir = results_base_dir / "07_reflow_section" / "logs"
@@ -1479,6 +1491,11 @@ async def reflow_section_with_llm(
                 call_params["temperature"] = 0
                 call_params["cache"] = {"no-cache": True}
                 try:
+                    if "gemini" not in (LLM_MODEL or "").lower():
+                        call_params["stop"] = ["```"]
+                except Exception:
+                    pass
+                try:
                     _retry2_cap = int(os.getenv("STAGE07_RETRY2_MAX_TOKENS", "1536"))
                 except Exception:
                     _retry2_cap = 1536
@@ -1521,8 +1538,14 @@ async def reflow_section_with_llm(
                 "Stage 07: LLM returned empty content. Verify API keys and Chat Completions access; inspect logs in 07_reflow_section/logs for request_info and response dumps."
             )
 
-        # Parse/repair JSON robustly
+        # Parse JSON: strict first (no repair). Optionally relax if allowed.
         try:
+            parsed = parse_json_strict(content)
+        except Exception as _strict_err:
+            if os.getenv("STAGE07_STRICT_PARSE_ONLY", "0").lower() in ("1", "true", "yes", "y"):
+                logger.warning(f"Strict JSON parse failed (no repair allowed): {_strict_err}")
+                raise
+            logger.warning(f"Strict JSON parse failed; attempting relaxed repair: {_strict_err}")
             parsed = clean_json_string(content, return_dict=True)
             # Optional: prune unexpected top-level keys for strictness (default ON)
             try:

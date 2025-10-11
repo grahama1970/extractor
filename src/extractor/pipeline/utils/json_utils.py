@@ -21,7 +21,7 @@ import os
 import json
 from pathlib import Path
 import re
-from typing import Union
+from typing import Union, Any
 
 from json_repair import repair_json
 from loguru import logger
@@ -224,6 +224,44 @@ def restrict_top_level_keys(obj: Union[dict, list], allowed: set[str]) -> Union[
     if isinstance(obj, dict):
         return {k: v for k, v in obj.items() if k in allowed}
     return obj
+
+
+# Strict JSON guard text used in prompts where we require exact JSON bodies.
+# Keep this single‑sourced so stages reference the same rules.
+STRICT_JSON_GUARD = (
+    "Return exactly one JSON object. No markdown, no code fences, no prose,"
+    " no comments, no trailing commas, and do not emit NaN/Infinity (use null)."
+)
+
+
+def parse_json_strict(text: str) -> Any:
+    """
+    Strict JSON parser:
+    - Requires the entire payload to be a single JSON object or array (no fences, no prefix/suffix prose).
+    - Forbids NaN/Infinity/-Infinity via parse_constant hook.
+    - Does NOT attempt repair. Raises ValueError on any violation.
+
+    Args:
+        text: incoming model content string.
+
+    Returns:
+        Parsed Python object (dict or list typically).
+    """
+    if not isinstance(text, str):
+        raise ValueError("parse_json_strict expects a string")
+    s = text.strip()
+    # Must be a single JSON object or array
+    if not ((s.startswith("{") and s.endswith("}")) or (s.startswith("[") and s.endswith("]"))):
+        raise ValueError("Response is not a single JSON object/array")
+
+    def _forbid_constants(x: str):
+        raise ValueError(f"Forbidden constant in JSON: {x}")
+
+    try:
+        return json.loads(s, parse_constant=_forbid_constants)
+    except Exception as e:
+        # Do not repair here; strict path must fail fast
+        raise ValueError(f"Strict JSON parse failed: {e}")
 
 
 def json_to_markdown(data, level=1, title_case=True):

@@ -199,6 +199,21 @@ cython_debug/
 .env.bak
 **/vertex_ai_service_account.json
 
+# Local artifacts and large generated data (keep repo lean)
+artifacts/
+scripts/artifacts/
+benchmarks/
+data/
+memory/
+screenshots/
+prototypes/tabbed/screenshots/
+prototypes/tabbed/pdfs/
+**/json_output/*.png
+**/__pycache__/
+**/.pytest_cache/
+*.tmp
+*.bak
+
 # Pipeline artifacts and local data (keep out of git)
 data/results/
 artifacts/
