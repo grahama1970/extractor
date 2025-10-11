@@ -415,7 +415,18 @@ def from_run(
                         rect = None
                 if rect is None:
                     continue
+                # Basic heuristic filters to avoid paragraph-as-table and absurd boxes
+                page_rect = doc[pno].rect
+                pa = float(page_rect.width * page_rect.height) or 1.0
+                ra = float(rect.width * rect.height)
+                if ra / pa > 0.85:  # skip near-full-page boxes
+                    continue
                 shp = t.get('pandas_metrics', {}).get('shape') or []
+                rows = int(shp[0]) if len(shp) > 0 and str(shp[0]).isdigit() else None
+                cols = int(shp[1]) if len(shp) > 1 and str(shp[1]).isdigit() else None
+                if cols is not None and cols <= 1:
+                    # Skip 1-column tables (often false positives over paragraphs)
+                    continue
                 label = f"table:{shp[0] if len(shp)>0 else '?'}x{shp[1] if len(shp)>1 else '?'}"
                 color = _color_rgb('table')
                 # Requirement: colored boxes with ~95% transparency (i.e., 5% opacity)
