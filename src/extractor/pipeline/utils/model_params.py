@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 from pathlib import Path
+import os
 from typing import Any, Dict, List
 
 
@@ -45,7 +46,11 @@ def build_chat_extras(model_name: str) -> Dict[str, Any]:
     # Default to OpenAI-compatible to avoid provider ambiguity and enable response_format
     extras["custom_llm_provider"] = "openai"
     if "gemini" not in name:
+        # Non-Gemini: request strict JSON object responses; reduce variance
         extras["response_format"] = {"type": "json_object"}
+        extras["top_p"] = 0
+        extras["presence_penalty"] = 0
+        extras["frequency_penalty"] = 0
     else:
         # Provider-specific GenerationConfig for Google Gemini
         extras["generation_config"] = {
@@ -53,4 +58,11 @@ def build_chat_extras(model_name: str) -> Dict[str, Any]:
             # Allow generous output length for structured blocks
             "max_output_tokens": 2048,
         }
+    # Optional: allow a seed via env for providers that support it
+    try:
+        _seed = os.getenv("LITELLM_SEED") or os.getenv("STAGE_SEED")
+        if _seed is not None and str(_seed).strip() != "":
+            extras["seed"] = int(str(_seed).strip())
+    except Exception:
+        pass
     return extras

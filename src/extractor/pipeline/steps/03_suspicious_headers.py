@@ -222,6 +222,20 @@ async def verify_header_with_llm(image_b64: str, context_text: str, model: str, 
 
     Always sends an image; provider error will be raised to the caller.
     """
+    # Normalize model + provider/json extras; conservative trim; log effective config
+    model_norm = normalize_model_alias(model)
+    extras = build_chat_extras(model_norm)
+    try:
+        logger.info(f"stage03.verify_header: effective_model={model_norm} extras_keys={list(extras.keys())}")
+    except Exception:
+        pass
+    try:
+        _trim = int(os.getenv("STAGE03_VERIFY_TRIM_CHARS", "800"))
+    except Exception:
+        _trim = 800
+    if isinstance(context_text, str) and len(context_text) > _trim:
+        context_text = context_text[:_trim]
+
     user_content: Any = [
         {"type": "text", "text": context_text},
         {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_b64}"}},
@@ -251,9 +265,6 @@ async def verify_header_with_llm(image_b64: str, context_text: str, model: str, 
         except Exception:
             pass
     sid = os.getenv("LITELLM_SESSION_ID") or get_run_id()
-    # Normalize model id and build provider extras (ensures JSON mode where supported)
-    model_norm = normalize_model_alias(model)
-    extras = build_chat_extras(model_norm)
     # Enforce per-item timeout via litellm timeout param and an outer watchdog
     # Cap tokens for this tiny JSON to prevent rare over-generation
     try:
@@ -261,7 +272,7 @@ async def verify_header_with_llm(image_b64: str, context_text: str, model: str, 
     except Exception:
         _verify_cap = 256
     results = await litellm_call(
-        prompts=[{"model": model_norm, "messages": messages, "kwargs": {**extras, "timeout": item_timeout, "max_tokens": _verify_cap}}],
+        prompts=[{"model": model_norm, "messages": messages, "kwargs": {**extras, "timeout": item_timeout, "max_tokens": _verify_cap, "temperature": 0, "top_p": 0, "cache": {"no-cache": True}, "stop": ["```"]}}],
         wrap_json=True,
         concurrency=1,
         desc="verify header",

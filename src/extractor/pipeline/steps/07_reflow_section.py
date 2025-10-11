@@ -966,13 +966,15 @@ async def reflow_section_with_llm(
             _compact = os.getenv("STAGE07_COMPACT_PROMPT", "").lower() in ("1", "true", "yes", "y")
             if _compact:
                 system_text = (
-                    "You output ONLY valid JSON. No prose, no markdown, no code fences."
+                    "You output ONLY minified JSON. No markdown, no code fences, no comments or explanations, "
+                    "no trailing commas, no NaN/Infinity. No prose."
                     f"\n{PROMPT_STRICT_REQUIREMENTS}"
                 )
             else:
                 system_text = (
-                    "You are a strict JSON generator. You respond with exactly one JSON object conforming to the schema."
-                    " Do not include any explanations, prose, code fences, or extra keys."
+                    "You are a strict JSON generator. Return ONLY minified JSON. "
+                    "No markdown, no code fences, no comments or explanations, no trailing commas, no NaN/Infinity. "
+                    "You respond with exactly one JSON object conforming to the schema. Do not include any explanations, prose, or extra keys."
                     f"\n{PROMPT_STRICT_REQUIREMENTS}"
                 )
 
@@ -1147,6 +1149,14 @@ async def reflow_section_with_llm(
             try:
                 if "gemini" not in (LLM_MODEL or "").lower():
                     call_params["max_tokens"] = STAGE07_MAX_TOKENS
+            except Exception:
+                pass
+            # If images are included on Attempt 1 (non-Gemini), clamp tokens to image cap after generic max is set
+            try:
+                if include_images and supports_vision and "gemini" not in (LLM_MODEL or "").lower():
+                    _img_cap = int(os.getenv("STAGE07_IMAGE_PROMPT_MAX_TOKENS", "1792"))
+                    prior_max = int(call_params.get("max_tokens") or STAGE07_MAX_TOKENS)
+                    call_params["max_tokens"] = min(prior_max, _img_cap)
             except Exception:
                 pass
             # Disable cache for strict JSON passes to avoid stale empties
@@ -1485,8 +1495,8 @@ async def reflow_section_with_llm(
                     _trim = 1200
                 _guard3 = (
                     "Return ONLY a minified JSON object with keys: reflowed_json, ocr_corrections, "
-                    "improvements_made, summary. No markdown, no code fences, no trailing commas. "
-                    "reflowed_json.blocks must be valid and _ordered."
+                    "improvements_made, summary. No markdown, no code fences, no comments or explanations, "
+                    "no trailing commas, no NaN/Infinity. reflowed_json.blocks must be valid and _ordered."
                 )
                 user_parts3 = [{"type": "text", "text": f"{_guard3}\n\n{context_text[:_trim]}"}]
                 messages3 = [
