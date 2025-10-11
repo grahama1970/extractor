@@ -59,6 +59,8 @@ def _put_box(
     fontsize: float = 6.5,
     tag_only: bool = False,
     use_annots: bool = True,
+    do_fill: bool = True,
+    fill_alpha: float = 0.05,
 ) -> None:
     """Render a box and optional label.
 
@@ -75,8 +77,16 @@ def _put_box(
             # Rectangle annotation (Square) with stroke color and border width
             a = page.add_rect_annot(rect)
             # PyMuPDF expects 0-1 floats for RGB
-            a.set_colors(stroke=color)
+            if do_fill:
+                a.set_colors(stroke=color, fill=color)
+            else:
+                a.set_colors(stroke=color)
             a.set_border(width=max(0.5, float(lw)))
+            try:
+                if 0.0 <= float(fill_alpha) <= 1.0:
+                    a.set_opacity(float(fill_alpha) if do_fill else 1.0)
+            except Exception:
+                pass
             if text:
                 # Set contents so viewers show text on click
                 a.set_info(content=text)
@@ -103,15 +113,29 @@ def _put_box(
                     pass
                 ft.update()
             elif text and tag_only:
-                tag_rect = fitz.Rect(rect.x0 + 2, rect.y0 + 2, rect.x0 + 72, rect.y0 + 12)
+                tag_rect = fitz.Rect(rect.x1 - 72, rect.y0 + 2, rect.x1 - 2, rect.y0 + 12) & page.rect
                 ft = page.add_freetext_annot(
                     tag_rect,
                     text,
                     fontsize=max(5.0, float(fontsize)),
                     rotate=0,
                 )
-                ft.set_colors(stroke=color, fill=None, text=color)
-                ft.set_border(width=0.0)
+                try:
+                    ft.set_colors(stroke=color, fill=color, text=(1, 1, 1))
+                except Exception:
+                    try:
+                        ft.setColors(stroke=color, fill=color)
+                        ft.set_colors(text=(1, 1, 1))
+                    except Exception:
+                        pass
+                try:
+                    ft.set_border(width=0.0)
+                except Exception:
+                    pass
+                try:
+                    ft.set_opacity(0.25)
+                except Exception:
+                    pass
                 ft.update()
             return
         except Exception:
