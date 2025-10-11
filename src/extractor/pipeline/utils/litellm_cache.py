@@ -33,7 +33,11 @@ Input/Output:
 # 4. Consult LESSONS_LEARNED.md about not breaking working code
 # ==============================================================================
 
-import litellm
+try:
+    import litellm  # type: ignore
+    _LITELLM_OK = True
+except Exception as _imp_err:
+    _LITELLM_OK = False
 import os
 
 try:
@@ -45,10 +49,14 @@ from dotenv import load_dotenv  # Import dotenv for environment variable loading
 # from litellm.caching import Cache, Type  # Import Cache and Type
 import sys  # Import sys for exit codes
 from loguru import logger
-from litellm.caching.caching import (
-    Cache as LiteLLMCache,
-    LiteLLMCacheType,
-)  # Import Cache and Type
+try:
+    from litellm.caching.caching import (
+        Cache as LiteLLMCache,
+        LiteLLMCacheType,
+    )  # type: ignore
+except Exception:
+    LiteLLMCache = None  # type: ignore
+    LiteLLMCacheType = None  # type: ignore
 
 # Import the utility function from our utils
 try:
@@ -64,6 +72,9 @@ load_dotenv()
 
 
 def initialize_litellm_cache() -> None:
+    if not _LITELLM_OK:
+        logger.info("LiteLLM not available; skipping cache initialization")
+        return
     # Allow disabling LiteLLM cache entirely via env flag
     if os.getenv("LITELLM_DISABLE_CACHE", "").lower() in {"1", "true", "yes", "y"}:
         try:
@@ -108,7 +119,9 @@ def initialize_litellm_cache() -> None:
 
         # Set up LiteLLM cache with debug logging
         logger.debug("Configuring LiteLLM Redis cache...")
-        litellm.cache = LiteLLMCache(  # Use imported Cache
+        if LiteLLMCache is None:
+            raise RuntimeError("LiteLLM caching module unavailable")
+        litellm.cache = LiteLLMCache(  # type: ignore
             type=LiteLLMCacheType.REDIS,  # Use Enum/Type
             host=redis_host,
             port=str(redis_port),  # Ensure port is a string
@@ -119,7 +132,10 @@ def initialize_litellm_cache() -> None:
 
         # Enable caching and verify
         logger.debug("Enabling LiteLLM cache...")
-        litellm.enable_cache()
+        try:
+            litellm.enable_cache()  # type: ignore[attr-defined]
+        except Exception:
+            pass
 
         # Set debug logging for LiteLLM
         os.environ["LITELLM_LOG"] = "DEBUG"

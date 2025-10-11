@@ -40,7 +40,6 @@ from extractor.pipeline.utils.diagnostics import (
     build_stage_timings,
 )
 from extractor.pipeline.utils.litellm_call import require_scillm_env, normalize_model_alias
-import litellm
 from extractor.pipeline.utils.litellm_cache import initialize_litellm_cache
 
 # --- Initialization & Configuration ---
@@ -103,7 +102,9 @@ async def describe_image_with_llm(image_data: bytes, context: str = "") -> str:
     ).strip()
     model = normalize_model_alias(raw_model)
     try:
-        resp = await litellm.acompletion(
+        import importlib
+        _litellm = importlib.import_module("litellm")
+        resp = await _litellm.acompletion(
             model=model,
             messages=[
                 {"role": "system", "content": system_prompt},

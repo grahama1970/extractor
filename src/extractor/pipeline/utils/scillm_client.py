@@ -4,11 +4,20 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-# Prefer local import path first; fall back when executed outside src layout
-try:  # pragma: no cover - import gateway only
-    from src.llm_adapter.adapter import LLMAdapter  # type: ignore
-except Exception:  # pragma: no cover
-    from llm_adapter.adapter import LLMAdapter  # type: ignore
+
+def _get_adapter(logs_root: Optional[Path] = None):
+    """Defer-import LLMAdapter to avoid hard dependency at module import time.
+    Returns an adapter instance or raises ImportError when unavailable.
+    """
+    try:  # prefer local path when executed inside repo
+        from src.llm_adapter.adapter import LLMAdapter  # type: ignore
+        return LLMAdapter(logs_root=logs_root)
+    except Exception:
+        try:
+            from llm_adapter.adapter import LLMAdapter  # type: ignore
+            return LLMAdapter(logs_root=logs_root)
+        except Exception as e:
+            raise ImportError(f"LLMAdapter unavailable: {e}. Ensure scillm/adapter deps are installed.")
 
 
 def apply_schema_hint(model: str, user_text: str) -> str:
@@ -58,7 +67,7 @@ async def reflow_section(
     logs_root = None
     if results_base_dir is not None:
         logs_root = Path(results_base_dir) / "07_reflow_section" / "logs"
-    adapter = LLMAdapter(logs_root=logs_root)
+    adapter = _get_adapter(logs_root)
     pv = prompt_version or os.getenv("STAGE07_PROMPT_VERSION", "reflow@0.1.0")
     rid = request_id or f"section_{section_id}"
     return await adapter.reflow_section(
@@ -82,7 +91,7 @@ async def verify_header(
     Async wrapper over the shared LLMAdapter for Stage 03 suspicious header verification.
     Returns an object with: verdict ("accept"|"reject"), reasons (List[str]).
     """
-    adapter = LLMAdapter()
+    adapter = _get_adapter(None)
     pv = os.getenv("STAGE03_PROMPT_VERSION", "header@0.1.0")
     return await adapter.verify_header(
         model=model,
@@ -93,4 +102,3 @@ async def verify_header(
         request_id=f"hdr_{os.getenv('LITELLM_SESSION_ID') or 'run'}",
         timeout=timeout,
     )
-

@@ -28,9 +28,23 @@ import sys
 from dataclasses import dataclass
 from typing import Any as _Any, Dict, List, Optional, Tuple
 
-# SciLLM is a forked distribution that installs as/over litellm; import litellm API
-import litellm as _litellm
-from litellm import Router
+# SciLLM is our primary path; litellm is optional and may change layout. Guard imports to avoid hard failures.
+_LITELLM_OK = True
+try:
+    import litellm as _litellm  # type: ignore
+    try:
+        from litellm import Router  # type: ignore
+    except Exception:  # Router optional in some builds
+        Router = object  # type: ignore
+except Exception as _litellm_import_err:  # pragma: no cover
+    _LITELLM_OK = False
+    class _DummyLiteLLM:  # minimal shim to avoid import-time crashes
+        def __getattr__(self, name):
+            raise ImportError(f"litellm unavailable ({_litellm_import_err}); accessed attribute '{name}'")
+        def completion(self, *a, **k):
+            raise ImportError(f"litellm unavailable ({_litellm_import_err})")
+    _litellm = _DummyLiteLLM()  # type: ignore
+    Router = object  # type: ignore
 from dotenv import find_dotenv, load_dotenv
 from loguru import logger
 from tqdm.asyncio import tqdm
@@ -249,8 +263,10 @@ def completion_simple(model: str, messages: List[Dict[str, str]], **kwargs) -> _
     # Route through OpenAI-compatible provider base when using CHUTES
     kwargs.setdefault("custom_llm_provider", "openai")
     kwargs.setdefault("timeout", 30)
+    if not _LITELLM_OK:
+        return {"error": {"type": "ImportError", "message": "litellm not available; prefer scillm path"}}
     try:
-        return _litellm.completion(model=nm, messages=messages, **kwargs)
+        return _litellm.completion(model=nm, messages=messages, **kwargs)  # type: ignore
     except Exception as e:
         # Surface a minimal error shape similar to OpenAI
         return {"error": {"type": type(e).__name__, "message": str(e)}}
@@ -279,7 +295,10 @@ if os.getenv("LITELLM_DEBUG", "").lower() in {"1","true","yes","y"}:
         setattr(_litellm, "debug", True)
     except Exception:
         pass
-initialize_litellm_cache()
+try:
+    initialize_litellm_cache()
+except Exception:
+    pass
 
 # Other env/defaults
 IMAGE_EXT = _IMAGE_EXT
