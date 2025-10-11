@@ -149,6 +149,21 @@ def _add_label_tab(
     return fta
 
 
+def _add_note(page: "fitz.Page", rect: "fitz.Rect", text: str, color: Tuple[float,float,float]):
+    """Add a small sticky note near the top-right of rect for compatibility with viewers' comment lists."""
+    try:
+        pt = fitz.Point(rect.x1 - 8, max(rect.y0 + 8, 8))
+        na = page.add_text_annot(pt, text)
+        try:
+            na.set_colors(stroke=color, fill=None)
+        except Exception:
+            pass
+        try:
+            na.update()
+        except Exception:
+            pass
+    except Exception:
+        pass
 def _rect_from(obj: Dict[str, Any]) -> Optional["fitz.Rect"]:
     bb = obj.get("bbox") or obj.get("original_rect") or obj.get("expanded_rect")
     if not isinstance(bb, (list, tuple)) or len(bb) != 4:
@@ -299,6 +314,7 @@ def from_run(
                 use_fill = color if sections_style in {"fill", "both"} else None
                 _add_rect_annot(doc[pno], rect, color=color, width=1.2, fill=use_fill, alpha=fill_alpha if use_fill else 1.0)
                 _add_label_tab(doc[pno], rect, label, color, alpha=0.25, fontsize=6.5)
+                _add_note(doc[pno], rect, label, color)
                 legends.setdefault(pno, []).append(label)
 
         # Tables (Stage 05)
@@ -326,6 +342,7 @@ def from_run(
                 # Requirement: colored boxes with ~95% transparency (i.e., 5% opacity)
                 _add_rect_annot(doc[pno], rect, color=color, width=0.8, fill=color, alpha=max(0.0, min(1.0, fill_alpha)))
                 _add_label_tab(doc[pno], rect, label, color, alpha=0.25, fontsize=6.5)
+                _add_note(doc[pno], rect, label, color)
                 legends.setdefault(pno, []).append(label)
 
         # Figures (Stage 06)
@@ -345,6 +362,7 @@ def from_run(
                 color = _color_rgb('figure')
                 _add_rect_annot(doc[pno], rect, color=color, width=0.8, fill=color, alpha=max(0.0, min(1.0, fill_alpha)))
                 _add_label_tab(doc[pno], rect, label, color, alpha=0.25, fontsize=6.5)
+                _add_note(doc[pno], rect, label, color)
                 legends.setdefault(pno, []).append(label)
 
         # Text groups (Stage 02 blocks)
@@ -364,10 +382,20 @@ def from_run(
                 color = (0.45, 0.45, 0.45)
                 _add_rect_annot(doc[pno], rect, color=color, width=0.8, fill=color, alpha=max(0.0, min(1.0, fill_alpha)))
                 _add_label_tab(doc[pno], rect, label, color, alpha=0.25, fontsize=6.5)
+                _add_note(doc[pno], rect, label, color)
                 legends.setdefault(pno, []).append(label)
 
         out.parent.mkdir(parents=True, exist_ok=True)
-        doc.save(str(out))
+        # Safe-save to repair any dangling references and compress
+        doc.save(str(out), garbage=4, deflate=True)
+    # Second-pass rewrite to avoid rare 'annotation not bound to any page' in some viewers
+    try:
+        tmp = out.with_suffix('.pdf.tmp')
+        with fitz.open(str(out)) as d2:
+            d2.save(str(tmp), garbage=4, deflate=True)
+        tmp.replace(out)
+    except Exception:
+        pass
 
     # Optional per-page legend sidecar
     if legend:

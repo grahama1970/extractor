@@ -112,6 +112,13 @@ def _put_box(
                 except Exception:
                     pass
                 ft.update()
+                # Add a tiny sticky note so comment lists see an entry
+                try:
+                    na = page.add_text_annot(fitz.Point(rect.x1 - 8, max(rect.y0 + 8, 8)), text)
+                    na.set_border(width=0.0)
+                    na.update()
+                except Exception:
+                    pass
             elif text and tag_only:
                 tag_rect = fitz.Rect(rect.x1 - 72, rect.y0 + 2, rect.x1 - 2, rect.y0 + 12) & page.rect
                 ft = page.add_freetext_annot(
@@ -474,7 +481,16 @@ def main(
                                 use_annots=use_annot_objs,
                             )
 
-    doc.save(str(output))
+    # Safe-save to reduce chances of corrupt annotation refs
+    doc.save(str(output), garbage=4, deflate=True)
+    # Second-pass rewrite to avoid rare 'annotation not bound to any page'
+    try:
+        tmp = output.with_suffix('.pdf.tmp')
+        with fitz.open(str(output)) as d2:
+            d2.save(str(tmp), garbage=4, deflate=True)
+        tmp.replace(output)
+    except Exception:
+        pass
 
     # Sidecar outputs (tables + legends)
     side_root = output.parent / (output.stem + '_ann')
