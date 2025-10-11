@@ -587,6 +587,79 @@ def run(
             pass
 
     suspicious_blocks = [b for b in blocks if b.get("is_suspicious")]
+
+    # --- Optional: synthesize Figure blocks from embedded images when none exist ---
+    try:
+        synth_fig = os.getenv("STAGE02_FIGURE_FROM_IMAGES", "1").lower() in {"1", "true", "yes", "y"}
+        has_fig = any((b.get("block_type") in ("Figure", "Image")) for b in blocks)
+        if synth_fig and not has_fig:
+            import fitz  # type: ignore
+            doc = fitz.open(str(pdf_path))
+            for pno in range(len(doc)):
+                try:
+                    imgs = doc[pno].get_images(full=True)
+                except Exception:
+                    imgs = []
+                if not imgs:
+                    continue
+                # Use first image rect per page; filter absurd sizes
+                try:
+                    rects = doc[pno].get_image_rects(imgs[0][0])
+                except Exception:
+                    rects = []
+                if not rects:
+                    continue
+                page_rect = doc[pno].rect
+                for r in rects:
+                    rr = r & page_rect
+                    if rr.is_empty:
+                        continue
+                    pa = float(page_rect.width * page_rect.height) or 1.0
+                    ra = float(rr.width * rr.height)
+                    if ra / pa > 0.90 or rr.width < 24 or rr.height < 24:
+                        continue
+                    blocks.append(
+                        {
+                            "block_type": "Figure",
+                            "page_idx": pno,
+                            "page": pno,
+                            "bbox": [rr.x0, rr.y0, rr.x1, rr.y1],
+                            "source": "synth_image_fallback",
+                        }
+                    )
+            if blocks and not any(b.get("block_type") in ("Figure", "Image") for b in blocks):
+                diagnostics.append(
+                    make_event(
+                        "02_marker_extractor",
+                        "warning",
+                        "figure_synth_failed",
+                        "No images found for figure synthesis",
+                        {},
+                    )
+                )
+            else:
+                diagnostics.append(
+                    make_event(
+                        "02_marker_extractor",
+                        "info",
+                        "figure_synth_applied",
+                        "Synthesized Figure blocks from embedded images",
+                        {},
+                    )
+                )
+    except Exception as _e:
+        try:
+            diagnostics.append(
+                make_event(
+                    "02_marker_extractor",
+                    "error",
+                    "figure_synth_exception",
+                    str(_e),
+                    {},
+                )
+            )
+        except Exception:
+            pass
     # predictor mode flags
     strict = os.getenv("OFFLINE_PDF_PREDICTORS", "1").lower() in {"0", "false"}
     missing = [k for k, v in (predictor_presence or {}).items() if not v]
