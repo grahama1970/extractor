@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import re
 from typing import List, Optional, Tuple, Set, Dict, Any
 
 import fitz
@@ -38,7 +39,7 @@ def _safe_load(p: Path) -> Optional[dict]:
         return None
 
 
-def _draw_box(
+def _put_box(
     page: fitz.Page,
     bbox: List[float],
     color: Tuple[float, float, float],
@@ -46,15 +47,63 @@ def _draw_box(
     lw: float = 1.2,
     fontsize: float = 6.5,
     tag_only: bool = False,
+    use_annots: bool = True,
 ) -> None:
+    """Render a box and optional label.
+
+    When use_annots=True, create proper PDF annotation objects (Square + FreeText).
+    Otherwise, draw vector graphics on the page (previous fallback behavior).
+    """
     try:
         rect = fitz.Rect(*bbox)
     except Exception:
         return
+
+    if use_annots:
+        try:
+            # Rectangle annotation (Square) with stroke color and border width
+            a = page.add_rect_annot(rect)
+            # PyMuPDF expects 0-1 floats for RGB
+            a.set_colors(stroke=color)
+            a.set_border(width=max(0.5, float(lw)))
+            if text:
+                # Set contents so viewers show text on click
+                a.set_info(content=text)
+            a.update()
+
+            # Optional small free-text label to mimic previous overlay labeling
+            if text and not tag_only:
+                label_rect = fitz.Rect(rect.x0 + 1, rect.y0 - 10, rect.x0 + 260, rect.y0 + 2)
+                ft = page.add_freetext_annot(
+                    label_rect,
+                    text,
+                    fontsize=max(5.0, float(fontsize)),
+                    rotate=0,
+                )
+                ft.set_colors(stroke=color, fill=None, text=color)
+                # Make the free text transparent background
+                ft.set_border(width=0.0)
+                ft.update()
+            elif text and tag_only:
+                tag_rect = fitz.Rect(rect.x0 + 2, rect.y0 + 2, rect.x0 + 72, rect.y0 + 12)
+                ft = page.add_freetext_annot(
+                    tag_rect,
+                    text,
+                    fontsize=max(5.0, float(fontsize)),
+                    rotate=0,
+                )
+                ft.set_colors(stroke=color, fill=None, text=color)
+                ft.set_border(width=0.0)
+                ft.update()
+            return
+        except Exception:
+            # Fall back to vector drawing if annotation APIs fail
+            pass
+
+    # Fallback: vector drawing (legacy behavior)
     page.draw_rect(rect, color=color, width=lw, fill=None)
     if text:
         if tag_only:
-            # Draw tiny tag box inside top-left to reduce collisions
             label_rect = fitz.Rect(rect.x0 + 2, rect.y0 + 2, rect.x0 + 72, rect.y0 + 12)
         else:
             label_rect = fitz.Rect(rect.x0 + 1, rect.y0 - 10, rect.x0 + 260, rect.y0 + 2)
@@ -95,7 +144,7 @@ def _parse_pages(pages: str, total_pages: int) -> Optional[Set[int]]:
 def main(
     input_pdf: Path = typer.Option(..., exists=True, help='Clean PDF to annotate'),
     results: Path = typer.Option(..., exists=True, help='Pipeline results directory (Stage 02–07 outputs)'),
-    output: Path = typer.Option(Path('scripts/artifacts/annotated.pdf')), 
+    output: Optional[Path] = typer.Option(None, help='Output annotated PDF; defaults to scripts/artifacts/<input>_annotated.pdf'), 
     export_pages: bool = typer.Option(False, help='Also export annotated pages as PNGs'),
     pages: str = typer.Option('', help='Comma separated page numbers or ranges (1-indexed). Example: "1,5,10-12"'),
     fallback_only: bool = typer.Option(False, help='Only annotate pages where Stage 05 applied fallback strategies'),
@@ -103,7 +152,21 @@ def main(
     no_labels: bool = typer.Option(True, help='Do not draw verbose labels; reduce clutter (draw tags or none).'),
     lw: float = typer.Option(1.2, help='Stroke width for boxes'),
     label_fontsize: float = typer.Option(6.5, help='Font size for labels/tags'),
+    use_annot_objs: bool = typer.Option(True, help='Use PDF annotation objects instead of drawing vectors'),
+    include_sections: bool = typer.Option(True, help='Draw Stage 04 sections'),
+    include_stage02: bool = typer.Option(False, help='Draw Stage 02 blocks (debug)'),
+    include_tables: bool = typer.Option(False, help='Draw Stage 05 tables'),
+    include_figures: bool = typer.Option(False, help='Draw Stage 06 figures'),
+    include_reflow: bool = typer.Option(False, help='Draw Stage 07 reflow tables'),
+    tags_only: bool = typer.Option(False, help='Draw tag labels only, not full rectangles'),
 ) -> None:
+    # Derive friendly output name when not provided
+    if output is None:
+        stem = input_pdf.stem
+        # drop a trailing _clean if present, then append _annotated
+        stem = re.sub(r"_clean$", "", stem)
+        out_name = f"{stem}_annotated.pdf"
+        output = Path('scripts/artifacts') / out_name
     output.parent.mkdir(parents=True, exist_ok=True)
 
     p02 = results / '02_marker_extractor/json_output/02_marker_blocks.json'
@@ -151,7 +214,7 @@ def main(
     # Per-page legend summary (sidecar)
     legends: Dict[int, List[str]] = {}
 
-    if j02 and 'blocks' in j02:
+    if include_stage02 and j02 and 'blocks' in j02:
         for i, b in enumerate(j02['blocks']):
             try:
                 page_idx = int(b.get('page', b.get('page_idx', 0)))
@@ -190,11 +253,20 @@ def main(
                             label = f'02 SuspectTable #{i} (p{page_idx+1})'
                             color = (0.7, 0.3, 0.0)
                 legends.setdefault(page_idx, []).append(label)
-                _draw_box(doc[page_idx], bbox, color, None if no_labels else label, lw=lw, fontsize=label_fontsize)
+                _put_box(
+                    doc[page_idx],
+                    bbox,
+                    color,
+                    None if no_labels else label,
+                    lw=lw,
+                    fontsize=label_fontsize,
+                    tag_only=tags_only,
+                    use_annots=use_annot_objs,
+                )
             except Exception:
                 continue
 
-    if j04 and 'sections' in j04:
+    if include_sections and j04 and 'sections' in j04:
         for s in j04['sections']:
             anchor = s.get('anchor') or {}
             bbox = anchor.get('bbox')
@@ -205,12 +277,21 @@ def main(
                     continue
                 sec_label = f'04 Section: {title[:32]} (p{page_idx+1})'
                 legends.setdefault(page_idx, []).append(sec_label)
-                _draw_box(doc[page_idx], bbox, (1.0, 0.5, 0.0), None if no_labels else sec_label, lw=lw, fontsize=label_fontsize)
+                _put_box(
+                    doc[page_idx],
+                    bbox,
+                    (1.0, 0.5, 0.0),
+                    None if no_labels else sec_label,
+                    lw=lw,
+                    fontsize=label_fontsize,
+                    tag_only=tags_only,
+                    use_annots=use_annot_objs,
+                )
 
     # Sidecar outputs for tables (json/markdown)
     tables_sidecar: Dict[int, List[Dict[str, Any]]] = {}
 
-    if j05 and 'tables' in j05:
+    if include_tables and j05 and 'tables' in j05:
         for k, t in enumerate(j05['tables']):
             try:
                 page_num = int(t.get('page_number', 1))
@@ -261,14 +342,32 @@ def main(
             label = ' '.join(tag_parts) + f' (p{page_num})'
             if tables_as == 'box':
                 legends.setdefault(page_idx, []).append(label)
-                _draw_box(doc[page_idx], bbox, color, None if no_labels else label, lw=lw, fontsize=label_fontsize)
+                _put_box(
+                    doc[page_idx],
+                    bbox,
+                    color,
+                    None if no_labels else label,
+                    lw=lw,
+                    fontsize=label_fontsize,
+                    tag_only=tags_only,
+                    use_annots=use_annot_objs,
+                )
             else:
                 # Draw a small tag only to avoid clutter; details go to sidecar
                 tag = f'T#{k}'
                 legends.setdefault(page_idx, []).append(label)
-                _draw_box(doc[page_idx], bbox, color, tag, lw=lw, fontsize=label_fontsize, tag_only=True)
+                _put_box(
+                    doc[page_idx],
+                    bbox,
+                    color,
+                    tag,
+                    lw=lw,
+                    fontsize=label_fontsize,
+                    tag_only=True,
+                    use_annots=use_annot_objs,
+                )
 
-    if j06 and 'figures' in j06:
+    if include_figures and j06 and 'figures' in j06:
         for k, f in enumerate(j06['figures']):
             try:
                 page_num = int(f.get('page_number', 1))
@@ -280,9 +379,18 @@ def main(
                 if page_allowed(page_idx):
                     flabel = f'06 Figure #{k} (p{page_num})'
                     legends.setdefault(page_idx, []).append(flabel)
-                    _draw_box(doc[page_idx], bbox, (0.9, 0.0, 0.8), None if no_labels else flabel, lw=lw, fontsize=label_fontsize)
+                    _put_box(
+                        doc[page_idx],
+                        bbox,
+                        (0.9, 0.0, 0.8),
+                        None if no_labels else flabel,
+                        lw=lw,
+                        fontsize=label_fontsize,
+                        tag_only=tags_only,
+                        use_annots=use_annot_objs,
+                    )
 
-    if j07 and 'reflowed_sections' in j07:
+    if include_reflow and j07 and 'reflowed_sections' in j07:
         for s in j07['reflowed_sections']:
             for k, t in enumerate(s.get('tables') or []):
                 try:
@@ -296,9 +404,27 @@ def main(
                         slabel = f'07 Table (S) #{k} (p{page_num})'
                         legends.setdefault(page_idx, []).append(slabel)
                         if tables_as == 'box':
-                            _draw_box(doc[page_idx], bbox, (0.3, 0.7, 1.0), None if no_labels else slabel, lw=lw, fontsize=label_fontsize)
+                            _put_box(
+                                doc[page_idx],
+                                bbox,
+                                (0.3, 0.7, 1.0),
+                                None if no_labels else slabel,
+                                lw=lw,
+                                fontsize=label_fontsize,
+                                tag_only=tags_only,
+                                use_annots=use_annot_objs,
+                            )
                         else:
-                            _draw_box(doc[page_idx], bbox, (0.3, 0.7, 1.0), 'T(S)', lw=lw, fontsize=label_fontsize, tag_only=True)
+                            _put_box(
+                                doc[page_idx],
+                                bbox,
+                                (0.3, 0.7, 1.0),
+                                'T(S)',
+                                lw=lw,
+                                fontsize=label_fontsize,
+                                tag_only=True,
+                                use_annots=use_annot_objs,
+                            )
 
     doc.save(str(output))
 
@@ -332,7 +458,12 @@ def main(
         for idx in page_indices:
             if not (0 <= idx < total_pages):
                 continue
-            pm = doc[idx].get_pixmap(dpi=150)
+            # annots=True ensures PDF annotation objects are rendered in the PNG exports
+            try:
+                pm = doc[idx].get_pixmap(dpi=150, annots=True)
+            except TypeError:
+                # Older PyMuPDF: annots flag may not exist; render without it
+                pm = doc[idx].get_pixmap(dpi=150)
             (outdir / f'page_{idx+1}.png').write_bytes(pm.tobytes('png'))
         print(str(outdir))
 

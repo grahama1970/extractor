@@ -942,6 +942,25 @@ async def build_and_validate_sections_comprehensive(
     else:
         blocks = input_data.get("blocks", [])
 
+    # Merge demoted text blocks from Stage 05 if present and allowed
+    try:
+        if os.getenv("STAGE05_DEMOTE_TABLE_HEADERS", "1").lower() in {"1","true","yes","y"}:
+            # infer sibling 05 path from output_dir
+            sibling05 = output_dir.parent / "05_table_extractor/json_output/05_tables.json"
+            if sibling05.exists():
+                t05 = json.loads(sibling05.read_text())
+                demoted = t05.get("demoted_text_blocks") or []
+                for d in demoted:
+                    b = {
+                        "block_type": "SectionHeader",
+                        "text": d.get("text"),
+                        "page": d.get("page_idx", 0),
+                        "bbox": d.get("bbox") or [0,0,0,0],
+                    }
+                    blocks.insert(0, b)
+    except Exception as _e:
+        logger.warning(f"Stage 04 could not merge demoted table headers: {_e}")
+
     # Process sections with comprehensive analysis
     section_result = await process_sections_comprehensive(
         blocks,
@@ -985,6 +1004,67 @@ async def build_and_validate_sections_comprehensive(
         "run_id": run_id,
         "diagnostics": diagnostics,
     }
+
+    # Optional fallback: derive sections from numbered headings in text blocks when none were built
+    try:
+        if (
+            result.get("section_count", 0) == 0
+            and os.getenv("STAGE04_ENABLE_TEXT_HEADING_FALLBACK", "0").lower() in {"1", "true", "yes", "y"}
+        ):
+            import re as _re
+            pat = _re.compile(r"^(?:\d+\.){1,6}\s+.+")
+            continued_suffix = " - Continued"
+            base_map: dict[str, dict] = {}
+            synth: list[dict] = []
+            # blocks variable is available from earlier scope
+            for b in blocks:
+                text = (b.get("text") or b.get("content") or "").strip()
+                if not text:
+                    continue
+                # Check first line to reduce false positives
+                first_line = text.splitlines()[0].strip()
+                if not pat.match(first_line):
+                    continue
+                is_cont = first_line.endswith(continued_suffix)
+                base_title = first_line[: -len(continued_suffix)] if is_cont else first_line
+                try:
+                    p = int(b.get("page", b.get("page_idx", 0)) or 0)
+                except Exception:
+                    p = 0
+                if is_cont and base_title in base_map:
+                    prev = base_map[base_title]
+                    prev["page_end"] = max(prev.get("page_end", p), p)
+                    md = prev.setdefault("metadata", {})
+                    md["continued"] = True
+                    cont = md.setdefault("continued_pages", [])
+                    if p not in cont:
+                        cont.append(p)
+                    continue
+                if base_title in base_map:
+                    # duplicate on same page; skip
+                    continue
+                sid = f"TSEC_TXT_P{p}_{len(synth)}"
+                entry = {
+                    "id": sid,
+                    "title": base_title,
+                    "level": 1,
+                    "page_start": p,
+                    "page_end": p,
+                    "blocks": [{"type": "heading", "level": 1, "text": base_title, "page": p}],
+                    "metadata": {"source": "derived_from_text"},
+                }
+                base_map[base_title] = entry
+                synth.append(entry)
+            if synth:
+                result["sections"] = synth
+                result["section_count"] = len(synth)
+                result["hierarchy_depth"] = 1
+                result["suspicious_header_analysis"]["total_sections"] = len(synth)
+                console.print(
+                    f"[yellow]Derived {len(synth)} sections from text headings (fallback).[/yellow]"
+                )
+    except Exception as _e:
+        logger.warning(f"Stage 04 text heading fallback failed: {_e}")
 
     # Fallback synthesis from tables when no sections were built (opt-in)
     try:

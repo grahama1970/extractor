@@ -248,6 +248,51 @@ def _attach_llm_assist_headers(result: Dict[str, Any], stage_dir: Path) -> None:
         pass
 
 
+def _demote_table_headers_to_text(result: Dict[str, Any]) -> None:
+    """Detect one-line numbered headings captured as small tables and emit demoted text blocks for Stage 04.
+
+    Adds result["demoted_text_blocks"]= [{page_idx, bbox, text}] when STAGE05_DEMOTE_TABLE_HEADERS=1.
+    """
+    if os.getenv("STAGE05_DEMOTE_TABLE_HEADERS", "1").lower() not in {"1","true","yes","y"}:
+        return
+    import re
+    pat = re.compile(r"^(?:\d+\.){1,6}\s+\S.*")
+    demoted: List[Dict[str, Any]] = []
+    for t in result.get("tables") or []:
+        try:
+            pm = t.get("pandas_metrics") or {}
+            shape = pm.get("shape") or [0, 0]
+            rows = int(shape[0] or 0)
+            cols = int(shape[1] or 0)
+        except Exception:
+            rows, cols = 0, 0
+        if cols and cols > 2:
+            continue
+        if rows and rows > int(os.getenv("STAGE05_DEMOTE_MAX_ROWS", "4")):
+            continue
+        cells: List[str] = []
+        src = t.get("pandas_df_raw") or t.get("pandas_df") or []
+        if isinstance(src, list):
+            for r in src[:8]:
+                if isinstance(r, dict):
+                    cells.extend([str(v).strip() for v in r.values()])
+                elif isinstance(r, list):
+                    cells.extend([str(v).strip() for v in r])
+        head = next((c for c in cells if c), None)
+        if not head or not pat.match(head):
+            continue
+        if head.endswith('.') or head.endswith(';'):
+            continue
+        try:
+            p = int(t.get("page_index", t.get("page_number", 1)) or 0)
+        except Exception:
+            p = 0
+        bbox = t.get("bbox") or []
+        demoted.append({"page_idx": p, "bbox": bbox, "text": head})
+    if demoted:
+        result["demoted_text_blocks"] = demoted
+
+
 def generate_pandas_metrics(df: pd.DataFrame) -> Dict[str, Any]:
     """Generate comprehensive metrics from a DataFrame for analysis."""
     if df.empty:
