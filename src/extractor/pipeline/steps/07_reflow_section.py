@@ -2427,8 +2427,49 @@ def run(
                 pass
 
     if not sections_to_process:
-        console.print("[yellow]No sections found to process. Exiting.[/yellow]")
-        return
+        # Synthesize minimal sections from tables when Stage 04 produced none
+        try:
+            tbl_payload = json.loads(Path(tables_json).read_text())
+            tables = tbl_payload.get("tables") or []
+        except Exception:
+            tables = []
+        if tables:
+            # Group tables by page and create one synthetic section per page
+            by_page: Dict[int, List[Dict[str, Any]]] = {}
+            for t in tables:
+                try:
+                    p = int(t.get("page_index", 0) or 0)
+                except Exception:
+                    p = 0
+                by_page.setdefault(p, []).append(t)
+            synth: List[Dict[str, Any]] = []
+            for p, group in sorted(by_page.items(), key=lambda kv: kv[0]):
+                sid = f"SYNTH_P{p}"
+                synth.append({
+                    "id": sid,
+                    "title": f"Tables (page {p})",
+                    "level": 1,
+                    "page_start": p,
+                    "page_end": p,
+                    "blocks": [],
+                    "tables": group,
+                    "figures": [],
+                    "raw_text": "",
+                    "merged_text": "",
+                })
+            sections_to_process = synth
+            diagnostics.append(
+                make_event(
+                    "07_reflow_section",
+                    "info",
+                    "synth_sections_from_tables",
+                    f"Created {len(synth)} synthetic sections from tables",
+                    {},
+                )
+            )
+        else:
+            console.print("[yellow]No sections found to process. Exiting.[/yellow]")
+            return
 
     # --- Processing ---
     if summary_only:

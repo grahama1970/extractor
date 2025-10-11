@@ -986,6 +986,64 @@ async def build_and_validate_sections_comprehensive(
         "diagnostics": diagnostics,
     }
 
+    # Fallback synthesis from tables when no sections were built
+    try:
+        if result.get("section_count", 0) == 0:
+            # Locate Stage 05 tables relative to results root
+            maybe = output_dir.parent / "05_table_extractor/json_output/05_tables.json"
+            tables_path = maybe if maybe.exists() else (output_dir / "../05_table_extractor/json_output/05_tables.json")
+            if tables_path.exists():
+                tbl = json.loads(tables_path.read_text())
+                tables = tbl.get("tables") or []
+                import re as _re
+                pat = _re.compile(r"^(?:\d+\.){1,6}\s+.+")
+                synth: list[dict] = []
+                seen = set()
+                scan_rows = os.getenv("STAGE04_TABLE_HEADING_SCAN_ROWS", "20")
+                try:
+                    scan_limit = int(scan_rows)
+                except Exception:
+                    scan_limit = 20
+                for t in tables:
+                    rows = t.get("pandas_df_raw") or t.get("pandas_df") or []
+                    cells: list[str] = []
+                    if isinstance(rows, list):
+                        iterable = rows if scan_limit <= 0 else rows[:scan_limit]
+                        for r in iterable:
+                            if isinstance(r, dict):
+                                cells.extend([str(v) for v in r.values()])
+                            elif isinstance(r, list):
+                                cells.extend([str(v) for v in r])
+                    matches = [c.strip() for c in cells if pat.match(str(c).strip())]
+                    if matches:
+                        try:
+                            p = int(t.get("page_index", t.get("page_number", 1)) or 0)
+                        except Exception:
+                            p = 0
+                        base_sid = f"TSEC_P{p}_{t.get('table_index', 0)}"
+                        for idx_m, match in enumerate(matches):
+                            if match in seen:
+                                continue
+                            seen.add(match)
+                            sid = f"{base_sid}_{idx_m}"
+                            synth.append({
+                                "id": sid,
+                                "title": match,
+                                "level": 1,
+                                "page_start": p,
+                                "page_end": p,
+                                "blocks": [{"type": "heading", "level": 1, "text": match, "page": p}],
+                                "metadata": {"source": "derived_from_tables"},
+                            })
+                if synth:
+                    result["sections"] = synth
+                    result["section_count"] = len(synth)
+                    result["hierarchy_depth"] = 1
+                    result["suspicious_header_analysis"]["total_sections"] = len(synth)
+                    console.print(f"[yellow]Derived {len(synth)} sections from table headings (fallback).[/yellow]")
+    except Exception as _e:
+        logger.warning(f"Stage 04 fallback synthesis failed: {_e}")
+
     # Save results
     output_path = json_output_dir / "04_sections.json"
     with open(output_path, "w") as f:
