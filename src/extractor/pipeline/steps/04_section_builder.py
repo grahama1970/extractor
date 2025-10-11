@@ -986,9 +986,9 @@ async def build_and_validate_sections_comprehensive(
         "diagnostics": diagnostics,
     }
 
-    # Fallback synthesis from tables when no sections were built
+    # Fallback synthesis from tables when no sections were built (opt-in)
     try:
-        if result.get("section_count", 0) == 0:
+        if result.get("section_count", 0) == 0 and os.getenv("STAGE04_ENABLE_TABLE_HEADING_FALLBACK", "0").lower() in {"1","true","yes","y"}:
             # Locate Stage 05 tables relative to results root
             maybe = output_dir.parent / "05_table_extractor/json_output/05_tables.json"
             tables_path = maybe if maybe.exists() else (output_dir / "../05_table_extractor/json_output/05_tables.json")
@@ -999,6 +999,7 @@ async def build_and_validate_sections_comprehensive(
                 pat = _re.compile(r"^(?:\d+\.){1,6}\s+.+")
                 synth: list[dict] = []
                 seen = set()
+                base_map: dict[str, dict] = {}
                 scan_rows = os.getenv("STAGE04_TABLE_HEADING_SCAN_ROWS", "20")
                 try:
                     scan_limit = int(scan_rows)
@@ -1026,15 +1027,30 @@ async def build_and_validate_sections_comprehensive(
                                 continue
                             seen.add(match)
                             sid = f"{base_sid}_{idx_m}"
-                            synth.append({
+                            # Normalize ' - Continued' as a continuation of the prior identical heading
+                            is_continued = match.rstrip().endswith(" - Continued")
+                            base_title = match.rstrip()[:-len(" - Continued")] if is_continued else match
+                            if is_continued and base_title in base_map:
+                                prev = base_map[base_title]
+                                prev["page_end"] = max(prev.get("page_end", p), p)
+                                md = prev.setdefault("metadata", {})
+                                md["continued"] = True
+                                cont = md.setdefault("continued_pages", [])
+                                if p not in cont:
+                                    cont.append(p)
+                                continue
+                            # Create a new section (store by base title to link continuations)
+                            entry = {
                                 "id": sid,
-                                "title": match,
+                                "title": base_title,
                                 "level": 1,
                                 "page_start": p,
                                 "page_end": p,
-                                "blocks": [{"type": "heading", "level": 1, "text": match, "page": p}],
+                                "blocks": [{"type": "heading", "level": 1, "text": base_title, "page": p}],
                                 "metadata": {"source": "derived_from_tables"},
-                            })
+                            }
+                            base_map[base_title] = entry
+                            synth.append(entry)
                 if synth:
                     result["sections"] = synth
                     result["section_count"] = len(synth)
