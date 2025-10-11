@@ -540,14 +540,19 @@ def from_run(
                 if cols is not None and cols <= 1:
                     # Skip 1-column tables (often false positives over paragraphs)
                     continue
-                label = f"table:{shp[0] if len(shp)>0 else '?'}x{shp[1] if len(shp)>1 else '?'}"
+                # Label: Table RxC for clarity
+                label = f"Table {shp[0] if len(shp)>0 else '?'}x{shp[1] if len(shp)>1 else '?'}"
                 color = _color_rgb('table')
                 # Requirement: colored boxes with ~95% transparency (i.e., 5% opacity)
-                _add_rect_annot(doc[pno], rect, color=color, width=0.8, fill=color, alpha=max(0.0, min(1.0, fill_alpha)))
+                ann = _add_rect_annot(doc[pno], rect, color=color, width=0.8, fill=color, alpha=max(0.0, min(1.0, fill_alpha)))
                 _draw_rect_overlay(doc[pno], rect, color, fill=True, fill_alpha=fill_alpha, width=0.8)
-                _add_label_tab(doc[pno], rect, label, color, alpha=0.25, fontsize=6.5)
-                _draw_label_tab_overlay(doc[pno], rect, label, color, fontsize=6.5)
+                try:
+                    if ann is not None:
+                        ann.set_info(content=label); ann.set_info(subject="Table"); ann.set_info(title=label)
+                except Exception:
+                    pass
                 _add_note(doc[pno], rect, label, color)
+                _add_freetext_bold(doc[pno], rect, label, color=(0,0,0), fontsize=8.0)
                 legends.setdefault(pno, []).append(label)
 
         # Figures (Stage 06)
@@ -645,13 +650,17 @@ def from_run(
                 rect = _clamp_to_page(rect0, doc[pno].rect)
                 if rect is None:
                     continue
-                label = 'textgroup'
+                label = 'TextGroup'
                 color = (0.45, 0.45, 0.45)
-                _add_rect_annot(doc[pno], rect, color=color, width=0.8, fill=color, alpha=max(0.0, min(1.0, fill_alpha)))
+                ann = _add_rect_annot(doc[pno], rect, color=color, width=0.8, fill=color, alpha=max(0.0, min(1.0, fill_alpha)))
                 _draw_rect_overlay(doc[pno], rect, color, fill=True, fill_alpha=fill_alpha, width=0.8)
-                _add_label_tab(doc[pno], rect, label, color, alpha=0.25, fontsize=6.5)
-                _draw_label_tab_overlay(doc[pno], rect, label, color, fontsize=6.5)
+                try:
+                    if ann is not None:
+                        ann.set_info(content=label); ann.set_info(subject="TextGroup"); ann.set_info(title=label)
+                except Exception:
+                    pass
                 _add_note(doc[pno], rect, label, color)
+                _add_freetext_bold(doc[pno], rect, label, color=(0,0,0), fontsize=8.0)
                 legends.setdefault(pno, []).append(label)
 
         out.parent.mkdir(parents=True, exist_ok=True)
