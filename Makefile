@@ -151,14 +151,18 @@ run-01-05:
 annotate-from-results:
 	@if [ -z "$(RUN_DIR)" ]; then echo "Usage: make annotate-from-results RUN_DIR=... PDF=..."; exit 1; fi
 	@if [ -z "$(PDF)" ] || [ ! -f "$(PDF)" ]; then echo "Set PDF=path/to/<stem>_clean.pdf"; exit 1; fi
+	# Canonical single artifact for with_requirements: *_annotated.pdf (render_annotated_pdf.from-run)
+	@rm -f scripts/artifacts/BHT_CV32A65X_with_requirements_annotated_*.pdf 2>/dev/null || true
 	PYTHONPATH=$(PWD)/src \
 	uv run python -m extractor.pipeline.tools.render_annotated_pdf from-run \
 	  --pdf "$(PDF)" \
 	  --run-dir "$(RUN_DIR)" \
+	  --out scripts/artifacts/BHT_CV32A65X_with_requirements_annotated.pdf \
+	  --sections-style stroke \
+	  --fill-alpha 0.05 \
 	  --export-pages \
-	  $$( [ -n "$(PAGES)" ] && echo --pages "$(PAGES)" || true ) \
-	  $$( [ -n "$(LEGEND)" ] && echo --legend || true )
-	@echo "[annotate-from-results] Done"
+	  --pages "1-3"
+	@echo "[annotate-from-results] Wrote scripts/artifacts/BHT_CV32A65X_with_requirements_annotated.pdf and page PNGs"
 
 .PHONY: smoke-annot-exist
 smoke-annot-exist:
