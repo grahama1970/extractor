@@ -95,11 +95,47 @@ def _add_rect_annot(
             annot.set_opacity(alpha)
     except Exception:
         pass
+    # Improve viewer compatibility: ensure annotation is printable/visible
+    try:
+        flag_val = getattr(fitz, "ANNOT_FLAG_PRINT", None) or getattr(fitz, "PDF_ANNOT_PRINT", None)
+        if flag_val is not None:
+            annot.set_flags(flag_val)
+    except Exception:
+        pass
     try:
         annot.update()
     except Exception:
         pass
     return annot
+
+
+def _draw_rect_overlay(
+    page: "fitz.Page",
+    rect: "fitz.Rect",
+    color: Tuple[float, float, float],
+    *,
+    fill: bool = True,
+    fill_alpha: float = 0.05,
+    width: float = 1.0,
+):
+    try:
+        sh = page.new_shape()
+        sh.draw_rect(rect)
+        # stroke_opacity defaults to 1.0; set fill_opacity for translucent fills
+        if fill:
+            sh.finish(color=color, fill=color, dashes=None, closePath=True,
+                      fill_opacity=max(0.0, min(1.0, float(fill_alpha))),
+                      stroke_opacity=1.0, width=max(0.5, float(width)))
+        else:
+            sh.finish(color=color, fill=None, dashes=None, closePath=True,
+                      stroke_opacity=1.0, width=max(0.5, float(width)))
+        sh.commit()
+    except Exception:
+        # Fallback: basic draw without alpha support
+        try:
+            page.draw_rect(rect, color=color, width=max(0.5, float(width)), fill=(color if fill else None))
+        except Exception:
+            pass
 
 
 def _add_label_tab(
@@ -142,11 +178,41 @@ def _add_label_tab(
         fta.set_opacity(alpha)
     except Exception:
         pass
+    # Improve viewer compatibility for FreeText tabs
+    try:
+        flag_val = getattr(fitz, "ANNOT_FLAG_PRINT", None) or getattr(fitz, "PDF_ANNOT_PRINT", None)
+        if flag_val is not None:
+            fta.set_flags(flag_val)
+    except Exception:
+        pass
     try:
         fta.update()
     except Exception:
         pass
     return fta
+
+
+def _draw_label_tab_overlay(
+    page: "fitz.Page",
+    rect: "fitz.Rect",
+    text: str,
+    color: Tuple[float, float, float],
+    *,
+    fontsize: float = 6.5,
+):
+    tab_h = 12.0
+    tab_w = max(56.0, min(120.0, len(text) * 4.2))
+    raw = fitz.Rect(rect.x1 - tab_w, rect.y0 - (tab_h / 2.0), rect.x1, rect.y0 + tab_h / 2.0)
+    tab_rect = _clamp_to_page(raw, page.rect)
+    if tab_rect is None:
+        return
+    # Draw filled tab
+    _draw_rect_overlay(page, tab_rect, color, fill=True, fill_alpha=1.0, width=0.0)
+    # White text inside tab
+    try:
+        page.insert_textbox(tab_rect, text, fontsize=max(5.0, float(fontsize)), color=(1,1,1), align=1)
+    except Exception:
+        pass
 
 
 def _add_note(page: "fitz.Page", rect: "fitz.Rect", text: str, color: Tuple[float,float,float]):
@@ -156,6 +222,16 @@ def _add_note(page: "fitz.Page", rect: "fitz.Rect", text: str, color: Tuple[floa
         na = page.add_text_annot(pt, text)
         try:
             na.set_colors(stroke=color, fill=None)
+        except Exception:
+            pass
+        try:
+            na.set_border(width=0)
+        except Exception:
+            pass
+        try:
+            flag_val = getattr(fitz, "ANNOT_FLAG_PRINT", None) or getattr(fitz, "PDF_ANNOT_PRINT", None)
+            if flag_val is not None:
+                na.set_flags(flag_val)
         except Exception:
             pass
         try:
@@ -313,7 +389,10 @@ def from_run(
                 color = _color_rgb('section')
                 use_fill = color if sections_style in {"fill", "both"} else None
                 _add_rect_annot(doc[pno], rect, color=color, width=1.2, fill=use_fill, alpha=fill_alpha if use_fill else 1.0)
+                # Flattened overlay for guaranteed visibility
+                _draw_rect_overlay(doc[pno], rect, color, fill=bool(use_fill), fill_alpha=fill_alpha, width=1.2)
                 _add_label_tab(doc[pno], rect, label, color, alpha=0.25, fontsize=6.5)
+                _draw_label_tab_overlay(doc[pno], rect, label, color, fontsize=6.5)
                 _add_note(doc[pno], rect, label, color)
                 legends.setdefault(pno, []).append(label)
 
@@ -341,7 +420,9 @@ def from_run(
                 color = _color_rgb('table')
                 # Requirement: colored boxes with ~95% transparency (i.e., 5% opacity)
                 _add_rect_annot(doc[pno], rect, color=color, width=0.8, fill=color, alpha=max(0.0, min(1.0, fill_alpha)))
+                _draw_rect_overlay(doc[pno], rect, color, fill=True, fill_alpha=fill_alpha, width=0.8)
                 _add_label_tab(doc[pno], rect, label, color, alpha=0.25, fontsize=6.5)
+                _draw_label_tab_overlay(doc[pno], rect, label, color, fontsize=6.5)
                 _add_note(doc[pno], rect, label, color)
                 legends.setdefault(pno, []).append(label)
 
@@ -361,7 +442,9 @@ def from_run(
                 label = "figure"
                 color = _color_rgb('figure')
                 _add_rect_annot(doc[pno], rect, color=color, width=0.8, fill=color, alpha=max(0.0, min(1.0, fill_alpha)))
+                _draw_rect_overlay(doc[pno], rect, color, fill=True, fill_alpha=fill_alpha, width=0.8)
                 _add_label_tab(doc[pno], rect, label, color, alpha=0.25, fontsize=6.5)
+                _draw_label_tab_overlay(doc[pno], rect, label, color, fontsize=6.5)
                 _add_note(doc[pno], rect, label, color)
                 legends.setdefault(pno, []).append(label)
 
@@ -381,7 +464,9 @@ def from_run(
                 label = 'textgroup'
                 color = (0.45, 0.45, 0.45)
                 _add_rect_annot(doc[pno], rect, color=color, width=0.8, fill=color, alpha=max(0.0, min(1.0, fill_alpha)))
+                _draw_rect_overlay(doc[pno], rect, color, fill=True, fill_alpha=fill_alpha, width=0.8)
                 _add_label_tab(doc[pno], rect, label, color, alpha=0.25, fontsize=6.5)
+                _draw_label_tab_overlay(doc[pno], rect, label, color, fontsize=6.5)
                 _add_note(doc[pno], rect, label, color)
                 legends.setdefault(pno, []).append(label)
 
