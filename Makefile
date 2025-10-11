@@ -164,6 +164,15 @@ annotate-from-results:
 	  --pages "1-3"
 	@echo "[annotate-from-results] Wrote scripts/artifacts/BHT_CV32A65X_with_requirements_annotated.pdf and page PNGs"
 
+.PHONY: smoke-stage02-figures
+smoke-stage02-figures:
+	@if [ -z "$(RUN_DIR)" ] && [ -z "$(JSON)" ]; then \
+	  echo "Usage: make smoke-stage02-figures RUN_DIR=... [JSON=...] [MIN=1]"; exit 1; \
+	fi
+	uv run scripts/smokes/smoke_stage02_has_figures.py \
+	  $$([ -n "$(JSON)" ] && echo --json "$(JSON)" || echo --run-dir "$(RUN_DIR)") \
+	  --min $${MIN:-1}
+
 .PHONY: smoke-annot-exist
 smoke-annot-exist:
 	@PYTHONPATH=$(PWD)/src python scripts/smokes/smoke_annotations_exist.py --pdf "$(PDF)"

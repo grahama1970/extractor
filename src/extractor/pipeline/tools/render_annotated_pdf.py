@@ -214,6 +214,63 @@ def _draw_label_tab_overlay(
     except Exception:
         pass
 
+def _add_label_tab_inside_top_right(
+    page: "fitz.Page",
+    target_rect: "fitz.Rect",
+    text: str,
+    color: Tuple[float, float, float],
+    *,
+    fontsize: float = 8.0,
+):
+    """Place a filled tab inside the box at the top-right, flush to the right edge.
+
+    Uses FreeText with white text on a colored rectangle for legibility.
+    """
+    label = text or ""
+    tab_h = 14.0
+    approx_char_w = 5.0
+    tab_w = max(56.0, min(140.0, len(label) * approx_char_w + 10.0))
+    inset = 1.0
+    x1 = target_rect.x1
+    x0 = max(target_rect.x0 + inset, x1 - tab_w)
+    y0 = target_rect.y0 + inset
+    y1 = min(target_rect.y1 - inset, y0 + tab_h)
+    lab = fitz.Rect(x0, y0, x1, y1)
+    lab = _clamp_to_page(lab, page.rect)
+    if lab is None:
+        return None
+    try:
+        fta = page.add_freetext_annot(lab, label, fontsize=max(6.0, float(fontsize)))
+    except Exception:
+        return None
+    try:
+        fta.set_colors(stroke=color, fill=color, text=(1, 1, 1))
+    except Exception:
+        try:
+            fta.setColors(stroke=color, fill=color)
+        except Exception:
+            pass
+    try:
+        fta.set_border(width=0.0)
+    except Exception:
+        pass
+    try:
+        fta.set_info(content=label)
+        fta.set_info(subject=label)
+        fta.set_info(title=label)
+    except Exception:
+        pass
+    try:
+        flag_val = getattr(fitz, "ANNOT_FLAG_PRINT", None) or getattr(fitz, "PDF_ANNOT_PRINT", None)
+        if flag_val is not None:
+            fta.set_flags(flag_val)
+    except Exception:
+        pass
+    try:
+        fta.update()
+    except Exception:
+        pass
+    return fta
 
 def _add_note(page: "fitz.Page", rect: "fitz.Rect", text: str, color: Tuple[float,float,float]):
     """Add a small sticky note near the top-right of rect for compatibility with viewers' comment lists."""
@@ -240,6 +297,61 @@ def _add_note(page: "fitz.Page", rect: "fitz.Rect", text: str, color: Tuple[floa
             pass
     except Exception:
         pass
+
+
+def _add_freetext_bold(
+    page: "fitz.Page",
+    target_rect: "fitz.Rect",
+    text: str,
+    *,
+    color: Tuple[float, float, float] = (0, 0, 0),
+    fontsize: float = 8.0,
+):
+    """Add a tiny bold FreeText label inside the top-right of target_rect.
+
+    Attempts multiple font options for bold; falls back gracefully if unsupported.
+    Background is transparent; border removed.
+    """
+    try:
+        tab_h = 12.0
+        tab_w = max(32.0, min(140.0, len(text) * 5.0))
+        inset = 1.0
+        x1 = target_rect.x1 - inset
+        x0 = max(target_rect.x0 + inset, x1 - tab_w)
+        y0 = target_rect.y0 + inset
+        y1 = min(target_rect.y1 - inset, y0 + tab_h)
+        r = _clamp_to_page(fitz.Rect(x0, y0, x1, y1), page.rect)
+        if r is None:
+            return None
+        ft = page.add_freetext_annot(r, text, fontsize=max(6.0, float(fontsize)))
+        ok_font = False
+        for name in ("helvB", "Helvetica-Bold", "Times-Bold", "Courier-Bold", "helv"):
+            try:
+                # Newer PyMuPDF
+                if hasattr(ft, "set_font"):
+                    try:
+                        ft.set_font(name, max(6.0, float(fontsize)))
+                        ok_font = True
+                        break
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+        try:
+            ft.set_colors(stroke=None, fill=None, text=color)
+        except Exception:
+            pass
+        try:
+            ft.set_border(width=0.0)
+        except Exception:
+            pass
+        try:
+            ft.update()
+        except Exception:
+            pass
+        return ft
+    except Exception:
+        return None
 def _rect_from(obj: Dict[str, Any]) -> Optional["fitz.Rect"]:
     bb = obj.get("bbox") or obj.get("original_rect") or obj.get("expanded_rect")
     if not isinstance(bb, (list, tuple)) or len(bb) != 4:
@@ -462,13 +574,20 @@ def from_run(
                         rect = rect0
                 if rect is None:
                     continue
-                label = "figure"
+                label = "Figure"
                 color = _color_rgb('figure')
-                _add_rect_annot(doc[pno], rect, color=color, width=0.8, fill=color, alpha=max(0.0, min(1.0, fill_alpha)))
+                ann = _add_rect_annot(doc[pno], rect, color=color, width=0.8, fill=color, alpha=max(0.0, min(1.0, fill_alpha)))
                 _draw_rect_overlay(doc[pno], rect, color, fill=True, fill_alpha=fill_alpha, width=0.8)
-                _add_label_tab(doc[pno], rect, label, color, alpha=0.25, fontsize=6.5)
-                _draw_label_tab_overlay(doc[pno], rect, label, color, fontsize=6.5)
+                try:
+                    if ann is not None:
+                        try:
+                            ann.set_info(content=label); ann.set_info(subject=label); ann.set_info(title=label)
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
                 _add_note(doc[pno], rect, label, color)
+                _add_freetext_bold(doc[pno], rect, label, color=(0, 0, 0), fontsize=8.5)
                 legends.setdefault(pno, []).append(label)
         elif include_figures:
             # Fallback: no Stage 06 figures; derive from page images for rough placement
@@ -497,13 +616,20 @@ def from_run(
                     rect = rect0
                 if rect is None:
                     continue
-                label = "figure"
+                label = "Figure"
                 color = _color_rgb('figure')
-                _add_rect_annot(doc[pno], rect, color=color, width=0.8, fill=color, alpha=max(0.0, min(1.0, fill_alpha)))
+                ann = _add_rect_annot(doc[pno], rect, color=color, width=0.8, fill=color, alpha=max(0.0, min(1.0, fill_alpha)))
                 _draw_rect_overlay(doc[pno], rect, color, fill=True, fill_alpha=fill_alpha, width=0.8)
-                _add_label_tab(doc[pno], rect, label, color, alpha=0.25, fontsize=6.5)
-                _draw_label_tab_overlay(doc[pno], rect, label, color, fontsize=6.5)
+                try:
+                    if ann is not None:
+                        try:
+                            ann.set_info(content=label); ann.set_info(subject=label); ann.set_info(title=label)
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
                 _add_note(doc[pno], rect, label, color)
+                _add_freetext_bold(doc[pno], rect, label, color=(0, 0, 0), fontsize=8.5)
                 legends.setdefault(pno, []).append(label)
 
         # Text groups (Stage 02 blocks)
