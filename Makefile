@@ -149,18 +149,18 @@ run-01-05:
 
 .PHONY: annotate-from-results
 annotate-from-results:
-	@if [ -z "$(OUT)" ]; then echo "Usage: make annotate-from-results OUT=... [TABLES_AS=json|markdown|box] [EXPORT_PAGES=1]"; exit 1; fi
-	$(eval CLEAN:=$(shell jq -r .clean_pdf_path "$(OUT)/01_annotation_processor/json_output/01_annotations.json" 2>/dev/null))
-	@if [ -z "$(CLEAN)" ] || [ ! -f "$(CLEAN)" ]; then echo "[annotate-from-results] CLEAN PDF not found under $(OUT). Run make run-01-05 first."; exit 1; fi
-	$(eval TABLES_AS?=json)
-	$(eval EXPORT_PAGES?=1)
-	$(eval SLUG?=$(shell basename $(OUT)))
-	uv run scripts/tools/pdf_annotate_from_pipeline.py \
-	  --input-pdf "$(OUT)/01_annotation_processor/$(notdir $(CLEAN))" \
-	  --results "$(OUT)" \
-	  --output scripts/artifacts/annotated_$(SLUG).pdf \
-	  --tables-as $(TABLES_AS) --no-labels $(if $(EXPORT_PAGES),--export-pages,)
-	@echo "[annotate-from-results] Wrote scripts/artifacts/annotated_$(SLUG).pdf"
+	@if [ -z "$(RUN_DIR)" ]; then echo "Usage: make annotate-from-results RUN_DIR=... PDF=..."; exit 1; fi
+	@if [ -z "$(PDF)" ] || [ ! -f "$(PDF)" ]; then echo "Set PDF=path/to/<stem>_clean.pdf"; exit 1; fi
+	PYTHONPATH=$(PWD)/src \
+	uv run python -m extractor.pipeline.tools.render_annotated_pdf from-run \
+	  --pdf "$(PDF)" \
+	  --run-dir "$(RUN_DIR)" \
+	  --export-pages
+	@echo "[annotate-from-results] Done"
+
+.PHONY: smoke-annot-exist
+smoke-annot-exist:
+	@PYTHONPATH=$(PWD)/src python scripts/smokes/smoke_annotations_exist.py --pdf "$(PDF)"
 
 .PHONY: annotate-run-01-05
 annotate-run-01-05: run-01-05 annotate-from-results

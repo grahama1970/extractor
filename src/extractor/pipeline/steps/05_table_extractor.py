@@ -18,6 +18,7 @@ import sys
 import json
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
+import re
 from datetime import datetime
 
 # Direct imports - fail fast
@@ -284,7 +285,10 @@ def _demote_table_headers_to_text(result: Dict[str, Any]) -> None:
         if head.endswith('.') or head.endswith(';'):
             continue
         try:
-            p = int(t.get("page_index", t.get("page_number", 1)) or 0)
+            if t.get("page_index") is not None:
+                p = int(t.get("page_index"))
+            else:
+                p = int(t.get("page_number", 1)) - 1
         except Exception:
             p = 0
         bbox = t.get("bbox") or []
@@ -926,7 +930,7 @@ def extract_all_tables(
         pdf_doc = fitz.open(str(pdf_path))
     except Exception as e:
         logger.error(f"Failed to open PDF {pdf_path}: {e}")
-        return []
+        return [], {}, {}
 
     try:
         total_pages = len(pdf_doc)
@@ -1331,10 +1335,7 @@ def run(
         filtered_tables = selected
 
     # --- Assign captions/titles from nearby text if missing ---
-    try:
-        import re as _re
-    except Exception:
-        _re = re
+    import re as _re
     for t in filtered_tables:
         if not t.get('caption') and not t.get('title'):
             cap = detect_table_caption(pdf_path, int(t.get('page_index',0)), t.get('bbox', [0,0,0,0]))
@@ -1423,6 +1424,8 @@ def run(
         "resources": resources,
         "metrics": metrics_payload,
     }
+    # Emit demoted text blocks so Stage 04 can merge heuristics
+    _demote_table_headers_to_text(result)
 
     output_path = json_output_dir / "05_tables.json"
     with open(output_path, "w") as f:

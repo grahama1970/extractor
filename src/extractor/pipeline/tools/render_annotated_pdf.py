@@ -189,16 +189,28 @@ def _clamp_to_page(rect: "fitz.Rect", page_rect: "fitz.Rect") -> Optional["fitz.
         return None
 
 
+def _rect_from_camelot(bb: Iterable[float], page_rect: "fitz.Rect") -> Optional["fitz.Rect"]:
+    """Convert Camelot bbox (origin bottom-left; y up) → PyMuPDF rect (origin top-left; y down)."""
+    try:
+        x0, y0, x1, y1 = [float(v) for v in bb]
+        page_h = float(page_rect.height)
+        y0_fitz = page_h - y1
+        y1_fitz = page_h - y0
+        return _clamp_to_page(fitz.Rect(x0, y0_fitz, x1, y1_fitz), page_rect)
+    except Exception:
+        return None
+
+
 @app.command()
 def from_run(
     pdf: Path = typer.Option(..., "--pdf", help="Input Stage 01 clean PDF", exists=True, dir_okay=False),
     run_dir: Path = typer.Option(..., "--run-dir", help="Pipeline run directory (contains 02/04/05/06 JSON)", exists=True, file_okay=False),
-    out: Path = typer.Option(..., "--out", help="Output annotated PDF path"),
+    out: Optional[Path] = typer.Option(None, "--out", help="Output annotated PDF path"),
     include_sections: bool = typer.Option(True, help="Include Stage 04 sections"),
     include_tables: bool = typer.Option(True, help="Include Stage 05 tables"),
     include_figures: bool = typer.Option(True, help="Include Stage 06 figures"),
     include_text_groups: bool = typer.Option(True, help="Include Stage 02 text groups"),
-    style: str = typer.Option("both", help="Annotation style: stroke|fill|both"),
+    style: str = typer.Option("stroke", help="Annotation style: stroke|fill|both"),
     fill_alpha: float = typer.Option(0.10, help="Fill opacity (0..1) when style includes fill"),
     export_pages: bool = typer.Option(True, help="Also export annotated pages as PNGs next to output"),
 ):
@@ -216,6 +228,14 @@ def from_run(
             return None
 
     j02, j04, j05, j06 = map(_load, (p02, p04, p05, p06))
+
+    # Auto-name output when not provided
+    if out is None:
+        stem = pdf.stem
+        if stem.endswith("_clean"):
+            stem = stem[: -len("_clean")]
+        out = Path("scripts/artifacts") / f"{stem}__run_annotated_prev.pdf"
+    out.parent.mkdir(parents=True, exist_ok=True)
 
     doc = fitz.open(str(pdf))
     with doc:
@@ -246,7 +266,7 @@ def from_run(
                     pno = 0
                 if not bb or not (0 <= pno < len(doc)):
                     continue
-                rect = _clamp_to_page(fitz.Rect(*bb), doc[pno].rect)
+                rect = _rect_from_camelot(bb, doc[pno].rect)
                 if rect is None:
                     continue
                 shp = t.get('pandas_metrics', {}).get('shape') or []
