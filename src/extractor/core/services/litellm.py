@@ -20,10 +20,13 @@ from __future__ import annotations
 
 import base64
 from io import BytesIO
+import os
 from pathlib import Path
 from typing import List, Optional, Annotated
 
-import litellm
+import json
+import urllib.request
+import urllib.error
 import PIL
 from pydantic import BaseModel
 from loguru import logger
@@ -44,7 +47,6 @@ from extractor.core.services.utils.log_utils import (
 )
 from extractor.core.services.utils.json_utils import clean_json_string
 from extractor.core.services.utils.litellm_cache import initialize_litellm_cache
-from litellm import completion_cost
 from extractor.pipeline.utils.litellm_response_utils import extract_content
 
 # --------------------------------------------------------------------------- #
@@ -62,16 +64,27 @@ project_root = Path(dotenv_path).parent
     reraise=True,
     stop=stop_after_attempt(3),
     wait=wait_exponential_jitter(initial=1, max=10),
-    retry=retry_if_exception_type(
-        (
-            litellm.exceptions.Timeout,
-            litellm.exceptions.RateLimitError,
-        )
-    ),
+    retry=retry_if_exception_type((TimeoutError, urllib.error.HTTPError, urllib.error.URLError)),
 )
-def _call_litellm(**kwargs):
-    """Internal wrapper around litellm.completion with Tenacity retries."""
-    return litellm.completion(**kwargs)
+def _openai_chat_request(api_base: str, api_key: str, payload: dict, timeout: int | None = None) -> dict:
+    base = api_base.rstrip("/")
+    url = f"{base}/chat/completions"
+    data = json.dumps(payload).encode("utf-8")
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}",
+        "Accept": "application/json",
+    }
+    req = urllib.request.Request(url=url, data=data, headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout or 30) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        try:
+            body = e.read().decode("utf-8")
+            return json.loads(body)
+        except Exception:
+            raise
 
 
 # --------------------------------------------------------------------------- #
@@ -101,17 +114,12 @@ class LiteLLMService(BaseService):
     # --------------------------------------------------------------------- #
     def __init__(self, config: Optional[BaseModel | dict] = None) -> None:
         super().__init__(config)
-
-        # LiteLLM global tweaks
-        litellm.enable_json_schema_validation = True
-
-        # Cache init
-        if self.enable_cache:
-            try:
+        # Keep cache init a no-op for scillm/openai-http; log and continue
+        try:
+            if self.enable_cache:
                 initialize_litellm_cache()
-                logger.info("LiteLLM cache initialised")
-            except Exception as exc:
-                logger.warning(f"Failed to initialise LiteLLM cache: {exc}")
+        except Exception:
+            pass
 
     # --------------------------------------------------------------------- #
     # Helpers
@@ -164,36 +172,38 @@ class LiteLLMService(BaseService):
             },
         ]
 
-        # Build kwargs for litellm.completion
-        litellm_kwargs = {
-            "model": self.litellm_model,
+        # Prepare OpenAI-compatible /v1/chat/completions payload (scillm backend)
+        api_base = (self.litellm_base_url or os.getenv("OPENAI_BASE_URL") or os.getenv("OPENAI_API_BASE") or os.getenv("CHUTES_API_BASE") or "").rstrip("/")
+        api_key = self.litellm_api_key or os.getenv("OPENAI_API_KEY") or os.getenv("CHUTES_API_KEY") or ""
+        if not api_base or not api_key:
+            logger.error("Missing OPENAI_BASE_URL/OPENAI_API_BASE and/or OPENAI_API_KEY for scillm client.")
+            return {}
+
+        payload = {
+            "model": self.litellm_model if not self.litellm_model.startswith("openai/") else self.litellm_model.split("/",1)[1],
             "messages": messages,
             "temperature": 0,
-            "timeout": timeout,
+            "response_format": {"type": "json_object"},
         }
-
-        # Optional overrides
-        if self.litellm_base_url:
-            litellm_kwargs["api_base"] = self.litellm_base_url
-        if self.litellm_api_key:
-            litellm_kwargs["api_key"] = self.litellm_api_key
-        if self.litellm_model.startswith(("openai/", "azure/")):
-            litellm_kwargs["response_format"] = {"type": "json_object"}
 
         # ------------------------------------------------------------------ #
         # Perform call with Tenacity retries
         # ------------------------------------------------------------------ #
         try:
-            log_api_request("LiteLLM", litellm_kwargs)
-            response = _call_litellm(**litellm_kwargs)
-            log_api_response("LiteLLM", response)
+            log_api_request("scillm-openai", {k: v for k,v in payload.items() if k != "messages"})
+            response = _openai_chat_request(api_base + "/v1", api_key, payload, timeout)
+            log_api_response("scillm-openai", response)
 
             # Extract textual answer
-            text = extract_content(response)
-            tokens = response.usage.total_tokens if response.usage else 0
+            text = ""
+            try:
+                text = (response.get("choices") or [{}])[0].get("message", {}).get("content", "")
+            except Exception:
+                text = ""
+            tokens = int(((response.get("usage") or {}).get("total_tokens") or 0))
 
-            # Monetary cost (USD)
-            cost_usd = float(completion_cost(completion_response=response))
+            # Monetary cost unknown via direct gateway → set to 0.0 for now
+            cost_usd = 0.0
 
             # Update block metadata
             metadata_update = {"llm_tokens_used": tokens, "llm_request_count": 1}
@@ -209,6 +219,6 @@ class LiteLLMService(BaseService):
             return result
 
         except Exception as exc:
-            log_api_error("LiteLLM", exc, litellm_kwargs)
-            logger.error(f"LiteLLM call failed after retries: {exc}")
+            log_api_error("scillm-openai", exc, {k: v for k,v in payload.items() if k != "messages"})
+            logger.error(f"scillm-openai call failed after retries: {exc}")
             return {}

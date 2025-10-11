@@ -5,7 +5,6 @@ This is a minimal wrapper that preserves Marker's original architecture.
 """
 
 from typing import Any, Dict, Optional
-import litellm
 from PIL import Image
 import base64
 import io
@@ -52,18 +51,14 @@ class MarkerLiteLLMAdapter(BaseService):
                 }
             ]
 
-            # Call LiteLLM
-            response = litellm.completion(
-                model=self.model_name, messages=messages, temperature=0, max_tokens=4096
+            # Call through the underlying service (now backed by scillm/openai-http)
+            result = self.litellm_service(
+                prompt=prompt,
+                image=image,
+                block=block,
+                response_schema=schema,
             )
-
-            # Extract the response text
-            response_text = extract_content(response)
-
-            # Parse the response based on the schema
-            # For now, return a dict with the response
-            # In practice, you'd parse based on the schema
-            return {"result": response_text}
+            return {"result": result}
 
         except Exception as e:
             print(f"LiteLLM call failed: {e}")

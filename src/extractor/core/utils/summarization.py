@@ -35,7 +35,8 @@ import textwrap
 import asyncio
 import tempfile
 from typing import Dict, Optional, List
-import litellm
+import urllib.request
+import urllib.error
 from loguru import logger
 from tenacity import retry, stop_after_attempt, wait_exponential
 from pydantic import BaseModel, ValidationError
@@ -207,22 +208,32 @@ def llm_summarize(
                 prompt_tokens = count_tokens_with_tiktoken(system_prompt + user_prompt, model=model)
                 repo_workflow.log_llm_request(model, prompt_tokens, len(user_prompt))
 
-            # Use standard litellm approach
-            response = litellm.completion(
-                model=model,
-                messages=[
+            # OpenAI-compatible HTTP (scillm) standard approach
+            base = (os.getenv("OPENAI_BASE_URL") or os.getenv("OPENAI_API_BASE") or os.getenv("CHUTES_API_BASE") or "").rstrip("/")
+            key = os.getenv("OPENAI_API_KEY") or os.getenv("CHUTES_API_KEY") or ""
+            payload = {
+                "model": model.split("/",1)[1] if model.lower().startswith("openai/") else model,
+                "messages": [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
-                google_vertex_project=google_vertex_project,
-                google_vertex_location=google_vertex_location,
-            )
+                "response_format": {"type": "json_object"},
+                "temperature": 0,
+            }
+            data = json.dumps(payload).encode("utf-8")
+            headers = {"Content-Type": "application/json", "Authorization": f"Bearer {key}"}
+            req = urllib.request.Request(url=f"{base}/v1/chat/completions", data=data, headers=headers, method="POST")
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                response = json.loads(resp.read().decode("utf-8"))
 
             # Complete the LLM request step if workflow tracking is available
             if repo_workflow:
                 repo_workflow.workflow_logger.complete_step("Process content with LLM")
 
-            content_text = extract_content(response) if not isinstance(response, str) else response
+            try:
+                content_text = (response.get("choices") or [{}])[0].get("message", {}).get("content", "")
+            except Exception:
+                content_text = ""
 
             content = clean_json_string(content_text, return_dict=True)
 
