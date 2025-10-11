@@ -52,6 +52,10 @@ from extractor.pipeline.utils.litellm_call import litellm_call
 from extractor.pipeline.utils.model_params import (
     build_chat_extras,
 )
+from extractor.pipeline.utils.scillm_client import (
+    apply_schema_hint as scillm_apply_schema_hint,
+    reflow_section as scillm_reflow_section,
+)
 from extractor.pipeline.utils.vision import preflight_vision_support
 from extractor.pipeline.utils.text_utils import sanitize_text
 from extractor.pipeline.utils.unified_conversion import build_unified_document_from_reflow
@@ -986,35 +990,9 @@ async def reflow_section_with_llm(
             # inlining it into the first text part (instead of using input_text/input_image).
             _converted = list(image_blocks)
 
-            # Build messages with a system role for all providers (including Gemini)
-            # Guard goes at the start of the user content to improve JSON adherence for providers that ignore system
-            # Include an inline schema hint for providers (Qwen, etc.) that follow user content more strictly.
-            schema_hint = ""
-            if _is_gemini(LLM_MODEL):
-                # Avoid referencing _json_schema before it is defined; provide a compact keys hint instead.
-                schema_hint = (
-                    "\nKeys: reflowed_json(object), ocr_corrections(object), "
-                    "improvements_made(string), summary(string)."
-                )
-            else:
-                # For non‑Gemini models (e.g., Qwen‑VL), optionally include an explicit minimal skeleton
-                _force_schema_hint = os.getenv("STAGE07_FORCE_SCHEMA_HINT", "1").lower() in ("1", "true", "yes", "y")
-                if _force_schema_hint:
-                    schema_hint = (
-                        "\nTop-level object MUST be exactly: {"
-                        "\"reflowed_json\": object, \"ocr_corrections\": object, "
-                        "\"improvements_made\": string, \"summary\": string }. "
-                        "Inside reflowed_json: { \"title\": string, \"blocks\": array }. "
-                        "Each block is one of: "
-                        "paragraph {type=\"paragraph\", text}, "
-                        "list {type=\"list\", items:string[]}, "
-                        "table {type=\"table\", columns:string[], rows:(string|number|null)[][]}, "
-                        "figure {type=\"figure\", image_ref, caption, title|null}. "
-                        "Do not add extra top-level keys."
-                    )
-                else:
-                    schema_hint = ""
-            user_text = f"Return ONLY valid JSON.{schema_hint}\n\n{context_text}"
+            # Build messages with a system role; append a provider-aware minimal schema hint
+            # via the centralized helper to avoid duplicating provider logic across steps.
+            user_text = scillm_apply_schema_hint(LLM_MODEL, f"Return ONLY valid JSON.\n\n{context_text}")
             user_parts = [{"type": "text", "text": user_text}]
             if include_images and supports_vision and _converted:
                 user_parts.extend(_converted)
@@ -1022,30 +1000,22 @@ async def reflow_section_with_llm(
                 {"role": "system", "content": system_text},
                 {"role": "user", "content": user_parts},
             ]
-            # Optional contracts adapter path
+            # Optional scillm adapter path (keeps existing behavior; does not remove litellm fallback)
             _use_adapter = os.getenv("USE_LLM_ADAPTER", "").lower() in ("1", "true", "yes", "y")
             if _use_adapter:
                 try:
-                    try:
-                        from src.llm_adapter.adapter import LLMAdapter  # type: ignore
-                    except Exception:
-                        from llm_adapter.adapter import LLMAdapter  # type: ignore
-                    adapter = LLMAdapter(logs_root=results_base_dir / "07_reflow_section" / "logs")
                     doc_id = str(section_data.get("doc_id") or "doc")
-                    section_id = str(
-                        section_data.get("id") or section_data.get("section_id") or "section"
-                    )
-                    prompt_version = os.getenv("STAGE07_PROMPT_VERSION", "reflow@0.1.0")
-                    res = await adapter.reflow_section(
+                    section_id = str(section_data.get("id") or section_data.get("section_id") or "section")
+                    res = await scillm_reflow_section(
                         model=LLM_MODEL,
                         messages=messages,
-                        prompt_version=prompt_version,
+                        results_base_dir=results_base_dir,
+                        prompt_version=os.getenv("STAGE07_PROMPT_VERSION", "reflow@0.1.0"),
                         doc_id=doc_id,
                         section_id=section_id,
                         request_id=f"section_{section_id}",
                         timeout=llm_timeout,
                     )
-                    # Build out payload in native shape
                     out = {**section_data}
                     out.update(
                         {
@@ -1063,7 +1033,7 @@ async def reflow_section_with_llm(
                                 "07_reflow_section",
                                 "info",
                                 "adapter_used",
-                                "Contracts adapter path engaged",
+                                "scillm adapter path engaged",
                                 {},
                             )
                         )

@@ -35,6 +35,7 @@ from extractor.pipeline.utils.annotations import (
 )
 from extractor.pipeline.utils.litellm_call import litellm_call, normalize_model_alias
 from extractor.pipeline.utils.model_params import build_chat_extras
+from extractor.pipeline.utils.scillm_client import verify_header as scillm_verify_header
 from extractor.pipeline.utils.diagnostics import (
     start_resource_sampler,
     stop_resource_sampler,
@@ -265,6 +266,10 @@ async def verify_header_with_llm(image_b64: str, context_text: str, model: str, 
         except Exception:
             pass
     sid = os.getenv("LITELLM_SESSION_ID") or get_run_id()
+    # Optional scillm adapter path (keeps deterministic knobs centralized)
+    if os.getenv("USE_LLM_ADAPTER", "").lower() in ("1", "true", "yes", "y"):
+        hv = await scillm_verify_header(model=model, messages=messages, timeout=item_timeout)
+        return {"is_header": hv.verdict == "accept", "reasoning": "; ".join(hv.reasons or [])}
     # Enforce per-item timeout via litellm timeout param and an outer watchdog
     # Cap tokens for this tiny JSON to prevent rare over-generation
     try:

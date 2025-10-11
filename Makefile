@@ -730,6 +730,7 @@ run-prod:
 	@if [ -z "$(PDF)" ] || [ -z "$(OUT)" ]; then \
 	  echo "Usage: make run-prod PDF=path/to/file.pdf OUT=data/results/pipeline_prod"; exit 1; fi
 	PROFILE=prod \
+	USE_LLM_ADAPTER=1 \
 	STAGE07_MINIMAL_JSON=1 STAGE07_FORCE_SCHEMA_HINT=1 STAGE07_PRUNE_TOPLEVEL_KEYS=1 \
 	python -m extractor.pipeline.run_all \
 	  --pdf "$(PDF)" \
