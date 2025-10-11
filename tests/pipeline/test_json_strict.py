@@ -30,3 +30,9 @@ def test_strict_guard_text_present():
     # Quick smoke to ensure the guard stays definitive
     assert "No markdown" in STRICT_JSON_GUARD
     assert "No prose" in STRICT_JSON_GUARD or "no prose" in STRICT_JSON_GUARD
+
+
+def test_trim_safety_example():
+    raw = "   {\n  \"a\": 1 }\n   "
+    trimmed = raw.rstrip("\n ").lstrip("\n ")
+    assert trimmed.startswith("{") and trimmed.endswith("}")

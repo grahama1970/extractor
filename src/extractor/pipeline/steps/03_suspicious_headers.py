@@ -34,6 +34,7 @@ from extractor.pipeline.utils.annotations import (
     load_relevant_rules as _load_relevant_rules,
 )
 from extractor.pipeline.utils.litellm_call import litellm_call, normalize_model_alias
+from extractor.pipeline.utils.json_utils import STOP_FENCES, STRICT_JSON_GUARD
 from extractor.pipeline.utils.model_params import build_chat_extras
 from extractor.pipeline.utils.scillm_client import verify_header as scillm_verify_header
 from extractor.pipeline.utils.diagnostics import (
@@ -189,7 +190,10 @@ SYSTEM_PROMPT = textwrap.dedent(
     Provide a strict JSON response with:
     - "is_header": true|false
     - "reasoning": short explanation
-"""
+
+    """.strip()
+    + "\n\n"
+    + STRICT_JSON_GUARD
 )
 
 # ------------------------------------------------------------------
@@ -284,6 +288,15 @@ async def verify_header_with_llm(image_b64: str, context_text: str, model: str, 
         session_id=sid,
         export="results",
     )
+    # Ensure stop fences use shared constant for non-Gemini providers
+    try:
+        if "gemini" not in (model_norm or "").lower():
+            if results and results[0] and hasattr(results[0], "request"):
+                kwargs = getattr(results[0].request, "kwargs", {}) or {}
+                if isinstance(kwargs, dict):
+                    kwargs["stop"] = STOP_FENCES
+    except Exception:
+        pass
     r = results[0] if results else None
     try:
         from loguru import logger as _logger

@@ -233,6 +233,13 @@ STRICT_JSON_GUARD = (
     " no comments, no trailing commas, and do not emit NaN/Infinity (use null)."
 )
 
+# Shared stop fences for non‑Gemini providers (belt-and-braces)
+STOP_FENCES = ["```", "__END_JSON__"]
+
+# Stable token caps used by pipeline steps
+MAX_TOKENS_IMAGE = 1792
+MAX_TOKENS_FINAL = 1536
+
 
 def parse_json_strict(text: str) -> Any:
     """

@@ -33,6 +33,9 @@ from extractor.pipeline.utils.json_utils import (
     restrict_top_level_keys,
     parse_json_strict,
     STRICT_JSON_GUARD,
+    STOP_FENCES,
+    MAX_TOKENS_IMAGE,
+    MAX_TOKENS_FINAL,
 )
 from extractor.pipeline.utils.litellm_response_utils import extract_content
 from extractor.pipeline.utils.image_io import (
@@ -1124,7 +1127,7 @@ async def reflow_section_with_llm(
             # If images are included on Attempt 1 (non-Gemini), clamp tokens to image cap after generic max is set
             try:
                 if include_images and supports_vision and "gemini" not in (LLM_MODEL or "").lower():
-                    _img_cap = int(os.getenv("STAGE07_IMAGE_PROMPT_MAX_TOKENS", "1792"))
+                    _img_cap = int(os.getenv("STAGE07_IMAGE_PROMPT_MAX_TOKENS", str(MAX_TOKENS_IMAGE)))
                     prior_max = int(call_params.get("max_tokens") or STAGE07_MAX_TOKENS)
                     call_params["max_tokens"] = min(prior_max, _img_cap)
             except Exception:
@@ -1148,10 +1151,10 @@ async def reflow_section_with_llm(
                     }
             else:
                 call_params["response_format"] = {"type": "json_object"}
-            # Add stop fence for non-Gemini providers to avoid spillover
+            # Add stop fences for non-Gemini providers to avoid spillover
             try:
                 if "gemini" not in (LLM_MODEL or "").lower():
-                    call_params["stop"] = ["```"]
+                    call_params["stop"] = STOP_FENCES
             except Exception:
                 pass
             # Instrumentation: write request summary now that messages exist
@@ -1285,7 +1288,7 @@ async def reflow_section_with_llm(
                 # Stop fence for non-Gemini providers
                 try:
                     if "gemini" not in (LLM_MODEL or "").lower():
-                        call_params2["stop"] = ["```"]
+                        call_params2["stop"] = STOP_FENCES
                 except Exception:
                     pass
                 # Log sanitized compact request for debugging
@@ -1492,7 +1495,7 @@ async def reflow_section_with_llm(
                 call_params["cache"] = {"no-cache": True}
                 try:
                     if "gemini" not in (LLM_MODEL or "").lower():
-                        call_params["stop"] = ["```"]
+                        call_params["stop"] = STOP_FENCES
                 except Exception:
                     pass
                 try:
