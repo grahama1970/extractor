@@ -28,8 +28,18 @@ from typing import Optional, List, Type
 from pydantic import BaseModel
 
 from extractor.core.processors import BaseProcessor
-from extractor.core.processors.llm import BaseLLMSimpleBlockProcessor
-from extractor.core.processors.llm.llm_meta import LLMSimpleBlockMetaProcessor
+try:
+    from extractor.core.processors.llm import BaseLLMSimpleBlockProcessor  # type: ignore
+    from extractor.core.processors.llm.llm_meta import LLMSimpleBlockMetaProcessor  # type: ignore
+except Exception:  # pragma: no cover - optional LLM path disabled in offline/minimal mode
+    class BaseLLMSimpleBlockProcessor(BaseProcessor):  # type: ignore
+        pass
+
+    class LLMSimpleBlockMetaProcessor(BaseProcessor):  # type: ignore
+        def __init__(self, *args, **kwargs):
+            ...
+        def __call__(self, *args, **kwargs):
+            ...
 from extractor.core.util import assign_config, download_font
 
 
@@ -57,7 +67,7 @@ class BaseConverter:
                 resolved_kwargs[param_name] = self.config
             elif param_name == "llm_service":
                 resolved_kwargs[param_name] = self.llm_service
-            elif param.name in self.artifact_dict:
+            elif param_name in getattr(self, 'artifact_dict', {}):
                 resolved_kwargs[param_name] = self.artifact_dict[param_name]
             elif param.default != inspect.Parameter.empty:
                 resolved_kwargs[param_name] = param.default
@@ -68,7 +78,8 @@ class BaseConverter:
                 # Skip *args parameters, they'll be handled by empty tuple
                 continue
             else:
-                raise ValueError(f"Cannot resolve dependency for parameter: {param_name}")
+                # Provide None for unresolved optional deps to keep offline/minimal mode working
+                resolved_kwargs[param_name] = None
 
         return cls(**resolved_kwargs)
 

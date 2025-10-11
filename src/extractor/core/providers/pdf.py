@@ -21,6 +21,7 @@ Example Usage:
 """
 
 import contextlib
+import typing as _t
 import os
 import ctypes
 import logging
@@ -31,9 +32,19 @@ from typing import Annotated, Dict, List, Optional, Set
 import pypdfium2 as pdfium
 import pypdfium2.raw as pdfium_c
 from ftfy import fix_text
-from pdftext.extraction import dictionary_output
-from pdftext.schema import Reference
-from pdftext.pdf.utils import flatten as flatten_pdf_page
+try:
+    from pdftext.extraction import dictionary_output  # type: ignore
+    from pdftext.schema import Reference  # type: ignore
+    from pdftext.pdf.utils import flatten as flatten_pdf_page  # type: ignore
+    _PDFTEXT_OK = True
+except Exception:  # pragma: no cover - optional dependency in minimal/offline mode
+    _PDFTEXT_OK = False
+    class Reference:  # type: ignore
+        ...
+    def dictionary_output(*args, **kwargs):  # type: ignore
+        return []
+    def flatten_pdf_page(*args, **kwargs):  # type: ignore
+        return None
 
 from PIL import Image
 from pypdfium2 import PdfiumError, PdfDocument
@@ -182,7 +193,14 @@ class PdfProvider(BaseProvider):
                 # Manually assign page bboxes, since we can't get them from pdftext
                 self.page_bboxes = {i: doc[i].get_bbox() for i in self.page_range}
             else:
-                self.page_lines = self.pdftext_extraction(doc)
+                # Use pdftext when available; otherwise leave lines empty (figures can still emit)
+                try:
+                    if _PDFTEXT_OK:
+                        self.page_lines = self.pdftext_extraction(doc)
+                    else:
+                        self.page_lines = {i: [] for i in self.page_range}
+                except Exception:
+                    self.page_lines = {i: [] for i in self.page_range}
 
     @contextlib.contextmanager
     def get_doc(self):
@@ -201,6 +219,40 @@ class PdfProvider(BaseProvider):
 
     def __len__(self) -> int:
         return self.page_count
+
+    def get_embedded_image_rects(self, page_index: int) -> _t.List[_t.Tuple[float, float, float, float]]:
+        """Return rectangles for embedded images on the given page.
+
+        Coordinates are returned as (x0, y0, x1, y1) in the provider's page space.
+        """
+        try:
+            import fitz  # PyMuPDF
+        except Exception as e:
+            raise RuntimeError(f"PyMuPDF not available for image rect extraction: {e}")
+
+        # Lazily open a fitz.Document if not already present
+        doc = getattr(self, "_fitz_doc", None)
+        if doc is None:
+            doc = fitz.open(self.filepath)
+            self._fitz_doc = doc
+
+        page = doc[page_index]
+        rects: _t.List[_t.Tuple[float, float, float, float]] = []
+        images = page.get_images(full=True) or []
+        for img in images:
+            try:
+                xref = img[0]
+                for r in page.get_image_rects(xref):
+                    # Filter absurd boxes
+                    pa = float(page.rect.width * page.rect.height) or 1.0
+                    ra = float(r.width * r.height)
+                    if ra / pa > 0.90 or r.width < 24 or r.height < 24:
+                        continue
+                    rects.append((float(r.x0), float(r.y0), float(r.x1), float(r.y1)))
+            except Exception:
+                continue
+
+        return rects
 
     def font_flags_to_format(self, flags: Optional[int]) -> Set[str]:
         if flags is None:

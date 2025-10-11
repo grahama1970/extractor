@@ -16,6 +16,7 @@ Example Usage:
 """
 
 from typing import Annotated, List, Optional, Any
+import os
 
 try:
     from surya.layout import LayoutPredictor  # type: ignore
@@ -66,19 +67,20 @@ class LayoutBuilder(BaseBuilder):
             layout_results = self.forced_layout(document.pages)
         else:
             if self.layout_model is None:
-                # Offline/optional mode: skip layout, leave pages as-is
+                # Offline/minimal mode: emit Figure blocks using embedded images from provider
                 for p in document.pages:
                     try:
                         p.layout_sliced = False
                     except Exception:
                         pass
-                layout_results = [None] * len(document.pages)
+                self.add_embedded_images(document.pages, provider)
+                return
             else:
                 layout_results = self.surya_layout(document.pages)
-        if layout_results and all(r is None for r in layout_results):
-            # nothing to add
-            return
-        self.add_blocks_to_pages(document.pages, layout_results)
+                if layout_results and all(r is None for r in layout_results):
+                    # nothing to add
+                    return
+                self.add_blocks_to_pages(document.pages, layout_results)
 
     def get_batch_size(self):
         if self.layout_batch_size is not None:
@@ -86,6 +88,41 @@ class LayoutBuilder(BaseBuilder):
         elif settings.TORCH_DEVICE_MODEL == "cuda":
             return 6
         return 6
+
+    def add_embedded_images(self, pages: List[PageGroup], provider: PdfProvider):
+        """
+        Emit Figure blocks using embedded image rectangles from the provider.
+        Coordinates from provider are already in page space; no rescaling needed.
+        """
+        for idx, page in enumerate(pages):
+            try:
+                rects = provider.get_embedded_image_rects(idx)
+            except Exception as _e:
+                logger.debug(f"get_embedded_image_rects unavailable: {_e}")
+                rects = []
+
+            for r in rects:
+                # Normalize (x0, y0, x1, y1)
+                if hasattr(r, "x0"):
+                    bbox = (r.x0, r.y0, r.x1, r.y1)
+                elif isinstance(r, (list, tuple)) and len(r) == 4:
+                    bbox = (r[0], r[1], r[2], r[3])
+                elif isinstance(r, dict) and all(k in r for k in ("x0", "y0", "x1", "y1")):
+                    bbox = (r["x0"], r["y0"], r["x1"], r["y1"])
+                else:
+                    continue
+
+                block_cls = get_block_class(BlockTypes.Figure)
+                layout_block = page.add_block(block_cls, PolygonBox.from_bbox(bbox))
+                layout_block.top_k = {BlockTypes.Figure: 1.0}
+                layout_block.confidence = 0.99
+                page.add_structure(layout_block)
+
+            # Ensure non-empty containers
+            if page.structure is None:
+                page.structure = []
+            if page.children is None:
+                page.children = []
 
     def forced_layout(self, pages: List[PageGroup]) -> List[LayoutResult]:
         layout_results = []

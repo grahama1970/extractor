@@ -21,7 +21,11 @@ from PIL import Image
 
 from extractor.core.providers import ProviderPageLines, BaseProvider, ProviderOutput
 from extractor.core.schema.polygon import PolygonBox
-from pdftext.schema import Reference
+try:
+    from pdftext.schema import Reference  # type: ignore
+except Exception:  # pragma: no cover - optional dependency in minimal/offline mode
+    class Reference:  # type: ignore
+        ...
 
 
 class ImageProvider(BaseProvider):

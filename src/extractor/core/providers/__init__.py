@@ -25,7 +25,11 @@ from typing import List, Optional, Dict, Any
 from PIL import Image
 from pydantic import BaseModel
 
-from pdftext.schema import Reference
+try:
+    from pdftext.schema import Reference  # type: ignore
+except Exception:  # pragma: no cover - optional dependency in minimal/offline mode
+    class Reference:  # type: ignore
+        ...
 
 from extractor.core.logger import configure_logging
 from extractor.core.schema.polygon import PolygonBox
