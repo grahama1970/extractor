@@ -249,10 +249,12 @@ def from_run(
     include_tables: bool = typer.Option(True, help="Include Stage 05 tables"),
     include_figures: bool = typer.Option(True, help="Include Stage 06 figures"),
     include_text_groups: bool = typer.Option(True, help="Include Stage 02 text groups"),
-    style: str = typer.Option("stroke", help="Annotation style: stroke|fill|both (sections honor this)"),
-    fill_alpha: float = typer.Option(0.05, help="Fill opacity (0..1). Used for non-section layers and for sections when style includes fill"),
-    export_pages: bool = typer.Option(True, help="Also export annotated pages as PNGs next to output"),
-    pages: str = typer.Option('', help="Limit PNG export to these pages (1-indexed, e.g. '1,3,10-12'). Does not affect the PDF annotations."),
+    sections_style: str = typer.Option("stroke", "--sections-style", help="Sections style: stroke|fill|both"),
+    fill_alpha: float = typer.Option(0.05, help="Fill opacity (0..1). Used for non-sections; sections use this when sections-style includes fill"),
+    tables_origin: str = typer.Option("camelot", help="Tables bbox origin: camelot|fitz"),
+    export_pages: bool = typer.Option(False, help="Also export annotated pages as PNGs next to output"),
+    png_dpi: int = typer.Option(144, help="DPI for PNG export"),
+    pages: str = typer.Option('', help="Limit PNG export to these pages (1-indexed, e.g. '1,3,10-12'). PNG export only; PDF annotations are full-document."),
     legend: bool = typer.Option(False, help="Write per-page legend markdown files alongside the annotated PDF"),
 ):
     """Annotate sections, tables, figures, and text groups from a run directory."""
@@ -294,7 +296,7 @@ def from_run(
                     continue
                 label = f"section:{(s.get('title') or 'Section')[:24]}"
                 color = _color_rgb('section')
-                use_fill = color if style in {"fill", "both"} else None
+                use_fill = color if sections_style in {"fill", "both"} else None
                 _add_rect_annot(doc[pno], rect, color=color, width=1.2, fill=use_fill, alpha=fill_alpha if use_fill else 1.0)
                 _add_label_tab(doc[pno], rect, label, color, alpha=0.25, fontsize=6.5)
                 legends.setdefault(pno, []).append(label)
@@ -309,7 +311,13 @@ def from_run(
                     pno = 0
                 if not bb or not (0 <= pno < len(doc)):
                     continue
-                rect = _rect_from_camelot(bb, doc[pno].rect)
+                if (tables_origin or "camelot").lower() == "camelot":
+                    rect = _rect_from_camelot(bb, doc[pno].rect)
+                else:
+                    try:
+                        rect = _clamp_to_page(fitz.Rect(*bb), doc[pno].rect)
+                    except Exception:
+                        rect = None
                 if rect is None:
                     continue
                 shp = t.get('pandas_metrics', {}).get('shape') or []
@@ -382,9 +390,9 @@ def from_run(
                 if not (0 <= i < len(doc)):
                     continue
                 try:
-                    pm = doc[i].get_pixmap(dpi=144, annots=True)
+                    pm = doc[i].get_pixmap(dpi=int(png_dpi), annots=True)
                 except TypeError:
-                    pm = doc[i].get_pixmap(dpi=144)
+                    pm = doc[i].get_pixmap(dpi=int(png_dpi))
                 (d / f'page_{i+1}.png').write_bytes(pm.tobytes('png'))
         except Exception:
             pass
