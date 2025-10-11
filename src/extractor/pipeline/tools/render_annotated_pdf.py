@@ -347,6 +347,7 @@ def from_run(
     png_dpi: int = typer.Option(144, help="DPI for PNG export"),
     pages: str = typer.Option('', help="Limit PNG export to these pages (1-indexed, e.g. '1,3,10-12'). PNG export only; PDF annotations are full-document."),
     legend: bool = typer.Option(False, help="Write per-page legend markdown files alongside the annotated PDF"),
+    figure_expand: float = typer.Option(0.20, help="Expand figure boxes by this fraction (e.g., 0.2 = +20%)"),
 ):
     """Annotate sections, tables, figures, and text groups from a run directory."""
     # Resolve JSON paths
@@ -438,7 +439,7 @@ def from_run(
                 legends.setdefault(pno, []).append(label)
 
         # Figures (Stage 06)
-        if include_figures and j06 and isinstance(j06.get('figures'), list):
+        if include_figures and j06 and isinstance(j06.get('figures'), list) and len(j06.get('figures') or [])>0:
             for f in j06['figures']:
                 bb = f.get('bbox')
                 try:
@@ -447,7 +448,53 @@ def from_run(
                     pno = 0
                 if not bb or not (0 <= pno < len(doc)):
                     continue
-                rect = _clamp_to_page(fitz.Rect(*bb), doc[pno].rect)
+                rect0 = _clamp_to_page(fitz.Rect(*bb), doc[pno].rect)
+                rect = rect0
+                # Expand figure rectangle by figure_expand fraction around center
+                if rect0 is not None and figure_expand and figure_expand != 0:
+                    try:
+                        cx = (rect0.x0 + rect0.x1) / 2.0
+                        cy = (rect0.y0 + rect0.y1) / 2.0
+                        w = rect0.width * (1.0 + figure_expand)
+                        h = rect0.height * (1.0 + figure_expand)
+                        rect = _clamp_to_page(fitz.Rect(cx - w/2.0, cy - h/2.0, cx + w/2.0, cy + h/2.0), doc[pno].rect)
+                    except Exception:
+                        rect = rect0
+                if rect is None:
+                    continue
+                label = "figure"
+                color = _color_rgb('figure')
+                _add_rect_annot(doc[pno], rect, color=color, width=0.8, fill=color, alpha=max(0.0, min(1.0, fill_alpha)))
+                _draw_rect_overlay(doc[pno], rect, color, fill=True, fill_alpha=fill_alpha, width=0.8)
+                _add_label_tab(doc[pno], rect, label, color, alpha=0.25, fontsize=6.5)
+                _draw_label_tab_overlay(doc[pno], rect, label, color, fontsize=6.5)
+                _add_note(doc[pno], rect, label, color)
+                legends.setdefault(pno, []).append(label)
+        elif include_figures:
+            # Fallback: no Stage 06 figures; derive from page images for rough placement
+            for pno in range(len(doc)):
+                try:
+                    imgs = doc[pno].get_images(full=True)
+                except Exception:
+                    imgs = []
+                if not imgs:
+                    continue
+                try:
+                    rects = doc[pno].get_image_rects(imgs[0][0])
+                except Exception:
+                    rects = []
+                if not rects:
+                    continue
+                rect0 = rects[0] & doc[pno].rect
+                # Expand by figure_expand
+                try:
+                    cx = (rect0.x0 + rect0.x1) / 2.0
+                    cy = (rect0.y0 + rect0.y1) / 2.0
+                    w = rect0.width * (1.0 + figure_expand)
+                    h = rect0.height * (1.0 + figure_expand)
+                    rect = _clamp_to_page(fitz.Rect(cx - w/2.0, cy - h/2.0, cx + w/2.0, cy + h/2.0), doc[pno].rect)
+                except Exception:
+                    rect = rect0
                 if rect is None:
                     continue
                 label = "figure"
