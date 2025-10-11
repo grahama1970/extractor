@@ -45,6 +45,11 @@ try:
 except ImportError:
     redis = None  # type: ignore
 from dotenv import load_dotenv  # Import dotenv for environment variable loading
+try:
+    # Preferred helper in this fork; uses env and configures litellm.cache
+    from litellm.extras import initialize_litellm_cache as extras_init_cache  # type: ignore
+except Exception:
+    extras_init_cache = None  # type: ignore
 
 # from litellm.caching import Cache, Type  # Import Cache and Type
 import sys  # Import sys for exit codes
@@ -87,6 +92,37 @@ def initialize_litellm_cache() -> None:
             pass
         logger.info("LiteLLM caching disabled via LITELLM_DISABLE_CACHE")
         return
+    # Run the extras initializer first when available; then optionally adjust namespace
+    if extras_init_cache is not None:
+        try:
+            extras_init_cache()
+            ns = os.getenv("LITELLM_CACHE_NAMESPACE") or os.getenv("LITELLM_SESSION_ID")
+            if ns and hasattr(litellm, "cache") and getattr(litellm, "cache", None) is not None:
+                try:
+                    # If existing cache does not support namespaces, recreate
+                    if LiteLLMCache is not None and LiteLLMCacheType is not None:
+                        cfg = getattr(litellm.cache, "__dict__", {})
+                        ctype = cfg.get("type") or getattr(litellm.cache, "type", None)
+                        host = cfg.get("host") or os.getenv("REDIS_HOST", "localhost")
+                        port = str(cfg.get("port") or os.getenv("REDIS_PORT", "6379"))
+                        pwd = cfg.get("password") or os.getenv("REDIS_PASSWORD")
+                        ttl = int(cfg.get("ttl") or os.getenv("LITELLM_CACHE_TTL", str(60 * 60 * 24 * 2)))
+                        if str(ctype).upper() in {"REDIS", str(LiteLLMCacheType.REDIS)}:
+                            litellm.cache = LiteLLMCache(  # type: ignore
+                                type=LiteLLMCacheType.REDIS, host=host, port=port, password=pwd, ttl=ttl, namespace=str(ns),
+                                supported_call_types=["acompletion", "completion"],
+                            )
+                            try:
+                                litellm.enable_cache()  # type: ignore[attr-defined]
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+            logger.info("LiteLLM cache initialized via extras helper")
+            return
+        except Exception as e:
+            logger.warning(f"extras.initialize_litellm_cache failed, falling back: {e}")
+
     redis_host = os.getenv("REDIS_HOST", "localhost")
     redis_port = int(os.getenv("REDIS_PORT", 6379))
     redis_password = os.getenv("REDIS_PASSWORD", None)  # Assuming password might be needed

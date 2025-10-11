@@ -37,6 +37,10 @@ import litellm
 import os
 import redis
 from dotenv import load_dotenv  # Import dotenv for environment variable loading
+try:
+    from litellm.extras import initialize_litellm_cache as extras_init_cache  # type: ignore
+except Exception:
+    extras_init_cache = None  # type: ignore
 
 # from litellm.caching import Cache, Type  # Import Cache and Type
 import sys  # Import sys for exit codes
@@ -63,6 +67,29 @@ load_dotenv()
 
 
 def initialize_litellm_cache() -> None:
+    # Prefer the built-in helper when available
+    if extras_init_cache is not None:
+        try:
+            extras_init_cache()
+            # Respect optional namespace for per-run isolation
+            cache_namespace = os.getenv("LITELLM_CACHE_NAMESPACE") or os.getenv("LITELLM_SESSION_ID")
+            if cache_namespace and getattr(litellm, "cache", None) is not None:
+                try:
+                    from litellm.caching.caching import Cache as _Cache, LiteLLMCacheType as _Type  # type: ignore
+                    cfg = getattr(litellm.cache, "__dict__", {})
+                    host = cfg.get("host") or os.getenv("REDIS_HOST", "localhost")
+                    port = str(cfg.get("port") or os.getenv("REDIS_PORT", "6379"))
+                    pwd = cfg.get("password") or os.getenv("REDIS_PASSWORD")
+                    ttl = int(cfg.get("ttl") or os.getenv("LITELLM_CACHE_TTL", str(60 * 60 * 24 * 2)))
+                    litellm.cache = _Cache(type=_Type.REDIS, host=host, port=port, password=pwd, ttl=ttl, namespace=str(cache_namespace), supported_call_types=["acompletion","completion"])  # type: ignore
+                    try:
+                        litellm.enable_cache()  # type: ignore[attr-defined]
+                    except Exception:
+                        pass
+            return
+        except Exception:
+            # Fall through to legacy path
+            pass
     redis_host = os.getenv("REDIS_HOST", "localhost")
     redis_port = int(os.getenv("REDIS_PORT", 6379))
     redis_password = os.getenv("REDIS_PASSWORD", None)  # Assuming password might be needed
