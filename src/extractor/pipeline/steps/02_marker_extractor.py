@@ -590,63 +590,136 @@ def run(
 
     # --- Optional: synthesize Figure blocks from embedded images when none exist ---
     try:
-        synth_fig = os.getenv("STAGE02_FIGURE_FROM_IMAGES", "1").lower() in {"1", "true", "yes", "y"}
+        # Always enable synthesis when offline/lenient mode is allowed
+        offline_enabled = os.getenv("OFFLINE_PDF_PREDICTORS", "1").lower() in {"1", "true", "yes", "y"}
+        synth_fig_env = os.getenv("STAGE02_FIGURE_FROM_IMAGES", "")
+        synth_fig = True if offline_enabled else (synth_fig_env.lower() in {"", "1", "true", "yes", "y"})
+
+        # Tunables (env)
+        try:
+            synth_min_w = int(os.getenv("STAGE02_SYNTH_FIG_MIN_WIDTH", "24"))
+        except Exception:
+            synth_min_w = 24
+        try:
+            synth_min_h = int(os.getenv("STAGE02_SYNTH_FIG_MIN_HEIGHT", "24"))
+        except Exception:
+            synth_min_h = 24
+        try:
+            synth_max_area_ratio = float(os.getenv("STAGE02_SYNTH_FIG_MAX_AREA_RATIO", "0.9"))
+        except Exception:
+            synth_max_area_ratio = 0.90
+
         has_fig = any((b.get("block_type") in ("Figure", "Image")) for b in blocks)
         if synth_fig and not has_fig:
             import fitz  # type: ignore
+
+            def _iou(a: "fitz.Rect", b: "fitz.Rect") -> float:
+                iw = max(0.0, min(a.x1, b.x1) - max(a.x0, b.x0))
+                ih = max(0.0, min(a.y1, b.y1) - max(a.y0, b.y0))
+                inter = iw * ih
+                ua = (a.width * a.height) + (b.width * b.height) - inter
+                return (inter / ua) if ua > 0 else 0.0
+
             doc = fitz.open(str(pdf_path))
-            for pno in range(len(doc)):
-                try:
-                    imgs = doc[pno].get_images(full=True)
-                except Exception:
-                    imgs = []
-                if not imgs:
-                    continue
-                # Use first image rect per page; filter absurd sizes
-                try:
-                    rects = doc[pno].get_image_rects(imgs[0][0])
-                except Exception:
-                    rects = []
-                if not rects:
-                    continue
-                page_rect = doc[pno].rect
-                for r in rects:
-                    rr = r & page_rect
-                    if rr.is_empty:
+            total_synth = 0
+            per_page_counts: dict[int, int] = {}
+            try:
+                for pno in range(len(doc)):
+                    try:
+                        imgs = doc[pno].get_images(full=True)
+                    except Exception:
+                        imgs = []
+                    if not imgs:
                         continue
-                    pa = float(page_rect.width * page_rect.height) or 1.0
-                    ra = float(rr.width * rr.height)
-                    if ra / pa > 0.90 or rr.width < 24 or rr.height < 24:
+
+                    page_rect = doc[pno].rect
+                    collected: list["fitz.Rect"] = []
+
+                    # Walk all images on the page and all their rects
+                    for im in imgs:
+                        try:
+                            xref = im[0]
+                            rects = doc[pno].get_image_rects(xref)
+                        except Exception:
+                            rects = []
+                        if not rects:
+                            continue
+
+                        for r in rects:
+                            rr = (r & page_rect)
+                            if rr.is_empty:
+                                continue
+
+                            pa = float(page_rect.width * page_rect.height) or 1.0
+                            ra = float(rr.width * rr.height)
+
+                            # Size / area filters (configurable)
+                            if rr.width < synth_min_w or rr.height < synth_min_h:
+                                continue
+                            if (ra / pa) > synth_max_area_ratio:
+                                continue
+
+                            # Deduplicate near-identical rects (by IoU)
+                            if any(_iou(rr, ex) > 0.90 for ex in collected):
+                                continue
+                            collected.append(rr)
+
+                    if not collected:
                         continue
-                    blocks.append(
-                        {
-                            "block_type": "Figure",
-                            "page_idx": pno,
-                            "page": pno,
-                            "bbox": [rr.x0, rr.y0, rr.x1, rr.y1],
-                            "source": "synth_image_fallback",
-                        }
+
+                    # Emit one synthesized Figure per rect
+                    per_page_counts[pno] = 0
+                    for idx, rr in enumerate(collected):
+                        blocks.append(
+                            {
+                                "block_type": "Figure",
+                                "page_idx": pno,
+                                "page": pno,
+                                "bbox": [float(rr.x0), float(rr.y0), float(rr.x1), float(rr.y1)],
+                                "id": f"SYNTHFIG_P{pno}_{idx}",
+                                "source": "synth_image_fallback",
+                            }
+                        )
+                        per_page_counts[pno] += 1
+                        total_synth += 1
+
+                # Diagnostics
+                if total_synth == 0:
+                    diagnostics.append(
+                        make_event(
+                            "02_marker_extractor",
+                            "warning",
+                            "figure_synth_failed",
+                            "No images met synthesis thresholds on any page",
+                            {
+                                "min_width": synth_min_w,
+                                "min_height": synth_min_h,
+                                "max_area_ratio": synth_max_area_ratio,
+                            },
+                        )
                     )
-            if blocks and not any(b.get("block_type") in ("Figure", "Image") for b in blocks):
-                diagnostics.append(
-                    make_event(
-                        "02_marker_extractor",
-                        "warning",
-                        "figure_synth_failed",
-                        "No images found for figure synthesis",
-                        {},
+                else:
+                    diagnostics.append(
+                        make_event(
+                            "02_marker_extractor",
+                            "info",
+                            "figure_synth_applied",
+                            f"Synthesized {total_synth} Figure block(s) from embedded images",
+                            {
+                                "pages_with_synth": len(per_page_counts),
+                                "per_page_counts": per_page_counts,
+                                "min_width": synth_min_w,
+                                "min_height": synth_min_h,
+                                "max_area_ratio": synth_max_area_ratio,
+                                "offline_enabled": bool(offline_enabled),
+                            },
+                        )
                     )
-                )
-            else:
-                diagnostics.append(
-                    make_event(
-                        "02_marker_extractor",
-                        "info",
-                        "figure_synth_applied",
-                        "Synthesized Figure blocks from embedded images",
-                        {},
-                    )
-                )
+            finally:
+                try:
+                    doc.close()
+                except Exception:
+                    pass
     except Exception as _e:
         try:
             diagnostics.append(
