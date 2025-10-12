@@ -16,6 +16,8 @@ from dataclasses import dataclass
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+import time
+from datetime import datetime
 
 import typer
 
@@ -69,67 +71,147 @@ def extract_sections(
     out.mkdir(parents=True, exist_ok=True)
     p = _paths(out)
 
+    # Minimal execution log and results to seed diagnostics/reporting
+    t_start = time.time()
+    execution_log: List[Dict[str, Any]] = []
+    results: Dict[str, Dict[str, Any]] = {}
+    output_files: List[str] = []
+
+    def _log(status: str, step: str, details: str = "") -> None:
+        execution_log.append({"timestamp": datetime.utcnow().isoformat(timespec="seconds") + "Z", "status": status, "step": step, "details": details})
+
     # Stage 01: annotation/cleaner
     # Produces cleaned PDF in p.anno_dir
-    _run(
-        [
-            sys.executable,
-            os.fspath(Path("src/extractor/pipeline/steps/01_annotation_processor.py")),
-            "run",
-            os.fspath(pdf_path),
-            "-o",
-            os.fspath(out),
-        ]
-    )
+    _log("started", "01_annotation_processor", os.fspath(pdf_path))
+    t0 = time.time()
+    try:
+        _run(
+            [
+                sys.executable,
+                os.fspath(Path("src/extractor/pipeline/steps/01_annotation_processor.py")),
+                "run",
+                os.fspath(pdf_path),
+                "-o",
+                os.fspath(out),
+            ]
+        )
+        took = time.time() - t0
+        results["01_annotation_processor"] = {"success": True, "duration": took}
+        _log("completed", "01_annotation_processor", f"ok in {took:.3f}s")
+    except Exception as e:
+        took = time.time() - t0
+        results["01_annotation_processor"] = {"success": False, "duration": took, "error": str(e)}
+        _log("failed", "01_annotation_processor", str(e))
+        _write_summary(pdf_path, out, t_start, execution_log, results, output_files)
+        raise
 
     clean_pdf = _find_clean_pdf(p.anno_dir)
 
     # Stage 02: marker blocks
-    _run(
-        [
-            sys.executable,
-            os.fspath(Path("src/extractor/pipeline/steps/02_marker_extractor.py")),
-            "run",
-            os.fspath(clean_pdf),
-            "-o",
-            os.fspath(out),
-        ]
-    )
+    _log("started", "02_marker_extractor", os.fspath(clean_pdf))
+    t0 = time.time()
+    try:
+        _run(
+            [
+                sys.executable,
+                os.fspath(Path("src/extractor/pipeline/steps/02_marker_extractor.py")),
+                "run",
+                os.fspath(clean_pdf),
+                "-o",
+                os.fspath(out),
+            ]
+        )
+        took = time.time() - t0
+        results["02_marker_extractor"] = {"success": True, "duration": took, "output": os.fspath(p.blocks_json)}
+        output_files.append(os.fspath(p.blocks_json))
+        _log("completed", "02_marker_extractor", f"wrote {p.blocks_json.name} in {took:.3f}s")
+    except Exception as e:
+        took = time.time() - t0
+        results["02_marker_extractor"] = {"success": False, "duration": took, "error": str(e)}
+        _log("failed", "02_marker_extractor", str(e))
+        _write_summary(pdf_path, out, t_start, execution_log, results, output_files)
+        raise
 
     # Stage 03: suspicious header verify
-    _run(
-        [
-            sys.executable,
-            os.fspath(Path("src/extractor/pipeline/steps/03_suspicious_headers.py")),
-            "run",
-            os.fspath(p.blocks_json),
-            "--pdf-dir",
-            os.fspath(p.anno_dir),
-            "-o",
-            os.fspath(out),
-        ]
-    )
+    _log("started", "03_suspicious_headers", os.fspath(p.blocks_json))
+    t0 = time.time()
+    try:
+        _run(
+            [
+                sys.executable,
+                os.fspath(Path("src/extractor/pipeline/steps/03_suspicious_headers.py")),
+                "run",
+                os.fspath(p.blocks_json),
+                "--pdf-dir",
+                os.fspath(p.anno_dir),
+                "-o",
+                os.fspath(out),
+            ]
+        )
+        took = time.time() - t0
+        results["03_suspicious_headers"] = {"success": True, "duration": took, "output": os.fspath(p.verified_json)}
+        output_files.append(os.fspath(p.verified_json))
+        _log("completed", "03_suspicious_headers", f"wrote {p.verified_json.name} in {took:.3f}s")
+    except Exception as e:
+        took = time.time() - t0
+        results["03_suspicious_headers"] = {"success": False, "duration": took, "error": str(e)}
+        _log("failed", "03_suspicious_headers", str(e))
+        _write_summary(pdf_path, out, t_start, execution_log, results, output_files)
+        raise
 
     # Stage 04: section builder
-    _run(
-        [
-            sys.executable,
-            os.fspath(Path("src/extractor/pipeline/steps/04_section_builder.py")),
-            "run",
-            os.fspath(p.verified_json),
-            "--pdf-dir",
-            os.fspath(p.anno_dir),
-            "-o",
-            os.fspath(out),
-        ]
-    )
+    _log("started", "04_section_builder", os.fspath(p.verified_json))
+    t0 = time.time()
+    try:
+        _run(
+            [
+                sys.executable,
+                os.fspath(Path("src/extractor/pipeline/steps/04_section_builder.py")),
+                "run",
+                os.fspath(p.verified_json),
+                "--pdf-dir",
+                os.fspath(p.anno_dir),
+                "-o",
+                os.fspath(out),
+            ]
+        )
+        took = time.time() - t0
+        results["04_section_builder"] = {"success": True, "duration": took, "output": os.fspath(p.sections_json)}
+        output_files.append(os.fspath(p.sections_json))
+        _log("completed", "04_section_builder", f"wrote {p.sections_json.name} in {took:.3f}s")
+    except Exception as e:
+        took = time.time() - t0
+        results["04_section_builder"] = {"success": False, "duration": took, "error": str(e)}
+        _log("failed", "04_section_builder", str(e))
+        _write_summary(pdf_path, out, t_start, execution_log, results, output_files)
+        raise
 
     if not p.sections_json.exists():
         raise FileNotFoundError(f"Sections JSON not found: {p.sections_json}")
 
     data = json.loads(p.sections_json.read_text())
     sections = data.get("sections") or data.get("result", {}).get("sections") or []
+    _write_summary(pdf_path, out, t_start, execution_log, results, output_files)
     return sections, p.sections_json
+
+
+def _write_summary(pdf_path: Path, out: Path, t_start: float, execution_log: List[Dict[str, Any]], results: Dict[str, Dict[str, Any]], output_files: List[str]) -> None:
+    """Best-effort write of a minimal pipeline summary."""
+    try:
+        successes = sum(1 for r in results.values() if r.get("success"))
+        summary = {
+            "pipeline_status": "completed" if successes == len(results) else "failed",
+            "pdf_path": os.fspath(pdf_path),
+            "total_duration": round(time.time() - t_start, 3),
+            "processors": {"total": len(results), "successful": successes, "failed": max(0, len(results) - successes)},
+            "results": results,
+            "execution_log": execution_log,
+            "output_files": output_files,
+        }
+        (out / "pipeline_summary.json").write_text(json.dumps(summary, indent=2))
+    except Exception:
+        # Never raise from diagnostics write
+        pass
 
 
 def build_cli() -> typer.Typer:

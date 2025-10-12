@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import typer
@@ -41,16 +42,28 @@ def build_cli() -> typer.Typer:
 
     results.mkdir(parents=True, exist_ok=True)
 
-    # Delegate to the unified surface to keep one code path
+    # Call run_all directly with deterministic/offline-friendly flags
+    # to avoid recursion between pipeline-happy -> pipeline-run -> pipeline-happy.
     cmd = [
-        "pipeline-run",
+        sys.executable,
+        "-m",
+        "extractor.pipeline.run_all",
         "run",
         "--pdf",
         str(pdf),
         "--results",
         str(results),
-        "--mode",
-        "fast",
+        # Deterministic / offline-friendly toggles
+        "--offline",
+        "--skip-export10",
+        "--skip-embeddings10",
+        "--skip-graph11",
+        # Downstream steps often support these flags; if unsupported they will be ignored.
+        "--skip-llm03",
+        "--skip-descriptions06",
+        "--summary-only07",
+        "--skip-proving08",
+        "--fast-embeddings10",
     ]
 
     if verbose:

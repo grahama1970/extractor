@@ -45,15 +45,21 @@ STRUCTURED_PIPELINES: Dict[Type, StructuredPipelineMeta] = {
     MarkdownProvider: StructuredPipelineMeta("markdown", "07_markdown_ingest"),
 }
 
+_FLATTEN_FN = None
+
 
 def _load_flatten_function():
+    global _FLATTEN_FN
+    if _FLATTEN_FN is not None:
+        return _FLATTEN_FN
     module_path = Path(__file__).resolve().parent / "steps" / "10_arangodb_exporter.py"
     spec = importlib.util.spec_from_file_location("pipeline_stage10", module_path)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"Unable to load Stage 10 module from {module_path}")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)  # type: ignore[attr-defined]
-    return module.flatten_document_to_pdf_objects  # type: ignore[attr-defined]
+    _FLATTEN_FN = module.flatten_document_to_pdf_objects  # type: ignore[attr-defined]
+    return _FLATTEN_FN
 
 
 def _ensure_dir(path: Path) -> None:
@@ -223,10 +229,12 @@ def _build_sections_from_blocks(unified_doc: UnifiedDocument) -> List[Dict]:
 
     if not sections:
         section = start_section(default_title, 1)
-        paragraphs = [
-            _text_from_block(block) for block in unified_doc.blocks if _text_from_block(block)
-        ]
-        section["paragraphs"].extend(filter(None, paragraphs))
+        paras: List[str] = []
+        for block in unified_doc.blocks:
+            txt = _text_from_block(block)
+            if txt:
+                paras.append(txt)
+        section["paragraphs"].extend(paras)
 
     for section in sections:
         paras = section.pop("paragraphs", [])

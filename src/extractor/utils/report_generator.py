@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, List
+from shutil import copyfile
 
 
 def generate_pipeline_report(summary_path: Path, output_dir: Path) -> Path:
@@ -40,14 +41,18 @@ def generate_pipeline_report(summary_path: Path, output_dir: Path) -> Path:
     report_content = _generate_report_content(pipeline_data, output_dir)
 
     # Write report
-    with open(report_path, "w") as f:
+    with open(report_path, "w", encoding="utf-8") as f:
         f.write(report_content)
 
     # Update latest symlink
     latest_link = reports_dir / "latest.md"
     if latest_link.exists():
         latest_link.unlink()
-    latest_link.symlink_to(report_name)
+    try:
+        latest_link.symlink_to(report_name)
+    except Exception:
+        # Fallback for environments without symlink privileges (e.g., Windows, some CI)
+        copyfile(report_path, latest_link)
 
     print("✅ Pipeline analysis report generated: {report_path}".format(report_path=report_path))
     print("📊 Report contains actual execution data to prevent hallucinations")
@@ -60,11 +65,12 @@ def _generate_report_content(pipeline_data: Dict[str, Any], output_dir: Path) ->
     """Generate the markdown report content."""
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    # Extract key metrics
-    total_processors = pipeline_data["processors"]["total"]
-    successful = pipeline_data["processors"]["successful"]
-    _ = pipeline_data["processors"].get("failed")
-    duration = pipeline_data["total_duration"]
+    # Extract key metrics (tolerant to missing keys)
+    processors = pipeline_data.get("processors", {}) or {}
+    total_processors = processors.get("total", 0)
+    successful = processors.get("successful", 0)
+    _ = processors.get("failed")
+    duration = pipeline_data.get("total_duration", 0.0) or 0.0
 
     # Start report
     report = f"""# Pipeline Execution Report - {timestamp}
@@ -191,7 +197,7 @@ def _add_extraction_details(pipeline_data: Dict[str, Any]) -> str:
     marker_result = pipeline_data["results"].get("marker_extractor", {})
     if marker_result.get("success"):
         # Extract block count from execution log
-        for log_entry in pipeline_data["execution_log"]:
+        for log_entry in pipeline_data.get("execution_log", []):
             if log_entry["step"] == "Marker Extraction" and "Extracted" in log_entry["details"]:
                 section += f"- **Blocks Extracted**: {log_entry['details']}\n"
                 break
@@ -208,7 +214,7 @@ def _add_extraction_details(pipeline_data: Dict[str, Any]) -> str:
                 break
 
     # Check output files
-    output_files = pipeline_data.get("output_files", [])
+    output_files = pipeline_data.get("output_files", []) or []
     if output_files:
         section += f"- **Output Files Generated**: {len(output_files)}\n"
 
@@ -233,7 +239,7 @@ def _generate_recommendations(pipeline_data: Dict[str, Any]) -> List[str]:
 
     # Check for failures
     failed_processors = []
-    for proc_name, result in pipeline_data["results"].items():
+    for proc_name, result in (pipeline_data.get("results") or {}).items():
         if not result["success"]:
             failed_processors.append((proc_name, result.get("error", "Unknown error")))
 
@@ -254,7 +260,7 @@ def _generate_recommendations(pipeline_data: Dict[str, Any]) -> List[str]:
 
     # Check for performance issues
     slow_processors = []
-    for proc_name, result in pipeline_data["results"].items():
+    for proc_name, result in (pipeline_data.get("results") or {}).items():
         if result["success"] and result["duration"] > 5.0:
             slow_processors.append(proc_name)
 
