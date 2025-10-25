@@ -19,7 +19,19 @@ from tenacity import (
     wait_exponential_jitter,
     retry_if_exception_type,
 )
-import litellm
+try:
+    import litellm  # type: ignore
+except Exception:  # pragma: no cover
+    class _DummyLitellm:
+        class exceptions:  # type: ignore
+            Timeout = Exception
+            RateLimitError = Exception
+
+        @staticmethod
+        def completion(**kwargs):
+            raise RuntimeError("litellm unavailable in this runtime")
+
+    litellm = _DummyLitellm()  # type: ignore
 
 # Global semaphore for controlling concurrent LLM calls
 LLM_SEMAPHORE = asyncio.Semaphore(int(os.getenv("MAX_CONCURRENT_LLM_CALLS", "3")))

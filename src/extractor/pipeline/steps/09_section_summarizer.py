@@ -23,12 +23,12 @@ from loguru import logger
 from rich.console import Console
 import typer
 from dotenv import load_dotenv, find_dotenv
-from extractor.pipeline.utils.litellm_cache import initialize_litellm_cache
 from extractor.pipeline.utils.diagnostics import get_run_id
-from extractor.pipeline.utils.litellm_call import litellm_call
 from extractor.pipeline.utils.json_utils import clean_json_string
 from extractor.pipeline.utils.json_mode import JSON_SYSTEM_GUARD
 from tqdm import tqdm
+from scillm import acompletion as sc_acompletion
+from extractor.pipeline.utils.model_select import get_text_model
 
 # Note: Avoid import-time side effects. CLI setup and environment initialization
 # are performed inside build_cli() so tests can import this module safely.
@@ -44,7 +44,7 @@ async def summarize_section(
     strict_json: bool = True,
     request_timeout: int = 120,
 ) -> Dict[str, Any]:
-    """Generate a summary for a single section using LiteLLM with optional rolling context."""
+    """Generate a summary for a single section using scillm with optional rolling context."""
     prev = previous_summaries or []
     async with semaphore:
         try:
@@ -83,30 +83,11 @@ async def summarize_section(
 
             # Prefer explicit JSON formatting via system guard + provider JSON mode (when supported)
             system_json_guard = JSON_SYSTEM_GUARD
-            candidates = [
-                os.getenv("LITELLM_MODEL"),
-                os.getenv("LITELLM_DEFAULT_MODEL"),
-                os.getenv("DEFAULT_LITELLM_MODEL"),
-                os.getenv("LITELLM_SMALL_MODEL"),
-                os.getenv("LITELLM_VLM_MODEL"),
-            ]
-            model_name = next((c.strip() for c in candidates if c and c.strip()), None)
-            if not model_name:
-                raise ValueError("No LLM model configured. Set LITELLM_DEFAULT_MODEL or DEFAULT_LITELLM_MODEL or LITELLM_VLM_MODEL in .env.")
-            # Use the shared LiteLLM batch runner for consistency with other stages
+            model_name = get_text_model()
+            # scillm + Chutes x-api-key path (no Bearer)
             is_gpt5 = "gpt-5" in (model_name or "").lower()
-            params = {
-                "model": model_name,
-                "messages": [
-                    {"role": "system", "content": system_json_guard},
-                    {"role": "user", "content": prompt},
-                ],
-                "timeout": request_timeout,
-            }
-            if not is_gpt5:
-                params["temperature"] = 0.3
-            if strict_json and "gemini" not in (model_name or "").lower():
-                params["response_format"] = {"type": "json_object"}
+            ch_base = os.getenv("CHUTES_API_BASE", "").strip()
+            ch_key = os.getenv("CHUTES_API_KEY", "").strip()
             # Optional contracts adapter path
             if os.getenv("USE_LLM_ADAPTER", "").lower() in ("1", "true", "yes", "y"):
                 try:
@@ -141,19 +122,39 @@ async def summarize_section(
                     )
                     result = res.summary_json
                 except Exception:
-                    # Fall back to litellm_call path
-                    sid = os.getenv("LITELLM_SESSION_ID") or get_run_id()
-                    out = await litellm_call(
-                        [params], concurrency=1, desc="summarize_section", session_id=sid, export="results"
+                    # Fall back to direct scillm call
+                    resp = await sc_acompletion(
+                        model=model_name,
+                        api_base=ch_base or None,
+                        api_key=ch_key,
+                        custom_llm_provider="openai",
+                        messages=[
+                            {"role": "system", "content": system_json_guard},
+                            {"role": "user", "content": prompt},
+                        ],
+                        response_format={"type": "json_object"} if (strict_json and "gemini" not in (model_name or "").lower()) else None,
+                        temperature=0.0 if is_gpt5 else 0.3,
+                        timeout=request_timeout,
                     )
-                    content = out[0].content if out else ""
+                    content = (resp.get("choices") or [{}])[0].get("message", {}).get("content", "")
                     result = clean_json_string(content, return_dict=True)
             else:
-                sid = os.getenv("LITELLM_SESSION_ID") or get_run_id()
-                out = await litellm_call(
-                    [params], concurrency=1, desc="summarize_section", session_id=sid, export="results"
+                # Direct SciLLM (x-api-key header; no helper)
+                resp = await sc_acompletion(
+                    model=model_name,
+                    custom_llm_provider="openai_like",
+                    api_base=ch_base or None,
+                    api_key=None,
+                    extra_headers={"x-api-key": ch_key} if ch_key else None,
+                    messages=[
+                        {"role": "system", "content": system_json_guard},
+                        {"role": "user", "content": prompt},
+                    ],
+                    response_format={"type": "json_object"} if strict_json else None,
+                    temperature=0.0 if is_gpt5 else 0.3,
+                    timeout=request_timeout,
                 )
-                content = out[0].content if out else ""
+                content = (resp.get("choices") or [{}])[0].get("message", {}).get("content", "")
                 result = clean_json_string(content, return_dict=True)
             if strict_json and (not isinstance(result, dict) or "summary" not in result):
                 # Fail fast when strict JSON is requested
@@ -197,10 +198,11 @@ async def summarize_section(
 async def create_checkpoint_summary(
     summaries: List[Dict[str, Any]], checkpoint_name: str = "Chapter", request_timeout: int = 120
 ) -> Dict[str, Any]:
-    """Create a higher-level summary of multiple sections.
+    """Create a higher-level summary of multiple sections via the paved scillm helper.
 
-    Used to create periodic checkpoints that summarize large chunks
-    of the document, preventing context overflow.
+    - Uses scillm.acompletion on an OpenAI-compatible Chutes path with x-api-key
+    - Deterministic one-retry backoff on specific transient errors (429 capacity)
+    - Fails fast with a clear error otherwise
     """
     if not summaries:
         return None
@@ -209,22 +211,21 @@ async def create_checkpoint_summary(
     if not successful_summaries:
         return None
 
-    # Collect all summaries
-    summary_texts = []
-    all_concepts = []
-
+    summary_texts: List[str] = []
     for s in successful_summaries:
-        if s.get("summary_data"):
-            summary_texts.append(f"- {s['section_title']}: {s['summary_data']['summary']}")
-            all_concepts.extend(s["summary_data"].get("key_concepts", []))
+        try:
+            if s.get("summary_data"):
+                summary_texts.append(f"- {s['section_title']}: {s['summary_data']['summary']}")
+        except Exception:
+            continue
 
     prompt = dedent(
         f"""
     Create a high-level summary of this chapter/part of the document.
-    
+
     Section summaries:
     {chr(10).join(summary_texts)}
-    
+
     Provide a JSON response with:
     {{
         "checkpoint_summary": "A comprehensive 3-4 sentence summary of this entire chunk",
@@ -235,50 +236,93 @@ async def create_checkpoint_summary(
     """
     ).strip()
 
-    try:
-        system_json_guard = (
-            "You output ONLY well-formed JSON objects. No prose, markdown, or extra text. "
-            "Use double-quoted keys/strings and no trailing commas."
-        )
-        model_name = (
-            os.getenv("LITELLM_MODEL")
-            or os.getenv("LITELLM_DEFAULT_MODEL")
-            or os.getenv("DEFAULT_LITELLM_MODEL")
-            or os.getenv("LITELLM_SMALL_MODEL")
-            or os.getenv("LITELLM_VLM_MODEL")
-        )
-        model_name = (model_name or "").strip()
-        if not model_name:
-            raise ValueError(
-                "No LLM model configured. Set LITELLM_DEFAULT_MODEL or DEFAULT_LITELLM_MODEL or LITELLM_VLM_MODEL in .env."
-            )
-        is_gpt5 = "gpt-5" in (model_name or "").lower()
-        params: Dict[str, Any] = {
-            "model": model_name,
-            "messages": [
-                {"role": "system", "content": system_json_guard},
+    # Choose text model (CHUTES_TEXT_MODEL is canonical; helper supports vendor-first ids)
+    model_name = (os.getenv("CHUTES_TEXT_MODEL") or get_text_model()).strip()
+    if not model_name:
+        logger.error("checkpoint_summary.no_model_configured")
+        return None
+
+    system_guard = JSON_SYSTEM_GUARD
+
+    async def _call_once_async():
+        return await sc_acompletion(
+            model=model_name,
+            custom_llm_provider="openai_like",
+            api_base=os.getenv("CHUTES_API_BASE", "").strip() or None,
+            api_key=None,
+            extra_headers={"x-api-key": os.getenv("CHUTES_API_KEY", "").strip()} if os.getenv("CHUTES_API_KEY") else None,
+            messages=[
+                {"role": "system", "content": system_guard},
                 {"role": "user", "content": prompt},
             ],
-            "timeout": request_timeout,
-        }
-        if "gemini" not in (model_name or "").lower():
-            params["response_format"] = {"type": "json_object"}
-        if not is_gpt5:
-            params["temperature"] = 0.3
-        sid = os.getenv("LITELLM_SESSION_ID") or get_run_id()
-        out = await litellm_call([params], concurrency=1, desc="checkpoint_summary", session_id=sid, export="results")
-        content = out[0].content if out else ""
-        result = clean_json_string(content, return_dict=True)
+            response_format={"type":"json_object"},
+            temperature=0.0,
+            timeout=request_timeout,
+        )
 
-        return {
-            "type": "checkpoint",
-            "name": checkpoint_name,
-            "sections_covered": len(successful_summaries),
-            "data": result,
-        }
-    except Exception as e:
-        logger.error(f"Failed to create checkpoint summary: {e}")
+    # Try up to 3 attempts total, honoring capacity signals; helper/client handle Retry-After internally
+    attempts = 0
+    last_err_msg = ""
+    while True:
+        try:
+            resp = await _call_once_async()
+            break
+        except Exception as e:
+            attempts += 1
+            msg = str(e)
+            last_err_msg = msg
+            if attempts >= 3:
+                logger.error(f"Failed to create checkpoint summary (attempts={attempts}): {e}")
+                # If capacity-related, emit a skip marker so downstream can record it deterministically
+                if any(t in msg for t in ("429", "Too Many Requests", "capacity", "maximum capacity")):
+                    return {
+                        "type": "checkpoint",
+                        "name": checkpoint_name,
+                        "sections_covered": len(successful_summaries),
+                        "data": {"checkpoint_skipped": "capacity"},
+                        "skipped": True,
+                        "reason": "capacity",
+                    }
+                if ("401" in msg) or ("Unauthorized" in msg):
+                    return {
+                        "type": "checkpoint",
+                        "name": checkpoint_name,
+                        "sections_covered": len(successful_summaries),
+                        "data": {"checkpoint_skipped": "auth"},
+                        "skipped": True,
+                        "reason": "auth",
+                    }
+                return None
+            # Capacity / rate limit: brief guard before next attempt; helper performs proper backoff
+            if any(t in msg for t in ("429", "Too Many Requests", "capacity", "maximum capacity")):
+                logger.info(f"checkpoint_summary.retry_after_capacity attempt={attempts}")
+                await asyncio.sleep(0.5)
+                continue
+            # Auth transients: allow one more try (helper may lock a working auth style)
+            if ("401" in msg) or ("Unauthorized" in msg):
+                logger.info(f"checkpoint_summary.retry_after_401 attempt={attempts}")
+                await asyncio.sleep(0.25)
+                continue
+            # Other errors: do not spin
+            logger.error(f"Failed to create checkpoint summary: {e}")
+            return None
+
+    content = (resp.get("choices") or [{}])[0].get("message", {}).get("content", "")
+    if not content:
+        logger.error("checkpoint_summary.empty_content")
         return None
+    try:
+        result = clean_json_string(content, return_dict=True)
+    except Exception as e:
+        logger.error(f"checkpoint_summary.json_clean_failed: {e}")
+        return None
+
+    return {
+        "type": "checkpoint",
+        "name": checkpoint_name,
+        "sections_covered": len(successful_summaries),
+        "data": result,
+    }
 
 
 async def batch_summarize_sections_rolling(

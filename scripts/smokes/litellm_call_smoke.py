@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """
-Smoke checks for extractor.pipeline.utils.litellm_call
+SciLLM Chutes smoke checks (replaces litellm_call smokes)
 
 Goals
-- Exercise CLI-equivalent calls without colliding with the upstream `litellm` package
-- Confirm env model resolution and basic text JSON sanity
-- Optionally run an image URL case
+- Confirm SciLLM env model resolution and basic text JSON sanity
+- Optionally run an image URL and local image case via helper/compression
 
 Artifacts
 - Writes a log file under scripts/artifacts/ with timestamp
@@ -23,17 +22,15 @@ import typer
 from dotenv import load_dotenv, find_dotenv
 
 
-app = typer.Typer(add_completion=False, help="Smoke: litellm_call (Router adapter)")
+app = typer.Typer(add_completion=False, help="Smoke: SciLLM Chutes helper")
 
 
 def _resolve_default_model() -> str:
-    # Prefer explicit SMOKE_MODEL; then OPENAI default if key present; then env chain
+    # Prefer explicit SMOKE_MODEL; then CHUTES_TEXT_MODEL
     sm = os.getenv("SMOKE_MODEL", "").strip()
     if sm:
         return sm
-    if os.getenv("OPENAI_API_KEY"):
-        return "openai/gpt-4o-mini"
-    return os.getenv("LITELLM_MODEL") or os.getenv("LITELLM_DEFAULT_MODEL") or os.getenv("DEFAULT_LITELLM_MODEL") or ""
+    return os.getenv("CHUTES_TEXT_MODEL", "")
 
 
 def _ensure_src_path():
@@ -59,16 +56,14 @@ def sanity(
     timeout: int = typer.Option(20, help="Request timeout seconds"),
     wrap_json: bool = typer.Option(True, help="Wrap non-JSON; include usage metadata"),
 ):
-    """Run a minimal {\"ok\":true} JSON sanity via litellm_call."""
+    """Run a minimal {\"ok\":true} JSON sanity via SciLLM helper."""
     try:
         try:
             load_dotenv(find_dotenv(usecwd=True))
         except Exception:
             load_dotenv()
-        # Prefer httpx transport to reduce aiohttp SSL noise
-        os.environ.setdefault("LITELLM_HTTPX", "1")
         _ensure_src_path()
-        from extractor.pipeline.utils import litellm_call as lc  # type: ignore
+        from scillm import completion  # type: ignore
 
         prompt = 'Return only {"ok":true} as JSON.'
         prompts = [prompt]
@@ -82,11 +77,21 @@ def sanity(
         }
 
         if not model:
-            model = lc.MODEL  # fall back to module default chain
+            model = os.getenv("CHUTES_TEXT_MODEL", "")
 
-        # Run and record
-        out = lc.asyncio.run(lc.litellm_call(prompts, **kwargs))  # type: ignore[attr-defined]
-        text = out[0] if out else ""
+        # Run and record (SciLLM helper returns OpenAI-like response)
+        res = completion(
+            model=model,
+            custom_llm_provider="openai_like",
+            api_base=os.environ.get("CHUTES_API_BASE",""),
+            api_key=None,
+            extra_headers={"x-api-key": os.environ.get("CHUTES_API_KEY","")},
+            messages=[{"role": "user", "content": prompt}],
+            response_format={"type":"json_object"},
+            timeout=timeout,
+        )
+        content = res.get("choices", [{}])[0].get("message", {}).get("content", "")
+        text = content if isinstance(content, str) else json.dumps(content)
         lines = [f"MODEL={model}", f"PROMPT={prompt}", f"OUTPUT={text[:300]}..."]
         ok = False
         try:
@@ -112,23 +117,38 @@ def image_url(
     model: str = typer.Option(_resolve_default_model(), help="Model (defaults to env)"),
     timeout: int = typer.Option(45, help="Request timeout seconds"),
 ):
-    """Describe a public image URL via litellm_call (vision)."""
+    """Describe a public image URL via SciLLM helper (vision-capable model required)."""
     try:
         try:
             load_dotenv(find_dotenv(usecwd=True))
         except Exception:
             load_dotenv()
-        os.environ.setdefault("LITELLM_HTTPX", "1")
         _ensure_src_path()
-        from extractor.pipeline.utils import litellm_call as lc  # type: ignore
+        from scillm import completion  # type: ignore
 
-        prompt = f"Describe this image: {url}"
-        prompts = [prompt]
-        kwargs = {"wrap_json": False, "request_timeout": timeout, "num_retries": 1, "show_progress": False, "concurrency": 1}
         if not model:
-            model = lc.MODEL
-        out = lc.asyncio.run(lc.litellm_call(prompts, **kwargs))  # type: ignore[attr-defined]
-        text = out[0] if out else ""
+            model = os.getenv("CHUTES_VLM_MODEL", os.getenv("CHUTES_TEXT_MODEL", ""))
+
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Describe this image."},
+                    {"type": "image_url", "image_url": {"url": url}},
+                ],
+            }
+        ]
+        res = completion(
+            model=model,
+            custom_llm_provider="openai_like",
+            api_base=os.environ.get("CHUTES_API_BASE",""),
+            api_key=None,
+            extra_headers={"x-api-key": os.environ.get("CHUTES_API_KEY","")},
+            messages=messages,
+            timeout=timeout,
+        )
+        content = res.get("choices", [{}])[0].get("message", {}).get("content", "")
+        text = content if isinstance(content, str) else json.dumps(content)
         ok = bool(text.strip())
         lines = [
             f"MODEL={model}",
@@ -154,17 +174,15 @@ def local_image(
     timeout: int = typer.Option(60, help="Request timeout seconds (raised for local images)"),
     max_kb: int = typer.Option(200, help="Max KB for local image compression"),
 ):
-    """Describe a local image (file path) via litellm_call (vision)."""
+    """Describe a local image (file path) via SciLLM helper (vision)."""
     try:
         try:
             load_dotenv(find_dotenv(usecwd=True))
         except Exception:
             load_dotenv()
-        os.environ.setdefault("LITELLM_HTTPX", "1")
         _ensure_src_path()
-        from extractor.pipeline.utils import litellm_call as lc  # type: ignore
-
         from extractor.pipeline.utils.image_helpers import compress_image_cached
+        from scillm import completion  # type: ignore
         from pathlib import Path as _Path
         p = _Path(path)
         if not p.exists():
@@ -179,10 +197,19 @@ def local_image(
                 ],
             }
         ]
-        prompts = [{"model": model or lc.MODEL, "messages": messages, "timeout": timeout}]
-        kwargs = {"wrap_json": False, "request_timeout": timeout, "num_retries": 1, "show_progress": False, "concurrency": 1}
-        out = lc.asyncio.run(lc.litellm_call(prompts, **kwargs))  # type: ignore[attr-defined]
-        text = out[0] if out else ""
+        if not model:
+            model = os.getenv("CHUTES_VLM_MODEL", os.getenv("CHUTES_TEXT_MODEL", ""))
+        res = completion(
+            model=model,
+            custom_llm_provider="openai_like",
+            api_base=os.environ.get("CHUTES_API_BASE",""),
+            api_key=None,
+            extra_headers={"x-api-key": os.environ.get("CHUTES_API_KEY","")},
+            messages=messages,
+            timeout=timeout,
+        )
+        content = res.get("choices", [{}])[0].get("message", {}).get("content", "")
+        text = content if isinstance(content, str) else json.dumps(content)
         ok = bool(text.strip())
         lines = [
             f"MODEL={model}",
@@ -207,22 +234,27 @@ def stream(
     model: str = typer.Option(_resolve_default_model(), help="Model (defaults to env)"),
     timeout: int = typer.Option(20, help="Request timeout seconds"),
 ):
-    """Stream a single prompt via litellm_call (stream=True) and save artifact."""
+    """Stream is not supported via the simple helper; run a non-stream JSON check instead."""
     try:
         try:
             load_dotenv(find_dotenv(usecwd=True))
         except Exception:
             load_dotenv()
-        os.environ.setdefault("LITELLM_HTTPX", "1")
         _ensure_src_path()
-        from extractor.pipeline.utils import litellm_call as lc  # type: ignore
-
-        prompts = [prompt]
-        kwargs = {"wrap_json": False, "request_timeout": timeout, "num_retries": 0, "show_progress": False, "concurrency": 1, "stream": True}
+        from scillm import completion  # type: ignore
         if not model:
-            model = lc.MODEL
-        out = lc.asyncio.run(lc.litellm_call(prompts, **kwargs))  # type: ignore[attr-defined]
-        text = out[0] if out else ""
+            model = os.getenv("CHUTES_TEXT_MODEL", "")
+        res = completion(
+            model=model,
+            custom_llm_provider="openai_like",
+            api_base=os.environ.get("CHUTES_API_BASE",""),
+            api_key=None,
+            extra_headers={"x-api-key": os.environ.get("CHUTES_API_KEY","")},
+            messages=[{"role":"user","content":prompt}],
+            timeout=timeout,
+        )
+        content = res.get("choices", [{}])[0].get("message", {}).get("content", "")
+        text = content if isinstance(content, str) else json.dumps(content)
         ok = bool(text.strip())
         lines = [f"MODEL={model}", f"PROMPT={prompt}", f"STREAM_OUTPUT={text[:200]}...", f"OK={ok}"]
         path_out = _write_artifact(lines)
@@ -241,24 +273,34 @@ def batch(
     model: str = typer.Option(_resolve_default_model(), help="Model (defaults to env)"),
     timeout: int = typer.Option(20, help="Request timeout seconds"),
 ):
-    """Run two prompts (batch) via litellm_call and save artifact."""
+    """Run two prompts (batch) via SciLLM helper (sequential) and save artifact."""
     try:
         try:
             load_dotenv(find_dotenv(usecwd=True))
         except Exception:
             load_dotenv()
-        os.environ.setdefault("LITELLM_HTTPX", "1")
         _ensure_src_path()
-        from extractor.pipeline.utils import litellm_call as lc  # type: ignore
+        from scillm import completion  # type: ignore
 
         prompts = ["What is 2+2?", "Capital of France?"]
-        kwargs = {"wrap_json": False, "request_timeout": timeout, "num_retries": 0, "show_progress": False, "concurrency": 2}
         if not model:
-            model = lc.MODEL
-        out = lc.asyncio.run(lc.litellm_call(prompts, **kwargs))  # type: ignore[attr-defined]
-        lines = [f"MODEL={model}", f"P0={prompts[0]}", f"R0={out[0][:120] if out else ''}", f"P1={prompts[1]}", f"R1={out[1][:120] if len(out)>1 else ''}"]
+            model = os.getenv("CHUTES_TEXT_MODEL", "")
+        outs: list[str] = []
+        for p in prompts:
+            r = completion(
+                model=model,
+                custom_llm_provider="openai_like",
+                api_base=os.environ.get("CHUTES_API_BASE",""),
+                api_key=None,
+                extra_headers={"x-api-key": os.environ.get("CHUTES_API_KEY","")},
+                messages=[{"role":"user","content":p}],
+                timeout=timeout,
+            )
+            c = r.get("choices", [{}])[0].get("message", {}).get("content", "")
+            outs.append(c if isinstance(c, str) else json.dumps(c))
+        lines = [f"MODEL={model}", f"P0={prompts[0]}", f"R0={outs[0][:120] if outs else ''}", f"P1={prompts[1]}", f"R1={outs[1][:120] if len(outs)>1 else ''}"]
         path_out = _write_artifact(lines)
-        ok = len(out) == 2 and all(isinstance(x, str) and x.strip() for x in out)
+        ok = len(outs) == 2 and all(isinstance(x, str) and x.strip() for x in outs)
         if ok:
             typer.echo(f"OK: batch returned two results; artifact: {path_out}")
         else:

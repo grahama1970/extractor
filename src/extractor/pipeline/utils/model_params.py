@@ -48,7 +48,8 @@ def build_chat_extras(model_name: str) -> Dict[str, Any]:
     if "gemini" not in name:
         # Non-Gemini: request strict JSON object responses; reduce variance
         extras["response_format"] = {"type": "json_object"}
-        extras["top_p"] = 0
+        # Avoid provider 400s: top_p must be in (0, 1], not 0
+        extras["top_p"] = 1
         extras["presence_penalty"] = 0
         extras["frequency_penalty"] = 0
     else:

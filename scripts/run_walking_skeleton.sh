@@ -33,14 +33,9 @@ python src/extractor/pipeline/steps/06_figure_extractor.py run \
   ${DESC_FLAG} \
   ${DESC_FLAG}
 
+# Defer PDF annotator until after reflow/summaries so it runs as 09a
 BASE_NAME=$(basename "$PDF_PATH")
 CLEAN_NAME="${BASE_NAME%.pdf}_clean.pdf"
-python src/extractor/pipeline/steps/06c_pdf_annotator.py \
-  "$OUT_DIR/01_annotation_processor/$CLEAN_NAME" \
-  --sections "$OUT_DIR/04_section_builder/json_output/04_sections.json" \
-  --tables "$OUT_DIR/05_table_extractor/json_output/05_tables.json" \
-  --figures "$OUT_DIR/06_figure_extractor/json_output/06_figures.json" \
-  -o "$OUT_DIR"
 
 # Stage 07: summary-only (no LLM); deterministic pass-through of merged text
 if [[ "${PROFILE}" == "prod" ]]; then
@@ -64,6 +59,17 @@ fi
 
 # Minimal summaries (no LLM) for Stage 10
 SUM_PATH=$(python scripts/make_min_summaries.py "$OUT_DIR/04_section_builder/json_output/04_sections.json" "$OUT_DIR")
+
+# Run the annotator AFTER Stage 07 (and summaries), tagging outputs under 09a
+python src/extractor/pipeline/steps/09a_pdf_annotator.py \
+  "$OUT_DIR/01_annotation_processor/$CLEAN_NAME" \
+  --sections "$OUT_DIR/04_section_builder/json_output/04_sections.json" \
+  --tables "$OUT_DIR/05_table_extractor/json_output/05_tables.json" \
+  --figures "$OUT_DIR/06_figure_extractor/json_output/06_figures.json" \
+  --reflowed "$OUT_DIR/07_reflow_section/json_output/07_reflowed.json" \
+  --blocks02 "$OUT_DIR/02_marker_extractor/json_output/02_marker_blocks.json" \
+  --stage-tag auto \
+  -o "$OUT_DIR"
 
 python src/extractor/pipeline/steps/10_arangodb_exporter.py run \
   --reflowed "$OUT_DIR/07_reflow_section/json_output/07_reflowed.json" \

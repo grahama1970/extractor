@@ -48,5 +48,10 @@ class BaseService:
         raise NotImplementedError
 
 
-# Import services for module-level access
-from extractor.core.services.litellm import LiteLLMService
+# Import services for module-level access (optional; guard litellm availability)
+try:
+    from extractor.core.services.litellm import LiteLLMService  # type: ignore
+except Exception:  # pragma: no cover
+    class LiteLLMService:  # type: ignore
+        def __init__(self, *args, **kwargs):  # minimal stub if litellm stack absent
+            raise ImportError("LiteLLM stack not available; use SciLLM paths instead.")

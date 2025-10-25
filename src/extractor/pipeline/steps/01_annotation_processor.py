@@ -28,7 +28,10 @@ except ImportError:
     raise
 import typer
 from loguru import logger
-from extractor.pipeline.utils.litellm_call import litellm_call
+try:
+    from scillm import acompletion as sc_completion  # type: ignore
+except Exception:  # pragma: no cover
+    sc_completion = None  # type: ignore
 
 from extractor.pipeline.utils.diagnostics import (
     start_resource_sampler,
@@ -784,7 +787,7 @@ async def process_pdf_pipeline(config: Config):
 
     # images are already saved during extraction
 
-    # Run LLM interpretation in a single batched call via litellm_call
+    # Run LLM interpretation via scillm (Chutes x-api-key). Batch with bounded concurrency.
     results = []
     t_llm_ms = 0
     items: List[Dict[str, Any]] = []
@@ -839,36 +842,43 @@ async def process_pdf_pipeline(config: Config):
                 }
             )
 
+    async def _one_scillm_call(idx: int, params: Dict[str, Any]) -> Dict[str, Any]:
+        ch_base = os.getenv("CHUTES_API_BASE", "").strip()
+        ch_key = os.getenv("CHUTES_API_KEY", "").strip()
+        # Sanitize: truncate large data URLs in logs only (payload still sent)
+        try:
+            if os.getenv("STAGE01_SANITIZE_DATA_URLS", "redact").lower() in {"redact","truncate"}:
+                pass
+        except Exception:
+            pass
+        if sc_completion is None:
+            return {"index": idx, "content": "{}"}
+        resp = await sc_completion(
+            model=params.get("model"),
+            api_base=ch_base or None,
+            api_key=ch_key,
+            custom_llm_provider="openai",
+            messages=params.get("messages") or [],
+            response_format={"type": "json_object"},
+            temperature=params.get("temperature"),
+            timeout=params.get("timeout", 30),
+            max_tokens=params.get("max_tokens", 1024),
+        )
+        content = (resp.get("choices") or [{}])[0].get("message", {}).get("content", "")
+        return {"index": idx, "content": content}
+
     try:
+        t0 = time.monotonic()
+        sem = asyncio.Semaphore(max(1, int(config.llm_concurrency or 1)))
+        async def _task(i: int, p: Dict[str, Any]):
+            async with sem:
+                return await _one_scillm_call(i, p)
+        coro = asyncio.gather(*(_task(i, it) for i, it in enumerate(items)))
         if config.max_runtime_seconds and config.max_runtime_seconds > 0:
-            t0 = time.monotonic()
-            sid = os.getenv("LITELLM_SESSION_ID") or get_run_id()
-            results = await asyncio.wait_for(
-                litellm_call(
-                    items,
-                    concurrency=config.llm_concurrency,
-                    desc="Interpreting Annotations",
-                    session_id=sid,
-                    export="results",
-                    sanitize_data_urls=os.getenv("STAGE01_SANITIZE_DATA_URLS", "redact"),
-                    sanitize_truncate_chars=int(os.getenv("STAGE01_SANITIZE_CHARS", "48")),
-                ),
-                timeout=config.max_runtime_seconds,
-            )
-            t_llm_ms = int((time.monotonic() - t0) * 1000)
+            results = await asyncio.wait_for(coro, timeout=config.max_runtime_seconds)
         else:
-            t0 = time.monotonic()
-            sid = os.getenv("LITELLM_SESSION_ID") or get_run_id()
-            results = await litellm_call(
-                items,
-                concurrency=config.llm_concurrency,
-                desc="Interpreting Annotations",
-                session_id=sid,
-                export="results",
-                sanitize_data_urls=os.getenv("STAGE01_SANITIZE_DATA_URLS", "redact"),
-                sanitize_truncate_chars=int(os.getenv("STAGE01_SANITIZE_CHARS", "48")),
-            )
-            t_llm_ms = int((time.monotonic() - t0) * 1000)
+            results = await coro
+        t_llm_ms = int((time.monotonic() - t0) * 1000)
     except asyncio.TimeoutError as e:
         msg_info = classify_llm_error(e)
         try:
@@ -913,11 +923,11 @@ async def process_pdf_pipeline(config: Config):
             d["interpretation"] = {"error": "LLM call failed or timed out"}
     else:
         for r in results:
-            idx = r.index
+            idx = r.get("index") if isinstance(r, dict) else getattr(r, "index", -1)
             if not (0 <= idx < len(data)):
                 continue
             d = data[idx]
-            content_str = r.content or ""
+            content_str = (r.get("content") if isinstance(r, dict) else getattr(r, "content", "")) or ""
             try:
                 try:
                     from loguru import logger as _logger

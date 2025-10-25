@@ -432,3 +432,6 @@ diff --git a/src/extractor/pipeline/steps/07_reflow_section.py b/src/extractor/p
 +        except Exception:
 +            parsed = {}
 ```
+> Note: This document contains historical references to .
+> Extractor is now SciLLM-only. Use 
+> helpers instead of .

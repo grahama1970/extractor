@@ -1,11 +1,26 @@
-prototypes/tabbed/html/src/pages/ClassicLayout.tsx (your current copy after you patch)
+ask copilot in the chat for a comprehensive review of th entire pipeline focusing on missing functionality, aspiration/brittle features, unnecesary adhoc/bespoke functions, strengths, the ability to handle a wide variety of pdf. Proved file paths and a list of clarifying questions and ask for unified diff as a file artifact and answer to your qeustins
+template:
 
-prototypes/tabbed/html/src/index.css (full file)
 
-prototypes/tabbed/html/src/App.css (if it still exists; confirm whether it’s imported anywhere)
+ in the devops project, we have been having good collaborative results
+  by the devops agent dynaically creating a notebook viewer, how might
+  we do that here for the extractor project? /home/graham/workspace/
+  experiments/devops/notebooks/sparta_rationales_plan.ipynb
 
-prototypes/tabbed/html/src/components/ui/sidebar.tsx (we rely on its layout helpers; want to confirm no extra overflow or width rules)
 
-prototypes/tabbed/html/index.html (to confirm no external stylesheet is pulled)
-
-Any project-level CSS that might affect layout (e.g., a global :root or .container wrapper)
+curl -X POST \
+		https://llm.chutes.ai/v1/chat/completions \
+		-H "Authorization: Bearer $CHUTES_API_KEY" \
+	-H "Content-Type: application/json" \
+	-d '  {
+    "model": "Qwen/Qwen3-235B-A22B-Instruct-2507",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Tell me a 250 word story."
+      }
+    ],
+    "stream": true,
+    "max_tokens": 1024,
+    "temperature": 0.7
+  }'

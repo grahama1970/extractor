@@ -28,8 +28,12 @@ from pathlib import Path
 
 import typer
 from dotenv import load_dotenv, find_dotenv
-import litellm
-from litellm import Router
+try:
+    import litellm  # type: ignore
+    from litellm import Router  # type: ignore
+except Exception:  # pragma: no cover
+    print("SKIP: litellm not installed; smoke_stage07_simple_text skipped.")
+    raise SystemExit(0)
 
 ASSETS = Path("scripts/smokes/pipeline/assets")
 SECTION_JSON = ASSETS / "section_sample.json"

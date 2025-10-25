@@ -1,6 +1,7 @@
-"""
-Utilities for self-contained PDF extraction pipeline
+"""Utilities for the extraction pipeline.
 
-This directory contains all external dependencies copied from the parent project
-to make the poc_simplified_v2 directory self-contained for code review.
+Note: SciLLM helpers are removed by policy. Steps must call
+`scillm.acompletion`/`Router.parallel_acompletions` directly.
 """
+
+__all__ = []

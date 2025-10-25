@@ -1008,7 +1008,7 @@ async def build_and_validate_sections_comprehensive(
     # Optional fallback: derive sections from numbered headings in text blocks when none were built
     try:
         if (
-            result.get("section_count", 0) == 0
+            result.get("section_count", 0) <= 1
             and os.getenv("STAGE04_ENABLE_TEXT_HEADING_FALLBACK", "0").lower() in {"1", "true", "yes", "y"}
         ):
             import re as _re
@@ -1017,12 +1017,15 @@ async def build_and_validate_sections_comprehensive(
             base_map: dict[str, dict] = {}
             synth: list[dict] = []
             # blocks variable is available from earlier scope
+            import re as _re2
+            _cf_re = _re2.compile(r"[\u200e\u200f\u202a-\u202e]")  # strip common bidi/control marks
             for b in blocks:
-                text = (b.get("text") or b.get("content") or "").strip()
+                text_raw = (b.get("text") or b.get("content") or "").strip()
+                text = _cf_re.sub("", text_raw)
                 if not text:
                     continue
                 # Check first line to reduce false positives
-                first_line = text.splitlines()[0].strip()
+                first_line = _cf_re.sub("", text.splitlines()[0]).strip()
                 if not pat.match(first_line):
                     continue
                 is_cont = first_line.endswith(continued_suffix)
@@ -1056,9 +1059,43 @@ async def build_and_validate_sections_comprehensive(
                 base_map[base_title] = entry
                 synth.append(entry)
             if synth:
+                # Post-process: attach pages[] and infer hierarchy via numeric prefixes
+                import re as _re3
+                num_re = _re3.compile(r"^(\d+(?:\.\d+)*)\.")
+                num_map: dict[str, dict] = {}
+                for s in synth:
+                    # pages: inclusive range + any continued_pages
+                    try:
+                        ps = int(s.get("page_start", 0)); pe = int(s.get("page_end", ps))
+                    except Exception:
+                        ps = pe = 0
+                    pages = list(range(ps, pe + 1))
+                    cont = (s.get("metadata", {}) or {}).get("continued_pages") or []
+                    try:
+                        pages = sorted({*pages, *[int(x) for x in cont]})
+                    except Exception:
+                        pages = pages
+                    s["pages"] = pages
+                    # number prefix for hierarchy
+                    m = num_re.match(s.get("title",""))
+                    if m:
+                        num = m.group(1)
+                        s.setdefault("metadata", {})["section_number"] = num
+                        s.setdefault("metadata", {})["section_depth"] = [int(x) for x in num.split('.')]
+                        num_map[num] = s
+                # parent_id via numeric prefix
+                max_depth = 1
+                for num, s in list(num_map.items()):
+                    parts = num.split('.')
+                    max_depth = max(max_depth, len(parts))
+                    if len(parts) > 1:
+                        parent_num = '.'.join(parts[:-1])
+                        parent = num_map.get(parent_num)
+                        if parent:
+                            s["parent_id"] = parent.get("id")
                 result["sections"] = synth
                 result["section_count"] = len(synth)
-                result["hierarchy_depth"] = 1
+                result["hierarchy_depth"] = max_depth
                 result["suspicious_header_analysis"]["total_sections"] = len(synth)
                 console.print(
                     f"[yellow]Derived {len(synth)} sections from text headings (fallback).[/yellow]"

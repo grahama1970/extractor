@@ -289,68 +289,35 @@ python -m extractor.pipeline.poc_simplified.lean4_converter technical_spec.pdf
 # Example output
 
 
-## 🤖 LLM Router CLI (litellm_call)
+## 🤖 LLM (SciLLM Chutes Helper)
 
-Call any LiteLLM‑supported model (OpenAI/Anthropic/Gemini/Ollama, etc.) with automatic image handling and optional JSON wrapping.
+Extractor now uses SciLLM directly for all Chutes calls. Prefer the built‑in helper `chutes_chat_json` for JSON‑mode requests.
 
-Quick install: the console script `litellm-call` is provided by this package (see `pyproject.toml`).
-
-Basic usage:
+Quick Doctor (expect {"ok":true}):
 ```bash
-# Simple text
-litellm-call "What is 2+2?"
-
-# Enforce JSON + include usage/cost metadata when available
-litellm-call --json "Return only {\"ok\":true}"
-
-# Multiple prompts in one go
-litellm-call "Capital of France?" "Largest ocean?"
-
-# Fan-out across multiple models (prefixes results with model by default)
-litellm-call --models openai/gpt-4o-mini,gemini/gemini-2.5-flash "Say hi"
-
-# Read prompts from a file (one per line) or JSONL
-litellm-call @prompts.txt
-litellm-call --jsonl @prompts.jsonl
-
-# Stdin
-echo "What is 2+2?" | litellm-call --stdin
-
-# Images: local path or remote URL inside the text; images are auto-detected
-litellm-call "What’s in this image? data/samples/panda.png https://example.com/cat.jpg"
-
-# Session, progress, and output control
-litellm-call --session-id dev-123 --no-progress --output results.txt --quiet "Hello"
+source .venv/bin/activate && set -a && [ -f .env ] && source .env && set +a
+unset OPENAI_API_KEY; export SCILLM_AUTOSCALE=1
+python - <<'PY'
+import os
+from extractor.pipeline.utils.chutes_scillm import chutes_chat_json
+out = chutes_chat_json(
+    model=os.environ.get('CHUTES_TEXT_MODEL',''),
+    messages=[{"role":"user","content":"Return only {\\"ok\\":true} as JSON."}],
+    timeout=30,
+)
+print(out['choices'][0]['message']['content'])
+PY
 ```
 
-Key options:
-- `--json`: shorthand for `--response-format json_object` and `--wrap-json`. Non‑JSON output is wrapped like `{ content, metadata }`.
-- `--models`: Comma‑separated list for one‑prompt → many‑models fan‑out.
-- `--prefix-model/--no-prefix-model`: Prefix each line with `[model]` when using `--models` (defaults to on).
-- `--image-cache-dir`: Persist image compression/downloads between runs.
-- `--session-id`: Attaches a `user`/session identifier to provider calls when supported.
-- `--no-progress`: Disables the progress bar (auto‑disabled for single non‑stream calls).
-- `--output/-o` + `--quiet`: Append results to a file and suppress stdout.
-- `--stream`: Streams plain text for a single prompt (no JSON augmentation).
-
-### Python helper
-
-The quickest way to call a model from your code:
-
+Python helper usage:
 ```python
-import asyncio
-from extractor.pipeline.utils.litellm_call import llm
-
-async def main():
-    # JSON enforced
-    s = await llm('Return only {"ok":true}', model='openai/gpt-4o-mini', json=True)
-    print(s)
-
-    # With an image
-    t = await llm('Describe this image', image='data/samples/panda.png', model='gemini/gemini-2.5-flash')
-    print(t)
-
-asyncio.run(main())
+from extractor.pipeline.utils.chutes_scillm import chutes_chat_json
+resp = chutes_chat_json(
+    model=os.environ["CHUTES_TEXT_MODEL"],
+    messages=[{"role":"user","content":"Return only {\\"ok\\":true} as JSON."}],
+    timeout=30,
+)
+content = resp["choices"][0]["message"]["content"]
 ```
 /-- Branch History Table specification -/
 structure BHT where
@@ -438,16 +405,16 @@ docker run -d -p 8529:8529 arangodb:latest
 
 ## 🚀 Advanced Usage
 
-### LLM Batch Calls (codex_call + litellm_call)
+### LLM Batch Calls (codex_call + SciLLM)
 - Canonical input: JSONL (one JSON object per line).
 - Fields per item:
   - "text": user prompt (required)
-  - "image": optional local path or URL (litellm_call compresses/encodes automatically)
+  - "image": optional local path or URL (helpers compress/encode automatically when needed)
   - "model": optional per-item model override (otherwise environment defaults)
   - Any provider-specific parameters you add are passed through to the API (e.g., temperature, response_format, reasoning), but are only sent if you include them.
 - Reasoning mapping:
   - codex_call: `--reasoning low` adds only `model_reasoning_effort: "low"` to each JSONL item.
-  - litellm_call: forwards any user-specified fields; it does not invent reasoning unless you include it in your JSONL.
+  - SciLLM: forwards any user-specified fields; it does not invent reasoning unless you include it in your JSONL.
 
 Example JSONL (data/demos/codex_call_demo_simple.jsonl)
 
@@ -462,9 +429,9 @@ Run via Codex (exec path):
 - `cat data/demos/codex_call_demo_simple.jsonl | python src/extractor/pipeline/utils/codex_call.py --stdin --jsonl --codex-bin codex`
 - Add minimal reasoning (Codex flag parity): `... --reasoning low` (adds `model_reasoning_effort: "low"` to each item).
 
-Run via API (LiteLLM):
-- `cat data/demos/codex_call_demo_simple.jsonl | python src/extractor/pipeline/utils/litellm_call.py --stdin --jsonl`
-- To pass reasoning through the API, include it yourself in JSONL, e.g., {"reasoning": {"effort": "low"}}.
+Run via SciLLM (helper):
+- Use your component to load each JSONL line and call `chutes_chat_json(...)` with `response_format={"type":"json_object"}` (or schema) per item.
+- To pass reasoning flags, include them directly in each JSONL object.
 
 
 ### Custom Pipeline Configuration

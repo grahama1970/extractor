@@ -705,6 +705,34 @@ def build_cli() -> typer.Typer:
     if validate:
         _validate_output("09", summaries_json)
 
+    # Stage 09a (PDF Annotator) — run AFTER reflow/summaries
+    stage09a_name = "09a_pdf_annotator"
+    ann_dir_09a = results / stage09a_name / "json_output"
+    ann_dir_09a.mkdir(parents=True, exist_ok=True)
+    annotated_pdf = results / stage09a_name / "annotated.pdf"
+    if resume and stage_completed(stage09a_name, [annotated_pdf]):
+        console.print(f"[yellow]Skipping {stage09a_name} (resume)\[/yellow]")
+    else:
+        _run(
+            [
+                sys.executable,
+                "src/extractor/pipeline/steps/09a_pdf_annotator.py",
+                str(effective_clean_pdf),
+                "--sections", str(sections_json),
+                "--tables", str(tables_json),
+                "--figures", str(figures_json),
+                "--reflowed", str(reflow_json),
+                "--blocks02", str(blocks_json),
+                "--stage-tag", "auto",
+                "-o", str(results),
+            ],
+            env,
+            stage_name=stage09a_name,
+        )
+        # record presence of annotated.pdf if created
+        outs = [annotated_pdf] if annotated_pdf.exists() else []
+        record_stage(stage09a_name, outs)
+
     # Stage 10 (Arango export)
     stage10_name = "10_arangodb_exporter"
     flat_json = results / stage10_name / "json_output" / "10_flattened_data.json"

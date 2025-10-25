@@ -8,71 +8,80 @@ dynamically-fetched context is then used to guide a VLM in reflowing and
 improving the section's content. All database and search logic is self-contained.
 """
 
-import os
-import sys
-import json
 import asyncio
-from pathlib import Path
-from typing import Dict, List, Optional, Any
-from datetime import datetime
-import numpy as np
-from textwrap import dedent
-import pandas as pd
-from typing import Optional
+import json
+import os
 import re
+import sys
+from datetime import datetime
+from pathlib import Path
+from textwrap import dedent
+from typing import Any
 
+import numpy as np
+import pandas as pd
 import typer
-from dotenv import load_dotenv, find_dotenv
-from extractor.pipeline.utils.litellm_cache import initialize_litellm_cache
+from dotenv import find_dotenv, load_dotenv
 from loguru import logger
 from rich.console import Console
+# Avoid hard dependency on scillm so deterministic prep paths can run
+try:
+    from scillm import acompletion as sc_acompletion  # type: ignore
+except Exception:  # pragma: no cover
+    sc_completion = None  # type: ignore
+    sc_acompletion = None  # type: ignore
 from tqdm.asyncio import tqdm_asyncio
 
-from extractor.pipeline.utils.json_utils import (
-    clean_json_string,
-    restrict_top_level_keys,
-    parse_json_strict,
-    STRICT_JSON_GUARD,
-    STOP_FENCES,
-    MAX_TOKENS_IMAGE,
-    MAX_TOKENS_FINAL,
-)
-from extractor.pipeline.utils.litellm_response_utils import extract_content
-from extractor.pipeline.utils.image_io import (
-    get_section_image_b64,
-    get_table_image_b64,
-    get_figure_image_b64,
-    get_annotation_image_b64,
-)
+from extractor.core.schema.unified_document import SourceType
+from extractor.pipeline.utils.ann_index import build_ann_index, load_ann_index, query_ann_index
 from extractor.pipeline.utils.diagnostics import (
-    start_resource_sampler,
-    stop_resource_sampler,
+    build_stage_timings,
+    classify_llm_error,
     get_run_id,
+    gpu_metrics_available,
     iso_now,
     make_event,
     snapshot_resources,
-    build_stage_timings,
-    classify_llm_error,
-    gpu_metrics_available,
+    start_resource_sampler,
+    stop_resource_sampler,
 )
+from extractor.pipeline.utils.image_io import (
+    get_annotation_image_b64,
+    get_figure_image_b64,
+    get_section_image_b64,
+    get_table_image_b64,
+)
+from extractor.pipeline.utils.json_utils import (
+    MAX_TOKENS_IMAGE,
+    STOP_FENCES,
+    STRICT_JSON_GUARD,
+    clean_json_string,
+    parse_json_strict,
+    restrict_top_level_keys,
+)
+from extractor.pipeline.utils.litellm_cache import initialize_litellm_cache
+from extractor.pipeline.utils.litellm_response_utils import extract_content
+from extractor.pipeline.utils.log_utils import sanitize_messages_for_return
 from extractor.pipeline.utils.metrics_logger import log_metric
-from extractor.pipeline.utils.litellm_call import litellm_call
 from extractor.pipeline.utils.model_params import (
     build_chat_extras,
 )
 from extractor.pipeline.utils.scillm_client import (
     apply_schema_hint as scillm_apply_schema_hint,
+)
+from extractor.pipeline.utils.scillm_client import (
     reflow_section as scillm_reflow_section,
 )
-from extractor.pipeline.utils.vision import preflight_vision_support
 from extractor.pipeline.utils.text_utils import sanitize_text
 from extractor.pipeline.utils.unified_conversion import build_unified_document_from_reflow
-from extractor.core.schema.unified_document import SourceType
-from extractor.pipeline.utils.ann_index import build_ann_index, query_ann_index, load_ann_index
-from extractor.pipeline.utils.log_utils import sanitize_messages_for_return
+from extractor.pipeline.utils.vision import preflight_vision_support
+
+# Model selection (place imports at top to satisfy E402)
+from extractor.pipeline.utils.model_select import get_vlm_model, get_text_model
+
 
 # Shared helper: table confidence heuristic (0.0–1.0)
-def _table_confidence(t: Dict[str, Any]) -> float:
+def _table_confidence(t: dict[str, Any]) -> float:
     try:
         pm = t.get("pandas_metrics") or {}
         shape = pm.get("shape") or [0, 0]
@@ -114,21 +123,13 @@ console = Console()
 
 # Text embedding model (lazy-loaded)
 text_embedding_model: Any = None
-from extractor.pipeline.utils.embeddings import ensure_embedder as _ensure_embedder
+from extractor.pipeline.utils.embeddings import ensure_embedder as _ensure_embedder  # noqa: E402
 
 # removed local embedder implementation
 
 # Configuration from environment variables
-# Use Ollama for free testing, or set LITELLM_VLM_MODEL env var for other providers
-# Use GPT-5 for reflow by default; can override via env
-# Default to Gemini Flash for multimodal reflow.
-# Stage 07 now prefers a dedicated override via `STAGE07_VLM_MODEL` and
-# falls back to the shared `LITELLM_VLM_MODEL` (used by Stage 06), then the default.
-LLM_MODEL = (
-    os.getenv("STAGE07_VLM_MODEL")
-    or os.getenv("LITELLM_VLM_MODEL")
-    or "gemini/gemini-2.5-flash"
-)
+# Default to a single canonical VLM model; may switch to Text at runtime when images are disabled
+LLM_MODEL = get_vlm_model()
 MAX_CONCURRENT_CALLS = int(os.getenv("MAX_CONCURRENT_LLM_CALLS", 3))
 LLM_SEMAPHORE = asyncio.Semaphore(MAX_CONCURRENT_CALLS)
 SEMANTIC_TOP_K = int(os.getenv("SEMANTIC_ANNOTATION_TOP_K", 5))
@@ -183,7 +184,7 @@ PROMPT_STRICT_REQUIREMENTS = (
 # --- Core LLM and Prompting Functions ---
 
 
-def build_reflow_prompt(section_data: Dict[str, Any]) -> str:
+def build_reflow_prompt(section_data: dict[str, Any]) -> str:
     """Builds a simplified prompt focused on the core reflow task."""
 
     table_count = len(section_data.get("tables", []))
@@ -214,9 +215,9 @@ def build_reflow_prompt(section_data: Dict[str, Any]) -> str:
     ).strip()
 
 
-def build_section_context_text(section: Dict[str, Any]) -> str:
+def build_section_context_text(section: dict[str, Any]) -> str:
     """Compose concise textual context including tables, figures, and the most relevant annotations (with text)."""
-    lines: List[str] = []
+    lines: list[str] = []
     title = sanitize_text(section.get("title", "Untitled"))
     level = section.get("level", 0)
     page_start = section.get("page_start")
@@ -293,7 +294,7 @@ def build_section_context_text(section: Dict[str, Any]) -> str:
                         text = re.sub(r"\s+", " ", text).strip()
                         return text
 
-                    normalized_preview: List[List[str]] = []
+                    normalized_preview: list[list[str]] = []
                     for r in rows:
                         if isinstance(r, dict):
                             normalized_preview.append([_normalize_cell(r.get(c, "")) for c in cols])
@@ -347,8 +348,8 @@ def build_section_context_text(section: Dict[str, Any]) -> str:
             lines.append(f"- Figure {f.get('figure_id')}: {desc[:300]} (image_path={imgp})")
 
     # Annotations on the same pages (include by default) with interpretation if available
-    def _blocks_to_text(blocks: List[Dict[str, Any]], max_chars: int = 400) -> str:
-        parts: List[str] = []
+    def _blocks_to_text(blocks: list[dict[str, Any]], max_chars: int = 400) -> str:
+        parts: list[str] = []
         for blk in blocks or []:
             for ln in blk.get("lines", []):
                 for sp in ln.get("spans", []):
@@ -418,7 +419,7 @@ def _sanitize_table_cell(val: Any) -> str:
         text = text.replace(old, new)
     tokens = text.split()
     if tokens and all(tok.lower() in {"in", "out", "ou", "t"} for tok in tokens):
-        merged: List[str] = []
+        merged: list[str] = []
         i = 0
         while i < len(tokens):
             tok = tokens[i].lower()
@@ -436,13 +437,13 @@ def _sanitize_table_cell(val: Any) -> str:
     return text
 
 
-def _build_table_block_from_stage05(table: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def _build_table_block_from_stage05(table: dict[str, Any]) -> dict[str, Any] | None:
     """Return a canonical table block derived from Stage 05 output."""
     pm = table.get("pandas_metrics") or {}
     orig_columns = pm.get("columns") or []
     columns = [_sanitize_table_cell(c) for c in orig_columns]
     rows_raw = table.get("pandas_df") or []
-    rows: List[List[Any]] = []
+    rows: list[list[Any]] = []
     if columns and isinstance(rows_raw, list):
         for row in rows_raw:
             if isinstance(row, dict):
@@ -462,7 +463,7 @@ def _build_table_block_from_stage05(table: Dict[str, Any]) -> Optional[Dict[str,
     if not columns and not rows:
         return None
 
-    confidence: Dict[str, Any] = {
+    confidence: dict[str, Any] = {
         "status": "high",
         "density": None,
         "source": "camelot+pandas",
@@ -492,7 +493,7 @@ def _build_table_block_from_stage05(table: Dict[str, Any]) -> Optional[Dict[str,
     return block
 
 
-def _build_figure_block_from_stage06(figure: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def _build_figure_block_from_stage06(figure: dict[str, Any]) -> dict[str, Any] | None:
     """Return a canonical figure block derived from Stage 06 output."""
 
     if not isinstance(figure, dict):
@@ -505,7 +506,7 @@ def _build_figure_block_from_stage06(figure: Dict[str, Any]) -> Optional[Dict[st
         page_idx = int(figure.get("page", figure.get("page_idx", -1)))
     except Exception:
         page_idx = -1
-    block: Dict[str, Any] = {
+    block: dict[str, Any] = {
         "type": "figure",
         "title": None,
         "caption": caption,
@@ -519,13 +520,13 @@ def _build_figure_block_from_stage06(figure: Dict[str, Any]) -> Optional[Dict[st
 
 
 async def reflow_section_with_llm(
-    section_data: Dict[str, Any],
+    section_data: dict[str, Any],
     results_base_dir: Path,
     *,
     include_images: bool,
     allow_fallback: bool,
     llm_timeout: int = 60,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Reflow a section using multimodal context (section/table/figure/annotation) and return structured JSON."""
     try:
         sec_diags = []
@@ -563,7 +564,7 @@ async def reflow_section_with_llm(
 
         # Build user content (text + images if supported)
         user_content: Any
-        image_blocks: List[Dict[str, Any]] = []
+        image_blocks: list[dict[str, Any]] = []
         # Optionally perform a lightweight preflight to avoid large failed calls
         if include_images:
             try:
@@ -775,7 +776,7 @@ async def reflow_section_with_llm(
             max_images = int(os.getenv("STAGE07_MAX_IMAGES", "6"))
             attached = 0
 
-            def _attach_blocks(b64: Optional[str], kind: str, meta: dict):
+            def _attach_blocks(b64: str | None, kind: str, meta: dict):
                 nonlocal attached, image_blocks
                 if b64 and attached < max_images:
                     image_blocks.append(
@@ -819,8 +820,85 @@ async def reflow_section_with_llm(
                     {"annotation_id": a.get("id")},
                 )
 
-        # LLM call: Chat Completions via litellm_call
+        # LLM call: Chat Completions via scillm (Chutes x-api-key)
         sid = os.getenv("LITELLM_SESSION_ID") or get_run_id()
+        # Simple prompt path (text-only). When images are NOT included, we can
+        # ask only for: reflow text + merge tables. This reduces provider
+        # variance and avoids empty responses.
+        SIMPLE = (os.getenv("STAGE07_SIMPLE_PROMPT", "1").lower() in ("1", "true", "yes", "y")) and (not include_images)
+        if SIMPLE:
+            try:
+                logs_dir = results_base_dir / "07_reflow_section" / "logs"
+                logs_dir.mkdir(parents=True, exist_ok=True)
+
+                # Build a compact prompt from existing context
+                # System
+                sys_msg = (
+                    "Return ONLY one JSON object with keys: reflowed_json {title, blocks[]}, "
+                    "ocr_corrections, improvements_made, summary. No prose, no code fences, no extra keys."
+                )
+
+                # User: section header + trimmed text + minimal table sketch
+                try:
+                    max_chars = int(os.getenv("STAGE07_CONTEXT_CHARS", "1200"))
+                except Exception:
+                    max_chars = 1200
+                text_part = context_text[:max_chars]
+
+                # Minimal table hint (headers + first sample row, if present)
+                table_hints: list[str] = []
+                for tb in (tables_in_section or [])[:3]:
+                    cols = tb.get("columns") or []
+                    if not cols:
+                        continue
+                    sample = tb.get("sample_rows") or tb.get("rows") or []
+                    first = sample[0] if sample else []
+                    table_hints.append(
+                        f"Table: headers={cols} sample_row={first if isinstance(first, list) else first}"
+                    )
+                tables_txt = "\n".join(table_hints)
+
+                user_text = (
+                    f"Section: {section_data.get('title') or 'Untitled'} (level {section_data.get('level')}) pages {section_data.get('page_start')}–{section_data.get('page_end')}\n"
+                    f"Text (trimmed):\n{text_part}\n\n"
+                    f"Tables (sketch):\n{tables_txt}"
+                ).strip()
+
+                messages_simple = [
+                    {"role": "system", "content": sys_msg},
+                    {"role": "user", "content": [{"type": "text", "text": user_text}]},
+                ]
+
+                # Call SciLLM once in JSON mode (no stop sequences)
+                ch_base = os.getenv("CHUTES_API_BASE", "").strip()
+                ch_key = os.getenv("CHUTES_API_KEY", "").strip()
+                resp_simple = await sc_acompletion(
+                    model=LLM_MODEL,
+                    api_base=ch_base if ch_base else None,
+                    api_key=ch_key,
+                    custom_llm_provider="openai",
+                    messages=messages_simple,
+                    response_format={"type": "json_object"},
+                    temperature=0,
+                    max_tokens=min(STAGE07_MAX_TOKENS, 1024),
+                    timeout=llm_timeout,
+                    cache={"no-cache": True},
+                )
+                content_simple = (resp_simple.get("choices") or [{}])[0].get("message", {}).get("content", "")
+                # Accept dict-or-string
+                if isinstance(content_simple, dict):
+                    result = content_simple
+                else:
+                    try:
+                        result = parse_json_strict(str(content_simple))
+                    except Exception:
+                        result = clean_json_string(str(content_simple), return_dict=True)
+                if isinstance(result, dict) and result.get("reflowed_json"):
+                    return {**section_data, **result, "reflow_status": "success"}
+                # If simple path failed to produce JSON, fall through to existing paths
+            except Exception:
+                pass
+
         # Minimal forced path for smokes: bypass complex strict/compact branches for Gemini
         _force_minimal = os.getenv("STAGE07_FORCE_MINIMAL_CALL", "").lower() in ("1", "true", "yes", "y")
         if _force_minimal:
@@ -849,11 +927,17 @@ async def reflow_section_with_llm(
                     )
                 except Exception:
                     pass
-                res = await litellm_call(
-                    [params_min], wrap_json=False, concurrency=1, desc="Reflow Section (forced-minimal)", session_id=sid, export="results"
+                resp_min = await sc_acompletion(
+                    model=LLM_MODEL,
+                    api_base=os.getenv("CHUTES_API_BASE", "").strip() or None,
+                    api_key=os.getenv("CHUTES_API_KEY", "").strip() or None,
+                    custom_llm_provider="openai",
+                    messages=messages_min,
+                    temperature=0,
+                    timeout=llm_timeout,
+                    cache={"no-cache": True},
                 )
-                rmin = res[0] if res else None
-                content_min = rmin.content if rmin else ""
+                content_min = (resp_min.get("choices") or [{}])[0].get("message", {}).get("content", "")
                 try:
                     (logs_dir / f"response_forced_min_{section_data.get('id','section')}.json").write_text(
                         json.dumps(content_min, ensure_ascii=False, indent=2, default=str) if isinstance(content_min, (dict, list)) else str(content_min)
@@ -1044,7 +1128,7 @@ async def reflow_section_with_llm(
                         pass
                     return out
                 except Exception:
-                    # Fall back to litellm_call path
+                    # Fall back to scillm direct path
                     pass
 
             extras = build_chat_extras(LLM_MODEL)
@@ -1152,11 +1236,7 @@ async def reflow_section_with_llm(
             else:
                 call_params["response_format"] = {"type": "json_object"}
             # Add stop fences for non-Gemini providers to avoid spillover
-            try:
-                if "gemini" not in (LLM_MODEL or "").lower():
-                    call_params["stop"] = STOP_FENCES
-            except Exception:
-                pass
+            # Do not set stop fences; some providers return empty content when stop is present
             # Instrumentation: write request summary now that messages exist
             try:
                 logs_dir = results_base_dir / "07_reflow_section" / "logs"
@@ -1212,23 +1292,28 @@ async def reflow_section_with_llm(
             except Exception:
                 pass
 
-            # Run strict call via litellm_call without mutating global drop_params
-                results = await litellm_call(
-                    [call_params],
-                    wrap_json=True,
-                    concurrency=1,
-                    desc="Reflow Section",
-                    session_id=sid,
-                    export="results",
-                )
-            r0 = results[0] if results else None
+            # Run strict call with scillm (Authorization: Bearer for Chutes Chat in this env)
+            ch_base = os.getenv("CHUTES_API_BASE", "").strip()
+            ch_key = os.getenv("CHUTES_API_KEY", "").strip()
+            resp_sync = await sc_acompletion(
+                model=LLM_MODEL,
+                api_base=ch_base if ch_base else None,
+                api_key=ch_key,
+                custom_llm_provider="openai",
+                messages=messages,
+                response_format={"type": "json_object"},
+                max_tokens=call_params.get("max_tokens"),
+                temperature=0,
+                timeout=llm_timeout,
+                cache={"no-cache": True},
+            )
             try:
                 from loguru import logger as _logger
-                if r0:
-                    _logger.info(f"reflow_strict: model={r0.request.model} ok={r0.exception is None}")
+                _ok = True if resp_sync else False
+                _logger.info(f"reflow_strict: model={LLM_MODEL} ok={_ok}")
             except Exception:
                 pass
-            resp = r0.content if r0 else ""
+            resp = (resp_sync.get("choices") or [{}])[0].get("message", {}).get("content", "")
             try:
                 (logs_dir / f"response_strict_{section_data.get('id','section')}.json").write_text(
                     json.dumps(resp, default=str, indent=2)
@@ -1240,10 +1325,16 @@ async def reflow_section_with_llm(
         except Exception:
             resp = ""
 
-        # Normalize response to get content (use shared extractor for broad compatibility)
-        content: Optional[str] = None
+        # Normalize response to get content: accept dict or string
+        content: str | None = None
         try:
-            content = extract_content(resp) or None
+            if isinstance(resp, dict):
+                content = json.dumps(resp, ensure_ascii=False)
+            elif isinstance(resp, str):
+                content = resp
+            else:
+                # Fallback to shared extractor for other response shapes
+                content = extract_content(resp) or None
         except Exception:
             content = None
         if not isinstance(content, str) or not content.strip():
@@ -1286,11 +1377,7 @@ async def reflow_section_with_llm(
                 else:
                     call_params2["response_format"] = {"type": "json_object"}
                 # Stop fence for non-Gemini providers
-                try:
-                    if "gemini" not in (LLM_MODEL or "").lower():
-                        call_params2["stop"] = STOP_FENCES
-                except Exception:
-                    pass
+                # Do not set stop fences; some providers return empty content when stop is present
                 # Log sanitized compact request for debugging
                 try:
                     logs_dir = results_base_dir / "07_reflow_section" / "logs"
@@ -1306,24 +1393,39 @@ async def reflow_section_with_llm(
                     )
                 except Exception:
                     pass
-                results2 = await litellm_call(
-                    [call_params2], wrap_json=True, concurrency=1, desc="Reflow Section (strict-compact)", session_id=sid, export="results"
+                # Compact strict pass with scillm
+                resp_sync2 = await sc_acompletion(
+                    model=LLM_MODEL,
+                    api_base=ch_base if ch_base else None,
+                    api_key=ch_key,
+                    custom_llm_provider="openai",
+                    messages=messages2,
+                    response_format={"type": "json_object"},
+                    max_tokens=call_params2.get("max_tokens"),
+                    temperature=0,
+                    timeout=llm_timeout,
+                    cache={"no-cache": True},
                 )
-                r2 = results2[0] if results2 else None
                 try:
                     from loguru import logger as _logger
-                    if r2:
-                        _logger.info(f"reflow_strict_compact: model={r2.request.model} ok={r2.exception is None}")
+                    _ok2 = True if resp_sync2 else False
+                    _logger.info(f"reflow_strict_compact: model={LLM_MODEL} ok={_ok2}")
                 except Exception:
                     pass
-                resp2 = r2.content if r2 else ""
+                resp2 = (resp_sync2.get("choices") or [{}])[0].get("message", {}).get("content", "")
                 try:
                     (logs_dir / f"response_strict_compact_{section_data.get('id','section')}.json").write_text(
                         json.dumps(resp2, default=str, indent=2) if isinstance(resp2, dict) else str(resp2)
                     )
                 except Exception:
                     pass
-                content = resp2 if isinstance(resp2, str) else None
+                if isinstance(resp2, dict):
+                    try:
+                        content = json.dumps(resp2, ensure_ascii=False)
+                    except Exception:
+                        content = None
+                else:
+                    content = resp2 if isinstance(resp2, str) else None
             except Exception:
                 content = None
         if not isinstance(content, str) or not content.strip():
@@ -1464,15 +1566,27 @@ async def reflow_section_with_llm(
                     except Exception:
                         content = None
 
+        # Accept dict content directly when response_format={"type":"json_object"}
+        if isinstance(content, dict):
+            try:
+                result = content  # treat as already-parsed JSON
+                try:
+                    (logs_dir / f"response_strict_compact_{section_data.get('id','section')}.json").write_text(
+                        json.dumps(result, indent=2)
+                    )
+                except Exception:
+                    pass
+                # short-circuit to final assembly for this section
+                parsed = result
+                # jump to downstream merge logic by setting a sentinel
+                content = json.dumps(result)
+            except Exception:
+                content = None
+
         if not isinstance(content, str) or not content.strip():
             # Attempt 3: Relaxed mode (no response_format). Parse free-form via clean_json_string downstream.
             try:
-                # Retry 2 shaping: brief backoff + trimmed context + no images + lower max_tokens
-                try:
-                    _backoff_ms = int(os.getenv("STAGE07_RETRY2_BACKOFF_MS", "300"))
-                except Exception:
-                    _backoff_ms = 300
-                await asyncio.sleep(max(0, _backoff_ms) / 1000.0)
+                # Retry 2 shaping (no local sleep/backoff; global limiter handles pacing)
 
                 try:
                     _trim = int(os.getenv("STAGE07_RETRY2_TRIM_CHARS", "1200"))
@@ -1508,20 +1622,23 @@ async def reflow_section_with_llm(
                 except Exception:
                     pass
 
-                results = await litellm_call(
-                    [call_params],
-                    wrap_json=False,
-                    concurrency=1,
-                    desc="Reflow Section (relaxed)",
-                    session_id=sid,
-                    export="results",
+                # Relaxed pass with scillm (no response_format)
+                resp_sync3 = await sc_acompletion(
+                    model=LLM_MODEL,
+                    api_base=ch_base if ch_base else None,
+                    api_key=ch_key,
+                    custom_llm_provider="openai",
+                    messages=messages3,
+                    max_tokens=call_params.get("max_tokens"),
+                    temperature=0,
+                    timeout=llm_timeout,
+                    cache={"no-cache": True},
                 )
-                r2 = results[0] if results else None
-                resp2 = r2.content if r2 else ""
+                resp2 = (resp_sync3.get("choices") or [{}])[0].get("message", {}).get("content", "")
                 try:
                     from loguru import logger as _logger
-                    if r2:
-                        _logger.info(f"reflow_relaxed: model={r2.request.model} ok={r2.exception is None}")
+                    _ok3 = True if resp_sync3 else False
+                    _logger.info(f"reflow_relaxed: model={LLM_MODEL} ok={_ok3}")
                 except Exception:
                     pass
                 try:
@@ -1534,7 +1651,14 @@ async def reflow_section_with_llm(
                     pass
             except Exception:
                 resp2 = ""
-            content = resp2 if isinstance(resp2, str) else None
+            # Accept dict content in relaxed mode as well
+            if isinstance(resp2, dict):
+                try:
+                    content = json.dumps(resp2, ensure_ascii=False)
+                except Exception:
+                    content = None
+            else:
+                content = resp2 if isinstance(resp2, str) else None
         if not isinstance(content, str) or not content.strip():
             typer.secho("Stage 07: LLM returned empty content.", fg=typer.colors.RED)
             raise RuntimeError(
@@ -1544,6 +1668,7 @@ async def reflow_section_with_llm(
         # Parse JSON: strict first (no repair). Optionally relax if allowed.
         try:
             parsed = parse_json_strict(content)
+            result = parsed
         except Exception as _strict_err:
             if os.getenv("STAGE07_STRICT_PARSE_ONLY", "0").lower() in ("1", "true", "yes", "y"):
                 logger.warning(f"Strict JSON parse failed (no repair allowed): {_strict_err}")
@@ -1655,7 +1780,7 @@ async def reflow_section_with_llm(
                             canon_map[f.get("figure_id")] = blk
                     rj = out.get("reflowed_json") or {}
                     blocks = list(rj.get("blocks") or [])
-                    updated: List[Any] = []
+                    updated: list[Any] = []
                     changed = False
                     for blk in blocks:
                         replaced = False
@@ -1721,7 +1846,7 @@ async def reflow_section_with_llm(
                         merged = canon.copy()
                         if isinstance(existing, dict) and existing.get("title"):
                             merged["title"] = existing.get("title")
-                        differences: List[Dict[str, Any]] = []
+                        differences: list[dict[str, Any]] = []
                         try:
                             existing_rows = existing.get("rows") if isinstance(existing, dict) else None
                             if isinstance(existing_rows, list):
@@ -1873,8 +1998,8 @@ def consolidate_data(
     sections_path: Path,
     tables_path: Path,
     figures_path: Path,
-    annotations_path: Optional[Path] = None,
-) -> List[Dict[str, Any]]:
+    annotations_path: Path | None = None,
+) -> list[dict[str, Any]]:
     """Reads and merges data from previous stages (sections, tables, figures, annotations)."""
     with open(sections_path) as f:
         sections_data = json.load(f).get("sections", [])
@@ -1886,14 +2011,14 @@ def consolidate_data(
         figures_list = json.load(f).get("figures", [])
 
     # Index by section id for quick join
-    tables_by_section: Dict[str, List[Dict[str, Any]]] = {}
+    tables_by_section: dict[str, list[dict[str, Any]]] = {}
     for t in tables_list:
         sid = t.get("section_id")
         if sid is None:
             continue
         tables_by_section.setdefault(sid, []).append(t)
 
-    figures_by_section: Dict[str, List[Dict[str, Any]]] = {}
+    figures_by_section: dict[str, list[dict[str, Any]]] = {}
     for g in figures_list:
         sid = g.get("section_id")
         if sid is None:
@@ -1901,8 +2026,8 @@ def consolidate_data(
         figures_by_section.setdefault(sid, []).append(g)
 
     # Load annotations by page (optional)
-    annotations_by_page: Dict[int, List[Dict[str, Any]]] = {}
-    source_pdf: Optional[str] = None
+    annotations_by_page: dict[int, list[dict[str, Any]]] = {}
+    source_pdf: str | None = None
     if annotations_path and annotations_path.exists():
         try:
             with open(annotations_path) as f:
@@ -1915,11 +2040,11 @@ def consolidate_data(
         except Exception as e:
             logger.warning(f"Failed to load annotations from {annotations_path}: {e}")
 
-    def _merge_text_blocks(blocks: List[Dict[str, Any]]) -> str:
+    def _merge_text_blocks(blocks: list[dict[str, Any]]) -> str:
         """Minimal normalization for fallback: join non-empty lines into paragraphs.
         LLM handles full reflow; this is only for pass-through when needed.
         """
-        parts: List[str] = []
+        parts: list[str] = []
         for b in blocks or []:
             txt = (b.get("text") or "").strip()
             if not txt:
@@ -1945,7 +2070,7 @@ def consolidate_data(
         section["figures"] = figures_by_section.get(sid, [])
 
         # Merge tables within the section when they represent header/body or continued parts across pages
-        def _rows_cols(t: Dict[str, Any]) -> tuple[int, int]:
+        def _rows_cols(t: dict[str, Any]) -> tuple[int, int]:
             m = t.get("pandas_metrics") or {}
             shape = m.get("shape") or [0, 0]
             try:
@@ -1963,7 +2088,7 @@ def consolidate_data(
             except Exception:
                 return 0.0
 
-        def _metrics_for(df: pd.DataFrame) -> Dict[str, Any]:
+        def _metrics_for(df: pd.DataFrame) -> dict[str, Any]:
             try:
                 if df is None or df.empty:
                     return {"shape": [0, 0], "data_density": 0.0, "columns": []}
@@ -1981,7 +2106,7 @@ def consolidate_data(
             except Exception:
                 return {"shape": [0, 0], "data_density": 0.0, "columns": []}
 
-        def _merge_section_tables(sec: Dict[str, Any]) -> None:
+        def _merge_section_tables(sec: dict[str, Any]) -> None:
             tabs = list(sec.get("tables") or [])
             if len(tabs) <= 1:
                 return
@@ -1995,7 +2120,7 @@ def consolidate_data(
                 )
             except Exception:
                 pass
-            merged: list[Dict[str, Any]] = tabs[:]
+            merged: list[dict[str, Any]] = tabs[:]
             i = 0
             while i < len(merged) - 1:
                 t1, t2 = merged[i], merged[i + 1]
@@ -2043,9 +2168,10 @@ def consolidate_data(
                             try:
                                 df1 = pd.DataFrame(t1.get("pandas_df") or [])
                                 df2 = pd.DataFrame(t2.get("pandas_df") or [])
-                                _collapse = lambda df: df.applymap(
-                                    lambda v: _sanitize_table_cell(v) if not pd.isna(v) else ""
-                                )
+                                def _collapse(df: pd.DataFrame) -> pd.DataFrame:
+                                    return df.applymap(
+                                        lambda v: _sanitize_table_cell(v) if not pd.isna(v) else ""
+                                    )
                                 if len(df1.columns) == len(df2.columns):
                                     out = pd.concat([_collapse(df1), _collapse(df2)], ignore_index=True)
                                     t1["pandas_df"] = out.to_dict("records")
@@ -2060,7 +2186,7 @@ def consolidate_data(
             # If multiple remain, keep the densest
             if len(merged) > 1:
 
-                def _density(t: Dict[str, Any]) -> float:
+                def _density(t: dict[str, Any]) -> float:
                     m = t.get("pandas_metrics") or {}
                     try:
                         return float(m.get("data_density") or 0.0)
@@ -2078,11 +2204,11 @@ def consolidate_data(
         # Attach relevant annotations by page range, then rank by semantic similarity (text-only fallback)
         page_start = int(section.get("page_start", 0) or 0)
         page_end = int(section.get("page_end", page_start) or page_start)
-        candidates: List[Dict[str, Any]] = []
+        candidates: list[dict[str, Any]] = []
         for p in range(page_start, page_end + 1):
             candidates.extend(annotations_by_page.get(p, []))
         # Always include all on-page annotations by default (no cut)
-        selected: List[Dict[str, Any]] = list(candidates)
+        selected: list[dict[str, Any]] = list(candidates)
         try:
             # Prefer semantic ranking when a text embedding model is available
             embedder = _ensure_embedder()
@@ -2093,8 +2219,8 @@ def consolidate_data(
                 query_text = f"{title}\n{raw_text}".strip()
                 q_vec = embedder.encode(query_text, normalize_embeddings=True)
 
-                def _blocks_to_text(blocks: List[Dict[str, Any]]) -> str:
-                    lines: List[str] = []
+                def _blocks_to_text(blocks: list[dict[str, Any]]) -> str:
+                    lines: list[str] = []
                     for blk in blocks or []:
                         for ln in blk.get("lines", []):
                             for sp in ln.get("spans", []):
@@ -2103,7 +2229,7 @@ def consolidate_data(
                                     lines.append(t)
                     return " ".join(lines)
 
-                annot_texts: List[str] = []
+                annot_texts: list[str] = []
                 for a in candidates:
                     inside = _blocks_to_text(a.get("inside_blocks", []))
                     above = _blocks_to_text(a.get("above_blocks", []))
@@ -2134,7 +2260,7 @@ def consolidate_data(
     return sections_data
 
 
-def _structured_fallback(section_data: Dict[str, Any]) -> Dict[str, Any]:
+def _structured_fallback(section_data: dict[str, Any]) -> dict[str, Any]:
     """Build a deterministic structured reflow (reflow_json) without LLM.
 
     - Merges consecutive text blocks into paragraphs
@@ -2148,16 +2274,16 @@ def _structured_fallback(section_data: Dict[str, Any]) -> Dict[str, Any]:
         lines = [ln.strip() for ln in str(text).splitlines() if ln.strip()]
         return " ".join(lines)
 
-    out: Dict[str, Any] = {
+    out: dict[str, Any] = {
         "section_id": section_data.get("id") or section_data.get("section_id") or "section",
         "title": section_data.get("title") or section_data.get("display_title") or "Untitled",
         "blocks": [],
     }
 
     # Merge consecutive Text blocks into paragraphs
-    para_text: List[str] = []
-    para_pages: List[int] = []
-    para_ids: List[str] = []
+    para_text: list[str] = []
+    para_pages: list[int] = []
+    para_ids: list[str] = []
     for b in section_data.get("blocks", []) or []:
         btype = b.get("block_type") or b.get("type")
         if btype == "Text":
@@ -2237,7 +2363,7 @@ def run(
     figures_json: Path = typer.Option(
         ..., "--figures", help="Path to Stage 06 figures JSON.", exists=True
     ),
-    annotations_json: Optional[Path] = typer.Option(
+    annotations_json: Path | None = typer.Option(
         None, "--annotations", help="Optional: Path to Stage 01 annotations JSON."
     ),
     output_dir: Path = typer.Option(
@@ -2254,7 +2380,7 @@ def run(
         "--allow-fallback",
         help="Allow text-only or pass-through fallbacks instead of failing early",
     ),
-    bundle: Optional[Path] = typer.Option(
+    bundle: Path | None = typer.Option(
         None,
         "--bundle",
         help="Debug: load consolidated sections JSON (keys: reflowed_sections or sections)",
@@ -2270,6 +2396,26 @@ def run(
     Reflows document sections using multimodal context from previous stages.
     """
     console.print("[bold green]Starting Section Reflow (Stage 07)[/bold green]")
+    # Choose model based on images policy: use Text model for text-only runs
+    global LLM_MODEL
+    try:
+        LLM_MODEL = get_vlm_model() if include_images else get_text_model()
+    except Exception as _e:
+        console.print(f"[red]Stage 07 model selection failed: {_e}[/red]")
+        raise typer.Exit(2)
+    # Early sanity: scillm/Chutes must be reachable to avoid hangs
+    try:
+        from extractor.pipeline.utils.preflight import scillm_quick_check
+
+        ok, reason = scillm_quick_check(timeout=3.0)
+        if not ok:
+            console.print(
+                f"[red]Stage 07 preflight failed: {reason}. Set CHUTES_API_BASE/CHUTES_API_KEY or use --summary-only.[/red]"
+            )
+            raise typer.Exit(2)
+    except Exception:
+        # If preflight import fails, be conservative and exit early
+        raise typer.Exit(2)
     run_id = get_run_id()
     diagnostics = []
     errors_count = 0
@@ -2326,6 +2472,20 @@ def run(
     json_output_dir = stage_output_dir / "json_output"
     stage_output_dir.mkdir(parents=True, exist_ok=True)
     json_output_dir.mkdir(exist_ok=True)
+
+    # Prefer enriched tables/figures when present (06a outputs)
+    try:
+        prefer_enriched = os.getenv("STAGE07_PREFER_ENRICHED", "1").lower() in ("1","true","yes","y")
+        if prefer_enriched:
+            base_dir = output_dir
+            enr_tables = base_dir / "06a_title_caption_enricher" / "json_output" / "05_tables.enriched.json"
+            enr_figs = base_dir / "06a_title_caption_enricher" / "json_output" / "06_figures.enriched.json"
+            if enr_tables.exists():
+                tables_json = enr_tables
+            if enr_figs.exists():
+                figures_json = enr_figs
+    except Exception:
+        pass
 
     sections_to_process = consolidate_data(
         sections_json, tables_json, figures_json, annotations_json
@@ -2412,10 +2572,11 @@ def run(
                         ids_scores.append({"id": aid, "score": score})
                         try:
                             # add optional snippet
+                            import os as _os
+
                             from extractor.pipeline.utils.ann_index import (
                                 render_ann_snippet as _snip,
                             )
-                            import os as _os
 
                             if _ann_list:
                                 _maxc = int(_os.getenv("ANN_SIMILAR_SNIPPET_CHARS", "200"))
@@ -2435,14 +2596,14 @@ def run(
             tables = []
         if tables:
             # Group tables by page and create one synthetic section per page
-            by_page: Dict[int, List[Dict[str, Any]]] = {}
+            by_page: dict[int, list[dict[str, Any]]] = {}
             for t in tables:
                 try:
                     p = int(t.get("page_index", 0) or 0)
                 except Exception:
                     p = 0
                 by_page.setdefault(p, []).append(t)
-            synth: List[Dict[str, Any]] = []
+            synth: list[dict[str, Any]] = []
             for p, group in sorted(by_page.items(), key=lambda kv: kv[0]):
                 sid = f"SYNTH_P{p}"
                 synth.append({
@@ -2511,7 +2672,7 @@ def run(
         except Exception:
             want_retry = True
         if want_retry:
-            def _needs_retry(sec: Dict[str, Any]) -> bool:
+            def _needs_retry(sec: dict[str, Any]) -> bool:
                 txt = (sec.get("reflowed_text") or "").strip()
                 return len(txt) == 0
 
@@ -2638,7 +2799,7 @@ def debug_bundle(
         raise typer.Exit(1)
 
     # Ensure minimal text fields for fallback if missing (source_text/merged_text)
-    def _ensure_min_text_fields(sec: Dict[str, Any]) -> None:
+    def _ensure_min_text_fields(sec: dict[str, Any]) -> None:
         if not isinstance(sec, dict):
             return
         if "source_text" in sec and "merged_text" in sec:
@@ -2736,18 +2897,18 @@ if __name__ == "__main__":
 
 # Helper for tests/smoke and for message shaping assertions
 def build_reflow_request_messages(
-    section_data: Dict[str, Any],
+    section_data: dict[str, Any],
     results_base_dir: Path,
     *,
     include_images: bool,
     model: str,
     context_text: str,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     def _is_gemini(m: str) -> bool:
         return "gemini" in (m or "").lower()
 
     # Collect images similar to the main function (section, low-conf table, optional figure, one annotation)
-    image_blocks: List[Dict[str, Any]] = []
+    image_blocks: list[dict[str, Any]] = []
     if include_images:
         # Section visual
         sec_b64 = get_section_image_b64(section_data, results_base_dir)

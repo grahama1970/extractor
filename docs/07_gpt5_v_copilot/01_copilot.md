@@ -216,3 +216,6 @@ Unified diffs (minimal changes)
          export="results",
      )
 ```
+> Note: This document contains historical references to .
+> Extractor is now SciLLM-only. Use 
+> helpers instead of .

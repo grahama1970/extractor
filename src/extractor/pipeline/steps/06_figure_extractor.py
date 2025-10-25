@@ -16,31 +16,39 @@ except ImportError:
     print("PyMuPDF (fitz) not installed. Stage 06 requires it.", file=sys.stderr)
     raise
 import asyncio
-from pathlib import Path
-from loguru import logger
-import sys
-from typing import List, Dict, Any, Optional
 import base64
-from tqdm.asyncio import tqdm_asyncio
 import os
-from datetime import datetime
-from dotenv import load_dotenv, find_dotenv
+import sys
 import textwrap
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
 import typer
-
-
+from dotenv import find_dotenv, load_dotenv
+from loguru import logger
 from rich.console import Console
+try:
+    from scillm import acompletion as sc_completion  # type: ignore
+except Exception:
+    sc_completion = None  # type: ignore
+from extractor.pipeline.utils.model_select import get_vlm_model, ModelSelectionError
+from tqdm.asyncio import tqdm_asyncio
+
 from extractor.pipeline.utils.diagnostics import (
-    start_resource_sampler,
-    stop_resource_sampler,
+    build_stage_timings,
     get_run_id,
+    gpu_metrics_available,
     iso_now,
     make_event,
     snapshot_resources,
-    build_stage_timings,
+    start_resource_sampler,
+    stop_resource_sampler,
 )
-from extractor.pipeline.utils.litellm_call import require_scillm_env, normalize_model_alias
 from extractor.pipeline.utils.litellm_cache import initialize_litellm_cache
+def _normalize_model_alias(model: str | None) -> str:
+    """Pass-through alias helper. Preserve prefixes like 'openai/'."""
+    return (model or "").strip()
 
 # --- Initialization & Configuration ---
 
@@ -68,8 +76,12 @@ console = Console()
 
 # Make key parameters configurable via environment variables
 VERTICAL_PADDING_RATIO = float(os.getenv("FIGURE_VERTICAL_PADDING", "0.2"))
-# Use local model for simple image descriptions (2-3 sentences)
-VLM_MODEL = (os.getenv("LITELLM_VLM_MODEL") or "").strip()
+# Single-source VLM model (no tiered fallbacks)
+try:
+    VLM_MODEL = get_vlm_model()
+except ModelSelectionError as _e:
+    print(f"Error: {_e}", file=sys.stderr)
+    VLM_MODEL = ""
 MAX_FIGURES_PER_DOC = int(os.getenv("FIGURE_MAX_PER_DOC", "12"))
 MAX_FIGURES_PER_SECTION = int(os.getenv("FIGURE_MAX_PER_SECTION", "3"))
 FIGURE_DESC_ENABLED = os.getenv("FIGURE_DESC", "1").lower() in {"1","true","yes"}
@@ -81,7 +93,7 @@ DEFAULT_VLM = os.getenv("DEFAULT_VLM", "Qwen/Qwen2.5-VL-32B-Instruct").strip()
 
 
 async def describe_image_with_llm(image_data: bytes, context: str = "") -> str:
-    """Describe an image via a single LiteLLM Chat call (Router.acompletion under the hood)."""
+    """Describe an image (SciLLM path; no direct Router use)."""
     system_prompt = textwrap.dedent(
         """
         You are a helpful assistant that writes concise technical figure descriptions (2–3 sentences).
@@ -93,33 +105,33 @@ async def describe_image_with_llm(image_data: bytes, context: str = "") -> str:
         {"type": "text", "text": f"Context: {context[:2000]}"},
         {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
     ]
-    require_scillm_env()
-    # Prefer explicit VLM model, then MED VLM, then DEFAULT_VLM constant
-    raw_model = (
-        os.getenv("LITELLM_VLM_MODEL")
-        or os.getenv("LITELLM_MED_VLM_MODEL")
-        or DEFAULT_VLM
-    ).strip()
-    model = normalize_model_alias(raw_model)
+    # Use SciLLM async client via helper (SciLLM-only policy)
+    ch_base = os.getenv("CHUTES_API_BASE", "").strip()
+    ch_key = os.getenv("CHUTES_API_KEY", "").strip()
+    model = _normalize_model_alias(VLM_MODEL)
+    if not model:
+        raise RuntimeError("CHUTES_VLM_MODEL not set; cannot describe images")
     try:
-        import importlib
-        _litellm = importlib.import_module("litellm")
-        resp = await _litellm.acompletion(
-            model=model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_content},
-            ],
-            timeout=25,
-            max_tokens=256,
-            temperature=0.2,
-            custom_llm_provider="openai",
-        )
-        content = None
-        try:
-            content = resp["choices"][0]["message"]["content"]
-        except Exception:
-            content = getattr(getattr(resp, "choices", [None])[0], "message", {}).get("content") if hasattr(resp, "choices") else None
+        if ch_base and ch_key:
+            from scillm import acompletion as sc_acompletion
+            resp = await sc_acompletion(
+                model=model,
+                custom_llm_provider="openai_like",
+                api_base=ch_base,
+                api_key=None,
+                extra_headers={"x-api-key": ch_key},
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_content},
+                ],
+                temperature=0.2,
+                timeout=25.0,
+            )
+            content = (resp.get("choices") or [{}])[0].get("message", {}).get("content", "")
+        else:
+            # No CHUTES_* present; return empty or a placeholder to keep deterministic behavior
+            logger.warning("CHUTES_* not set; skipping figure description (scillm required)")
+            content = ""
         desc = (content or "").strip()
         if not desc:
             logger.error(f"figure_description.empty_output model={model}")
@@ -131,11 +143,11 @@ async def describe_image_with_llm(image_data: bytes, context: str = "") -> str:
 
 async def extract_and_describe_figure(
     pdf_path: Path,
-    block: Dict[str, Any],
+    block: dict[str, Any],
     figure_id: str,
     output_dir: Path,
     skip_descriptions: bool = False,
-) -> Optional[Dict[str, Any]]:
+) -> dict[str, Any] | None:
     """Extract a single figure with padding and get its description."""
     try:
         page_num = block.get("page_idx", 0)
@@ -238,6 +250,88 @@ async def extract_and_describe_figure(
                     figure_md_diags = []
                 description = f"Error: Failed to get description - {e}"
 
+        # Title detection / inference (text-only, local or scillm text model)
+        import re as _re
+        figure_title: str | None = None
+        title_source: str | None = None
+        try:
+            import fitz as _fitz
+            with _fitz.open(str(pdf_path)) as _doc:
+                _page2 = _doc[page_num]
+                rr = _fitz.Rect(*bbox)
+                # Prefer caption below the figure
+                band_below = _fitz.Rect(rr.x0, rr.y1, rr.x1, min(_page2.rect.height, rr.y1 + 140))
+                blks = _page2.get_text('blocks', clip=band_below)
+                for b in sorted(blks, key=lambda x: x[1]):
+                    txt = (b[4] or '').strip()
+                    if not txt:
+                        continue
+                    if _re.match(r"^\s*(Figure|Fig\.)\s*([A-Za-z0-9\-\.]+)?[\.:]?\s*(.*)$", txt, _re.IGNORECASE):
+                        figure_title = txt
+                        title_source = 'below'
+                        break
+                if figure_title is None:
+                    band_above = _fitz.Rect(rr.x0, max(0, rr.y0 - 120), rr.x1, rr.y0)
+                    blks2 = _page2.get_text('blocks', clip=band_above)
+                    for b in sorted(blks2, key=lambda x: -x[3]):
+                        txt = (b[4] or '').strip()
+                        if not txt:
+                            continue
+                        if _re.match(r"^\s*(Figure|Fig\.)\s*([A-Za-z0-9\-\.]+)?[\.:]?\s*(.*)$", txt, _re.IGNORECASE):
+                            figure_title = txt
+                            title_source = 'above'
+                            break
+        except Exception:
+            pass
+
+        if not figure_title:
+            # Infer using nearby text and description (text-only); prefix with INFER:
+            base = os.getenv('CHUTES_API_BASE', '').strip(); key = os.getenv('CHUTES_API_KEY','').strip()
+            model = (os.getenv('CHUTES_TEXT_MODEL') or os.getenv('LITELLM_DEFAULT_MODEL') or '').strip()
+            inferred = None
+            if sc_completion and base and key and model:
+                prompt = (
+                    "You are naming a figure for a technical document. Return ONLY a short title (<=10 words).\n"
+                    "Do not include the word 'Figure' or numbering.\n\n"
+                    f"Context (nearby text):\n{nearby_text[:800]}\n\n"
+                    f"Description (if any):\n{(description or '')[:400]}\n"
+                )
+                try:
+                    # We are already in an async context; await sc_completion directly.
+                    resp = await sc_completion(
+                        model=model,
+                        api_base=base,
+                        api_key=key,
+                        custom_llm_provider='openai',
+                        messages=[{"role":"user","content": prompt}],
+                        response_format={"type":"json_object"},
+                        max_tokens=64,
+                        temperature=0.2,
+                        timeout=6.0,
+                    )
+                    content = (resp.get('choices') or [{}])[0].get('message',{}).get('content','').strip()
+                    inferred = content.strip().strip('"') if content else None
+                except Exception:
+                    inferred = None
+            if inferred:
+                figure_title = f"INFER: {inferred}"
+                title_source = title_source or 'infer'
+
+        number = None; base_title = None; normalized_id = None
+        if figure_title:
+            m = _re.match(r"\s*(?:Figure|Fig\.)\s*([A-Za-z0-9\-\.]+)?[\.:]?\s*(.*)$", figure_title, _re.IGNORECASE)
+            if m:
+                number = (m.group(1) or '').strip() or None
+                base_title = (m.group(2) or '').strip()
+            else:
+                base_title = figure_title
+            if number:
+                normalized_id = f"figure-{number}"
+            elif base_title:
+                import hashlib as _hash
+                slug = ''.join(ch.lower() if ch.isalnum() else '-' for ch in base_title).strip('-')
+                normalized_id = f"figure-{slug or _hash.sha1(base_title.encode('utf-8')).hexdigest()[:8]}"
+
         return {
             "figure_id": figure_id,
             "page": page_num,
@@ -245,6 +339,11 @@ async def extract_and_describe_figure(
             "image_path": str(img_path.relative_to(output_dir.parent.parent)),
             "bbox": [float(x0), float(y0), float(x1), float(y1)],
             "ai_description": description,
+            "title": figure_title,
+            "title_source": title_source,
+            "number": number,
+            "base_title": base_title,
+            "normalized_id": normalized_id,
             "metadata": (
                 {"diagnostics": figure_md_diags}
                 if isinstance(locals().get("figure_md_diags"), list)
@@ -259,10 +358,10 @@ async def extract_and_describe_figure(
 
 async def process_figures_batch(
     pdf_path: Path,
-    figure_blocks: List[Dict[str, Any]],
+    figure_blocks: list[dict[str, Any]],
     output_dir: Path,
     skip_descriptions: bool = False,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Process all figures concurrently with a progress bar."""
     # Optional: cap the number of figures processed to keep runs deterministic/fast
     if MAX_FIGURES_PER_DOC and isinstance(figure_blocks, list):

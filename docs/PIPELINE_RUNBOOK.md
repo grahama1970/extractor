@@ -1,13 +1,12 @@
 # Pipeline Runbook (Offline-First, Then Online)
 
-Goal: Methodically validate the PDF extraction pipeline end-to-end. First run "offline" (no LLM/DB calls) to confirm structure and artifacts. Then run "online" with real LLM calls (Gemini via `LITELLM_DEFAULT_MODEL`) and ArangoDB export/graph.
+Goal: Methodically validate the PDF extraction pipeline end-to-end. First run "offline" (no LLM/DB calls) to confirm structure and artifacts. Then run "online" with real LLM calls (SciLLM via `CHUTES_*`) and ArangoDB export/graph.
 
 ## Prerequisites
 
 - Python venv activated; project installed with extras.
 - `.env` present and loaded. Required keys:
-- Default model: set either `LITELLM_DEFAULT_MODEL` (preferred) or `DEFAULT_LITELLM_MODEL` (e.g., `gemini/gemini-2.5-flash`)
-  - `GEMINI_API_KEY` (for online runs)
+- `CHUTES_API_BASE`, `CHUTES_API_KEY`, and `CHUTES_TEXT_MODEL` (for online runs)
   - `ARANGO_HOST`, `ARANGO_PORT`, `ARANGO_USER`, `ARANGO_PASSWORD`
 - Set `PYTHONPATH=src` when running Python modules directly.
 - Canonical input PDF: `data/input/pipeline/BHT_CV32A65X_marked.pdf`
@@ -22,8 +21,7 @@ export PYTHONPATH=$(pwd)/src
 
 Sanity checks:
 
-- LLM (no network): `python scripts/smoke_litellm_parallel.py --mode helper`
-- LLM (online): `python src/extractor/pipeline/utils/litellm_call.py sanity --wrap-json --timeout 45`
+- LLM (online): `python scripts/tools/scillm_quick_doctor.py` (expects {"ok":true})
 - Arango: quick ping in Python
 
 ```
@@ -214,6 +212,9 @@ Use this as a quick-reference while debugging. Mark when a step is verified.
 - [ ] 09 Section Summarizer
   - In: Stage 07 or 08 JSON
   - Out: `09_section_summarizer/json_output/09_summaries.json`
+ - [ ] 09a PDF Annotator (post‑reflow)
+  - In: Stage 01 clean PDF, Stage 04/05/06 JSONs, Stage 07 reflow JSON, Stage 02 blocks
+  - Out: `09a_pdf_annotator/annotated.pdf`, `09a_pdf_annotator/json_output/annotations.json`
 - [ ] 10 Arango Export
   - In: Stage 07 + 09 JSON
   - Out: `10_arangodb_exporter/json_output/10_flattened_data.json` + confirmation when exporting

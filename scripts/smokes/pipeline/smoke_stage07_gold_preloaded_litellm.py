@@ -3,28 +3,24 @@
 # requires-python = ">=3.10"
 # dependencies = [
 #   "python-dotenv",
-#   "litellm>=1.74.7",
 #   "tqdm",
 #   "loguru",
 #   "httpx",
 #   "pillow",
 #   "json-repair",
+#   "typer>=0.12",
 # ]
 # ///
-# ///
-# dependencies += ["typer>=0.12"]
-# ///
 """
-Stage 07 Gemini strict JSON smoke using pre-07 gold input, via litellm_call helper.
+Stage 07 strict JSON smoke using pre-07 gold input, via SciLLM Chutes helper.
 
 What it does
 - Loads pre-Step07 sections JSON (prefers real results, falls back to gold sample)
 - Builds compact user text and attaches a section image by local path
-- Calls litellm_call with a single request, using response_format=json_schema (strict), temperature=0
-- Enables LiteLLM debug and httpx, and disables drop_params to preserve structured-output flags
+- Calls SciLLM helper with a single request, using response_format=json_schema (strict), temperature=0
 
 Outputs
-- scripts/artifacts/stage07_gold_preloaded_litellm.json
+- scripts/artifacts/stage07_gold_preloaded_scillm.json
 """
 from __future__ import annotations
 
@@ -83,16 +79,10 @@ app = typer.Typer(add_completion=False, help="Stage 07 gold-preloaded litellm sm
 async def main_async() -> None:
     # Environment and module path
     load_dotenv(find_dotenv(usecwd=True) or None)
-    os.environ.setdefault("LITELLM_HTTPX", "1")
-    os.environ.setdefault("LITELLM_DEBUG", "1")
-    os.environ.setdefault("LITELLM_DROP_PARAMS", "0")  # keep structured-output flags
     sys.path.insert(0, os.path.abspath("src"))
-
-    from extractor.pipeline.utils.litellm_call import litellm_call
-
-    key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-    if not key:
-        print("GEMINI_API_KEY/GOOGLE_API_KEY not set")
+from scillm import completion
+    if not (os.getenv("CHUTES_API_BASE") and os.getenv("CHUTES_API_KEY")):
+        print("CHUTES_API_BASE/CHUTES_API_KEY not set")
         raise SystemExit(1)
 
     # Prefer real 04 results; fallback to gold sample
@@ -111,7 +101,7 @@ async def main_async() -> None:
     context = _context_from_section(sec)
     img_path = _find_section_image(sec)
 
-    # Build OpenAI-style messages, using a local image path (litellm_call will compress → data URL)
+    # Build OpenAI-style messages, using a local image path
     parts: list[dict] = [{"type": "text", "text": context}]
     if img_path and img_path.exists():
         parts.append({"type": "image_url", "image_url": {"url": str(img_path)}})
@@ -150,25 +140,29 @@ async def main_async() -> None:
         "additionalProperties": False,
     }
 
-    req = {
-        "model": "gemini/gemini-2.5-flash",
-        "messages": messages,
-        "response_format": {"type": "json_schema", "json_schema": {"schema": schema}},
-        "temperature": 0,
-        "cache": {"no-cache": True},
-    }
-
-    results = await litellm_call([req], desc="stage07_gold_preloaded_litellm", export="results")
-    r0 = results[0]
-    if r0.exception is not None or not r0.content:
-        print("litellm_call returned empty or error")
-        print({"error": str(r0.exception) if r0.exception else None, "kwargs": r0.request.kwargs})
+    model = os.getenv("CHUTES_TEXT_MODEL", "")
+    res = completion(
+        model=model,
+        custom_llm_provider="openai_like",
+        api_base=os.getenv("CHUTES_API_BASE",""),
+        api_key=None,
+        extra_headers={"x-api-key": os.getenv("CHUTES_API_KEY","")},
+        messages=messages,
+        response_format={"type": "json_schema", "json_schema": {"schema": schema}},
+        temperature=0,
+        timeout=60,
+    )
+    content = res.get("choices", [{}])[0].get("message", {}).get("content")
+    if not content:
+        print("SciLLM helper returned empty content")
         raise SystemExit(2)
 
     out_dir = Path("scripts/artifacts")
     out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / "stage07_gold_preloaded_litellm.json").write_text(r0.content, encoding="utf-8")
-    print("OK: Stage 07 gold-preloaded strict JSON via litellm_call returned")
+    (out_dir / "stage07_gold_preloaded_scillm.json").write_text(
+        content if isinstance(content, str) else json.dumps(content), encoding="utf-8"
+    )
+    print("OK: Stage 07 gold-preloaded strict JSON via SciLLM helper returned")
 
 
 @app.command()

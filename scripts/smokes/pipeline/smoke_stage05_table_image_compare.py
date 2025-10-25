@@ -17,7 +17,11 @@ from typing import Dict, List
 
 import typer
 from dotenv import find_dotenv, load_dotenv
-from litellm import Router
+try:
+    from litellm import Router  # type: ignore
+except Exception:
+    print("SKIP: litellm not installed; smoke_stage05_table_image_compare skipped.")
+    raise SystemExit(0)
 
 
 def _load_stage07():

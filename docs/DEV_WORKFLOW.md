@@ -36,13 +36,14 @@ Use MCP Puppeteer to validate UI flows and capture screenshots. Typical loop:
 2. In Codex, navigate to `http://localhost:3000` and perform interactions
 3. Save screenshots to `screenshots/` and iterate on UI
 
-## LLM Provider Sanity
+## LLM Provider Sanity (SciLLM)
 
-Run the unified adapter check (LiteLLM):
+Run the SciLLM Quick Doctor (JSON ok):
 
 ```bash
 source .venv/bin/activate && set -a && [ -f .env ] && source .env && set +a
-python src/extractor/pipeline/utils/litellm_call.py sanity --wrap-json --model "${LITELLM_MODEL:-${LITELLM_DEFAULT_MODEL:-${DEFAULT_LITELLM_MODEL:-gpt-4o-mini}}}"
+unset OPENAI_API_KEY; export SCILLM_AUTOSCALE=1
+python scripts/tools/scillm_quick_doctor.py
 ```
 
 ## Notes

@@ -29,9 +29,8 @@ from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 import typer
 from dotenv import load_dotenv, find_dotenv
-from extractor.pipeline.utils.litellm_cache import initialize_litellm_cache
 from extractor.pipeline.utils.diagnostics import get_run_id
-from extractor.pipeline.utils.litellm_call import litellm_call
+from scillm import acompletion as sc_acompletion
 
 try:
     from arango import ArangoClient
@@ -47,11 +46,7 @@ except Exception:  # allow import without python-arango for non-DB debug paths
 
 if not load_dotenv(find_dotenv(), override=True):
     print("Warning: .env not found; proceeding with process env only.", file=sys.stderr)
-# Initialize LiteLLM cache for rationale generation
-try:
-    initialize_litellm_cache()
-except Exception as _e:
-    logger.warning(f"LiteLLM cache init failed (continuing): {_e}")
+# No litellm cache here; scillm calls use Chutes x-api-key path
 
 
 logger.remove()
@@ -530,16 +525,24 @@ async def _rationale_for_pair(text_a: str, text_b: str, model: str, max_tokens: 
             "timeout": 60,
         }
         params["temperature"] = 1.0 if "gpt-5" in (_mdl or "").lower() else 0.1
-        sid = os.getenv("LITELLM_SESSION_ID") or get_run_id()
-        out = await litellm_call([params], concurrency=1, desc="graph_rationale", session_id=sid, export="results")
-        r = out[0] if out else None
-        try:
-            from loguru import logger as _logger
-            if r:
-                _logger.info(f"graph_rationale: model={r.request.model} ok={r.exception is None}")
-        except Exception:
-            pass
-        return (((r.content if r else "").strip()))[:600]
+        ch_base = os.getenv("CHUTES_API_BASE", "").strip()
+        ch_key = os.getenv("CHUTES_API_KEY", "").strip()
+        resp = await sc_acompletion(
+            model=_mdl,
+            api_base=ch_base or None,
+            api_key=ch_key,
+            custom_llm_provider="openai",
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            response_format={"type": "json_object"} if os.getenv("GRAPH_RATIONALE_JSON", "0") in ("1","true","yes") else None,
+            temperature=1.0 if "gpt-5" in (_mdl or "").lower() else 0.1,
+            timeout=60,
+            max_tokens=max_tokens,
+        )
+        content = (resp.get("choices") or [{}])[0].get("message", {}).get("content", "")
+        return (content or "").strip()[:600]
     except Exception:
         return ""
 

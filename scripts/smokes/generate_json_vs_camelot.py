@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Smoke: Validate Generate JSON (LLM) against Camelot on a real PDF table.
+Deprecated: Generate JSON vs Camelot (litellm). Extractor is SciLLM-only; keep as no-op.
 
 Steps
 - Prefer a synthetic table PDF fixture (vector grid with text) for determinism; fall back to project PDFs
@@ -32,7 +32,8 @@ from dotenv import load_dotenv, find_dotenv
 from PIL import Image
 
 
-from extractor.pipeline.utils.litellm_call import litellm_call
+print("SKIP: generate_json_vs_camelot smoke deprecated (SciLLM-only)")
+raise SystemExit(0)
 
 # Optional synthetic PDF generator (reportlab). If unavailable, skip.
 def _maybe_generate_synthetic_pdf(path: Path, rows: int = 6, cols: int = 5) -> bool:
@@ -254,4 +255,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

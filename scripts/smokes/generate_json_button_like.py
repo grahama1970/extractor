@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Smoke: Replicate the Generate JSON button behavior against Gemini 2.5 Flash using litellm_call.
+Deprecated: Generate JSON button-like smoke (litellm). Extractor is SciLLM-only; this smoke is kept as a no-op.
 
 - Loads a known table image fixture (tests/stage07_manual/images/table1.png)
 - Applies the same 20% expansion logic on a given bounding box (normalized coords)
@@ -28,7 +28,8 @@ from typing import Any, Dict
 from PIL import Image
 from dotenv import load_dotenv, find_dotenv
 
-from extractor.pipeline.utils.litellm_call import litellm_call
+print("SKIP: generate_json_button_like smoke deprecated (SciLLM-only)")
+raise SystemExit(0)
 
 
 def expand_box(x: float, y: float, w: float, h: float, factor: float = 1.2) -> tuple[float, float, float, float]:
@@ -136,4 +137,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

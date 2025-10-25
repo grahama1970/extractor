@@ -65,32 +65,33 @@ def _prompt(candidate_snip: str, gold_snip: str, diff_snip: str) -> str:
 
 def _call_router(model: str, content: str) -> dict | None:
     try:
-        # Use project helper to route via LiteLLM Router
-        sys.path.insert(0, str(ROOT / "src"))
-        from extractor.pipeline.utils.litellm_call import litellm_call_sync  # type: ignore
-
-        out = litellm_call_sync(
-            name="step_eval_agent",
-            prompts=[content],
-            models=[model],
-            response_json=True,
-            temperature=0,
-            extra_kwargs={"max_tokens": 512},
-        )
-        # litellm_call_sync returns list of dicts (per prompt)
-        if isinstance(out, list) and out:
-            payload = out[0].get("response")
-            if isinstance(payload, dict):
-                return payload
-            # Some providers return text; try to parse
-            if isinstance(payload, str):
-                try:
-                    return json.loads(payload)
-                except Exception:
-                    return None
+        sys.path.insert(0, str(ROOT / 'src'))
+        from scillm import acompletion as sc_acompletion  # type: ignore
+        import asyncio as _asyncio
+        async def _run():
+            resp = await sc_acompletion(
+                model=model,
+                api_base=os.environ.get('CHUTES_API_BASE','').strip() or None,
+                api_key=os.environ.get('CHUTES_API_KEY','').strip() or None,
+                custom_llm_provider='openai',
+                messages=[{"role":"user","content": content}],
+                response_format={"type":"json_object"},
+                temperature=0,
+                max_tokens=512,
+                timeout=60,
+            )
+            return (resp.get('choices') or [{}])[0].get('message',{}).get('content','')
+        payload = _asyncio.run(_run())
+        if isinstance(payload, dict):
+            return payload
+        if isinstance(payload, str) and payload.strip():
+            try:
+                return json.loads(payload)
+            except Exception:
+                return None
         return None
     except Exception as e:
-        print(f"SKIP: Router eval not available ({e})")
+        print(f"SKIP: SciLLM eval not available ({e})")
         return None
 
 

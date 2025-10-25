@@ -25,16 +25,28 @@ def _prompt(cand,gold): return ("Return ONLY JSON with the rubric fields.\n" f"G
 def _call(model: str, prompt: str):
     try:
         sys.path.insert(0, str(ROOT / 'src'))
-        from extractor.pipeline.utils.litellm_call import litellm_call_sync  # type: ignore
-        out = litellm_call_sync(name='step09_eval', prompts=[prompt], models=[model], response_json=True, temperature=0, extra_kwargs={"max_tokens":512})
-        if isinstance(out, list) and out:
-            r = out[0].get('response')
-            if isinstance(r, dict): return r
-            if isinstance(r, str):
-                try: return json.loads(r)
-                except Exception: return None
+        from scillm import acompletion as sc_acompletion  # type: ignore
+        import asyncio as _asyncio
+        async def _run():
+            resp = await sc_acompletion(
+                model=model,
+                api_base=os.environ.get('CHUTES_API_BASE','').strip() or None,
+                api_key=os.environ.get('CHUTES_API_KEY','').strip() or None,
+                custom_llm_provider='openai',
+                messages=[{"role":"user","content": prompt}],
+                response_format={"type":"json_object"},
+                temperature=0,
+                max_tokens=512,
+                timeout=60,
+            )
+            return (resp.get('choices') or [{}])[0].get('message',{}).get('content','')
+        content = _asyncio.run(_run())
+        if isinstance(content, dict): return content
+        if isinstance(content, str) and content.strip():
+            try: return json.loads(content)
+            except Exception: return None
     except Exception as e:
-        print(f"SKIP: Router eval unavailable ({e})")
+        print(f"SKIP: SciLLM eval unavailable ({e})")
     return None
 
 def main():

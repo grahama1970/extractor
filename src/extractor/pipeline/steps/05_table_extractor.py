@@ -51,7 +51,12 @@ from extractor.pipeline.utils.diagnostics import (
     build_stage_timings,
     gpu_metrics_available,
 )
-from extractor.pipeline.utils.litellm_call import litellm_call
+# scillm is only needed for optional LLM labeling; avoid hard import so table
+# extraction can run without model deps
+try:
+    from scillm import acompletion as sc_acompletion  # type: ignore
+except Exception:  # pragma: no cover
+    sc_acompletion = None  # type: ignore
 
 
 # --- Initialization ---
@@ -216,18 +221,33 @@ def _attach_llm_assist_headers(result: Dict[str, Any], stage_dir: Path) -> None:
                 "Return JSON: {\"headers\": [..]} with the same length as input.\n"
             )
             user = json.dumps({"headers_input": headers_in}, ensure_ascii=False)
-            params = {
-                "model": model,
-                "messages": [
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": [{"type": "text", "text": user}]},
-                ],
-                "temperature": 0,
-                "timeout": int(os.getenv("TABLE_LLM_ASSIST_TIMEOUT", "30")),
-                "max_tokens": int(os.getenv("TABLE_LLM_ASSIST_MAX_TOKENS", "256")),
-            }
-            resp = litellm_call([params], wrap_json=True, concurrency=1, desc="table_header_assist", export="results")
-            patch = resp[0].json if resp and getattr(resp[0], "json", None) else None
+            ch_base = os.getenv("CHUTES_API_BASE", "").strip()
+            ch_key = os.getenv("CHUTES_API_KEY", "").strip()
+            if sc_acompletion is None:
+                _resp = {"choices": [{"message": {"content": "{}"}}]}
+            else:
+                import asyncio as _asyncio
+                async def _call():
+                    return await sc_acompletion(
+                        model=model,
+                        api_base=ch_base or None,
+                        api_key=ch_key,
+                        custom_llm_provider="openai",
+                        messages=[
+                            {"role": "system", "content": system},
+                            {"role": "user", "content": [{"type": "text", "text": user}]},
+                        ],
+                        response_format={"type": "json_object"},
+                        temperature=0,
+                        timeout=int(os.getenv("TABLE_LLM_ASSIST_TIMEOUT", "30")),
+                        max_tokens=int(os.getenv("TABLE_LLM_ASSIST_MAX_TOKENS", "256")),
+                    )
+                _resp = _asyncio.run(_call())
+            content = (_resp.get("choices") or [{}])[0].get("message", {}).get("content", "")
+            try:
+                patch = json.loads(content) if content else None
+            except Exception:
+                patch = None
             if not isinstance(patch, dict):
                 continue
             new_headers = patch.get("headers")
@@ -1387,12 +1407,109 @@ def run(
 
     # --- Assign captions/titles from nearby text if missing ---
     import re as _re
+    import hashlib
+    def _parse_table_label(txt: str) -> tuple[object, str]:
+        # Returns (number, normalized_title_without_label)
+        m = _re.match(r"\s*(?:Table|Tbl\.)\s*([A-Za-z0-9\-\.]+)?[\.:]?\s*(.*)$", txt, _re.IGNORECASE)
+        if not m:
+            return None, txt.strip()
+        num = (m.group(1) or "").strip() or None
+        rem = (m.group(2) or "").strip()
+        return num, rem
+
+    def _slug(s: str) -> str:
+        s2 = "".join(ch.lower() if ch.isalnum() else "-" for ch in s)
+        s2 = _re.sub(r"-+", "-", s2).strip("-")
+        return s2 or hashlib.sha1(s.encode("utf-8")).hexdigest()[:8]
+
+    def _infer_title_with_scillm(context: str, timeout: float = 6.0):
+        try:
+            from scillm import acompletion as _sc  # noqa: N806
+        except Exception:
+            _sc = None  # noqa: N806
+        base = os.getenv("CHUTES_API_BASE", "").strip()
+        key = os.getenv("CHUTES_API_KEY", "").strip()
+        model = (os.getenv("CHUTES_TEXT_MODEL") or os.getenv("LITELLM_DEFAULT_MODEL") or "").strip()
+        if not (_sc and base and key and model):
+            return None
+        prompt = (
+            "You are naming a table for a technical document. Return ONLY a short title (<=10 words).\n"
+            "Do not include the word 'Table' or numbering.\n\n"
+            f"Context:\n{context[:1200]}\n"
+        )
+        try:
+            import asyncio as _asyncio
+            async def _call():
+                return await _sc(
+                    model=model,
+                    api_base=base,
+                    api_key=key,
+                    custom_llm_provider="openai",
+                    messages=[{"role":"user","content": prompt}],
+                    response_format={"type":"json_object"},
+                    max_tokens=64,
+                    temperature=0.2,
+                    timeout=timeout,
+                )
+            resp = _asyncio.run(_call())
+            content = (resp.get("choices") or [{}])[0].get("message", {}).get("content", "").strip()
+            # Allow plain text if provider ignores json_object
+            title = content.strip().strip('"') if content else ""
+            return title or None
+        except Exception:
+            return None
+
+    # --- Assign captions/titles from nearby text if missing; infer when absent ---
     for t in filtered_tables:
-        if not t.get('caption') and not t.get('title'):
-            cap = detect_table_caption(pdf_path, int(t.get('page_index',0)), t.get('bbox', [0,0,0,0]))
+        page_idx = int(t.get('page_index',0))
+        bbox = t.get('bbox', [0,0,0,0])
+        title_src = None
+        title_txt = (t.get('title') or t.get('caption') or '').strip()
+        if not title_txt:
+            cap = detect_table_caption(pdf_path, page_idx, bbox)
             if cap:
-                t['caption'] = cap
-                t['title'] = cap
+                title_txt = cap
+                title_src = 'above'
+        if not title_txt:
+            # build minimal context from header row and nearby text band
+            try:
+                import fitz as _fitz
+                with _fitz.open(str(pdf_path)) as _doc:
+                    _page = _doc[page_idx]
+                    r = _fitz.Rect(*bbox)
+                    band = _fitz.Rect(r.x0, max(0, r.y0-120), r.x1, r.y0)
+                    blks = _page.get_text('blocks', clip=band)
+                    near = '\n'.join((b[4] or '').strip() for b in blks if (b[4] or '').strip())
+            except Exception:
+                near = ''
+            import pandas as _pd  # for header synthesis
+            header = ''
+            try:
+                df = _pd.DataFrame(t.get('pandas_df') or [])
+                if not df.empty:
+                    header = ' | '.join(str(c) for c in df.columns if str(c).strip())
+            except Exception:
+                pass
+            ctx = f"Header: {header}\nNearby: {near}".strip()
+            inferred = _infer_title_with_scillm(ctx) or (header if header else (near.split('\n',1)[0] if near else ''))
+            if inferred:
+                title_txt = f"INFER: {inferred.strip()}"
+                title_src = 'infer'
+        if title_txt:
+            t['title'] = title_txt
+            if 'caption' not in t:
+                t['caption'] = title_txt
+            num, rem = _parse_table_label(title_txt)
+            t['number'] = num
+            base = rem.replace('(Continued)','').replace('— Continued','').strip()
+            t['base_title'] = base
+            t['continued'] = bool('Continued' in title_txt)
+            t['title_source'] = title_src or 'detected'
+            t['title_confidence'] = 0.9 if title_src in {'above','header'} else 0.6
+            if num:
+                t['normalized_id'] = f"table-{_slug(num)}"
+            else:
+                t['normalized_id'] = f"table-{_slug(base or title_txt)}"
 
     # --- De-duplicate header rows accidentally included in body ---
     try:

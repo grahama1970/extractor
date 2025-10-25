@@ -416,29 +416,48 @@ References
 
 ---
 
-## LLM Provider Sanity Check
+## LLM Provider Sanity Check (SciLLM‑First)
 
-Prefer validating through the same path the codebase uses: `src/extractor/pipeline/utils/litellm_call.py` (LiteLLM Router). This exercises auth, routing, and our multimodal prep.
+ALWAYS use SciLLM directly for Chutes. Do not route through LiteLLM or other adapters for Chutes calls.
+Extractor uses SciLLM acompletion for all Chutes calls (async, no httpx fallbacks). Pipeline stages call SciLLM directly; no bespoke wrappers or model aliasing.
 
-Basic check (prints JSON and succeeds if it contains `{"ok":true}`):
+- Quick guide: see `SCILLM_USAGE.md` for exact env, examples, and fixes.
+- Helper (preferred): `src/extractor/pipeline/utils/chutes_scillm.py: chutes_chat_json()`.
+- Unset OpenAI envs to avoid Bearer conflicts: `unset OPENAI_API_KEY OPENAI_BASE_URL`.
 
-```bash
-source .venv/bin/activate && set -a && [ -f .env ] && source .env && set +a
-python src/extractor/pipeline/utils/litellm_call.py sanity --model "${LITELLM_MODEL:-gpt-4o-mini}"
-```
-
-Expect: output JSON includes `{"ok":true}` (the adapter may add a `metadata` object). Exit code 0 on success, non‑zero otherwise.
-
-Debug variant (always JSON, includes error/usage metadata on failure):
+Quick Doctor (expect `{ "ok": true }` and exit 0):
 
 ```bash
-python src/extractor/pipeline/utils/litellm_call.py sanity --wrap-json --model "${LITELLM_MODEL:-gpt-4o-mini}"
+source .venv/bin/activate && \
+set -a && [ -f .env ] && source .env && set +a && \
+SCILLM_AUTOSCALE=${SCILLM_AUTOSCALE:-1} \
+python scripts/tools/scillm_quick_doctor.py
 ```
 
-Notes:
-- Set provider creds in `.env` (e.g., `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OLLAMA_BASE_URL`, etc.).
-- Set your default model via one of (highest precedence first): `LITELLM_MODEL`, `LITELLM_DEFAULT_MODEL`, or `DEFAULT_LITELLM_MODEL`.
-- For batch/JSONL tests, see `--stdin` and `--jsonl` in the script help.
+VS Code Task: run `SciLLM: Quick Doctor` from the Command Palette.
+
+Canonical direct form (if you must call the client directly):
+
+```
+from scillm import completion
+import os
+
+resp = completion(
+  model=os.environ["CHUTES_TEXT_MODEL"],
+  api_base=os.environ["CHUTES_API_BASE"].rstrip('/'),
+  api_key=None,
+  custom_llm_provider="openai_like",
+  messages=[{"role":"user","content":"Return only {\"ok\":true} as JSON."}],
+  response_format={"type":"json_object"},
+  extra_headers={"x-api-key": os.environ["CHUTES_API_KEY"]},
+  timeout=60,
+)
+```
+
+Troubleshooting (summary; see SCILLM_USAGE.md for details):
+- Flip base with/without `/v1` if you see 404.
+- Ensure the model id exists in `GET $CHUTES_API_BASE/models` for your tenant.
+- Keep `api_key=None` and supply `x-api-key` in `extra_headers` exactly once.
 
 ---
 

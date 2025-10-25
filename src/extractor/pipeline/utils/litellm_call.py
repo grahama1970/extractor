@@ -65,6 +65,10 @@ from extractor.pipeline.utils.litellm_response_utils import (
 )
 from extractor.pipeline.utils.response_utils import to_messages_and_model
 from extractor.pipeline.utils.log_utils import sanitize_messages_for_return
+try:
+    from scillm import acompletion as _sc_acompletion  # type: ignore
+except Exception:  # pragma: no cover
+    _sc_acompletion = None  # type: ignore
 
 # Optional cache initializer — no-op if unavailable
 try:
@@ -83,14 +87,7 @@ logger.add(sys.stderr, level=_log_level)
 # Best-effort .env loading; no exceptions
 _ = load_dotenv(find_dotenv(usecwd=True) or None)
 
-# Map Chutes → OpenAI-compatible env if present (lets OpenAI provider hit Chutes base)
-try:
-    if os.getenv("CHUTES_API_KEY") and os.getenv("CHUTES_API_BASE"):
-        # Only set if OPENAI_* not already set
-        os.environ.setdefault("OPENAI_API_KEY", os.environ["CHUTES_API_KEY"])  # point OpenAI client to Chutes key
-        os.environ.setdefault("OPENAI_API_BASE", os.environ["CHUTES_API_BASE"])  # point base to Chutes endpoint
-except Exception:
-    pass
+# Removed automatic mapping of CHUTES_* → OPENAI_* to avoid unintended Bearer paths.
 
 # -----------------------------------------------------------------------------
 # SciLLM/Chutes routing hardening helpers
@@ -100,25 +97,12 @@ _INPROC_CACHE: Dict[str, _Any] = {}
 _CACHE_TTL_SEC = 300
 
 def require_scillm_env() -> None:
-    """Ensure OPENAI_* env are populated from CHUTES_* if present; fail fast if missing."""
-    ch_base = os.getenv("CHUTES_API_BASE")
-    ch_key = os.getenv("CHUTES_API_KEY")
-    # Normalize CHUTES base to include /v1 for OpenAI-compatible routes
-    if ch_base:
-        base_norm = ch_base.rstrip("/")
-        if not base_norm.endswith("/v1"):
-            base_norm = base_norm + "/v1"
-        ch_base = base_norm
-    if ch_base and not (os.getenv("OPENAI_BASE_URL") or os.getenv("OPENAI_API_BASE")):
-        os.environ["OPENAI_BASE_URL"] = ch_base
-        os.environ["OPENAI_API_BASE"] = ch_base
-    if ch_key and not os.getenv("OPENAI_API_KEY"):
-        os.environ["OPENAI_API_KEY"] = ch_key
-    base = (os.getenv("OPENAI_BASE_URL") or os.getenv("OPENAI_API_BASE") or "").strip()
-    key = (os.getenv("OPENAI_API_KEY") or "").strip()
-    if not base or not key:
+    """Validate presence of SciLLM/Chutes env only; do not mutate OPENAI_* envs."""
+    ch_base = (os.getenv("CHUTES_API_BASE") or "").strip()
+    ch_key = (os.getenv("CHUTES_API_KEY") or "").strip()
+    if not ch_base or not ch_key:
         raise EnvironmentError(
-            "SciLLM/Chutes env missing: set CHUTES_API_BASE and CHUTES_API_KEY (or OPENAI_BASE_URL/OPENAI_API_BASE and OPENAI_API_KEY)."
+            "SciLLM/Chutes env missing: set CHUTES_API_BASE and CHUTES_API_KEY."
         )
 
 def _load_id_map(path: str = ".artifacts/chutes/id_map.json") -> Dict[str, str]:
@@ -186,10 +170,12 @@ _ALIAS_MAP = {
 }
 
 def _env_map_openai_like() -> None:
-    """Ensure OPENAI_* env are populated from CHUTES_* if present."""
+    """Optional bridge for OpenAI-compatible utilities; opt-in via LLM_OPENAI_BRIDGE=1."""
+    if os.getenv("LLM_OPENAI_BRIDGE", "").lower() not in {"1", "true", "yes", "y"}:
+        return
     try:
-        base = os.getenv("CHUTES_API_BASE") or os.getenv("OPENAI_BASE_URL") or os.getenv("OPENAI_API_BASE")
-        key = os.getenv("CHUTES_API_KEY") or os.getenv("OPENAI_API_KEY")
+        base = os.getenv("CHUTES_API_BASE")
+        key = os.getenv("CHUTES_API_KEY")
         if base:
             os.environ.setdefault("OPENAI_BASE_URL", base)
             os.environ.setdefault("OPENAI_API_BASE", base)
@@ -252,24 +238,26 @@ def normalize_model_id(model: str, *, ttl_sec: int = 600) -> str:
     return mid
 
 def completion_simple(model: str, messages: List[Dict[str, str]], **kwargs) -> _Any:
-    """Direct litellm.completion call with normalization and JSON mode.
-
-    This bypasses Router deployment health for simple sanity probes.
-    """
-    _env_map_openai_like()
+    """Direct SciLLM completion to Chutes (OpenAI-compatible) with JSON mode by default (SciLLM-only)."""
+    require_scillm_env()
     nm = normalize_model_id(model)
-    # Ensure json_object unless caller overrides
+    base = os.getenv("CHUTES_API_BASE", "").rstrip("/")
+    key = os.getenv("CHUTES_API_KEY", "").strip()
     kwargs.setdefault("response_format", {"type": "json_object"})
-    # Route through OpenAI-compatible provider base when using CHUTES
-    kwargs.setdefault("custom_llm_provider", "openai")
     kwargs.setdefault("timeout", 30)
-    if not _LITELLM_OK:
-        return {"error": {"type": "ImportError", "message": "litellm not available; prefer scillm path"}}
-    try:
-        return _litellm.completion(model=nm, messages=messages, **kwargs)  # type: ignore
-    except Exception as e:
-        # Surface a minimal error shape similar to OpenAI
-        return {"error": {"type": type(e).__name__, "message": str(e)}}
+    if _sc_acompletion is None:
+        raise ImportError("scillm missing")
+    import asyncio as _asyncio
+    async def _call():
+        return await _sc_acompletion(
+            model=nm,
+            api_base=base,
+            api_key=key,
+            custom_llm_provider="openai",
+            messages=messages,
+            **kwargs,
+        )
+    return _asyncio.run(_call())
 
 def completion(model: str, messages: List[Dict[str, _Any]], **kwargs) -> _Any:
     """Public wrapper used by steps: normalize alias, ensure env, and apply timeouts."""
@@ -286,19 +274,7 @@ DEFAULT_MODEL = (
 )
 MODEL = DEFAULT_MODEL  # compatibility alias expected by tests
 
-# Drop unsupported provider params unless explicitly disabled
-_litellm.drop_params = os.getenv("LITELLM_DROP_PARAMS", "true").lower() in {"1", "true", "yes", "y"}
-# Optional: enable verbose LiteLLM debug
-if os.getenv("LITELLM_DEBUG", "").lower() in {"1","true","yes","y"}:
-    try:
-        setattr(_litellm, "logging", True)
-        setattr(_litellm, "debug", True)
-    except Exception:
-        pass
-try:
-    initialize_litellm_cache()
-except Exception:
-    pass
+# Disable legacy litellm-specific tweaks; SciLLM path is authoritative now.
 
 # Other env/defaults
 IMAGE_EXT = _IMAGE_EXT

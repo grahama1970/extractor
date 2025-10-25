@@ -5,7 +5,11 @@ import asyncio
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-import litellm
+# SciLLM-first: keep litellm optional; prefer scillm
+try:
+    import scillm as litellm  # type: ignore
+except Exception:  # pragma: no cover
+    litellm = None  # type: ignore
 from loguru import logger
 
 from extractor.pipeline.utils.litellm_response_utils import extract_content
@@ -173,18 +177,48 @@ class LLMAdapter:
 
         start_monotonic = asyncio.get_event_loop().time()
         try:
-            resp = await litellm.acompletion(**kwargs)  # type: ignore[attr-defined]
+            # Prefer SciLLM; fall back if unavailable
+            if hasattr(litellm, "acompletion"):
+                resp = await litellm.acompletion(**kwargs)  # type: ignore[attr-defined]
+            else:
+                raise RuntimeError("SciLLM/LiteLLM client unavailable for adapter.")
+
+            # Normalize JSON content: accept dict or string for response_format={"type":"json_object"}
             raw_text = extract_content(resp) or ""
+            json_obj = None
+            try:
+                # If extract_content produced empty string, try direct access
+                if not raw_text:
+                    ch = resp.get("choices") if isinstance(resp, dict) else getattr(resp, "choices", None)
+                    if ch:
+                        msg = ch[0].get("message") if isinstance(ch[0], dict) else getattr(ch[0], "message", None)
+                        if msg is not None:
+                            content_val = msg.get("content") if isinstance(msg, dict) else getattr(msg, "content", None)
+                            if isinstance(content_val, dict):
+                                json_obj = content_val
+                                import json as _json
+
+                                raw_text = _json.dumps(content_val, ensure_ascii=False)
+                            elif isinstance(content_val, str):
+                                raw_text = content_val
+                # If we still have text, attempt to parse into json_obj for downstream strict typing
+                if json_obj is None and raw_text:
+                    import json as _json
+
+                    try:
+                        parsed = _json.loads(raw_text)
+                        if isinstance(parsed, dict):
+                            json_obj = parsed
+                    except Exception:
+                        json_obj = None
+            except Exception:
+                # Non-fatal; downstream _parse_json will repair when possible
+                json_obj = None
+
             (req_dir / "raw.txt").write_text(raw_text)
             usage_obj = getattr(resp, "usage", None)
             used = getattr(usage_obj, "total_tokens", None) if usage_obj else None
             cost = None
-            try:
-                from litellm import completion_cost
-
-                cost = float(completion_cost(completion_response=resp))
-            except Exception:
-                cost = None
             duration_ms = int((asyncio.get_event_loop().time() - start_monotonic) * 1000)
             metadata_payload = dict(metadata or {})
             log_metric(
@@ -200,13 +234,13 @@ class LLMAdapter:
                 },
             )
             verdict = {
-                "valid_json": bool(raw_text.strip()),
+                "valid_json": bool(raw_text.strip()) or isinstance(json_obj, dict),
                 "total_tokens": used,
                 "cost_usd": cost,
                 "duration_ms": duration_ms,
             }
             (req_dir / "verdict.json").write_text(json.dumps(verdict, indent=2))
-            return {"text": raw_text, "usage": used, "cost": cost}
+            return {"text": raw_text, "json_obj": json_obj, "usage": used, "cost": cost}
         except Exception as e:
             duration_ms = int((asyncio.get_event_loop().time() - start_monotonic) * 1000)
             metadata_payload = dict(metadata or {})
@@ -257,6 +291,10 @@ class LLMAdapter:
 
     @staticmethod
     def _parse_json(payload: Dict[str, Any]) -> Dict[str, Any]:
+        # Prefer normalized json_obj when present (already a dict)
+        obj = payload.get("json_obj")
+        if isinstance(obj, dict):
+            return obj
         text = payload.get("text") or ""
         cleaned = clean_json_string(text, return_dict=True)
         if isinstance(cleaned, dict):

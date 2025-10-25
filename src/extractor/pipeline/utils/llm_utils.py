@@ -14,10 +14,10 @@ from textwrap import dedent
 from loguru import logger
 from PIL import Image
 
-import litellm
+from scillm import acompletion as scillm_acompletion  # type: ignore
 
 # Import json cleaning utility
-from utils.json_utils import clean_json_string
+from extractor.core.services.utils.json_utils import clean_json_string
 
 # from utils.async_processing import call_llm_with_retry
 from extractor.pipeline.utils.litellm_response_utils import extract_content
@@ -72,7 +72,11 @@ async def call_llm_with_image(
         if response_format == "json":
             kwargs["response_format"] = {"type": "json_object"}
 
-        response = litellm.completion(**kwargs)
+        # SciLLM async client
+        import asyncio as _asyncio
+        async def _call():
+            return await scillm_acompletion(**kwargs)
+        response = _asyncio.run(_call())
 
         # Extract response
         content = extract_content(response)

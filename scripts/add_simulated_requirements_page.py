@@ -316,7 +316,7 @@ def add_page_3(input_pdf: Path, output_pdf: Path) -> None:
 
 
 def add_simulated_tables_section(doc: "fitz.Document", header_style: dict, body_style: dict) -> None:
-    """Append a new '(Simulated)' section 4.1.4.5 including tables that
+    """Append a new '(Simulated)' section 4.1.5 including tables that
     demonstrate merge vs. non-merge scenarios. Creates one or more pages at end.
     """
     # Create first page of this section
@@ -443,7 +443,8 @@ def add_simulated_tables_section(doc: "fitz.Document", header_style: dict, body_
         return y + total_height + 10  # return next y
 
     # Content for the new section
-    draw_title(page, "4.1.4.5. TABLE MERGE SCENARIOS (Simulated)")
+    # Corrected numbering: 4.1.5 per spec
+    draw_title(page, "4.1.5. TABLE MERGE SCENARIOS (Simulated)")
     y = body_rect.y0
     y = draw_paragraph(
         page,
@@ -500,7 +501,8 @@ def add_simulated_tables_section(doc: "fitz.Document", header_style: dict, body_
 
     # Next page: continuation (mergeable part 2)
     page2 = doc.new_page(width=612, height=792)
-    draw_title(page2, "4.1.4.5. TABLE MERGE SCENARIOS (Simulated) - Continued")
+    # Continuation page uses the same corrected section number
+    draw_title(page2, "4.1.5. TABLE MERGE SCENARIOS (Simulated) - Continued")
     body2 = fitz.Rect(left, top + 44, right, bottom)
     y2 = body2.y0
     y2 = draw_paragraph(

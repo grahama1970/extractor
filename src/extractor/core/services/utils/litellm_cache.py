@@ -33,22 +33,37 @@ Input/Output:
 # 4. Consult LESSONS_LEARNED.md about not breaking working code
 # ==============================================================================
 
-import litellm
 import os
-import redis
 from dotenv import load_dotenv  # Import dotenv for environment variable loading
-try:
-    from litellm.extras import initialize_litellm_cache as extras_init_cache  # type: ignore
-except Exception:
+
+# Make this module safe when litellm/redis are not installed. If missing, we no-op.
+try:  # pragma: no cover
+    import litellm  # type: ignore
+    try:
+        from litellm.extras import initialize_litellm_cache as extras_init_cache  # type: ignore
+    except Exception:  # pragma: no cover
+        extras_init_cache = None  # type: ignore
+except Exception:  # pragma: no cover
+    litellm = None  # type: ignore
     extras_init_cache = None  # type: ignore
+
+try:  # pragma: no cover
+    import redis  # type: ignore
+except Exception:  # pragma: no cover
+    redis = None  # type: ignore
 
 # from litellm.caching import Cache, Type  # Import Cache and Type
 import sys  # Import sys for exit codes
 from loguru import logger
-from litellm.caching.caching import (
-    Cache as LiteLLMCache,
-    LiteLLMCacheType,
-)  # Import Cache and Type
+
+try:  # pragma: no cover
+    from litellm.caching.caching import (
+        Cache as LiteLLMCache,
+        LiteLLMCacheType,
+    )  # type: ignore
+except Exception:  # pragma: no cover
+    LiteLLMCache = None  # type: ignore
+    LiteLLMCacheType = None  # type: ignore
 from typing import Any  # Import Any for type hint
 
 # Import the utility function from our utils
@@ -67,11 +82,19 @@ load_dotenv()
 
 
 def initialize_litellm_cache() -> None:
+    # If litellm isn't available, safely no-op
+    if litellm is None or LiteLLMCache is None or LiteLLMCacheType is None:
+        logger.info("LiteLLM not available; skipping cache initialization")
+        return
     # Prefer the built-in helper when available
     if extras_init_cache is not None:
         try:
             extras_init_cache()
-            # Respect optional namespace for per-run isolation
+        except Exception:
+            # Fall through to legacy path
+            pass
+        else:
+            # Optional: adjust namespace on existing cache
             cache_namespace = os.getenv("LITELLM_CACHE_NAMESPACE") or os.getenv("LITELLM_SESSION_ID")
             if cache_namespace and getattr(litellm, "cache", None) is not None:
                 try:
@@ -81,18 +104,24 @@ def initialize_litellm_cache() -> None:
                     port = str(cfg.get("port") or os.getenv("REDIS_PORT", "6379"))
                     pwd = cfg.get("password") or os.getenv("REDIS_PASSWORD")
                     ttl = int(cfg.get("ttl") or os.getenv("LITELLM_CACHE_TTL", str(60 * 60 * 24 * 2)))
-                    litellm.cache = _Cache(type=_Type.REDIS, host=host, port=port, password=pwd, ttl=ttl, namespace=str(cache_namespace), supported_call_types=["acompletion","completion"])  # type: ignore
+                    litellm.cache = _Cache(  # type: ignore
+                        type=_Type.REDIS,
+                        host=host,
+                        port=port,
+                        password=pwd,
+                        ttl=ttl,
+                        namespace=str(cache_namespace),
+                        supported_call_types=["acompletion", "completion"],
+                    )
                     try:
                         litellm.enable_cache()  # type: ignore[attr-defined]
                     except Exception:
                         pass
             return
-        except Exception:
-            # Fall through to legacy path
-            pass
+    # If redis is not installed, fall back to local cache
     redis_host = os.getenv("REDIS_HOST", "localhost")
     redis_port = int(os.getenv("REDIS_PORT", 6379))
-    redis_password = os.getenv("REDIS_PASSWORD", None)  # Assuming password might be needed
+    redis_password = os.getenv("REDIS_PASSWORD", None)
 
     try:
         logger.debug(
@@ -101,6 +130,8 @@ def initialize_litellm_cache() -> None:
 
         # Test Redis connection before enabling caching
         logger.debug("Testing Redis connection...")
+        if redis is None:
+            raise ImportError("redis library not installed")
         test_redis = redis.Redis(
             host=redis_host,
             port=redis_port,
@@ -156,12 +187,15 @@ def initialize_litellm_cache() -> None:
         except Exception as e:
             logger.warning(f"Redis test write/read failed: {e}")
 
-    except (redis.ConnectionError, redis.TimeoutError) as e:
+    except Exception as e:
         logger.warning(f"⚠️ Redis connection failed: {e}. Falling back to in-memory caching.")
         # Fall back to in-memory caching if Redis is unavailable
         logger.debug("Configuring in-memory cache fallback...")
-        litellm.cache = LiteLLMCache(type=LiteLLMCacheType.LOCAL)  # Use Enum/Type
-        litellm.enable_cache()
+        try:
+            litellm.cache = LiteLLMCache(type=LiteLLMCacheType.LOCAL)  # type: ignore
+            litellm.enable_cache()  # type: ignore[attr-defined]
+        except Exception:
+            pass
         logger.debug("In-memory cache enabled")
 
 

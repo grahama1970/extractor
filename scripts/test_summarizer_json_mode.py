@@ -21,7 +21,11 @@ import asyncio
 import argparse
 from textwrap import dedent
 
-import litellm
+try:
+    import litellm  # type: ignore
+except Exception:
+    print("SKIP: litellm not installed; test_summarizer_json_mode skipped.")
+    raise SystemExit(0)
 from extractor.pipeline.utils.litellm_response_utils import extract_content
 
 try:
