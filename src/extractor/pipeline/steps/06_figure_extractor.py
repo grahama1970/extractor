@@ -23,10 +23,16 @@ import textwrap
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+import threading
+try:
+    import psutil  # type: ignore
+except Exception:  # pragma: no cover
+    psutil = None  # type: ignore
 
 import typer
 from dotenv import find_dotenv, load_dotenv
 from loguru import logger
+from scillm.extras import clean_json_string
 from rich.console import Console
 try:
     from scillm import acompletion as sc_completion  # type: ignore
@@ -45,7 +51,6 @@ from extractor.pipeline.utils.diagnostics import (
     start_resource_sampler,
     stop_resource_sampler,
 )
-from extractor.pipeline.utils.litellm_cache import initialize_litellm_cache
 def _normalize_model_alias(model: str | None) -> str:
     """Pass-through alias helper. Preserve prefixes like 'openai/'."""
     return (model or "").strip()
@@ -55,10 +60,8 @@ def _normalize_model_alias(model: str | None) -> str:
 # Fail fast if .env is missing
 if not load_dotenv(find_dotenv()):
     print("Warning: .env not found; continuing with process environment.", file=sys.stderr)
-try:
-    initialize_litellm_cache()
-except Exception as _e:
-    logger.warning(f"LiteLLM cache init failed (continuing): {_e}")
+# SciLLM-only policy: avoid importing legacy LiteLLM cache to prevent lingering
+# background threads or side effects that can block process exit.
 
 # Avoid configuring handlers at import time; configure in CLI path.
 def _configure_logging_once() -> None:
@@ -90,6 +93,28 @@ DEFAULT_VLM = os.getenv("DEFAULT_VLM", "Qwen/Qwen2.5-VL-32B-Instruct").strip()
 
 
 # --- Core Functions ---
+
+
+def _dump_debug_state(tag: str, out_dir: Path) -> None:
+    """Write a small debug_state.json with thread + process info."""
+    try:
+        info: dict[str, Any] = {"tag": tag, "time": datetime.now().isoformat()}
+        info["threads"] = [
+            {"name": t.name, "daemon": t.daemon, "alive": t.is_alive()}
+            for t in threading.enumerate()
+        ]
+        if psutil is not None:
+            p = psutil.Process()
+            info["open_files"] = [f.path for f in (p.open_files() or [])]
+            try:
+                info["fds"] = p.num_fds()  # type: ignore[attr-defined]
+            except Exception:
+                pass
+            info["rss_mb"] = int((p.memory_info().rss or 0) / (1024 * 1024))
+        out = out_dir / "debug_state.json"
+        out.write_text(json.dumps(info, indent=2))
+    except Exception:
+        pass
 
 
 async def describe_image_with_llm(image_data: bytes, context: str = "") -> str:
@@ -290,19 +315,27 @@ async def extract_and_describe_figure(
             model = (os.getenv('CHUTES_TEXT_MODEL') or os.getenv('LITELLM_DEFAULT_MODEL') or '').strip()
             inferred = None
             if sc_completion and base and key and model:
+                # Ask for strict JSON, then parse using clean_json_string
                 prompt = (
-                    "You are naming a figure for a technical document. Return ONLY a short title (<=10 words).\n"
+                    "You are naming a figure for a technical document. Return ONLY a short title (<=10 words) in JSON.\n"
                     "Do not include the word 'Figure' or numbering.\n\n"
+                    "Return: {\"title\": \"<short title>\"}.\n\n"
                     f"Context (nearby text):\n{nearby_text[:800]}\n\n"
                     f"Description (if any):\n{(description or '')[:400]}\n"
                 )
                 try:
+                    # Choose paved-path auth by base
+                    is_openai = 'api.openai.com' in base
+                    provider = 'openai' if is_openai else 'openai_like'
+                    api_key_for_call = key if is_openai else None
+                    extra_headers = {} if is_openai else {'x-api-key': key}
                     # We are already in an async context; await sc_completion directly.
                     resp = await sc_completion(
                         model=model,
                         api_base=base,
-                        api_key=key,
-                        custom_llm_provider='openai',
+                        api_key=api_key_for_call,
+                        custom_llm_provider=provider,
+                        extra_headers=extra_headers,
                         messages=[{"role":"user","content": prompt}],
                         response_format={"type":"json_object"},
                         max_tokens=64,
@@ -310,7 +343,13 @@ async def extract_and_describe_figure(
                         timeout=6.0,
                     )
                     content = (resp.get('choices') or [{}])[0].get('message',{}).get('content','').strip()
-                    inferred = content.strip().strip('"') if content else None
+                    if content:
+                        try:
+                            normalized = clean_json_string(content)
+                            obj = json.loads(normalized) if normalized else {}
+                            inferred = (obj or {}).get('title') or None
+                        except Exception:
+                            inferred = content.strip().strip('"')
                 except Exception:
                     inferred = None
             if inferred:
@@ -359,7 +398,7 @@ async def extract_and_describe_figure(
 async def process_figures_batch(
     pdf_path: Path,
     figure_blocks: list[dict[str, Any]],
-    output_dir: Path,
+    output_dir,
     skip_descriptions: bool = False,
 ) -> list[dict[str, Any]]:
     """Process all figures concurrently with a progress bar."""
@@ -403,6 +442,16 @@ def run(
         False,
         "--skip-descriptions/--no-skip-descriptions",
         help="Offline mode: skip LLM descriptions and emit placeholders",
+    ),
+    debug: bool = typer.Option(
+        bool(os.getenv("STAGE06_DEBUG", "").lower() in ("1", "true", "yes", "y")),
+        "--debug/--no-debug",
+        help="Emit extra debugging artifacts (threads, open files) at end of stage.",
+    ),
+    force_exit: bool = typer.Option(
+        bool(os.getenv("STAGE06_FORCE_EXIT", "0").lower() in ("1", "true", "yes", "y")),
+        "--force-exit/--no-force-exit",
+        help="Force an immediate process exit after writing outputs (workaround for third-party threads).",
     ),
 ):
     """Extracts figures, describes them, and associates them with sections."""
@@ -569,9 +618,25 @@ def run(
     with open(output_path, "w") as f:
         json.dump(result, f, indent=2)
 
+    if debug:
+        _dump_debug_state("after_write", json_output_dir)
+
     console.print(
         f"✅ Figure extraction complete. Saved {len(extracted_figures)} figures to: {output_path}"
     )
+    # Optional hard exit to avoid lingering background threads from third-party libs.
+    if force_exit:
+        try:
+            live = [t for t in threading.enumerate() if t.is_alive() and t is not threading.current_thread()]
+            if live:
+                logger.warning(
+                    "Force-exit enabled; terminating despite live threads: "
+                    + ", ".join(f"{t.name}(daemon={t.daemon})" for t in live)
+                )
+        except Exception:
+            pass
+        # Use os._exit to avoid atexit handlers/threads keeping process alive.
+        os._exit(0)
 
 
 def debug_bundle(

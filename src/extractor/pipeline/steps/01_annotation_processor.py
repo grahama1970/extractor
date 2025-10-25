@@ -43,7 +43,8 @@ from extractor.pipeline.utils.diagnostics import (
 
 # Use pipeline-local JSON utilities to avoid heavy core service deps during this stage
 from extractor.pipeline.utils.json_utils import clean_json_string
-from extractor.pipeline.utils.litellm_cache import initialize_litellm_cache
+# SciLLM-only policy: avoid importing legacy LiteLLM cache to prevent
+# background threads or side effects that can block process exit.
 
 # ------------------------------------------------------------------
 # GLOBAL CONSTANTS
@@ -744,12 +745,7 @@ async def process_pdf_pipeline(config: Config):
     except Exception:
         pass
     # removed duplicate re-initialization of run_id/diagnostics/counters
-    # Initialize LiteLLM cache once per run (avoid import-time side effects)
-    try:
-        if config.cache:
-            initialize_litellm_cache()
-    except Exception as _e:
-        logger.warning(f"LiteLLM cache init failed (continuing): {_e}")
+    # Removed legacy LiteLLM cache init (SciLLM-only policy)
     print(f"Processing '{config.input_pdf.name}'…")
 
     # Define clear output paths for this stage

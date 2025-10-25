@@ -29,6 +29,24 @@ ts="$(date +%Y%m%d_%H%M%S)"
 run_dir="${out_root%/}/xtrace_${ts}"
 mkdir -p "${run_dir}"
 
+STAGE_TIMEOUT_SEC=${STAGE_TIMEOUT_SEC:-900}
+VERBOSE=${VERBOSE:-0}
+
+# Preflight snapshot for debugging hangs
+{
+  echo "[xtrace] started: $(date -Is)"
+  echo "[xtrace] python: $(python -V 2>&1) ($(command -v python))"
+  echo "[xtrace] cwd: $(pwd)"
+  echo "[xtrace] stage timeout (sec): ${STAGE_TIMEOUT_SEC}"
+  echo "[xtrace] env (selected):"
+  echo "  CHUTES_API_BASE=${CHUTES_API_BASE:-}"
+  echo "  CHUTES_TEXT_MODEL=${CHUTES_TEXT_MODEL:-}"
+  echo "  CHUTES_VLM_MODEL=${CHUTES_VLM_MODEL:-}"
+  echo "  SCILLM_AUTOSCALE=${SCILLM_AUTOSCALE:-}"
+  echo "  OPENAI_API_KEY=${OPENAI_API_KEY:+<set>}"
+  echo "  OPENAI_BASE_URL=${OPENAI_BASE_URL:+<set>}"
+} >"${run_dir}/preflight.txt" 2>&1 || true
+
 stages_json="[]"
 stage_index=0
 FAIL_FAST=${FAIL_FAST:-0}
@@ -68,7 +86,29 @@ run_one_stage() {
 
   local start_s end_s code
   start_s="$(date +%s)"
-  if ("$@" >"${sdir}/stage.out" 2>"${sdir}/stage.err"); then
+  # Record the exact command line for reproducibility
+  printf '%q ' "$@" >"${sdir}/cmd.sh" || true
+  echo >>"${sdir}/cmd.sh" || true
+  chmod +x "${sdir}/cmd.sh" || true
+
+  # Build effective command with timeout if configured
+  local -a eff_cmd
+  if [[ "${STAGE_TIMEOUT_SEC}" != "0" ]]; then
+    eff_cmd=(timeout -k 10 "${STAGE_TIMEOUT_SEC}" "$@")
+  else
+    eff_cmd=("$@")
+  fi
+
+  # Optional verbosity
+  if [[ "${VERBOSE}" == "1" ]]; then
+    (
+      set -x
+      "${eff_cmd[@]}"
+    ) >"${sdir}/stage.out" 2>"${sdir}/stage.err"
+  else
+    ("${eff_cmd[@]}" >"${sdir}/stage.out" 2>"${sdir}/stage.err")
+  fi
+  if [[ $? -eq 0 ]]; then
     code=0
   else
     code=$?

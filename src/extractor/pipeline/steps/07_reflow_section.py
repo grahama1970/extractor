@@ -59,7 +59,6 @@ from extractor.pipeline.utils.json_utils import (
     parse_json_strict,
     restrict_top_level_keys,
 )
-from extractor.pipeline.utils.litellm_cache import initialize_litellm_cache
 from extractor.pipeline.utils.litellm_response_utils import extract_content
 from extractor.pipeline.utils.log_utils import sanitize_messages_for_return
 from extractor.pipeline.utils.metrics_logger import log_metric
@@ -104,11 +103,8 @@ def _table_confidence(t: dict[str, Any]) -> float:
 if not load_dotenv(find_dotenv(), override=False):
     logger.warning(".env not found; proceeding with process environment only.")
 
-# Initialize LiteLLM cache to prevent duplicate calls
-try:
-    initialize_litellm_cache()
-except Exception as _e:
-    logger.warning(f"LiteLLM cache init failed (continuing): {_e}")
+# SciLLM-only policy: remove legacy LiteLLM cache initialization to avoid
+# background threads preventing clean process exit.
 
 logger.add(
     sys.stderr,
