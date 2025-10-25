@@ -12,7 +12,10 @@ except Exception:  # pragma: no cover
     litellm = None  # type: ignore
 from loguru import logger
 
-from extractor.pipeline.utils.litellm_response_utils import extract_content
+from extractor.pipeline.utils.response_utils import (
+    extract_content,
+    normalize_json_content,
+)
 from extractor.pipeline.utils.metrics_logger import log_metric
 from extractor.core.services.utils.json_utils import clean_json_string
 from src.contracts import HeaderVerdict, ReflowedSection, SectionSummary
@@ -183,37 +186,8 @@ class LLMAdapter:
             else:
                 raise RuntimeError("SciLLM/LiteLLM client unavailable for adapter.")
 
-            # Normalize JSON content: accept dict or string for response_format={"type":"json_object"}
-            raw_text = extract_content(resp) or ""
-            json_obj = None
-            try:
-                # If extract_content produced empty string, try direct access
-                if not raw_text:
-                    ch = resp.get("choices") if isinstance(resp, dict) else getattr(resp, "choices", None)
-                    if ch:
-                        msg = ch[0].get("message") if isinstance(ch[0], dict) else getattr(ch[0], "message", None)
-                        if msg is not None:
-                            content_val = msg.get("content") if isinstance(msg, dict) else getattr(msg, "content", None)
-                            if isinstance(content_val, dict):
-                                json_obj = content_val
-                                import json as _json
-
-                                raw_text = _json.dumps(content_val, ensure_ascii=False)
-                            elif isinstance(content_val, str):
-                                raw_text = content_val
-                # If we still have text, attempt to parse into json_obj for downstream strict typing
-                if json_obj is None and raw_text:
-                    import json as _json
-
-                    try:
-                        parsed = _json.loads(raw_text)
-                        if isinstance(parsed, dict):
-                            json_obj = parsed
-                    except Exception:
-                        json_obj = None
-            except Exception:
-                # Non-fatal; downstream _parse_json will repair when possible
-                json_obj = None
+            # Normalize JSON content (dict-or-string) once for all call sites
+            raw_text, json_obj = normalize_json_content(resp)
 
             (req_dir / "raw.txt").write_text(raw_text)
             usage_obj = getattr(resp, "usage", None)

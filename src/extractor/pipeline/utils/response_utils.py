@@ -8,6 +8,8 @@ Design:
 - Keep JSON cleaning/parsing centralized by reusing json_utils.clean_json_string
 - Keep response content extraction tolerant of both dict (OpenAI-style) and
   ModelResponse-like objects, including content lists (multimodal parts)
+- Provide normalize_json_content() to accept dict-or-string JSON mode content
+  and return a consistent (raw_text, json_obj) pair.
 """
 
 from __future__ import annotations
@@ -18,6 +20,7 @@ from typing import Any, Dict
 from extractor.pipeline.utils.json_utils import clean_json_string
 from extractor.pipeline.utils.image_helpers import extract_images
 from typing import Any as _Any, Dict as _Dict, List as _List, Optional as _Optional, Tuple as _Tuple
+import json as _json
 
 
 def extract_content(resp: Any) -> str:
@@ -46,6 +49,12 @@ def extract_content(resp: Any) -> str:
                     if parts:
                         return "\n".join(parts)
                 if content is not None:
+                    # If providers return a JSON object in content (JSON mode), serialize to string
+                    if isinstance(content, dict):
+                        try:
+                            return _json.dumps(content, ensure_ascii=False)
+                        except Exception:
+                            return ""
                     return str(content)
                 txt = ch[0].get("text")
                 if isinstance(txt, str):
@@ -74,6 +83,11 @@ def extract_content(resp: Any) -> str:
                                 parts.append(t.strip())
                     if parts:
                         return "\n".join(parts)
+                if isinstance(content, dict):
+                    try:
+                        return _json.dumps(content, ensure_ascii=False)
+                    except Exception:
+                        return ""
                 return str(content)
             txt = getattr(ch0, "text", None)
             if isinstance(txt, str):
@@ -94,6 +108,53 @@ def extract_content(resp: Any) -> str:
     if isinstance(resp, str):
         return resp
     return ""
+
+
+def normalize_json_content(resp: Any) -> _Tuple[str, _Optional[_Dict[str, _Any]]]:
+    """
+    Normalize JSON mode responses into (raw_text, json_obj or None).
+
+    - Handles dict-or-string in message.content.
+    - Attempts to json.loads string content; if that fails, tries clean_json_string.
+    - Returns ("", None) if not available/parseable.
+    """
+    raw_text = extract_content(resp) or ""
+    json_obj: _Optional[_Dict[str, _Any]] = None
+    try:
+        if raw_text:
+            try:
+                parsed = _json.loads(raw_text)
+                if isinstance(parsed, dict):
+                    json_obj = parsed
+            except Exception:
+                # Attempt repair via cleaner
+                repaired = clean_json_string(raw_text, return_dict=True)
+                if isinstance(repaired, dict):
+                    json_obj = repaired
+        else:
+            # Try direct access if extract_content couldn't resolve
+            choices = getattr(resp, "choices", None) if not isinstance(resp, dict) else resp.get("choices")
+            if choices:
+                first = choices[0]
+                message = getattr(first, "message", None) if not isinstance(first, dict) else first.get("message")
+                if message is not None:
+                    content = getattr(message, "content", None) if not isinstance(message, dict) else message.get("content")
+                    if isinstance(content, dict):
+                        json_obj = content
+                        raw_text = _json.dumps(content, ensure_ascii=False)
+                    elif isinstance(content, str):
+                        raw_text = content
+                        try:
+                            parsed = _json.loads(raw_text)
+                            if isinstance(parsed, dict):
+                                json_obj = parsed
+                        except Exception:
+                            repaired = clean_json_string(raw_text, return_dict=True)
+                            if isinstance(repaired, dict):
+                                json_obj = repaired
+    except Exception:
+        json_obj = None
+    return raw_text, json_obj
 
 
 def to_messages_and_model(

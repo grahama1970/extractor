@@ -1,5 +1,5 @@
 """
-Simple LLM utility functions using litellm
+Simple LLM utility functions using SciLLM
 
 No complex classes, just simple functions that work!
 """
@@ -20,7 +20,7 @@ from scillm import acompletion as scillm_acompletion  # type: ignore
 from extractor.core.services.utils.json_utils import clean_json_string
 
 # from utils.async_processing import call_llm_with_retry
-from extractor.pipeline.utils.litellm_response_utils import extract_content
+from extractor.pipeline.utils.response_utils import extract_content
 
 
 async def call_llm_with_image(
@@ -43,9 +43,9 @@ async def call_llm_with_image(
         Dict with response or None if failed
     """
 
-    # Default model
+    # Default model (SciLLM/Chutes)
     if model is None:
-        model = os.getenv("LITELLM_MODEL", "moonshot/kimi-k2-turbo-preview")
+        model = os.getenv("CHUTES_TEXT_MODEL", "chutesai/Mistral-Small-3.1-24B-Instruct-2503")
 
     try:
         messages = [{"role": "user", "content": []}]
@@ -72,11 +72,8 @@ async def call_llm_with_image(
         if response_format == "json":
             kwargs["response_format"] = {"type": "json_object"}
 
-        # SciLLM async client
-        import asyncio as _asyncio
-        async def _call():
-            return await scillm_acompletion(**kwargs)
-        response = _asyncio.run(_call())
+        # SciLLM async client (await directly; no nested event loop)
+        response = await scillm_acompletion(**kwargs)
 
         # Extract response
         content = extract_content(response)
