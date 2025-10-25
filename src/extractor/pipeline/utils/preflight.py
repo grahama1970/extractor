@@ -3,13 +3,15 @@ from __future__ import annotations
 
 import os
 from typing import Tuple
+import urllib.request
+import urllib.error
 
 
 def scillm_quick_check(timeout: float = 3.0) -> Tuple[bool, str]:
     """Fast sanity check for scillm/Chutes availability.
 
     - Verifies CHUTES_API_BASE and CHUTES_API_KEY are set
-    - Makes a cheap GET to /models with x-api-key
+    - Makes a cheap GET to /v1/models (or /models if base already endswith /v1) with x-api-key
     - Returns (ok, reason)
     """
     base = (os.getenv("CHUTES_API_BASE") or "").rstrip("/")
@@ -17,13 +19,19 @@ def scillm_quick_check(timeout: float = 3.0) -> Tuple[bool, str]:
     if not base or not key:
         return False, "CHUTES_API_BASE/CHUTES_API_KEY not set"
     try:
-        import httpx  # type: ignore
-
-        url = f"{base}/models"
-        r = httpx.get(url, headers={"x-api-key": key}, timeout=timeout)
-        if r.status_code == 200:
-            return True, "ok"
-        return False, f"HTTP {r.status_code} from /models"
+        # Normalize to .../v1/models
+        if base.endswith("/v1"):
+            url = f"{base}/models"
+        else:
+            url = f"{base}/v1/models"
+        req = urllib.request.Request(url, headers={"x-api-key": key})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            code = getattr(resp, "status", None) or resp.getcode()
+            if code == 200:
+                return True, "ok"
+            return False, f"HTTP {code} from /models"
+    except urllib.error.HTTPError as e:  # pragma: no cover
+        return False, f"http error: {e.code}"
     except Exception as e:  # pragma: no cover
         return False, f"http error: {e}"
 
