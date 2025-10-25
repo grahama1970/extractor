@@ -530,6 +530,12 @@ async def reflow_section_with_llm(
     """Reflow a section using multimodal context (section/table/figure/annotation) and return structured JSON."""
     # Enforce text-only for Stage 07
     include_images = False
+    # Ensure text model is selected even when debug-bundle bypasses run()
+    global LLM_MODEL
+    try:
+        LLM_MODEL = get_text_model()
+    except Exception:
+        pass
     try:
         sec_diags = []
 
