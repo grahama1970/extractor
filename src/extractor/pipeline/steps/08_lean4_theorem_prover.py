@@ -53,7 +53,7 @@ from extractor.pipeline.utils.diagnostics import (
 from extractor.pipeline.utils.json_mode import JSON_SYSTEM_GUARD
 
 # Import JSON utilities
-from extractor.pipeline.utils.json_utils import clean_json_string
+from scillm.extras.json_utils import clean_json_string
 
 try:
     from lean4_prover.core.validation_models import get_validation_strategy

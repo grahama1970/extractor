@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 from typing import Any, Dict
 
-from extractor.pipeline.utils.json_utils import clean_json_string
+from scillm.extras.json_utils import clean_json_string
 from extractor.pipeline.utils.image_helpers import extract_images
 from typing import Any as _Any, Dict as _Dict, List as _List, Optional as _Optional, Tuple as _Tuple
 import json as _json

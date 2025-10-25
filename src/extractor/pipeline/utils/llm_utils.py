@@ -17,7 +17,7 @@ from PIL import Image
 from scillm import acompletion as scillm_acompletion  # type: ignore
 
 # Import json cleaning utility
-from extractor.core.services.utils.json_utils import clean_json_string
+from scillm.extras.json_utils import clean_json_string
 
 # from utils.async_processing import call_llm_with_retry
 from extractor.pipeline.utils.response_utils import extract_content

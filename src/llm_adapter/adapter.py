@@ -17,7 +17,7 @@ from extractor.pipeline.utils.response_utils import (
     normalize_json_content,
 )
 from extractor.pipeline.utils.metrics_logger import log_metric
-from extractor.core.services.utils.json_utils import clean_json_string
+from scillm.extras.json_utils import clean_json_string
 from src.contracts import HeaderVerdict, ReflowedSection, SectionSummary
 
 
