@@ -31,6 +31,8 @@ mkdir -p "${run_dir}"
 
 stages_json="[]"
 stage_index=0
+FAIL_FAST=${FAIL_FAST:-0}
+STOP=0
 
 append_stage_json() {
   local label="$1"
@@ -74,6 +76,9 @@ run_one_stage() {
   echo -n "${code}" >"${sdir}/exit_code"
   end_s="$(date +%s)"
   append_stage_json "${label}" "${start_s}" "${end_s}" "${code}" "${sdir}"
+  if [[ "$FAIL_FAST" == "1" && $code -ne 0 ]]; then
+    STOP=1
+  fi
   return "${code}"
 }
 
@@ -83,7 +88,9 @@ current_cmd=()
 
 flush_stage_if_any() {
   if [[ -n "${current_label}" && ${#current_cmd[@]} -gt 0 ]]; then
-    run_one_stage "${current_label}" "${current_cmd[@]}" || true
+    if [[ "$STOP" != "1" ]]; then
+      run_one_stage "${current_label}" "${current_cmd[@]}" || true
+    fi
     current_label=""
     current_cmd=()
   fi

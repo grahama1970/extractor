@@ -2674,42 +2674,6 @@ def run(
             return await tqdm_asyncio.gather(*tasks, desc="Reflowing Sections (text-first)")
 
         processed_sections = asyncio.run(run_tasks_first())
-
-        # Optional single-image retry when first pass is empty/invalid
-        try:
-            want_retry = os.getenv("STAGE07_SINGLE_IMAGE_RETRY", "1").lower() in ("1", "true", "yes", "y")
-        except Exception:
-            want_retry = True
-        if want_retry:
-            def _needs_retry(sec: dict[str, Any]) -> bool:
-                txt = (sec.get("reflowed_text") or "").strip()
-                return len(txt) == 0
-
-            if any(_needs_retry(ps) for ps in processed_sections):
-                # Limit images to 1 and disable section/figure images for retry
-                os.environ["STAGE07_MAX_IMAGES"] = "1"
-                os.environ["ATTACH_SECTION_IMAGE"] = "0"
-                os.environ["STAGE07_INCLUDE_FIGURES"] = "0"
-
-                async def run_tasks_retry():
-                    tasks = []
-                    for idx, s in enumerate(sections_to_process):
-                        if _needs_retry(processed_sections[idx]):
-                            tasks.append(
-                                reflow_section_with_llm(
-                                    s,
-                                    output_dir,
-                                    include_images=False,
-                                    allow_fallback=allow_fallback,
-                                    llm_timeout=llm_timeout,
-                                )
-                            )
-                        else:
-                            # keep previous output
-                            tasks.append(asyncio.sleep(0.0, result=processed_sections[idx]))
-                    return await tqdm_asyncio.gather(*tasks, desc="Reflowing Sections (single-image retry)")
-
-                processed_sections = asyncio.run(run_tasks_retry())
     logger.debug(f"processed_sections_count={len(processed_sections)}")
 
     # --- Final Output ---

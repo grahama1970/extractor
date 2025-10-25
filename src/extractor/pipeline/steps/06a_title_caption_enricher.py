@@ -33,6 +33,7 @@ import urllib.request
 import typer
 from loguru import logger
 from scillm import acompletion as sc_acompletion
+from extractor.pipeline.utils.response_utils import normalize_json_content
 from typing import Iterable
 
 
@@ -87,23 +88,24 @@ def _chutes_title_infer(prompt_ctx: str, timeout: float = 6.0) -> Optional[str]:
         except Exception:
             pass
         model = os.getenv("CHUTES_TEXT_MODEL", "").strip()
-        base = os.getenv("CHUTES_API_BASE", "").strip()
-        key = os.getenv("CHUTES_API_KEY", "").strip()
-        if not (model and base and key):
+        if not model:
             return None
-        resp = asyncio.run(sc_acompletion(
-            model=model,
-            custom_llm_provider="openai_like",
-            api_base=base,
-            api_key=None,
-            extra_headers={"x-api-key": key},
-            messages=[{"role": "user", "content": prompt}],
-            response_format={"type": "json_object"},
-            temperature=0.2,
-            timeout=timeout,
-        ))
-        content = (resp.get("choices") or [{}])[0].get("message", {}).get("content", "").strip()
-        return content.strip().strip('"') or None
+        resp = asyncio.run(
+            sc_acompletion(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                response_format={"type": "json_object"},
+                temperature=0.2,
+                timeout=timeout,
+            )
+        )
+        raw_text, json_obj = normalize_json_content(resp)
+        if isinstance(json_obj, dict):
+            t = json_obj.get("title")
+            if isinstance(t, str) and t.strip():
+                return t.strip()
+        content = (raw_text or "").strip()
+        return content.strip('"') or None
     except Exception as e:
         logger.debug(f"Title inference skipped: {e}")
         return None
