@@ -64,10 +64,16 @@ DEBUG = False
 
 # --------------------------------------------------------------------------- #
 # Move multiprocessing worker to top-level for cross-platform compatibility (spawn/fork)
-def _worker(pdf_str: str, q: "mp.Queue[Dict[str, Any]]"):
+def _worker(pdf_str: str, q: "mp.Queue[Dict[str, Any]]", dump_dir_str: str):
     try:
         blocks_local, presence = extract_blocks(Path(pdf_str))
-        q.put({"ok": True, "blocks": blocks_local, "predictors": presence})
+        # Avoid large objects over mp.Queue → write to temp JSON and return small message
+        dump_dir = Path(dump_dir_str)
+        dump_dir.mkdir(parents=True, exist_ok=True)
+        tmp_path = dump_dir / f"02_blocks_{uuid.uuid4().hex}.json"
+        with tmp_path.open("w", encoding="utf-8") as f:
+            json.dump({"blocks": blocks_local, "predictors": presence}, f, ensure_ascii=False)
+        q.put({"ok": True, "path": str(tmp_path)})
     except Exception as exc:
         q.put({"ok": False, "error": str(exc)})
 
@@ -516,46 +522,44 @@ def run(
             console.print(f"[red]Stage 02 failed: {e}[/red]")
             raise typer.Exit(1)
     else:
-        # Run extraction in a separate process so we can enforce a hard timeout
-        # Worker moved to top-level to be picklable in 'spawn' start method environments (Windows/macOS).
+        # Run extraction in a separate process with temp-file handoff to avoid mp.Queue backpressure
         q: "mp.Queue[Dict[str, Any]]" = mp.Queue()
-        p = mp.Process(target=_worker, args=(str(pdf_path), q), daemon=True)
+        p = mp.Process(target=_worker, args=(str(pdf_path), q, str(json_output_dir)), daemon=True)
         t_ex0 = time.monotonic()
         p.start()
-        p.join(timeout)
 
-        if p.is_alive():
-            console.print(
-                f"[red]Stage 02 timed out after {timeout}s. Terminating extractor...[/red]"
-            )
+        # Read small result first, then join (prevents child blocking on q.put for large payloads)
+        try:
+            result = q.get(timeout=timeout)
+        except Exception:
+            console.print(f"[red]Stage 02 extractor produced no result within {timeout}s[/red]")
             try:
                 diagnostics.append(
                     make_event(
                         "02_marker_extractor",
                         "error",
                         "extractor_timeout",
-                        f"Timed out after {timeout}s",
+                        f"No result within {timeout}s",
                         {"pdf_path": str(pdf_path), "timeout": timeout},
                     )
                 )
                 errors_count += 1
             except Exception:
                 pass
-            try:
-                p.terminate()
-                p.join(2)
-            finally:
-                if p.is_alive():
-                    p.kill()
-                    p.join(1)
+            if p.is_alive():
+                try:
+                    p.terminate()
+                    p.join(2)
+                finally:
+                    if p.is_alive():
+                        p.kill()
+                        p.join(1)
             raise typer.Exit(1)
 
+        # Allow child to exit; do not block indefinitely
+        p.join(5)
         extract_duration_ms = int((time.monotonic() - t_ex0) * 1000)
-        if q.empty():
-            console.print("[red]Stage 02 failed: no data returned from extractor process[/red]")
-            raise typer.Exit(1)
 
-        result = q.get()
         if not result.get("ok", False):
             logger.exception("Stage 02 failed during extraction")
             try:
@@ -574,8 +578,22 @@ def run(
             console.print(f"[red]Stage 02 failed: {result.get('error', 'Unknown error')}[/red]")
             raise typer.Exit(1)
 
-        blocks = result["blocks"]
-        predictor_presence = result.get("predictors", {})
+        # Load large payload from temp file written by the child process
+        tmp_path = Path(result.get("path", ""))
+        if not tmp_path.exists():
+            console.print("[red]Stage 02 failed: extractor output path missing[/red]")
+            raise typer.Exit(1)
+        try:
+            tmp_data = json.loads(tmp_path.read_text(encoding="utf-8"))
+        except Exception as e:
+            console.print(f"[red]Stage 02 failed: could not read extractor output: {e}[/red]")
+            raise typer.Exit(1)
+        blocks = tmp_data.get("blocks") or []
+        predictor_presence = tmp_data.get("predictors", {})
+        try:
+            tmp_path.unlink()
+        except Exception:
+            pass
 
     # Optional: force-tag all SectionHeader blocks as suspicious_header for Stage 03 testing
     if mark_all_headers_suspicious:
