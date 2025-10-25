@@ -528,6 +528,8 @@ async def reflow_section_with_llm(
     llm_timeout: int = 60,
 ) -> dict[str, Any]:
     """Reflow a section using multimodal context (section/table/figure/annotation) and return structured JSON."""
+    # Enforce text-only for Stage 07
+    include_images = False
     try:
         sec_diags = []
 
@@ -2372,8 +2374,9 @@ def run(
     summary_only: bool = typer.Option(
         False, "--summary-only", help="Emit merged_text snapshot without LLM calls."
     ),
+    # Stage 07 is text-only. Images are disabled regardless of flag.
     include_images: bool = typer.Option(
-        False, "--include-images/--no-include-images", help="Include images in LLM input (default off for simple profile)"
+        False, "--include-images/--no-include-images", help="(disabled) Stage 07 is text-only"
     ),
     allow_fallback: bool = typer.Option(
         False,
@@ -2396,10 +2399,11 @@ def run(
     Reflows document sections using multimodal context from previous stages.
     """
     console.print("[bold green]Starting Section Reflow (Stage 07)[/bold green]")
-    # Choose model based on images policy: use Text model for text-only runs
+    # Force text-only policy for Stage 07
+    include_images = False
     global LLM_MODEL
     try:
-        LLM_MODEL = get_vlm_model() if include_images else get_text_model()
+        LLM_MODEL = get_text_model()
     except Exception as _e:
         console.print(f"[red]Stage 07 model selection failed: {_e}[/red]")
         raise typer.Exit(2)
@@ -2447,10 +2451,9 @@ def run(
     # --- Profile toggles (simple profile defaults) ---
     try:
         simple = os.getenv("PROFILE_SIMPLE", "").lower() in ("1", "true", "yes", "y")
-        if simple:
-            include_images = False
-            # ensure downstream helpers do not attach extra images by default
-            os.environ.setdefault("STAGE07_MAX_IMAGES", "0")
+        # ensure downstream helpers do not attach extra images by default
+        include_images = False
+        os.environ.setdefault("STAGE07_MAX_IMAGES", "0")
     except Exception:
         pass
 
@@ -2690,7 +2693,7 @@ def run(
                                 reflow_section_with_llm(
                                     s,
                                     output_dir,
-                                    include_images=True,
+                                    include_images=False,
                                     allow_fallback=allow_fallback,
                                     llm_timeout=llm_timeout,
                                 )
@@ -2904,6 +2907,8 @@ def build_reflow_request_messages(
     model: str,
     context_text: str,
 ) -> list[dict[str, Any]]:
+    # Enforce text-only for Stage 07
+    include_images = False
     def _is_gemini(m: str) -> bool:
         return "gemini" in (m or "").lower()
 
