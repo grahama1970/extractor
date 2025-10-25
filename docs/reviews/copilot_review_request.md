@@ -7,49 +7,71 @@ Do NOT IGNORE!!!!!!!
 
 **Project**
 
-* Fork/Repo: `<OWNER/REPO>` (the external github repo)
-* Branch: `<BRANCH>`
-* Path: `<GIT_SOURCE_WITH_BRANCH>`  *(e.g., `git@github.com:<OWNER>/<REPO>.git#<BRANCH>`)*
+* Fork/Repo: `grahama1970/extractor`
+* Branch: `feat/annotator-pymupdf-restore`
+* Path: `git@github.com:grahama1970/extractor.git#feat/annotator-pymupdf-restore`
 
 **Task**
 
-* `<ONE-LINE SUMMARY OF THE CHANGE YOU WANT>`
+* Stabilize pipeline steps 01→07 under a SciLLM‑only policy; enforce text‑only for Stage 07; normalize JSON‑mode parsing (dict or string) at a single choke‑point; remove deprecated litellm/httpx paths on the hot path; add an array‑safe xtrace runner; deliver one unified diff.
 
 **Context (brief, optional)**
 
-* `<WHY this change is needed / what’s broken / desired outcome>`
-* `<Any operational constraints or runtime modes>`
+* Failures stem from JSON‑mode shape (content as dict vs string) and legacy paths. Stage 07 must be text‑only (reflow text + merge tables). Inputs must never mutate PDFs under `data/input/`. Add a small array‑safe runner to capture per‑stage logs to avoid “hangs”.
 
 **Review Scope (relative paths)**
 
 * Primary:
 
-  * `<path/to/file1>`
-  * `<path/to/file2>`
+  * `src/extractor/pipeline/steps/01_annotation_processor.py`
+  * `src/extractor/pipeline/steps/02_marker_extractor.py`
+  * `src/extractor/pipeline/steps/04_section_builder.py`
+  * `src/extractor/pipeline/steps/05_table_extractor.py`
+  * `src/extractor/pipeline/steps/06_figure_extractor.py`
+  * `src/extractor/pipeline/steps/06a_title_caption_enricher.py`
+  * `src/extractor/pipeline/steps/06b_layout_sketcher.py`
+  * `src/extractor/pipeline/steps/07_reflow_section.py`
 * Also check (if needed):
 
-  * `<scripts/tests/docs/etc>`
+  * `src/llm_adapter/adapter.py`
+  * `src/extractor/pipeline/utils/response_utils.py`
+  * `src/extractor/pipeline/utils/llm_utils.py`
+  * `src/extractor/pipeline/utils/preflight.py`
+  * `src/extractor/pipeline/utils/model_select.py`
+  * `src/extractor/pipeline/utils/litellm_response_utils.py` (target for removal/replace)
+  * `scripts/tools/pipeline_xtrace.sh` (new)
+  * `scripts/run_simple.sh`
+  * `scripts/tools/remove_pdf_annotations.py`
+  * Docs/README references if touched
 
 **Objectives**
 
-* `<Objective 1 (what to add/fix/harden)>`
-* `<Objective 2>`
-* `<Objective 3>`
+* JSON‑mode normalization: single helper that accepts dict‑or‑string in `choices[0].message.content`; use it in the adapter and Stage 07.
+* Stage 07 text‑only: remove/disable multimodal branches; always select `CHUTES_TEXT_MODEL`; keep focus on reflow text + merge tables.
+* SciLLM‑only: replace any litellm/httpx paths on the 01→07 flow; call `scillm.acompletion` (async) consistently.
+* Xtrace runner: ensure `scripts/tools/pipeline_xtrace.sh` exists (array‑safe), captures per‑stage `stage.out`/`stage.err`, and writes `summary.json`.
+* Safety: never mutate PDFs under `data/input/`; rely on `scripts/tools/remove_pdf_annotations.py` to produce copies.
 
 **Constraints**
 
 * **Unified diff only**, inline inside a single fenced block.
 * **No PRs, no hosted links, no URLs, no extra commentary.**
-* Include a **one-line commit subject** inside the patch.
+* Include a **one‑line commit subject** inside the patch.
 * **Numeric hunk headers only** (`@@ -old,+new @@`), no symbolic headers.
-* Patch must apply cleanly on branch `<BRANCH>`.
+* Patch must apply cleanly on branch `feat/annotator-pymupdf-restore`.
 * Preserve plan→execute semantics; avoid destructive defaults.
 
 **Acceptance (we will validate)**
 
-* `<Acceptance criterion 1 (artifacts produced / command succeeds)>`
-* `<Acceptance criterion 2 (content present / counts match)>`
-* `<Acceptance criterion 3 (tests/smokes pass)>`
+* Ripgrep guardrails:
+  * `rg -n "litellm_response_utils|httpx.get\(|openai_like" src/extractor` → no matches
+  * `rg -n "include_images" src/extractor/pipeline/steps/07_reflow_section.py` → only in comments/disabled logic
+* JSON normalization:
+  * Adapter + Stage 07 accept dict‑or‑string JSON content; no “empty content” paths remain.
+* Runner present:
+  * `scripts/tools/pipeline_xtrace.sh` is executable and produces a `summary.json` with populated stages.
+* Safety:
+  * No writes to `data/input/`; Stage 01 and tools operate on copies.
 
 **Deliverables (STRICT — inline only; exactly these sections, in this order)**
 
@@ -68,12 +90,12 @@ Do NOT IGNORE!!!!!!!
 
 **Clarifying Questions (answer succinctly in the ANSWERS section; if unknown, reply `TBD` + minimal dependency needed)**
 
-* Dependencies/data sources: Do we need to pin inputs/models/versions for repeatability?
-* Schema drift: Should exporters/parsers tolerate missing/renamed columns with failing smokes?
-* Safety: Are all mutating paths gated behind `--execute`? Any missing guards?
-* Tests/smokes: Which deterministic smokes must pass (counts > 0, report count==pairs, strict formats)?
-* Performance: Any batch sizes, rate limits, or timeouts/retries to honor?
-* Observability: What summary lines should the CLI print on completion?
+* Dependencies/data sources: Pin `CHUTES_TEXT_MODEL`/`CHUTES_VLM_MODEL` via env only, or add defaults in `model_select.py`?
+* Schema drift: Should parsers tolerate missing/renamed JSON keys with warnings, or fail fast?
+* Safety: Enforce a hard guard to prevent writes under `data/input/` at all CLI entrypoints?
+* Tests/smokes: Which deterministic smokes must pass locally (e.g., JSON present, counts > 0)? Any CI‑only checks?
+* Performance: Preferred default acompletion timeout and concurrency for 01→07 (e.g., 60–90s, ≤8 workers)?
+* Observability: Minimal summary lines/counters each stage should print (counts, artifact paths)?
 
 **Output Format (must match exactly; no extra text):**
 UNIFIED_DIFF:
@@ -90,10 +112,10 @@ ANSWERS:
 
 ## Quick “Drop-In” Mini Version
 
-**Request:** Produce a **single unified diff** (inline) for `<OWNER/REPO>#<BRANCH>` that achieves: `<brief objectives>`.
-**Scope:** `<paths…>`
-**Constraints:** No PRs/links; include a one-line commit subject; numeric hunk headers only; patch applies cleanly.
-**Acceptance:** `<bullets>`
+**Request:** Produce a **single unified diff** (inline) for `grahama1970/extractor#feat/annotator-pymupdf-restore` that stabilizes 01→07 (SciLLM‑only; Stage 07 text‑only; JSON‑mode normalization; drop litellm/httpx on hot path; add xtrace runner).
+**Scope:** `src/extractor/pipeline/steps/0{1,2,4,5,6,6a,6b,7}_*.py`, `src/llm_adapter/adapter.py`, `src/extractor/pipeline/utils/{response_utils.py,llm_utils.py,preflight.py,model_select.py}`, `scripts/tools/pipeline_xtrace.sh`
+**Constraints:** No PRs/links; include a one‑line commit subject; numeric hunks only; patch applies cleanly.
+**Acceptance:** rg guards above; xtrace runner present; Stage 07 JSON accepted dict or string; no writes to `data/input/`.
 
 **Output (exact):**
 UNIFIED_DIFF:
@@ -105,26 +127,3 @@ UNIFIED_DIFF:
 ANSWERS:
 
 * `<answers to: deps, schema drift, safety, tests, performance, observability>`
-
----
-
-## Optional Toggles (copy/paste as needed)
-
-* **Strict JSON Mode:** “All generated configs/snippets must be strict JSON: no comments, no trailing commas, no markdown/codefences inside the JSON.”
-* **Flag-First DX:** “Commands and code must use explicit flag-first configuration; no hidden env defaults.”
-* **Worker/Batching Defaults:** “Default ≤3 workers; batch size 10–15; retries with exponential backoff.”
-* **Determinism:** “Seeded or deterministic outputs where feasible; produce minified JSON artifacts.”
-* **MBOX Variant (if you ever switch modes):** Replace the UNIFIED_DIFF block with:
-  **Output (exact):**
-  `MBOX:` *(paste full git-format patch series; no code fences)*
-
----
-
-### Placeholder Key
-
-* `<OWNER/REPO>`: Repository identifier
-* `<BRANCH>`: Target branch name
-* `<GIT_SOURCE_WITH_BRANCH>`: Fetchable ref (SSH/HTTPS) with `#<BRANCH>` if helpful to your tools
-* `<paths…>`: Narrow file list to focus Copilot
-* `<brief objectives>` / `<Acceptance>`: What “done” looks like
-
