@@ -103,14 +103,13 @@ while (($#)); do
 done
 flush_stage_if_any
 
-python - <<'PY' >"${run_dir}/summary.json"
+XT_STAGES="${stages_json}" XT_RUN_DIR="${run_dir}" \
+  python - <<'PY' >"${run_dir}/summary.json"
 import json,os
 stages=json.loads(os.environ["XT_STAGES"]) if os.environ.get("XT_STAGES") else []
 overall=0 if all(e.get("exit_code",0)==0 for e in stages) else 1
 print(json.dumps({"run_dir": os.environ.get("XT_RUN_DIR",""), "stages": stages, "overall_exit_code": overall}, ensure_ascii=False, indent=2))
 PY
-XT_STAGES="${stages_json}" XT_RUN_DIR="${run_dir}"
 
 echo "summary: ${run_dir}/summary.json"
 exit 0
-
