@@ -13,12 +13,11 @@ Do NOT IGNORE!!!!!!!
 
 **Task**
 
-* Consolidate SciLLM-only async calls, remove litellm/shims, normalize JSON-mode parsing, add array-safe xtrace runner, and enforce PDF annotation safety.
+* Structured code review of the extractor pipeline for robustness and maintainability under a "SciLLM-only, async-only" policy; propose minimal, high-confidence changes via a single unified diff (no re-architecture).
 
 **Context (brief, optional)**
 
-* Migrated to SciLLM; residual litellm/shims and inconsistent JSON-mode handling cause brittleness (e.g., Stage 07 "empty content" when content is a dict). Prior "hangs" were shell early-exit due to quoting.
-* Operate with SciLLM acompletion only (no httpx fallbacks); never mutate PDFs under data/input/.
+* The project has moved to SciLLM (Chutes) calls only and aims to remove legacy litellm usage. JSON mode responses may be dict or string; code should normalize once. Avoid bespoke wrappers; ensure pipeline never mutates PDFs under `data/input/`.
 
 **Review Scope (relative paths)**
 
@@ -37,24 +36,25 @@ Do NOT IGNORE!!!!!!!
 * Also check (if needed):
 
   * src/llm_adapter/adapter.py
-  * src/extractor/pipeline/utils/litellm_call.py
-  * src/extractor/pipeline/utils/litellm_cache.py
-  * src/extractor/pipeline/utils/litellm_image_utils.py
+  * src/extractor/pipeline/utils/llm_utils.py
   * src/extractor/pipeline/utils/litellm_response_utils.py
+  * src/extractor/pipeline/utils/litellm_call.py (target for removal)
+  * src/extractor/pipeline/utils/vendor_parallel_acompletion.py
   * src/extractor/pipeline/utils/chutes_client.py
   * src/extractor/pipeline/utils/scillm_client.py
-  * src/extractor/pipeline/utils/vendor_parallel_acompletion.py
+  * src/extractor/pipeline/utils/model_select.py
+  * src/extractor/pipeline/utils/preflight.py
   * scripts/run_simple.sh
   * scripts/tools/remove_pdf_annotations.py
   * AGENTS.md, SCILLM_USAGE.md, README.md
 
 **Objectives**
 
-* Remove litellm shims/imports; use scillm.acompletion everywhere (no httpx).
-* Normalize JSON-mode to accept dict or string in choices[0].message.content.
-* Remove bespoke SciLLM wrappers; call SciLLM directly.
-* Add array-safe scripts/tools/pipeline_xtrace.sh with per-stage .out/.err + JSON summary.
-* Enforce: never mutate PDFs under data/input/; operate on copies only.
+* Identify and remove remaining litellm/shim usages; rely on `scillm.acompletion` consistently (no httpx fallbacks).
+* Normalize JSON mode parsing once (dict or string in `choices[0].message.content`) and use it across call sites.
+* Eliminate ad‑hoc/bespoke SciLLM wrappers; prefer direct, consistent calls.
+* Add a simple array‑safe xtrace runner script (`scripts/tools/pipeline_xtrace.sh`) to capture per‑stage `.out/.err` and a JSON summary (optional but preferred if small/safe).
+* Enforce that PDFs under `data/input/` are never mutated in place.
 
 **Constraints**
 
@@ -63,13 +63,14 @@ Do NOT IGNORE!!!!!!!
 * Include a **one-line commit subject** inside the patch.
 * **Numeric hunk headers only** (`@@ -old,+new @@`), no symbolic headers.
 * Patch must apply cleanly on branch "feat/annotator-pymupdf-restore".
-* Preserve plan→execute semantics; avoid destructive defaults.
+* Prefer minimal, high-confidence edits; avoid large refactors.
 
 **Acceptance (we will validate)**
 
-* rg -n "litellm_call|chutes_scillm|achutes_chat|httpx" under src/extractor/ → none (tests allowed).
-* Stage 07 writes non-empty strict JSON; no "empty content" errors when content is dict.
-* scripts/tools/pipeline_xtrace.sh produces per-stage logs and a JSON summary; no shell quoting failures.
+* `rg -n "litellm_call|litellm_cache|httpx" src/extractor` returns none (tests allowed).
+* A JSON content normalizer is introduced/used in adapter/07 to handle dict-or-string uniformly; Stage 07 no longer errors on "empty content".
+* Optional xtrace script exists and produces per‑stage logs and a summary JSON without quoting errors.
+* No code path mutates PDFs under `data/input/`.
 
 **Deliverables (STRICT — inline only; exactly these sections, in this order)**
 
@@ -90,12 +91,11 @@ Do NOT IGNORE!!!!!!!
 
 **Clarifying Questions (answer succinctly in the ANSWERS section; if unknown, reply `TBD` + minimal dependency needed)**
 
-* Dependencies/data sources: Do we need to pin inputs/models/versions for repeatability?
-* Schema drift: Should exporters/parsers tolerate missing/renamed columns with failing smokes?
-* Safety: Are all mutating paths gated behind `--execute`? Any missing guards?
-* Tests/smokes: Which deterministic smokes must pass (counts > 0, report count==pairs, strict formats)?
-* Performance: Any batch sizes, rate limits, or timeouts/retries to honor?
-* Observability: What summary lines should the CLI print on completion?
+* Dependencies/data sources: Should inputs/models be pinned for repeatability?
+* Schema drift: Tolerate missing/renamed keys with warnings or fail fast?
+* Safety: Is a global guard desired to prevent writes under `data/input/`?
+* Tests/smokes: Which deterministic smokes must pass locally?
+* Performance: Preferred default concurrency/timeouts for `scillm.acompletion`?
 
 **Output Format (must match exactly; no extra text):**
 UNIFIED_DIFF:
