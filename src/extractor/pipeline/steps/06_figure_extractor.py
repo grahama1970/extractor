@@ -25,7 +25,6 @@ from pathlib import Path
 from typing import Any, Optional
 
 import fitz  # PyMuPDF
-import typer
 from dotenv import find_dotenv, load_dotenv
 from loguru import logger
 from rich.console import Console
@@ -40,6 +39,7 @@ from extractor.pipeline.utils.figure_extractor_utils import (
     _bbox_area,
     _normalize_title,
     _assemble_result,
+    intersect_sections,
 )
 
 # Load environment (project standard). Does not override existing env vars.
@@ -225,30 +225,17 @@ async def _process_all(
         doc.close()
 
 
-def _intersect_sections(figures: list[dict[str, Any]], sections: list[dict[str, Any]]):
-    for figure in figures:
-        if not figure.get("bbox"):
-            continue
-        try:
-            fb = fitz.Rect(figure["bbox"])  # type: ignore[arg-type]
-            for s in sections:
-                if s["page_start"] <= figure["page"] <= s["page_end"]:
-                    sb = fitz.Rect(s["bbox"])  # type: ignore[arg-type]
-                    if sb.intersects(fb):
-                        figure["section_id"] = s.get("id", "unknown")
-                        break
-        except Exception:
-            continue
+## section intersection moved to utils.intersect_sections
 
 
 def run(
-    stage_02_json: Optional[Path] = typer.Argument(None, help="Path to Stage 02 (Marker) JSON, unless --bundle."),
-    stage_04_json: Optional[Path] = typer.Option(None, "--sections", help="Path to Stage 04 (Sections) JSON."),
-    pdf_dir: Optional[Path] = typer.Option(None, "--pdf-dir", help="Directory with the *_clean.pdf."),
-    output_dir: Path = typer.Option("data/results/pipeline", "-o", help="Parent pipeline results dir."),
-    bundle: Optional[Path] = typer.Option(None, "--bundle", exists=True, file_okay=True, dir_okay=False, readable=True),
-    skip_descriptions: bool = typer.Option(False, "--skip-descriptions/--no-skip-descriptions"),
-):
+    stage_02_json: Optional[Path] = None,
+    stage_04_json: Optional[Path] = None,
+    pdf_dir: Optional[Path] = None,
+    output_dir: Path = Path("data/results/pipeline"),
+    bundle: Optional[Path] = None,
+    skip_descriptions: bool = False,
+) -> Path:
     """Extract figures, call SciLLM once per figure (image + band texts), write JSON."""
     import time
 
@@ -261,24 +248,20 @@ def run(
         sections = data.get("sections") or []
         clean_pdf = data.get("clean_pdf") or ""
         if not stage_02_data or not clean_pdf:
-            typer.secho("Bundle missing 'marker_blocks' or 'clean_pdf'", fg=typer.colors.RED)
-            raise typer.Exit(2)
+            raise ValueError("Bundle missing 'marker_blocks' or 'clean_pdf'")
         pdf_path = Path(clean_pdf)
         label = Path(bundle).name
     else:
         if not (stage_02_json and stage_04_json and pdf_dir):
-            typer.secho("Provide stage_02_json, --sections, and --pdf-dir, or use --bundle.", fg=typer.colors.RED)
-            raise typer.Exit(2)
+            raise ValueError("Provide stage_02_json, sections json, and pdf_dir, or pass bundle")
         if not stage_02_json.exists() or not stage_04_json.exists():
-            typer.secho("Input JSON not found.", fg=typer.colors.RED)
-            raise typer.Exit(2)
+            raise FileNotFoundError("Input JSON not found")
         stage_02_data = json.loads(stage_02_json.read_text())
         sections = json.loads(stage_04_json.read_text()).get("sections", [])
         try:
             pdf_path = next(pdf_dir.glob("*_clean.pdf"))
         except StopIteration:
-            typer.secho("No '*_clean.pdf' found in --pdf-dir.", fg=typer.colors.RED)
-            raise typer.Exit(2)
+            raise FileNotFoundError("No '*_clean.pdf' found in pdf_dir")
         label = stage_02_json.name
 
     blocks = [b for b in stage_02_data.get("blocks", []) if b.get("block_type") in ("Figure", "Image")]
@@ -300,7 +283,7 @@ def run(
 
     # Map to sections
     if figures and sections:
-        _intersect_sections(figures, sections)
+        intersect_sections(figures, sections)
 
     result = {
         "timestamp": datetime.now().isoformat(),
@@ -317,14 +300,4 @@ def run(
     console.print(
         f"stage06:done out={out_path} duration_ms={int((time.monotonic()-t0)*1000)} count={len(figures)}"
     )
-
-
-def build_cli():
-    app = typer.Typer(help="Extracts figures and generates descriptions/titles via SciLLM (single multimodal call).")
-    app.command(name="run")(run)
-    return app
-
-
-if __name__ == "__main__":
-    build_cli()()
-
+    return out_path

@@ -156,3 +156,29 @@ def detect_title_local(
     except Exception:
         pass
     return None, None
+
+
+def intersect_sections(figures: list[dict], sections: list[dict]) -> None:
+    """Attach section_id to each figure when its bbox intersects a section bbox on overlapping pages.
+
+    Mutates `figures` in place. Ignores malformed entries gracefully.
+    """
+    for figure in figures:
+        try:
+            bbox = figure.get("bbox")
+            page = figure.get("page")
+            if not bbox or page is None:
+                continue
+            fb = fitz.Rect(bbox)  # type: ignore[arg-type]
+            for s in sections:
+                ps = s.get("page_start")
+                pe = s.get("page_end")
+                sb = s.get("bbox")
+                if ps is None or pe is None or sb is None:
+                    continue
+                if ps <= page <= pe:
+                    if fitz.Rect(sb).intersects(fb):  # type: ignore[arg-type]
+                        figure["section_id"] = s.get("id", "unknown")
+                        break
+        except Exception:
+            continue
