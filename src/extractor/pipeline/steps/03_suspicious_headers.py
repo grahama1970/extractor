@@ -155,16 +155,7 @@ def _ensure_first_span_color(page: fitz.Page, block: dict[str, Any]) -> None:
 # ------------------------------------------------------------------
 # CONFIGURATION
 # ------------------------------------------------------------------
-def build_cli():
-    import typer as _typer
-
-    app = _typer.Typer(
-        help="Verify suspicious headers using a multimodal LLM.", add_completion=False
-    )
-    # Expose the primary runner as a subcommand
-    app.command(name="run")(run)
-    app.command(name="debug-bundle")(debug_bundle)
-    return app
+## CLI removed: import and call run(...), or use a debug harness.
 
 
 def _env_vlm_model(default: str = "") -> str:

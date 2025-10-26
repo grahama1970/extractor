@@ -2851,17 +2851,10 @@ def debug_bundle(
     console.print(f"[green]Saved debug reflow to:[/green] {output_path}")
 
 
-def build_cli():
-    import typer as _typer
-
-    app = _typer.Typer(help="Reflows document sections using a VLM (offline)")
-    app.command(name="run")(run)
-    app.command(name="debug-bundle")(debug_bundle)
-    return app
+## CLI removed: import and call run(...), or use a debug harness.
 
 
-if __name__ == "__main__":
-    build_cli()()
+## No __main__: import and call run(...)
 
 
 # Helper for tests/smoke and for message shaping assertions

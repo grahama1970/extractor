@@ -1330,14 +1330,7 @@ def debug_bundle(
         raise typer.Exit(1)
 
 
-def build_cli():
-    import typer as _typer
-
-    app = _typer.Typer(help="Build sections with sophisticated header detection")
-    app.command(name="run")(run)
-    app.command(name="debug-bundle")(debug_bundle)
-    return app
+## CLI removed: import and call run(...), or use a debug harness.
 
 
-if __name__ == "__main__":
-    build_cli()()
+## No __main__: import and call run(...)

@@ -625,42 +625,7 @@ def _cmd_test():
     console.print(json.dumps(result, indent=2))
 
 
-def build_cli() -> typer.Typer:
-    """Construct and return the Typer app for this step.
-
-    - Loads .env if present (warns if missing; does not exit at import time)
-    - Initializes LiteLLM cache best-effort
-    - Configures logging for CLI usage
-    """
-    # Local console for this CLI
-    global console
-    console = Console()
-
-    # Environment setup: do not hard-exit if missing .env to keep tests simple
-    try:
-        if not load_dotenv(find_dotenv()):
-            logger.warning("No .env file found — proceeding without it")
-    except Exception as _e:
-        logger.warning(f".env load failed: {_e}")
-
-    try:
-        initialize_litellm_cache()
-    except Exception as _e:
-        logger.warning(f"LiteLLM cache init failed (continuing): {_e}")
-
-    # Configure logging for CLI context
-    try:
-        logger.remove()
-    except Exception:
-        pass
-    logger.add(sys.stderr, level="INFO")
-
-    app = typer.Typer(help="Generate concurrent summaries for PDF sections")
-    app.command(name="run")(_cmd_run)
-    app.command(name="debug-bundle")(_cmd_debug_bundle)
-    app.command(name="test")(_cmd_test)
-    return app
+## CLI removed: import and call run(...) entry points from Python/tests.
 
 
-if __name__ == "__main__":
-    build_cli()()
+## No __main__: run via scripts/debug or import.

@@ -37,7 +37,7 @@ from extractor.pipeline.utils.response_utils import normalize_json_content
 from typing import Iterable
 
 
-app = typer.Typer(add_completion=False)
+## CLI removed: import and call run(...), or use a debug harness.
 
 
 def _load_json(p: Path) -> Dict[str, Any]:
@@ -392,7 +392,6 @@ def enrich_figures(figs: List[Dict[str, Any]], *, page_blocks: Optional[Dict[int
     return out
 
 
-@app.command()
 def run(
     tables_json: Path = typer.Option(
         ..., "--tables", exists=True, help="Path to Stage 05 tables JSON"

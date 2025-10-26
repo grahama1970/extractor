@@ -54,16 +54,7 @@ RENDER_DPI = 200
 ANNOT_FREETEXT = "FreeText"
 
 
-def build_cli():
-    import typer as _typer
-
-    app = _typer.Typer(help="Annotate → LLM → Clean PDF → ArangoDB", add_completion=False)
-
-    # Re-register commands inside the factory to avoid import-time side effects
-    # by referencing the existing callables.
-    app.command(name="run")(run)
-    app.command(name="debug-bundle")(debug_bundle)
-    return app
+## CLI removed: call run(...) or debug_bundle(...) from Python or use a tiny debug script.
 
 
 """Relevant-to rules config (optional file-based)."""
@@ -1265,5 +1256,4 @@ def debug_bundle(
 # ------------------------------------------------------------------
 # DEBUG ENTRY
 # ------------------------------------------------------------------
-if __name__ == "__main__":
-    build_cli()()
+## No __main__: use scripts/debug or import and call run(...)

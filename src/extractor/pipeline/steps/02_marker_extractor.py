@@ -882,15 +882,7 @@ def debug_bundle(
 
 
 # --------------------------------------------------------------------------- #
-def build_cli():
-    import typer as _typer
-
-    app = _typer.Typer(help="Stage-02: native JSON block extractor")
-    app.command(name="run")(run)
-    app.command(name="test")(test)
-    app.command(name="debug-bundle")(debug_bundle)
-    return app
+## CLI removed: call run(...) directly or use a debug harness.
 
 
-if __name__ == "__main__":
-    build_cli()()
+## No __main__: import and call run(...)

@@ -328,13 +328,7 @@ def debug_bundle(
     console.print(f"[green]Debug bundle: wrote {out}")
 
 
-def build_cli():
-    import typer as _typer
-
-    app = _typer.Typer(help="Insert Stage 01 annotations into Arango and bridge to pdf_objects")
-    app.command(name="run")(run)
-    app.command(name="debug-bundle")(debug_bundle)
-    return app
+## CLI removed: import and call run(...), or use a debug harness.
 
 
 if __name__ == "__main__":

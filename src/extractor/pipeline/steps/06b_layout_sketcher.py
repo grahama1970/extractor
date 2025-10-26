@@ -511,10 +511,7 @@ def run(input_path: str, output_path: str, **kwargs) -> dict[str, Any]:
     return sketches
 
 
-app = typer.Typer(add_completion=False)
-
-
-@app.command()
+## CLI removed: call run(...) or main(...) from Python.
 def main(
     results_dir: Path = typer.Option("data/results/pipeline", "-o", help="Results dir"),
     grid: int = typer.Option(GRID, "--grid", min=4, max=64, help="Grid granularity (NxN)"),

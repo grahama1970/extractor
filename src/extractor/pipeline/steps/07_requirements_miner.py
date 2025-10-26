@@ -26,7 +26,7 @@ from typing import Any
 import typer
 import hashlib
 
-app = typer.Typer(add_completion=False, help="Identify requirement candidates after Stage 07.")
+## CLI removed: import and call run(...), or use a debug harness.
 
 
 MODALITY_RE = re.compile(r"\b(shall|must|should|will|may|might|could|can)\b", re.IGNORECASE)
@@ -350,7 +350,6 @@ def _summarize(cands: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-@app.command()
 def run(
     reflowed_json: Path = typer.Argument(..., exists=True, readable=True, help="Path to 07_reflowed.json"),
     output_dir: Path = typer.Option(Path("data/results/pipeline"), "-o", help="Results root directory"),
