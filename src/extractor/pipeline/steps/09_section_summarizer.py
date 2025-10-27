@@ -26,8 +26,7 @@ from tqdm import tqdm
 from scillm import acompletion as sc_acompletion
 from extractor.pipeline.utils.model_select import get_text_model
 
-# Note: Avoid import-time side effects. CLI setup and environment initialization
-# are performed inside build_cli() so tests can import this module safely.
+# Note: Avoid import-time side effects. Tests can import this module safely.
 
 console = Console()
 
@@ -597,7 +596,37 @@ def _cmd_test():
     console.print(json.dumps(result, indent=2))
 
 
-## CLI removed: import and call run(...) entry points from Python/tests.
+if __name__ == "__main__":
+    # Minimal entry: INPUT_JSON [OUT_DIR]  or  --bundle BUNDLE_JSON [OUT_DIR]
+    try:
+        from dotenv import find_dotenv, load_dotenv
 
-
-## No __main__: run via scripts/debug or import.
+        load_dotenv(find_dotenv())
+    except Exception:
+        pass
+    import sys
+    argv = sys.argv[1:]
+    if not argv or argv[0] in ("-h", "--help"):
+        print(
+            "Usage: python -m extractor.pipeline.steps.09_section_summarizer INPUT_JSON [OUT_DIR]\n"
+            "   or: python -m extractor.pipeline.steps.09_section_summarizer --bundle BUNDLE_JSON [OUT_DIR]",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    out_dir = Path("data/results/pipeline")
+    if argv[0] == "--bundle":
+        if len(argv) < 2:
+            print("--bundle requires a path", file=sys.stderr)
+            sys.exit(2)
+        bundle = Path(argv[1])
+        out_dir = Path(argv[2]) if len(argv) > 2 else out_dir
+        out = _cmd_debug_bundle(bundle=bundle, output_dir=out_dir)
+        print(str(out))
+    else:
+        input_json = Path(argv[0])
+        out_dir = Path(argv[1]) if len(argv) > 1 else out_dir
+        out = _cmd_run(
+            input_json=input_json,
+            output_dir=out_dir,
+        )
+        print(str(out))

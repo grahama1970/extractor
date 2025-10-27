@@ -10,7 +10,7 @@ module under a stable alias of the form `sXX_name` (e.g., `s09_section_summarize
 
 Example usage:
     from extractor.pipeline.steps import s09_section_summarizer as step09
-    app = step09.build_cli()
+    # Call its run(...) or use its minimal __main__ entry for local debugging.
 """
 
 from __future__ import annotations

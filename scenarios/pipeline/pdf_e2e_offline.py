@@ -58,16 +58,15 @@ def main() -> int:
 
     cmd = [
         sys.executable,
-        str(ROOT / "src" / "extractor" / "pipeline" / "run_all.py"),
-        "run",
+        "-m",
+        "extractor.pipeline",
         "--pdf",
         str(pdf_path),
-        "--results",
+        "--out",
         str(out_dir.parent),
-        "--offline",
-        "--skip-export10",
-        "--skip-embeddings10",
-        "--skip-graph11",
+        "--summary-only",
+        "--skip-fig-descriptions",
+        "--skip-export",
     ]
     env = os.environ.copy()
     log_path = ART / f"pdf_e2e_offline_{ts()}.log"
@@ -91,4 +90,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

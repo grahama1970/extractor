@@ -512,11 +512,9 @@ quick-pipeline:
 # Full pipeline (requires provider API keys and ArangoDB configured in env)
 pipeline-full:
 	. .venv/bin/activate 2>/dev/null || true; \
-	PYTHONPATH=src LITELLM_HTTPX=1 $(PY) src/extractor/pipeline/run_all.py \
+	PYTHONPATH=src $(PY) -m extractor.pipeline \
 		--pdf data/input/pipeline/BHT_CV32A65X_marked.pdf \
-		--results data/results/pipeline \
-		--arango-db "$${ARANGO_DATABASE:-pdf_knowledge_base_test}" \
-		$$( [ -n "$$LEAN4_CLI_CMD" ] && echo --lean4-cli "$$LEAN4_CLI_CMD" || true )
+		--out data/results/pipeline
 
 # --- Bundles for LLM code reviews ---
 BUNDLE_ROOT ?= prototypes/tabbed
@@ -752,3 +750,17 @@ run-prod:
 	  --results "$(OUT)" \
 	  --no-offline --no-skip-llm03 --no-skip-descriptions06 --full07 \
 	  --skip-export10 --skip-embeddings10 --skip-graph11 --skip-proving08
+# Deterministic golden verify (no network)
+pipeline-verify-expected:
+	. .venv/bin/activate 2>/dev/null || true; \
+	PYTHONPATH=src $(PY) -m extractor.pipeline \
+		--pdf data/input/pipeline/BHT_CV32A65X_with_requirements_noannots.pdf \
+		--out data/results/pipeline \
+		--summary-only \
+		--skip-fig-descriptions \
+		--skip-export && \
+	uv run scripts/tools/expected_verify.py \
+		--pdf data/input/pipeline/BHT_CV32A65X_with_requirements_noannots.pdf \
+		--out data/results/pipeline \
+		--expected-root data/expected/pipeline \
+		--steps 01,02,04,05,06,07,09

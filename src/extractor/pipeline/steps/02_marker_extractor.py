@@ -855,3 +855,23 @@ def debug_bundle(
 
 
 ## No __main__: import and call run(...)
+if __name__ == "__main__":
+    # Minimal entry: PDF path and optional OUT_DIR
+    try:
+        from dotenv import find_dotenv, load_dotenv
+
+        load_dotenv(find_dotenv())
+    except Exception:
+        pass
+    import sys
+    argv = sys.argv[1:]
+    if not argv or argv[0] in ("-h", "--help"):
+        print(
+            "Usage: python -m extractor.pipeline.steps.02_marker_extractor INPUT_PDF [OUT_DIR]",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    pdf_path = Path(argv[0])
+    out_dir = Path(argv[1]) if len(argv) > 1 else Path("data/results/pipeline")
+    out = run(pdf_path=pdf_path, output_dir=out_dir)
+    print(str(out))

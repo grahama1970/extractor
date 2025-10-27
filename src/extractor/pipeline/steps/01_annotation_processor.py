@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 PDF Annotation Extract → Context Capture → LLM Interpretation → Clean PDF → ArangoDB
-Refactored POC with Typer CLI and easy debug mode for VS Code.
+Function-first with a minimal __main__ for VS Code debugging.
 """
 
 import os
@@ -1166,6 +1166,28 @@ def run(
 
 
 # ------------------------------------------------------------------
+# Minimal __main__ for convenience: import-safe, optional
+if __name__ == "__main__":
+    try:
+        from dotenv import find_dotenv, load_dotenv
+
+        load_dotenv(find_dotenv())
+    except Exception:
+        pass
+    import sys
+    from pathlib import Path
+    argv = sys.argv[1:]
+    if not argv or argv[0] in ("-h", "--help"):
+        print(
+            "Usage: python -m extractor.pipeline.steps.01_annotation_processor INPUT_PDF [OUT_DIR]",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    input_pdf = Path(argv[0])
+    out_dir = Path(argv[1]) if len(argv) > 1 else Path("data/results/pipeline")
+    out = run(input_pdf=input_pdf, output_dir=out_dir)
+    print(str(out))
+
 # DEBUG-BUNDLE COMMAND
 # ------------------------------------------------------------------
 def debug_bundle(

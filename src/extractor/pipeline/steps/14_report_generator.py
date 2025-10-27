@@ -75,8 +75,7 @@ from loguru import logger
 from rich.console import Console
 
 # pydantic not used; removed to reduce cold start
-import typer
-from dotenv import load_dotenv, find_dotenv
+from dotenv import find_dotenv, load_dotenv
 
 # Avoid import-time side effects; CLI will initialize env/logging.
 console = None  # type: ignore[assignment]
@@ -686,31 +685,15 @@ async def generate_comprehensive_report(
     return json_path, report
 
 
-# ============================================
-# TYPER CLI COMMANDS
-# ============================================
-
-
-def _cmd_run(
-    results_dir: Path = typer.Argument(
-        "data/results/pipeline",
-        help="Path to the parent directory containing all pipeline stage results.",
-    ),
-):
-    """Generates a comprehensive final report from all pipeline stage outputs."""
+def run_report(results_dir: Path = Path("data/results/pipeline")) -> Tuple[Path, Dict[str, Any]]:
+    """Pure-Python entry: generate a comprehensive final report from a results directory."""
+    global console
+    if console is None:
+        console = Console()
     console.print(f"[green]Generating final report from results in: {results_dir}[/green]")
-
     if not results_dir.exists():
-        console.print(f"[red]Results directory not found: {results_dir}[/red]")
-        raise typer.Exit(1)
-
-    # The report will be saved in the top-level of the results directory
-    output_path, result = asyncio.run(generate_comprehensive_report(results_dir, results_dir))
-
-    if result.get("success"):
-        console.print(f"✅ Report generation complete. Final reports saved in: {results_dir}")
-    else:
-        console.print("❌ Report generation failed.")
+        raise FileNotFoundError(f"Results directory not found: {results_dir}")
+    return asyncio.run(generate_comprehensive_report(results_dir, results_dir))
 
 
 def _cmd_debug():
@@ -737,22 +720,8 @@ def _cmd_debug():
     console.print("  python 08_report_generator.py working pipeline_run/")
 
 
-def _cmd_debug_bundle(
-    bundle: Path = typer.Argument(
-        ...,
-        exists=True,
-        file_okay=True,
-        dir_okay=False,
-        readable=True,
-        help="Bundle containing stage results under keys named by stage directories or under 'results' map",
-    ),
-    output_dir: Path = typer.Option(
-        "data/results/pipeline",
-        "-o",
-        help="Results directory to materialize and generate the report from",
-    ),
-):
-    """Run Stage 14 from a single bundle by materializing stage outputs and generating the report."""
+def debug_bundle(bundle: Path, output_dir: Path = Path("data/results/pipeline")) -> Tuple[Path, Dict[str, Any]]:
+    """Pure-Python debug: materialize provided results and generate the report."""
     stage_output_dir = Path(output_dir)
     stage_output_dir.mkdir(parents=True, exist_ok=True)
     try:
@@ -762,12 +731,9 @@ def _cmd_debug_bundle(
             # Treat entire object as the results map
             results_map = data
         if not isinstance(results_map, dict) or not results_map:
-            raise ValueError(
-                "Bundle must be an object mapping stage names to their JSON results, or have 'results' key"
-            )
+            raise ValueError("Bundle must be an object mapping stage names to JSON results, or have 'results' key")
     except Exception as e:
-        typer.secho(f"Failed to load bundle: {e}", fg=typer.colors.RED)
-        raise typer.Exit(1)
+        raise ValueError(f"Failed to load bundle: {e}")
 
     canonical = {
         "01_annotation_processor": "01_annotations.json",
@@ -791,52 +757,34 @@ def _cmd_debug_bundle(
         (stage_dir / filename).write_text(json.dumps(obj, indent=2))
 
     # Generate report using the standard path-based flow
-    output_path, result = asyncio.run(
-        generate_comprehensive_report(stage_output_dir, stage_output_dir)
-    )
-    if result.get("success"):
-        console.print(f"[green]Debug bundle: report generated at {output_path}")
-    else:
-        typer.secho("Report generation failed in debug-bundle.", fg=typer.colors.RED)
-        raise typer.Exit(1)
-
-
-def build_cli() -> typer.Typer:
-    """Construct and return the Typer app for this step.
-
-    - Loads .env if present (warns if missing)
-    - Configures logging for CLI context
-    """
-    global console
-    console = Console()
-
-    try:
-        if not load_dotenv(find_dotenv()):
-            logger.warning("No .env file found — proceeding without it")
-    except Exception as _e:
-        logger.warning(f".env load failed: {_e}")
-
-    try:
-        logger.remove()
-    except Exception:
-        pass
-    logger.add(
-        sys.stderr,
-        level="INFO",
-        format="<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
-    )
-
-    app = typer.Typer(
-        name="stage14-report-generator",
-        help="Generate comprehensive pipeline report",
-        add_completion=False,
-        no_args_is_help=True,
-    )
-    app.command(name="run")(_cmd_run)
-    app.command(name="debug")(_cmd_debug)
-    app.command(name="debug-bundle")(_cmd_debug_bundle)
-    return app
+    output_path, result = asyncio.run(generate_comprehensive_report(stage_output_dir, stage_output_dir))
+    return output_path, result
 
 
 if __name__ == "__main__":
-    build_cli()()
+    # Tiny, optional entry for convenience. Keeps module import side-effect free.
+    try:
+        load_dotenv(find_dotenv())
+    except Exception:
+        pass
+    import sys
+    argv = sys.argv[1:]
+    if not argv or argv[0] in ("-h", "--help"):
+        print(
+            "Usage: python -m extractor.pipeline.steps.14_report_generator [RESULTS_DIR] | --bundle BUNDLE_JSON [OUT_DIR]",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    if argv and argv[0] == "--bundle":
+        try:
+            bundle = Path(argv[1])
+        except IndexError:
+            print("--bundle requires a path", file=sys.stderr)
+            sys.exit(2)
+        out_dir = Path(argv[2]) if len(argv) > 2 else Path("data/results/pipeline")
+        out, _ = debug_bundle(bundle, out_dir)
+        print(str(out))
+    else:
+        results_dir = Path(argv[0]) if argv else Path("data/results/pipeline")
+        out, _ = run_report(results_dir)
+        print(str(out))

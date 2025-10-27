@@ -34,7 +34,7 @@ def main() -> None:
     stamp = ts()
     log = ART_ROOT / f"pipeline_all_{stamp}.log"
     summary_path = ART_ROOT / f"pipeline_all_{stamp}.json"
-    args = [sys.executable, str(ROOT / "src" / "extractor" / "pipeline" / "run_all.py")]
+    args = [sys.executable, "-m", "extractor.pipeline"]
     extra = os.getenv("PIPELINE_ARGS", "").strip()
     if extra:
         args.extend(extra.split())

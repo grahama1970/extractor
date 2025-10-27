@@ -2707,6 +2707,50 @@ def run(
     return output_path
 
 
+if __name__ == "__main__":
+    # Minimal entry: SECTIONS_JSON TABLES_JSON FIGURES_JSON [ANNOTATIONS_JSON] [OUT_DIR] [--summary-only]
+    try:
+        from dotenv import find_dotenv, load_dotenv
+
+        load_dotenv(find_dotenv())
+    except Exception:
+        pass
+    import sys
+    argv = sys.argv[1:]
+    if not argv or argv[0] in ("-h", "--help"):
+        print(
+            "Usage: python -m extractor.pipeline.steps.07_reflow_section SECTIONS_JSON TABLES_JSON FIGURES_JSON [ANNOTATIONS_JSON] [OUT_DIR] [--summary-only]",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    summary_only = False
+    if "--summary-only" in argv:
+        summary_only = True
+        argv = [a for a in argv if a != "--summary-only"]
+    if len(argv) < 3:
+        print("Missing required paths", file=sys.stderr)
+        sys.exit(2)
+    sections_json = Path(argv[0]); tables_json = Path(argv[1]); figures_json = Path(argv[2])
+    ann_json = None
+    out_dir = Path("data/results/pipeline")
+    if len(argv) >= 4:
+        p = Path(argv[3])
+        if p.suffix.lower() == ".json":
+            ann_json = p
+            out_dir = Path(argv[4]) if len(argv) >= 5 else out_dir
+        else:
+            out_dir = p
+    out = run(
+        sections_json=sections_json,
+        tables_json=tables_json,
+        figures_json=figures_json,
+        annotations_json=ann_json,
+        output_dir=out_dir,
+        summary_only=summary_only,
+    )
+    print(str(out))
+
+
 def debug_bundle(
     bundle: Path,
     output_dir: Path = Path("data/results/pipeline"),
@@ -2816,7 +2860,7 @@ def debug_bundle(
 ## CLI removed: import and call run(...), or use a debug harness.
 
 
-## No __main__: import and call run(...)
+## __main__ added above for convenience
 
 
 # Helper for tests/smoke and for message shaping assertions

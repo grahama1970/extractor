@@ -30,7 +30,7 @@ In‑scope paths (this review)
   - `src/extractor/pipeline/pipeline_router.py` — dispatch between PDF vs structured providers; forwards to `run_all`
   - `src/extractor/pipeline/steps/` — 01→14 step CLIs (annotation processor, marker extractor, suspicious headers, section builder, table/figure extractors, reflow, summarizer, arango export/graph, insert annotations, report)
   - `src/extractor/pipeline/utils/` — `litellm_call.py`, `json_utils.py`, `diagnostics.py`, `prompt_builder.py`, `embeddings.py`, `unified_conversion.py`, etc.
-  - CLI runners: `run_all.py`, `cli_happy.py`; top‑level docs under `src/extractor/pipeline/docs/`
+  - Runner: `python -m extractor.pipeline` (in‑package), and `cli_happy.py`; docs under `src/extractor/pipeline/docs/`
 
 Inputs you have
 - This review bundle (code + docs) assembled via our bundler. Treat docs as claims requiring evidence in code and tests. Mark missing/out‑of‑date artifacts as **P0 doc‑debt** with explicit fixes.

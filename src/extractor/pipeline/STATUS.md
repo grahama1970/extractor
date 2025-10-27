@@ -4,7 +4,8 @@ Scope: src/extractor/pipeline and subfolders
 Last reviewed: 2025-09-09
 
 Summary
-- The flattened pipeline (01→14) is implemented with per‑step Typer CLIs under src/extractor/pipeline/steps and an end‑to‑end runner at src/extractor/pipeline/run_all.py.
+- The flattened pipeline (01→14) is function‑first under src/extractor/pipeline/steps. Use the in‑package runner:
+  - python -m extractor.pipeline --pdf <input.pdf> --out data/results/pipeline
 - Gold standards exist under data/gold_standards/pipeline for each stage. Validation helpers live in src/extractor/pipeline/tools.
 - A single-command runner with validation is available: pipeline-run-and-validate and pipeline-quick-smoke. A pure run-all exists: pipeline-run-all run.
 - With correct environment (.env, LLM keys, Arango, Lean4 CLI), all stages can run start→finish. Heavy stages have “skip” modes where possible.
@@ -100,7 +101,7 @@ Current Gaps / Work To Do
 2) validate_gold_standard.py gold subcommand path
    - Fix _gs_dir() to data/gold_standards/pipeline (current path points to a non‑existent src/extractor/pipeline/gold_standards).
 3) Run‑all debug/validation ergonomics
-   - pipeline/run_all.py now exposes per‑stage skip flags: --skip-llm03, --skip-descriptions06, --summary-only07, --skip-proving08, --skip-export10, --skip-embeddings10, --skip-graph11. Consider a consolidated "--offline" preset alias.
+  - Runner flags (deterministic defaults): --summary-only (Stage 07), --skip-fig-descriptions (Stage 06), --skip-export (Stage 10). Consider a consolidated "--offline" preset alias.
    - Optional: add a --validate switch to chain compare_to_gold.
 4) Embedding model download footprint (Stage 10)
    - Consider env to disable embeddings or use a lighter local model for CI. Option: add --skip-embeddings (store None) while retaining structure.

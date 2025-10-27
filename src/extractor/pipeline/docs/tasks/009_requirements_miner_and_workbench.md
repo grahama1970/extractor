@@ -16,7 +16,7 @@ Out of scope (for this issue)
 
 Deliverables
 - Stage: `src/extractor/pipeline/steps/07_requirements_miner.py`
-- Runner integration: call miner between 07 and 08 in `src/extractor/pipeline/run_all.py`
+- Runner integration: call miner between 07 and 08 via `python -m extractor.pipeline` (module runner)
 - Artifacts:
   - `07_requirements.json` (see schema below)
   - `07_requirements_summary.json` (counts, modality/condition histograms)
@@ -56,7 +56,7 @@ Pipeline tasks
 - [ ] Optional LLM assist (env‑gated; cached); never required for offline.
 
 2) Wire into runner
-- [ ] In `run_all.py`, call miner between Stage 07 and Stage 08 (respect `--offline`).
+- [ ] In the module runner (`python -m extractor.pipeline`), call miner between Stage 07 and Stage 08 (respect `--summary-only`).
 - [ ] Ensure `--prove` behavior unchanged. No new flags.
 - [ ] Add manifest/resume marks for `07_requirements_miner`.
 
@@ -114,4 +114,3 @@ Rollback
 Owner & Timeline
 - Owner: Pipeline/Backend
 - ETA: Miner + runner wire (1–2 days), smokes (1 day), Stage 08 enrich (0.5 day), docs (0.5 day).
-

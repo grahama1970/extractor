@@ -1272,4 +1272,24 @@ def debug_bundle(
 ## CLI removed: import and call run(...), or use a debug harness.
 
 
-## No __main__: import and call run(...)
+if __name__ == "__main__":
+    # Minimal entry: INPUT_JSON, PDF_DIR, [OUT_DIR]
+    try:
+        from dotenv import find_dotenv, load_dotenv
+
+        load_dotenv(find_dotenv())
+    except Exception:
+        pass
+    import sys
+    argv = sys.argv[1:]
+    if len(argv) < 2 or argv[0] in ("-h", "--help"):
+        print(
+            "Usage: python -m extractor.pipeline.steps.04_section_builder INPUT_JSON PDF_DIR [OUT_DIR]",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    input_json = Path(argv[0])
+    pdf_dir = Path(argv[1])
+    out_dir = Path(argv[2]) if len(argv) > 2 else Path("data/results/pipeline")
+    out, _ = run(input_json=input_json, pdf_dir=pdf_dir, output_dir=out_dir)
+    print(str(out))

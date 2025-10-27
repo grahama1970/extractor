@@ -301,3 +301,51 @@ def run(
         f"stage06:done out={out_path} duration_ms={int((time.monotonic()-t0)*1000)} count={len(figures)}"
     )
     return out_path
+
+
+if __name__ == "__main__":
+    # Minimal entry: either --bundle BUNDLE_JSON [OUT_DIR] [--skip-descriptions]
+    # or STAGE02_JSON STAGE04_JSON PDF_DIR [OUT_DIR] [--skip-descriptions]
+    try:
+        from dotenv import find_dotenv, load_dotenv
+
+        load_dotenv(find_dotenv())
+    except Exception:
+        pass
+    import sys
+    argv = sys.argv[1:]
+    if not argv or argv[0] in ("-h", "--help"):
+        print(
+            "Usage: python -m extractor.pipeline.steps.06_figure_extractor --bundle BUNDLE [OUT_DIR] [--skip-descriptions]\n"
+            "   or: python -m extractor.pipeline.steps.06_figure_extractor STAGE02_JSON STAGE04_JSON PDF_DIR [OUT_DIR] [--skip-descriptions]",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    skip = False
+    if "--skip-descriptions" in argv:
+        skip = True
+        argv = [a for a in argv if a != "--skip-descriptions"]
+    kw = {}
+    if argv and argv[0] == "--bundle":
+        try:
+            bundle = Path(argv[1])
+        except IndexError:
+            print("--bundle requires a path", file=sys.stderr)
+            sys.exit(2)
+        out_dir = Path(argv[2]) if len(argv) > 2 else Path("data/results/pipeline")
+        kw = {"bundle": bundle, "output_dir": out_dir, "skip_descriptions": skip}
+    else:
+        if len(argv) < 3:
+            print("Missing args. See --help.", file=sys.stderr)
+            sys.exit(2)
+        s02 = Path(argv[0]); s04 = Path(argv[1]); pdf_dir = Path(argv[2])
+        out_dir = Path(argv[3]) if len(argv) > 3 else Path("data/results/pipeline")
+        kw = {
+            "stage_02_json": s02,
+            "stage_04_json": s04,
+            "pdf_dir": pdf_dir,
+            "output_dir": out_dir,
+            "skip_descriptions": skip,
+        }
+    out = run(**kw)
+    print(str(out))
