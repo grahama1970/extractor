@@ -31,7 +31,6 @@ from pathlib import Path
 from typing import Any, cast
 
 # Direct imports - fail fast
-import typer
 from dotenv import find_dotenv, load_dotenv
 from loguru import logger
 from rich.console import Console
@@ -92,7 +91,6 @@ initialize_litellm_cache()
 
 # Logger configured per run (see CLI commands below) to align with prior stages.
 
-app = typer.Typer(help="Extract and prove formal requirements using Lean 4")
 console = Console()
 
 # LLM Configuration
@@ -197,7 +195,7 @@ async def identify_requirements_in_section(
                         "tables": len(tables or []),
                     }
                 )
-                t0=time.monotonic()
+                _t0=time.monotonic()
                 return await sc_acompletion(
                     model=LEAN4_MODEL,
                     api_base=ch_base or None,
@@ -547,6 +545,7 @@ def _certainly_health(api_base: str, timeout: float = 3.0) -> bool:
         url = (api_base.rstrip("/") + "/healthz") if api_base else ""
         if not url:
             return False
+        import httpx
         r = httpx.get(url, timeout=timeout)
         if r.status_code != 200:
             return False
@@ -1261,18 +1260,10 @@ async def process_reflowed_sections(
 
 
 def run(
-    input_json: Path = typer.Argument(
-        ..., help="Path to Stage 07 reflowed sections JSON.", exists=True
-    ),
-    output_dir: Path = typer.Option(
-        "data/results/pipeline", "-o", help="Parent directory for pipeline results."
-    ),
-    skip_proving: bool = typer.Option(
-        False, "--skip-proving", help="Only extract requirements without running the Lean 4 prover."
-    ),
-    requirements_json: Path | None = typer.Option(
-        None, "--requirements", help="Optional path to 07_requirements.json to merge before proving"
-    ),
+    input_json: Path,
+    output_dir: Path = Path("data/results/pipeline"),
+    skip_proving: bool = False,
+    requirements_json: Path | None = None,
 ):
     """
     Extracts and proves formal requirements from reflowed sections using Lean 4.
@@ -1461,20 +1452,9 @@ def run(
 
 
 def debug_bundle(
-    bundle: Path = typer.Argument(
-        ...,
-        exists=True,
-        file_okay=True,
-        dir_okay=False,
-        readable=True,
-        help="Bundle with key 'reflowed_sections' (Stage 07 output-compatible)",
-    ),
-    output_dir: Path = typer.Option(
-        "data/results/pipeline", "-o", help="Parent directory for pipeline results."
-    ),
-    skip_proving: bool = typer.Option(
-        True, "--skip-proving/--no-skip-proving", help="Skip Lean proving for debug runs."
-    ),
+    bundle: Path,
+    output_dir: Path = Path("data/results/pipeline"),
+    skip_proving: bool = True,
 ):
     """Run Stage 08 from a consolidated bundle of reflowed sections."""
     stage_output_dir = output_dir / "08_lean4_theorem_prover"
@@ -1514,29 +1494,10 @@ def debug_bundle(
         if not isinstance(data, dict) or not isinstance(data.get("reflowed_sections"), list):
             raise ValueError("Bundle must include 'reflowed_sections' list")
     except Exception as e:
-        typer.secho(f"Failed to load bundle: {e}", fg=typer.colors.RED)
-        raise typer.Exit(1)
+        print(f"Failed to load bundle: {e}")
+        raise ValueError(f"Failed to load bundle: {e}")
 
-    # Auto-discover miner JSON if not provided, and inject into pipeline_data for guaranteed merge
-    if requirements_json is None:
-        # Heuristic: look under sibling 07_requirements_miner/json_output
-        try:
-            base_dir = input_json.parent.parent.parent  # .../07_reflow_section/json_output → results root
-            auto = base_dir / "07_requirements_miner" / "json_output" / "07_requirements.json"
-            if auto.exists():
-                try:
-                    inj = json.loads(auto.read_text()).get("requirements") or []
-                    data["_miner_requirements"] = inj
-                except Exception:
-                    os.environ["LEAN4_MINER_JSON"] = str(auto)
-        except Exception:
-            pass
-    else:
-        try:
-            inj = json.loads(Path(requirements_json).read_text()).get("requirements") or []
-            data["_miner_requirements"] = inj
-        except Exception:
-            os.environ["LEAN4_MINER_JSON"] = str(requirements_json)
+    # Keep debug bundle minimal; skip auto-merge logic here
 
     result = asyncio.run(process_reflowed_sections(data, skip_proving=skip_proving))
 
@@ -1575,4 +1536,4 @@ def debug_bundle(
 
 
 if __name__ == "__main__":
-    build_cli()()
+    print("Import and call run(...) or debug_bundle(...); no CLI framework required.")

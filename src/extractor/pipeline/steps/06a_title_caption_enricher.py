@@ -27,10 +27,8 @@ import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-import json as _json
-import urllib.request
+import asyncio
 
-import typer
 from loguru import logger
 from scillm import acompletion as sc_acompletion
 from extractor.pipeline.utils.response_utils import normalize_json_content
@@ -393,20 +391,13 @@ def enrich_figures(figs: List[Dict[str, Any]], *, page_blocks: Optional[Dict[int
 
 
 def run(
-    tables_json: Path = typer.Option(
-        ..., "--tables", exists=True, help="Path to Stage 05 tables JSON"
-    ),
-    figures_json: Path = typer.Option(
-        ..., "--figures", exists=True, help="Path to Stage 06 figures JSON"
-    ),
-    sections_json: Path | None = typer.Option(
-        None, "--sections", exists=True, help="Optional Stage 04 sections JSON"
-    ),
-    output_dir: Path = typer.Option(
-        "data/results/pipeline", "-o", help="Results base directory"
-    ),
-) -> None:
-    console = typer.echo
+    tables_json: Path,
+    figures_json: Path,
+    sections_json: Path | None = None,
+    output_dir: Path = Path("data/results/pipeline"),
+) -> Path:
+    def _console(msg: str) -> None:
+        logger.info(msg)
     t = _load_json(tables_json)
     f = _load_json(figures_json)
     page_blocks = _flatten_section_blocks(sections_json) if sections_json else {}
@@ -417,10 +408,11 @@ def run(
     enriched_root = output_dir / "06a_title_caption_enricher" / "json_output"
     _save_json(enriched_root / "05_tables.enriched.json", {"tables": tables_e, "timestamp": datetime.now().isoformat()})
     _save_json(enriched_root / "06_figures.enriched.json", {"figures": figs_e, "timestamp": datetime.now().isoformat()})
-    console(
+    _console(
         f"Enriched titles written to: {enriched_root / '05_tables.enriched.json'} and {enriched_root / '06_figures.enriched.json'}"
     )
+    return enriched_root
 
 
 if __name__ == "__main__":
-    app()
+    print("Import and call run(...), or use scripts/debug/stage06_debug.py")

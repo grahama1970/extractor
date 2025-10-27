@@ -12,25 +12,23 @@ This stage runs AFTER documents are loaded into ArangoDB and creates edges based
 3. Combined weighted scores
 """
 
-import os
-import sys
-import json
-import asyncio
-import math
-from pathlib import Path
-from typing import Dict, List, Any, Optional, cast, Tuple
-from datetime import datetime, timezone
-import numpy as np
-from numpy.typing import NDArray
+import os  # noqa: E402
+import sys  # noqa: E402
+import json  # noqa: E402
+import asyncio  # noqa: E402
+import math  # noqa: E402
+from pathlib import Path  # noqa: E402
+from typing import Dict, List, Any, Optional, cast, Tuple  # noqa: E402
+from datetime import datetime, timezone  # noqa: E402
+import numpy as np  # noqa: E402
+from numpy.typing import NDArray  # noqa: E402
 
 # Third-party
-from loguru import logger
-from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn
-import typer
-from dotenv import load_dotenv, find_dotenv
-from extractor.pipeline.utils.diagnostics import get_run_id
-from scillm import acompletion as sc_acompletion
+from loguru import logger  # noqa: E402
+from rich.console import Console  # noqa: E402
+from rich.progress import Progress, SpinnerColumn, TextColumn  # noqa: E402
+from extractor.pipeline.utils.diagnostics import get_run_id  # noqa: E402,F401
+from scillm import acompletion as sc_acompletion  # noqa: E402
 
 try:
     from arango import ArangoClient
@@ -44,8 +42,7 @@ except Exception:  # allow import without python-arango for non-DB debug paths
     class StandardDatabase: ...  # type: ignore
 
 
-if not load_dotenv(find_dotenv(), override=True):
-    print("Warning: .env not found; proceeding with process env only.", file=sys.stderr)
+# Do not load .env at import time; caller/debug harness should load env.
 # No litellm cache here; scillm calls use Chutes x-api-key path
 
 
@@ -108,7 +105,8 @@ def _validate_edges(edges: list[dict]) -> dict:
             counts_by_type[rtype] = counts_by_type.get(rtype, 0) + 1
             if rtype not in EDGE_ALLOWED_TYPES:
                 violations.append({"edge": e, "reason": "invalid_relationship_type"})
-            _from = e.get("_from"); _to = e.get("_to")
+            _from = e.get("_from")
+            _to = e.get("_to")
             if not (isinstance(_from, str) and isinstance(_to, str)):
                 violations.append({"edge": e, "reason": "from_to_not_str"})
             if not (str(_from).startswith("pdf_objects/") and str(_to).startswith("pdf_objects/")):
@@ -174,7 +172,9 @@ def _conflict_edges_from_docs(documents: list[dict], tolerance_ratio: float = 0.
     edges: list[dict] = []
     buckets: dict[tuple[str,str,str], list[tuple[str,float]]] = {}
     for d in documents:
-        key = d.get("_key"); doc_id = d.get("doc_id"); sec = d.get("section_id")
+        key = d.get("_key")
+        doc_id = d.get("doc_id")
+        sec = d.get("section_id")
         for u in d.get("units", []) or []:
             dim = str(u.get("dim"))
             val = u.get("value_si")
@@ -211,7 +211,9 @@ def _duplicates_edges_from_docs(documents: list[dict]) -> list[dict]:
     edges: list[dict] = []
     buckets: dict[tuple[str, str], dict[str, str]] = {}
     for d in documents:
-        doc_id = d.get("doc_id"); sec = d.get("section_id"); key = d.get("_key")
+        doc_id = d.get("doc_id")
+        sec = d.get("section_id")
+        key = d.get("_key")
         txt = (d.get("text_content") or "").strip().lower()
         if not (doc_id and sec and key and txt):
             continue
@@ -248,8 +250,10 @@ def _contradicts_edges_from_docs(documents: list[dict]) -> list[dict]:
         rtm = d.get("rtm") if isinstance(d.get("rtm"), dict) else None
         if not rtm:
             continue
-        norm = rtm.get("lean4_norm"); pol = rtm.get("lean4_polarity")
-        doc_id = d.get("doc_id"); key = d.get("_key")
+        norm = rtm.get("lean4_norm")
+        pol = rtm.get("lean4_polarity")
+        doc_id = d.get("doc_id")
+        key = d.get("_key")
         if not (doc_id and key and isinstance(norm, str) and isinstance(pol, str)):
             continue
         buckets.setdefault((str(doc_id), norm.strip()), []).append(d)
@@ -261,7 +265,8 @@ def _contradicts_edges_from_docs(documents: list[dict]) -> list[dict]:
             continue
         # Create a single edge between first assert and first deny
         try:
-            ka = a[0]["_key"]; kd = dny[0]["_key"]
+            ka = a[0]["_key"]
+            kd = dny[0]["_key"]
             edges.append({
                 "_from": f"pdf_objects/{ka}",
                 "_to": f"pdf_objects/{kd}",
@@ -287,7 +292,9 @@ def _supersedes_edges_from_docs(documents: list[dict]) -> list[dict]:
     edges: list[dict] = []
     buckets: dict[tuple[str, str], list[dict]] = {}
     for d in documents:
-        doc_id = d.get("doc_id"); sec = d.get("section_id"); rev = d.get("revision_id")
+        doc_id = d.get("doc_id")
+        sec = d.get("section_id")
+        rev = d.get("revision_id")
         if not (doc_id and sec and rev and d.get("_key")):
             continue
         buckets.setdefault((str(doc_id), str(sec)), []).append(d)
@@ -295,7 +302,8 @@ def _supersedes_edges_from_docs(documents: list[dict]) -> list[dict]:
         if len(items) < 2:
             continue
         items_sorted = sorted(items, key=lambda x: str(x.get("revision_id")))
-        older = items_sorted[0]; newer = items_sorted[-1]
+        older = items_sorted[0]
+        newer = items_sorted[-1]
         if str(older.get("revision_id")) == str(newer.get("revision_id")):
             continue
         edges.append({
@@ -323,7 +331,8 @@ def _refers_to_edges_from_docs(documents: list[dict]) -> list[dict]:
     # Build map to first object key per section
     first_key_by_sec: dict[str, str] = {}
     for d in documents:
-        sec = d.get("section_id"); key = d.get("_key")
+        sec = d.get("section_id")
+        key = d.get("_key")
         if sec and key and sec not in first_key_by_sec:
             first_key_by_sec[str(sec)] = str(key)
     known_secs = set(first_key_by_sec.keys())
@@ -333,7 +342,8 @@ def _refers_to_edges_from_docs(documents: list[dict]) -> list[dict]:
     # Also detect generic numeric refs like 3.1 that exist in known_secs
     pattern = re.compile(r"\b(?:see\s+(?:section\s+)?)?(?P<sid>[A-Za-z0-9_.-]+)\b", re.IGNORECASE)
     for d in documents:
-        key = d.get("_key"); txt = (d.get("text_content") or "")
+        key = d.get("_key")
+        txt = (d.get("text_content") or "")
         if not (key and txt):
             continue
         for m in pattern.finditer(txt):
@@ -708,17 +718,11 @@ async def find_and_create_relationships(
 
 
 def run(
-    input_json: Path = typer.Argument(
-        ..., help="Path to Stage 10 flattened data JSON.", exists=True
-    ),
-    output_dir: Path = typer.Option(
-        "data/results/pipeline", "-o", help="Parent directory for pipeline results."
-    ),
-    k_neighbors: int = typer.Option(10, help="Number of neighbors to find for similarity."),
-    similarity_threshold: float = typer.Option(0.55, help="Minimum similarity to create an edge."),
-    skip_graph_creation: bool = typer.Option(
-        False, "--skip-graph-creation", help="Prepare graph edges but do not export to ArangoDB."
-    ),
+    input_json: Path,
+    output_dir: Path = Path("data/results/pipeline"),
+    k_neighbors: int = 10,
+    similarity_threshold: float = 0.55,
+    skip_graph_creation: bool = False,
 ):
     """Builds graph relationships between PDF objects using FAISS and hierarchy."""
     console.print("[bold green]Building PDF Knowledge Graph (Stage 11)[/bold green]")
@@ -873,7 +877,7 @@ def run(
             )
         except (ArangoError, ValueError) as e:
             logger.error(f"Failed to connect to ArangoDB: {e}")
-            raise typer.Exit(1)
+            raise RuntimeError("Failed to connect to ArangoDB")
 
     # Detect proved section ids from Stage 08 (if present)
     proved_sec_ids: Optional[set] = None
@@ -971,22 +975,14 @@ def run(
         with open(output_path, "w") as f:
             json.dump(confirmation, f, indent=2)
         console.print(f"✅ Graph creation complete. Confirmation saved to: {output_path}")
+        return output_path
 
 
 def debug_bundle(
-    bundle: Path = typer.Argument(
-        ...,
-        exists=True,
-        file_okay=True,
-        dir_okay=False,
-        readable=True,
-        help="Bundle JSON with key 'documents' (flattened pdf_objects)",
-    ),
-    output_dir: Path = typer.Option(
-        "data/results/pipeline", "-o", help="Parent directory for pipeline results."
-    ),
-    k_neighbors: int = typer.Option(10, help="Number of neighbors to find for similarity."),
-    similarity_threshold: float = typer.Option(0.55, help="Minimum similarity to create an edge."),
+    bundle: Path,
+    output_dir: Path = Path("data/results/pipeline"),
+    k_neighbors: int = 10,
+    similarity_threshold: float = 0.55,
 ):
     """Run Stage 11 from a single JSON bundle, emitting edges JSON without DB access."""
     stage_output_dir = output_dir / "11_arango_create_graph"
@@ -1000,8 +996,8 @@ def debug_bundle(
         if not isinstance(documents, list) or not documents:
             raise ValueError("Bundle must include non-empty 'documents' list")
     except Exception as e:
-        typer.secho(f"Failed to load bundle: {e}", fg=typer.colors.RED)
-        raise typer.Exit(1)
+        print(f"Failed to load bundle: {e}")
+        raise ValueError(f"Failed to load bundle: {e}")
 
     docs_with_embed = [doc for doc in documents if doc.get("embedding")]
     if not docs_with_embed:
@@ -1121,4 +1117,5 @@ else:
 
 
 if __name__ == "__main__":
-    build_cli()()
+    # No CLI: import and call run(...) from a debug harness.
+    print("Stage 11: run via scripts/debug or import run(...)")

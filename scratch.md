@@ -1,3 +1,13 @@
+ has typer been removed from all steps; /home/graham/
+  workspace/experiments/extractor/src/extractor/
+  pipeline/steps
+  does each step easy to use main block that can be run
+  with an expected input and putput that can be easily
+  debugged in the VSCode debugger. The original test
+  pdf is: /home/graham/workspace/experiments/extractor/
+  data/input/pipeline/
+  BHT_CV32A65X_with_requirements_noannots.pdf
+
 ask copilot in the chat for a comprehensive review of th entire pipeline focusing on missing functionality, aspiration/brittle features, unnecesary adhoc/bespoke functions, strengths, the ability to handle a wide variety of pdf. Proved file paths and a list of clarifying questions and ask for unified diff as a file artifact and answer to your qeustins
 template:
 

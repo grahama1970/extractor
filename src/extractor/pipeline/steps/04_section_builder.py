@@ -37,7 +37,10 @@ import base64
 # Third-party
 from loguru import logger
 from rich.console import Console
-import typer
+from extractor.pipeline.utils.section_builder_utils import (
+    _bucket_color,
+    _roman_to_int,
+)
 from extractor.pipeline.utils.diagnostics import (
     start_resource_sampler,
     stop_resource_sampler,
@@ -88,33 +91,7 @@ SECTION_NUMBER_PATTERNS = [
 # COLOR ENRICHMENT UTILITIES
 # ================================
 
-def _rgb_to_hex(rgb: Tuple[float, float, float]) -> str:
-    try:
-        r, g, b = rgb
-        r = int(max(0, min(255, round(r * (255 if r <= 1 else 1)))))
-        g = int(max(0, min(255, round(g * (255 if g <= 1 else 1)))))
-        b = int(max(0, min(255, round(b * (255 if b <= 1 else 1)))))
-        return f"#{r:02x}{g:02x}{b:02x}"
-    except Exception:
-        return "#000000"
-
-def _bucket_color(hex_str: str) -> str:
-    try:
-        h = hex_str.lstrip('#')
-        r = int(h[0:2], 16); g = int(h[2:4], 16); b = int(h[4:6], 16)
-        if r < 30 and g < 30 and b < 30:
-            return "black"
-        if r > 200 and g > 200 and b > 200:
-            return "white"
-        if r > g and r > b:
-            return "red"
-        if g > r and g > b:
-            return "green"
-        if b > r and b > g:
-            return "blue"
-        return "gray"
-    except Exception:
-        return "unknown"
+## moved to utils: _rgb_to_hex, _bucket_color
 
 def _enrich_header_colors(pdf_path: Path, sections: List[Dict[str, Any]]) -> None:
     """For each section, attach first-span fill color inferred from the header block bbox.
@@ -197,19 +174,7 @@ def _enrich_header_colors(pdf_path: Path, sections: List[Dict[str, Any]]) -> Non
 # ============================================
 
 
-def _roman_to_int(roman: str) -> int:
-    values = {"I": 1, "V": 5, "X": 10, "L": 50, "C": 100, "D": 500, "M": 1000}
-    roman = roman.upper()
-    total = 0
-    prev = 0
-    for ch in reversed(roman):
-        val = values.get(ch, 0)
-        if val < prev:
-            total -= val
-        else:
-            total += val
-            prev = val
-    return total
+## moved to utils: _roman_to_int
 
 
 def analyze_section_numbering(text: str) -> Dict[str, Any]:
@@ -1066,7 +1031,8 @@ async def build_and_validate_sections_comprehensive(
                 for s in synth:
                     # pages: inclusive range + any continued_pages
                     try:
-                        ps = int(s.get("page_start", 0)); pe = int(s.get("page_end", ps))
+                        ps = int(s.get("page_start", 0))
+                        pe = int(s.get("page_end", ps))
                     except Exception:
                         ps = pe = 0
                     pages = list(range(ps, pe + 1))
@@ -1193,38 +1159,26 @@ async def build_and_validate_sections_comprehensive(
 
 
 def run(
-    input_json: Path = typer.Argument(..., help="Path to Stage 03 results (verified blocks)."),
-    pdf_dir: Path = typer.Option(
-        ..., "--pdf-dir", help="Directory with the clean PDF from Stage 01."
-    ),
-    output_dir: Path = typer.Option(..., "-o", help="Parent directory for pipeline results."),
-    debug: bool = typer.Option(
-        False, "--debug", help="Enable verbose logging to a stage log file."
-    ),
-    fallback_heuristics: bool = typer.Option(
-        False,
-        "--fallback-heuristics/--no-fallback-heuristics",
-        help="Enable minimal header detection if Stage 03 metadata is missing",
-    ),
-    max_visual_pages: int = typer.Option(
-        MAX_VISUAL_PAGES_DEFAULT,
-        "--max-visual-pages",
-        help="Max pages to include in a section composite image",
-    ),
+    input_json: Path,
+    pdf_dir: Path,
+    output_dir: Path,
+    debug: bool = False,
+    fallback_heuristics: bool = False,
+    max_visual_pages: int = MAX_VISUAL_PAGES_DEFAULT,
 ):
     """Runs comprehensive section building with sophisticated header validation."""
     console.print(f"[green]Building sections from verified blocks: {input_json.name}[/green]")
 
     if not input_json.exists():
         console.print(f"[red]Input JSON not found: {input_json}[/red]")
-        raise typer.Exit(1)
+        raise FileNotFoundError(f"Input JSON not found: {input_json}")
 
     # Derive the clean PDF path
     try:
         pdf_path = next(pdf_dir.glob("*_clean.pdf"))
     except StopIteration:
-        console.print(f"[red]No '*_clean.pdf' found in --pdf-dir: {pdf_dir}[/red]")
-        raise typer.Exit(1)
+        console.print(f"[red]No '*_clean.pdf' found in pdf_dir: {pdf_dir}[/red]")
+        raise FileNotFoundError(f"No '*_clean.pdf' found in {pdf_dir}")
 
     # Define clear output paths and configure logging to a file
     stage_output_dir = output_dir / "04_section_builder"
@@ -1261,30 +1215,15 @@ def run(
         console.print(f"🖼️  Visual captures: {result.get('visual_captures', 0)}")
     else:
         console.print("❌ Section building failed.")
-        raise typer.Exit(1)
+        raise RuntimeError("Section building failed")
 
 
 def debug_bundle(
-    bundle: Path = typer.Argument(
-        ...,
-        exists=True,
-        file_okay=True,
-        dir_okay=False,
-        readable=True,
-        help="Bundle with keys: verified_blocks (Stage 03 object), clean_pdf (path)",
-    ),
-    output_dir: Path = typer.Option(..., "-o", help="Parent directory for pipeline results."),
-    debug: bool = typer.Option(False, "--debug", help="Verbose logging"),
-    fallback_heuristics: bool = typer.Option(
-        False,
-        "--fallback-heuristics/--no-fallback-heuristics",
-        help="Enable minimal header detection if Stage 03 metadata is missing",
-    ),
-    max_visual_pages: int = typer.Option(
-        MAX_VISUAL_PAGES_DEFAULT,
-        "--max-visual-pages",
-        help="Max pages to include in a section composite image",
-    ),
+    bundle: Path,
+    output_dir: Path,
+    debug: bool = False,
+    fallback_heuristics: bool = False,
+    max_visual_pages: int = MAX_VISUAL_PAGES_DEFAULT,
 ):
     """Run Stage 04 with a consolidated bundle (verified blocks + clean PDF)."""
     stage_output_dir = output_dir / "04_section_builder"
@@ -1323,11 +1262,11 @@ def debug_bundle(
         if result.get("success"):
             console.print(f"✅ Debug bundle sections built: {output_path}")
         else:
-            typer.secho("Debug bundle section build failed.", fg=typer.colors.RED)
-            raise typer.Exit(1)
+            print("Debug bundle section build failed.")
+            raise RuntimeError("Debug bundle section build failed")
     except Exception as e:
-        typer.secho(f"Failed to run debug-bundle: {e}", fg=typer.colors.RED)
-        raise typer.Exit(1)
+        print(f"Failed to run debug-bundle: {e}")
+        raise RuntimeError(f"Failed to run debug-bundle: {e}")
 
 
 ## CLI removed: import and call run(...), or use a debug harness.

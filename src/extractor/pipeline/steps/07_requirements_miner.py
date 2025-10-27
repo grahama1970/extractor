@@ -22,8 +22,6 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-
-import typer
 import hashlib
 
 ## CLI removed: import and call run(...), or use a debug harness.
@@ -351,8 +349,8 @@ def _summarize(cands: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def run(
-    reflowed_json: Path = typer.Argument(..., exists=True, readable=True, help="Path to 07_reflowed.json"),
-    output_dir: Path = typer.Option(Path("data/results/pipeline"), "-o", help="Results root directory"),
+    reflowed_json: Path,
+    output_dir: Path = Path("data/results/pipeline"),
 ):
     out_dir = output_dir / "07_requirements_miner" / "json_output"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -400,8 +398,8 @@ def run(
     (out_dir / "07_requirements.json").write_text(json.dumps(req_json, indent=2))
     summary = _summarize(candidates)
     (out_dir / "07_requirements_summary.json").write_text(json.dumps(summary, indent=2))
-    typer.echo(json.dumps({"ok": True, "total": summary["total"], "out": str(out_dir)}, indent=2))
+    print(json.dumps({"ok": True, "total": summary["total"], "out": str(out_dir)}, indent=2))
 
 
 if __name__ == "__main__":
-    app()
+    print("Import and call run(...); no CLI framework required.")

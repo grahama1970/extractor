@@ -20,8 +20,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-import typer
-from dotenv import find_dotenv, load_dotenv
+# (dotenv loaded by caller/debug harness)
 from loguru import logger
 from rich.console import Console
 # Avoid hard dependency on scillm so deterministic prep paths can run
@@ -100,8 +99,7 @@ def _table_confidence(t: dict[str, Any]) -> float:
 
 # --- Initialization & Configuration ---
 
-if not load_dotenv(find_dotenv(), override=False):
-    logger.warning(".env not found; proceeding with process environment only.")
+# Do not load .env at import time; the caller or debug harness should load env.
 
 # SciLLM-only policy: remove legacy LiteLLM cache initialization to avoid
 # background threads preventing clean process exit.
@@ -851,6 +849,7 @@ async def reflow_section_with_llm(
 
                 # Minimal table hint (headers + first sample row, if present)
                 table_hints: list[str] = []
+                tables_in_section = section_data.get("tables") or []
                 for tb in (tables_in_section or [])[:3]:
                     cols = tb.get("columns") or []
                     if not cols:
@@ -1664,7 +1663,7 @@ async def reflow_section_with_llm(
             else:
                 content = resp2 if isinstance(resp2, str) else None
         if not isinstance(content, str) or not content.strip():
-            typer.secho("Stage 07: LLM returned empty content.", fg=typer.colors.RED)
+            logger.error("Stage 07: LLM returned empty content.")
             raise RuntimeError(
                 "Stage 07: LLM returned empty content. Verify API keys and Chat Completions access; inspect logs in 07_reflow_section/logs for request_info and response dumps."
             )
@@ -1986,13 +1985,11 @@ async def reflow_section_with_llm(
                     )
                 except Exception:
                     pass
-                typer.secho(
-                    "Stage 07: Falling back to merged text (no LLM)", fg=typer.colors.YELLOW
-                )
+                logger.warning("Stage 07: Falling back to merged text (no LLM)")
                 return out
             except Exception:
                 pass
-        typer.secho(f"Stage 07: LLM call failed: {e}", fg=typer.colors.RED)
+        logger.error(f"Stage 07: LLM call failed: {e}")
         raise RuntimeError(
             "Stage 07 failed: LLM call did not return usable JSON. Check 07_reflow_section/logs, verify API keys, and confirm the configured Chat model is reachable."
         )
@@ -2358,45 +2355,18 @@ def _structured_fallback(section_data: dict[str, Any]) -> dict[str, Any]:
 
 # --- Main Orchestration and CLI ---
 def run(
-    sections_json: Path = typer.Option(
-        ..., "--sections", help="Path to Stage 04 sections JSON.", exists=True
-    ),
-    tables_json: Path = typer.Option(
-        ..., "--tables", help="Path to Stage 05 tables JSON.", exists=True
-    ),
-    figures_json: Path = typer.Option(
-        ..., "--figures", help="Path to Stage 06 figures JSON.", exists=True
-    ),
-    annotations_json: Path | None = typer.Option(
-        None, "--annotations", help="Optional: Path to Stage 01 annotations JSON."
-    ),
-    output_dir: Path = typer.Option(
-        "data/results/pipeline", "-o", help="Parent directory for pipeline results."
-    ),
-    summary_only: bool = typer.Option(
-        False, "--summary-only", help="Emit merged_text snapshot without LLM calls."
-    ),
-    # Stage 07 is text-only. Images are disabled regardless of flag.
-    include_images: bool = typer.Option(
-        False, "--include-images/--no-include-images", help="(disabled) Stage 07 is text-only"
-    ),
-    allow_fallback: bool = typer.Option(
-        False,
-        "--allow-fallback",
-        help="Allow text-only or pass-through fallbacks instead of failing early",
-    ),
-    bundle: Path | None = typer.Option(
-        None,
-        "--bundle",
-        help="Debug: load consolidated sections JSON (keys: reflowed_sections or sections)",
-    ),
-    llm_timeout: int = typer.Option(60, "--timeout", help="Per-request LLM timeout in seconds"),
-    mode: str = typer.Option(
-        "strict",
-        "--mode",
-        help="Reflow mode: 'strict' (default) or 'minimal' (Gemini-safe JSON).",
-    ),
-):
+    sections_json: Path,
+    tables_json: Path,
+    figures_json: Path,
+    annotations_json: Path | None = None,
+    output_dir: Path = Path("data/results/pipeline"),
+    summary_only: bool = False,
+    include_images: bool = False,
+    allow_fallback: bool = False,
+    bundle: Path | None = None,
+    llm_timeout: int = 60,
+    mode: str = "strict",
+) -> Path:
     """
     Reflows document sections using multimodal context from previous stages.
     """
@@ -2408,7 +2378,7 @@ def run(
         LLM_MODEL = get_text_model()
     except Exception as _e:
         console.print(f"[red]Stage 07 model selection failed: {_e}[/red]")
-        raise typer.Exit(2)
+        raise RuntimeError("Stage 07 model selection failed")
     # Early sanity: scillm/Chutes must be reachable to avoid hangs
     try:
         from extractor.pipeline.utils.preflight import scillm_quick_check
@@ -2418,10 +2388,9 @@ def run(
             console.print(
                 f"[red]Stage 07 preflight failed: {reason}. Set CHUTES_API_BASE/CHUTES_API_KEY or use --summary-only.[/red]"
             )
-            raise typer.Exit(2)
-    except Exception:
-        # If preflight import fails, be conservative and exit early
-        raise typer.Exit(2)
+            raise RuntimeError("Stage 07 preflight failed")
+    except Exception as _e:
+        raise RuntimeError(f"Stage 07 preflight error: {_e}")
     run_id = get_run_id()
     diagnostics = []
     errors_count = 0
@@ -2452,7 +2421,6 @@ def run(
 
     # --- Profile toggles (simple profile defaults) ---
     try:
-        simple = os.getenv("PROFILE_SIMPLE", "").lower() in ("1", "true", "yes", "y")
         # ensure downstream helpers do not attach extra images by default
         include_images = False
         os.environ.setdefault("STAGE07_MAX_IMAGES", "0")
@@ -2736,21 +2704,15 @@ def run(
 
     console.print("\n[bold green]✅ Section reflow complete.[/bold green]")
     console.print(f"   - Results saved to: [cyan]{output_path}[/cyan]")
+    return output_path
 
 
 def debug_bundle(
-    bundle: Path = typer.Argument(
-        ...,
-        exists=True,
-        file_okay=True,
-        dir_okay=False,
-        readable=True,
-        help="Consolidated sections JSON (keys: sections or reflowed_sections)",
-    ),
-    output_dir: Path = typer.Option("data/results/pipeline", "-o", help="Results directory"),
-    include_images: bool = typer.Option(True, "--include-images/--no-include-images"),
-    allow_fallback: bool = typer.Option(False, "--allow-fallback"),
-    request_timeout: int = typer.Option(120, "--timeout", help="Per-request LLM timeout (seconds)"),
+    bundle: Path,
+    output_dir: Path = Path("data/results/pipeline"),
+    include_images: bool = True,
+    allow_fallback: bool = False,
+    request_timeout: int = 120,
 ):
     """Run Stage 07 directly from a consolidated JSON bundle (debug only)."""
     stage_output_dir = output_dir / "07_reflow_section"
@@ -2764,8 +2726,8 @@ def debug_bundle(
         if not isinstance(sections_to_process, list):
             raise ValueError("bundle must contain list under 'sections' or 'reflowed_sections'")
     except Exception as e:
-        typer.secho(f"Failed to load bundle: {e}", fg=typer.colors.RED)
-        raise typer.Exit(1)
+        logger.error(f"Failed to load bundle: {e}")
+        raise ValueError(f"Failed to load bundle: {e}")
 
     # Ensure minimal text fields for fallback if missing (source_text/merged_text)
     def _ensure_min_text_fields(sec: dict[str, Any]) -> None:

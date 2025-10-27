@@ -10,7 +10,6 @@ export (stage 10) to create concise summaries that include proven requirements.
 """
 
 import os
-import sys
 import json
 import asyncio
 from pathlib import Path
@@ -21,9 +20,6 @@ from textwrap import dedent
 # Third-party
 from loguru import logger
 from rich.console import Console
-import typer
-from dotenv import load_dotenv, find_dotenv
-from extractor.pipeline.utils.diagnostics import get_run_id
 from scillm.extras.json_utils import clean_json_string
 from extractor.pipeline.utils.json_mode import JSON_SYSTEM_GUARD
 from tqdm import tqdm
@@ -33,7 +29,7 @@ from extractor.pipeline.utils.model_select import get_text_model
 # Note: Avoid import-time side effects. CLI setup and environment initialization
 # are performed inside build_cli() so tests can import this module safely.
 
-console = None  # type: ignore[assignment]
+console = Console()
 
 
 async def summarize_section(
@@ -262,7 +258,6 @@ async def create_checkpoint_summary(
 
     # Try up to 3 attempts total, honoring capacity signals; helper/client handle Retry-After internally
     attempts = 0
-    last_err_msg = ""
     while True:
         try:
             resp = await _call_once_async()
@@ -270,7 +265,7 @@ async def create_checkpoint_summary(
         except Exception as e:
             attempts += 1
             msg = str(e)
-            last_err_msg = msg
+            _ = msg  # keep var for potential future logging; avoid unused
             if attempts >= 3:
                 logger.error(f"Failed to create checkpoint summary (attempts={attempts}): {e}")
                 # If capacity-related, emit a skip marker so downstream can record it deterministically
@@ -466,22 +461,12 @@ async def batch_summarize_sections_rolling(
 
 
 def _cmd_run(
-    input_json: Path = typer.Argument(
-        ..., help="Path to Stage 08 (theorems) or Stage 07 (reflow) JSON output.", exists=True
-    ),
-    output_dir: Path = typer.Option(
-        "data/results/pipeline", "-o", help="Parent directory for pipeline results."
-    ),
-    max_concurrent: int = typer.Option(5, help="Maximum concurrent LLM calls"),
-    window_size: int = typer.Option(3, help="Rolling window size for context"),
-    strict_json: bool = typer.Option(
-        True,
-        "--strict-json/--no-strict-json",
-        help="Require provider JSON mode or allow free-form parsing",
-    ),
-    request_timeout: int = typer.Option(
-        120, "--timeout", help="Per-request LLM timeout in seconds"
-    ),
+    input_json: Path,
+    output_dir: Path = Path("data/results/pipeline"),
+    max_concurrent: int = 5,
+    window_size: int = 3,
+    strict_json: bool = True,
+    request_timeout: int = 120,
 ):
     """Generates summaries for all sections using concurrent processing."""
     console.print("[bold green]Starting Section Summarization (Stage 09)[/bold green]")
@@ -532,30 +517,16 @@ def _cmd_run(
         json.dump(final_output, f, indent=2)
 
     console.print(f"📄 Results saved to: {output_path}")
+    return output_path
 
 
 def _cmd_debug_bundle(
-    bundle: Path = typer.Argument(
-        ...,
-        exists=True,
-        file_okay=True,
-        dir_okay=False,
-        readable=True,
-        help="Bundle with key: reflowed_sections (list)",
-    ),
-    output_dir: Path = typer.Option(
-        "data/results/pipeline", "-o", help="Parent directory for pipeline results."
-    ),
-    max_concurrent: int = typer.Option(5, help="Maximum concurrent LLM calls"),
-    window_size: int = typer.Option(3, help="Rolling window size for context"),
-    strict_json: bool = typer.Option(
-        True,
-        "--strict-json/--no-strict-json",
-        help="Require provider JSON mode or allow free-form parsing",
-    ),
-    request_timeout: int = typer.Option(
-        120, "--timeout", help="Per-request LLM timeout in seconds"
-    ),
+    bundle: Path,
+    output_dir: Path = Path("data/results/pipeline"),
+    max_concurrent: int = 5,
+    window_size: int = 3,
+    strict_json: bool = True,
+    request_timeout: int = 120,
 ):
     """Run Stage 09 summarization from a consolidated list of sections."""
     stage_output_dir = output_dir / "09_section_summarizer"
@@ -569,8 +540,8 @@ def _cmd_debug_bundle(
         if not isinstance(sections, list) or not sections:
             raise ValueError("Bundle must include non-empty 'reflowed_sections' list")
     except Exception as e:
-        typer.secho(f"Failed to load bundle: {e}", fg=typer.colors.RED)
-        raise typer.Exit(1)
+        print(f"Failed to load bundle: {e}")
+        raise ValueError(f"Failed to load bundle: {e}")
 
     summaries = asyncio.run(
         batch_summarize_sections_rolling(
@@ -592,6 +563,7 @@ def _cmd_debug_bundle(
     output_path = json_output_dir / "09_summaries.json"
     output_path.write_text(json.dumps(final_output, indent=2))
     console.print(f"[green]Debug bundle: saved {successful_count} summaries to {output_path}")
+    return output_path
 
 
 def _cmd_test():

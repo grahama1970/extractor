@@ -20,10 +20,10 @@ import textwrap
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Annotated, Any, cast
+from typing import Any, cast
 
 import fitz  # PyMuPDF
-import typer
+# Typer removed: use plain functions for easier debugging
 from loguru import logger
 # Avoid hard dependency at import time; prefer adapter helper; direct scillm used only if present
 try:
@@ -54,21 +54,21 @@ from extractor.pipeline.utils.diagnostics import (
     start_resource_sampler,
     stop_resource_sampler,
 )
-from extractor.pipeline.utils.json_utils import STOP_FENCES, STRICT_JSON_GUARD
+from extractor.pipeline.utils.json_utils import STRICT_JSON_GUARD
 def _normalize_model_alias(model: str | None) -> str:
     m = (model or "").strip()
     if m.lower().startswith("openai/"):
         m = m[len("openai/"):]
     return m
-from extractor.pipeline.utils.model_params import build_chat_extras
-from extractor.pipeline.utils.prompt_builder import build_llm_context
-from extractor.pipeline.utils.scillm_client import verify_header as scillm_verify_header
+from extractor.pipeline.utils.model_params import build_chat_extras  # noqa: E402
+from extractor.pipeline.utils.prompt_builder import build_llm_context  # noqa: E402
+from extractor.pipeline.utils.scillm_client import verify_header as scillm_verify_header  # noqa: E402
 
 try:
     import psutil  # type: ignore
 except Exception:
     psutil = None  # type: ignore
-import time
+import time  # noqa: E402
 
 # Cache initialization will be handled within command execution to avoid import-time side effects.
 
@@ -1154,78 +1154,23 @@ async def process_pdf_pipeline(config: Config):
 # COMMAND-LINE INTERFACE
 # ------------------------------------------------------------------
 def run(
-    input_json: Annotated[
-        Path, typer.Argument(..., help="Path to the Marker JSON output from Stage 02.")
-    ],
-    pdf_dir: Annotated[
-        Path,
-        typer.Option(
-            "--pdf-dir", help="Directory containing the source and clean PDFs from Stage 01."
-        ),
-    ] = Path("data/results/pipeline/01_annotation_processor"),
-    output_dir: Annotated[
-        Path, typer.Option("-o", help="Parent directory for pipeline results.")
-    ] = Path("data/results/pipeline"),
-    model: Annotated[
-        str | None, typer.Option("--model", help="Name of the vision-capable LLM to use.")
-    ] = None,
-    concurrency: Annotated[int, typer.Option("-c", help="Number of concurrent API calls.")] = 1,
-    dpi: Annotated[
-        int, typer.Option("--dpi", help="Rendering resolution for context images.")
-    ] = 150,
-    debug: Annotated[
-        bool, typer.Option("--debug", help="Enable verbose logging to a stage log file.")
-    ] = False,
-    limit: Annotated[
-        int, typer.Option("--limit", help="Limit number of suspicious headers to verify (0 = all).")
-    ] = 0,
-    timeout: Annotated[
-        int, typer.Option("--timeout", help="Overall stage timeout in seconds (0 = no limit).")
-    ] = 0,
-    annotations_json: Annotated[
-        Path | None,
-        typer.Option("--annotations", help="Optional: Path to Stage 01 annotations JSON"),
-    ] = None,
-    use_knowledge: Annotated[
-        bool,
-        typer.Option("--use-knowledge/--no-knowledge", help="Use on-page annotations for cues"),
-    ] = True,
-    use_prior: Annotated[
-        bool,
-        typer.Option(
-            "--use-prior/--no-prior",
-            help="Use prior decisions from ArangoDB for cues (retrieval-only)",
-        ),
-    ] = True,
-    auto_reject: Annotated[
-        bool,
-        typer.Option(
-            "--auto-reject/--no-auto-reject",
-            help="Auto-reject when cues strongly disagree with header",
-        ),
-    ] = True,
-    persist_headers: Annotated[
-        bool,
-        typer.Option(
-            "--persist-headers/--no-persist-headers",
-            help="Persist decisions to ArangoDB (off by default)",
-        ),
-    ] = False,
-    verify_all_headers: Annotated[
-        bool,
-        typer.Option(
-            "--verify-all-headers/--only-suspicious",
-            help="Verify all SectionHeader blocks, not only suspicious ones",
-        ),
-    ] = False,
-    skip_llm: Annotated[
-        bool,
-        typer.Option(
-            "--skip-llm/--no-skip-llm",
-            help="Offline mode: skip LLM vision verification and pass through with structural normalization",
-        ),
-    ] = False,
-):
+    input_json: Path,
+    pdf_dir: Path = Path("data/results/pipeline/01_annotation_processor"),
+    output_dir: Path = Path("data/results/pipeline"),
+    model: str | None = None,
+    concurrency: int = 1,
+    dpi: int = 150,
+    debug: bool = False,
+    limit: int = 0,
+    timeout: int = 0,
+    annotations_json: Path | None = None,
+    use_knowledge: bool = True,
+    use_prior: bool = True,
+    auto_reject: bool = True,
+    persist_headers: bool = False,
+    verify_all_headers: bool = False,
+    skip_llm: bool = False,
+) -> Path:
     """
     Finds and verifies suspicious section headers in a Marker JSON file using a multimodal LLM.
     """
@@ -1235,10 +1180,10 @@ def run(
         candidates = sorted(pdf_dir.glob("*_clean.pdf"))
         clean_pdf_path = candidates[0]
     except (StopIteration, IndexError):
-        raise typer.BadParameter(f"No '*_clean.pdf' found in --pdf-dir: {pdf_dir}")
+        raise ValueError(f"No '*_clean.pdf' found in pdf_dir: {pdf_dir}")
 
     if not input_json.exists():
-        raise typer.BadParameter(f"Input JSON not found: {input_json}")
+        raise FileNotFoundError(f"Input JSON not found: {input_json}")
 
     # Define clear output paths for this stage
     stage_output_dir = output_dir / "03_suspicious_headers"
@@ -1254,7 +1199,7 @@ def run(
         try:
             data = json.loads(input_json.read_text())
         except Exception as e:
-            raise typer.BadParameter(f"Failed to load input JSON: {e}")
+            raise ValueError(f"Failed to load input JSON: {e}")
         blocks = data.get("blocks", [])
         # Heuristic demotion mirrors the pre-LLM guardrails used in the online path.
         # This reduces false top-level sections in offline/CI runs.
@@ -1289,8 +1234,8 @@ def run(
         data["status"] = "Completed"
         out = json_output_dir / "03_verified_blocks.json"
         out.write_text(json.dumps(data, indent=2))
-        typer.secho(f"[offline] Heuristic demotion applied; wrote {out}", fg=typer.colors.GREEN)
-        return
+        print(f"[offline] Heuristic demotion applied; wrote {out}")
+        return out
 
     # Configure logging sink per stage run
     try:
@@ -1338,6 +1283,7 @@ def run(
         verify_all_headers=verify_all_headers,
     )
     asyncio.run(process_pdf_pipeline(cfg))
+    return stage_output_dir / "json_output" / "03_verified_blocks.json"
 
 
 def debug_test():
@@ -1400,23 +1346,14 @@ def debug_test():
 
 
 def debug_bundle(
-    bundle: Path = typer.Argument(
-        ...,
-        exists=True,
-        file_okay=True,
-        dir_okay=False,
-        readable=True,
-        help="Bundle with keys: marker_blocks (Stage 02 output object), clean_pdf (path)",
-    ),
-    output_dir: Path = typer.Option(
-        "data/results/pipeline", "-o", help="Parent directory for pipeline results."
-    ),
-    model: str | None = typer.Option(None, "--model", help="LLM model to use (defaults to env)"),
-    concurrency: int = typer.Option(1, "-c", help="Concurrent LLM calls"),
-    dpi: int = typer.Option(150, "--dpi", help="Rendering DPI for context images"),
-    debug: bool = typer.Option(False, "--debug", help="Verbose logging"),
-    limit: int = typer.Option(0, "--limit", help="Limit suspicious headers to verify (0=all)"),
-    timeout: int = typer.Option(0, "--timeout", help="Overall timeout (0=no limit)"),
+    bundle: Path,
+    output_dir: Path = Path("data/results/pipeline"),
+    model: str | None = None,
+    concurrency: int = 1,
+    dpi: int = 150,
+    debug: bool = False,
+    limit: int = 0,
+    timeout: int = 0,
 ):
     """Run Stage 03 with a consolidated bundle.
 
@@ -1434,14 +1371,14 @@ def debug_bundle(
     try:
         data = json.loads(bundle.read_text())
     except Exception as e:
-        typer.secho(f"Failed to read bundle: {e}", fg=typer.colors.RED)
-        raise typer.Exit(1)
+        print(f"Failed to read bundle: {e}")
+        raise ValueError(f"Failed to read bundle: {e}")
 
     marker_blocks = data.get("marker_blocks")
     clean_pdf = data.get("clean_pdf")
     if not marker_blocks or not clean_pdf:
-        typer.secho("Bundle must include 'marker_blocks' and 'clean_pdf'", fg=typer.colors.RED)
-        raise typer.Exit(1)
+        print("Bundle must include 'marker_blocks' and 'clean_pdf'")
+        raise ValueError("Invalid bundle: missing keys")
 
     tmp_json = stage_output_dir / "_bundle_marker_blocks.json"
     tmp_json.write_text(json.dumps(marker_blocks))
@@ -1459,7 +1396,8 @@ def debug_bundle(
     )
     asyncio.run(process_pdf_pipeline(cfg))
     print("Debug bundle: verification complete for suspicious headers")
+    return stage_output_dir / "json_output" / "03_verified_blocks.json"
 
 
 if __name__ == "__main__":
-    build_cli()()
+    print("Import and call run(...) or use scripts/debug/stage03_debug.py")

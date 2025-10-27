@@ -28,9 +28,7 @@ import json
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
-
-import typer
-from dotenv import load_dotenv, find_dotenv
+# (dotenv to be loaded by caller/debug harness)
 from loguru import logger
 from rich.console import Console
 
@@ -98,14 +96,11 @@ def ensure_graph(
 
 
 def run(
-    annotations: Path = typer.Option(
-        ..., "--annotations", help="Path to Stage 01 annotations JSON", exists=True
-    ),
-    output_dir: Path = typer.Option("data/results/pipeline", "-o", help="Results base directory"),
-    mode: str = typer.Option("both", "--mode", help="Operation: insert | bridge | both"),
+    annotations: Path,
+    output_dir: Path = Path("data/results/pipeline"),
+    mode: str = "both",
 ):
-    if not load_dotenv(find_dotenv(), override=True):
-        console.print("[yellow].env not found; relying on process env.[/yellow]")
+    # Do not load .env here; caller should load env before calling run().
 
     host = os.getenv("ARANGO_HOST", "localhost")
     port = int(os.getenv("ARANGO_PORT", 8529))
@@ -119,7 +114,7 @@ def run(
 
     if not password:
         console.print("[red]ARANGO_PASS / ARANGO_PASSWORD not set[/red]")
-        raise typer.Exit(1)
+        raise RuntimeError("ARANGO password not set")
 
     client = ArangoClient(hosts=f"http://{host}:{port}")
     # Ensure DB
@@ -191,8 +186,8 @@ def run(
         )
     mode_l = (mode or "both").lower().strip()
     if mode_l not in {"insert", "bridge", "both"}:
-        console.print("[red]Invalid --mode. Use: insert | bridge | both[/red]")
-        raise typer.Exit(2)
+        console.print("[red]Invalid mode. Use: insert | bridge | both[/red]")
+        raise ValueError("Invalid mode")
 
     # Upsert annotations
     if mode_l in {"insert", "both"} and docs:
@@ -276,15 +271,8 @@ def run(
 
 
 def debug_bundle(
-    bundle: Path = typer.Argument(
-        ...,
-        exists=True,
-        file_okay=True,
-        dir_okay=False,
-        readable=True,
-        help="Bundle with keys 'annotations' and optional 'pdf_objects'",
-    ),
-    output_dir: Path = typer.Option("data/results/pipeline", "-o", help="Results base directory"),
+    bundle: Path,
+    output_dir: Path = Path("data/results/pipeline"),
 ):
     """Dry-run: validate bundle and estimate potential edges. No DB ops."""
     stage_output_dir = Path(output_dir) / "12_insert_annotations"
@@ -301,8 +289,8 @@ def debug_bundle(
         if not isinstance(pdf_objects, list):
             pdf_objects = []
     except Exception as e:
-        typer.secho(f"Failed to load bundle: {e}", fg=typer.colors.RED)
-        raise typer.Exit(1)
+        print(f"Failed to load bundle: {e}")
+        raise ValueError(f"Failed to load bundle: {e}")
 
     ann_pages = [a.get("page") for a in annotations if a.get("page") is not None]
     obj_pages = [o.get("page_num") for o in pdf_objects if o.get("page_num") is not None]
@@ -332,4 +320,4 @@ def debug_bundle(
 
 
 if __name__ == "__main__":
-    build_cli()()
+    print("Stage 12: run via scripts/debug or import run(...)")

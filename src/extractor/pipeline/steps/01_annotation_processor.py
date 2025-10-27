@@ -12,7 +12,7 @@ import textwrap
 from pathlib import Path
 import sys
 from dataclasses import dataclass, field
-from typing import List, Dict, Any, Optional, cast, Annotated
+from typing import List, Dict, Any, Optional, cast
 from datetime import datetime
 import time
 
@@ -26,7 +26,6 @@ try:
 except ImportError:
     print("PyMuPDF (fitz) not installed. Stage 01 requires it.", file=sys.stderr)
     raise
-import typer
 from loguru import logger
 try:
     from scillm import acompletion as sc_completion  # type: ignore
@@ -1105,32 +1104,18 @@ async def process_pdf_pipeline(config: Config):
 # CLI
 # ------------------------------------------------------------------
 def run(
-    input_pdf: Annotated[Path, typer.Argument(..., help="PDF with annotations")],
-    output_dir: Annotated[
-        Path, typer.Option("-o", help="Parent directory for pipeline results")
-    ] = Path("data/results/pipeline"),
-    llm_model: Annotated[Optional[str], typer.Option("--model")] = None,
+    input_pdf: Path,
+    output_dir: Path = Path("data/results/pipeline"),
+    llm_model: Optional[str] = None,
     concurrency: int = 5,
     dpi: int = 150,
-    include_freetext: bool = typer.Option(
-        False, "--include-freetext", help="Include FreeText annotations."
-    ),
-    images: bool = typer.Option(
-        False, "--images/--no-images", help="Include annotation images in LLM prompts."
-    ),
-    debug: bool = typer.Option(
-        False, "--debug", help="Enable verbose logging to a stage log file."
-    ),
-    limit: int = typer.Option(
-        0, "--limit", help="Limit number of annotations to process (0 = all)."
-    ),
-    timeout: int = typer.Option(
-        0, "--timeout", help="Overall stage timeout in seconds (0 = no limit)."
-    ),
-    cache: bool = typer.Option(
-        True, "--cache/--no-cache", help="Enable LiteLLM cache (default: enabled)"
-    ),
-):
+    include_freetext: bool = False,
+    images: bool = False,
+    debug: bool = False,
+    limit: int = 0,
+    timeout: int = 0,
+    cache: bool = True,
+) -> Path:
     """Processes a PDF to extract and interpret annotations, saving to a structured output directory."""
 
     # Define the specific output directory for this stage
@@ -1175,25 +1160,17 @@ def run(
         asyncio.run(process_pdf_pipeline(cfg))
     except Exception as e:
         logger.exception("Stage 01 failed")
-        typer.secho(f"Stage 01 failed: {e}", fg=typer.colors.RED)
-        raise typer.Exit(code=1)
+        print(f"Stage 01 failed: {e}")
+        raise RuntimeError(f"Stage 01 failed: {e}")
+    return stage_output_dir / "json_output" / "01_annotations.json"
 
 
 # ------------------------------------------------------------------
 # DEBUG-BUNDLE COMMAND
 # ------------------------------------------------------------------
 def debug_bundle(
-    bundle: Path = typer.Argument(
-        ...,
-        exists=True,
-        file_okay=True,
-        dir_okay=False,
-        readable=True,
-        help="Bundle JSON with key 'pdf' and optional 'options'",
-    ),
-    output_dir: Path = typer.Option(
-        "data/results/pipeline", "-o", help="Parent directory for pipeline results."
-    ),
+    bundle: Path,
+    output_dir: Path = Path("data/results/pipeline"),
 ):
     """Run Stage 01 from a single JSON bundle.
 
@@ -1221,8 +1198,8 @@ def debug_bundle(
             raise ValueError("Bundle must include existing 'pdf' file path")
         opts = data.get("options") or {}
     except Exception as e:
-        typer.secho(f"Failed to load bundle: {e}", fg=typer.colors.RED)
-        raise typer.Exit(1)
+        print(f"Failed to load bundle: {e}")
+        raise ValueError(f"Failed to load bundle: {e}")
 
     cfg = Config(
         input_pdf=pdf_path,
@@ -1248,9 +1225,9 @@ def debug_bundle(
     try:
         asyncio.run(process_pdf_pipeline(cfg))
     except Exception as e:
-        typer.secho(f"Stage 01 debug-bundle failed: {e}", fg=typer.colors.RED)
-        raise typer.Exit(1)
-    typer.secho("Debug-bundle run completed for Stage 01", fg=typer.colors.GREEN)
+        print(f"Stage 01 debug-bundle failed: {e}")
+        raise RuntimeError(f"Stage 01 debug-bundle failed: {e}")
+    print("Debug-bundle run completed for Stage 01")
 
 
 # ------------------------------------------------------------------

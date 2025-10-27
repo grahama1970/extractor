@@ -13,7 +13,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-import typer
 from loguru import logger
 
 try:
@@ -22,7 +21,7 @@ except Exception as e:  # pragma: no cover
     raise RuntimeError("PyMuPDF (fitz) is required for 09a_pdf_annotator") from e
 
 
-app = typer.Typer(help="Overlay section/table/figure/text-chunk boxes on a PDF for human+agent review")
+# No CLI framework; import and call run(...)
 
 
 def _safe_get_bbox(obj: dict[str, Any]) -> list[float] | None:
@@ -35,32 +34,23 @@ def _safe_get_bbox(obj: dict[str, Any]) -> list[float] | None:
         return None
 
 
-@app.command()
 def run(
-    pdf_path: Path = typer.Argument(..., exists=True, dir_okay=False, readable=True),
-    sections_json: Path = typer.Option(..., "--sections", exists=True, help="Stage 04 sections JSON"),
-    tables_json: Path = typer.Option(..., "--tables", exists=True, help="Stage 05 tables JSON"),
-    figures_json: Path = typer.Option(..., "--figures", exists=True, help="Stage 06 figures JSON"),
-    # Optional: knowledge chunks from Stage 07 and block lookup from Stage 02
-    reflowed_json: Path | None = typer.Option(None, "--reflowed", exists=True, help="Stage 07 reflowed JSON (optional)"),
-    blocks02_json: Path | None = typer.Option(None, "--blocks02", exists=True, help="Stage 02 marker blocks JSON (optional; used to map chunk source block_ids to page/bbox)"),
-    headers03_json: Path | None = typer.Option(None, "--headers03", exists=True, help="Stage 03 verified blocks JSON (optional; overlays suspicious header verdicts)"),
-    layout06b_json: Path | None = typer.Option(None, "--layout06b", exists=True, help="Stage 06b layout sketch JSON (optional; overlays column bands)"),
-    output_dir: Path = typer.Option("data/results/pipeline", "-o", help="Results root"),
-    stage_tag: str = typer.Option("auto", "--stage-tag", help="Directory tag under results (auto|06c|09a). auto→09a when --reflowed is provided, else 06c."),
-    labels: bool = typer.Option(True, "--labels/--no-labels", help="Draw tiny labels (kind/id/title) next to boxes"),
-    grid: int = typer.Option(0, "--grid", help="Draw a light debugging grid (N x N). 0 disables."),
-    rewrite_headers: bool = typer.Option(False, "--rewrite-headers", help="Overlay section headers with titles from Stage 04 using original header color."),
-    overwrite_pdf: bool = typer.Option(False, "--overwrite-pdf", help="When --rewrite-headers is set, overwrite the input PDF in place (incremental save)."),
-    replace_text_layer: bool = typer.Option(
-        False,
-        "--replace-text-layer",
-        help=(
-            "Remove the original header text (redact without fill) and insert the corrected"
-            " title so the extractable text layer matches the visual overlay."
-        ),
-    ),
-):
+    pdf_path: Path,
+    sections_json: Path,
+    tables_json: Path,
+    figures_json: Path,
+    reflowed_json: Path | None = None,
+    blocks02_json: Path | None = None,
+    headers03_json: Path | None = None,
+    layout06b_json: Path | None = None,
+    output_dir: Path = Path("data/results/pipeline"),
+    stage_tag: str = "auto",
+    labels: bool = True,
+    grid: int = 0,
+    rewrite_headers: bool = False,
+    overwrite_pdf: bool = False,
+    replace_text_layer: bool = False,
+) -> Path:
     # Decide stage directory name. Prefer running after 07/08/09 when reflowed_json is available.
     tag = stage_tag
     if tag == "auto":
@@ -138,7 +128,7 @@ def run(
     # Annotate
     # Safety: do not allow overwriting PDFs under data/input/ or external input paths
     if overwrite_pdf and str(pdf_path).startswith("data/input/"):
-        raise typer.BadParameter("Refusing to overwrite a source PDF under data/input/. Use a copy or disable --overwrite-pdf.")
+        raise ValueError("Refusing to overwrite a source PDF under data/input/. Use a copy or disable --overwrite-pdf.")
     doc = fitz.open(str(pdf_path))
     overlays: list[dict[str, Any]] = []
 
@@ -277,7 +267,8 @@ def run(
                         r = page.rect
                         for c in cols:
                             try:
-                                gx0 = int(c.get("x0", 0)); gx1 = int(c.get("x1", 0))
+                                gx0 = int(c.get("x0", 0))
+                                gx1 = int(c.get("x1", 0))
                                 x0 = r.x0 + (r.width) * (gx0 / grid_n)
                                 x1 = r.x0 + (r.width) * (gx1 / grid_n)
                                 band = fitz.Rect(min(x0, x1), r.y0, max(x0, x1), r.y1)
@@ -336,7 +327,7 @@ def run(
     (json_dir / "annotations.json").write_text(
         json.dumps({"overlays": overlays}, ensure_ascii=False, indent=2), encoding="utf-8"
     )
-    typer.echo(f"Annotated PDF saved: {annotated_pdf}")
+    print(f"Annotated PDF saved: {annotated_pdf}")
 
     # Optional: color-aware header overlay directly onto the source PDF
     if rewrite_headers:
@@ -413,10 +404,10 @@ def run(
                     else:
                         # Already a distinct output path
                         pass
-                typer.echo(f"Section headers overlaid in: {target_path}")
+                print(f"Section headers overlaid in: {target_path}")
         except Exception as e:
             logger.warning(f"Header rewrite failed (continuing): {e}")
 
 
 if __name__ == "__main__":
-    app()
+    print("Import and call run(...); no CLI framework required.")

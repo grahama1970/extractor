@@ -37,9 +37,21 @@ except ImportError:
         file=sys.stderr,
     )
     raise
-import typer
 from dotenv import load_dotenv, find_dotenv
 from loguru import logger
+from extractor.pipeline.utils.table_extractor_utils import (
+    _stable_table_hash,
+    _should_assist,
+    _headers_from_table,
+    _apply_headers,
+    _extract_table_text_for_heuristics,
+    sanitize_cell,
+    fragmentation_score,
+    should_retry_fragmentation,
+    has_fragmentation_improvement,
+    should_replace_table,
+    coalesce_repeated_header_rows,
+)
 from rich.console import Console
 from extractor.pipeline.utils.diagnostics import (
     start_resource_sampler,
@@ -149,45 +161,13 @@ FRAGMENTATION_IMPROVEMENT_MIN = max(
 
 # --- Core Functions ---
 
-def _stable_table_hash(table: Dict[str, Any]) -> str:
-    import hashlib
-    h = hashlib.sha256()
-    payload = {
-        "bbox": table.get("bbox"),
-        "cols": table.get("columns") or table.get("header") or [],
-        "shape": (table.get("pandas_metrics") or {}).get("shape") or [],
-    }
-    h.update(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8"))
-    return h.hexdigest()
+## moved helpers into extractor.pipeline.utils.table_extractor_utils
 
-def _should_assist(table: Dict[str, Any]) -> bool:
-    pm = table.get("pandas_metrics") or {}
-    density = float(pm.get("data_density") or 0.0)
-    frag = int(table.get("fragmentation_score") or 0)
-    camel = table.get("camelot_metrics") or {}
-    acc = float(camel.get("accuracy") or 0.0) / 100.0
-    if frag >= int(os.getenv("TABLE_LLM_ASSIST_FRAG_MIN", "4")):
-        return True
-    if density <= float(os.getenv("TABLE_LLM_ASSIST_DENSITY_MAX", "0.25")):
-        return True
-    if acc and acc <= float(os.getenv("TABLE_LLM_ASSIST_ACCURACY_MAX", "0.55")):
-        return True
-    return False
+## moved
 
-def _headers_from_table(t: Dict[str, Any]) -> List[str]:
-    if t.get("header"):
-        return [str(x) for x in t["header"]]
-    if t.get("columns"):
-        return [str(x) for x in t["columns"]]
-    rows = t.get("rows") or []
-    return [str(x) for x in (rows[0] if rows else [])]
+## moved
 
-def _apply_headers(t: Dict[str, Any], headers: List[str]) -> None:
-    n = len(headers)
-    if t.get("header") and isinstance(t["header"], list) and len(t["header"]) == n:
-        t["header"] = headers
-    elif t.get("columns") and isinstance(t["columns"], list) and len(t["columns"]) == n:
-        t["columns"] = headers
+## moved
 
 def _attach_llm_assist_headers(result: Dict[str, Any], stage_dir: Path) -> None:
     sidecar = stage_dir / "05_tables_llm_assist.json"
@@ -317,21 +297,7 @@ def _demote_table_headers_to_text(result: Dict[str, Any]) -> None:
         result["demoted_text_blocks"] = demoted
 
 
-def _extract_table_text_for_heuristics(t: Dict[str, Any]) -> str:
-    src = t.get("pandas_df_raw") or t.get("pandas_df")
-    cells = []
-    if isinstance(src, list):
-        for r in src:
-            if isinstance(r, dict):
-                cells.extend([str(v).strip() for v in r.values()])
-            elif isinstance(r, list):
-                cells.extend([str(v).strip() for v in r])
-    elif isinstance(src, dict):
-        for r in src.values():
-            if isinstance(r, list):
-                cells.extend([str(v).strip() for v in r])
-    text = " ".join([c for c in cells if c])
-    return " ".join(text.split())
+## moved to utils: _extract_table_text_for_heuristics
 
 
 def _demote_sentence_like_single_row_tables(result: Dict[str, Any]) -> None:
@@ -395,68 +361,19 @@ def score_table(df: pd.DataFrame) -> float:
     return float(df.astype(str).ne("").sum().sum())
 
 
-def sanitize_cell(val: Any) -> str:
-    if val is None:
-        return ""
-    text = str(val).replace("\u00a0", " ").replace("\n", " ")
-    text = " ".join(text.split()).strip()
-    replacements = {
-        "Subsyste m": "Subsystem",
-        "Asynchro nous": "Asynchronous",
-        "SUBSY STEM": "SUBSYSTEM",
-        "EXECU TE": "EXECUTE",
-        "bht_updat e_i": "bht_update_i",
-        "bht_predi ction_o": "bht_prediction_o",
-        "connexi on": "Connection",
-        "Descripti on": "Description",
-    }
-    for old, new in replacements.items():
-        text = text.replace(old, new)
-    tokens = text.split()
-    if tokens and all(tok.lower() in {"in", "out", "ou", "t"} for tok in tokens):
-        merged: List[str] = []
-        i = 0
-        while i < len(tokens):
-            tok = tokens[i].lower()
-            if tok == "in":
-                merged.append("in")
-            elif tok == "out":
-                merged.append("out")
-            elif tok == "ou" and i + 1 < len(tokens) and tokens[i + 1].lower() == "t":
-                merged.append("out")
-                i += 1
-            else:
-                merged.append(tok)
-            i += 1
-        text = "/".join(merged)
-    return text
+## moved to utils: sanitize_cell
 
 
-def fragmentation_score(df: pd.DataFrame) -> int:
-    count = 0
-    for cell in df.astype(str).values.flatten():
-        if sanitize_cell(cell) != str(cell):
-            count += 1
-    return count
+## moved to utils: fragmentation_score
 
 
-def should_retry_fragmentation(score: int) -> bool:
-    """Return True when the fragmentation score exceeds the retry threshold."""
-    return score > FRAGMENTATION_RETRY_THRESHOLD
+## moved to utils: should_retry_fragmentation
 
 
-def has_fragmentation_improvement(existing: int, new: int) -> bool:
-    """Check if the new fragmentation score improves on the existing one."""
-    return (existing - new) >= FRAGMENTATION_IMPROVEMENT_MIN
+## moved to utils: has_fragmentation_improvement
 
 
-def should_replace_table(existing_frag: int, new_frag: int, existing_score: float, new_score: float) -> bool:
-    """Decide whether a new extraction should replace the existing candidate."""
-    if has_fragmentation_improvement(existing_frag, new_frag):
-        return True
-    if new_frag == existing_frag and new_score > existing_score:
-        return True
-    return False
+## moved to utils: should_replace_table
 
 
 def try_camelot_strategy(
@@ -919,66 +836,10 @@ def extract_tables_from_page(
     return extracted_tables, best_strategy, strategy_durations, page_metrics
 
 
-def _normalize_cell(val: Any) -> str:
-    s = str(val or "").strip()
-    s = s.replace("\u00a0", " ")  # NBSP -> space
-    s = " ".join(s.split())
-    return s.lower()
+## moved to utils: _normalize_cell
 
 
-def coalesce_repeated_header_rows(
-    df: pd.DataFrame, min_match: float = TABLE_HEADER_REPEAT_MIN_MATCH
-) -> pd.DataFrame:
-    """Remove repeated header rows that appear mid-body (common in multi-page Camelot outputs).
-
-    Strategy:
-    - Treat the first non-empty row as the header prototype (or use columns if already meaningful).
-    - For each subsequent row, compute fraction of columns equal (normalized) to header prototype; if >= min_match, drop row.
-    - Preserve original index order.
-    """
-    if df is None or df.empty:
-        return df
-
-    # Determine header prototype
-    # Prefer column labels if they are all non-empty strings and not default numeric labels
-    header_proto = None
-    try:
-        cols = list(df.columns)
-        if cols and not all(isinstance(c, int) for c in cols):
-            header_proto = [_normalize_cell(c) for c in cols]
-    except Exception:
-        header_proto = None
-    if header_proto is None:
-        # Use first non-empty row
-        for _, row in df.iterrows():
-            vals = [_normalize_cell(v) for v in row.tolist()]
-            if any(vals):
-                header_proto = vals
-                break
-    if not header_proto:
-        return df
-
-    keep_mask = []
-    for i, row in df.iterrows():
-        vals = [_normalize_cell(v) for v in row.tolist()]
-        if not any(vals):
-            keep_mask.append(True)
-            continue
-        # Compute match ratio
-        n = max(1, min(len(vals), len(header_proto)))
-        matches = sum(1 for a, b in zip(vals[:n], header_proto[:n]) if a == b and a != "")
-        ratio = matches / float(n)
-        if ratio >= min_match and i != df.index[0]:
-            # Drop this repeated header row
-            keep_mask.append(False)
-        else:
-            keep_mask.append(True)
-    try:
-        df2 = df.loc[df.index[keep_mask]].copy()
-        df2.reset_index(drop=True, inplace=True)
-        return df2
-    except Exception:
-        return df
+## moved to utils: coalesce_repeated_header_rows
 
 
 def extract_all_tables(
@@ -1069,15 +930,9 @@ def extract_all_tables(
 
 
 def run(
-    input_json: Path = typer.Argument(..., help="Path to Stage 04 sections JSON."),
-    pdf_dir: Path = typer.Option(
-        "data/results/pipeline/01_annotation_processor",
-        "--pdf-dir",
-        help="Directory with the clean PDF from Stage 01.",
-    ),
-    output_dir: Path = typer.Option(
-        "data/results/pipeline", "-o", help="Parent directory for pipeline results."
-    ),
+    input_json: Path,
+    pdf_dir: Path = Path("data/results/pipeline/01_annotation_processor"),
+    output_dir: Path = Path("data/results/pipeline"),
 ):
     """Extracts tables from the PDF and associates them with sections."""
     console.print(f"[green]Extracting tables based on sections in: {input_json.name}[/green]")
@@ -1113,8 +968,7 @@ def run(
 
     # --- Input Validation ---
     if not input_json.exists():
-        console.print(f"[red]Input JSON not found: {input_json}[/red]")
-        raise typer.Exit(1)
+        raise FileNotFoundError(f"Input JSON not found: {input_json}")
 
     with open(input_json, "r") as f:
         sections_data = json.load(f)
@@ -1126,8 +980,7 @@ def run(
         try:
             pdf_path = next(pdf_dir.glob("*_clean.pdf"))
         except StopIteration:
-            console.print(f"[red]No '*_clean.pdf' found in --pdf-dir: {pdf_dir}[/red]")
-            raise typer.Exit(1)
+            raise FileNotFoundError(f"No '*_clean.pdf' found in pdf_dir: {pdf_dir}")
     sections = sections_data.get("sections", [])
 
     # --- Directory Setup ---
@@ -1606,17 +1459,8 @@ def run(
 
 
 def debug_bundle(
-    bundle: Path = typer.Argument(
-        ...,
-        exists=True,
-        file_okay=True,
-        dir_okay=False,
-        readable=True,
-        help="Bundle with keys: sections (Stage 04 object), clean_pdf (path)",
-    ),
-    output_dir: Path = typer.Option(
-        "data/results/pipeline", "-o", help="Parent directory for pipeline results."
-    ),
+    bundle: Path,
+    output_dir: Path = Path("data/results/pipeline"),
 ):
     """Run Stage 05 with a consolidated bundle (sections + clean PDF)."""
     stage_output_dir = output_dir / "05_table_extractor"
@@ -1655,18 +1499,14 @@ def debug_bundle(
     except Exception:
         pass
 
-    try:
-        data = json.loads(bundle.read_text())
-        sections_obj = data.get("sections")
-        clean_pdf = data.get("clean_pdf")
-        if not sections_obj or not clean_pdf:
-            raise ValueError("Bundle must include 'sections' and 'clean_pdf'")
-        tmp_sections = stage_output_dir / "_bundle_sections.json"
-        tmp_sections.write_text(json.dumps({"sections": sections_obj}))
-        pdf_path = Path(clean_pdf)
-    except Exception as e:
-        typer.secho(f"Failed to load bundle: {e}", fg=typer.colors.RED)
-        raise typer.Exit(1)
+    data = json.loads(bundle.read_text())
+    sections_obj = data.get("sections")
+    clean_pdf = data.get("clean_pdf")
+    if not sections_obj or not clean_pdf:
+        raise ValueError("Bundle must include 'sections' and 'clean_pdf'")
+    tmp_sections = stage_output_dir / "_bundle_sections.json"
+    tmp_sections.write_text(json.dumps({"sections": sections_obj}))
+    pdf_path = Path(clean_pdf)
 
     # Extract tables and associate
     all_tables, strategy_summary, quality_summary = extract_all_tables(

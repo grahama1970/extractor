@@ -13,9 +13,9 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import asyncio
 from typing import Any
 
-import typer
 
 GRID = 12  # default grid granularity (rows = cols = GRID)
 SCHEMA_VERSION = "0.2.0"
@@ -513,13 +513,13 @@ def run(input_path: str, output_path: str, **kwargs) -> dict[str, Any]:
 
 ## CLI removed: call run(...) or main(...) from Python.
 def main(
-    results_dir: Path = typer.Option("data/results/pipeline", "-o", help="Results dir"),
-    grid: int = typer.Option(GRID, "--grid", min=4, max=64, help="Grid granularity (NxN)"),
-    summary_limit: int = typer.Option(80, "--summary-limit", min=16, max=400, help="Max chars for element summaries"),
-    flow_text: bool = typer.Option(False, "--flow-text", help="Also emit flow_stream *.txt files"),
-    min_gap_ratio: float = typer.Option(0.04, "--min-gap-ratio", help="Column gap fraction (0–1)"),
-    header_footer_band: float = typer.Option(0.05, "--header-footer-band", help="Top/bottom band as fraction (0–0.2)"),
-    place_floats: str = typer.Option("inline", "--place-floats", help="Float placement in flow: inline|sidebar|append"),
+    results_dir: Path = Path("data/results/pipeline"),
+    grid: int = GRID,
+    summary_limit: int = 80,
+    flow_text: bool = False,
+    min_gap_ratio: float = 0.04,
+    header_footer_band: float = 0.05,
+    place_floats: str = "inline",
 ) -> None:
     # Run and, if generated deterministically, re-map grid/summary settings by rebuilding per-section
     run(str(results_dir), str(results_dir))
@@ -555,4 +555,4 @@ def main(
 
 
 if __name__ == "__main__":
-    app()
+    print("Import and call run(...) or main(...); no CLI framework required.")
