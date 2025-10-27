@@ -5,6 +5,7 @@ import time
 import shlex
 import subprocess
 from pathlib import Path
+import sys
 import typer
 
 
@@ -53,14 +54,14 @@ def build_cli() -> typer.Typer:
         if mode == "fast":
             cmd = ["pipeline-happy", "--pdf", str(pdf_path), "--results", str(out_dir)]
         else:
+            # Accurate mode calls the modern function-first runner
             cmd = [
-                "python",
+                sys.executable,
                 "-m",
-                "extractor.pipeline.run_all",
-                "run",
+                "extractor.pipeline.run_pipeline",
                 "--pdf",
                 str(pdf_path),
-                "--results",
+                "--out",
                 str(out_dir),
             ]
 

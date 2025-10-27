@@ -1213,6 +1213,7 @@ def run(
         console.print(f"✅ Section building complete. Output saved to: {output_path}")
         console.print(f"📄 Sections created: {result.get('section_count', 0)}")
         console.print(f"🖼️  Visual captures: {result.get('visual_captures', 0)}")
+        return output_path
     else:
         console.print("❌ Section building failed.")
         raise RuntimeError("Section building failed")

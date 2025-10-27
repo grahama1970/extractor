@@ -72,9 +72,14 @@ def draw_overlays(
                 x0, y0, x1, y1 = _scale_bbox(b, scale, page_px_h, y_flip)
                 draw.rectangle([x0, y0, x1, y1], outline=b.color, width=b.width)
                 if b.label:
-                    # draw label background for readability
-                    tw, th = draw.textsize(b.label, font=font)
+                    # draw label background for readability (Pillow 10+: use textbbox)
                     margin = 2
+                    try:
+                        bbox = draw.textbbox((0, 0), b.label, font=font)
+                        tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+                    except Exception:
+                        # Fallback approximate sizes
+                        tw, th = len(b.label) * 6, 10
                     bg = (0, 0, 0)
                     draw.rectangle([x0, max(0, y0 - th - 2 * margin), x0 + tw + 2 * margin, y0], fill=bg)
                     draw.text((x0 + margin, y0 - th - margin), b.label, fill=(255, 255, 255), font=font)
@@ -83,4 +88,3 @@ def draw_overlays(
             base.save(out_path)
     finally:
         doc.close()
-

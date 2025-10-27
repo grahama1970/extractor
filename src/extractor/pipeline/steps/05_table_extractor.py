@@ -130,6 +130,15 @@ TABLE_MULTI_PAGE_MERGE_ENABLED = os.getenv("TABLE_MULTI_PAGE_MERGE_ENABLED", "tr
 )
 TABLE_MULTI_PAGE_MERGE_MIN_IOU = float(os.getenv("TABLE_MULTI_PAGE_MERGE_MIN_IOU", 0.3))
 
+# Selection behavior (quick win: stop data loss)
+# When true, keep legacy behavior of selecting exactly one primary table per page.
+# Default is false: keep ALL tables; let downstream consolidation (Stage 07) decide.
+TABLE_SELECT_ONE_PER_PAGE = os.getenv("TABLE_SELECT_ONE_PER_PAGE", "false").lower() in (
+    "1",
+    "true",
+    "yes",
+    "y",
+)
 # Feature toggles (env-configurable)
 # Important: Stage 05 shall NOT merge/stitch tables by default. Merging happens in Stage 07.
 # Default this feature OFF to avoid header/body stitching at this stage.
@@ -1231,8 +1240,10 @@ def run(
             except Exception:
                 pass
 
-    # Select the best table per page to ensure exactly one primary table per page
-    if all_tables:
+    # Selection behavior:
+    # By default KEEP ALL filtered tables (no data loss).
+    # If TABLE_SELECT_ONE_PER_PAGE=true, keep legacy behavior (exactly one per page).
+    if TABLE_SELECT_ONE_PER_PAGE and all_tables:
         by_page: Dict[int, List[Dict[str, Any]]] = {}
         for t in all_tables:
             by_page.setdefault(int(t.get("page_index", 0)), []).append(t)
@@ -1255,7 +1266,6 @@ def run(
                 selected.append(best)
             except Exception:
                 continue
-        # Replace filtered_tables by page-best selection
         filtered_tables = selected
 
     # --- Assign captions/titles from nearby text if missing ---
@@ -1449,6 +1459,18 @@ def run(
     _demote_table_headers_to_text(result)
     _demote_sentence_like_single_row_tables(result)
 
+    # Minimal schema validation
+    try:
+        for t in result.get("tables", []):
+            assert isinstance(t.get("bbox"), (list, tuple)) and len(t.get("bbox")) == 4
+            assert isinstance(t.get("page_index"), (int, float))
+            # pandas_metrics optional but if present should expose shape/columns
+            pm = t.get("pandas_metrics", {}) or {}
+            if pm:
+                _ = pm.get("shape"), pm.get("columns")
+    except Exception as _e:
+        console.print(f"[yellow]Stage 05 schema warning: {_e}[/yellow]")
+
     output_path = json_output_dir / "05_tables.json"
     with open(output_path, "w") as f:
         json.dump(result, f, indent=2, ensure_ascii=False)
@@ -1456,6 +1478,7 @@ def run(
     console.print(
         f"✅ Table extraction complete. Saved {len(filtered_tables)} tables to: {output_path}"
     )
+    return output_path
 
 
 def debug_bundle(
@@ -1538,11 +1561,22 @@ def debug_bundle(
         if (rows >= TABLE_FILTER_MIN_ROWS) or (rows >= 2 and density >= TABLE_FILTER_MIN_DENSITY):
             filtered_tables.append(t)
     if not filtered_tables and all_tables:
-        try:
-            best = max(all_tables, key=lambda t: float(t.get("score", 0.0)))
-            filtered_tables = [best]
-        except Exception:
-            filtered_tables = all_tables[:1]
+        # Keep all extracted tables by default (avoid data loss on multi-table pages).
+        # Old behavior (collapse to a single "best" table) can be enabled via env flag.
+        import os as _os
+        single = (_os.getenv("STAGE05_SINGLE_PER_PAGE", "0").lower() in ("1", "true", "yes", "y"))
+        if single:
+            try:
+                best = max(all_tables, key=lambda t: float(t.get("score", 0.0)))
+                filtered_tables = [best]
+            except Exception:
+                filtered_tables = all_tables[:1]
+        else:
+            filtered_tables = all_tables
+            # Mark low-confidence carry-through so Stage 07 can decide merges or drops.
+            for t in filtered_tables:
+                t.setdefault("provenance", {})
+                t["provenance"]["stage05_filter"] = "fallback_keep_all"
 
     try:
         samples = stop_resource_sampler(sampler) if sampler else []

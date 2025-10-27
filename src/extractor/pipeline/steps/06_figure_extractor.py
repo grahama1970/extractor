@@ -295,6 +295,15 @@ def run(
     }
 
     out_path = json_dir / "06_figures.json"
+    # Minimal schema validation
+    try:
+        for f in result.get("figures", []):
+            assert isinstance(f.get("bbox"), (list, tuple)) and len(f.get("bbox")) == 4
+            # accept page or page_idx
+            _ = f.get("page_idx") if "page_idx" in f else f.get("page")
+    except Exception as _e:
+        console.print(f"[yellow]Stage 06 schema warning: {_e}[/yellow]")
+
     out_path.write_text(json.dumps(result, indent=2))
 
     console.print(

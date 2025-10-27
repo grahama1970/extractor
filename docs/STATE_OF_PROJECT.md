@@ -181,7 +181,7 @@ Takeaway: We did not find a single system that combines robust AI extraction (ta
 - **14_report_generator** – Aggregates run diagnostics, resource samples, and operator-friendly metadata into the final reports consumed by pipeline dashboards.
 
 ## Structured Providers & Conversion Layer
-- **Router** – `pipeline_router` maps file types to `STRUCTURED_PIPELINES`, invoking `run_structured_pipeline` with deterministic skips and normalized outputs.
+- **Router** – `pipeline_router` maps file types to `STRUCTURED_PIPELINES`, invoking `run_structured_pipeline` for structured formats and `run_pipeline` for PDFs.
 - **HTMLProvider** – BeautifulSoup + optional Trafilatura path; preserves headings, tables, forms, images, generator metadata, and builds a hierarchy/keyword index.
 - **DOCXProvider** – Uses docx2python + python-docx for images/comments; promotes numbered headings, merges tables when Claude analysis is enabled, and tags mangled-docx fallbacks for Stage 05 reuse.
 - **PPTXProvider** – python-pptx ingestion with slide hierarchy, notes folding, embedded image export, and optional AI table merge analysis; captures slide metadata (count, dimensions).
@@ -199,7 +199,7 @@ Takeaway: We did not find a single system that combines robust AI extraction (ta
 
 ## CLI Surfaces
 - **Unified CLI** – `python -m src.cli extract <input> <out> [--mode fast|accurate]` routes PDFs to PyMuPDF fast mode or to the `run_all` accurate path (with deterministic skips), and auto-dispatches structured formats to their providers.
-- **Operator Tools** – `pipeline-run` (`cli_mode.run`) wraps fast vs accurate execution with optional JSON envelopes; `pipeline-run-all run` executes the Typer pipeline (stages 01→14); `pipeline-happy` remains for deterministic validation/score aggregation and is used by `cli_happy`.
+- **Operator Tools** – `pipeline-run` (`cli_mode.run`) wraps fast vs accurate execution with optional JSON envelopes; `run_pipeline` executes the modern function‑first pipeline; `pipeline-happy` remains for deterministic validation/score aggregation and is used by `cli_happy`.
 - **Automation Hooks** – Make targets (`make smokes-pipeline-happy`, `make quick-pipeline`, `make extract-fast …`) and VS Code tasks provide one-click validation loops.
 
 ## Known Gaps & Watchlist

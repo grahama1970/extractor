@@ -12,6 +12,13 @@ import argparse
 from pathlib import Path
 from PIL import Image, ImageChops
 
+# Map short step to directory name for per-step/visual locations
+STEP_DIR = {
+    "02": "02_marker_extractor",
+    "05": "05_table_extractor",
+    "06": "06_figure_extractor",
+}
+
 
 def _diff(a: Path, b: Path, *, threshold: int = 10) -> tuple[bool, int]:
     ia = Image.open(a).convert("RGB")
@@ -39,8 +46,9 @@ def main() -> int:
     steps = [s.strip() for s in args.steps.split(',') if s.strip()]
     failures = 0
     for s in steps:
-        exp_dir = args.expected / s
-        act_dir = args.actual / s
+        step_dir = STEP_DIR.get(s, s)
+        exp_dir = args.expected / step_dir / "visual"
+        act_dir = args.actual / step_dir / "visual"
         if not exp_dir.exists() or not act_dir.exists():
             print(f"WARN: missing visual dir for step {s}")
             continue
@@ -64,4 +72,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

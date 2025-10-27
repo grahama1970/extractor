@@ -15,7 +15,8 @@ from extractor.pipeline.structured_pipeline import (
     STRUCTURED_PIPELINES,
     run_structured_pipeline,
 )
-from extractor.pipeline import run_all as pdf_pipeline
+import subprocess
+import sys
 
 
 app = typer.Typer(add_completion=False, help="Dispatch extraction pipeline by format")
@@ -65,26 +66,18 @@ def run(
     provider_cls = provider_from_filepath(str(input_path))
 
     if issubclass(provider_cls, PdfProvider):
-        typer.echo("Detected PDF input; running legacy PDF pipeline.")
-        pdf_pipeline.run(
-            pdf=input_path,
-            results=results,
-            arango_db=arango_db,
-            session=session,
-            lean4_cli=lean4_cli,
-            offline=offline,
-            skip_llm03=False,
-            skip_descriptions06=False,
-            summary_only07=False,
-            skip_proving08=False,
-            skip_export10=skip_export10,
-            skip_embeddings10=skip_embeddings10,
-            fast_embeddings10=fast_embeddings10,
-            skip_graph11=False,
-            validate=False,
-            annotations_json=None,
-        )
-        return
+        typer.echo("Detected PDF input; running modern PDF pipeline (run_pipeline).")
+        cmd = [
+            sys.executable,
+            "-m",
+            "extractor.pipeline.run_pipeline",
+            "--pdf",
+            str(input_path),
+            "--out",
+            str(results),
+        ]
+        proc = subprocess.run(cmd)
+        raise typer.Exit(code=proc.returncode)
 
     for structured_cls, meta in STRUCTURED_PIPELINES.items():
         if issubclass(provider_cls, structured_cls):

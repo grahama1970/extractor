@@ -159,6 +159,21 @@ FIGURE_FALLBACK_ENABLED = os.getenv("STAGE07_FIGURE_FALLBACK", "false").lower() 
 # Max output tokens for strict JSON responses (can be tuned via env)
 STAGE07_MAX_TOKENS = int(os.getenv("STAGE07_MAX_TOKENS", "2048"))
 
+# Layout sketch consumption (quick win)
+USE_LAYOUT_SKETCH = os.getenv("STAGE07_USE_LAYOUT_SKETCH", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+    "y",
+)
+LAYOUT_CONF_THRESH = float(os.getenv("STAGE07_LAYOUT_CONF_THRESH", "0.75"))
+OMIT_IMAGES_IF_CONFIDENT = os.getenv("STAGE07_OMIT_IMAGES_IF_CONFIDENT", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+    "y",
+)
+
 PROMPT_STRICT_REQUIREMENTS = (
     "Strict requirements for the JSON you return:\n"
     "- Merge Stage 05 table fragments that share the same logical columns into a SINGLE table block."
@@ -251,6 +266,29 @@ def build_section_context_text(section: dict[str, Any]) -> str:
             ensure_ascii=False,
         )
     )
+
+    # Inject compact layout prior (from 06b) when present
+    try:
+        lsk = section.get("layout_sketch") or {}
+        if isinstance(lsk, dict) and lsk:
+            conf = (lsk.get("conf") or {}).get("ordering")
+            cols = lsk.get("columns") or []
+            dsl = lsk.get("flow_stream") or ""
+            # Keep DSL compact to protect token budget
+            dsl_snippet = dsl if len(dsl) <= 1200 else (dsl[:1200] + " …")
+            lines.append("Layout Prior:")
+            lines.append(
+                json.dumps(
+                    {
+                        "ordering_conf": conf,
+                        "columns": cols,  # grid bands [{id,x0,x1}]
+                        "dsl": dsl_snippet,
+                    },
+                    ensure_ascii=False,
+                )
+            )
+    except Exception:
+        pass
 
     raw_text = sanitize_text(
         section.get("source_text") or section.get("merged_text") or section.get("raw_text", "")
@@ -385,6 +423,86 @@ def build_section_context_text(section: dict[str, Any]) -> str:
             )
 
     return "\n".join(lines)
+
+
+# --- JSON normalization helper (dict-or-string) ---
+
+def _content_to_json_dict(content: Any) -> dict[str, Any]:
+    """Normalize JSON content that may be a dict (already parsed) or a string.
+
+    - If content is dict → return as-is
+    - If content is str → try strict parse, then repair via clean_json_string
+    - Else → raise ValueError
+    """
+    if isinstance(content, dict):
+        return content
+    if isinstance(content, str):
+        if not content.strip():
+            raise ValueError("empty content string")
+        try:
+            return parse_json_strict(content)
+        except Exception:
+            return clean_json_string(content, return_dict=True)
+    raise ValueError(f"unsupported content type: {type(content)}")
+
+
+def _iou_rect(a: list[float], b: list[float]) -> float:
+    try:
+        ax0, ay0, ax1, ay1 = map(float, a)
+        bx0, by0, bx1, by1 = map(float, b)
+    except Exception:
+        return 0.0
+    inter_w = max(0.0, min(ax1, bx1) - max(ax0, bx0))
+    inter_h = max(0.0, min(ay1, by1) - max(ay0, by0))
+    inter = inter_w * inter_h
+    if inter <= 0:
+        return 0.0
+    area_a = max(0.0, (ax1 - ax0)) * max(0.0, (ay1 - ay0))
+    area_b = max(0.0, (bx1 - bx0)) * max(0.0, (by1 - by0))
+    union = area_a + area_b - inter
+    return float(inter / union) if union > 0 else 0.0
+
+
+def _apply_layout_ordering(section: dict[str, Any]) -> None:
+    """Optionally reorder section tables/figures using 06b layout sketch reading_order.
+
+    Matches by IoU between item bbox and elements_original_bbox.
+    Safe no-op if sketch missing or fields absent.
+    """
+    lsk = section.get("layout_sketch") or {}
+    if not isinstance(lsk, dict) or not lsk:
+        return
+    elements = lsk.get("elements") or []
+    orig = {e.get("id"): e for e in elements if isinstance(e, dict)}
+    bbox_map = {e.get("id"): e.get("bbox") for e in (lsk.get("elements_original_bbox") or [])}
+
+    def _order_items(items: list[dict], kind: str) -> list[dict]:
+        scored = []
+        for it in items:
+            bb = it.get("bbox") or it.get("bbox0")
+            best = (-1.0, 999999)  # IoU, reading_order
+            for eid, eb in bbox_map.items():
+                meta = orig.get(eid) or {}
+                if (meta.get("kind") != kind) or (not eb):
+                    continue
+                iou = _iou_rect(bb or [], eb)
+                if iou > best[0]:
+                    best = (iou, int(meta.get("reading_order", 999999)))
+            scored.append((best, it))
+        # sort by reading_order asc, then by IoU desc (so higher IoU comes earlier when orders equal)
+        scored.sort(key=lambda t: (t[0][1], -t[0][0]))
+        return [it for _, it in scored]
+
+    try:
+        if isinstance(section.get("tables"), list):
+            section["tables"] = _order_items(section["tables"], "table")
+        if isinstance(section.get("figures"), list):
+            section["figures"] = _order_items(section["figures"], "figure")
+        # record provenance for debugging
+        meta = section.setdefault("_layout_prior", {})
+        meta["ordering"] = "06b"
+    except Exception:
+        pass
 
 def _normalize_table_text(val: Any) -> str:
     if val is None:
@@ -522,8 +640,9 @@ async def reflow_section_with_llm(
     llm_timeout: int = 60,
 ) -> dict[str, Any]:
     """Reflow a section using multimodal context (section/table/figure/annotation) and return structured JSON."""
-    # Enforce text-only for Stage 07
-    include_images = False
+    # Respect allow-images toggle (default text-only). Per-section gating may still disable images.
+    _ALLOW_IMAGES = os.getenv("STAGE07_ALLOW_IMAGES", "0").lower() in ("1", "true", "yes", "y")
+    include_images = bool(include_images and _ALLOW_IMAGES)
     # Ensure text model is selected even when debug-bundle bypasses run()
     global LLM_MODEL
     try:
@@ -550,6 +669,27 @@ async def reflow_section_with_llm(
                 "grok-vision",
             )
         )
+
+        # Layout-based gating: omit images when we have a confident layout prior
+        try:
+            if include_images and USE_LAYOUT_SKETCH and OMIT_IMAGES_IF_CONFIDENT:
+                conf = float(((section_data.get("layout_sketch") or {}).get("conf") or {}).get("ordering") or 0.0)
+                if conf >= LAYOUT_CONF_THRESH:
+                    include_images = False
+                    try:
+                        sec_diags.append(
+                            make_event(
+                                "07_reflow_section",
+                                "info",
+                                "images_omitted_due_to_layout_conf",
+                                f"ordering_conf={conf}",
+                                {},
+                            )
+                        )
+                    except Exception:
+                        pass
+        except Exception:
+            pass
 
         # Build textual context
         context_text = build_section_context_text(section_data)
@@ -1668,16 +1808,22 @@ async def reflow_section_with_llm(
                 "Stage 07: LLM returned empty content. Verify API keys and Chat Completions access; inspect logs in 07_reflow_section/logs for request_info and response dumps."
             )
 
-        # Parse JSON: strict first (no repair). Optionally relax if allowed.
+        # Try unified normalization first (dict or string → dict); else strict → repair
         try:
-            parsed = parse_json_strict(content)
+            parsed = _content_to_json_dict(content)
             result = parsed
-        except Exception as _strict_err:
-            if os.getenv("STAGE07_STRICT_PARSE_ONLY", "0").lower() in ("1", "true", "yes", "y"):
-                logger.warning(f"Strict JSON parse failed (no repair allowed): {_strict_err}")
-                raise
-            logger.warning(f"Strict JSON parse failed; attempting relaxed repair: {_strict_err}")
-            parsed = clean_json_string(content, return_dict=True)
+        except Exception as _norm_err:
+            # Parse JSON: strict first (no repair). Optionally relax if allowed.
+            try:
+                parsed = parse_json_strict(content)
+                result = parsed
+            except Exception as _strict_err:
+                if os.getenv("STAGE07_STRICT_PARSE_ONLY", "0").lower() in ("1", "true", "yes", "y"):
+                    logger.warning(f"Strict JSON parse failed (no repair allowed): {_strict_err}")
+                    raise
+                logger.warning(f"Strict JSON parse failed; attempting relaxed repair: {_strict_err}")
+                # Prefer project cleaner to handle stray fences/trailing commas, etc.
+                parsed = clean_json_string(content, return_dict=True)
             # Optional: prune unexpected top-level keys for strictness (default ON)
             try:
                 if os.getenv("STAGE07_PRUNE_TOPLEVEL_KEYS", "1").lower() in ("1", "true", "yes", "y"):
@@ -2371,8 +2517,9 @@ def run(
     Reflows document sections using multimodal context from previous stages.
     """
     console.print("[bold green]Starting Section Reflow (Stage 07)[/bold green]")
-    # Force text-only policy for Stage 07
-    include_images = False
+    # Respect allow-images toggle (default text-only)
+    _ALLOW_IMAGES = os.getenv("STAGE07_ALLOW_IMAGES", "0").lower() in ("1", "true", "yes", "y")
+    include_images = bool(include_images and _ALLOW_IMAGES)
     global LLM_MODEL
     try:
         LLM_MODEL = get_text_model()
@@ -2421,9 +2568,8 @@ def run(
 
     # --- Profile toggles (simple profile defaults) ---
     try:
-        # ensure downstream helpers do not attach extra images by default
-        include_images = False
-        os.environ.setdefault("STAGE07_MAX_IMAGES", "0")
+        if not include_images:
+            os.environ.setdefault("STAGE07_MAX_IMAGES", "0")
     except Exception:
         pass
 
@@ -2464,30 +2610,33 @@ def run(
         sections_json, tables_json, figures_json, annotations_json
     )
     # Attach layout sketches if available (06b step)
-    try:
-        sketches_path = output_dir / "06b_layout_sketcher" / "json_output" / "06b_layout_sketch.json"
-        if sketches_path.exists():
-            sk_map = json.loads(sketches_path.read_text()).get("sections", {})
-            sk_count = 0
-            for s in sections_to_process:
-                sid = str(s.get("id"))
-                sk = sk_map.get(sid)
-                if sk:
-                    s["layout_sketch"] = sk
-                    sk_count += 1
-            diagnostics.append(
-                make_event(
-                    "07_reflow_section",
-                    "info",
-                    "layout_sketch_attached",
-                    f"Attached sketches for {sk_count} sections",
-                    {},
+    if USE_LAYOUT_SKETCH:
+        try:
+            sketches_path = output_dir / "06b_layout_sketcher" / "json_output" / "06b_layout_sketch.json"
+            if sketches_path.exists():
+                sk_map = json.loads(sketches_path.read_text()).get("sections", {})
+                sk_count = 0
+                for s in sections_to_process:
+                    sid = str(s.get("id"))
+                    sk = sk_map.get(sid)
+                    if isinstance(sk, dict):
+                        s["layout_sketch"] = sk
+                        # Apply deterministic ordering for tables/figures before prompting
+                        _apply_layout_ordering(s)
+                        sk_count += 1
+                diagnostics.append(
+                    make_event(
+                        "07_reflow_section",
+                        "info",
+                        "layout_sketch_attached",
+                        f"Attached sketches for {sk_count} sections",
+                        {},
+                    )
                 )
+        except Exception as _e:
+            diagnostics.append(
+                make_event("07_reflow_section", "warning", "layout_sketch_missing", str(_e), {})
             )
-    except Exception as _e:
-        diagnostics.append(
-            make_event("07_reflow_section", "warning", "layout_sketch_missing", str(_e), {})
-        )
 
     # Optional: load or build FAISS index from Stage 01 annotations for similar text lookup
     ann_index = None
@@ -2625,16 +2774,34 @@ def run(
     else:
 
         async def run_tasks_first():
-            tasks = [
-                reflow_section_with_llm(
-                    s,
-                    output_dir,
-                    include_images=include_images,
-                    allow_fallback=allow_fallback,
-                    llm_timeout=llm_timeout,
+            tasks = []
+            for s in sections_to_process:
+                use_images = include_images
+                if USE_LAYOUT_SKETCH and OMIT_IMAGES_IF_CONFIDENT:
+                    try:
+                        conf = float(((s.get("layout_sketch") or {}).get("conf") or {}).get("ordering") or 0.0)
+                        if conf >= LAYOUT_CONF_THRESH:
+                            use_images = False
+                            diagnostics.append(
+                                make_event(
+                                    "07_reflow_section",
+                                    "info",
+                                    "images_omitted_due_to_layout_conf",
+                                    f"Omitted images for section {s.get('id')} (conf={conf:.2f} >= {LAYOUT_CONF_THRESH})",
+                                    {},
+                                )
+                            )
+                    except Exception:
+                        pass
+                tasks.append(
+                    reflow_section_with_llm(
+                        s,
+                        output_dir,
+                        include_images=use_images,
+                        allow_fallback=allow_fallback,
+                        llm_timeout=llm_timeout,
+                    )
                 )
-                for s in sections_to_process
-            ]
             return await tqdm_asyncio.gather(*tasks, desc="Reflowing Sections (text-first)")
 
         processed_sections = asyncio.run(run_tasks_first())
@@ -2730,7 +2897,9 @@ if __name__ == "__main__":
     if len(argv) < 3:
         print("Missing required paths", file=sys.stderr)
         sys.exit(2)
-    sections_json = Path(argv[0]); tables_json = Path(argv[1]); figures_json = Path(argv[2])
+    sections_json = Path(argv[0])
+    tables_json = Path(argv[1])
+    figures_json = Path(argv[2])
     ann_json = None
     out_dir = Path("data/results/pipeline")
     if len(argv) >= 4:

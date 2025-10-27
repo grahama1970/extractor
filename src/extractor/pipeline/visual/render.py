@@ -1,39 +1,16 @@
 #!/usr/bin/env python3
-# /// script
-# requires-python = ">=3.10"
-# dependencies = [
-#   "pymupdf>=1.24.2",
-#   "Pillow>=10.3.0",
-# ]
-# ///
-
 from __future__ import annotations
 
 import argparse
 import json
-import os
 from pathlib import Path
-from typing import Iterable, List
+from typing import Iterable
 
-# Avoid importing extractor.pipeline package __init__ (which re-exports APIs with extra deps).
-# Load the overlay module directly by path.
-import importlib.util as _ilu
-_overlay_path = Path('src/extractor/pipeline/visual/overlay.py')
-import sys as _sys
-spec = _ilu.spec_from_file_location('overlay', _overlay_path)
-if spec and spec.loader:
-    _mod = _ilu.module_from_spec(spec)
-    _sys.modules['overlay'] = _mod
-    spec.loader.exec_module(_mod)
-    Box = _mod.Box
-    draw_overlays = _mod.draw_overlays
-else:
-    raise RuntimeError(f"Failed to load overlay module from {_overlay_path}")
+from .overlay import Box, draw_overlays
 
 
 def _load_json(p: Path):
-    with p.open("r", encoding="utf-8") as f:
-        return json.load(f)
+    return json.loads(p.read_text())
 
 
 def boxes_from_stage02(path: Path) -> Iterable[Box]:
@@ -69,37 +46,31 @@ def boxes_from_stage06(path: Path) -> Iterable[Box]:
         yield Box(page=int(page), x0=bbox[0], y0=bbox[1], x1=bbox[2], y1=bbox[3], label=f"F{i}:{title}", color=(255, 128, 0))
 
 
-def boxes_from_stage03(path: Path) -> Iterable[Box]:
-    data = _load_json(path)
-    for i, b in enumerate(data.get("suspicious_headers", [])):
-        bbox = b.get("bbox")
-        page = b.get("page_idx", 0)
-        reason = b.get("reason") or "suspicious"
-        if not bbox:
-            continue
-        yield Box(page=int(page), x0=bbox[0], y0=bbox[1], x1=bbox[2], y1=bbox[3], label=f"H{i}:{reason}", color=(255, 0, 0))
-
-
 STEP_MAP = {
     "02": ("02_marker_extractor/json_output/02_marker_blocks.json", boxes_from_stage02),
-    "03": ("03_suspicious_headers/json_output/03_verified_blocks.json", boxes_from_stage03),
     "05": ("05_table_extractor/json_output/05_tables.json", boxes_from_stage05),
     "06": ("06_figure_extractor/json_output/06_figures.json", boxes_from_stage06),
 }
 
+STEP_DIR = {
+    "02": "02_marker_extractor",
+    "05": "05_table_extractor",
+    "06": "06_figure_extractor",
+}
+
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Render visual overlays for selected steps")
+    ap = argparse.ArgumentParser(description="Render visual overlays for selected steps (package entry)")
     ap.add_argument("--pdf", required=True, type=Path)
     ap.add_argument("--out", required=True, type=Path, help="pipeline results root (data/results/pipeline)")
-    ap.add_argument("--viz-out", required=True, type=Path, help="directory for rendered PNGs")
-    ap.add_argument("--steps", default="02,05,06", help="comma list among 02,03,05,06")
+    ap.add_argument("--viz-out", type=Path, default=Path("data/results/pipeline"))
+    ap.add_argument("--steps", default="02,05,06")
     ap.add_argument("--dpi", type=int, default=144)
-    ap.add_argument("--y-flip", action="store_true", help="flip Y if coordinates use bottom-left origin")
+    ap.add_argument("--y-flip", action="store_true")
     args = ap.parse_args()
 
     pdf = args.pdf
-    steps: List[str] = [s.strip() for s in args.steps.split(",") if s.strip()]
+    steps = [s.strip() for s in args.steps.split(",") if s.strip()]
     for s in steps:
         rel, fn = STEP_MAP.get(s, (None, None))
         if not rel:
@@ -110,10 +81,11 @@ def main() -> int:
             print(f"WARN: missing output for step {s}: {src}")
             continue
         boxes = list(fn(src))
-        out_dir = args.viz_out / s
+        # Write visuals under each step directory for clarity: <out>/<step_dir>/visual
+        step_dir = STEP_DIR.get(s, s)
+        out_dir = args.viz_out / step_dir / "visual"
         draw_overlays(pdf, boxes, out_dir, dpi=args.dpi, y_flip=args.y_flip)
         print(f"rendered step {s} → {out_dir}")
-
     return 0
 
 

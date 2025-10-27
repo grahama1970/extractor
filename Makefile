@@ -764,3 +764,61 @@ pipeline-verify-expected:
 		--out data/results/pipeline \
 		--expected-root data/expected/pipeline \
 		--steps 01,02,04,05,06,07,09
+# Render visual overlays for steps (PNG per page)
+pipeline-render-visuals:
+	. .venv/bin/activate 2>/dev/null || true; \
+	PYTHONPATH=src $(PY) -m extractor.pipeline \
+		--pdf data/input/pipeline/BHT_CV32A65X_with_requirements_noannots.pdf \
+		--out data/results/pipeline \
+		--summary-only \
+		--skip-fig-descriptions \
+		--skip-export && \
+	PYTHONPATH=src $(PY) -m extractor.pipeline.visual.render \
+		--pdf data/input/pipeline/BHT_CV32A65X_with_requirements_noannots.pdf \
+		--out data/results/pipeline \
+		--viz-out data/results/pipeline \
+		--steps 02,05,06
+
+# Compare rendered visuals with expected
+pipeline-verify-expected-images:
+	uv run scripts/tools/expected_imgdiff.py \
+		--expected data/expected/pipeline/BHT_CV32A65X_with_requirements_noannots \
+		--actual   data/results/pipeline \
+		--steps 02,05,06
+# Live (LLM-on) pipeline run for actual results (no deterministic flags)
+pipeline-live:
+	. .venv/bin/activate 2>/dev/null || true; \
+	PYTHONPATH=src $(PY) -m extractor.pipeline \
+		--pdf data/input/pipeline/BHT_CV32A65X_with_requirements_noannots.pdf \
+		--out data/results/pipeline
+
+# Live run + visuals + snapshot for side-by-side diff later
+pipeline-live-visuals:
+	. .venv/bin/activate 2>/dev/null || true; \
+	PYTHONPATH=src $(PY) -m extractor.pipeline \
+		--pdf data/input/pipeline/BHT_CV32A65X_with_requirements_noannots.pdf \
+		--out data/results/pipeline && \
+	PYTHONPATH=src $(PY) -m extractor.pipeline.visual.render \
+		--pdf data/input/pipeline/BHT_CV32A65X_with_requirements_noannots.pdf \
+		--out data/results/pipeline \
+		--viz-out data/results/pipeline \
+		--steps 02,05,06 && \
+	uv run scripts/tools/snapshot_pipeline_outputs.py \
+		--out data/results/pipeline \
+		--visual-dir data/results/pipeline \
+		--dest-root scripts/artifacts/snapshots
+PIPELINE_PDF ?= data/input/pipeline/BHT_CV32A65X_marked.pdf
+PIPELINE_OUT ?= data/results/pipeline
+
+.PHONY: pipeline-fast
+pipeline-fast:
+	PYTHONPATH=src \
+	python -m extractor.pipeline.run_pipeline \
+	  --pdf $(PIPELINE_PDF) \
+	  --out $(PIPELINE_OUT) \
+	  --summary-only \
+	  --skip-fig-descriptions || true
+	@mkdir -p scripts/artifacts/pipeline
+	PYTHONPATH=src \
+	python scripts/tools/collect_proofs.py $(PIPELINE_OUT) scripts/artifacts/pipeline
+	@echo "Artifacts collected under scripts/artifacts/pipeline"

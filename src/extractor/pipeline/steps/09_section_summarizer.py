@@ -20,7 +20,7 @@ from textwrap import dedent
 # Third-party
 from loguru import logger
 from rich.console import Console
-from scillm.extras.json_utils import clean_json_string
+from extractor.pipeline.utils.json_utils import clean_json_string
 from extractor.pipeline.utils.json_mode import JSON_SYSTEM_GUARD
 from tqdm import tqdm
 from scillm import acompletion as sc_acompletion

@@ -1,19 +1,19 @@
 """
 Thin API to run key pipeline stages and return sections.
 
-Runs Stages 01 (clean), 02 (marker blocks), 03 (suspicious header verify),
-and 04 (section builder) via their CLI scripts, writing outputs to
-`data/results/pipeline` by default, and returns the parsed sections list
-from `04_sections.json`.
+DEPRECATION NOTICE (2025‑10‑27):
+- This module previously spawned subprocesses to call per‑step CLIs.
+- It now calls the step functions directly (no subprocess) to align with the
+  function‑first pipeline (`extractor.pipeline.run_pipeline`).
+- Prefer using `run_pipeline` for full multi‑stage runs. This module remains as
+  a convenience for 01→04 extraction.
 """
 
 from __future__ import annotations
 
 import json
 import os
-import subprocess
 from dataclasses import dataclass
-import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 import time
@@ -34,15 +34,9 @@ class PipelinePaths:
     sections_json: Path
 
 
-def _run(cmd: List[str], cwd: Optional[Path] = None, env: Optional[Dict[str, str]] = None) -> None:
-    e = os.environ.copy()
-    if env:
-        e.update(env)
-    # Ensure imports resolve
-    e.setdefault("PYTHONPATH", str(Path.cwd() / "src"))
-    proc = subprocess.run(cmd, cwd=str(cwd) if cwd else None)
-    if proc.returncode != 0:
-        raise RuntimeError(f"Command failed ({proc.returncode}): {' '.join(cmd)}")
+def _noop_env(_: Optional[Dict[str, str]] = None) -> None:
+    # Kept for compatibility with older call sites that passed env
+    return None
 
 
 def _find_clean_pdf(anno_dir: Path) -> Path:
@@ -80,21 +74,19 @@ def extract_sections(
     def _log(status: str, step: str, details: str = "") -> None:
         execution_log.append({"timestamp": datetime.utcnow().isoformat(timespec="seconds") + "Z", "status": status, "step": step, "details": details})
 
-    # Stage 01: annotation/cleaner
-    # Produces cleaned PDF in p.anno_dir
+    # Import steps lazily and call functions directly (no subprocess)
+    from extractor.pipeline.steps import (
+        s01_annotation_processor as s01,
+        s02_marker_extractor as s02,
+        s03_suspicious_headers as s03,
+        s04_section_builder as s04,
+    )
+
+    # Stage 01: annotation/cleaner — produces cleaned PDF in p.anno_dir
     _log("started", "01_annotation_processor", os.fspath(pdf_path))
     t0 = time.time()
     try:
-        _run(
-            [
-                sys.executable,
-                os.fspath(Path("src/extractor/pipeline/steps/01_annotation_processor.py")),
-                "run",
-                os.fspath(pdf_path),
-                "-o",
-                os.fspath(out),
-            ]
-        )
+        s01.run(pdf_path, out)
         took = time.time() - t0
         results["01_annotation_processor"] = {"success": True, "duration": took}
         _log("completed", "01_annotation_processor", f"ok in {took:.3f}s")
@@ -111,16 +103,7 @@ def extract_sections(
     _log("started", "02_marker_extractor", os.fspath(clean_pdf))
     t0 = time.time()
     try:
-        _run(
-            [
-                sys.executable,
-                os.fspath(Path("src/extractor/pipeline/steps/02_marker_extractor.py")),
-                "run",
-                os.fspath(clean_pdf),
-                "-o",
-                os.fspath(out),
-            ]
-        )
+        s02.run(clean_pdf, out)
         took = time.time() - t0
         results["02_marker_extractor"] = {"success": True, "duration": took, "output": os.fspath(p.blocks_json)}
         output_files.append(os.fspath(p.blocks_json))
@@ -136,18 +119,7 @@ def extract_sections(
     _log("started", "03_suspicious_headers", os.fspath(p.blocks_json))
     t0 = time.time()
     try:
-        _run(
-            [
-                sys.executable,
-                os.fspath(Path("src/extractor/pipeline/steps/03_suspicious_headers.py")),
-                "run",
-                os.fspath(p.blocks_json),
-                "--pdf-dir",
-                os.fspath(p.anno_dir),
-                "-o",
-                os.fspath(out),
-            ]
-        )
+        s03.run(p.blocks_json, p.anno_dir, out)
         took = time.time() - t0
         results["03_suspicious_headers"] = {"success": True, "duration": took, "output": os.fspath(p.verified_json)}
         output_files.append(os.fspath(p.verified_json))
@@ -163,18 +135,7 @@ def extract_sections(
     _log("started", "04_section_builder", os.fspath(p.verified_json))
     t0 = time.time()
     try:
-        _run(
-            [
-                sys.executable,
-                os.fspath(Path("src/extractor/pipeline/steps/04_section_builder.py")),
-                "run",
-                os.fspath(p.verified_json),
-                "--pdf-dir",
-                os.fspath(p.anno_dir),
-                "-o",
-                os.fspath(out),
-            ]
-        )
+        s04.run(p.verified_json, p.anno_dir, out)
         took = time.time() - t0
         results["04_section_builder"] = {"success": True, "duration": took, "output": os.fspath(p.sections_json)}
         output_files.append(os.fspath(p.sections_json))
