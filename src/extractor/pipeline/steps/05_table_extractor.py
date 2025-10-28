@@ -197,7 +197,7 @@ def _attach_llm_assist_headers(result: Dict[str, Any], stage_dir: Path) -> None:
     tables = result.get("tables") or []
     # Budget gating (tokens/cost)
     try:
-        tokens_budget = int(os.getenv("STAGE05_TOKENS_BUDGET", "0"))
+        tokens_budget = int(os.getenv("STAGE05_TOKENS_BUDGET", "120000"))
     except Exception:
         tokens_budget = 0
     cost_budget = float(os.getenv("STAGE05_COST_BUDGET_USD", "0") or 0)

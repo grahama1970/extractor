@@ -3358,11 +3358,54 @@ def run(
     except Exception as _e:
         logger.warning(f"Stage 07 visual overlay generation failed: {_e}")
 
-    with open(output_path, "w") as f:
-        json.dump(final_output, f, indent=2, ensure_ascii=False)
+    if os.getenv("DRY_RUN", "0").lower() not in {"1","true","yes","y"}:
+        with open(output_path, "w") as f:
+            json.dump(final_output, f, indent=2, ensure_ascii=False)
+        console.print("\n[bold green]✅ Section reflow complete.[/bold green]")
+        console.print(f"   - Results saved to: [cyan]{output_path}[/cyan]")
+    else:
+        console.print("\n[yellow]DRY_RUN=1 → skipped writing 07_reflowed.json (logs/artifacts still recorded)[/yellow]")
 
-    console.print("\n[bold green]✅ Section reflow complete.[/bold green]")
-    console.print(f"   - Results saved to: [cyan]{output_path}[/cyan]")
+    # timings_summary.json (best-effort) under RUN_RESULTS_DIR/07_reflow_section/logs
+    try:
+        from pathlib import Path as _P
+        rd = os.getenv("RUN_RESULTS_DIR")
+        if rd:
+            ldir = _P(rd) / "07_reflow_section" / "logs"
+            tfile = ldir / "timings.jsonl"
+            if tfile.exists():
+                lat = []
+                attempts = 0
+                ok = 0
+                exc = 0
+                for line in tfile.read_text(encoding="utf-8").splitlines():
+                    attempts += 1
+                    try:
+                        rec = json.loads(line)
+                        if str(rec.get("outcome")) == "ok":
+                            ok += 1
+                        if str(rec.get("outcome")) == "exception":
+                            exc += 1
+                        if rec.get("latency_ms") is not None:
+                            lat.append(float(rec["latency_ms"]))
+                    except Exception:
+                        continue
+                lat_sorted = sorted(lat)
+                def _pct(p: float) -> float:
+                    if not lat_sorted:
+                        return 0.0
+                    idx = int(max(0, min(len(lat_sorted)-1, round(p * (len(lat_sorted)-1)))))
+                    return float(lat_sorted[idx])
+                summary = {
+                    "attempts": attempts,
+                    "ok": ok,
+                    "exceptions": exc,
+                    "p50_ms": _pct(0.50),
+                    "p95_ms": _pct(0.95),
+                }
+                (ldir / "timings_summary.json").write_text(json.dumps(summary, indent=2))
+    except Exception:
+        pass
     return output_path
 
 
@@ -3514,7 +3557,10 @@ def debug_bundle(
         "resources": resources,
     }
     output_path = json_output_dir / "07_reflowed.json"
-    output_path.write_text(json.dumps(final_output, indent=2, ensure_ascii=False))
+    if os.getenv("DRY_RUN", "0").lower() not in {"1","true","yes","y"}:
+        output_path.write_text(json.dumps(final_output, indent=2, ensure_ascii=False))
+    else:
+        console.print("[yellow]DRY_RUN=1 → skipped writing 07_reflowed.json (debug path)[/yellow]")
     console.print(f"[green]Saved debug reflow to:[/green] {output_path}")
 
 

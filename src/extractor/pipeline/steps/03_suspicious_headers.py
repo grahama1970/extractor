@@ -1085,6 +1085,7 @@ async def process_pdf_pipeline(config: Config):
                 llm_payloads.append({"error": {"type": "ParseError", "message": ans[:200]}})
 
     # 7) Apply results back to blocks — update types, suspicion fields, persist
+    parse_error_count = 0
     prep_idx = 0
     for idx, task in enumerate(tasks):
         # Determine result (auto or from batch)
@@ -1107,6 +1108,13 @@ async def process_pdf_pipeline(config: Config):
                 if payload.get("reasoning") is None:
                     payload["reasoning"] = ""
                 llm_result = payload
+
+        # Count parse_error soft-fails for observability/thresholds
+        try:
+            if str(llm_result.get("reasoning", "")).strip() == "parse_error":
+                parse_error_count += 1
+        except Exception:
+            pass
 
         # Update JSON in place
         block_to_update = marker_data["pages"][task.page_idx]["blocks"][task.block_idx]
@@ -1210,10 +1218,78 @@ async def process_pdf_pipeline(config: Config):
         pass
     marker_data["timings"] = timings
     marker_data["resources"] = resources
-    with open(output_json_path, "w") as f:
-        json.dump(marker_data, f, indent=2)
+    # Threshold policy for parse errors
+    try:
+        warn_frac = float(os.getenv("PARSE_WARN_FRAC", "0.05"))
+    except Exception:
+        warn_frac = 0.05
+    try:
+        fail_frac = float(os.getenv("PARSE_FAIL_FRAC", "0.20"))
+    except Exception:
+        fail_frac = 0.20
+    total_verified = max(1, len(tasks) - len(auto_results))
+    parse_rate = parse_error_count / float(total_verified)
 
-    print(f"\nVerification complete. Updated JSON saved to: {output_json_path}")
+    # Write output unless DRY_RUN=1
+    if os.getenv("DRY_RUN", "0").lower() not in {"1","true","yes","y"}:
+        with open(output_json_path, "w") as f:
+            json.dump(marker_data, f, indent=2)
+        print(f"\nVerification complete. Updated JSON saved to: {output_json_path}")
+    else:
+        print("[03] DRY_RUN=1 → skipped writing json_output (logs/timings still recorded)")
+
+    # Summarize timings.jsonl → timings_summary.json (best-effort)
+    try:
+        from pathlib import Path as _P
+        rd = os.getenv("RUN_RESULTS_DIR")
+        if rd:
+            logs_dir = _P(rd) / "03_suspicious_headers" / "logs"
+            tfile = logs_dir / "timings.jsonl"
+            if tfile.exists():
+                lat = []
+                attempts = 0
+                ok = 0
+                exc = 0
+                for line in tfile.read_text(encoding="utf-8").splitlines():
+                    try:
+                        rec = json.loads(line)
+                        attempts += 1
+                        if str(rec.get("outcome")) == "ok":
+                            ok += 1
+                        if str(rec.get("outcome")) == "exception":
+                            exc += 1
+                        if rec.get("latency_ms") is not None:
+                            lat.append(float(rec["latency_ms"]))
+                    except Exception:
+                        continue
+                lat_sorted = sorted(lat)
+                def _pct(p: float) -> float:
+                    if not lat_sorted:
+                        return 0.0
+                    idx = int(max(0, min(len(lat_sorted)-1, round(p * (len(lat_sorted)-1)))))
+                    return float(lat_sorted[idx])
+                summary = {
+                    "attempts": attempts,
+                    "ok": ok,
+                    "exceptions": exc,
+                    "parse_error_count": parse_error_count,
+                    "parse_error_rate": round(parse_rate, 4),
+                    "p50_ms": _pct(0.50),
+                    "p95_ms": _pct(0.95),
+                }
+                (logs_dir / "timings_summary.json").write_text(json.dumps(summary, indent=2))
+    except Exception:
+        pass
+
+    # Enforce thresholds: warn vs fail
+    if parse_rate >= fail_frac:
+        raise RuntimeError(
+            f"Stage 03 parse_error rate {parse_rate:.2%} exceeded fail threshold {fail_frac:.0%}"
+        )
+    if parse_rate >= warn_frac:
+        print(
+            f"[03] Warning: parse_error rate {parse_rate:.2%} exceeded warn threshold {warn_frac:.0%}"
+        )
 
 
 # ------------------------------------------------------------------
