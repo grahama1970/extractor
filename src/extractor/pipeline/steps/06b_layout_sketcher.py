@@ -789,7 +789,37 @@ def _build_section_sketch(
             })
         return out
 
-    objects_v2 = [_obj_to_v2(e) for e in enriched]
+    def _round_bbox(b):
+        try:
+            x0, y0, x1, y1 = [float(x) for x in b]
+            return [round(x0, 2), round(y0, 2), round(x1, 2), round(y1, 2)]
+        except Exception:
+            return b
+
+    # Round bbox and trim noisy metrics for token efficiency
+    objects_v2 = []
+    seen_ids = set()
+    for e in enriched:
+        o = _obj_to_v2(e)
+        # enforce unique id (stable) and round bbox
+        oid = str(o.get("id"))
+        if oid in seen_ids:
+            # de-dup exact repeats by id (rare)
+            continue
+        seen_ids.add(oid)
+        if isinstance(o.get("bbox"), list) and len(o["bbox"]) == 4:
+            o["bbox"] = _round_bbox(o["bbox"])
+        # Trim figure/table metrics for compact prompts
+        if o.get("type") == "table":
+            # keep only rows/cols and header_norm; drop nested verbose metrics in compact path
+            o.pop("metrics", None)
+            if isinstance(o.get("camelot_acc"), (int, float)):
+                o["camelot_acc"] = round(float(o["camelot_acc"]), 2)
+        if o.get("type") == "figure":
+            # prefer explicit page int; drop None page
+            if o.get("page") is None:
+                o.pop("page", None)
+        objects_v2.append(o)
     # Mark table continuity/merge by logical_table_id
     try:
         by_lt: Dict[str, List[dict]] = {}
@@ -818,11 +848,11 @@ def _build_section_sketch(
         "section_title_source": "actual",
         "page_window": {"start": int(pw_start), "end": int(pw_end)},
         "frame": {
-            "page_size": [float(page_bbox[2]-page_bbox[0]), float(page_bbox[3]-page_bbox[1])],
-            "section_bbox": [float(x) for x in sec_bbox_union],
-            "section_area": float(_area(sec_bbox_union)),
-            "grid": {"cols": len(first_cols), "gutter": gutter},
-            "columns": [{"id": i, "x0": float(c[0]), "x1": float(c[1]), "width": float(c[1]-c[0])} for i, c in enumerate(first_cols)],
+            "page_size": [round(float(page_bbox[2]-page_bbox[0]), 2), round(float(page_bbox[3]-page_bbox[1]), 2)],
+            "section_bbox": [round(float(x), 2) for x in sec_bbox_union],
+            "section_area": round(float(_area(sec_bbox_union)), 1),
+            "grid": {"cols": len(first_cols), "gutter": round(float(gutter), 2)},
+            "columns": [{"id": i, "x0": round(float(c[0]), 2), "x1": round(float(c[1]), 2), "width": round(float(c[1]-c[0]), 2)} for i, c in enumerate(first_cols)],
         },
         "objects": objects_v2,
     }
@@ -948,7 +978,6 @@ def _build_section_sketch_llm(
     - Returns a dict {grid,elements,quick_summary} or None on failure.
     """
     try:
-        import json as _json
         import os
 
         from extractor.pipeline.utils.model_params import image_file_to_data_url

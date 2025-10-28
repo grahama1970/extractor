@@ -358,6 +358,9 @@ def _build_compact_prompt(
     # Top Summary
     lines.append(f"Top Summary\n- title: {title}\n- pages: {pg0}–{pg1}\n- blocks: {blocks_count}")
     lines.append(f"- tables: {len(tables)}\n- figures: {len(figures)}")
+    # Ensure stable, unique, monotonic table indices for prompt display
+    used_idx = set()
+    next_idx = 0
     for tb in tables:
         pm = tb.get("pandas_metrics") or {}
         shape = pm.get("shape") or [0, 0]
@@ -367,8 +370,27 @@ def _build_compact_prompt(
         acc = camel.get("accuracy")
         strat = tb.get("strategy") or tb.get("strategy_history") or None
         qf = tb.get("quality_fallback") or None
+        # dedupe/assign a display index and round floats
+        try:
+            tbi = int(tb.get('table_index'))
+        except Exception:
+            tbi = None
+        if tbi in used_idx or tbi is None:
+            while next_idx in used_idx:
+                next_idx += 1
+            disp_idx = next_idx
+            used_idx.add(disp_idx)
+            next_idx += 1
+        else:
+            disp_idx = tbi
+            used_idx.add(disp_idx)
+        def _r2(x):
+            try:
+                return round(float(x), 2)
+            except Exception:
+                return x
         lines.append(
-            f"  • table idx {tb.get('table_index')}: rows×cols={rows}×{cols}, density={density}, camelot_acc={acc}, strategy={strat}, quality_fallback={qf}"
+            f"  • table idx {disp_idx}: rows×cols={rows}×{cols}, density={_r2(density)}, camelot_acc={_r2(acc)}, strategy={strat}, quality_fallback={qf}"
         )
 
     # Layout Sketch DSL (compact)
@@ -401,6 +423,8 @@ def _build_compact_prompt(
     # Tables: headers + first row
     if tables:
         lines.append("Tables (headers + first row):")
+        used_idx2 = set()
+        next_idx2 = 0
         for tb in tables[:4]:
             pm = tb.get("pandas_metrics") or {}
             headers = pm.get("columns") or []
@@ -410,8 +434,21 @@ def _build_compact_prompt(
                 first_row_list = first if isinstance(first, list) else [first.get(h, "") for h in headers]
             except Exception:
                 first_row_list = first if isinstance(first, list) else []
+            try:
+                tbi2 = int(tb.get('table_index'))
+            except Exception:
+                tbi2 = None
+            if tbi2 in used_idx2 or tbi2 is None:
+                while next_idx2 in used_idx2:
+                    next_idx2 += 1
+                disp_idx2 = next_idx2
+                used_idx2.add(disp_idx2)
+                next_idx2 += 1
+            else:
+                disp_idx2 = tbi2
+                used_idx2.add(disp_idx2)
             lines.append(
-                f"- table idx {tb.get('table_index')} headers={headers} first_row={first_row_list} page={tb.get('page_index')}"
+                f"- table idx {disp_idx2} headers={headers} first_row={first_row_list} page={tb.get('page_index')}"
             )
 
     # Figures: title/caption + bbox/page
@@ -421,8 +458,11 @@ def _build_compact_prompt(
             title_f = (fg.get("title") or "").strip()
             cap = (fg.get("caption") or fg.get("ai_description") or "").strip()
             bbox = fg.get("bbox") or fg.get("bbox0") or []
-            page = fg.get("page") or fg.get("page_idx")
-            lines.append(f"- figure id={fg.get('figure_id')} title={title_f or None} caption={cap[:160] if cap else None} bbox={bbox} page={page}")
+            page = fg.get("page") if fg.get("page") is not None else (fg.get("page_idx") if fg.get("page_idx") is not None else None)
+            if page is None:
+                lines.append(f"- figure id={fg.get('figure_id')} title={title_f or None} caption={cap[:160] if cap else None} bbox={bbox}")
+            else:
+                lines.append(f"- figure id={fg.get('figure_id')} title={title_f or None} caption={cap[:160] if cap else None} bbox={bbox} page={page}")
 
     # Strict JSON schema reminder (no parts; no fences)
     lines.append(
