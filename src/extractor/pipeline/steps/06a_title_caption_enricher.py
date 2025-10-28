@@ -30,8 +30,9 @@ from typing import Any, Dict, List, Optional, Tuple
 import asyncio
 
 from loguru import logger
-from scillm import acompletion as sc_acompletion
+from extractor.pipeline.utils.scillm_router import get_text_router
 from extractor.pipeline.utils.response_utils import normalize_json_content
+from extractor.pipeline.utils.debug_utils import ensure_logs_dir, time_block
 from typing import Iterable
 
 
@@ -67,46 +68,67 @@ def _explicit_figure_title(f: Dict[str, Any]) -> Optional[str]:
     return txt
 
 
-def _chutes_title_infer(prompt_ctx: str, timeout: float = 6.0) -> Optional[str]:
-    """Infer a short title via SciLLM directly (Chutes x‑api‑key, OpenAI‑compatible path)."""
+def _chutes_title_infer_struct(prompt_ctx: str, timeout: float = 45.0) -> Optional[Dict[str, Any]]:
+    """Infer title metadata using SciLLM and return a structured dict.
+
+    Returns a dict subset of: {title, number, base_title, continued}
+    or None on failure/empty content.
+    """
+    prompt = (
+        "You are naming elements in scientific/engineering documents. Return ONLY strict JSON with keys: "
+        "{\"title\": string|null, \"number\": string|null, \"base_title\": string|null, \"continued\": boolean|null}. "
+        "title: concise (<=10 words), no numbering and without the words 'Table'/'Figure'. If unsure, set title=null. "
+        "number: the element's explicit number if present (e.g., '4-1', 'IV', '1'), else null. "
+        "base_title: the semantic title without numbering or prefixes, else null. continued: true if the text implies a continued table/figure.\n\n"
+        f"Context (ignore boilerplate labels):\n{prompt_ctx[:1500]}\n"
+    )
+    # Router-only JSON call
     try:
-        prompt = (
-            "Return ONLY a short, precise technical title (<= 10 words). "
-            "Do not include numbering or the words 'Table'/'Figure'. "
-            "If nearby text appears generic (e.g., just 'Figure 3' or boilerplate) "
-            "ignore it and rely on the table headers/sample or the figure content/description.\n\n"
-            f"Context:\n{prompt_ctx[:1200]}\n"
-        )
-        # QUICKSTART helper: wrapper handles x-api-key vs Bearer, /v1 base, and backoff
-        # Allow env override for slow chutes via CHUTES_INFER_TIMEOUT (seconds)
-        try:
-            _t_env = float(os.getenv("CHUTES_INFER_TIMEOUT", "0").strip() or 0)
-            if _t_env > 0:
-                timeout = _t_env
-        except Exception:
-            pass
-        model = os.getenv("CHUTES_TEXT_MODEL", "").strip()
-        if not model:
-            return None
-        resp = asyncio.run(
-            sc_acompletion(
-                model=model,
-                messages=[{"role": "user", "content": prompt}],
-                response_format={"type": "json_object"},
-                temperature=0.2,
-                timeout=timeout,
+        router = get_text_router()
+        # Write per-call timing under the stage logs directory if env RUN_RESULTS_DIR is set
+        results_dir = os.getenv("RUN_RESULTS_DIR")
+        if results_dir:
+            logs_dir = ensure_logs_dir(Path(results_dir), "06a_title_caption_enricher")
+            with time_block(logs_dir, "title_infer", kind="text", ctx_chars=len(prompt_ctx or "")):
+                resp = asyncio.run(
+                    router.acompletion(
+                        model="chutes/text",
+                        messages=[
+                            {"role": "system", "content": "Return ONLY strict JSON for scientific/engineering docs."},
+                            {"role": "user", "content": prompt},
+                        ],
+                        response_format={"type": "json_object"},
+                        temperature=0,
+                        timeout=timeout,
+                    )
+                )
+        else:
+            resp = asyncio.run(
+                router.acompletion(
+                    model="chutes/text",
+                    messages=[
+                        {"role": "system", "content": "Return ONLY strict JSON for scientific/engineering docs."},
+                        {"role": "user", "content": prompt},
+                    ],
+                    response_format={"type": "json_object"},
+                    temperature=0,
+                    timeout=timeout,
+                )
             )
-        )
-        raw_text, json_obj = normalize_json_content(resp)
+        _, json_obj = normalize_json_content(resp)
         if isinstance(json_obj, dict):
-            t = json_obj.get("title")
-            if isinstance(t, str) and t.strip():
-                return t.strip()
-        content = (raw_text or "").strip()
-        return content.strip('"') or None
+            out: Dict[str, Any] = {}
+            title = json_obj.get("title")
+            out["title"] = title.strip() if isinstance(title, str) and title.strip() else None
+            for k in ("number", "base_title"):
+                v = json_obj.get(k)
+                out[k] = v.strip() if isinstance(v, str) and v.strip() else None
+            cont = json_obj.get("continued")
+            out["continued"] = bool(cont) if isinstance(cont, bool) else None
+            return out
     except Exception as e:
-        logger.debug(f"Title inference skipped: {e}")
-        return None
+        logger.debug(f"SciLLM Router infer failed: {e}")
+    return None
 
 
 # -----------------------------
@@ -307,20 +329,24 @@ def enrich_tables(tables: List[Dict[str, Any]], *, page_blocks: Optional[Dict[in
             except Exception:
                 basic = ""
             ctx_all = "\n".join([p for p in ctx_parts + ([basic] if basic else []) if p]).strip()
-            inferred = _chutes_title_infer(ctx_all or basic)
-            if inferred:
-                title = f"INFER: {inferred}"
-                title_source = "infer"
+            inferred = _chutes_title_infer_struct(ctx_all or basic)
+            if isinstance(inferred, dict):
+                title = inferred.get("title")
+                title_source = "infer" if title else "missing"
+                number = inferred.get("number")
+                base_title = inferred.get("base_title") or title
+                cont = bool(inferred.get("continued"))
             else:
-                # deterministic fallback: header or first body row
-                fallback_line = (ctx_all.splitlines()[0] if ctx_all else (basic.splitlines()[0] if basic else "")).strip()
-                title = f"INFER: {fallback_line}" if fallback_line else "INFER: Untitled Table"
-                title_source = "infer"
-        # Parse number + base_title for merging
-        m = re.match(r"\s*(?:Table|Tbl\.)\s*([A-Za-z0-9\-\.]+)?[\.:]?\s*(.*)$", title or "", re.IGNORECASE)
-        number = (m.group(1).strip() if (m and m.group(1)) else None) or None
-        base_title = (m.group(2).strip() if (m and m.group(2)) else title or None) or None
-        cont = bool(title and "Continued" in title)
+                title = None
+                title_source = "missing"
+                number = None
+                base_title = None
+                cont = False
+        else:
+            # If an explicit title exists, prefer it; derive base fields without regex assumptions
+            number = None
+            base_title = title
+            cont = bool(title and "Continued" in title)
         norm_id = _normalize_id("table", number, base_title)
         tt.update(
             {
@@ -361,20 +387,25 @@ def enrich_figures(figs: List[Dict[str, Any]], *, page_blocks: Optional[Dict[int
             if ai_desc:
                 ctx_parts.append(f"AI: {ai_desc}")
             ctx = "\n".join(ctx_parts)[:1200]
-            inferred = _chutes_title_infer(ctx)
-            if inferred:
-                title = f"INFER: {inferred}"
-                title_source = "infer"
+            # Use structured SciLLM inference directly (no legacy helper)
+            inferred = _chutes_title_infer_struct(ctx)
+            if isinstance(inferred, dict):
+                title = inferred.get("title")
+                title_source = "infer" if title else "missing"
+                number = inferred.get("number")
+                base_title = inferred.get("base_title") or title
+                cont = bool(inferred.get("continued"))
             else:
-                # deterministic fallback: first sentence of description
-                base = ai_desc or ctx
-                first = base.split(".", 1)[0].strip()
-                title = f"INFER: {first}" if first else "INFER: Untitled Figure"
-                title_source = "infer"
-        m = re.match(r"\s*(?:Figure|Fig\.)\s*([A-Za-z0-9\-\.]+)?[\.:]?\s*(.*)$", title or "", re.IGNORECASE)
-        number = (m.group(1).strip() if (m and m.group(1)) else None) or None
-        base_title = (m.group(2).strip() if (m and m.group(2)) else title or None) or None
-        cont = bool(title and "Continued" in title)
+                title = None
+                title_source = "missing"
+                number = None
+                base_title = None
+                cont = False
+        # if title still missing after structured infer, leave as missing (no deterministic fabrication)
+        else:
+            number = None
+            base_title = title
+            cont = bool(title and "Continued" in title)
         norm_id = _normalize_id("figure", number, base_title)
         ff.update(
             {

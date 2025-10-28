@@ -28,7 +28,7 @@ from loguru import logger  # noqa: E402
 from rich.console import Console  # noqa: E402
 from rich.progress import Progress, SpinnerColumn, TextColumn  # noqa: E402
 from extractor.pipeline.utils.diagnostics import get_run_id  # noqa: E402,F401
-from scillm import acompletion as sc_acompletion  # noqa: E402
+from extractor.pipeline.utils.scillm_router import get_text_router  # noqa: E402
 
 try:
     from arango import ArangoClient
@@ -78,9 +78,7 @@ GRAPH_ENABLE_RATIONALES = os.getenv("GRAPH_ENABLE_RATIONALES", "true").lower() i
 # Prefer the project's default LLM for rationales unless explicitly overridden
 GRAPH_RATIONALE_MODEL = (
     os.getenv("GRAPH_RATIONALE_MODEL")
-    or os.getenv("LITELLM_DEFAULT_MODEL")
-    or os.getenv("DEFAULT_LITELLM_MODEL")
-    or os.getenv("LITELLM_MODEL")
+    or os.getenv("CHUTES_TEXT_MODEL")
     or "gemini/gemini-2.5-flash"
 )
 GRAPH_RATIONALE_CONCURRENCY = int(os.getenv("GRAPH_RATIONALE_CONCURRENCY", 8))
@@ -537,11 +535,9 @@ async def _rationale_for_pair(text_a: str, text_b: str, model: str, max_tokens: 
         params["temperature"] = 1.0 if "gpt-5" in (_mdl or "").lower() else 0.1
         ch_base = os.getenv("CHUTES_API_BASE", "").strip()
         ch_key = os.getenv("CHUTES_API_KEY", "").strip()
-        resp = await sc_acompletion(
-            model=_mdl,
-            api_base=ch_base or None,
-            api_key=ch_key,
-            custom_llm_provider="openai",
+        router = get_text_router()
+        resp = await router.acompletion(
+            model="chutes/text",
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
@@ -551,7 +547,7 @@ async def _rationale_for_pair(text_a: str, text_b: str, model: str, max_tokens: 
             timeout=60,
             max_tokens=max_tokens,
         )
-        content = (resp.get("choices") or [{}])[0].get("message", {}).get("content", "")
+        content = getattr(resp, "choices", [{}])[0].get("message", {}).get("content", "")
         return (content or "").strip()[:600]
     except Exception:
         return ""

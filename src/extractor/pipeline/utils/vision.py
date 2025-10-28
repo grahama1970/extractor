@@ -11,7 +11,7 @@ try:
 except Exception:
     _HAS_PIL = False
 
-from extractor.pipeline.utils.litellm_call import litellm_call
+from scillm import acompletion as sc_acompletion  # type: ignore
 
 # Tiny 1x1 transparent PNG
 _TINY_PNG_B64 = (
@@ -110,29 +110,20 @@ async def preflight_vision_support(model: str, timeout_sec: int = 10) -> bool:
                 else image_part
             ),
         ]
-        params = {
-            "model": model,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": content_parts,
-                }
-            ],
-            "max_tokens": 32,
-            "timeout": timeout_sec,
-            "stream": False,
-        }
         # We don't need parsed JSON, just a successful roundtrip
-        ret = await litellm_call([params], wrap_json=False, concurrency=1, desc="Vision Preflight", export="results")
-        r0 = ret[0] if ret else None
-        try:
-            from loguru import logger as _logger
-            if r0:
-                _logger.info(f"vision_preflight: model={r0.request.model} ok={r0.exception is None}")
-        except Exception:
-            pass
-        # Consider an empty response as failure (some providers return empty on unsupported input)
-        if not r0 or not isinstance(r0.content, str) or not r0.content.strip():
+        base = os.getenv("CHUTES_API_BASE")
+        key = os.getenv("CHUTES_API_KEY")
+        resp = await sc_acompletion(
+            model=model,
+            api_base=base,
+            api_key=key,
+            custom_llm_provider="openai",
+            messages=[{"role": "user", "content": content_parts}],
+            max_tokens=32,
+            timeout=timeout_sec,
+        )
+        content = (resp.get("choices") or [{}])[0].get("message", {}).get("content")
+        if not content or (isinstance(content, str) and not content.strip()):
             raise RuntimeError("vision_preflight_empty_response")
         set_cached_vision_support(model, True)
         return True

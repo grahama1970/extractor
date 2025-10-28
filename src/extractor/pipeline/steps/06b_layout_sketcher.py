@@ -21,7 +21,8 @@ from typing import Any, Dict, List, Optional, Tuple
 GRID = 12  # default grid granularity (rows = cols = GRID)
 SCHEMA_VERSION = "0.2.0"
 # Env toggles
-ALLOW_VLM = os.getenv("STAGE06B_ALLOW_VLM", "").lower() in ("1", "true", "yes", "y")
+# Default VLM-assisted sketch ON; disable via STAGE06B_ALLOW_VLM=0 if needed
+ALLOW_VLM = os.getenv("STAGE06B_ALLOW_VLM", "1").lower() in ("1", "true", "yes", "y")
 PYMUPDF_FALLBACK = os.getenv("STAGE06B_PYMUPDF_FALLBACK", "").lower() in ("1", "true", "yes", "y")
 SOURCE_PDF_ENV = os.getenv("STAGE06B_SOURCE_PDF", "").strip() or None
 EMIT_MERGE_HINTS = os.getenv("STAGE06B_EMIT_MERGE_HINTS", "").lower() in ("1", "true", "yes", "y")
@@ -356,6 +357,8 @@ def _build_section_sketch(
     tables_for_section: Optional[List[dict]] = None,
     figures_for_section: Optional[List[dict]] = None,
     emit_merge_hints: bool = EMIT_MERGE_HINTS,
+    base_results_dir: Optional[Path] = None,
+    source_pdf: Optional[Path] = None,
 ) -> dict[str, Any]:
     if page_layout is None:
         page_layout = {}
@@ -386,8 +389,38 @@ def _build_section_sketch(
     # Tables from Stage 05 (associated via section_id)
     for t in (tables_for_section or []):
         bbox = t.get("bbox") or [0, 0, 0, 0]
-        hdr = t.get("header") or t.get("columns") or (t.get("pandas_metrics") or {}).get("columns") or []
+        pm = t.get("pandas_metrics") or {}
+        camel = t.get("camelot_metrics") or {}
+        hdr = t.get("header") or t.get("columns") or pm.get("columns") or []
         hdr_text = " | ".join([str(h) for h in hdr])
+        # Normalize header string for logical grouping
+        def _norm_hdr(h: str) -> str:
+            s = " ".join(str(h or "").strip().lower().split())
+            return s.replace(" ", "_")
+        header_norm = "|".join([_norm_hdr(h) for h in hdr]) if hdr else ""
+        shp = pm.get("shape") or [0, 0]
+        try:
+            rows = int(shp[0] or 0)
+            cols = int(shp[1] or 0)
+        except Exception:
+            rows, cols = 0, 0
+        try:
+            density = float(pm.get("data_density") or 0.0)
+        except Exception:
+            density = 0.0
+        try:
+            camel_acc = float(camel.get("accuracy") or 0.0)
+        except Exception:
+            camel_acc = 0.0
+        try:
+            camel_ws = float(camel.get("whitespace") or 0.0)
+        except Exception:
+            camel_ws = 0.0
+        frag = float(t.get("fragmentation_score") or 0.0)
+        total_cells = int(pm.get("total_cells") or 0)
+        non_empty_cells = int(pm.get("non_empty_cells") or 0)
+        import hashlib as _hl
+        logical_table_id = f"lt_{_hl.sha1(header_norm.encode('utf-8')).hexdigest()[:10]}" if header_norm else None
         raw_elements.append(
             {
                 "kind": "table",
@@ -398,8 +431,21 @@ def _build_section_sketch(
                 "page": int(t.get("page") or t.get("page_idx") or t.get("page_index") or section_page_idx),
                 "area": _area(bbox),
                 "aspect": _aspect(bbox),
-                "confidence": float((t.get("confidence") or (t.get("pandas_metrics") or {}).get("data_density") or 1.0)),
+                "confidence": float((t.get("confidence") or pm.get("data_density") or 1.0)),
                 "llm_assist": bool((t.get("llm_assist") or {}).get("patch")),
+                "header_norm": header_norm,
+                "logical_table_id": logical_table_id,
+                "metrics": {
+                    "rows": rows,
+                    "cols": cols,
+                    "data_density": round(density, 3),
+                    "total_cells": total_cells,
+                    "non_empty_cells": non_empty_cells,
+                    "camelot_acc": round(camel_acc, 2),
+                    "camelot_whitespace": round(camel_ws, 2),
+                    "fragmentation": round(frag, 3),
+                },
+                "title_hint": (t.get("title") or t.get("caption") or ""),
             }
         )
     # Figures from Stage 06
@@ -466,6 +512,13 @@ def _build_section_sketch(
         e.pop("_top", None)
         e.pop("_left", None)
         e.pop("_neg_area", None)
+        # Assign stable sketch_id per element
+        try:
+            sid = str(sec.get("id") or "sec")
+            prefix = {"text": "txt", "table": "tbl", "figure": "fig"}.get(e.get("kind"), "blk")
+            e["sketch_id"] = f"{sid}-{prefix}-{i:03d}"
+        except Exception:
+            e["sketch_id"] = e.get("id") or f"elem_{i:03d}"
 
     # Overlap flag via pairwise IoU
     try:
@@ -569,6 +622,211 @@ def _build_section_sketch(
                 "header_body": header_body,
                 "conf": round(min(0.95, conf), 2),
             })
+    # Helper: build a compact, instructive DSL (plain text) for prompts
+    def _build_instructive_dsl(
+        sec_id: str,
+        pages: list[int],
+        first_page_bbox: list[float],
+        elements_sorted: list[dict[str, Any]],
+        columns_map: dict[int, list[list[float]]],
+    ) -> str:
+        lines: list[str] = []
+        if pages:
+            lines.append(
+                f"Section: id={sec_id} pages={pages} bbox_section[{pages[0]}]={first_page_bbox}"
+            )
+        # Optional column hint if >1 column on the first page
+        try:
+            first_p = pages[0] if pages else section_page_idx
+            cols = columns_map.get(first_p) or []
+            if len(cols) >= 2:
+                px0, py0, px1, py1 = first_page_bbox
+                bands = []
+                for (cx0, cx1) in cols:
+                    a = (float(cx0) - px0) / max(1e-6, (px1 - px0))
+                    b = (float(cx1) - px0) / max(1e-6, (px1 - px0))
+                    bands.append(f"{a:.2f}–{b:.2f}")
+                lines.append(
+                    f"Columns: {len(cols)} bands " + ", ".join(bands)
+                )
+        except Exception:
+            pass
+        # Flow lines (reading order already assigned)
+        for i, e in enumerate(elements_sorted, start=1):
+            k = e.get("kind")
+            pg = int(e.get("page", section_page_idx))
+            bb = e.get("bbox") or []
+            sid = e.get("sketch_id") or e.get("id") or f"elem_{i:03d}"
+            hint_src = (e.get("summary") or "").replace("\n", " ")
+            hint = _summ(hint_src, 120)
+            if k == "table":
+                m = (e.get("metrics") or {})
+                rows, cols = int(m.get("rows", 0)), int(m.get("cols", 0))
+                den = m.get("density")
+                acc = m.get("camelot_acc")
+                hnorm = e.get("header_norm") or ""
+                lt = e.get("logical_table_id") or ""
+                title_hint = (e.get("title_hint") or "").strip()
+                lines.append(
+                    f"{i}) id={sid} type=table page={pg} bbox={bb} header_norm=\"{hnorm}\" logical_table_id={lt} meta(shape={rows}x{cols},density={den},camelot_acc={acc}) title_hint=\"{_summ(title_hint,80)}\" hint=\"{hint}\""
+                )
+            elif k == "figure":
+                lines.append(
+                    f"{i}) id={sid} type=figure page={pg} bbox={bb} hint=\"{hint}\""
+                )
+            else:
+                # paragraph/list hints; mark too-short and coalesce group when applicable
+                try:
+                    too_short = bool(int(e.get("char_count", 0)) < 40 and (float(bb[3])-float(bb[1])) <= 20)
+                except Exception:
+                    too_short = False
+                cg = e.get("coalesce_group")
+                cg_part = f" coalesce_group={cg}" if cg else ""
+                ts_part = " too_short=1" if too_short else ""
+                lines.append(
+                    f"{i}) id={sid} type=paragraph page={pg} bbox={bb}{ts_part}{cg_part} hint=\"{hint}\""
+                )
+        return "\n".join(lines)
+
+    # ---- Build SKETCH_V2 (minimal, deterministic, prompt-friendly) ----
+    def _union_bbox(elems: list[dict[str, Any]]) -> list[float]:
+        x0 = y0 = float("inf")
+        x1 = y1 = float("-inf")
+        found = False
+        for e in elems:
+            b = e.get("bbox")
+            if not (isinstance(b, (list, tuple)) and len(b) == 4):
+                continue
+            ex0, ey0, ex1, ey1 = map(float, b)
+            x0 = min(x0, ex0)
+            y0 = min(y0, ey0)
+            x1 = max(x1, ex1)
+            y1 = max(y1, ey1)
+            found = True
+        return [x0, y0, x1, y1] if found else [0.0, 0.0, 0.0, 0.0]
+
+    def _page_window(elems: list[dict[str, Any]]) -> tuple[int, int]:
+        pages = [int(e.get("page", section_page_idx)) for e in elems]
+        return (min(pages), max(pages)) if pages else (section_page_idx, section_page_idx)
+
+    # Map anchored floats back to text blocks (refs)
+    text_by_id = {e.get("id"): e for e in enriched if e.get("kind") == "text"}
+    floats = [e for e in enriched if e.get("kind") in ("table", "figure")]
+    refs_map: Dict[str, List[str]] = {}
+    for f in floats:
+        anchor = f.get("anchor_element_id")
+        if anchor and anchor in text_by_id:
+            refs_map.setdefault(anchor, []).append(f.get("sketch_id") or f.get("id"))
+
+    sec_bbox_union = _union_bbox(enriched)
+    pw_start, pw_end = _page_window(enriched)
+    first_p = sorted({int(e.get("page", section_page_idx)) for e in enriched})[0] if enriched else section_page_idx
+    first_cols = columns_by_page.get(first_p) or [[page_bbox[0], page_bbox[2]]]
+    # Heuristic gutter estimate
+    try:
+        if len(first_cols) >= 2:
+            gaps = [first_cols[i+1][0] - first_cols[i][1] for i in range(len(first_cols)-1)]
+            gutter = max(0, int(min(gaps)))
+        else:
+            gutter = 0
+    except Exception:
+        gutter = 0
+
+    def _obj_to_v2(e: dict[str, Any]) -> dict[str, Any]:
+        sid = e.get("sketch_id") or e.get("id")
+        out: dict[str, Any] = {
+            "id": sid,
+            "type": "paragraph" if e.get("kind") == "text" else e.get("kind"),
+            "page": int(e.get("page", section_page_idx)),
+            "ro": int(e.get("reading_order", 0)),
+            "col": int(e.get("column_id", 0)) if not e.get("spans_columns") else "span",
+            "bbox": e.get("bbox") or [0, 0, 0, 0],
+            "area": float(e.get("area", _area(e.get("bbox") or [0, 0, 0, 0]))),
+        }
+        if e.get("kind") == "text":
+            # too_short heuristic (persist)
+            try:
+                bb = out["bbox"]
+                too_short = bool(int(e.get("char_count", 0)) < 40 and (float(bb[3]) - float(bb[1])) <= 20)
+            except Exception:
+                too_short = False
+            out.update({
+                "reflow_hint": True,
+                "too_short": bool(too_short),
+                "text_preview": _summ(e.get("summary") or "", 160),
+            })
+            # refs
+            r = refs_map.get(e.get("id")) or refs_map.get(sid) or []
+            if r:
+                out["refs"] = r
+        elif e.get("kind") == "table":
+            m = (e.get("metrics") or {})
+            out.update({
+                "title_hint": (e.get("title_hint") or ""),
+                "header_norm": e.get("header_norm") or "",
+                "rows": int(m.get("rows", 0)),
+                "cols": int(m.get("cols", 0)),
+                "logical_table_id": e.get("logical_table_id") or "",
+                "continued": False,
+                "merge": False,
+                # Back-compat quick fields
+                "density": m.get("data_density"),
+                "camelot_acc": m.get("camelot_acc"),
+                # Rich metrics for smarter prompts/ops
+                "metrics": {
+                    "data_density": m.get("data_density"),
+                    "total_cells": m.get("total_cells"),
+                    "non_empty_cells": m.get("non_empty_cells"),
+                    "camelot_acc": m.get("camelot_acc"),
+                    "camelot_whitespace": m.get("camelot_whitespace"),
+                    "fragmentation": m.get("fragmentation"),
+                },
+            })
+        elif e.get("kind") == "figure":
+            out.update({
+                "caption_hint": _summ(e.get("summary") or "", 160),
+                "desc_hint": _summ(e.get("summary") or "", 160),
+            })
+        return out
+
+    objects_v2 = [_obj_to_v2(e) for e in enriched]
+    # Mark table continuity/merge by logical_table_id
+    try:
+        by_lt: Dict[str, List[dict]] = {}
+        for o in objects_v2:
+            if o.get("type") == "table" and o.get("logical_table_id"):
+                by_lt.setdefault(o["logical_table_id"], []).append(o)
+        for lt, items in by_lt.items():
+            if len(items) >= 2:
+                # Sort by reading order and mark continued/merge
+                items.sort(key=lambda x: int(x.get("ro", 0)))
+                for j, t in enumerate(items):
+                    t["merge"] = True
+                    t["continued"] = (j < len(items)-1)
+    except Exception:
+        pass
+
+    sketch_v2 = {
+        "sketch_format": "SKETCH_V2",
+        "version": 1,
+        "units": "pt",
+        "origin": "top-left",
+        "doc_id": str((sec.get("metadata", {}) or {}).get("doc_id") or ""),
+        "section_id": str(sec.get("id")),
+        "source_hash": str((sec.get("metadata", {}) or {}).get("section_hash") or ""),
+        "section_title": str(sec.get("title") or ""),
+        "section_title_source": "actual",
+        "page_window": {"start": int(pw_start), "end": int(pw_end)},
+        "frame": {
+            "page_size": [float(page_bbox[2]-page_bbox[0]), float(page_bbox[3]-page_bbox[1])],
+            "section_bbox": [float(x) for x in sec_bbox_union],
+            "section_area": float(_area(sec_bbox_union)),
+            "grid": {"cols": len(first_cols), "gutter": gutter},
+            "columns": [{"id": i, "x0": float(c[0]), "x1": float(c[1]), "width": float(c[1]-c[0])} for i, c in enumerate(first_cols)],
+        },
+        "objects": objects_v2,
+    }
+
     result: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "grid": grid,
@@ -589,8 +847,91 @@ def _build_section_sketch(
     }
     if emit_merge_hints and table_merge_hints:
         result["table_merge_hints"] = table_merge_hints
+    # Mirror merge hints into sketch_v2 so downstream prompts have a single source
+    try:
+        if table_merge_hints:
+            sketch_v2["merge_hints"] = table_merge_hints
+    except Exception:
+        pass
     if include_flow:
-        result["flow_stream"] = _build_flow_stream(result["elements"], grid_cols, exclude_header_footer=True, place_floats=place_floats)
+        result["flow_stream"] = _build_flow_stream(
+            result["elements"], grid_cols, exclude_header_footer=True, place_floats=place_floats
+        )
+        # Also provide a compact, instructive DSL for prompts
+        result["instructive_dsl"] = _build_instructive_dsl(
+            sec_id=str(sec.get("id")),
+            pages=pages_present,
+            first_page_bbox=page_bbox,
+            elements_sorted=enriched,
+            columns_map=columns_by_page,
+        )
+        # Attach SKETCH_V2 for deterministic ops prompts
+        result["sketch_v2"] = sketch_v2
+    # Generate or attach a first-page section image for optional VLM refinement
+    # Prefer the canonical image emitted by Stage 04 (visual_path on the section).
+    try:
+        # If 04_section_builder already provided a visual_path, reuse it and skip cropping.
+        try:
+            if isinstance(sec.get("visual_path"), str) and sec.get("visual_path").strip():
+                vrel = sec["visual_path"].strip()
+                result["visual_path"] = vrel
+                if isinstance(result.get("sketch_v2"), dict):
+                    result["sketch_v2"]["visual_path"] = vrel
+                # Do not generate a duplicate crop when a canonical image exists.
+                return result
+        except Exception:
+            pass
+        if base_results_dir is not None and source_pdf is not None and source_pdf.exists():
+            try:
+                import fitz  # PyMuPDF
+            except Exception:
+                fitz = None
+            if fitz is not None:
+                pages_present = sorted({int(e.get("page", section_page_idx)) for e in enriched})
+                pno = pages_present[0] if pages_present else section_page_idx
+                # union bbox on that page
+                xs0 = float("inf")
+                ys0 = float("inf")
+                xs1 = float("-inf")
+                ys1 = float("-inf")
+                found = False
+                for e in enriched:
+                    if int(e.get("page", section_page_idx)) != pno:
+                        continue
+                    b = e.get("bbox")
+                    if not (isinstance(b, (list, tuple)) and len(b)==4):
+                        continue
+                    x0, y0, x1, y1 = map(float, b)
+                    xs0 = min(xs0, x0)
+                    ys0 = min(ys0, y0)
+                    xs1 = max(xs1, x1)
+                    ys1 = max(ys1, y1)
+                    found = True
+                if not found:
+                    xs0,ys0,xs1,ys1 = map(float, page_bbox)
+                doc = fitz.open(str(source_pdf))
+                try:
+                    page = doc[pno]
+                    rect = fitz.Rect(xs0,ys0,xs1,ys1)
+                    zoom = 1024.0/max(1.0, rect.width)
+                    mat = fitz.Matrix(zoom, zoom)
+                    pix = page.get_pixmap(matrix=mat, clip=rect, alpha=False)
+                    vis_dir = base_results_dir / "06b_layout_sketcher" / "visual"
+                    vis_dir.mkdir(parents=True, exist_ok=True)
+                    sid = str(sec.get("id"))
+                    out_path = vis_dir / f"section_{sid}_p{pno}.png"
+                    pix.save(str(out_path))
+                    try:
+                        rel = out_path.relative_to(base_results_dir)
+                    except Exception:
+                        rel = out_path
+                    result["visual_path"] = str(rel)
+                    if isinstance(result.get("sketch_v2"), dict):
+                        result["sketch_v2"]["visual_path"] = str(rel)
+                finally:
+                    doc.close()
+    except Exception:
+        pass
     return result
 
 
@@ -601,11 +942,10 @@ def _build_section_sketch_llm(
     grid: int = GRID,
     timeout: float = 30.0,
 ) -> dict[str, Any] | None:
-    """Optional VLM-assisted layout sketch using scillm on the section visual.
+    """Optional VLM-assisted layout sketch using SciLLM Router-only.
 
-    - Uses scillm.completion with explicit x-api-key (no Bearer) for Chutes.
-    - Model: STAGE06B_VLM_MODEL or LITELLM_LARGE_VLLM_MODEL or LITELLM_VLM_MODEL.
-    - Returns a dict with keys {grid,elements,quick_summary} or None on failure.
+    - Model: CHUTES_VLM_MODEL (+ ALT1/ALT2 via Router). No litellm/httpx fallbacks.
+    - Returns a dict {grid,elements,quick_summary} or None on failure.
     """
     try:
         import json as _json
@@ -649,29 +989,35 @@ def _build_section_sketch_llm(
                 ],
             },
         ]
-        from scillm import acompletion as sc_acompletion
-        resp = asyncio.run(sc_acompletion(
-            model=model,
-            custom_llm_provider="openai_like",
-            api_base=base,
-            api_key=None,
-            extra_headers={"x-api-key": key},
-            messages=messages,
-            response_format={"type":"json_object"},
-            temperature=0,
-            timeout=timeout,
-        ))
-        content = (resp.get("choices") or [{}])[0].get("message", {}).get("content", "")
-        if not isinstance(content, str) or not content.strip():
-            return None
-        out = _json.loads(content)
-        if not isinstance(out, dict) or "elements" not in out:
-            return None
-        # Enrich LLM result with schema and contract to align with deterministic path
-        if isinstance(out, dict):
-            out.setdefault("schema_version", SCHEMA_VERSION)
-            out.setdefault("grid_contract", {"cell": "half-open", "rounding": "floor/ceil", "eps": 1e-6})
-        return out
+        from extractor.pipeline.utils.scillm_router import get_vlm_router
+        from extractor.pipeline.utils.response_utils import normalize_json_content
+        from extractor.pipeline.utils.debug_utils import ensure_logs_dir, time_block
+        router = get_vlm_router()
+        _rd = os.getenv("RUN_RESULTS_DIR")
+        if _rd:
+            logs_dir = ensure_logs_dir(Path(_rd), "06b_layout_sketcher")
+            with time_block(logs_dir, "section_vlm_sketch", section_id=str(sec.get("id"))):
+                resp = asyncio.run(router.acompletion(
+                    model="chutes/vlm",
+                    messages=messages,
+                    response_format={"type":"json_object"},
+                    temperature=0,
+                    timeout=timeout,
+                ))
+        else:
+            resp = asyncio.run(router.acompletion(
+                model="chutes/vlm",
+                messages=messages,
+                response_format={"type":"json_object"},
+                temperature=0,
+                timeout=timeout,
+            ))
+        _, obj = normalize_json_content(resp)
+        if isinstance(obj, dict) and obj.get("elements"):
+            obj.setdefault("schema_version", SCHEMA_VERSION)
+            obj.setdefault("grid_contract", {"cell": "half-open", "rounding": "floor/ceil", "eps": 1e-6})
+            return obj
+        return None
     except Exception:
         return None
 
@@ -845,6 +1191,32 @@ def run(input_path: str, output_path: str, **kwargs) -> dict[str, Any]:
     out_dir = base / "06b_layout_sketcher" / "json_output"
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "06b_layout_sketch.json").write_text(json.dumps(sketches, ensure_ascii=False, indent=2))
+    # Also emit a SKETCH_V2 consolidated view for convenience
+    try:
+        v2 = {"sections": {}}
+        # Map section_id -> visual_path from Stage 04 (if present)
+        _vis_by_sid = {}
+        try:
+            for _s in sections:
+                _sid = str(_s.get("id"))
+                _v = _s.get("visual_path")
+                if _sid and isinstance(_v, str) and _v.strip():
+                    _vis_by_sid[_sid] = _v.strip()
+        except Exception:
+            _vis_by_sid = {}
+        for sid, sk in sketches.get("sections", {}).items():
+            if isinstance(sk, dict) and sk.get("sketch_v2"):
+                v2["sections"][sid] = sk["sketch_v2"]
+                # Ensure visual_path is carried through into sketch_v2
+                try:
+                    vp = sk.get("visual_path") or _vis_by_sid.get(sid)
+                    if vp and isinstance(vp, str):
+                        v2["sections"][sid]["visual_path"] = vp
+                except Exception:
+                    pass
+        (out_dir / "06b_layout_sketch_v2.json").write_text(json.dumps(v2, ensure_ascii=False, indent=2))
+    except Exception:
+        pass
     return sketches
 
 
@@ -921,6 +1293,8 @@ def main(
                     tables_for_section=tabs_by_sec.get(sid, []),
                     figures_for_section=figs_by_sec.get(sid, []),
                     emit_merge_hints=EMIT_MERGE_HINTS,
+                    base_results_dir=base,
+                    source_pdf=source_pdf,
                 )
                 rebuilt["sections"][sid] = sketch
                 if flow_text and isinstance(sketch.get("flow_stream"), str):

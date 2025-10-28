@@ -34,7 +34,7 @@ def build_chat_messages(
 
 
 def build_chat_extras(model_name: str) -> Dict[str, Any]:
-    """Return extra kwargs for litellm.acompletion calls.
+    """Return extra kwargs for SciLLM acompletion calls.
 
     Standardize provider knobs so JSON mode is honored across OpenAI-compatible gateways.
     - Set custom_llm_provider to "openai" by default so response_format works when routed.
@@ -61,7 +61,7 @@ def build_chat_extras(model_name: str) -> Dict[str, Any]:
         }
     # Optional: allow a seed via env for providers that support it
     try:
-        _seed = os.getenv("LITELLM_SEED") or os.getenv("STAGE_SEED")
+        _seed = os.getenv("STAGE_SEED")
         if _seed is not None and str(_seed).strip() != "":
             extras["seed"] = int(str(_seed).strip())
     except Exception:

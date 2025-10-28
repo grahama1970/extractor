@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Tuple, Optional
+from typing import Iterable, Tuple
 
 import fitz  # PyMuPDF
 from PIL import Image, ImageDraw, ImageFont
@@ -16,30 +16,13 @@ class Box:
     x1: float
     y1: float
     label: str = ""
-    color: Tuple[int, int, int] = (255, 0, 0)
-    width: int = 3
+    color: Tuple[int, int, int] = (0, 200, 0)
 
 
-def _page_image(doc: fitz.Document, page_num: int, dpi: int = 144) -> Image.Image:
-    page = doc.load_page(page_num)
-    zoom = dpi / 72.0
-    mat = fitz.Matrix(zoom, zoom)
-    pm = page.get_pixmap(matrix=mat, alpha=False)
-    img = Image.frombytes("RGB", [pm.width, pm.height], pm.samples)
-    return img
-
-
-def _scale_bbox(b: Box, scale: float, page_height_px: int, y_flip: bool) -> Tuple[int, int, int, int]:
-    x0 = int(b.x0 * scale)
-    x1 = int(b.x1 * scale)
+def _to_pixels(x: float, y: float, scale: float, page_h_pts: float, y_flip: bool) -> Tuple[int, int]:
     if y_flip:
-        # flip Y if input uses bottom-left origin
-        y0 = int((page_height_px / scale - b.y1) * scale)
-        y1 = int((page_height_px / scale - b.y0) * scale)
-    else:
-        y0 = int(b.y0 * scale)
-        y1 = int(b.y1 * scale)
-    return x0, y0, x1, y1
+        y = page_h_pts - y
+    return int(round(x * scale)), int(round(y * scale))
 
 
 def draw_overlays(
@@ -49,42 +32,49 @@ def draw_overlays(
     *,
     dpi: int = 144,
     y_flip: bool = False,
-    font: Optional[ImageFont.FreeTypeFont] = None,
 ) -> None:
-    """Render annotated PNGs with rectangular overlays per page.
-
-    - Groups boxes by page and draws colored rectangles + labels.
-    - Saves files as page_###.png in out_dir.
-    """
     out_dir.mkdir(parents=True, exist_ok=True)
-    doc = fitz.open(pdf_path)
+    doc = fitz.open(str(pdf_path))
+    scale = dpi / 72.0
+    by_page: dict[int, list[Box]] = {}
+    for b in boxes:
+        by_page.setdefault(int(b.page), []).append(b)
+
+    font = None
     try:
-        page_to_boxes: dict[int, list[Box]] = {}
-        for b in boxes:
-            page_to_boxes.setdefault(b.page, []).append(b)
+        font = ImageFont.load_default()
+    except Exception:
+        font = None
 
-        for pno, items in page_to_boxes.items():
-            base = _page_image(doc, pno, dpi=dpi)
-            draw = ImageDraw.Draw(base)
-            page_px_h = base.height
-            scale = dpi / 72.0
-            for b in items:
-                x0, y0, x1, y1 = _scale_bbox(b, scale, page_px_h, y_flip)
-                draw.rectangle([x0, y0, x1, y1], outline=b.color, width=b.width)
-                if b.label:
-                    # draw label background for readability (Pillow 10+: use textbbox)
-                    margin = 2
-                    try:
-                        bbox = draw.textbbox((0, 0), b.label, font=font)
-                        tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-                    except Exception:
-                        # Fallback approximate sizes
-                        tw, th = len(b.label) * 6, 10
-                    bg = (0, 0, 0)
-                    draw.rectangle([x0, max(0, y0 - th - 2 * margin), x0 + tw + 2 * margin, y0], fill=bg)
-                    draw.text((x0 + margin, y0 - th - margin), b.label, fill=(255, 255, 255), font=font)
+    for pidx in range(len(doc)):
+        page = doc[pidx]
+        pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
+        img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+        draw = ImageDraw.Draw(img, "RGBA")
+        page_boxes = by_page.get(pidx, [])
+        if not page_boxes:
+            # still write the page to keep navigation simple
+            out = out_dir / f"page_{pidx:03d}.png"
+            img.save(out)
+            continue
+        for b in page_boxes:
+            x0, y0 = _to_pixels(b.x0, b.y0, scale, page.rect.height, y_flip)
+            x1, y1 = _to_pixels(b.x1, b.y1, scale, page.rect.height, y_flip)
+            # Ensure proper ordering
+            x0, x1 = min(x0, x1), max(x0, x1)
+            y0, y1 = min(y0, y1), max(y0, y1)
+            # Rectangle with translucent fill and solid stroke
+            r, g, bl = b.color
+            draw.rectangle([x0, y0, x1, y1], outline=(r, g, bl, 255), width=3)
+            draw.rectangle([x0, y0, x1, y1], fill=(r, g, bl, 40))
+            if b.label:
+                txt = b.label[:80]
+                tw, th = draw.textbbox((0, 0), txt, font=font)[2:4] if font else (0, 0)
+                pad = 3
+                bx0, by0 = x0, max(0, y0 - th - 2 * pad)
+                bx1, by1 = x0 + tw + 2 * pad, by0 + th + 2 * pad
+                draw.rectangle([bx0, by0, bx1, by1], fill=(0, 0, 0, 160))
+                draw.text((bx0 + pad, by0 + pad), txt, fill=(255, 255, 255, 255), font=font)
+        out = out_dir / f"page_{pidx:03d}.png"
+        img.save(out)
 
-            out_path = out_dir / f"page_{pno:03d}.png"
-            base.save(out_path)
-    finally:
-        doc.close()

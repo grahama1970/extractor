@@ -63,12 +63,8 @@ from extractor.pipeline.utils.diagnostics import (
     build_stage_timings,
     gpu_metrics_available,
 )
-# scillm is only needed for optional LLM labeling; avoid hard import so table
-# extraction can run without model deps
-try:
-    from scillm import acompletion as sc_acompletion  # type: ignore
-except Exception:  # pragma: no cover
-    sc_acompletion = None  # type: ignore
+# SciLLM Router builder (OpenAI-compatible); avoid direct SDK calls in steps
+from extractor.pipeline.utils.scillm_router import get_text_router
 
 
 # --- Initialization ---
@@ -185,7 +181,12 @@ def _attach_llm_assist_headers(result: Dict[str, Any], stage_dir: Path) -> None:
     except Exception:
         side_data = {}
 
-    model = os.getenv("TABLE_LLM_ASSIST_MODEL", os.getenv("LITELLM_MODEL", "gpt-4o-mini"))
+    # SciLLM-only: resolve model from TABLE_LLM_ASSIST_MODEL or CHUTES_TEXT_MODEL.
+    # Do not fall back to any LITELLM_* envs.
+    model = (os.getenv("TABLE_LLM_ASSIST_MODEL") or os.getenv("CHUTES_TEXT_MODEL") or "").strip()
+    if not model:
+        logger.debug("LLM assist disabled: no TABLE_LLM_ASSIST_MODEL/CHUTES_TEXT_MODEL set")
+        return
     tables = result.get("tables") or []
     updated = 0
     for t in tables:
@@ -210,29 +211,22 @@ def _attach_llm_assist_headers(result: Dict[str, Any], stage_dir: Path) -> None:
                 "Return JSON: {\"headers\": [..]} with the same length as input.\n"
             )
             user = json.dumps({"headers_input": headers_in}, ensure_ascii=False)
-            ch_base = os.getenv("CHUTES_API_BASE", "").strip()
-            ch_key = os.getenv("CHUTES_API_KEY", "").strip()
-            if sc_acompletion is None:
-                _resp = {"choices": [{"message": {"content": "{}"}}]}
-            else:
-                import asyncio as _asyncio
-                async def _call():
-                    return await sc_acompletion(
-                        model=model,
-                        api_base=ch_base or None,
-                        api_key=ch_key,
-                        custom_llm_provider="openai",
-                        messages=[
-                            {"role": "system", "content": system},
-                            {"role": "user", "content": [{"type": "text", "text": user}]},
-                        ],
-                        response_format={"type": "json_object"},
-                        temperature=0,
-                        timeout=int(os.getenv("TABLE_LLM_ASSIST_TIMEOUT", "30")),
-                        max_tokens=int(os.getenv("TABLE_LLM_ASSIST_MAX_TOKENS", "256")),
-                    )
-                _resp = _asyncio.run(_call())
-            content = (_resp.get("choices") or [{}])[0].get("message", {}).get("content", "")
+            import asyncio as _asyncio
+            async def _call():
+                router = get_text_router()
+                resp = await router.acompletion(
+                    model="chutes/text",
+                    messages=[
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": [{"type": "text", "text": user}]},
+                    ],
+                    response_format={"type": "json_object"},
+                    temperature=0,
+                    timeout=int(os.getenv("TABLE_LLM_ASSIST_TIMEOUT", "30")),
+                    max_tokens=int(os.getenv("TABLE_LLM_ASSIST_MAX_TOKENS", "256")),
+                )
+                return getattr(resp, "choices", [{}])[0].get("message", {}).get("content", "")
+            content = _asyncio.run(_call())
             try:
                 patch = json.loads(content) if content else None
             except Exception:
@@ -248,15 +242,16 @@ def _attach_llm_assist_headers(result: Dict[str, Any], stage_dir: Path) -> None:
             _apply_headers(t, new_headers)
             side_data[cache_key] = {"headers": new_headers}
             updated += 1
-        except Exception:
+        except Exception as e:
+            logger.warning(f"LLM assist header patch failed for table: {e}")
             continue
 
     try:
         if updated:
             sidecar.write_text(json.dumps(side_data, ensure_ascii=False, indent=2))
-    except Exception:
-        pass
-
+    except Exception as e:
+        logger.warning(f"Failed to persist LLM assist sidecar: {e}")
+        
 
 def _demote_table_headers_to_text(result: Dict[str, Any]) -> None:
     """Detect one-line numbered headings captured as small tables and emit demoted text blocks for Stage 04.
@@ -760,87 +755,78 @@ def extract_tables_from_page(
         1 for info in page_tables.values() if info.get("quality_fallback")
     )
 
-    # Convert to output format: select exactly one best table per page
-    extracted_tables = []
-    table_idx = 0
+    # Convert to output format: KEEP ALL detected tables for this page.
+    # Legacy single-best behavior is handled later via TABLE_SELECT_ONE_PER_PAGE gating.
+    extracted_tables: List[Dict[str, Any]] = []
     if page_tables:
-        best_key = min(
-            page_tables.keys(),
-            key=lambda k: (page_tables[k].get("fragmentation", 0), -float(page_tables[k]["score"] or 0.0)),
-        )
-        table_info = page_tables[best_key]
-        table = table_info["table"]
-
-        # Extract table image
-        bbox_tuple = getattr(table, "_bbox", None)
-        if not bbox_tuple and hasattr(table, "cells") and getattr(table, "cells"):
-            try:
-                xs = [c.x1 for c in table.cells] + [c.x2 for c in table.cells]
-                ys = [c.y1 for c in table.cells] + [c.y2 for c in table.cells]
-                bbox_tuple = (min(xs), min(ys), max(xs), max(ys))
-            except Exception:
-                bbox_tuple = None
-        img_path = (
-            extract_table_image(pdf_doc, page_num, bbox_tuple, output_dir, table_idx, diagnostics)
-            if bbox_tuple
-            else None
-        )
-
-        # Optionally coalesce repeated header rows mid-body before metrics
-        df = table.df
-        if TABLE_HEADER_COALESCE_ENABLED:
-            try:
-                df = coalesce_repeated_header_rows(df, TABLE_HEADER_REPEAT_MIN_MATCH)
-            except Exception as e:
-                logger.debug("Header coalesce failed; continuing")
+        idx = 0
+        for bbox_key, table_info in page_tables.items():
+            table = table_info["table"]
+            # Extract bbox
+            bbox_tuple = getattr(table, "_bbox", None)
+            if not bbox_tuple and hasattr(table, "cells") and getattr(table, "cells"):
                 try:
-                    diagnostics.append(
-                        make_event(
-                            "05_table_extractor",
-                            "warning",
-                            "header_coalesce_failed",
-                            str(e),
-                            {"page_index": page_num, "table_idx": table_idx},
+                    xs = [c.x1 for c in table.cells] + [c.x2 for c in table.cells]
+                    ys = [c.y1 for c in table.cells] + [c.y2 for c in table.cells]
+                    bbox_tuple = (min(xs), min(ys), max(xs), max(ys))
+                except Exception:
+                    bbox_tuple = None
+            # Optionally extract an image per table
+            img_path = (
+                extract_table_image(pdf_doc, page_num, bbox_tuple, output_dir, idx, diagnostics)
+                if bbox_tuple
+                else None
+            )
+            # Optional header coalesce before metrics
+            df = table.df
+            if TABLE_HEADER_COALESCE_ENABLED:
+                try:
+                    df = coalesce_repeated_header_rows(df, TABLE_HEADER_REPEAT_MIN_MATCH)
+                except Exception as e:
+                    logger.debug("Header coalesce failed; continuing")
+                    try:
+                        diagnostics.append(
+                            make_event(
+                                "05_table_extractor",
+                                "warning",
+                                "header_coalesce_failed",
+                                str(e),
+                                {"page_index": page_num, "table_idx": idx},
+                            )
                         )
+                    except Exception:
+                        pass
+            df_clean = df.map(sanitize_cell)
+            fragmentation = fragmentation_score(df_clean)
+            table_data = {
+                "page_number": page_num + 1,
+                "page_index": page_num,
+                "table_index": idx + 1,
+                "bbox": list(bbox_tuple) if bbox_tuple else [],
+                "extraction_method": "camelot",
+                "strategy": table_info["strategy"],
+                "fragmentation_score": fragmentation,
+                "pandas_df_raw": df.to_dict("records"),
+                "pandas_df": df_clean.to_dict("records"),
+                "pandas_metrics": generate_pandas_metrics(df_clean),
+                "camelot_metrics": {
+                    "accuracy": getattr(table, "accuracy", None),
+                    "whitespace": getattr(table, "whitespace", None),
+                    "order": getattr(table, "order", None),
+                },
+                "score": table_info.get("score", 0.0),
+                "quality_fallback": bool(table_info.get("quality_fallback", False)),
+                "strategy_history": table_info.get("history", []),
+            }
+            if img_path:
+                try:
+                    table_data["table_image_path"] = str(
+                        Path(img_path).resolve().relative_to(output_dir.parent.parent.resolve())
                     )
                 except Exception:
-                    pass
-
-        df_clean = df.map(sanitize_cell)
-        fragmentation = fragmentation_score(df_clean)
-
-        # Build table data
-        table_data = {
-            "page_number": page_num + 1,
-            "page_index": page_num,
-            "table_index": table_idx + 1,
-            "bbox": list(bbox_tuple) if bbox_tuple else [],
-            "extraction_method": "camelot",
-            "strategy": table_info["strategy"],
-            "fragmentation_score": fragmentation,
-            "pandas_df_raw": df.to_dict("records"),
-            "pandas_df": df_clean.to_dict("records"),
-            "pandas_metrics": generate_pandas_metrics(df_clean),
-            "camelot_metrics": {
-                "accuracy": table.accuracy,
-                "whitespace": table.whitespace,
-                "order": table.order,
-            },
-            "score": table_info["score"],
-            "quality_fallback": bool(table_info.get("quality_fallback", False)),
-            "strategy_history": table_info.get("history", []),
-        }
-
-        if img_path:
-            # store path relative to results root (../.. from image_output)
-            try:
-                table_data["table_image_path"] = str(
-                    Path(img_path).resolve().relative_to(output_dir.parent.parent.resolve())
-                )
-            except Exception:
-                table_data["table_image_path"] = img_path
-
-        extracted_tables.append(table_data)
+                    table_data["table_image_path"] = img_path
+            extracted_tables.append(table_data)
+            idx += 1
 
     return extracted_tables, best_strategy, strategy_durations, page_metrics
 
@@ -1286,15 +1272,11 @@ def run(
         return s2 or hashlib.sha1(s.encode("utf-8")).hexdigest()[:8]
 
     def _infer_title_with_scillm(context: str, timeout: float = 6.0):
-        try:
-            from scillm import acompletion as _sc  # noqa: N806
-        except Exception:
-            _sc = None  # noqa: N806
-        base = os.getenv("CHUTES_API_BASE", "").strip()
-        key = os.getenv("CHUTES_API_KEY", "").strip()
-        model = (os.getenv("CHUTES_TEXT_MODEL") or os.getenv("LITELLM_DEFAULT_MODEL") or "").strip()
-        if not (_sc and base and key and model):
+        # Opt-in only to keep Stage 05 deterministic for goldens
+        if os.getenv("STAGE05_LLM_INFER", "0").lower() not in {"1","true","yes","y"}:
             return None
+        router = get_text_router()
+        model = "chutes/text"
         prompt = (
             "You are naming a table for a technical document. Return ONLY a short title (<=10 words).\n"
             "Do not include the word 'Table' or numbering.\n\n"
@@ -1303,23 +1285,21 @@ def run(
         try:
             import asyncio as _asyncio
             async def _call():
-                return await _sc(
+                resp = await router.acompletion(
                     model=model,
-                    api_base=base,
-                    api_key=key,
-                    custom_llm_provider="openai",
                     messages=[{"role":"user","content": prompt}],
                     response_format={"type":"json_object"},
                     max_tokens=64,
                     temperature=0.2,
                     timeout=timeout,
                 )
-            resp = _asyncio.run(_call())
-            content = (resp.get("choices") or [{}])[0].get("message", {}).get("content", "").strip()
-            # Allow plain text if provider ignores json_object
-            title = content.strip().strip('"') if content else ""
+                msg = getattr(resp, "choices", [{}])[0].get("message", {})
+                content = msg.get("content", "").strip()
+                return content.strip('"') if content else ""
+            title = _asyncio.run(_call())
             return title or None
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Title infer via SciLLM failed: {e}")
             return None
 
     # --- Assign captions/titles from nearby text if missing; infer when absent ---
@@ -1655,23 +1635,10 @@ def debug_bundle(
 
 
 if __name__ == "__main__":
-    # Minimal entry: INPUT_JSON [PDF_DIR] [OUT_DIR]
-    try:
-        from dotenv import find_dotenv, load_dotenv
-
-        load_dotenv(find_dotenv())
-    except Exception:
-        pass
-    import sys
-    argv = sys.argv[1:]
-    if not argv or argv[0] in ("-h", "--help"):
-        print(
-            "Usage: python -m extractor.pipeline.steps.05_table_extractor INPUT_JSON [PDF_DIR] [OUT_DIR]",
-            file=sys.stderr,
-        )
-        sys.exit(2)
-    input_json = Path(argv[0])
-    pdf_dir = Path(argv[1]) if len(argv) > 1 else Path("data/results/pipeline/01_annotation_processor")
-    out_dir = Path(argv[2]) if len(argv) > 2 else Path("data/results/pipeline")
-    out = run(input_json=input_json, pdf_dir=pdf_dir, output_dir=out_dir)
-    print(str(out))
+    # Deprecated per unified runner policy. Use: python -m extractor.pipeline
+    print(
+        "This step is not intended to be run directly.\n"
+        "Use the unified runner: python -m extractor.pipeline",
+        file=sys.stderr,
+    )
+    sys.exit(2)

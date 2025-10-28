@@ -8,8 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from dotenv import load_dotenv, find_dotenv
-import litellm as _litellm
-from extractor.pipeline.utils.litellm_call import litellm_call
+from scillm import acompletion as sc_acompletion  # type: ignore
 
 from scillm.extras.json_utils import clean_json_string
 from extractor.pipeline.utils.model_params import (
@@ -19,10 +18,6 @@ from extractor.pipeline.utils.model_params import (
 
 
 load_dotenv(find_dotenv(), override=False)
-_litellm.drop_params = True  # tolerate provider-specific unsupported params
-# Bridge env var naming: accept OPEN_ROUTER_API_KEY as alias for OPENROUTER_API_KEY
-if os.getenv("OPEN_ROUTER_API_KEY") and not os.getenv("OPENROUTER_API_KEY"):
-    os.environ["OPENROUTER_API_KEY"] = os.getenv("OPEN_ROUTER_API_KEY")  # type: ignore
 
 
 @dataclass
@@ -37,41 +32,39 @@ class CallResult:
 async def chat_call(
     model: str, system_text: str, user_text: str, image_url: Optional[str], *, timeout: int = 60
 ) -> CallResult:
-    """Use the project's litellm_call for consistency. It injects token/cost metadata into JSON when possible.
-    Falls back to retrying without image once if provider rejects image inputs."""
+    """SciLLM-only eval call via acompletion. Falls back once without image if needed."""
 
-    def _build_params(with_image: bool) -> Dict[str, Any]:
-        messages = build_chat_messages(system_text, user_text, image_url if with_image else None)
-        extras = build_chat_extras(model)
-        params = {
-            "model": model,
-            "messages": messages,
-            "timeout": timeout,
-            "temperature": 0,
-            "top_p": 1,
-            **extras,
-        }
-        # OpenRouter support
-        mlow = (model or "").lower()
-        if mlow.startswith("openrouter/"):
-            api_key = os.getenv("OPENROUTER_API_KEY")
-            if api_key:
-                params["api_key"] = api_key
-            params["api_base"] = os.getenv("OPENROUTER_API_BASE", "https://openrouter.ai/api/v1")
-        return params
+    def _build_messages(with_image: bool) -> Dict[str, Any]:
+        return build_chat_messages(system_text, user_text, image_url if with_image else None)
 
     # First attempt: with image if provided
-    params = _build_params(with_image=bool(image_url))
-    results = await litellm_call([params], wrap_json=False, concurrency=1, desc="LLM Eval")
-    content = results[0] if results else ""
+    messages = _build_messages(with_image=bool(image_url))
+    resp = await sc_acompletion(
+        model=model,
+        api_base=os.getenv("CHUTES_API_BASE"),
+        api_key=os.getenv("CHUTES_API_KEY"),
+        custom_llm_provider="openai",
+        messages=messages,
+        timeout=timeout,
+        temperature=0,
+        top_p=1,
+    )
+    content = (resp.get("choices") or [{}])[0].get("message", {}).get("content") or ""
 
     # If empty and we tried image, retry without image
     if not (isinstance(content, str) and content.strip()) and image_url:
-        params2 = _build_params(with_image=False)
-        results2 = await litellm_call(
-            [params2], wrap_json=False, concurrency=1, desc="LLM Eval (no image)"
+        messages2 = _build_messages(with_image=False)
+        resp2 = await sc_acompletion(
+            model=model,
+            api_base=os.getenv("CHUTES_API_BASE"),
+            api_key=os.getenv("CHUTES_API_KEY"),
+            custom_llm_provider="openai",
+            messages=messages2,
+            timeout=timeout,
+            temperature=0,
+            top_p=1,
         )
-        content = results2[0] if results2 else ""
+        content = (resp2.get("choices") or [{}])[0].get("message", {}).get("content") or ""
 
     # Parse and extract metadata if present
     parsed: Optional[Dict[str, Any]] = None

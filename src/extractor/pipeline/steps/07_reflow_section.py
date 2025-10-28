@@ -16,7 +16,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 from textwrap import dedent
-from typing import Any
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -27,8 +27,9 @@ from rich.console import Console
 try:
     from scillm import acompletion as sc_acompletion  # type: ignore
 except Exception:  # pragma: no cover
-    sc_completion = None  # type: ignore
+    sc_completion = None  # legacy alias unused
     sc_acompletion = None  # type: ignore
+from litellm import Router  # SciLLM-compatible Router (OpenAI-like)
 from tqdm.asyncio import tqdm_asyncio
 
 from extractor.core.schema.unified_document import SourceType
@@ -58,24 +59,129 @@ from extractor.pipeline.utils.json_utils import (
     parse_json_strict,
     restrict_top_level_keys,
 )
-from extractor.pipeline.utils.litellm_response_utils import extract_content
+
+
+def _build_compact_prompt(
+    *,
+    results_base_dir: Path,
+    section_data: Dict[str, Any],
+    tables: List[Dict[str, Any]],
+    figures: List[Dict[str, Any]],
+    sketch_v2_by_sec: Dict[str, Any],
+) -> str:
+    """Construct a compact, string-only prompt using 06b's sketch_v2 + 06a enrichments."""
+    sid = str(section_data.get("id"))
+    sketch = (sketch_v2_by_sec or {}).get(sid) or {}
+    tabs_for_sec = [t for t in (tables or []) if str(t.get("section_id")) == sid]
+    figs_for_sec = [f for f in (figures or []) if str(f.get("section_id")) == sid]
+
+    # Identify merge candidates by (logical_table_id, header_norm)
+    merges: List[str] = []
+    by_key: Dict[str, List[str]] = {}
+    for t in tabs_for_sec:
+        key = f"{t.get('logical_table_id') or ''}|{t.get('header_norm') or ''}"
+        if key.strip('|'):
+            by_key.setdefault(key, []).append(str(t.get('id') or t.get('table_id') or 'tbl'))
+    for k, ids in by_key.items():
+        if len(ids) >= 2:
+            merges.append(f"logical={k} parts={','.join(ids[:6])}")
+
+    lines: List[str] = []
+    lines.append("You output ONLY a compact JSON object with keys: reflowed_json, ocr_corrections, improvements_made, summary. No markdown, no code fences.")
+    lines.append("")
+    lines.append(f"Section id: {sid}")
+    lines.append(f"Tables: {len(tabs_for_sec)} | Figures: {len(figs_for_sec)}")
+    for m in merges[:4]:
+        lines.append(f"Merge candidate: {m}")
+
+    # Minimal sketch slice
+    objs = (sketch.get("objects") or []) if isinstance(sketch, dict) else []
+    if objs:
+        mini = []
+        for o in objs[:20]:
+            mini.append({
+                "id": o.get("id"),
+                "type": o.get("type"),
+                "page": o.get("page"),
+                "grid_bbox": o.get("grid_bbox"),
+                "header_norm": o.get("header_norm"),
+                "logical_table_id": o.get("logical_table_id"),
+                "summary": o.get("summary"),
+            })
+        try:
+            import json as _json
+            lines.append("")
+            lines.append("Sketch (minimal):")
+            lines.append(_json.dumps(mini, ensure_ascii=False))
+        except Exception:
+            pass
+
+    # Heads/titles summary
+    if tabs_for_sec:
+        lines.append("")
+        lines.append("Tables heads/titles:")
+        for t in tabs_for_sec[:8]:
+            hid = t.get("id") or t.get("table_id")
+            lines.append(f"- {hid}: header_norm={t.get('header_norm')} title={t.get('title')}")
+    if figs_for_sec:
+        lines.append("")
+        lines.append("Figures titles:")
+        for f in figs_for_sec[:6]:
+            fid = f.get("id") or f.get("figure_id")
+            lines.append(f"- {fid}: title={f.get('title')} caption={f.get('caption')}")
+
+    lines.append("")
+    lines.append("Return ONLY the JSON; keep it compact.")
+    return "\n".join(lines)
+from extractor.pipeline.utils.response_utils import extract_content
 from extractor.pipeline.utils.log_utils import sanitize_messages_for_return
 from extractor.pipeline.utils.metrics_logger import log_metric
 from extractor.pipeline.utils.model_params import (
     build_chat_extras,
 )
-from extractor.pipeline.utils.scillm_client import (
-    apply_schema_hint as scillm_apply_schema_hint,
-)
-from extractor.pipeline.utils.scillm_client import (
-    reflow_section as scillm_reflow_section,
-)
+# SciLLM client adapter wrappers are not used in Stage 07 per policy (Router-only)
 from extractor.pipeline.utils.text_utils import sanitize_text
 from extractor.pipeline.utils.unified_conversion import build_unified_document_from_reflow
 from extractor.pipeline.utils.vision import preflight_vision_support
 
 # Model selection (place imports at top to satisfy E402)
 from extractor.pipeline.utils.model_select import get_vlm_model, get_text_model
+from extractor.pipeline.utils.debug_utils import ensure_logs_dir, time_block, summarize_messages
+
+
+def _build_text_router() -> Router:
+    """Build a SciLLM Router for TEXT JSON mode using env CHUTES_* values.
+
+    - model_name group: "chutes/text"
+    - entries: CHUTES_TEXT_MODEL (+ ALT1/ALT2 if set)
+    - provider: openai_like with Bearer via api_key
+    """
+    base = os.environ["CHUTES_API_BASE"]
+    key = os.environ["CHUTES_API_KEY"]
+    m0 = os.environ.get("CHUTES_TEXT_MODEL", "").strip()
+    m1 = os.environ.get("CHUTES_TEXT_MODEL_ALT1", "").strip()
+    m2 = os.environ.get("CHUTES_TEXT_MODEL_ALT2", "").strip()
+    if not m0:
+        raise RuntimeError("CHUTES_TEXT_MODEL is not set")
+
+    def entry(model: str, order: int):
+        return {
+            "model_name": "chutes/text",
+            "litellm_params": {
+                "custom_llm_provider": "openai_like",
+                "model": model,
+                "api_base": base,
+                "api_key": key,
+            },
+            "order": order,
+        }
+
+    lst = [entry(m0, 1)]
+    if m1:
+        lst.append(entry(m1, 2))
+    if m2:
+        lst.append(entry(m2, 3))
+    return Router(model_list=lst)
 
 
 # Shared helper: table confidence heuristic (0.0–1.0)
@@ -122,8 +228,8 @@ from extractor.pipeline.utils.embeddings import ensure_embedder as _ensure_embed
 # removed local embedder implementation
 
 # Configuration from environment variables
-# Default to a single canonical VLM model; may switch to Text at runtime when images are disabled
-LLM_MODEL = get_vlm_model()
+# Resolve the concrete model inside run() so we can avoid requiring a VLM when images are disabled.
+LLM_MODEL: str | None = None
 MAX_CONCURRENT_CALLS = int(os.getenv("MAX_CONCURRENT_LLM_CALLS", 3))
 LLM_SEMAPHORE = asyncio.Semaphore(MAX_CONCURRENT_CALLS)
 SEMANTIC_TOP_K = int(os.getenv("SEMANTIC_ANNOTATION_TOP_K", 5))
@@ -135,7 +241,8 @@ INCLUDE_FIGURE_IMAGES = os.getenv("STAGE07_INCLUDE_FIGURES", "false").lower() in
     "y",
 )
 MAX_ANNOTATION_IMAGES = int(os.getenv("STAGE07_MAX_ANNOTATION_IMAGES", "2"))
-ATTACH_SECTION_IMAGE = os.getenv("STAGE07_ATTACH_SECTION_IMAGE", "true").lower() in (
+# Default to including the section image when available
+ATTACH_SECTION_IMAGE = os.getenv("STAGE07_ATTACH_SECTION_IMAGE", "1").lower() in (
     "1",
     "true",
     "yes",
@@ -173,6 +280,10 @@ OMIT_IMAGES_IF_CONFIDENT = os.getenv("STAGE07_OMIT_IMAGES_IF_CONFIDENT", "true")
     "yes",
     "y",
 )
+
+# Visual proof toggles
+STAGE07_VISUAL_PROOF = os.getenv("STAGE07_VISUAL_PROOF", "").lower() in ("1", "true", "yes", "y")
+STAGE07_SOURCE_PDF = os.getenv("STAGE07_SOURCE_PDF", "").strip() or None
 
 PROMPT_STRICT_REQUIREMENTS = (
     "Strict requirements for the JSON you return:\n"
@@ -224,6 +335,116 @@ def build_reflow_prompt(section_data: dict[str, Any]) -> str:
     ).strip()
 
 
+def _build_compact_prompt(
+    section: dict[str, Any],
+    *,
+    text_char_cap: int = 1200,
+) -> str:
+    """Build a compact, string-only prompt with:
+    - Top Summary: counts and per-table metrics (rows×cols, density, camelot_acc, strategy, quality_fallback)
+    - Layout Sketch DSL (from 06b) and quick grid/columns overview
+    - Minimal inputs: trimmed text, tables (headers + first row), figures (title/caption + bbox/page)
+    - Strict JSON contract reminder (no code fences, no extra keys)
+    """
+    lines: list[str] = []
+    title = sanitize_text(section.get("title", "Untitled"))
+    pg0 = section.get("page_start")
+    pg1 = section.get("page_end")
+    blocks_count = len(section.get("blocks", []) or [])
+
+    tables = section.get("tables") or []
+    figures = section.get("figures") or []
+
+    # Top Summary
+    lines.append(f"Top Summary\n- title: {title}\n- pages: {pg0}–{pg1}\n- blocks: {blocks_count}")
+    lines.append(f"- tables: {len(tables)}\n- figures: {len(figures)}")
+    for tb in tables:
+        pm = tb.get("pandas_metrics") or {}
+        shape = pm.get("shape") or [0, 0]
+        rows, cols = (int(shape[0] or 0), int(shape[1] or 0)) if isinstance(shape, (list, tuple)) else (0, 0)
+        density = pm.get("data_density")
+        camel = tb.get("camelot_metrics") or {}
+        acc = camel.get("accuracy")
+        strat = tb.get("strategy") or tb.get("strategy_history") or None
+        qf = tb.get("quality_fallback") or None
+        lines.append(
+            f"  • table idx {tb.get('table_index')}: rows×cols={rows}×{cols}, density={density}, camelot_acc={acc}, strategy={strat}, quality_fallback={qf}"
+        )
+
+    # Layout Sketch DSL (compact)
+    lsk = section.get("layout_sketch") or {}
+    if isinstance(lsk, dict) and lsk:
+        grid = lsk.get("grid", 12)
+        cols = lsk.get("columns") or []
+        dsl = (lsk.get("flow_stream") or "").strip()
+        dsl_compact = dsl if len(dsl) <= 900 else (dsl[:900] + " …")
+        lines.append("\nLayout Sketch")
+        lines.append(f"- grid: {grid}")
+        if cols:
+            try:
+                lines.append(f"- columns: {json.dumps(cols, ensure_ascii=False)[:300]}")
+            except Exception:
+                lines.append("- columns: (unavailable)")
+        if dsl_compact:
+            lines.append("- dsl:")
+            lines.append(dsl_compact)
+
+    # Minimal Inputs
+    src_text = sanitize_text(
+        section.get("source_text") or section.get("merged_text") or section.get("raw_text") or ""
+    )
+    lines.append("\nInputs")
+    lines.append("Text (trimmed):")
+    if src_text:
+        lines.append(src_text[:text_char_cap])
+
+    # Tables: headers + first row
+    if tables:
+        lines.append("Tables (headers + first row):")
+        for tb in tables[:4]:
+            pm = tb.get("pandas_metrics") or {}
+            headers = pm.get("columns") or []
+            sample_rows = tb.get("pandas_df") or tb.get("pandas_df_dict") or tb.get("rows") or []
+            first = sample_rows[0] if sample_rows else []
+            try:
+                first_row_list = first if isinstance(first, list) else [first.get(h, "") for h in headers]
+            except Exception:
+                first_row_list = first if isinstance(first, list) else []
+            lines.append(
+                f"- table idx {tb.get('table_index')} headers={headers} first_row={first_row_list} page={tb.get('page_index')}"
+            )
+
+    # Figures: title/caption + bbox/page
+    if figures:
+        lines.append("Figures (title/caption + bbox/page):")
+        for fg in figures[:6]:
+            title_f = (fg.get("title") or "").strip()
+            cap = (fg.get("caption") or fg.get("ai_description") or "").strip()
+            bbox = fg.get("bbox") or fg.get("bbox0") or []
+            page = fg.get("page") or fg.get("page_idx")
+            lines.append(f"- figure id={fg.get('figure_id')} title={title_f or None} caption={cap[:160] if cap else None} bbox={bbox} page={page}")
+
+    # Strict JSON schema reminder (no parts; no fences)
+    lines.append(
+        dedent(
+            """
+            Instruction
+            Return ONLY one JSON object with keys:
+              - reflowed_json { title: string, blocks: [ {paragraph|list|table|figure} … ] }
+              - ocr_corrections: {"erroneous": "corrected", …}
+              - improvements_made: string
+              - summary: string
+            No code fences. No extra keys. No explanations outside JSON.
+            """
+        ).strip()
+    )
+
+    return "\n".join(lines).strip()
+
+
+# (No HTTP fallback: SciLLM-only policy)
+
+
 def build_section_context_text(section: dict[str, Any]) -> str:
     """Compose concise textual context including tables, figures, and the most relevant annotations (with text)."""
     lines: list[str] = []
@@ -236,15 +457,22 @@ def build_section_context_text(section: dict[str, Any]) -> str:
     try:
         sk = section.get("layout_sketch") or {}
         if sk:
-            grid = sk.get("grid", 12)
-            elems = sk.get("elements") or []
-            text_n = sum(1 for e in elems if e.get("kind") == "text")
-            table_n = sum(1 for e in elems if e.get("kind") == "table")
-            figure_n = sum(1 for e in elems if e.get("kind") == "figure")
-            qs = (sk.get("quick_summary") or "").strip()
-            lines.append(f"LayoutSketch: grid={grid} text={text_n} tables={table_n} figures={figure_n}")
-            if qs:
-                lines.append(f"SketchSummary: {qs}")
+            # Prefer human-readable instructive DSL if present
+            dsl = (sk.get("instructive_dsl") or "").strip()
+            if dsl:
+                lines.append("LayoutSketch (instructive):")
+                # Cap to protect tokens; leave the rest to the model’s reasoning
+                lines.append(dsl if len(dsl) <= 1200 else (dsl[:1200] + " …"))
+            else:
+                grid = sk.get("grid", 12)
+                elems = sk.get("elements") or []
+                text_n = sum(1 for e in elems if e.get("kind") == "text")
+                table_n = sum(1 for e in elems if e.get("kind") == "table")
+                figure_n = sum(1 for e in elems if e.get("kind") == "figure")
+                qs = (sk.get("quick_summary") or "").strip()
+                lines.append(f"LayoutSketch: grid={grid} text={text_n} tables={table_n} figures={figure_n}")
+                if qs:
+                    lines.append(f"SketchSummary: {qs}")
     except Exception:
         pass
     # Include a concise JSON-like section summary to ground the LLM
@@ -834,7 +1062,8 @@ async def reflow_section_with_llm(
                 pass
             user_content = [{"type": "text", "text": context_text}] + image_blocks
         elif supports_vision and not include_images:
-            user_content = [{"type": "text", "text": context_text}]
+            # Use plain string content; some providers return empty content for array parts
+            user_content = context_text
         else:
             user_content = f"""{context_text}
 
@@ -908,9 +1137,12 @@ async def reflow_section_with_llm(
         # Limit context size for GPT-5 stability
         if "gpt-5" in (LLM_MODEL or "").lower():
             context_text = context_text[:3000]
+        # Compact cap for providers that return empty content with long payloads
+        _cap = int(os.getenv("STAGE07_TEXT_MAX_CHARS", "2000"))
+        _user_compact = user_content[:_cap]
         messages = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_content},
+            {"role": "user", "content": _user_compact},
         ]
 
         # Attach images for Chat Completions (data URL parts)
@@ -963,82 +1195,85 @@ async def reflow_section_with_llm(
                 )
 
         # LLM call: Chat Completions via scillm (Chutes x-api-key)
-        sid = os.getenv("LITELLM_SESSION_ID") or get_run_id()
+        # SciLLM-only: no litellm session envs; use our run id
+        sid = get_run_id()
         # Simple prompt path (text-only). When images are NOT included, we can
         # ask only for: reflow text + merge tables. This reduces provider
         # variance and avoids empty responses.
         SIMPLE = (os.getenv("STAGE07_SIMPLE_PROMPT", "1").lower() in ("1", "true", "yes", "y")) and (not include_images)
         if SIMPLE:
             try:
-                logs_dir = results_base_dir / "07_reflow_section" / "logs"
-                logs_dir.mkdir(parents=True, exist_ok=True)
+                logs_dir = ensure_logs_dir(results_base_dir, "07_reflow_section")
 
-                # Build a compact prompt from existing context
-                # System
-                sys_msg = (
-                    "Return ONLY one JSON object with keys: reflowed_json {title, blocks[]}, "
-                    "ocr_corrections, improvements_made, summary. No prose, no code fences, no extra keys."
-                )
+                # Build compact user prompt with Top Summary + Layout DSL + minimal inputs
+                compact_user = _build_compact_prompt(section_data, text_char_cap=int(os.getenv("STAGE07_CONTEXT_CHARS", "1200")))
 
-                # User: section header + trimmed text + minimal table sketch
+                # Save prompt artifact for first section (or once per run if not exists)
                 try:
-                    max_chars = int(os.getenv("STAGE07_CONTEXT_CHARS", "1200"))
+                    artifacts_dir = Path("scripts/artifacts")
+                    artifacts_dir.mkdir(parents=True, exist_ok=True)
+                    prompt_path = artifacts_dir / "07_section0_prompt_compact.md"
+                    if not prompt_path.exists():
+                        prompt_path.write_text(compact_user, encoding="utf-8")
                 except Exception:
-                    max_chars = 1200
-                text_part = context_text[:max_chars]
-
-                # Minimal table hint (headers + first sample row, if present)
-                table_hints: list[str] = []
-                tables_in_section = section_data.get("tables") or []
-                for tb in (tables_in_section or [])[:3]:
-                    cols = tb.get("columns") or []
-                    if not cols:
-                        continue
-                    sample = tb.get("sample_rows") or tb.get("rows") or []
-                    first = sample[0] if sample else []
-                    table_hints.append(
-                        f"Table: headers={cols} sample_row={first if isinstance(first, list) else first}"
-                    )
-                tables_txt = "\n".join(table_hints)
-
-                user_text = (
-                    f"Section: {section_data.get('title') or 'Untitled'} (level {section_data.get('level')}) pages {section_data.get('page_start')}–{section_data.get('page_end')}\n"
-                    f"Text (trimmed):\n{text_part}\n\n"
-                    f"Tables (sketch):\n{tables_txt}"
-                ).strip()
+                    pass
 
                 messages_simple = [
-                    {"role": "system", "content": sys_msg},
-                    {"role": "user", "content": [{"type": "text", "text": user_text}]},
+                    {"role": "system", "content": "You respond with JSON only — no code fences, no prose."},
+                    {"role": "user", "content": compact_user},
                 ]
 
-                # Call SciLLM once in JSON mode (no stop sequences)
-                ch_base = os.getenv("CHUTES_API_BASE", "").strip()
-                ch_key = os.getenv("CHUTES_API_KEY", "").strip()
-                resp_simple = await sc_acompletion(
-                    model=LLM_MODEL,
-                    api_base=ch_base if ch_base else None,
-                    api_key=ch_key,
-                    custom_llm_provider="openai",
-                    messages=messages_simple,
-                    response_format={"type": "json_object"},
-                    temperature=0,
-                    max_tokens=min(STAGE07_MAX_TOKENS, 1024),
-                    timeout=llm_timeout,
-                    cache={"no-cache": True},
-                )
-                content_simple = (resp_simple.get("choices") or [{}])[0].get("message", {}).get("content", "")
-                # Accept dict-or-string
-                if isinstance(content_simple, dict):
-                    result = content_simple
-                else:
+                try:
+                    _router_s = _build_text_router()
+                    _r_s = await _router_s.acompletion(
+                        model="chutes/text",
+                        messages=messages_simple,
+                        response_format={"type": "json_object"},
+                        temperature=0,
+                        max_tokens=min(STAGE07_MAX_TOKENS, 1024),
+                        timeout=max(30, int(os.getenv("STAGE07_TIMEOUT","90"))),
+                    )
+                    content_simple = _r_s.choices[0].message.get("content") if hasattr(_r_s, "choices") else None
+                except Exception:
+                    content_simple = None
+
+                # If SDK came back empty, immediately try HTTP fallback with same payload
+                result: dict[str, Any] | None = None
+                if (isinstance(content_simple, (str, dict)) and str(content_simple).strip()) or isinstance(content_simple, dict):
+                    # Accept dict-or-string
+                    if isinstance(content_simple, dict):
+                        result = content_simple
+                    else:
+                        try:
+                            result = parse_json_strict(str(content_simple))
+                        except Exception:
+                            result = clean_json_string(str(content_simple), return_dict=True)
+
+                # Record per-section summary
+                try:
+                    artifacts_dir = Path("scripts/artifacts")
+                    artifacts_dir.mkdir(parents=True, exist_ok=True)
+                    summary_path = artifacts_dir / "07_live_response_summary.json"
+                    entry = {
+                        "section_id": section_data.get("id"),
+                        "transport": ("sdk" if result is not None else "none"),
+                        "ok": bool(result and isinstance(result, dict) and result.get("reflowed_json")),
+                        "timestamp": iso_now(),
+                    }
                     try:
-                        result = parse_json_strict(str(content_simple))
+                        prev = json.loads(summary_path.read_text()) if summary_path.exists() else []
+                        if not isinstance(prev, list):
+                            prev = []
                     except Exception:
-                        result = clean_json_string(str(content_simple), return_dict=True)
+                        prev = []
+                    prev.append(entry)
+                    summary_path.write_text(json.dumps(prev, indent=2))
+                except Exception:
+                    pass
+
                 if isinstance(result, dict) and result.get("reflowed_json"):
                     return {**section_data, **result, "reflow_status": "success"}
-                # If simple path failed to produce JSON, fall through to existing paths
+                # If compact path failed to produce JSON, fall through to existing strict/relaxed branches
             except Exception:
                 pass
 
@@ -1052,7 +1287,7 @@ async def reflow_section_with_llm(
                 minimal_user = f"{minimal_guard}\n\n{context_text[:1200]}"
                 messages_min = [
                     {"role": "system", "content": "You output ONLY compact JSON."},
-                    {"role": "user", "content": [{"type": "text", "text": minimal_user}]},
+                    {"role": "user", "content": minimal_user},
                 ]
                 params_min = {
                     "model": LLM_MODEL,
@@ -1070,17 +1305,19 @@ async def reflow_section_with_llm(
                     )
                 except Exception:
                     pass
-                resp_min = await sc_acompletion(
-                    model=LLM_MODEL,
-                    api_base=os.getenv("CHUTES_API_BASE", "").strip() or None,
-                    api_key=os.getenv("CHUTES_API_KEY", "").strip() or None,
-                    custom_llm_provider="openai",
-                    messages=messages_min,
-                    temperature=0,
-                    timeout=llm_timeout,
-                    cache={"no-cache": True},
-                )
-                content_min = (resp_min.get("choices") or [{}])[0].get("message", {}).get("content", "")
+                try:
+                    _router_min = _build_text_router()
+                    _r_min = await _router_min.acompletion(
+                        model="chutes/text",
+                        messages=messages_min,
+                        response_format={"type": "json_object"},
+                        temperature=0,
+                        max_tokens=min(STAGE07_MAX_TOKENS, 512),
+                        timeout=llm_timeout,
+                    )
+                    content_min = _r_min.choices[0].message.get("content") if hasattr(_r_min, "choices") else None
+                except Exception:
+                    content_min = None
                 try:
                     (logs_dir / f"response_forced_min_{section_data.get('id','section')}.json").write_text(
                         json.dumps(content_min, ensure_ascii=False, indent=2, default=str) if isinstance(content_min, (dict, list)) else str(content_min)
@@ -1220,9 +1457,8 @@ async def reflow_section_with_llm(
             # inlining it into the first text part (instead of using input_text/input_image).
             _converted = list(image_blocks)
 
-            # Build messages with a system role; append a provider-aware minimal schema hint
-            # via the centralized helper to avoid duplicating provider logic across steps.
-            user_text = scillm_apply_schema_hint(LLM_MODEL, f"Return ONLY valid JSON.\n\n{context_text}")
+            # Build messages with a system role; inline a minimal schema hint
+            user_text = f"Return ONLY valid JSON.\n\n{context_text}"
             user_parts = [{"type": "text", "text": user_text}]
             if include_images and supports_vision and _converted:
                 user_parts.extend(_converted)
@@ -1230,49 +1466,7 @@ async def reflow_section_with_llm(
                 {"role": "system", "content": system_text},
                 {"role": "user", "content": user_parts},
             ]
-            # Optional scillm adapter path (keeps existing behavior; does not remove litellm fallback)
-            _use_adapter = os.getenv("USE_LLM_ADAPTER", "").lower() in ("1", "true", "yes", "y")
-            if _use_adapter:
-                try:
-                    doc_id = str(section_data.get("doc_id") or "doc")
-                    section_id = str(section_data.get("id") or section_data.get("section_id") or "section")
-                    res = await scillm_reflow_section(
-                        model=LLM_MODEL,
-                        messages=messages,
-                        results_base_dir=results_base_dir,
-                        prompt_version=os.getenv("STAGE07_PROMPT_VERSION", "reflow@0.1.0"),
-                        doc_id=doc_id,
-                        section_id=section_id,
-                        request_id=f"section_{section_id}",
-                        timeout=llm_timeout,
-                    )
-                    out = {**section_data}
-                    out.update(
-                        {
-                            "reflowed_json": res.reflowed_json,
-                            "ocr_corrections": res.ocr_corrections or {},
-                            "improvements_made": res.improvements_made or "",
-                            "summary": res.summary or "",
-                            "reflow_status": "success",
-                        }
-                    )
-                    try:
-                        md = out.setdefault("metadata", {})
-                        md.setdefault("diagnostics", []).append(
-                            make_event(
-                                "07_reflow_section",
-                                "info",
-                                "adapter_used",
-                                "scillm adapter path engaged",
-                                {},
-                            )
-                        )
-                    except Exception:
-                        pass
-                    return out
-                except Exception:
-                    # Fall back to scillm direct path
-                    pass
+            # No adapter path — Router-only per policy; fallbacks handled later via curl if needed
 
             extras = build_chat_extras(LLM_MODEL)
             # Avoid collisions: if using response_format for Gemini, drop generation_config from extras
@@ -1435,28 +1629,28 @@ async def reflow_section_with_llm(
             except Exception:
                 pass
 
-            # Run strict call with scillm (Authorization: Bearer for Chutes Chat in this env)
-            ch_base = os.getenv("CHUTES_API_BASE", "").strip()
-            ch_key = os.getenv("CHUTES_API_KEY", "").strip()
-            resp_sync = await sc_acompletion(
-                model=LLM_MODEL,
-                api_base=ch_base if ch_base else None,
-                api_key=ch_key,
-                custom_llm_provider="openai",
-                messages=messages,
-                response_format={"type": "json_object"},
-                max_tokens=call_params.get("max_tokens"),
-                temperature=0,
-                timeout=llm_timeout,
-                cache={"no-cache": True},
-            )
+            # Run strict call via SciLLM Router (OpenAI-compatible JSON mode)
+            try:
+                _router = _build_text_router()
+                with time_block(logs_dir, "attempt_strict", section_id=str(section_data.get("id","section")), **summarize_messages(messages)):
+                    _r = await _router.acompletion(
+                        model="chutes/text",
+                        messages=messages,
+                        response_format=call_params.get("response_format", {"type": "json_object"}),
+                        temperature=0,
+                        max_tokens=int(call_params.get("max_tokens") or 1024),
+                        timeout=llm_timeout,
+                    )
+                content_obj = _r.choices[0].message.get("content") if hasattr(_r, "choices") else None
+            except Exception:
+                content_obj = None
             try:
                 from loguru import logger as _logger
-                _ok = True if resp_sync else False
+                _ok = True if (content_obj is not None) else False
                 _logger.info(f"reflow_strict: model={LLM_MODEL} ok={_ok}")
             except Exception:
                 pass
-            resp = (resp_sync.get("choices") or [{}])[0].get("message", {}).get("content", "")
+            resp = content_obj or ""
             try:
                 (logs_dir / f"response_strict_{section_data.get('id','section')}.json").write_text(
                     json.dumps(resp, default=str, indent=2)
@@ -1488,13 +1682,69 @@ async def reflow_section_with_llm(
                     "Return ONLY a minified JSON object with keys: reflowed_json, ocr_corrections, improvements_made, summary. "
                     "No markdown, no code fences, no trailing commas. reflowed_json.blocks must be valid and _ordered."
                 )
+                use_compact = os.getenv("STAGE07_USE_COMPACT", "").lower() in ("1","true","yes","y")
                 compact_user = f"{compact_guard}\n\n{context_text[:1500]}"
-                user_parts2 = [{"type": "text", "text": compact_user}]
-                if include_images and supports_vision and _converted:
-                    user_parts2.extend(_converted)
+                if use_compact:
+                    # Load sketch_v2 once
+                    try:
+                        skv2_path = results_base_dir / "06b_layout_sketcher" / "json_output" / "06b_layout_sketch_v2.json"
+                        skv2 = json.loads(skv2_path.read_text()) if skv2_path.exists() else {"sections": {}}
+                        sk_by_sec = skv2.get("sections") or {}
+                    except Exception:
+                        sk_by_sec = {}
+                    compact_user = _build_compact_prompt(
+                        results_base_dir=results_base_dir,
+                        section_data=section_data,
+                        tables=section_data.get("tables", []),
+                        figures=section_data.get("figures", []),
+                        sketch_v2_by_sec=sk_by_sec,
+                    )
+                    # Persist the exact prompt for this section
+                    try:
+                        art = Path("scripts/artifacts")
+                        art.mkdir(parents=True, exist_ok=True)
+                        (art / f"07_{section_data.get('id','section')}_prompt_compact.md").write_text(compact_user, encoding="utf-8")
+                    except Exception:
+                        pass
+                # Use plain string content for text-only reliability
+                # Domain-aware system prompt (concise but explicit)
+                sys_msg = (
+                    "You are reflowing scientific/engineering hardware documents. "
+                    "Return ONLY strict JSON (no markdown/fences). Merge contiguous tables with identical schema; "
+                    "preserve column order and values; fix hyphenation inside words; limit to keys requested."
+                )
+                # Optional: include the section image (multimodal) if requested
+                user_content: Any = compact_user
+                try:
+                    include_image = os.getenv("STAGE07_INCLUDE_SECTION_IMAGE", "").lower() in ("1","true","yes","y")
+                    if include_image:
+                        # Resolve a section image; prefer 04's visual_path on the section, else any 06b visual_path
+                        vrel: Optional[str] = None
+                        try:
+                            vrel = str(section_data.get("visual_path") or "") or None
+                        except Exception:
+                            vrel = None
+                        if not vrel:
+                            try:
+                                skv2_path = results_base_dir / "06b_layout_sketcher" / "json_output" / "06b_layout_sketch_v2.json"
+                                skv2 = json.loads(skv2_path.read_text()) if skv2_path.exists() else {"sections": {}}
+                                sid = str(section_data.get("id"))
+                                vrel = str(((skv2.get("sections") or {}).get(sid) or {}).get("visual_path") or "") or None
+                            except Exception:
+                                vrel = None
+                        if vrel:
+                            from extractor.pipeline.utils.model_params import image_file_to_data_url as _img_to_data
+                            vpath = (results_base_dir / vrel).resolve()
+                            if vpath.exists():
+                                user_content = [
+                                    {"type": "text", "text": compact_user},
+                                    {"type": "image_url", "image_url": {"url": _img_to_data(vpath)}},
+                                ]
+                except Exception:
+                    pass
                 messages2 = [
-                    {"role": "system", "content": "You output ONLY compact JSON."},
-                    {"role": "user", "content": user_parts2},
+                    {"role": "system", "content": sys_msg},
+                    {"role": "user", "content": user_content},
                 ]
                 call_params2 = {"model": LLM_MODEL, "messages": messages2, "timeout": llm_timeout, **extras}
                 call_params2["temperature"] = 0
@@ -1523,8 +1773,7 @@ async def reflow_section_with_llm(
                 # Do not set stop fences; some providers return empty content when stop is present
                 # Log sanitized compact request for debugging
                 try:
-                    logs_dir = results_base_dir / "07_reflow_section" / "logs"
-                    logs_dir.mkdir(parents=True, exist_ok=True)
+                    logs_dir = ensure_logs_dir(results_base_dir, "07_reflow_section")
                     sanitized_messages2 = sanitize_messages_for_return(messages2, mode="truncate", max_str_len=48)
                     payload_dump2 = {
                         "model": LLM_MODEL,
@@ -1536,26 +1785,28 @@ async def reflow_section_with_llm(
                     )
                 except Exception:
                     pass
-                # Compact strict pass with scillm
-                resp_sync2 = await sc_acompletion(
-                    model=LLM_MODEL,
-                    api_base=ch_base if ch_base else None,
-                    api_key=ch_key,
-                    custom_llm_provider="openai",
-                    messages=messages2,
-                    response_format={"type": "json_object"},
-                    max_tokens=call_params2.get("max_tokens"),
-                    temperature=0,
-                    timeout=llm_timeout,
-                    cache={"no-cache": True},
-                )
+                # Compact strict pass via Router (JSON mode)
+                try:
+                    _router2 = _build_text_router()
+                    with time_block(logs_dir, "attempt_compact", section_id=str(section_data.get("id","section")), **summarize_messages(messages2)):
+                        _r2 = await _router2.acompletion(
+                            model="chutes/text",
+                            messages=messages2,
+                            response_format=call_params2.get("response_format", {"type": "json_object"}),
+                            temperature=0,
+                            max_tokens=int(call_params2.get("max_tokens") or 1024),
+                            timeout=llm_timeout,
+                        )
+                    content_obj2 = _r2.choices[0].message.get("content") if hasattr(_r2, "choices") else None
+                except Exception:
+                    content_obj2 = None
                 try:
                     from loguru import logger as _logger
-                    _ok2 = True if resp_sync2 else False
+                    _ok2 = True if (content_obj2 is not None) else False
                     _logger.info(f"reflow_strict_compact: model={LLM_MODEL} ok={_ok2}")
                 except Exception:
                     pass
-                resp2 = (resp_sync2.get("choices") or [{}])[0].get("message", {}).get("content", "")
+                resp2 = content_obj2 or ""
                 try:
                     (logs_dir / f"response_strict_compact_{section_data.get('id','section')}.json").write_text(
                         json.dumps(resp2, default=str, indent=2) if isinstance(resp2, dict) else str(resp2)
@@ -1727,6 +1978,55 @@ async def reflow_section_with_llm(
                 content = None
 
         if not isinstance(content, str) or not content.strip():
+            # Attempt 2: Compact strict JSON retry (shorter guard/context, lower caps)
+            try:
+                try:
+                    _trim2 = int(os.getenv("STAGE07_RETRY1_TRIM_CHARS", "900"))
+                except Exception:
+                    _trim2 = 900
+                _guard2 = (
+                    "Return ONLY a compact JSON object with keys: reflowed_json, ocr_corrections, "
+                    "improvements_made, summary. No markdown, no code fences, and no trailing commas."
+                )
+                user_text2 = f"{_guard2}\n\n{context_text[:_trim2]}"
+                messages2 = [
+                    {"role": "system", "content": "You output ONLY compact JSON."},
+                    {"role": "user", "content": user_text2},
+                ]
+                _retry1_cap = int(os.getenv("STAGE07_RETRY1_MAX_TOKENS", "1024"))
+                try:
+                    _router3 = _build_text_router()
+                    _r3 = await _router3.acompletion(
+                        model="chutes/text",
+                        messages=messages2,
+                        response_format={"type": "json_object"},
+                        temperature=0,
+                        max_tokens=_retry1_cap,
+                        timeout=llm_timeout,
+                    )
+                    content2 = _r3.choices[0].message.get("content") if hasattr(_r3, "choices") else None
+                except Exception:
+                    content2 = None
+                # Accept dict content directly
+                if isinstance(content2, dict):
+                    try:
+                        content = json.dumps(content2, ensure_ascii=False)
+                    except Exception:
+                        content = None
+                elif isinstance(content2, str) and content2.strip():
+                    content = content2
+                try:
+                    (logs_dir / f"response_strict_compact_{section_data.get('id','section')}.json").write_text(
+                        json.dumps(content2, ensure_ascii=False, indent=2, default=str)
+                        if isinstance(content2, dict)
+                        else str(content2)
+                    )
+                except Exception:
+                    pass
+            except Exception:
+                pass
+
+        if not isinstance(content, str) or not content.strip():
             # Attempt 3: Relaxed mode (no response_format). Parse free-form via clean_json_string downstream.
             try:
                 # Retry 2 shaping (no local sleep/backoff; global limiter handles pacing)
@@ -1766,21 +2066,21 @@ async def reflow_section_with_llm(
                     pass
 
                 # Relaxed pass with scillm (no response_format)
-                resp_sync3 = await sc_acompletion(
-                    model=LLM_MODEL,
-                    api_base=ch_base if ch_base else None,
-                    api_key=ch_key,
-                    custom_llm_provider="openai",
-                    messages=messages3,
-                    max_tokens=call_params.get("max_tokens"),
-                    temperature=0,
-                    timeout=llm_timeout,
-                    cache={"no-cache": True},
-                )
-                resp2 = (resp_sync3.get("choices") or [{}])[0].get("message", {}).get("content", "")
+                try:
+                    _router4 = _build_text_router()
+                    _r4 = await _router4.acompletion(
+                        model="chutes/text",
+                        messages=messages3,
+                        temperature=0,
+                        max_tokens=int(call_params.get("max_tokens") or 1024),
+                        timeout=max(30, int(os.getenv("STAGE07_TIMEOUT","90"))),
+                    )
+                    resp2 = _r4.choices[0].message.get("content") if hasattr(_r4, "choices") else None
+                except Exception:
+                    resp2 = None
                 try:
                     from loguru import logger as _logger
-                    _ok3 = True if resp_sync3 else False
+                    _ok3 = True if (resp2 is not None) else False
                     _logger.info(f"reflow_relaxed: model={LLM_MODEL} ok={_ok3}")
                 except Exception:
                     pass
@@ -2522,7 +2822,8 @@ def run(
     include_images = bool(include_images and _ALLOW_IMAGES)
     global LLM_MODEL
     try:
-        LLM_MODEL = get_text_model()
+        # Choose model based on whether images are included
+        LLM_MODEL = get_vlm_model() if include_images else get_text_model()
     except Exception as _e:
         console.print(f"[red]Stage 07 model selection failed: {_e}[/red]")
         raise RuntimeError("Stage 07 model selection failed")
@@ -2866,6 +3167,128 @@ def run(
         final_output["unified_document"] = unified_document_payload
 
     output_path = json_output_dir / "07_reflowed.json"
+
+    # Optional: render visual overlays per section to show provenance of reflow blocks
+    try:
+        if STAGE07_VISUAL_PROOF:
+            # Resolve source PDF from Stage 04 payload; allow env override
+            src_pdf: Optional[Path] = None
+            try:
+                s04 = json.loads(sections_json.read_text())
+                sp = s04.get("source_pdf")
+                if isinstance(sp, str) and Path(sp).exists():
+                    src_pdf = Path(sp)
+            except Exception:
+                src_pdf = None
+            if not src_pdf and STAGE07_SOURCE_PDF:
+                p = Path(STAGE07_SOURCE_PDF)
+                src_pdf = p if p.exists() else None
+
+            # Build quick indexes to map sources → bboxes
+            blocks_index: Dict[str, Tuple[int, List[float]]] = {}
+            try:
+                if "sections" in s04:
+                    for sec in s04.get("sections") or []:
+                        for b in sec.get("blocks") or []:
+                            bid = b.get("id") or b.get("block_id")
+                            bb = b.get("bbox") or []
+                            try:
+                                pg = int(b.get("page") or b.get("page_idx") or sec.get("page_start") or 0)
+                            except Exception:
+                                pg = 0
+                            if bid and isinstance(bb, list) and len(bb) == 4:
+                                blocks_index[str(bid)] = (pg, [float(bb[0]), float(bb[1]), float(bb[2]), float(bb[3])])
+            except Exception:
+                pass
+
+            tables_index: Dict[int, Tuple[int, List[float]]] = {}
+            try:
+                tj = json.loads((tables_json or Path()).read_text()) if tables_json and tables_json.exists() else {}
+                for t in tj.get("tables") or []:
+                    try:
+                        idx = int(t.get("table_index"))
+                        pg = int(t.get("page_index", 0))
+                        bb = t.get("bbox") or []
+                        if isinstance(bb, list) and len(bb) == 4:
+                            tables_index[idx] = (pg, [float(bb[0]), float(bb[1]), float(bb[2]), float(bb[3])])
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+
+            figures_index: Dict[str, Tuple[int, List[float]]] = {}
+            try:
+                fj = json.loads((figures_json or Path()).read_text()) if figures_json and figures_json.exists() else {}
+                for f in fj.get("figures") or []:
+                    fid = f.get("figure_id") or f.get("id") or f.get("image_path")
+                    try:
+                        pg = int(f.get("page") or f.get("page_idx") or f.get("page_index") or 0)
+                    except Exception:
+                        pg = 0
+                    bb = f.get("bbox") or []
+                    if fid and isinstance(bb, list) and len(bb) == 4:
+                        figures_index[str(fid)] = (pg, [float(bb[0]), float(bb[1]), float(bb[2]), float(bb[3])])
+            except Exception:
+                pass
+
+            # Render overlays
+            if src_pdf and processed_sections:
+                from extractor.pipeline.visual.overlay import Box, draw_overlays
+                stage_vis = stage_output_dir / "visual_output"
+                for sec in processed_sections:
+                    sid = str(sec.get("id") or "section")
+                    boxes: List[Box] = []
+                    # Prefer structured JSON blocks when present
+                    rj = (sec.get("reflowed_json") or {}).get("blocks") if isinstance(sec.get("reflowed_json"), dict) else None
+                    blocks_list = rj if isinstance(rj, list) else []
+                    for i, b in enumerate(blocks_list):
+                        typ = (b.get("type") or "").lower()
+                        label = f"{i}:{typ}" if typ else f"{i}"
+                        src = b.get("source") or {}
+                        drawn = False
+                        # Paragraph/List/Heading → map first block_id
+                        if typ in {"paragraph", "list", "heading"}:
+                            bids = src.get("block_ids") or []
+                            if isinstance(bids, list) and bids:
+                                key = str(bids[0])
+                                if key in blocks_index:
+                                    pg, bb = blocks_index[key]
+                                    boxes.append(Box(page=int(pg), x0=bb[0], y0=bb[1], x1=bb[2], y1=bb[3], label=label, color=(0, 170, 255), width=3))
+                                    drawn = True
+                        # Table → map table_indices
+                        if not drawn and typ == "table":
+                            tids = src.get("table_indices") or []
+                            if isinstance(tids, list) and tids:
+                                ti0 = None
+                                try:
+                                    ti0 = int(tids[0])
+                                except Exception:
+                                    ti0 = None
+                                if ti0 is not None and ti0 in tables_index:
+                                    pg, bb = tables_index[ti0]
+                                    boxes.append(Box(page=int(pg), x0=bb[0], y0=bb[1], x1=bb[2], y1=bb[3], label=label, color=(0, 200, 0), width=3))
+                                    drawn = True
+                        # Figure → map by figure_id or image_ref
+                        if not drawn and typ == "figure":
+                            fid = b.get("figure_id") or b.get("image_ref")
+                            if fid and str(fid) in figures_index:
+                                pg, bb = figures_index[str(fid)]
+                                boxes.append(Box(page=int(pg), x0=bb[0], y0=bb[1], x1=bb[2], y1=bb[3], label=label, color=(255, 128, 0), width=3))
+                                drawn = True
+                        # As a last resort, draw at the first page listed in source without bbox (skip to avoid misleading boxes)
+                    if boxes:
+                        vout = stage_vis / sid
+                        draw_overlays(src_pdf, boxes, vout)
+                        try:
+                            # Attach relative paths for convenience
+                            rel = [str(p.relative_to(output_dir.parent.parent)) for p in vout.glob("*.png")]
+                            if rel:
+                                sec.setdefault("visual_overlays", rel)
+                        except Exception:
+                            pass
+    except Exception as _e:
+        logger.warning(f"Stage 07 visual overlay generation failed: {_e}")
+
     with open(output_path, "w") as f:
         json.dump(final_output, f, indent=2, ensure_ascii=False)
 

@@ -23,7 +23,7 @@ from rich.console import Console
 from extractor.pipeline.utils.json_utils import clean_json_string
 from extractor.pipeline.utils.json_mode import JSON_SYSTEM_GUARD
 from tqdm import tqdm
-from scillm import acompletion as sc_acompletion
+from extractor.pipeline.utils.scillm_router import get_text_router
 from extractor.pipeline.utils.model_select import get_text_model
 
 # Note: Avoid import-time side effects. Tests can import this module safely.
@@ -240,12 +240,9 @@ async def create_checkpoint_summary(
     system_guard = JSON_SYSTEM_GUARD
 
     async def _call_once_async():
-        return await sc_acompletion(
-            model=model_name,
-            custom_llm_provider="openai_like",
-            api_base=os.getenv("CHUTES_API_BASE", "").strip() or None,
-            api_key=None,
-            extra_headers={"x-api-key": os.getenv("CHUTES_API_KEY", "").strip()} if os.getenv("CHUTES_API_KEY") else None,
+        router = get_text_router()
+        return await router.acompletion(
+            model="chutes/text",
             messages=[
                 {"role": "system", "content": system_guard},
                 {"role": "user", "content": prompt},
@@ -301,7 +298,7 @@ async def create_checkpoint_summary(
             logger.error(f"Failed to create checkpoint summary: {e}")
             return None
 
-    content = (resp.get("choices") or [{}])[0].get("message", {}).get("content", "")
+    content = (getattr(resp, "choices", [{}])[0].get("message", {}).get("content", ""))
     if not content:
         logger.error("checkpoint_summary.empty_content")
         return None

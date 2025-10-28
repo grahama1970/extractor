@@ -5,7 +5,8 @@ from typing import Any, Dict
 
 from tenacity import retry, stop_after_attempt, wait_exponential
 
-from extractor.pipeline.utils.litellm_call import litellm_call
+import os
+from scillm import acompletion as sc_acompletion  # type: ignore
 
 
 SYSTEM_PROMPT = (
@@ -22,7 +23,7 @@ SYSTEM_PROMPT = (
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=2, max=10))
 async def verify_header_with_llm(image_b64: str, context_text: str, model: str) -> Dict[str, Any]:
-    """Verify header using litellm_call (vision required) with strict JSON intent.
+    """Verify header using SciLLM acompletion (vision) with strict JSON intent.
 
     Always sends an image; provider error will be raised to the caller.
     """
@@ -34,13 +35,21 @@ async def verify_header_with_llm(image_b64: str, context_text: str, model: str) 
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": user_content},
     ]
-    results = await litellm_call(
-        prompts=[{"model": model, "messages": messages}],
-        wrap_json=True,
-        concurrency=1,
-        desc="verify header",
+    ch_base = os.getenv("CHUTES_API_BASE")
+    ch_key = os.getenv("CHUTES_API_KEY")
+    resp = await sc_acompletion(
+        model=model,
+        api_base=ch_base,
+        api_key=ch_key,
+        custom_llm_provider="openai",
+        messages=messages,
+        response_format={"type": "json_object"},
+        temperature=0,
+        timeout=int(os.getenv("VERIFIER_TIMEOUT", "30")),
+        max_tokens=256,
     )
-    answer = results[0] if results else ""
+    content = (resp.get("choices") or [{}])[0].get("message", {}).get("content")
+    answer = content if isinstance(content, str) else json.dumps(content or {})
     try:
         payload = json.loads(answer) if answer else {}
     except Exception:

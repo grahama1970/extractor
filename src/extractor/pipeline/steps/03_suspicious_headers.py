@@ -26,12 +26,10 @@ import fitz  # PyMuPDF
 # Typer removed: use plain functions for easier debugging
 from loguru import logger
 # Avoid hard dependency at import time; prefer adapter helper; direct scillm used only if present
-try:
-    from scillm import acompletion as sc_acompletion  # type: ignore
-except Exception:  # pragma: no cover
-    sc_acompletion = None  # type: ignore
+from extractor.pipeline.utils.scillm_router import get_text_router
 
 from extractor.pipeline.utils.ann_index import query_ann_index
+from extractor.pipeline.utils.debug_utils import ensure_logs_dir, time_block
 from extractor.pipeline.utils.annotations import (
     cue_from_annotation as _cue_from_annotation,
 )
@@ -62,7 +60,7 @@ def _normalize_model_alias(model: str | None) -> str:
     return m
 from extractor.pipeline.utils.model_params import build_chat_extras  # noqa: E402
 from extractor.pipeline.utils.prompt_builder import build_llm_context  # noqa: E402
-from extractor.pipeline.utils.scillm_client import verify_header as scillm_verify_header  # noqa: E402
+# No scillm_client wrappers; Router-only policy for SciLLM
 
 try:
     import psutil  # type: ignore
@@ -159,8 +157,8 @@ def _ensure_first_span_color(page: fitz.Page, block: dict[str, Any]) -> None:
 
 
 def _env_vlm_model(default: str = "") -> str:
-    """Return VLM model from environment only. No hardcoded defaults."""
-    return (os.getenv("LITELLM_VLM_MODEL") or "").strip()
+    """SciLLM-only: prefer CHUTES_VLM_MODEL; do not consult LITELLM_* envs."""
+    return (os.getenv("CHUTES_VLM_MODEL") or default).strip()
 
 
 @dataclass
@@ -302,20 +300,29 @@ async def verify_header_with_llm(image_b64: str, context_text: str, model: str, 
     except Exception:
         _verify_cap = 256
 
-    # SciLLM async call (SciLLM-only policy)
-    if sc_acompletion is None:
-        raise RuntimeError("SciLLM not available for Stage 03")
-    resp = await sc_acompletion(
-        model=model_norm,
-        api_base=ch_base or None,
-        api_key=ch_key,
-        custom_llm_provider="openai",
-        messages=messages,
-        response_format={"type": "json_object"},
-        max_tokens=_verify_cap,
-        temperature=0,
-        timeout=item_timeout,
-    )
+    # SciLLM Router-only call (OpenAI-compatible JSON)
+    router = get_text_router()
+    _rd = os.getenv("RUN_RESULTS_DIR")
+    if _rd:
+        logs_dir = ensure_logs_dir(Path(_rd), "03_suspicious_headers")
+        with time_block(logs_dir, "verify_header", page=int(task.page_idx), block=int(task.block_idx)):
+            resp = await router.acompletion(
+                model="chutes/text",
+                messages=messages,
+                response_format={"type": "json_object"},
+                max_tokens=_verify_cap,
+                temperature=0,
+                timeout=item_timeout,
+            )
+    else:
+        resp = await router.acompletion(
+            model="chutes/text",
+            messages=messages,
+            response_format={"type": "json_object"},
+            max_tokens=_verify_cap,
+            temperature=0,
+            timeout=item_timeout,
+        )
     answer = (resp.get("choices") or [{}])[0].get("message", {}).get("content", "")
     try:
         payload = json.loads(answer) if answer else {}
@@ -952,20 +959,16 @@ async def process_pdf_pipeline(config: Config):
                 _verify_cap = 256
 
             async def _process_item(item: dict) -> str:
-                if sc_acompletion is None:
-                    return "{}"
-                resp = await sc_acompletion(
-                    model=item.get("model"),
-                    api_base=ch_base or None,
-                    api_key=ch_key,
-                    custom_llm_provider="openai",
+                router = get_text_router()
+                resp = await router.acompletion(
+                    model="chutes/text",
                     messages=item.get("messages"),
                     response_format={"type": "json_object"},
                     max_tokens=_verify_cap,
                     temperature=0,
                     timeout=config.item_timeout_seconds,
                 )
-                return (resp.get("choices") or [{}])[0].get("message", {}).get("content", "")
+                return (getattr(resp, "choices", [{}])[0].get("message", {}).get("content", ""))
 
             results = await process_items_concurrently(
                 prepared,

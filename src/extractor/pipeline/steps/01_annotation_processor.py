@@ -28,7 +28,7 @@ except ImportError:
     raise
 from loguru import logger
 try:
-    from scillm import acompletion as sc_completion  # type: ignore
+    from scillm import acompletion as sc_acompletion  # type: ignore
 except Exception:  # pragma: no cover
     sc_completion = None  # type: ignore
 
@@ -179,7 +179,8 @@ class Config:
     render_dpi: int = 150
     llm_model: str = field(
         default_factory=lambda: os.getenv(
-            "LITELLM_DEFAULT_MODEL", os.getenv("DEFAULT_LITELLM_MODEL", "")
+            # SciLLM-only: do not consult LITELLM/DEFAULT_LITELLM envs
+            "",
         )
     )
     llm_concurrency: int = 5
@@ -833,13 +834,13 @@ async def process_pdf_pipeline(config: Config):
         ch_key = os.getenv("CHUTES_API_KEY", "").strip()
         # Sanitize: truncate large data URLs in logs only (payload still sent)
         try:
-            if os.getenv("STAGE01_SANITIZE_DATA_URLS", "redact").lower() in {"redact","truncate"}:
+            if os.getenv("STAGE01_SANITIZE_DATA_URLS", "redact").lower() in {"redact", "truncate"}:
                 pass
         except Exception:
             pass
-        if sc_completion is None:
+        if sc_acompletion is None:
             return {"index": idx, "content": "{}"}
-        resp = await sc_completion(
+        resp = await sc_acompletion(
             model=params.get("model"),
             api_base=ch_base or None,
             api_key=ch_key,
@@ -1143,7 +1144,8 @@ def run(
         output_dir=stage_output_dir,
         llm_model=llm_model
         or os.getenv(
-            "LITELLM_DEFAULT_MODEL", os.getenv("DEFAULT_LITELLM_MODEL", "openai/gpt-4o-mini")
+            # SciLLM-only: remove legacy defaults
+            "",
         ),
         llm_concurrency=concurrency,
         render_dpi=dpi,
@@ -1233,8 +1235,8 @@ def debug_bundle(
             opts.get(
                 "model",
                 os.getenv(
-            "LITELLM_DEFAULT_MODEL",
-                    os.getenv("DEFAULT_LITELLM_MODEL", ""),
+            # SciLLM-only: remove legacy defaults
+            "",
                 ),
             )
         ),

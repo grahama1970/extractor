@@ -34,7 +34,7 @@ from typing import Any, cast
 from dotenv import find_dotenv, load_dotenv
 from loguru import logger
 from rich.console import Console
-from scillm import acompletion as sc_acompletion
+from extractor.pipeline.utils.scillm_router import get_text_router
 from scillm.extras.providers import certainly_prove
 from tqdm.asyncio import tqdm
 # httpx not used for LLM calls; SciLLM-only policy
@@ -85,7 +85,12 @@ except Exception:
 if not load_dotenv(find_dotenv()):
     print("Warning: .env not found; continuing with process environment.", file=sys.stderr)
 
-from extractor.pipeline.utils.litellm_cache import initialize_litellm_cache
+# SciLLM-only: legacy litellm cache disabled; define a no-op initializer
+try:
+    from extractor.pipeline.utils.litellm_cache import initialize_litellm_cache  # type: ignore
+except Exception:  # pragma: no cover
+    def initialize_litellm_cache():  # type: ignore
+        return None
 
 initialize_litellm_cache()
 
@@ -196,10 +201,9 @@ async def identify_requirements_in_section(
                     }
                 )
                 _t0=time.monotonic()
-                return await sc_acompletion(
-                    model=LEAN4_MODEL,
-                    api_base=ch_base or None,
-                    api_key=ch_key,
+                router = get_text_router()
+                return await router.acompletion(
+                    model="chutes/text",
                     messages=[
                         {"role": "system", "content": JSON_SYSTEM_GUARD},
                         {"role": "user", "content": prompt},
@@ -662,10 +666,9 @@ async def prove_requirement(requirement: str, strategy: Any):
             ch_base = os.getenv("CHUTES_API_BASE", "").strip()
             ch_key = os.getenv("CHUTES_API_KEY", "").strip()
             async def _do_scillm_prover():
-                return await sc_acompletion(
-                    model=LEAN4_PROVER_MODEL,
-                    api_base=ch_base or None,
-                    api_key=ch_key,
+                router = get_text_router()
+                return await router.acompletion(
+                    model="chutes/text",
                     messages=[
                         {"role": "system", "content": "You are a Lean 4 theorem prover service. Return STRICT JSON with keys: success(bool), lean_code(string), stdout(string), stderr(string), proof_output(string|null)."},
                         {"role": "user", "content": textwrap.dedent(f"""

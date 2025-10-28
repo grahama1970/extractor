@@ -59,6 +59,17 @@ def main(argv: Optional[list[str]] = None) -> int:
     p.add_argument("--summary-only", action="store_true")
     p.add_argument("--skip-fig-descriptions", action="store_true")
     p.add_argument("--skip-export", action="store_true")
+    p.add_argument("--extract-requirements", action="store_true", help="Run 07_requirements_miner after reflow")
+    p.add_argument(
+        "--prove-requirements",
+        action="store_true",
+        help="Run 08_lean4_theorem_prover (may be slow); implies --extract-requirements",
+    )
+    p.add_argument(
+        "--annotate-pdf",
+        action="store_true",
+        help="Run 09a_pdf_annotator to generate an annotated PDF with overlays",
+    )
     p.add_argument("--stop-on-fail", action="store_true", default=True)
     args = p.parse_args(argv)
 
@@ -86,9 +97,13 @@ def main(argv: Optional[list[str]] = None) -> int:
         try:
             json_dir = stage_dir / "json_output"
             img_dir = stage_dir / "image_output"
+            vis_dir = stage_dir / "visual_output"
             txt_dir = stage_dir / "text_output"
             idx = {
-                "images": [str(p.relative_to(out)) for p in (img_dir.rglob("*"))] if img_dir.exists() else [],
+                "images": [
+                    *([str(p.relative_to(out)) for p in (img_dir.rglob("*"))] if img_dir.exists() else []),
+                    *([str(p.relative_to(out)) for p in (vis_dir.rglob("*.png"))] if vis_dir.exists() else []),
+                ],
                 "json": [str(p.relative_to(out)) for p in (json_dir.glob("*.json"))] if json_dir.exists() else [],
                 "text": [str(p.relative_to(out)) for p in (txt_dir.rglob("*.txt"))] if txt_dir.exists() else [],
             }
@@ -107,6 +122,9 @@ def main(argv: Optional[list[str]] = None) -> int:
         s05_table_extractor as s05,
         s06_figure_extractor as s06,
         s07_reflow_section as s07,
+        s09a_pdf_annotator as s09a,
+        s07_requirements_miner as s07req,
+        s08_lean4_theorem_prover as s08,
         s09_section_summarizer as s09,
         s10_arangodb_exporter as s10,
     )
@@ -213,6 +231,80 @@ def main(argv: Optional[list[str]] = None) -> int:
     results["07"] = a07
     _write_artifacts_index((out / "07_reflow_section"))
     manifest.record_stage("07_reflow_section", "Completed", {"json": str(a07.relative_to(out))})
+
+    # 09a PDF annotator (optional visual end-product)
+    if args.annotate_pdf:
+        try:
+            annotated = _step(
+                "09a_pdf_annotator",
+                s09a.run,
+                pdf,
+                out / "04_section_builder" / "json_output" / "04_sections.json",
+                out / "05_table_extractor" / "json_output" / "05_tables.json",
+                out / "06_figure_extractor" / "json_output" / "06_figures.json",
+                out / "07_reflow_section" / "json_output" / "07_reflowed.json",
+                out / "02_marker_extractor" / "json_output" / "02_marker_blocks.json",
+                None,  # headers03_json (auto-discovered in 09a)
+                out / "06b_layout_sketcher" / "json_output" / "06b_layout_sketch.json",
+                out,
+                "09a",
+                True,
+                12,
+                False,
+                False,
+                False,
+                stop_on_fail=args.stop_on_fail,
+            )
+            if annotated:
+                _write_artifacts_index((out / "09a_pdf_annotator"))
+                manifest.record_stage(
+                    "09a_pdf_annotator",
+                    "Completed",
+                    {"json": str((out / "09a_pdf_annotator" / "json_output" / "annotations.json").relative_to(out))},
+                )
+        except Exception as e:
+            logger.warning(f"09a_pdf_annotator failed (continuing): {e}")
+
+    # 07½ Requirements miner (optional)
+    req_json_path: Optional[Path] = None
+    if args.extract_requirements or args.prove_requirements:
+        a07r = _step(
+            "07_requirements_miner",
+            s07req.run,
+            out / "07_reflow_section" / "json_output" / "07_reflowed.json",
+            out,
+            stop_on_fail=args.stop_on_fail,
+        )
+        if not a07r and args.stop_on_fail:
+            return 1
+        _write_artifacts_index((out / "07_requirements_miner"))
+        req_json_path = out / "07_requirements_miner" / "json_output" / "07_requirements.json"
+        try:
+            rcount = len(__import__("json").loads(req_json_path.read_text()).get("requirements", [])) if req_json_path.exists() else None
+        except Exception:
+            rcount = None
+        manifest.record_stage(
+            "07_requirements_miner",
+            "Completed",
+            {"json": str(req_json_path.relative_to(out)) if req_json_path and req_json_path.exists() else ""},
+            counts={"requirements": rcount} if isinstance(rcount, int) else None,
+        )
+
+    # 08 Lean4 theorem prover (optional; default skip unless requested)
+    if args.prove_requirements:
+        a08 = _step(
+            "08_lean4_theorem_prover",
+            s08.run,
+            out / "07_reflow_section" / "json_output" / "07_reflowed.json",
+            out,
+            False,  # skip_proving=False → actually prove
+            req_json_path if req_json_path and req_json_path.exists() else None,
+            stop_on_fail=args.stop_on_fail,
+        )
+        if not a08 and args.stop_on_fail:
+            return 1
+        _write_artifacts_index((out / "08_lean4_theorem_prover"))
+        manifest.record_stage("08_lean4_theorem_prover", "Completed", {"json": str((out / "08_lean4_theorem_prover" / "json_output" / "08_theorems.json").relative_to(out))})
 
     # 09
     a09 = _step(

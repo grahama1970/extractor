@@ -66,6 +66,8 @@ console = Console()
 
 # Visuals
 MAX_VISUAL_PAGES_DEFAULT = int(os.getenv("MAX_VISUAL_PAGES", "2"))
+STAGE04_VISUAL_PROOF = os.getenv("STAGE04_VISUAL_PROOF", "").lower() in {"1", "true", "yes", "y"}
+STAGE04_SOURCE_PDF = os.getenv("STAGE04_SOURCE_PDF", "").strip() or None
 
 # Optional color enrichment for headers (first-span color via PyMuPDF)
 STAGE04_COLOR_ENRICH = os.getenv("STAGE04_COLOR_ENRICH", "1").lower() in {"1", "true", "yes", "y"}
@@ -1149,6 +1151,124 @@ async def build_and_validate_sections_comprehensive(
         json.dump(result, f, indent=2)
 
     logger.info(f"Stage 04 comprehensive analysis complete. Output: {output_path}")
+
+    # Optional: render per-page overlays (visual proof) of sections/blocks
+    try:
+        if STAGE04_VISUAL_PROOF:
+            # Resolve source PDF: prefer provided pdf_path; else from result; else env override
+            src_pdf: Optional[Path] = None
+            if pdf_path and Path(pdf_path).exists():
+                src_pdf = Path(pdf_path)
+            if not src_pdf:
+                try:
+                    tp = result.get("source_pdf")
+                    if isinstance(tp, str) and Path(tp).exists():
+                        src_pdf = Path(tp)
+                except Exception:
+                    src_pdf = None
+            if not src_pdf and STAGE04_SOURCE_PDF:
+                p = Path(STAGE04_SOURCE_PDF)
+                src_pdf = p if p.exists() else None
+
+            if src_pdf and result.get("sections"):
+                from extractor.pipeline.visual.overlay import Box, draw_overlays
+
+                # Build overlay boxes: one color per role; section union per page
+                role_colors = {
+                    "SectionHeader": (0, 200, 0),  # green
+                    "heading": (0, 200, 0),
+                    "paragraph": (0, 170, 255),  # blue
+                    "text": (0, 170, 255),
+                    "list": (180, 0, 255),  # purple
+                }
+
+                def _short(s: str, n: int = 40) -> str:
+                    s = " ".join((s or "").split())
+                    return s if len(s) <= n else s[: n - 1] + "…"
+
+                boxes: List[Box] = []
+                for s in result.get("sections", []):
+                    title = s.get("display_title") or s.get("title") or "Section"
+                    sid = s.get("id") or "sec"
+                    # Per-page section union bbox
+                    page_to_union: Dict[int, List[float]] = {}
+                    for b in (s.get("blocks") or []):
+                        bb = b.get("bbox")
+                        if not bb or len(bb) != 4:
+                            continue
+                        try:
+                            p = int(b.get("page") or b.get("page_idx") or 0)
+                        except Exception:
+                            p = 0
+                        if p not in page_to_union:
+                            page_to_union[p] = [float(bb[0]), float(bb[1]), float(bb[2]), float(bb[3])]
+                        else:
+                            ub = page_to_union[p]
+                            page_to_union[p] = [min(ub[0], bb[0]), min(ub[1], bb[1]), max(ub[2], bb[2]), max(ub[3], bb[3])]
+                        # Block-level box
+                        kind = (b.get("type") or b.get("block_type") or "text").lower()
+                        color = role_colors.get(b.get("block_type"), role_colors.get(kind, (255, 128, 0)))
+                        label = f"{sid}:{kind}"
+                        boxes.append(
+                            Box(
+                                page=p,
+                                x0=float(bb[0]),
+                                y0=float(bb[1]),
+                                x1=float(bb[2]),
+                                y1=float(bb[3]),
+                                label=label,
+                                color=color,
+                                width=3,
+                            )
+                        )
+                    # Section union per page
+                    for p, ub in page_to_union.items():
+                        boxes.append(
+                            Box(
+                                page=int(p),
+                                x0=float(ub[0]),
+                                y0=float(ub[1]),
+                                x1=float(ub[2]),
+                                y1=float(ub[3]),
+                                label=f"{sid}:{_short(title)}",
+                                color=(255, 0, 0),  # red for section envelope
+                                width=2,
+                            )
+                        )
+
+                if boxes:
+                    visual_out = output_dir / "visual_output"
+                    draw_overlays(src_pdf, boxes, visual_out)
+                    # Attach relative paths list for convenience and write artifacts index
+                    try:
+                        results_root = output_dir.parent.parent  # .../results
+                        rel_imgs = [str(p.relative_to(results_root)) for p in visual_out.glob("*.png")]
+                        if rel_imgs:
+                            result.setdefault("visual_overlays", rel_imgs)
+                            # merge into artifacts_index.json (images + visual)
+                            idx_path = json_output_dir / "artifacts_index.json"
+                            idx = {"images": [], "json": [], "text": []}
+                            if idx_path.exists():
+                                try:
+                                    idx = json.loads(idx_path.read_text())
+                                except Exception:
+                                    idx = {"images": [], "json": [], "text": []}
+                            existing_imgs = set(idx.get("images") or [])
+                            existing_imgs.update(
+                                [
+                                    str(p.relative_to(results_root))
+                                    for p in (output_dir / "image_output").rglob("*")
+                                ]
+                            )
+                            existing_imgs.update(rel_imgs)
+                            idx["images"] = sorted(existing_imgs)
+                            (json_output_dir / "artifacts_index.json").write_text(json.dumps(idx, indent=2))
+                    except Exception:
+                        pass
+            else:
+                logger.info("Stage 04 visual overlay skipped: source PDF not resolved or no sections.")
+    except Exception as _e:
+        logger.warning(f"Stage 04 visual overlay generation failed: {_e}")
 
     return output_path, result
 

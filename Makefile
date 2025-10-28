@@ -34,9 +34,8 @@ pipeline-smoke:
 
 
 .PHONY: coco-export smoke-tabbed-api help setup setup-smokes smokes-python dev stop lint fmt type test api-smokes ux-health smokes ci scaffold smoke-issue \
-		gamified-e2e gamified-all gamified-all-fast gamified-codex gamified-cli \
-		smoke-litellm smoke-litellm-image smoke-litellm-all smoke-litellm-results \
-		smoke-07-reflow-min bundle-tabbed state-of-project
+			gamified-e2e gamified-all gamified-all-fast gamified-codex gamified-cli \
+			smoke-07-reflow-min bundle-tabbed state-of-project
 
 help:
 	@echo "Common targets:"
@@ -112,12 +111,12 @@ setup:
 
 # Lean environment for Python smokes only (no heavy dev extras)
 setup-smokes:
-	python3 -m venv .venv && \
-	. .venv/bin/activate && \
-	python -m ensurepip --upgrade && \
-	python -m pip install -U pip && \
-	python -m pip install "litellm>=1.74.7" python-dotenv typer httpx loguru pillow urlextract strip_tags tqdm json-repair PyMuPDF camelot-py opencv-python-headless pandas tenacity && \
-	python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+		python3 -m venv .venv && \
+		. .venv/bin/activate && \
+		python -m ensurepip --upgrade && \
+		python -m pip install -U pip && \
+		python -m pip install python-dotenv typer httpx loguru pillow urlextract strip_tags tqdm json-repair PyMuPDF camelot-py opencv-python-headless pandas tenacity && \
+		python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
 
 # Optional: use uv to install only the minimal smokes extra
 setup-smokes-uv:

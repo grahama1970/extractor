@@ -28,7 +28,9 @@ import fitz  # PyMuPDF
 from dotenv import find_dotenv, load_dotenv
 from loguru import logger
 from rich.console import Console
-from scillm import acompletion
+from extractor.pipeline.utils.scillm_router import get_vlm_router
+from extractor.pipeline.utils.response_utils import normalize_json_content
+from extractor.pipeline.utils.debug_utils import ensure_logs_dir, time_block
 
 from extractor.pipeline.utils.figure_extractor_utils import (
     _estimate_bbox,
@@ -54,6 +56,7 @@ CONCURRENCY = int(os.getenv("STAGE06_CONCURRENCY", "6"))
 BAND_ABOVE_PX = int(os.getenv("STAGE06_BAND_ABOVE_PX", "120"))
 BAND_BELOW_PX = int(os.getenv("STAGE06_BAND_BELOW_PX", "140"))
 VLM_TIMEOUT_SEC = float(os.getenv("STAGE06_VLM_TIMEOUT_SEC", "25"))
+USE_JSON_CHAT = os.getenv("SCILLM_USE_JSON_CHAT", "").lower() in {"1","true","yes","y"}
 FIGURE_MIN_AREA = int(os.getenv("FIGURE_MIN_AREA_PX", "5000"))
 FIGURE_DESC_ENABLED = os.getenv("FIGURE_DESC", "1").lower() in {"1", "true", "yes"}
 
@@ -76,6 +79,7 @@ async def _describe_and_title_multimodal(
     text_above: str,
     text_below: str,
     nearby_text: str,
+    router: Any | None = None,
 ) -> dict[str, Optional[str]]:
     base = os.getenv("CHUTES_API_BASE", "").strip()
     key = os.getenv("CHUTES_API_KEY", "").strip()
@@ -101,34 +105,39 @@ async def _describe_and_title_multimodal(
         {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
     ]
 
-    try:
-        resp = await acompletion(
-            model=model,
-            custom_llm_provider="openai_like",
-            api_base=base,
-            api_key=None,
-            extra_headers={"x-api-key": key},
+    # Router-only (SciLLM). No SDK/curl fallback inside steps.
+    router = get_vlm_router()
+    # Optional per-call timing: set RUN_RESULTS_DIR to base results dir
+    _rd = os.getenv("RUN_RESULTS_DIR")
+    if _rd:
+        logs_dir = ensure_logs_dir(Path(_rd), "06_figure_extractor")
+        with time_block(logs_dir, "figure_vlm", parts=len(user_parts), image=1 if any(isinstance(p, dict) and p.get("type")=="image_url" for p in user_parts) else 0):
+            resp = await router.acompletion(
+                model="chutes/vlm",
+                messages=[{"role": "system", "content": system}, {"role": "user", "content": user_parts}],
+                response_format={"type": "json_object"},
+                temperature=0.2,
+                max_tokens=220,
+                timeout=VLM_TIMEOUT_SEC,
+            )
+    else:
+        resp = await router.acompletion(
+            model="chutes/vlm",
             messages=[{"role": "system", "content": system}, {"role": "user", "content": user_parts}],
             response_format={"type": "json_object"},
             temperature=0.2,
             max_tokens=220,
             timeout=VLM_TIMEOUT_SEC,
         )
-        content = (resp.get("choices") or [{}])[0].get("message", {}).get("content", "")
-        if isinstance(content, dict):
-            obj = content
-        else:
-            # If a string slipped through, accept it as raw JSON
-            obj = json.loads(content) if content else {}
+    _, obj = normalize_json_content(resp)
+    if isinstance(obj, dict):
         return {
-            "description": (obj or {}).get("description"),
-            "title": (obj or {}).get("title"),
-            "source": (obj or {}).get("source"),
-            "number": (obj or {}).get("number"),
+            "description": obj.get("description"),
+            "title": obj.get("title"),
+            "source": obj.get("source"),
+            "number": obj.get("number"),
         }
-    except Exception as e:
-        logger.warning(f"multimodal.describe_title.error err={e}")
-        return {}
+    return {}
 
 
 async def _process_one(
@@ -138,6 +147,7 @@ async def _process_one(
     figure_id: str,
     image_output_dir: Path,
     skip_descriptions: bool,
+    router: Any | None = None,
 ) -> dict[str, Any] | None:
     try:
         page_num = int(block.get("page_idx", 0))
@@ -159,7 +169,11 @@ async def _process_one(
 
         if FIGURE_DESC_ENABLED and not skip_descriptions and _bbox_area(expanded_bbox) >= FIGURE_MIN_AREA:
             meta = await _describe_and_title_multimodal(
-                image_data=image_data, text_above=above_text, text_below=below_text, nearby_text=nearby_text
+                image_data=image_data,
+                text_above=above_text,
+                text_below=below_text,
+                nearby_text=nearby_text,
+                router=router,
             )
             if meta:
                 if isinstance(meta.get("description"), str):
@@ -200,11 +214,23 @@ async def _process_all(
     skip_descriptions: bool,
 ) -> list[dict[str, Any]]:
     sem = asyncio.Semaphore(max(1, CONCURRENCY))
+    # Router is constructed on demand inside calls (get_vlm_router)
+    router = None
+    try:
+        from extractor.pipeline.utils.scillm_router import get_vlm_router as _rv
+        router = _rv()
+    except Exception:
+        router = None
 
     async def runner(i: int, blk: dict[str, Any]) -> dict[str, Any] | None:
         async with sem:
             return await _process_one(
-                doc=doc, block=blk, figure_id=f"figure_{i+1:03d}", image_output_dir=image_output_dir, skip_descriptions=skip_descriptions
+                doc=doc,
+                block=blk,
+                figure_id=f"figure_{i+1:03d}",
+                image_output_dir=image_output_dir,
+                skip_descriptions=skip_descriptions,
+                router=router,
             )
 
     tasks = []
@@ -220,9 +246,47 @@ async def _process_all(
                 continue
             if res:
                 out.append(res)
+        # Write per-figure summaries for diagnostics
+        try:
+            logs_dir = image_output_dir.parent / "logs"
+            logs_dir.mkdir(parents=True, exist_ok=True)
+            for i, r in enumerate(out):
+                if not isinstance(r, dict):
+                    continue
+                (logs_dir / f"figure_{i+1:03d}.summary.json").write_text(
+                    json.dumps(
+                        {
+                            "id": r.get("figure_id"),
+                            "has_title": bool(r.get("title")),
+                            "has_description": bool(r.get("ai_description")),
+                            "title_source": r.get("title_source"),
+                        },
+                        indent=2,
+                    )
+                )
+        except Exception:
+            pass
         return out
     finally:
         doc.close()
+        # Ensure router is closed cleanly to avoid aiohttp warnings
+        if router is not None:
+            try:
+                close = getattr(router, "aclose", None) or getattr(router, "close", None)
+                if close is not None:
+                    maybe = close()
+                    if hasattr(maybe, "__await__"):
+                        try:
+                            import asyncio as _asyncio
+                            loop = _asyncio.get_running_loop()
+                            # schedule without blocking
+                            loop.create_task(maybe)  # type: ignore
+                        except RuntimeError:
+                            # no running loop, run synchronously
+                            import asyncio as _asyncio
+                            _asyncio.run(maybe)  # type: ignore
+            except Exception:
+                pass
 
 
 ## section intersection moved to utils.intersect_sections
@@ -347,7 +411,9 @@ if __name__ == "__main__":
         if len(argv) < 3:
             print("Missing args. See --help.", file=sys.stderr)
             sys.exit(2)
-        s02 = Path(argv[0]); s04 = Path(argv[1]); pdf_dir = Path(argv[2])
+        s02 = Path(argv[0])
+        s04 = Path(argv[1])
+        pdf_dir = Path(argv[2])
         out_dir = Path(argv[3]) if len(argv) > 3 else Path("data/results/pipeline")
         kw = {
             "stage_02_json": s02,
