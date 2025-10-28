@@ -133,20 +133,20 @@ def _build_compact_prompt(
     lines.append("")
     lines.append("Return ONLY the JSON; keep it compact.")
     return "\n".join(lines)
-from extractor.pipeline.utils.response_utils import extract_content
-from extractor.pipeline.utils.log_utils import sanitize_messages_for_return
-from extractor.pipeline.utils.metrics_logger import log_metric
-from extractor.pipeline.utils.model_params import (
+from extractor.pipeline.utils.response_utils import extract_content  # noqa: E402
+from extractor.pipeline.utils.log_utils import sanitize_messages_for_return  # noqa: E402
+from extractor.pipeline.utils.metrics_logger import log_metric  # noqa: E402
+from extractor.pipeline.utils.model_params import (  # noqa: E402
     build_chat_extras,
 )
 # SciLLM client adapter wrappers are not used in Stage 07 per policy (Router-only)
-from extractor.pipeline.utils.text_utils import sanitize_text
-from extractor.pipeline.utils.unified_conversion import build_unified_document_from_reflow
-from extractor.pipeline.utils.vision import preflight_vision_support
+from extractor.pipeline.utils.text_utils import sanitize_text  # noqa: E402
+from extractor.pipeline.utils.unified_conversion import build_unified_document_from_reflow  # noqa: E402
+from extractor.pipeline.utils.vision import preflight_vision_support  # noqa: E402
 
 # Model selection (place imports at top to satisfy E402)
-from extractor.pipeline.utils.model_select import get_vlm_model, get_text_model
-from extractor.pipeline.utils.debug_utils import ensure_logs_dir, time_block, summarize_messages
+from extractor.pipeline.utils.model_select import get_vlm_model, get_text_model  # noqa: E402
+from extractor.pipeline.utils.debug_utils import ensure_logs_dir, time_block, summarize_messages, log_timing  # noqa: E402
 
 
 def _build_text_router() -> Router:
@@ -1208,13 +1208,22 @@ async def reflow_section_with_llm(
                 # Build compact user prompt with Top Summary + Layout DSL + minimal inputs
                 compact_user = _build_compact_prompt(section_data, text_char_cap=int(os.getenv("STAGE07_CONTEXT_CHARS", "1200")))
 
-                # Save prompt artifact for first section (or once per run if not exists)
+                # Save artifacts for this section for review (prompt + sketch)
                 try:
                     artifacts_dir = Path("scripts/artifacts")
                     artifacts_dir.mkdir(parents=True, exist_ok=True)
-                    prompt_path = artifacts_dir / "07_section0_prompt_compact.md"
-                    if not prompt_path.exists():
-                        prompt_path.write_text(compact_user, encoding="utf-8")
+                    sid_str = str(section_data.get("id", "section"))
+                    (artifacts_dir / f"07_section_{sid_str}_prompt_compact.md").write_text(
+                        compact_user, encoding="utf-8"
+                    )
+                    try:
+                        # Persist the section's layout sketch we used for gating (if present)
+                        sv = section_data.get("layout_sketch") or {}
+                        (artifacts_dir / f"06b_section_{sid_str}_sketch_v2.json").write_text(
+                            json.dumps(sv, ensure_ascii=False, indent=2, default=str)
+                        )
+                    except Exception:
+                        pass
                 except Exception:
                     pass
 
@@ -1224,7 +1233,9 @@ async def reflow_section_with_llm(
                 ]
 
                 try:
+                    import time as _t
                     _router_s = _build_text_router()
+                    _t0 = _t.monotonic()
                     _r_s = await _router_s.acompletion(
                         model="chutes/text",
                         messages=messages_simple,
@@ -1232,6 +1243,46 @@ async def reflow_section_with_llm(
                         temperature=0,
                         max_tokens=min(STAGE07_MAX_TOKENS, 1024),
                         timeout=max(30, int(os.getenv("STAGE07_TIMEOUT","90"))),
+                    )
+                    _elapsed_ms = int((_t.monotonic() - _t0) * 1000)
+                    _usage = getattr(_r_s, "usage", None) or {}
+                    _model_served = getattr(_r_s, "model", None)
+                    # Persist the exact request/response payloads in logs
+                    try:
+                        logs_dir = ensure_logs_dir(results_base_dir, "07_reflow_section")
+                        req = {
+                            "model": "chutes/text",
+                            "messages": messages_simple,
+                            "response_format": {"type": "json_object"},
+                            "temperature": 0,
+                            "max_tokens": min(STAGE07_MAX_TOKENS, 1024),
+                            "timeout": max(30, int(os.getenv("STAGE07_TIMEOUT","90"))),
+                        }
+                        (logs_dir / f"request_payload_compact_section_{sid_str}.json").write_text(
+                            json.dumps(req, ensure_ascii=False, indent=2, default=str)
+                        )
+                        resp_content = (
+                            _r_s.choices[0].message.get("content") if hasattr(_r_s, "choices") else None
+                        )
+                        (logs_dir / f"response_compact_section_{sid_str}.json").write_text(
+                            json.dumps(resp_content, ensure_ascii=False, indent=2, default=str)
+                            if isinstance(resp_content, (dict, list))
+                            else str(resp_content)
+                        )
+                    except Exception:
+                        pass
+                    log_timing(
+                        "07_reflow_section",
+                        {
+                            "attempt": "strict_compact",
+                            "outcome": "ok",
+                            "route_name": "chutes/text",
+                            "model": _model_served,
+                            "latency_ms": _elapsed_ms,
+                            "timeout_s": int(os.getenv("STAGE07_TIMEOUT","90")),
+                            "tokens_in": _usage.get("prompt_tokens"),
+                            "tokens_out": _usage.get("completion_tokens"),
+                        },
                     )
                     content_simple = _r_s.choices[0].message.get("content") if hasattr(_r_s, "choices") else None
                 except Exception:
@@ -1306,7 +1357,9 @@ async def reflow_section_with_llm(
                 except Exception:
                     pass
                 try:
+                    import time as _t
                     _router_min = _build_text_router()
+                    _t0 = _t.monotonic()
                     _r_min = await _router_min.acompletion(
                         model="chutes/text",
                         messages=messages_min,
@@ -1314,6 +1367,22 @@ async def reflow_section_with_llm(
                         temperature=0,
                         max_tokens=min(STAGE07_MAX_TOKENS, 512),
                         timeout=llm_timeout,
+                    )
+                    _elapsed_ms = int((_t.monotonic() - _t0) * 1000)
+                    _usage = getattr(_r_min, "usage", None) or {}
+                    _model_served = getattr(_r_min, "model", None)
+                    log_timing(
+                        "07_reflow_section",
+                        {
+                            "attempt": "minimal_json",
+                            "outcome": "ok",
+                            "route_name": "chutes/text",
+                            "model": _model_served,
+                            "latency_ms": _elapsed_ms,
+                            "timeout_s": llm_timeout,
+                            "tokens_in": _usage.get("prompt_tokens"),
+                            "tokens_out": _usage.get("completion_tokens"),
+                        },
                     )
                     content_min = _r_min.choices[0].message.get("content") if hasattr(_r_min, "choices") else None
                 except Exception:

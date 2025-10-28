@@ -29,7 +29,7 @@ from loguru import logger
 from extractor.pipeline.utils.scillm_router import get_text_router
 
 from extractor.pipeline.utils.ann_index import query_ann_index
-from extractor.pipeline.utils.debug_utils import ensure_logs_dir, time_block
+from extractor.pipeline.utils.debug_utils import log_timing
 from extractor.pipeline.utils.annotations import (
     cue_from_annotation as _cue_from_annotation,
 )
@@ -172,7 +172,7 @@ class Config:
     debug: bool = False
     task_limit: int = 0  # 0 = no limit
     max_runtime_seconds: int = 0  # 0 = no limit (CLI override or STAGE03_TIMEOUT)
-    item_timeout_seconds: int = int(os.getenv("STAGE03_ITEM_TIMEOUT", "90"))
+    item_timeout_seconds: int = int(os.getenv("STAGE03_ITEM_TIMEOUT", "30"))
     # Knowledge/annotations support
     annotations_json: Path | None = None
     use_knowledge: bool = True
@@ -267,54 +267,19 @@ async def verify_header_with_llm(image_b64: str, context_text: str, model: str, 
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": user_content},
     ]
-    # Optional contracts adapter path
-    if os.getenv("USE_LLM_ADAPTER", "").lower() in ("1", "true", "yes", "y"):
-        try:
-            try:
-                from src.llm_adapter.adapter import LLMAdapter  # type: ignore
-            except Exception:
-                from llm_adapter.adapter import LLMAdapter  # type: ignore
-            adapter = LLMAdapter()
-            hv = await adapter.verify_header(
-                model=model,
-                messages=messages,
-                prompt_version=os.getenv("STAGE03_PROMPT_VERSION", "header@0.1.0"),
-                doc_id="doc",
-                section_id="hdr",
-                request_id=f"hdr_{get_run_id()}",
-                timeout=30,
-            )
-            return {"is_header": hv.verdict == "accept", "reasoning": "; ".join(hv.reasons or [])}
-        except Exception:
-            pass
-    # Prefer scillm adapter path when enabled
-    if os.getenv("USE_LLM_ADAPTER", "").lower() in ("1", "true", "yes", "y"):
-        hv = await scillm_verify_header(model=model, messages=messages, timeout=item_timeout)
-        return {"is_header": hv.verdict == "accept", "reasoning": "; ".join(hv.reasons or [])}
-
-    # Direct scillm call to Chutes with x-api-key
-    ch_base = os.getenv("CHUTES_API_BASE", "").strip()
-    ch_key = os.getenv("CHUTES_API_KEY", "").strip()
     try:
         _verify_cap = int(os.getenv("STAGE03_VERIFY_MAX_TOKENS", "256"))
     except Exception:
         _verify_cap = 256
-
-    # SciLLM Router-only call (OpenAI-compatible JSON)
+    # Top-priority timeout override via env
+    try:
+        item_timeout = int(os.getenv("SC_TIMEOUT_STAGE_03", str(item_timeout)))
+    except Exception:
+        pass
     router = get_text_router()
-    _rd = os.getenv("RUN_RESULTS_DIR")
-    if _rd:
-        logs_dir = ensure_logs_dir(Path(_rd), "03_suspicious_headers")
-        with time_block(logs_dir, "verify_header", page=int(task.page_idx), block=int(task.block_idx)):
-            resp = await router.acompletion(
-                model="chutes/text",
-                messages=messages,
-                response_format={"type": "json_object"},
-                max_tokens=_verify_cap,
-                temperature=0,
-                timeout=item_timeout,
-            )
-    else:
+    # Timed SciLLM Router-only call
+    t0 = time.monotonic()
+    try:
         resp = await router.acompletion(
             model="chutes/text",
             messages=messages,
@@ -323,13 +288,85 @@ async def verify_header_with_llm(image_b64: str, context_text: str, model: str, 
             temperature=0,
             timeout=item_timeout,
         )
-    answer = (resp.get("choices") or [{}])[0].get("message", {}).get("content", "")
+        elapsed_ms = int((time.monotonic() - t0) * 1000)
+    except Exception as e:
+        elapsed_ms = int((time.monotonic() - t0) * 1000)
+        log_timing(
+            "03_suspicious_headers",
+            {
+                "attempt": "verify_header",
+                "outcome": "exception",
+                "exception": type(e).__name__,
+                "exception_msg": str(e)[:300],
+                "route_name": "chutes/text",
+                "timeout_s": item_timeout,
+                "latency_ms": elapsed_ms,
+                "payload_chars": len(context_text or ""),
+                "with_image": bool(image_b64),
+                "retries_conf": int(os.getenv("LITELLM_MAX_RETRIES", "0")),
+            },
+        )
+        raise
+    # Observability: append per-attempt timing (success path, after we have resp)
+    try:
+        if isinstance(resp, dict):
+            served_model = resp.get("model")
+            usage = resp.get("usage") or {}
+        else:
+            served_model = getattr(resp, "model", None)
+            usage = getattr(resp, "usage", None) or {}
+        log_timing(
+            "03_suspicious_headers",
+            {
+                "attempt": "verify_header",
+                "outcome": "ok",
+                "route_name": "chutes/text",
+                "model": served_model,
+                "timeout_s": item_timeout,
+                "latency_ms": elapsed_ms,
+                "payload_chars": len(context_text or ""),
+                "with_image": bool(image_b64),
+                "retries_conf": int(os.getenv("LITELLM_MAX_RETRIES", "0")),
+                "tokens_in": usage.get("prompt_tokens"),
+                "tokens_out": usage.get("completion_tokens"),
+            },
+        )
+    except Exception:
+        pass
+    # Normalize response content
+    if isinstance(resp, dict):
+        choices = resp.get("choices") or [{}]
+    else:
+        choices = getattr(resp, "choices", [{}])
+    msg = (choices or [{}])[0].get("message", {}) if isinstance(choices, list) else {}
+    answer = (msg or {}).get("content", "")
     try:
         payload = json.loads(answer) if answer else {}
-    except Exception:
-        payload = {"error": {"type": "ParseError", "message": answer[:200]}}
+    except Exception as pe:
+        # Soft-fail on parse errors; log and continue
+        log_timing(
+            "03_suspicious_headers",
+            {
+                "attempt": "llm_parse",
+                "outcome": "parse_error",
+                "route_name": "chutes/text",
+                "parse_error_message": str(pe)[:200],
+            },
+        )
+        payload = {"is_header": False, "reasoning": "parse_error"}
     if isinstance(payload, dict) and payload.get("error"):
         err = payload["error"]
+        # Log explicit model error then raise
+        log_timing(
+            "03_suspicious_headers",
+            {
+                "attempt": "verify_header",
+                "outcome": "exception",
+                "exception": "LLMErrorEnvelope",
+                "exception_msg": f"{err.get('type')}:{err.get('message')}"[:300],
+                "route_name": "chutes/text",
+            },
+        )
         raise RuntimeError(f"LLM error: {err.get('type')}: {err.get('message')}")
     if not isinstance(payload, dict):
         payload = {"content": payload}
@@ -427,7 +464,12 @@ class VerificationTask:
         return target, above, below
 
     def render_context_image_b64(self) -> str:
-        """Renders an image of the block and its neighbors, saves it, and returns base64."""
+        """Renders an image of the block and its neighbors, saves it, and returns base64.
+
+        Also logs render timing and metadata to RUN_RESULTS_DIR/03_suspicious_headers/logs/timings.jsonl
+        using attempt=context_render.
+        """
+        t_start = time.monotonic()
         target, above, below = self.get_context_blocks()
 
         expanded_rect = fitz.Rect(target["bbox"])
@@ -456,7 +498,28 @@ class VerificationTask:
         self.page_blocks[self.block_idx]["context_image_path"] = str(image_path)
 
         # IMPORTANT: Encode as PNG to match data URL type
-        return base64.b64encode(pix.tobytes("png")).decode("utf-8")
+        b = pix.tobytes("png")
+        b64 = base64.b64encode(b).decode("utf-8")
+        try:
+            log_timing(
+                "03_suspicious_headers",
+                {
+                    "attempt": "context_render",
+                    "outcome": "ok",
+                    "render_ms": int((time.monotonic() - t_start) * 1000),
+                    "page_idx": int(self.page_idx),
+                    "block_idx": int(self.block_idx),
+                    "blocks_in_context": int(1 + (1 if above else 0) + (1 if below else 0)),
+                    "w": getattr(pix, "width", None),
+                    "h": getattr(pix, "height", None),
+                    "image_pixels": (getattr(pix, "width", 0) or 0) * (getattr(pix, "height", 0) or 0),
+                    "b64_bytes": len(b64),
+                    "render_cache": "miss",
+                },
+            )
+        except Exception:
+            pass
+        return b64
 
     def build_dataset_record(
         self,

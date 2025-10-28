@@ -29,6 +29,7 @@ from rich.console import Console  # noqa: E402
 from rich.progress import Progress, SpinnerColumn, TextColumn  # noqa: E402
 from extractor.pipeline.utils.diagnostics import get_run_id  # noqa: E402,F401
 from extractor.pipeline.utils.scillm_router import get_text_router  # noqa: E402
+from extractor.pipeline.utils.debug_utils import log_timing  # noqa: E402
 
 try:
     from arango import ArangoClient
@@ -533,22 +534,60 @@ async def _rationale_for_pair(text_a: str, text_b: str, model: str, max_tokens: 
             "timeout": 60,
         }
         params["temperature"] = 1.0 if "gpt-5" in (_mdl or "").lower() else 0.1
-        ch_base = os.getenv("CHUTES_API_BASE", "").strip()
-        ch_key = os.getenv("CHUTES_API_KEY", "").strip()
         router = get_text_router()
-        resp = await router.acompletion(
-            model="chutes/text",
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-            response_format={"type": "json_object"} if os.getenv("GRAPH_RATIONALE_JSON", "0") in ("1","true","yes") else None,
-            temperature=1.0 if "gpt-5" in (_mdl or "").lower() else 0.1,
-            timeout=60,
-            max_tokens=max_tokens,
-        )
-        content = getattr(resp, "choices", [{}])[0].get("message", {}).get("content", "")
-        return (content or "").strip()[:600]
+        timeout_s = int(os.getenv("GRAPH_RATIONALE_TIMEOUT", "60"))
+        import time as _t
+        _t0 = _t.monotonic()
+        try:
+            resp = await router.acompletion(
+                model="chutes/text",
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+                response_format={"type": "json_object"} if os.getenv("GRAPH_RATIONALE_JSON", "0") in ("1","true","yes") else None,
+                temperature=1.0 if "gpt-5" in (_mdl or "").lower() else 0.1,
+                timeout=timeout_s,
+                max_tokens=max_tokens,
+            )
+            _elapsed_ms = int((_t.monotonic() - _t0) * 1000)
+            if isinstance(resp, dict):
+                choices = resp.get("choices") or [{}]
+                served_model = resp.get("model")
+                usage = resp.get("usage") or {}
+            else:
+                choices = getattr(resp, "choices", [{}])
+                served_model = getattr(resp, "model", None)
+                usage = getattr(resp, "usage", None) or {}
+            content = (choices[0].get("message", {}) or {}).get("content", "")
+            log_timing(
+                "11_arango_create_graph",
+                {
+                    "attempt": "rationale",
+                    "outcome": "ok",
+                    "route_name": "chutes/text",
+                    "model": served_model,
+                    "latency_ms": _elapsed_ms,
+                    "timeout_s": timeout_s,
+                    "tokens_in": usage.get("prompt_tokens"),
+                    "tokens_out": usage.get("completion_tokens"),
+                },
+            )
+            return (content or "").strip()[:600]
+        except Exception as e:
+            _elapsed_ms = int((_t.monotonic() - _t0) * 1000)
+            log_timing(
+                "11_arango_create_graph",
+                {
+                    "attempt": "rationale",
+                    "outcome": "exception",
+                    "exception": type(e).__name__,
+                    "exception_msg": str(e)[:300],
+                    "latency_ms": _elapsed_ms,
+                    "timeout_s": timeout_s,
+                },
+            )
+            raise
     except Exception:
         return ""
 

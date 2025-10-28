@@ -27,10 +27,8 @@ except ImportError:
     print("PyMuPDF (fitz) not installed. Stage 01 requires it.", file=sys.stderr)
     raise
 from loguru import logger
-try:
-    from scillm import acompletion as sc_acompletion  # type: ignore
-except Exception:  # pragma: no cover
-    sc_completion = None  # type: ignore
+from extractor.pipeline.utils.scillm_router import get_text_router
+from extractor.pipeline.utils.debug_utils import log_timing
 
 from extractor.pipeline.utils.diagnostics import (
     start_resource_sampler,
@@ -830,29 +828,61 @@ async def process_pdf_pipeline(config: Config):
             )
 
     async def _one_scillm_call(idx: int, params: Dict[str, Any]) -> Dict[str, Any]:
-        ch_base = os.getenv("CHUTES_API_BASE", "").strip()
-        ch_key = os.getenv("CHUTES_API_KEY", "").strip()
-        # Sanitize: truncate large data URLs in logs only (payload still sent)
+        # Router-only OpenAI-compatible call
+        router = get_text_router()
+        t0 = time.monotonic()
+        timeout_s = int(params.get("timeout", 30))
         try:
-            if os.getenv("STAGE01_SANITIZE_DATA_URLS", "redact").lower() in {"redact", "truncate"}:
-                pass
-        except Exception:
-            pass
-        if sc_acompletion is None:
+            resp = await router.acompletion(
+                model="chutes/text",
+                messages=params.get("messages") or [],
+                response_format={"type": "json_object"},
+                temperature=params.get("temperature"),
+                timeout=timeout_s,
+                max_tokens=int(params.get("max_tokens", 1024)),
+            )
+            elapsed_ms = int((time.monotonic() - t0) * 1000)
+            # Normalize resp access
+            if isinstance(resp, dict):
+                choices = resp.get("choices") or [{}]
+                model_served = resp.get("model")
+                usage = resp.get("usage") or {}
+            else:
+                choices = getattr(resp, "choices", [{}])
+                model_served = getattr(resp, "model", None)
+                usage = getattr(resp, "usage", None) or {}
+            content = (choices or [{}])[0].get("message", {}).get("content", "")
+            log_timing(
+                "01_annotation_processor",
+                {
+                    "attempt": "interpret_annotation",
+                    "outcome": "ok",
+                    "route_name": "chutes/text",
+                    "model": model_served,
+                    "latency_ms": elapsed_ms,
+                    "timeout_s": timeout_s,
+                    "tokens_in": usage.get("prompt_tokens"),
+                    "tokens_out": usage.get("completion_tokens"),
+                    "item_index": idx,
+                },
+            )
+            return {"index": idx, "content": content}
+        except Exception as e:
+            elapsed_ms = int((time.monotonic() - t0) * 1000)
+            log_timing(
+                "01_annotation_processor",
+                {
+                    "attempt": "interpret_annotation",
+                    "outcome": "exception",
+                    "exception": type(e).__name__,
+                    "exception_msg": str(e)[:300],
+                    "latency_ms": elapsed_ms,
+                    "timeout_s": timeout_s,
+                    "item_index": idx,
+                },
+            )
+            # Return neutral content so outer parse can soft-fail
             return {"index": idx, "content": "{}"}
-        resp = await sc_acompletion(
-            model=params.get("model"),
-            api_base=ch_base or None,
-            api_key=ch_key,
-            custom_llm_provider="openai",
-            messages=params.get("messages") or [],
-            response_format={"type": "json_object"},
-            temperature=params.get("temperature"),
-            timeout=params.get("timeout", 30),
-            max_tokens=params.get("max_tokens", 1024),
-        )
-        content = (resp.get("choices") or [{}])[0].get("message", {}).get("content", "")
-        return {"index": idx, "content": content}
 
     try:
         t0 = time.monotonic()

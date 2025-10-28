@@ -65,6 +65,7 @@ from extractor.pipeline.utils.diagnostics import (
 )
 # SciLLM Router builder (OpenAI-compatible); avoid direct SDK calls in steps
 from extractor.pipeline.utils.scillm_router import get_text_router
+from extractor.pipeline.utils.debug_utils import log_timing, write_jsonl, ensure_logs_dir
 
 
 # --- Initialization ---
@@ -186,15 +187,53 @@ def _attach_llm_assist_headers(result: Dict[str, Any], stage_dir: Path) -> None:
     model = (os.getenv("TABLE_LLM_ASSIST_MODEL") or os.getenv("CHUTES_TEXT_MODEL") or "").strip()
     if not model:
         logger.debug("LLM assist disabled: no TABLE_LLM_ASSIST_MODEL/CHUTES_TEXT_MODEL set")
+        # log skip at global RUN_RESULTS_DIR
+        log_timing(
+            "05_table_extractor",
+            {"attempt": "llm_assist_headers_skip", "outcome": "skip", "reason": "model_unavailable"},
+            stage_dir=stage_dir,
+        )
         return
     tables = result.get("tables") or []
+    # Budget gating (tokens/cost)
+    try:
+        tokens_budget = int(os.getenv("STAGE05_TOKENS_BUDGET", "0"))
+    except Exception:
+        tokens_budget = 0
+    cost_budget = float(os.getenv("STAGE05_COST_BUDGET_USD", "0") or 0)
+    budget_enforce = os.getenv("STAGE05_BUDGET_ENFORCE", "true").lower() in ("1","true","yes","y")
+    tokens_used = 0
+    cost_used = 0.0
+    # Token usage log path
+    rd = os.getenv("RUN_RESULTS_DIR")
+    token_logs_dir = ensure_logs_dir(Path(rd), "05_table_extractor") if rd else stage_dir
     updated = 0
     for t in tables:
         try:
             if not _should_assist(t):
+                log_timing(
+                    "05_table_extractor",
+                    {
+                        "attempt": "llm_assist_headers_skip",
+                        "outcome": "skip",
+                        "reason": "doc_filtered",
+                        "table_hash": _stable_table_hash(t),
+                    },
+                    stage_dir=stage_dir,
+                )
                 continue
             headers_in = _headers_from_table(t)
             if not headers_in:
+                log_timing(
+                    "05_table_extractor",
+                    {
+                        "attempt": "llm_assist_headers_skip",
+                        "outcome": "skip",
+                        "reason": "short_headers",
+                        "table_hash": _stable_table_hash(t),
+                    },
+                    stage_dir=stage_dir,
+                )
                 continue
             table_hash = _stable_table_hash(t)
             cache_key = f"assist:{table_hash}:{model}"
@@ -202,7 +241,44 @@ def _attach_llm_assist_headers(result: Dict[str, Any], stage_dir: Path) -> None:
             if cached and isinstance(cached.get("headers"), list) and len(cached["headers"]) == len(headers_in):
                 t["llm_assist"] = {"model": model, "patch": cached}
                 _apply_headers(t, cached["headers"])
+                log_timing(
+                    "05_table_extractor",
+                    {
+                        "attempt": "llm_assist_headers",
+                        "outcome": "ok",
+                        "cached": True,
+                        "table_hash": table_hash,
+                    },
+                    stage_dir=stage_dir,
+                )
                 updated += 1
+                continue
+            # Budget gate before making a new call
+            if budget_enforce and ((tokens_budget and tokens_used >= tokens_budget) or (cost_budget and cost_used >= cost_budget)):
+                log_timing(
+                    "05_table_extractor",
+                    {
+                        "attempt": "llm_assist_headers_skip",
+                        "outcome": "skip",
+                        "reason": "budget_exceeded",
+                        "table_hash": table_hash,
+                        "tokens_used": tokens_used,
+                        "tokens_limit": tokens_budget,
+                        "cost_used_usd": round(cost_used, 6),
+                        "cost_limit_usd": cost_budget or None,
+                    },
+                    stage_dir=stage_dir,
+                )
+                write_jsonl(token_logs_dir, "token_usage.jsonl", {
+                    "ts": datetime.utcnow().isoformat()+"Z",
+                    "event": "assist_skipped",
+                    "reason": "budget_exceeded",
+                    "table_hash": table_hash,
+                    "tokens_used": tokens_used,
+                    "tokens_limit": tokens_budget,
+                    "cost_used_usd": round(cost_used, 6),
+                    "cost_limit_usd": cost_budget or None,
+                })
                 continue
             # Build strict JSON prompt
             system = (
@@ -212,6 +288,7 @@ def _attach_llm_assist_headers(result: Dict[str, Any], stage_dir: Path) -> None:
             )
             user = json.dumps({"headers_input": headers_in}, ensure_ascii=False)
             import asyncio as _asyncio
+            import time as _time
             async def _call():
                 router = get_text_router()
                 resp = await router.acompletion(
@@ -222,19 +299,95 @@ def _attach_llm_assist_headers(result: Dict[str, Any], stage_dir: Path) -> None:
                     ],
                     response_format={"type": "json_object"},
                     temperature=0,
-                    timeout=int(os.getenv("TABLE_LLM_ASSIST_TIMEOUT", "30")),
+                    timeout=int(os.getenv("SC_TIMEOUT_STAGE_05_ASSIST", os.getenv("TABLE_LLM_ASSIST_TIMEOUT", "20"))),
                     max_tokens=int(os.getenv("TABLE_LLM_ASSIST_MAX_TOKENS", "256")),
                 )
-                return getattr(resp, "choices", [{}])[0].get("message", {}).get("content", "")
-            content = _asyncio.run(_call())
+                return resp
+            _t0 = _time.monotonic()
+            try:
+                resp = _asyncio.run(_call())
+                _elapsed_ms = int((_time.monotonic() - _t0) * 1000)
+                # Extract content and usage
+                content = getattr(resp, "choices", [{}])[0].get("message", {}).get("content", "")
+                usage = getattr(resp, "usage", None) or {}
+                served_model = getattr(resp, "model", None)
+                # Update budgets
+                try:
+                    tokens_used += int(usage.get("prompt_tokens") or 0) + int(usage.get("completion_tokens") or 0)
+                except Exception:
+                    pass
+                # Optional: cost tracking left as placeholder (provider-specific); keep zero unless integrated
+                write_jsonl(token_logs_dir, "token_usage.jsonl", {
+                    "ts": datetime.utcnow().isoformat()+"Z",
+                    "event": "assist_used",
+                    "table_hash": table_hash,
+                    "model": served_model,
+                    "prompt_tokens": usage.get("prompt_tokens"),
+                    "completion_tokens": usage.get("completion_tokens"),
+                    "total_tokens": usage.get("total_tokens"),
+                    "tokens_used_cumulative": tokens_used,
+                })
+                log_timing(
+                    "05_table_extractor",
+                    {
+                        "attempt": "llm_assist_headers",
+                        "outcome": "ok",
+                        "route_name": "chutes/text",
+                        "model": served_model,
+                        "latency_ms": _elapsed_ms,
+                        "timeout_s": int(os.getenv("SC_TIMEOUT_STAGE_05_ASSIST", os.getenv("TABLE_LLM_ASSIST_TIMEOUT", "20"))),
+                        "retries_conf": int(os.getenv("LITELLM_MAX_RETRIES", "0")),
+                        "tokens_in": usage.get("prompt_tokens"),
+                        "tokens_out": usage.get("completion_tokens"),
+                        "table_hash": table_hash,
+                        "cached": False,
+                    },
+                    stage_dir=stage_dir,
+                )
+            except Exception as e:
+                _elapsed_ms = int((_time.monotonic() - _t0) * 1000)
+                log_timing(
+                    "05_table_extractor",
+                    {
+                        "attempt": "llm_assist_headers",
+                        "outcome": "exception",
+                        "exception": type(e).__name__,
+                        "exception_msg": str(e)[:300],
+                        "latency_ms": _elapsed_ms,
+                        "timeout_s": int(os.getenv("SC_TIMEOUT_STAGE_05_ASSIST", os.getenv("TABLE_LLM_ASSIST_TIMEOUT", "20"))),
+                        "table_hash": table_hash,
+                    },
+                    stage_dir=stage_dir,
+                )
+                raise
             try:
                 patch = json.loads(content) if content else None
-            except Exception:
+            except Exception as pe:
+                log_timing(
+                    "05_table_extractor",
+                    {
+                        "attempt": "llm_assist_headers_parse",
+                        "outcome": "parse_error",
+                        "parse_error_message": str(pe)[:200],
+                        "table_hash": table_hash,
+                    },
+                    stage_dir=stage_dir,
+                )
                 patch = None
             if not isinstance(patch, dict):
                 continue
             new_headers = patch.get("headers")
             if not isinstance(new_headers, list) or len(new_headers) != len(headers_in):
+                log_timing(
+                    "05_table_extractor",
+                    {
+                        "attempt": "llm_assist_headers_parse",
+                        "outcome": "parse_error",
+                        "reason": "schema_mismatch",
+                        "table_hash": table_hash,
+                    },
+                    stage_dir=stage_dir,
+                )
                 continue
             # normalize whitespace
             new_headers = [" ".join(str(h).split()) for h in new_headers]
@@ -244,6 +397,17 @@ def _attach_llm_assist_headers(result: Dict[str, Any], stage_dir: Path) -> None:
             updated += 1
         except Exception as e:
             logger.warning(f"LLM assist header patch failed for table: {e}")
+            log_timing(
+                "05_table_extractor",
+                {
+                    "attempt": "llm_assist_headers",
+                    "outcome": "exception",
+                    "exception": type(e).__name__,
+                    "exception_msg": str(e)[:300],
+                    "table_hash": _stable_table_hash(t),
+                },
+                stage_dir=stage_dir,
+            )
             continue
 
     try:

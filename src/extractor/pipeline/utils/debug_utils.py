@@ -33,6 +33,32 @@ def write_jsonl(logs_dir: Path, name: str, payload: Dict[str, Any]) -> None:
         pass
 
 
+def log_timing(stage_key: str, record: Dict[str, Any], *, stage_dir: Optional[Path] = None) -> None:
+    """Append a standardized timing/observability record.
+
+    - Always attempts to write under RUN_RESULTS_DIR/{stage_key}/logs/timings.jsonl when RUN_RESULTS_DIR is set.
+    - Optionally mirrors to `stage_dir/timings.jsonl` when provided (for stage-local artifacts).
+    - Adds an ISO timestamp and the `stage` key automatically; keeps fields flat and JSONL-safe.
+    """
+    try:
+        rec: Dict[str, Any] = {"ts": _iso_now(), "stage": stage_key}
+        rec.update(record)
+        rd = os.getenv("RUN_RESULTS_DIR")
+        if rd:
+            logs_dir = ensure_logs_dir(Path(rd), stage_key)
+            write_jsonl(logs_dir, "timings.jsonl", rec)
+        if stage_dir is not None:
+            try:
+                path = Path(stage_dir) / "timings.jsonl"
+                with path.open("a", encoding="utf-8") as f:
+                    f.write(json.dumps(rec, ensure_ascii=False, default=str) + "\n")
+            except Exception:
+                pass
+    except Exception:
+        # Never raise from observability helper
+        pass
+
+
 @dataclass
 class TimerEvent:
     logs_dir: Path
@@ -102,4 +128,3 @@ def summarize_messages(messages: Any) -> Dict[str, Any]:
         return {"parts": count, "chars": chars, "images": images}
     except Exception:
         return {}
-
