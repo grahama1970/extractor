@@ -128,13 +128,30 @@ def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool
     # Build the document (this creates and processes all blocks)
     try:
         document = converter.build_document(str(pdf_path))
-    except Exception:
+    except Exception as e:
+        logger.error(f"Marker document building failed: {e}")
         # If predictor presence is weak and fallback is allowed, try simple extractor
         if os.getenv("STAGE02_ALLOW_SIMPLE", "1").lower() in ("1", "true", "yes", "y"):
-            tmp = Path(os.getenv("STAGE02_TMP", "/tmp")) / f"marker_simple_{uuid.uuid4().hex}.json"
-            blocks = fallback_simple_extract(pdf_path, tmp)
-            return blocks, predictor_presence
-        raise
+            logger.warning("Falling back to simple extraction mode")
+            try:
+                tmp = Path(os.getenv("STAGE02_TMP", "/tmp")) / f"marker_simple_{uuid.uuid4().hex}.json"
+                blocks = fallback_simple_extract(pdf_path, tmp)
+                logger.info(f"Simple extraction succeeded, extracted {len(blocks)} blocks")
+                return blocks, predictor_presence
+            except Exception as fallback_error:
+                logger.error(f"Simple extraction fallback also failed: {fallback_error}")
+                if os.getenv("PIPELINE_FAIL_FAST", "0").lower() in ("1", "true", "yes", "y"):
+                    raise RuntimeError(f"Both marker and simple extraction failed: {e}") from e
+                # Return empty blocks to allow pipeline to continue
+                logger.warning("Returning empty blocks to allow pipeline continuation")
+                return [], predictor_presence
+        else:
+            # Fallback disabled, fail according to pipeline policy
+            if os.getenv("PIPELINE_FAIL_FAST", "0").lower() in ("1", "true", "yes", "y"):
+                raise RuntimeError(f"Marker extraction failed: {e}") from e
+            else:
+                logger.warning("STAGE02_ALLOW_SIMPLE disabled, returning empty blocks")
+                return [], predictor_presence
 
     # Color enrichment via PyMuPDF is disabled to comply with Stage‑02 policy
     fitz_doc = None
@@ -487,7 +504,13 @@ def run(
         except Exception as e:
             logger.exception("Stage 02 failed during inline extraction")
             console.print(f"[red]Stage 02 failed: {e}[/red]")
-            raise RuntimeError("Stage 02 inline extraction failed")
+            if os.getenv("PIPELINE_FAIL_FAST", "0").lower() in ("1", "true", "yes", "y"):
+                raise RuntimeError("Stage 02 inline extraction failed") from e
+            else:
+                logger.warning("Continuing with empty blocks due to fail-fast disabled")
+                blocks = []
+                predictor_presence = False
+                extract_duration_ms = int((time.monotonic() - t_ex0) * 1000)
     else:
         # Run extraction in a separate process with temp-file handoff to avoid mp.Queue backpressure
         q: "mp.Queue[Dict[str, Any]]" = mp.Queue()
@@ -554,7 +577,13 @@ def run(
             except Exception:
                 pass
             console.print(f"[red]Stage 02 failed: {result.get('error', 'Unknown error')}[/red]")
-            raise RuntimeError(f"Stage 02 failed: {result.get('error', 'Unknown error')}")
+            if os.getenv("PIPELINE_FAIL_FAST", "0").lower() in ("1", "true", "yes", "y"):
+                raise RuntimeError(f"Stage 02 failed: {result.get('error', 'Unknown error')}")
+            else:
+                logger.warning("Continuing with empty blocks due to fail-fast disabled")
+                blocks = []
+                predictor_presence = False
+                extract_duration_ms = int((time.monotonic() - t_ex0) * 1000)
 
         # Load large payload from temp file written by the child process
         tmp_path = Path(result.get("path", ""))

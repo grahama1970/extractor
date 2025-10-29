@@ -29,6 +29,11 @@ except ImportError:
 from loguru import logger
 from extractor.pipeline.utils.scillm_router import get_text_router
 from extractor.pipeline.utils.debug_utils import log_timing
+from extractor.pipeline.steps.scillm_preflight_validator import (
+    validate_scillm_env_sync,
+    require_scillm_preflight,
+    quick_scillm_check
+)
 
 from extractor.pipeline.utils.diagnostics import (
     start_resource_sampler,
@@ -720,6 +725,19 @@ async def process_pdf_pipeline(config: Config):
     errors_count = 0
     warnings_count = 0
     resources: Dict[str, Any] = {}
+    
+    # AGENTS.md compliance: Validate SciLLM environment before processing
+    if config.llm_model or os.getenv("CHUTES_TEXT_MODEL"):
+        try:
+            require_scillm_preflight()
+        except RuntimeError as e:
+            logger.error(f"SciLLM preflight validation failed: {e}")
+            if os.getenv("PIPELINE_FAIL_FAST", "0").lower() in ("1", "true", "yes", "y"):
+                raise
+            # Continue without LLM if not in fail-fast mode
+            logger.warning("Continuing without LLM inference due to preflight failure")
+            config.llm_model = ""
+    
     sampler = (
         start_resource_sampler(float(os.getenv("SAMPLE_INTERVAL_SEC", "2")))
         if os.getenv("ENABLE_RESOURCE_SAMPLING", "0").lower() in ("1", "true", "yes", "y")
@@ -828,7 +846,13 @@ async def process_pdf_pipeline(config: Config):
             )
 
     async def _one_scillm_call(idx: int, params: Dict[str, Any]) -> Dict[str, Any]:
-        # Router-only OpenAI-compatible call
+        # Router-only OpenAI-compatible call with AGENTS.md preflight validation
+        # Fail fast if SciLLM environment is not properly configured
+        if not quick_scillm_check():
+            raise RuntimeError(
+                "SciLLM environment not configured. "
+                "Please set CHUTES_API_BASE, CHUTES_API_KEY, and CHUTES_TEXT_MODEL"
+            )
         router = get_text_router()
         t0 = time.monotonic()
         timeout_s = int(params.get("timeout", 30))

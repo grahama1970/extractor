@@ -27,6 +27,11 @@ import fitz  # PyMuPDF
 from loguru import logger
 # Avoid hard dependency at import time; prefer adapter helper; direct scillm used only if present
 from extractor.pipeline.utils.scillm_router import get_text_router
+from extractor.pipeline.steps.scillm_preflight_validator import (
+    validate_scillm_env_sync,
+    require_scillm_preflight,
+    quick_scillm_check
+)
 
 from extractor.pipeline.utils.ann_index import query_ann_index
 from extractor.pipeline.utils.debug_utils import log_timing
@@ -276,6 +281,16 @@ async def verify_header_with_llm(image_b64: str, context_text: str, model: str, 
         item_timeout = int(os.getenv("SC_TIMEOUT_STAGE_03", str(item_timeout)))
     except Exception:
         pass
+    # AGENTS.md compliance: Validate SciLLM environment before making calls
+    if not quick_scillm_check():
+        logger.warning("SciLLM environment not configured, skipping header verification")
+        return {
+            "verified": False,
+            "reason": "SciLLM environment not configured",
+            "confidence": 0.0,
+            "llm_elapsed_ms": 0
+        }
+    
     router = get_text_router()
     # Timed SciLLM Router-only call
     t0 = time.monotonic()

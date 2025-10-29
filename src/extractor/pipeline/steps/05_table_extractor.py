@@ -65,6 +65,10 @@ from extractor.pipeline.utils.diagnostics import (
 )
 # SciLLM Router builder (OpenAI-compatible); avoid direct SDK calls in steps
 from extractor.pipeline.utils.scillm_router import get_text_router
+from extractor.pipeline.steps.scillm_preflight_validator import (
+    validate_scillm_env_sync,
+    quick_scillm_check
+)
 from extractor.pipeline.utils.debug_utils import log_timing, write_jsonl, ensure_logs_dir
 
 
@@ -1439,6 +1443,12 @@ def run(
         # Opt-in only to keep Stage 05 deterministic for goldens
         if os.getenv("STAGE05_LLM_INFER", "0").lower() not in {"1","true","yes","y"}:
             return None
+        
+        # AGENTS.md compliance: Validate SciLLM environment before making calls
+        if not quick_scillm_check():
+            logger.warning("SciLLM environment not configured, skipping table title inference")
+            return None
+            
         router = get_text_router()
         model = "chutes/text"
         prompt = (
@@ -1494,12 +1504,24 @@ def run(
             try:
                 df = _pd.DataFrame(t.get('pandas_df') or [])
                 if not df.empty:
-                    header = ' | '.join(str(c) for c in df.columns if str(c).strip())
+                    # Avoid numeric column indices as titles - use meaningful content instead
+                    cols = [str(c) for c in df.columns if str(c).strip()]
+                    # Filter out pure numeric column names (0, 1, 2, etc.)
+                    meaningful_cols = [c for c in cols if not c.isdigit()]
+                    if meaningful_cols:
+                        header = ' | '.join(meaningful_cols)
+                    else:
+                        # If all columns are numeric, use first row content instead
+                        try:
+                            first_row = df.iloc[0].astype(str).tolist()
+                            header = ' | '.join(str(cell) for cell in first_row if str(cell).strip())[:100]
+                        except Exception:
+                            header = ''
             except Exception:
                 pass
             ctx = f"Header: {header}\nNearby: {near}".strip()
             inferred = _infer_title_with_scillm(ctx) or (header if header else (near.split('\n',1)[0] if near else ''))
-            if inferred:
+            if inferred and inferred.strip():
                 title_txt = f"INFER: {inferred.strip()}"
                 title_src = 'infer'
         if title_txt:

@@ -29,6 +29,11 @@ from dotenv import find_dotenv, load_dotenv
 from loguru import logger
 from rich.console import Console
 from extractor.pipeline.utils.scillm_router import get_vlm_router
+from extractor.pipeline.steps.scillm_preflight_validator import (
+    validate_scillm_env_sync,
+    require_scillm_preflight,
+    quick_scillm_check
+)
 from extractor.pipeline.utils.response_utils import normalize_json_content
 from extractor.pipeline.utils.debug_utils import ensure_logs_dir, time_block
 
@@ -81,11 +86,27 @@ async def _describe_and_title_multimodal(
     nearby_text: str,
     router: Any | None = None,
 ) -> dict[str, Optional[str]]:
+    # AGENTS.md compliance: Validate VLM environment before making calls
+    if not quick_scillm_check():
+        logger.warning("SciLLM environment not configured, skipping multimodal figure analysis")
+        return {
+            "description": "SciLLM not configured",
+            "title": "Figure",
+            "source": "unknown",
+            "number": None
+        }
+    
     base = os.getenv("CHUTES_API_BASE", "").strip()
     key = os.getenv("CHUTES_API_KEY", "").strip()
     model = (os.getenv("CHUTES_VLM_MODEL") or "").strip()
     if not (base and key and model):
-        return {}
+        logger.warning("VLM environment incomplete, skipping multimodal figure analysis")
+        return {
+            "description": "VLM environment incomplete",
+            "title": "Figure", 
+            "source": "unknown",
+            "number": None
+        }
 
     b64 = base64.b64encode(image_data).decode("utf-8")
     system = (
