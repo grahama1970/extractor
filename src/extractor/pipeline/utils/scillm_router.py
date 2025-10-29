@@ -12,17 +12,21 @@ _VLM_ROUTER: Router | None = None
 
 
 def _auth_params() -> Dict[str, Any]:
-    """Return litellm auth params based on CHUTES_AUTH_STYLE: 'x-api-key' or 'bearer'.
+    """Return litellm auth params for Chutes chat/completions.
 
-    Default is 'bearer' to match working Stage 07 behavior.
+    Enforce Bearer-only for chat on this tenant, regardless of CHUTES_AUTH_STYLE.
+    If CHUTES_AUTH_STYLE is set and not 'bearer', print a one-line warning and
+    proceed with Bearer headers.
     """
     style = (os.environ.get("CHUTES_AUTH_STYLE") or "bearer").strip().lower()
     base = os.environ.get("CHUTES_API_BASE", "")
     key = os.environ.get("CHUTES_API_KEY", "")
-    if style == "x-api-key":
-        return {"api_base": base, "api_key": None, "extra_headers": {"x-api-key": key}}
-    # bearer (default)
-    return {"api_base": base, "api_key": key}
+    if style and style != "bearer":
+        try:
+            print(f"[scillm_router] WARNING: CHUTES_AUTH_STYLE='{style}' ignored for chat; using Bearer.")
+        except Exception:
+            pass
+    return {"api_base": base, "api_key": None, "extra_headers": {"Authorization": f"Bearer {key}"}}
 
 
 def _model_entry(model: str) -> Dict[str, Any]:
@@ -42,7 +46,7 @@ def get_text_router() -> Router:
     if _TEXT_ROUTER is not None:
         return _TEXT_ROUTER
     # Optional auto-discovery from /v1/models when SCILLM_AUTO_ROUTER=1
-    auto = os.getenv("SCILLM_AUTO_ROUTER", "").lower() in {"1","true","yes","y"}
+    auto = os.getenv("SCILLM_AUTO_ROUTER", "0").lower() in {"1","true","yes","y"}
     primary = os.environ.get("CHUTES_TEXT_MODEL", "")
     alts: List[str] = [
         os.environ.get("CHUTES_TEXT_MODEL_ALT1", ""),
@@ -53,7 +57,7 @@ def get_text_router() -> Router:
         key = os.getenv("CHUTES_API_KEY", "")
         if base and key:
             r = run([
-                "curl","-sS","-H",f"Authorization: Bearer {key}",f"{base}/models"
+                "curl","-sS","--max-time","3","-H",f"Authorization: Bearer {key}",f"{base}/models"
             ], check=False, stdout=PIPE, text=True)
             try:
                 data = json.loads(r.stdout)
@@ -81,7 +85,13 @@ def get_text_router() -> Router:
     for m in alts:
         if m:
             model_list.append(_model_entry(m))
-    _TEXT_ROUTER = Router(model_list=model_list or [{}])
+    if not model_list and not auto:
+        raise RuntimeError("No CHUTES_TEXT_MODEL pins provided and SCILLM_AUTO_ROUTER is disabled. Set CHUTES_TEXT_MODEL or enable SCILLM_AUTO_ROUTER=1 for dev triage.")
+    _TEXT_ROUTER = Router(
+        model_list=model_list or [{}],
+        num_retries=0,
+        default_litellm_params={"timeout": 20},
+    )
     return _TEXT_ROUTER
 
 
@@ -89,7 +99,7 @@ def get_vlm_router() -> Router:
     global _VLM_ROUTER
     if _VLM_ROUTER is not None:
         return _VLM_ROUTER
-    auto = os.getenv("SCILLM_AUTO_ROUTER", "").lower() in {"1","true","yes","y"}
+    auto = os.getenv("SCILLM_AUTO_ROUTER", "0").lower() in {"1","true","yes","y"}
     primary = os.environ.get("CHUTES_VLM_MODEL", "")
     alts: List[str] = [
         os.environ.get("CHUTES_VLM_MODEL_ALT1", ""),
@@ -100,7 +110,7 @@ def get_vlm_router() -> Router:
         key = os.getenv("CHUTES_API_KEY", "")
         if base and key:
             r = run([
-                "curl","-sS","-H",f"Authorization: Bearer {key}",f"{base}/models"
+                "curl","-sS","--max-time","3","-H",f"Authorization: Bearer {key}",f"{base}/models"
             ], check=False, stdout=PIPE, text=True)
             try:
                 data = json.loads(r.stdout)
@@ -127,5 +137,34 @@ def get_vlm_router() -> Router:
     for m in alts:
         if m:
             model_list.append(_model_entry_vlm(m))
-    _VLM_ROUTER = Router(model_list=model_list or [{}])
+    if not model_list and not auto:
+        raise RuntimeError("No CHUTES_VLM_MODEL pins provided and SCILLM_AUTO_ROUTER is disabled. Set CHUTES_VLM_MODEL or enable SCILLM_AUTO_ROUTER=1 for dev triage.")
+    _VLM_ROUTER = Router(
+        model_list=model_list or [{}],
+        num_retries=0,
+        default_litellm_params={"timeout": 20},
+    )
     return _VLM_ROUTER
+
+
+def close_text_router() -> None:
+    global _TEXT_ROUTER
+    try:
+        if _TEXT_ROUTER is not None:
+            _TEXT_ROUTER.close()
+    finally:
+        _TEXT_ROUTER = None
+
+
+def close_vlm_router() -> None:
+    global _VLM_ROUTER
+    try:
+        if _VLM_ROUTER is not None:
+            _VLM_ROUTER.close()
+    finally:
+        _VLM_ROUTER = None
+
+
+def close_all_routers() -> None:
+    close_text_router()
+    close_vlm_router()

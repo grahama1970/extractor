@@ -1770,19 +1770,10 @@ async def reflow_section_with_llm(
                 pass
         except Exception:
             resp = ""
-
-        # Normalize response to get content: accept dict or string
-        content: str | None = None
-        try:
-            if isinstance(resp, dict):
-                content = json.dumps(resp, ensure_ascii=False)
-            elif isinstance(resp, str):
-                content = resp
-            else:
-                # Fallback to shared extractor for other response shapes
-                content = extract_content(resp) or None
-        except Exception:
-            content = None
+        # Normalize (accept dict or string) using shared helper
+        from extractor.pipeline.utils.response_utils import normalize_json_content
+        raw_text, json_obj = normalize_json_content(resp) if resp is not None else ("", None)
+        content = raw_text if isinstance(raw_text, str) else ""
         if not isinstance(content, str) or not content.strip():
             # Attempt 2 (strict-compact): reduce context + simplified guard to improve provider reliability
             try:
@@ -2203,14 +2194,23 @@ async def reflow_section_with_llm(
                     pass
             except Exception:
                 resp2 = ""
-            # Accept dict content in relaxed mode as well
-            if isinstance(resp2, dict):
-                try:
-                    content = json.dumps(resp2, ensure_ascii=False)
-                except Exception:
-                    content = None
-            else:
-                content = resp2 if isinstance(resp2, str) else None
+            # Normalize relaxed response (dict-or-string) before emptiness checks
+            try:
+                from extractor.pipeline.utils.response_utils import normalize_json_content as _nz
+                _raw2, _obj2 = _nz(resp2)
+                if isinstance(_obj2, dict):
+                    content = json.dumps(_obj2, ensure_ascii=False)
+                else:
+                    content = _raw2 if isinstance(_raw2, str) and _raw2.strip() else (resp2 if isinstance(resp2, str) else None)
+            except Exception:
+                # Fallback: previous behavior
+                if isinstance(resp2, dict):
+                    try:
+                        content = json.dumps(resp2, ensure_ascii=False)
+                    except Exception:
+                        content = None
+                else:
+                    content = resp2 if isinstance(resp2, str) else None
         if not isinstance(content, str) or not content.strip():
             logger.error("Stage 07: LLM returned empty content.")
             raise RuntimeError(
@@ -3444,6 +3444,11 @@ def run(
                     "p95_ms": _pct(0.95),
                 }
                 (ldir / "timings_summary.json").write_text(json.dumps(summary, indent=2))
+    except Exception:
+        pass
+    try:
+        from extractor.pipeline.utils.scillm_router import close_all_routers as _close_routers
+        _close_routers()
     except Exception:
         pass
     return output_path

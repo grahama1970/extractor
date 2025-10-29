@@ -4,7 +4,7 @@ Stage 06a: Title/Caption Enricher (text-only)
 
 Purpose
 - Add titles to tables and figures using explicit nearby text when present.
-- If no explicit title exists, infer a short title via the Chutes text model (scillm, x-api-key),
+- If no explicit title exists, infer a short title via the Chutes text model (SciLLM Router; Bearer auth only),
   and prefix with "INFER: ". Falls back to deterministic heuristics if the model is unavailable.
 
 Inputs
@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import re
 from datetime import datetime
 from pathlib import Path
@@ -32,8 +33,7 @@ import asyncio
 from loguru import logger
 from extractor.pipeline.utils.scillm_router import get_text_router
 from extractor.pipeline.utils.response_utils import normalize_json_content
-from extractor.pipeline.utils.debug_utils import ensure_logs_dir, time_block, log_timing
-from extractor.pipeline.utils.preflight import scillm_quick_check
+from extractor.pipeline.utils.preflight import require_scillm_env
 from typing import Iterable
 
 
@@ -69,7 +69,7 @@ def _explicit_figure_title(f: Dict[str, Any]) -> Optional[str]:
     return txt
 
 
-def _chutes_title_infer_struct(prompt_ctx: str, timeout: float = 45.0) -> Optional[Dict[str, Any]]:
+def _chutes_title_infer_struct(prompt_ctx: str, timeout: float = 20.0) -> Optional[Dict[str, Any]]:
     """Infer title metadata using SciLLM and return a structured dict.
 
     Returns a dict subset of: {title, number, base_title, continued}
@@ -83,94 +83,98 @@ def _chutes_title_infer_struct(prompt_ctx: str, timeout: float = 45.0) -> Option
         "base_title: the semantic title without numbering or prefixes, else null. continued: true if the text implies a continued table/figure.\n\n"
         f"Context (ignore boilerplate labels):\n{prompt_ctx[:1500]}\n"
     )
-    # Router-only JSON call (Bearer auth only for this tenant)
-    try:
-        # Enforce Bearer for chat on this tenant
-        os.environ.setdefault("CHUTES_AUTH_STYLE", "bearer")
-        # Preflight once per call site (fast, 3s)
-        ok, reason = scillm_quick_check(timeout=3.0)
-        if not ok:
-            raise RuntimeError(f"06a preflight failed: {reason}")
-        router = get_text_router()
-        # Write per-call timing under the stage logs directory if env RUN_RESULTS_DIR is set
-        results_dir = os.getenv("RUN_RESULTS_DIR")
-        if results_dir:
-            logs_dir = ensure_logs_dir(Path(results_dir), "06a_title_caption_enricher")
-            with time_block(logs_dir, "title_infer", kind="text", ctx_chars=len(prompt_ctx or "")):
-                try:
-                    (logs_dir / "last_request.json").write_text(
-                        json.dumps({
-                            "model": "chutes/text",
-                            "messages": [
-                                {"role": "system", "content": "Return ONLY strict JSON for scientific/engineering docs."},
-                                {"role": "user", "content": prompt},
-                            ],
-                            "response_format": {"type": "json_object"},
-                            "temperature": 0,
-                            "timeout": timeout,
-                        }, ensure_ascii=False, indent=2),
-                        encoding="utf-8",
-                    )
-                except Exception:
-                    pass
-                resp = asyncio.run(
-                    router.acompletion(
-                        model="chutes/text",
-                        messages=[
-                            {"role": "system", "content": "Return ONLY strict JSON for scientific/engineering docs."},
-                            {"role": "user", "content": prompt},
-                        ],
-                        response_format={"type": "json_object"},
-                        temperature=0,
-                        timeout=timeout,
-                    )
-                )
-                try:
-                    usage = getattr(resp, "usage", None) or {}
-                    served = getattr(resp, "model", None)
-                    log_timing(
-                        "06a_title_caption_enricher",
-                        {
-                            "attempt": "title_infer",
-                            "outcome": "ok",
-                            "model": served,
-                            "tokens_in": usage.get("prompt_tokens"),
-                            "tokens_out": usage.get("completion_tokens"),
-                        },
-                        stage_dir=logs_dir,
-                    )
-                    (logs_dir / "last_response.json").write_text(
-                        json.dumps(getattr(resp, "choices", [{}])[0].get("message", {}).get("content", ""), ensure_ascii=False, indent=2),
-                        encoding="utf-8",
-                    )
-                except Exception:
-                    pass
-        else:
-            resp = asyncio.run(
-                router.acompletion(
-                    model="chutes/text",
-                    messages=[
-                        {"role": "system", "content": "Return ONLY strict JSON for scientific/engineering docs."},
-                        {"role": "user", "content": prompt},
-                    ],
-                    response_format={"type": "json_object"},
-                    temperature=0,
-                    timeout=timeout,
-                )
+    # Fast env preflight to avoid hangs on misconfiguration
+    ok_env, _reason = require_scillm_env()
+    if not ok_env:
+        return None
+
+    # Router-only JSON call with minimal logging artifacts when RUN_RESULTS_DIR is set
+    router = get_text_router()
+    results_dir = os.getenv("RUN_RESULTS_DIR")
+    stage_dir = Path(results_dir) / "06a_title_caption_enricher" if results_dir else None
+    logs_dir = (stage_dir / "logs") if stage_dir else None
+    if logs_dir:
+        try:
+            logs_dir.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            logs_dir = None
+
+    messages = [
+        {"role": "system", "content": "Return ONLY strict JSON for scientific/engineering docs."},
+        {"role": "user", "content": prompt},
+    ]
+
+    # Persist last_request.json if requested
+    if logs_dir:
+        try:
+            (logs_dir / "last_request.json").write_text(
+                json.dumps(
+                    {
+                        "model": "chutes/text",
+                        "messages": messages,
+                        "response_format": {"type": "json_object"},
+                        "temperature": 0,
+                        "timeout": timeout,
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
             )
-        _, json_obj = normalize_json_content(resp)
-        if isinstance(json_obj, dict):
-            out: Dict[str, Any] = {}
-            title = json_obj.get("title")
-            out["title"] = title.strip() if isinstance(title, str) and title.strip() else None
-            for k in ("number", "base_title"):
-                v = json_obj.get(k)
-                out[k] = v.strip() if isinstance(v, str) and v.strip() else None
-            cont = json_obj.get("continued")
-            out["continued"] = bool(cont) if isinstance(cont, bool) else None
-            return out
+        except Exception:
+            pass
+
+    t0 = time.time()
+    resp = None
+    err: Optional[str] = None
+    try:
+        resp = asyncio.run(
+            router.acompletion(
+                model="chutes/text",
+                messages=messages,
+                response_format={"type": "json_object"},
+                temperature=0,
+                timeout=timeout,
+            )
+        )
     except Exception as e:
+        err = str(e)
         logger.debug(f"SciLLM Router infer failed: {e}")
+    t1 = time.time()
+
+    # Normalize and persist last_response + timings
+    raw_text, json_obj = normalize_json_content(resp) if resp is not None else ("", None)
+    if logs_dir:
+        try:
+            (logs_dir / "last_response.json").write_text(
+                raw_text if raw_text else json.dumps({"error": err or "empty"}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+        except Exception:
+            pass
+        try:
+            timing_row = {
+                "ts": datetime.utcnow().isoformat() + "Z",
+                "op": "title_infer",
+                "ctx_chars": len(prompt_ctx or ""),
+                "duration_ms": int((t1 - t0) * 1000),
+                "ok": bool(json_obj),
+                "error": (err[:200] if err else None),
+            }
+            with (stage_dir / "timings.jsonl").open("a", encoding="utf-8") as f:
+                f.write(json.dumps(timing_row, ensure_ascii=False) + "\n")
+        except Exception:
+            pass
+
+    if isinstance(json_obj, dict):
+        out: Dict[str, Any] = {}
+        title = json_obj.get("title")
+        out["title"] = title.strip() if isinstance(title, str) and title.strip() else None
+        for k in ("number", "base_title"):
+            v = json_obj.get(k)
+            out[k] = v.strip() if isinstance(v, str) and v.strip() else None
+        cont = json_obj.get("continued")
+        out["continued"] = bool(cont) if isinstance(cont, bool) else None
+        return out
     return None
 
 
@@ -485,6 +489,11 @@ def run(
     _console(
         f"Enriched titles written to: {enriched_root / '05_tables.enriched.json'} and {enriched_root / '06_figures.enriched.json'}"
     )
+    try:
+        from extractor.pipeline.utils.scillm_router import close_all_routers
+        close_all_routers()
+    except Exception:
+        pass
     return enriched_root
 
 
