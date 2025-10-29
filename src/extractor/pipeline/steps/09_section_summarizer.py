@@ -23,7 +23,7 @@ from rich.console import Console
 from extractor.pipeline.utils.json_utils import clean_json_string
 from extractor.pipeline.utils.json_mode import JSON_SYSTEM_GUARD
 from tqdm import tqdm
-from extractor.pipeline.utils.scillm_router import get_text_router
+from extractor.pipeline.utils.scillm_router import get_text_router, close_all_routers
 from extractor.pipeline.utils.model_select import get_text_model
 
 # Note: Avoid import-time side effects. Tests can import this module safely.
@@ -42,7 +42,6 @@ async def summarize_section(
     """Generate a summary for a single section using scillm with optional rolling context."""
     prev = previous_summaries or []
     async with semaphore:
-        try:
             # Build rolling context
             prev_text = "\n".join(
                 f"- {p.get('section_title', 'Untitled')}: {p.get('summary_data',{}).get('summary','')}"
@@ -76,92 +75,30 @@ async def summarize_section(
             """
             ).strip()
 
-            # Prefer explicit JSON formatting via system guard + provider JSON mode (when supported)
+            # Router-only, strict JSON; fail fast on any deviation
             system_json_guard = JSON_SYSTEM_GUARD
             model_name = get_text_model()
-            # scillm + Chutes x-api-key path (no Bearer)
             is_gpt5 = "gpt-5" in (model_name or "").lower()
-            ch_base = os.getenv("CHUTES_API_BASE", "").strip()
-            ch_key = os.getenv("CHUTES_API_KEY", "").strip()
-            # Optional contracts adapter path
-            if os.getenv("USE_LLM_ADAPTER", "").lower() in ("1", "true", "yes", "y"):
-                try:
-                    try:
-                        from src.llm_adapter.adapter import LLMAdapter  # type: ignore
-                    except Exception:
-                        from llm_adapter.adapter import LLMAdapter  # type: ignore
-                    adapter = LLMAdapter()
-                    messages = [
-                        {
-                            "role": "user",
-                            "content": [
-                                {
-                                    "type": "text",
-                                    "text": (
-                                        "You are a section summarization engine. Return ONLY a JSON object with key: summary_json."
-                                        ' No code fences. schema: {"bullets":[string],"length":"short|medium|long"}.\n\n'
-                                        + prompt
-                                    ),
-                                }
-                            ],
-                        }
-                    ]
-                    res = await adapter.summarize_section(
-                        model=model_name,
-                        messages=messages,
-                        prompt_version=os.getenv("STAGE09_PROMPT_VERSION", "summary@0.1.0"),
-                        doc_id=str(section.get("doc_id") or "doc"),
-                        section_id=str(section.get("id") or "section"),
-                        request_id=f"sum_{section.get('id','section')}",
-                        timeout=request_timeout,
-                    )
-                    result = res.summary_json
-                except Exception:
-                    # Fall back to direct scillm call
-                    resp = await sc_acompletion(
-                        model=model_name,
-                        api_base=ch_base or None,
-                        api_key=ch_key,
-                        custom_llm_provider="openai",
-                        messages=[
-                            {"role": "system", "content": system_json_guard},
-                            {"role": "user", "content": prompt},
-                        ],
-                        response_format={"type": "json_object"} if (strict_json and "gemini" not in (model_name or "").lower()) else None,
-                        temperature=0.0 if is_gpt5 else 0.3,
-                        timeout=request_timeout,
-                    )
-                    content = (resp.get("choices") or [{}])[0].get("message", {}).get("content", "")
-                    result = clean_json_string(content, return_dict=True)
-            else:
-                # Direct SciLLM (x-api-key header; no helper)
-                resp = await sc_acompletion(
-                    model=model_name,
-                    custom_llm_provider="openai_like",
-                    api_base=ch_base or None,
-                    api_key=None,
-                    extra_headers={"x-api-key": ch_key} if ch_key else None,
-                    messages=[
-                        {"role": "system", "content": system_json_guard},
-                        {"role": "user", "content": prompt},
-                    ],
-                    response_format={"type": "json_object"} if strict_json else None,
-                    temperature=0.0 if is_gpt5 else 0.3,
-                    timeout=request_timeout,
-                )
-                content = (resp.get("choices") or [{}])[0].get("message", {}).get("content", "")
-                result = clean_json_string(content, return_dict=True)
-            if strict_json and (not isinstance(result, dict) or "summary" not in result):
-                # Fail fast when strict JSON is requested
-                raise ValueError(
-                    f"Invalid JSON from LLM (strict mode). Raw snippet: {str(content)[:200]}"
-                )
-            if not isinstance(result, dict) or "summary" not in result:
-                try:
-                    logger.debug(f"LLM summary raw content (snippet): {(content or '')[:180]}")
-                except Exception:
-                    pass
-                raise ValueError("Invalid LLM summary JSON")
+            router = get_text_router()
+            resp = await router.acompletion(
+                model="chutes/text",
+                messages=[
+                    {"role": "system", "content": system_json_guard},
+                    {"role": "user", "content": prompt},
+                ],
+                response_format={"type": "json_object"} if strict_json else None,
+                temperature=0.0 if is_gpt5 else 0.0,
+                timeout=request_timeout,
+            )
+            content = (getattr(resp, "choices", [{}])[0].get("message", {}).get("content", ""))
+            result = clean_json_string(content, return_dict=True)
+            if strict_json and (
+                not isinstance(result, dict)
+                or "summary" not in result
+                or not isinstance(result.get("key_concepts", []), list)
+                or any(k not in {"summary", "key_concepts"} for k in result.keys())
+            ):
+                raise ValueError(f"stage09.invalid_json: {str(content)[:160]}")
             return {
                 "section_id": section.get("id"),
                 "section_title": section.get("title"),
@@ -171,22 +108,6 @@ async def summarize_section(
                     "key_concepts": result.get("key_concepts", []),
                 },
                 "success": True,
-            }
-        except Exception as e:
-            logger.warning(f"Summarize fallback for {section.get('title')}: {e}")
-            # Fallback: first 300 chars + naive key concepts split
-            text = (
-                section.get("reflowed_text")
-                or section.get("merged_text")
-                or section.get("raw_text")
-                or ""
-            )
-            return {
-                "section_id": section.get("id"),
-                "section_title": section.get("title"),
-                "section_level": section.get("level", 0),
-                "summary_data": {"summary": text[:300], "key_concepts": []},
-                "success": False,
             }
 
 
@@ -513,6 +434,11 @@ def _cmd_run(
         json.dump(final_output, f, indent=2)
 
     console.print(f"📄 Results saved to: {output_path}")
+    # Ensure router sessions are closed (avoid aiohttp warnings)
+    try:
+        close_all_routers()
+    except Exception:
+        pass
     return output_path
 
 
