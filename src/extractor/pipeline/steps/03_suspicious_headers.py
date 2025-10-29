@@ -1316,13 +1316,25 @@ def run(
     """
     Finds and verifies suspicious section headers in a Marker JSON file using a multimodal LLM.
     """
-    # Derive the clean PDF path from the pdf_dir
-    # Assumes a naming convention like '..._clean.pdf'
-    try:
-        candidates = sorted(pdf_dir.glob("*_clean.pdf"))
-        clean_pdf_path = candidates[0]
-    except (StopIteration, IndexError):
-        raise ValueError(f"No '*_clean.pdf' found in pdf_dir: {pdf_dir}")
+    # Resolve a clean PDF produced by Stage 00 preflight first; fall back to legacy 01 path.
+    run_results_dir = Path(os.getenv("RUN_RESULTS_DIR", "data/results/pipeline"))
+    preflight_dir = run_results_dir / "00_preflight"
+    clean_pdf_path: Path | None = None
+    if preflight_dir.exists():
+        matches = sorted(preflight_dir.rglob("clean.pdf"))
+        if matches:
+            # Prefer a match whose parent name appears in input_json path; else take the first
+            prefer = [m for m in matches if m.parent.name in str(input_json)]
+            clean_pdf_path = prefer[0] if prefer else matches[0]
+    if clean_pdf_path is None:
+        # Legacy: derive the clean PDF path from the provided pdf_dir
+        try:
+            candidates = sorted(pdf_dir.glob("*_clean.pdf"))
+            clean_pdf_path = candidates[0]
+        except (StopIteration, IndexError):
+            raise ValueError(
+                f"No 'clean.pdf' under {preflight_dir} and no '*_clean.pdf' found in pdf_dir: {pdf_dir}"
+            )
 
     if not input_json.exists():
         raise FileNotFoundError(f"Input JSON not found: {input_json}")

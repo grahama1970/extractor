@@ -29,6 +29,16 @@ def __getattr__(name: str):  # noqa: D401
 
     This avoids import-time side effects from unrelated step modules.
     """
+    # Support convenience alias: step_XX[_a]_name → sXX[_a]_name
+    if name.startswith("step_"):
+        alias = "s" + name[len("step_"):]
+        # Delegate to the same loader for the canonical alias
+        mod = __getattr__(alias)
+        globals()[name] = mod
+        if name not in __all__:
+            __all__.append(name)
+        return mod
+
     m = re.match(r"^s(\d{2}[A-Za-z]?)_([A-Za-z0-9_]+)$", name)
     if not m:
         raise AttributeError(name)

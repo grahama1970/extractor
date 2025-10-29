@@ -5,35 +5,36 @@ from typing import Any, Dict, List
 
 from scillm import Router
 import json
-import os
 from subprocess import run, PIPE
 
 _TEXT_ROUTER: Router | None = None
 _VLM_ROUTER: Router | None = None
 
 
+def _auth_params() -> Dict[str, Any]:
+    """Return litellm auth params based on CHUTES_AUTH_STYLE: 'x-api-key' or 'bearer'.
+
+    Default is 'bearer' to match working Stage 07 behavior.
+    """
+    style = (os.environ.get("CHUTES_AUTH_STYLE") or "bearer").strip().lower()
+    base = os.environ.get("CHUTES_API_BASE", "")
+    key = os.environ.get("CHUTES_API_KEY", "")
+    if style == "x-api-key":
+        return {"api_base": base, "api_key": None, "extra_headers": {"x-api-key": key}}
+    # bearer (default)
+    return {"api_base": base, "api_key": key}
+
+
 def _model_entry(model: str) -> Dict[str, Any]:
-    return {
-        "model_name": "chutes/text",
-        "litellm_params": {
-            "custom_llm_provider": "openai_like",
-            "model": model,
-            "api_base": os.environ.get("CHUTES_API_BASE", ""),
-            "api_key": os.environ.get("CHUTES_API_KEY", ""),
-        },
-    }
+    lp = {"custom_llm_provider": "openai_like", "model": model}
+    lp.update(_auth_params())
+    return {"model_name": "chutes/text", "litellm_params": lp}
 
 
 def _model_entry_vlm(model: str) -> Dict[str, Any]:
-    return {
-        "model_name": "chutes/vlm",
-        "litellm_params": {
-            "custom_llm_provider": "openai_like",
-            "model": model,
-            "api_base": os.environ.get("CHUTES_API_BASE", ""),
-            "api_key": os.environ.get("CHUTES_API_KEY", ""),
-        },
-    }
+    lp = {"custom_llm_provider": "openai_like", "model": model}
+    lp.update(_auth_params())
+    return {"model_name": "chutes/vlm", "litellm_params": lp}
 
 
 def get_text_router() -> Router:

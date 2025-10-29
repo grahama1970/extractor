@@ -32,7 +32,8 @@ import asyncio
 from loguru import logger
 from extractor.pipeline.utils.scillm_router import get_text_router
 from extractor.pipeline.utils.response_utils import normalize_json_content
-from extractor.pipeline.utils.debug_utils import ensure_logs_dir, time_block
+from extractor.pipeline.utils.debug_utils import ensure_logs_dir, time_block, log_timing
+from extractor.pipeline.utils.preflight import scillm_quick_check
 from typing import Iterable
 
 
@@ -82,14 +83,36 @@ def _chutes_title_infer_struct(prompt_ctx: str, timeout: float = 45.0) -> Option
         "base_title: the semantic title without numbering or prefixes, else null. continued: true if the text implies a continued table/figure.\n\n"
         f"Context (ignore boilerplate labels):\n{prompt_ctx[:1500]}\n"
     )
-    # Router-only JSON call
+    # Router-only JSON call (Bearer auth only for this tenant)
     try:
+        # Enforce Bearer for chat on this tenant
+        os.environ.setdefault("CHUTES_AUTH_STYLE", "bearer")
+        # Preflight once per call site (fast, 3s)
+        ok, reason = scillm_quick_check(timeout=3.0)
+        if not ok:
+            raise RuntimeError(f"06a preflight failed: {reason}")
         router = get_text_router()
         # Write per-call timing under the stage logs directory if env RUN_RESULTS_DIR is set
         results_dir = os.getenv("RUN_RESULTS_DIR")
         if results_dir:
             logs_dir = ensure_logs_dir(Path(results_dir), "06a_title_caption_enricher")
             with time_block(logs_dir, "title_infer", kind="text", ctx_chars=len(prompt_ctx or "")):
+                try:
+                    (logs_dir / "last_request.json").write_text(
+                        json.dumps({
+                            "model": "chutes/text",
+                            "messages": [
+                                {"role": "system", "content": "Return ONLY strict JSON for scientific/engineering docs."},
+                                {"role": "user", "content": prompt},
+                            ],
+                            "response_format": {"type": "json_object"},
+                            "temperature": 0,
+                            "timeout": timeout,
+                        }, ensure_ascii=False, indent=2),
+                        encoding="utf-8",
+                    )
+                except Exception:
+                    pass
                 resp = asyncio.run(
                     router.acompletion(
                         model="chutes/text",
@@ -102,6 +125,26 @@ def _chutes_title_infer_struct(prompt_ctx: str, timeout: float = 45.0) -> Option
                         timeout=timeout,
                     )
                 )
+                try:
+                    usage = getattr(resp, "usage", None) or {}
+                    served = getattr(resp, "model", None)
+                    log_timing(
+                        "06a_title_caption_enricher",
+                        {
+                            "attempt": "title_infer",
+                            "outcome": "ok",
+                            "model": served,
+                            "tokens_in": usage.get("prompt_tokens"),
+                            "tokens_out": usage.get("completion_tokens"),
+                        },
+                        stage_dir=logs_dir,
+                    )
+                    (logs_dir / "last_response.json").write_text(
+                        json.dumps(getattr(resp, "choices", [{}])[0].get("message", {}).get("content", ""), ensure_ascii=False, indent=2),
+                        encoding="utf-8",
+                    )
+                except Exception:
+                    pass
         else:
             resp = asyncio.run(
                 router.acompletion(
