@@ -24,6 +24,25 @@ Based on [OpenAI Prompting Guide](https://cookbook.openai.com/examples/gpt-5/gpt
 
 ---
 
+## SciLLM Protocol (must follow)
+
+- Router‑only: use `scillm.Router(.acompletion)` everywhere; no httpx/OpenAI fallbacks.
+- Models: read `CHUTES_TEXT_MODEL` (+ `ALT1/ALT2`) and `CHUTES_VLM_MODEL` (+ `ALT1/ALT2`).
+- Auth (this tenant): Chat requires Bearer. Keep `CHUTES_AUTH_STYLE=bearer` (default). Do not flip to `x-api-key` without approval.
+- Preflight: probe `GET $CHUTES_API_BASE/models` and a minimal `POST $CHUTES_API_BASE/chat/completions` (Bearer). Fail fast on non‑200.
+- JSON mode: `response_format={"type":"json_object"}`, temp=0, strict “no fences/extra keys”. Accept dict or string; normalize to dict.
+- Logging: write per‑attempt `timings.jsonl` (served_model, tokens, latency_ms, outcome) and `timings_summary.json` per stage.
+- No bespoke wrappers: centralize in `extractor/pipeline/utils/scillm_router.py`. No stage‑local clients.
+
+References (local)
+- QUICKSTART: `/home/graham/workspace/experiments/litellm/QUICKSTART.md`
+- Notebooks:
+  - `/home/graham/workspace/experiments/litellm/notebooks/00_quickstart.ipynb`
+  - `/home/graham/workspace/experiments/litellm/notebooks/01_chutes_openai_compatible.ipynb`
+  - `/home/graham/workspace/experiments/litellm/notebooks/02_router_parallel_batch.ipynb`
+  - `/home/graham/workspace/experiments/litellm/notebooks/03_model_list_first_success.ipynb`
+
+
 ## UX-Specific Directives (Universal, Not Project-Specific)
 
 * **Frameworks**: React + Tailwind + ShadCN. Responsive design, modern SVG icons, tasteful animations.
