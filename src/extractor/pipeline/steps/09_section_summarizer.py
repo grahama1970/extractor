@@ -13,7 +13,7 @@ import os
 import json
 import asyncio
 from pathlib import Path
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 from datetime import datetime
 from textwrap import dedent
 
@@ -38,6 +38,8 @@ async def summarize_section(
     window_size: int = 3,
     strict_json: bool = True,
     request_timeout: int = 120,
+    timings_lock: Optional[asyncio.Lock] = None,
+    timings_path: Optional[Path] = None,
 ) -> Dict[str, Any]:
     """Generate a summary for a single section using scillm with optional rolling context."""
     prev = previous_summaries or []
@@ -80,39 +82,84 @@ async def summarize_section(
             model_name = get_text_model()
             is_gpt5 = "gpt-5" in (model_name or "").lower()
             router = get_text_router()
-            resp = await router.acompletion(
-                model="chutes/text",
-                messages=[
-                    {"role": "system", "content": system_json_guard},
-                    {"role": "user", "content": prompt},
-                ],
-                response_format={"type": "json_object"} if strict_json else None,
-                temperature=0.0 if is_gpt5 else 0.0,
-                timeout=request_timeout,
-            )
-            content = (getattr(resp, "choices", [{}])[0].get("message", {}).get("content", ""))
-            result = clean_json_string(content, return_dict=True)
-            if strict_json and (
-                not isinstance(result, dict)
-                or "summary" not in result
-                or not isinstance(result.get("key_concepts", []), list)
-                or any(k not in {"summary", "key_concepts"} for k in result.keys())
-            ):
-                raise ValueError(f"stage09.invalid_json: {str(content)[:160]}")
-            return {
-                "section_id": section.get("id"),
-                "section_title": section.get("title"),
-                "section_level": section.get("level", 0),
-                "summary_data": {
-                    "summary": result.get("summary", ""),
-                    "key_concepts": result.get("key_concepts", []),
-                },
-                "success": True,
-            }
+
+            t0 = asyncio.get_event_loop().time()
+            error: Optional[str] = None
+            served_model: Optional[str] = None
+            usage: Dict[str, Any] = {}
+            try:
+                resp = await router.acompletion(
+                    model="chutes/text",
+                    messages=[
+                        {"role": "system", "content": system_json_guard},
+                        {"role": "user", "content": prompt},
+                    ],
+                    response_format={"type": "json_object"} if strict_json else None,
+                    temperature=0.0 if is_gpt5 else 0.0,
+                    timeout=request_timeout,
+                )
+                served_model = getattr(resp, "model", None) or getattr(resp, "id", None) or "chutes/text"
+                content = (getattr(resp, "choices", [{}])[0].get("message", {}).get("content", ""))
+                usage_obj = getattr(resp, "usage", None) or {}
+                if isinstance(usage_obj, dict):
+                    usage = usage_obj
+                else:
+                    usage = {
+                        "prompt_tokens": getattr(usage_obj, "prompt_tokens", None),
+                        "completion_tokens": getattr(usage_obj, "completion_tokens", None),
+                        "total_tokens": getattr(usage_obj, "total_tokens", None),
+                    }
+                result = clean_json_string(content, return_dict=True)
+                if strict_json and (
+                    not isinstance(result, dict)
+                    or "summary" not in result
+                    or not isinstance(result.get("key_concepts", []), list)
+                    or any(k not in {"summary", "key_concepts"} for k in result.keys())
+                ):
+                    raise ValueError(f"stage09.invalid_json: {str(content)[:160]}")
+                return {
+                    "section_id": section.get("id"),
+                    "section_title": section.get("title"),
+                    "section_level": section.get("level", 0),
+                    "summary_data": {
+                        "summary": result.get("summary", ""),
+                        "key_concepts": result.get("key_concepts", []),
+                    },
+                    "success": True,
+                }
+            except Exception as e:
+                error = f"{type(e).__name__}: {e}"
+                raise
+            finally:
+                # Per-attempt timings
+                if timings_path is not None and timings_lock is not None:
+                    t1 = asyncio.get_event_loop().time()
+                    latency_ms = int((t1 - t0) * 1000)
+                    line = {
+                        "ts": datetime.utcnow().isoformat() + "Z",
+                        "type": "section",
+                        "section_id": section.get("id"),
+                        "section_title": section.get("title"),
+                        "served_model": served_model,
+                        "usage": usage,
+                        "latency_ms": latency_ms,
+                        "outcome": "success" if error is None else "error",
+                        "error": error,
+                    }
+                    try:
+                        async with timings_lock:
+                            with timings_path.open("a", encoding="utf-8") as f:
+                                f.write(json.dumps(line, ensure_ascii=False) + "\n")
+                    except Exception:
+                        pass
 
 
 async def create_checkpoint_summary(
-    summaries: List[Dict[str, Any]], checkpoint_name: str = "Chapter", request_timeout: int = 120
+    summaries: List[Dict[str, Any]],
+    checkpoint_name: str = "Chapter",
+    request_timeout: int = 120,
+    timings_lock: Optional[asyncio.Lock] = None,
+    timings_path: Optional[Path] = None,
 ) -> Dict[str, Any]:
     """Create a higher-level summary of multiple sections via the paved scillm helper.
 
@@ -175,6 +222,10 @@ async def create_checkpoint_summary(
 
     # Try up to 3 attempts total, honoring capacity signals; helper/client handle Retry-After internally
     attempts = 0
+    last_error: Optional[str] = None
+    served_model: Optional[str] = None
+    usage: Dict[str, Any] = {}
+    start_time = asyncio.get_event_loop().time()
     while True:
         try:
             resp = await _call_once_async()
@@ -187,6 +238,22 @@ async def create_checkpoint_summary(
                 logger.error(f"Failed to create checkpoint summary (attempts={attempts}): {e}")
                 # If capacity-related, emit a skip marker so downstream can record it deterministically
                 if any(t in msg for t in ("429", "Too Many Requests", "capacity", "maximum capacity")):
+                    if timings_path is not None and timings_lock is not None:
+                        try:
+                            async with timings_lock:
+                                with timings_path.open("a", encoding="utf-8") as f:
+                                    f.write(json.dumps({
+                                        "ts": datetime.utcnow().isoformat() + "Z",
+                                        "type": "checkpoint",
+                                        "name": checkpoint_name,
+                                        "served_model": None,
+                                        "usage": {},
+                                        "latency_ms": int((asyncio.get_event_loop().time() - start_time) * 1000),
+                                        "outcome": "skipped_capacity",
+                                        "error": msg,
+                                    }) + "\n")
+                        except Exception:
+                            pass
                     return {
                         "type": "checkpoint",
                         "name": checkpoint_name,
@@ -196,6 +263,22 @@ async def create_checkpoint_summary(
                         "reason": "capacity",
                     }
                 if ("401" in msg) or ("Unauthorized" in msg):
+                    if timings_path is not None and timings_lock is not None:
+                        try:
+                            async with timings_lock:
+                                with timings_path.open("a", encoding="utf-8") as f:
+                                    f.write(json.dumps({
+                                        "ts": datetime.utcnow().isoformat() + "Z",
+                                        "type": "checkpoint",
+                                        "name": checkpoint_name,
+                                        "served_model": None,
+                                        "usage": {},
+                                        "latency_ms": int((asyncio.get_event_loop().time() - start_time) * 1000),
+                                        "outcome": "skipped_auth",
+                                        "error": msg,
+                                    }) + "\n")
+                        except Exception:
+                            pass
                     return {
                         "type": "checkpoint",
                         "name": checkpoint_name,
@@ -224,10 +307,38 @@ async def create_checkpoint_summary(
         logger.error("checkpoint_summary.empty_content")
         return None
     try:
+        served_model = getattr(resp, "model", None) or getattr(resp, "id", None) or "chutes/text"
+        usage_obj = getattr(resp, "usage", None) or {}
+        if isinstance(usage_obj, dict):
+            usage = usage_obj
+        else:
+            usage = {
+                "prompt_tokens": getattr(usage_obj, "prompt_tokens", None),
+                "completion_tokens": getattr(usage_obj, "completion_tokens", None),
+                "total_tokens": getattr(usage_obj, "total_tokens", None),
+            }
         result = clean_json_string(content, return_dict=True)
     except Exception as e:
         logger.error(f"checkpoint_summary.json_clean_failed: {e}")
         return None
+
+    # timings write
+    if timings_path is not None and timings_lock is not None:
+        try:
+            async with timings_lock:
+                with timings_path.open("a", encoding="utf-8") as f:
+                    f.write(json.dumps({
+                        "ts": datetime.utcnow().isoformat() + "Z",
+                        "type": "checkpoint",
+                        "name": checkpoint_name,
+                        "served_model": served_model,
+                        "usage": usage,
+                        "latency_ms": int((asyncio.get_event_loop().time() - start_time) * 1000),
+                        "outcome": "success",
+                        "error": None,
+                    }) + "\n")
+        except Exception:
+            pass
 
     return {
         "type": "checkpoint",
@@ -244,6 +355,7 @@ async def batch_summarize_sections_rolling(
     checkpoint_interval: int = 20,
     strict_json: bool = True,
     request_timeout: int = 120,
+    timings_dir: Optional[Path] = None,
 ) -> List[Dict[str, Any]]:
     """Summarize sections with rolling window context and periodic checkpoints.
 
@@ -280,6 +392,15 @@ async def batch_summarize_sections_rolling(
     all_summaries = []
     checkpoint_buffer = []  # Buffer for checkpoint creation
     last_checkpoint = None
+    timings_lock = asyncio.Lock()
+    timings_path: Optional[Path] = None
+    if timings_dir is not None:
+        timings_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            timings_path = (timings_dir / "timings.jsonl")
+            timings_path.touch(exist_ok=True)
+        except Exception:
+            timings_path = None
 
     # Process in batches to balance order and concurrency
     batch_size = max_concurrent
@@ -312,6 +433,8 @@ async def batch_summarize_sections_rolling(
                     window_size=window_size + 1 if last_checkpoint else window_size,
                     strict_json=strict_json,
                     request_timeout=request_timeout,
+                    timings_lock=timings_lock if timings_path is not None else None,
+                    timings_path=timings_path,
                 )
                 tasks.append((i + j, task))  # Store index for ordering
 
@@ -338,6 +461,8 @@ async def batch_summarize_sections_rolling(
                     checkpoint_buffer,
                     f"Checkpoint {len(all_summaries) // checkpoint_interval}",
                     request_timeout=request_timeout,
+                    timings_lock=timings_lock if timings_path is not None else None,
+                    timings_path=timings_path,
                 )
                 if checkpoint:
                     last_checkpoint = checkpoint
@@ -359,7 +484,11 @@ async def batch_summarize_sections_rolling(
     if checkpoint_buffer:
         logger.info(f"Creating final checkpoint for {len(checkpoint_buffer)} sections...")
         checkpoint = await create_checkpoint_summary(
-            checkpoint_buffer, "Final Checkpoint", request_timeout=request_timeout
+            checkpoint_buffer,
+            "Final Checkpoint",
+            request_timeout=request_timeout,
+            timings_lock=timings_lock if timings_path is not None else None,
+            timings_path=timings_path,
         )
         if checkpoint:
             all_summaries.append(
@@ -374,6 +503,46 @@ async def batch_summarize_sections_rolling(
                 }
             )
 
+    # Aggregate timings into summary if available
+    if timings_path is not None:
+        try:
+            calls = success = error = latency_sum = 0
+            prompt_tokens_total = completion_tokens_total = total_tokens_total = 0
+            with timings_path.open("r", encoding="utf-8") as f:
+                for line in f:
+                    try:
+                        rec = json.loads(line)
+                    except Exception:
+                        continue
+                    calls += 1
+                    if rec.get("outcome") == "success":
+                        success += 1
+                    else:
+                        error += 1
+                    latency_sum += int(rec.get("latency_ms") or 0)
+                    u = rec.get("usage") or {}
+                    prompt_tokens_total += int(u.get("prompt_tokens") or 0)
+                    completion_tokens_total += int(u.get("completion_tokens") or 0)
+                    total_tokens_total += int(u.get("total_tokens") or 0)
+            timings_summary_path = (timings_dir / "timings_summary.json") if timings_dir else None
+            if timings_summary_path:
+                with timings_summary_path.open("w", encoding="utf-8") as f:
+                    json.dump(
+                        {
+                            "calls": calls,
+                            "success": success,
+                            "error": error,
+                            "latency_ms_total": latency_sum,
+                            "latency_ms_avg": (latency_sum // calls) if calls else 0,
+                            "prompt_tokens_total": prompt_tokens_total,
+                            "completion_tokens_total": completion_tokens_total,
+                            "total_tokens_total": total_tokens_total,
+                        },
+                        f,
+                        indent=2,
+                    )
+        except Exception:
+            pass
     return all_summaries
 
 
@@ -406,15 +575,24 @@ def _cmd_run(
     console.print(f"Found {len(sections)} sections to summarize.")
 
     # --- Concurrent Summarization ---
-    summaries = asyncio.run(
-        batch_summarize_sections_rolling(
-            sections=sections,
-            max_concurrent=max_concurrent,
-            window_size=window_size,
-            strict_json=strict_json,
-            request_timeout=request_timeout,
+    timings_dir = stage_output_dir
+    try:
+        summaries = asyncio.run(
+            batch_summarize_sections_rolling(
+                sections=sections,
+                max_concurrent=max_concurrent,
+                window_size=window_size,
+                strict_json=strict_json,
+                request_timeout=request_timeout,
+                timings_dir=timings_dir,
+            )
         )
-    )
+    finally:
+        # Ensure router sessions are closed (avoid aiohttp warnings)
+        try:
+            close_all_routers()
+        except Exception:
+            pass
 
     successful_count = sum(1 for s in summaries if s.get("success"))
     console.print(f"\n✅ Generated {successful_count}/{len(sections)} summaries.")
@@ -434,11 +612,6 @@ def _cmd_run(
         json.dump(final_output, f, indent=2)
 
     console.print(f"📄 Results saved to: {output_path}")
-    # Ensure router sessions are closed (avoid aiohttp warnings)
-    try:
-        close_all_routers()
-    except Exception:
-        pass
     return output_path
 
 
@@ -465,15 +638,23 @@ def _cmd_debug_bundle(
         print(f"Failed to load bundle: {e}")
         raise ValueError(f"Failed to load bundle: {e}")
 
-    summaries = asyncio.run(
-        batch_summarize_sections_rolling(
-            sections=sections,
-            max_concurrent=max_concurrent,
-            window_size=window_size,
-            strict_json=strict_json,
-            request_timeout=request_timeout,
+    timings_dir = stage_output_dir
+    try:
+        summaries = asyncio.run(
+            batch_summarize_sections_rolling(
+                sections=sections,
+                max_concurrent=max_concurrent,
+                window_size=window_size,
+                strict_json=strict_json,
+                request_timeout=request_timeout,
+                timings_dir=timings_dir,
+            )
         )
-    )
+    finally:
+        try:
+            close_all_routers()
+        except Exception:
+            pass
     successful_count = sum(1 for s in summaries if s.get("success"))
     final_output = {
         "timestamp": datetime.now().isoformat(),
