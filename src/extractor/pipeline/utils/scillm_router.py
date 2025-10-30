@@ -92,10 +92,10 @@ def get_text_router() -> Router:
         raise RuntimeError("CHUTES_TEXT_MODEL is required (alternates optional).")
     if not model_list and not auto:
         raise RuntimeError("No CHUTES_TEXT_MODEL pins provided and SCILLM_AUTO_ROUTER is disabled. Set CHUTES_TEXT_MODEL or enable SCILLM_AUTO_ROUTER=1 for dev triage.")
+    # Router now handles transient retries natively; avoid layering retries here
+    # to prevent duplicate backoffs. Use Router defaults.
     _TEXT_ROUTER = Router(
         model_list=model_list or [{}],
-        num_retries=0,
-        default_litellm_params={"timeout": 20},
     )
     return _TEXT_ROUTER
 
@@ -149,8 +149,6 @@ def get_vlm_router() -> Router:
         raise RuntimeError("No CHUTES_VLM_MODEL pins provided and SCILLM_AUTO_ROUTER is disabled. Set CHUTES_VLM_MODEL or enable SCILLM_AUTO_ROUTER=1 for dev triage.")
     _VLM_ROUTER = Router(
         model_list=model_list or [{}],
-        num_retries=0,
-        default_litellm_params={"timeout": 20},
     )
     return _VLM_ROUTER
 

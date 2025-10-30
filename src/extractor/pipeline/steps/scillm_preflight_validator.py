@@ -23,47 +23,50 @@ async def probe_models_endpoint(base_url: str, api_key: str) -> Tuple[bool, str]
     """Probe GET $CHUTES_API_BASE/models endpoint per AGENTS.md."""
     try:
         headers = {"Authorization": f"Bearer {api_key}"}
+        attempts = int(os.getenv("SCILLM_PREFLIGHT_RETRIES", "1")) + 1
+        backoff = float(os.getenv("SCILLM_PREFLIGHT_BACKOFF", "0.75"))
         async with aiohttp.ClientSession() as session:
-            # Ensure proper URL construction - base_url should end with /v1
             models_url = f"{base_url}/models"
-            async with session.get(
-                models_url,
-                headers=headers,
-                timeout=aiohttp.ClientTimeout(total=10)
-            ) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    models = data.get("data", [])
-                    
-                    # Check if requested models are available
-                    text_model = os.getenv("CHUTES_TEXT_MODEL")
-                    vlm_model = os.getenv("CHUTES_VLM_MODEL")
-                    
-                    model_ids = [m.get("id", "") for m in models]
-                    
-                    if text_model and text_model not in model_ids:
-                        # Try to find similar models
-                        similar_text = [m for m in model_ids if text_model.split("/")[-1] in m]
-                        if not similar_text:
-                            return False, f"Text model '{text_model}' not found in available models"
+            last_text = ""
+            for i in range(attempts):
+                try:
+                    async with session.get(
+                        models_url,
+                        headers=headers,
+                        timeout=aiohttp.ClientTimeout(total=10)
+                    ) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            models = data.get("data", [])
+                            text_model = os.getenv("CHUTES_TEXT_MODEL")
+                            vlm_model = os.getenv("CHUTES_VLM_MODEL")
+                            model_ids = [m.get("id", "") for m in models]
+                            if text_model and text_model not in model_ids:
+                                similar_text = [m for m in model_ids if text_model.split("/")[-1] in m]
+                                if not similar_text:
+                                    return False, f"Text model '{text_model}' not found in available models"
+                                else:
+                                    logger.warning(f"Requested text model '{text_model}' not found, similar models: {similar_text}")
+                            if vlm_model and vlm_model not in model_ids:
+                                similar_vlm = [m for m in model_ids if "vlm" in m.lower() or "vision" in m.lower()]
+                                if not similar_vlm:
+                                    return False, f"VLM model '{vlm_model}' not found in available models"
+                                else:
+                                    logger.warning(f"Requested VLM model '{vlm_model}' not found, VLM models available: {similar_vlm}")
+                            logger.info(f"SciLLM preflight: Found {len(model_ids)} total models")
+                            return True, "Models endpoint accessible"
                         else:
-                            logger.warning(f"Requested text model '{text_model}' not found, but similar models available: {similar_text}")
-                    
-                    if vlm_model and vlm_model not in model_ids:
-                        # Try to find similar VLM models
-                        similar_vlm = [m for m in model_ids if "vlm" in m.lower() or "vision" in m.lower()]
-                        if not similar_vlm:
-                            return False, f"VLM model '{vlm_model}' not found in available models"
-                        else:
-                            logger.warning(f"Requested VLM model '{vlm_model}' not found, but VLM models available: {similar_vlm}")
-                    
-                    logger.info(f"SciLLM preflight: Found {len(model_ids)} total models")
-                    return True, "Models endpoint accessible"
-                else:
-                    text = await resp.text()
-                    return False, f"Models endpoint returned {resp.status}: {text}"
-    except Exception as e:
-        return False, f"Models endpoint probe failed: {e}"
+                            last_text = await resp.text()
+                            if 500 <= resp.status < 600 and i < attempts - 1:
+                                await asyncio.sleep(backoff)
+                                continue
+                            return False, f"Models endpoint returned {resp.status}: {last_text}"
+                except Exception as ex:
+                    last_text = str(ex)
+                    if i < attempts - 1:
+                        await asyncio.sleep(backoff)
+                        continue
+                    return False, f"Models endpoint probe failed: {last_text}"
 
 
 async def probe_chat_completions_endpoint(base_url: str, api_key: str) -> Tuple[bool, str]:
@@ -115,22 +118,34 @@ async def validate_scillm_preflight() -> Tuple[bool, str]:
     """
     base_url = os.getenv("CHUTES_API_BASE", "").rstrip("/")
     api_key = os.getenv("CHUTES_API_KEY", "")
-    
+
     if not base_url:
         return False, "CHUTES_API_BASE not set"
     if not api_key:
         return False, "CHUTES_API_KEY not set"
-    
-    # Probe models endpoint first
+
+    # Prefer paved healthcheck from scillm if available (Router-only policy)
+    try:
+        from scillm.paved import chutes_healthcheck  # type: ignore
+
+        hc = await chutes_healthcheck()
+        ok = bool(hc.get("ok"))
+        if ok:
+            logger.info("SciLLM preflight (paved): ok — served_model=%s", hc.get("served_model"))
+            return True, "Healthcheck passed"
+        # fall through to explicit probes if paved check reports not ok
+    except Exception:
+        pass
+
+    # Fallback explicit probes (rarely needed)
     models_ok, models_reason = await probe_models_endpoint(base_url, api_key)
     if not models_ok:
         return False, f"Models probe failed: {models_reason}"
-    
-    # Probe chat completions endpoint
+
     chat_ok, chat_reason = await probe_chat_completions_endpoint(base_url, api_key)
     if not chat_ok:
         return False, f"Chat completions probe failed: {chat_reason}"
-    
+
     logger.info("SciLLM preflight validation passed")
     return True, "All endpoints accessible and responsive"
 
