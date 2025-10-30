@@ -962,6 +962,11 @@ def _build_section_sketch(
                     doc.close()
     except Exception:
         pass
+    try:
+        from extractor.pipeline.utils.scillm_router import close_all_routers
+        close_all_routers()
+    except Exception:
+        pass
     return result
 
 

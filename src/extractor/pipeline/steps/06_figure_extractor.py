@@ -86,27 +86,15 @@ async def _describe_and_title_multimodal(
     nearby_text: str,
     router: Any | None = None,
 ) -> dict[str, Optional[str]]:
-    # AGENTS.md compliance: Validate VLM environment before making calls
+    # AGENTS.md compliance: SciLLM must be configured for multimodal analysis
     if not quick_scillm_check():
-        logger.warning("SciLLM environment not configured, skipping multimodal figure analysis")
-        return {
-            "description": "SciLLM not configured",
-            "title": "Figure",
-            "source": "unknown",
-            "number": None
-        }
+        raise RuntimeError("SciLLM environment not configured; figure analysis requires Chutes.")
     
     base = os.getenv("CHUTES_API_BASE", "").strip()
     key = os.getenv("CHUTES_API_KEY", "").strip()
     model = (os.getenv("CHUTES_VLM_MODEL") or "").strip()
     if not (base and key and model):
-        logger.warning("VLM environment incomplete, skipping multimodal figure analysis")
-        return {
-            "description": "VLM environment incomplete",
-            "title": "Figure", 
-            "source": "unknown",
-            "number": None
-        }
+        raise RuntimeError("VLM environment incomplete; set CHUTES_API_BASE/CHUTES_API_KEY/CHUTES_VLM_MODEL.")
 
     b64 = base64.b64encode(image_data).decode("utf-8")
     system = (
@@ -326,6 +314,11 @@ def run(
 
     t0 = time.monotonic()
 
+    # Enforce preflight if descriptions are enabled (no soft skip)
+    if not skip_descriptions and FIGURE_DESC_ENABLED:
+        from extractor.pipeline.steps.scillm_preflight_validator import require_scillm_preflight
+        require_scillm_preflight()
+
     # Load inputs
     if bundle is not None:
         data = json.loads(Path(bundle).read_text())
@@ -394,6 +387,11 @@ def run(
     console.print(
         f"stage06:done out={out_path} duration_ms={int((time.monotonic()-t0)*1000)} count={len(figures)}"
     )
+    try:
+        from extractor.pipeline.utils.scillm_router import close_all_routers
+        close_all_routers()
+    except Exception:
+        pass
     return out_path
 
 

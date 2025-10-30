@@ -281,15 +281,9 @@ async def verify_header_with_llm(image_b64: str, context_text: str, model: str, 
         item_timeout = int(os.getenv("SC_TIMEOUT_STAGE_03", str(item_timeout)))
     except Exception:
         pass
-    # AGENTS.md compliance: Validate SciLLM environment before making calls
+    # AGENTS.md compliance: Validate SciLLM environment before making calls (no soft skip)
     if not quick_scillm_check():
-        logger.warning("SciLLM environment not configured, skipping header verification")
-        return {
-            "verified": False,
-            "reason": "SciLLM environment not configured",
-            "confidence": 0.0,
-            "llm_elapsed_ms": 0
-        }
+        raise RuntimeError("SciLLM environment not configured; header verification requires Chutes.")
     
     router = get_text_router()
     # Timed SciLLM Router-only call
@@ -1331,6 +1325,11 @@ def run(
     """
     Finds and verifies suspicious section headers in a Marker JSON file using a multimodal LLM.
     """
+    # Enforce preflight when LLM is used (no soft skip)
+    if not skip_llm:
+        from extractor.pipeline.steps.scillm_preflight_validator import require_scillm_preflight
+        require_scillm_preflight()
+
     # Resolve a clean PDF produced by Stage 00 preflight first; fall back to legacy 01 path.
     run_results_dir = Path(os.getenv("RUN_RESULTS_DIR", "data/results/pipeline"))
     preflight_dir = run_results_dir / "00_preflight"
@@ -1362,9 +1361,8 @@ def run(
     json_output_dir.mkdir(exist_ok=True)
     image_output_dir.mkdir(exist_ok=True)
 
-    # Offline mode: apply lightweight heuristics to demote obvious non-headers,
-    # then pass through with structural normalization (no LLM calls).
     if skip_llm:
+        # Explicit operator override: allowed skip (not implicit soft-skip)
         try:
             data = json.loads(input_json.read_text())
         except Exception as e:
@@ -1404,6 +1402,11 @@ def run(
         out = json_output_dir / "03_verified_blocks.json"
         out.write_text(json.dumps(data, indent=2))
         print(f"[offline] Heuristic demotion applied; wrote {out}")
+        try:
+            from extractor.pipeline.utils.scillm_router import close_all_routers
+            close_all_routers()
+        except Exception:
+            pass
         return out
 
     # Configure logging sink per stage run
@@ -1452,6 +1455,11 @@ def run(
         verify_all_headers=verify_all_headers,
     )
     asyncio.run(process_pdf_pipeline(cfg))
+    try:
+        from extractor.pipeline.utils.scillm_router import close_all_routers
+        close_all_routers()
+    except Exception:
+        pass
     return stage_output_dir / "json_output" / "03_verified_blocks.json"
 
 

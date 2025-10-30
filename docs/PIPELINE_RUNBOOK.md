@@ -233,3 +233,38 @@ Use this as a quick-reference while debugging. Mark when a step is verified.
 - If litellm_call fails due to provider JSON enforcement, toggle `--strict-json/--no-strict-json` on Stage 09.
 - For Stage 11 rationales, set `GRAPH_RATIONALE_MODEL` to your provider (e.g., Gemini) or set `GRAPH_ENABLE_RATIONALES=false`.
 - Keep `LITELLM_ATTACH_SESSION=true` (default) for better cache namespacing.
+### One Way To Call Chutes (Paved Path)
+
+We use exactly one allowed shape for Chutes calls (no alternates, no discovery):
+
+- Provider: `openai_like`
+- Auth: `Authorization: Bearer $CHUTES_API_KEY` (never x-api-key)
+- Single pinned model: `CHUTES_TEXT_MODEL` set to a vendor id that returns 200 on `/chat/completions`
+- JSON mode only: `response_format={"type":"json_object"}`
+- Router lifecycle: stages close routers automatically at the end
+
+Environment (CI/prod)
+
+```
+export CHUTES_API_BASE=https://llm.chutes.ai/v1
+export CHUTES_API_KEY=cpk_...
+export CHUTES_TEXT_MODEL=moonshotai/Kimi-K2-Instruct-0905
+unset SCILLM_AUTO_ROUTER CHUTES_TEXT_MODEL_ALT1 CHUTES_TEXT_MODEL_ALT2 CHUTES_AUTH_STYLE
+```
+
+Sanity probes (must succeed before long runs)
+
+```
+curl -sS -w '%{http_code}\n' -o /dev/null \
+  -H "Authorization: Bearer $CHUTES_API_KEY" \
+  "$CHUTES_API_BASE/models"   # expect 200
+
+printf '%s' '{"model":"'"$CHUTES_TEXT_MODEL"'","messages":[{"role":"user","content":"Return only {\"ok\":true} as JSON."}],"response_format":{"type":"json_object"}}' >/tmp/payload.json
+curl -sS -w '%{http_code}\n' -o /tmp/chat.json \
+  -H "content-type: application/json" \
+  -H "Authorization: Bearer $CHUTES_API_KEY" \
+  -d @/tmp/payload.json \
+  "$CHUTES_API_BASE/chat/completions"  # expect 200
+```
+
+If you see “Unmapped LLM provider”, your pinned model id is not routed to `/chat/completions` on this host. Set `CHUTES_TEXT_MODEL` to a routable id and re‑probe.

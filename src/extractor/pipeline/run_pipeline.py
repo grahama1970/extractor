@@ -18,7 +18,7 @@ Flags
   --skip-fig-descriptions  Skip Stage 06 VLM descriptions (faster, no network)
   --summary-only           Make Stage 07 text-only (no SciLLM calls)
   --skip-export            Do not write to ArangoDB in Stage 10
-  --stop-on-fail           Stop at first failing step (default)
+  --stop-on-fail           Stop at first failing step (opt-in)
 """
 
 from __future__ import annotations
@@ -70,7 +70,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         action="store_true",
         help="Run 09a_pdf_annotator to generate an annotated PDF with overlays",
     )
-    p.add_argument("--stop-on-fail", action="store_true", default=True)
+    p.add_argument("--stop-on-fail", action="store_true", default=False)
     args = p.parse_args(argv)
 
     # Load .env once (no import-time side effects in steps)
@@ -78,6 +78,16 @@ def main(argv: Optional[list[str]] = None) -> int:
         load_dotenv(find_dotenv(), override=True)
     except Exception:
         pass
+
+    # Enforce SciLLM/Chutes preflight for an online-only pipeline.
+    # If Chutes is not reachable or misconfigured, fail fast (no offline bypasses).
+    try:
+        from extractor.pipeline.steps.scillm_preflight_validator import require_scillm_preflight
+
+        require_scillm_preflight()
+    except Exception as e:
+        logger.error(f"SciLLM preflight failed: {e}")
+        return 1
 
     pdf = args.pdf
     out = args.out
@@ -118,6 +128,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     from extractor.pipeline.steps import (
         s01_annotation_processor as s01,
         s02_marker_extractor as s02,
+        s03_suspicious_headers as s03,
         s04_section_builder as s04,
         s05_table_extractor as s05,
         s06_figure_extractor as s06,
@@ -145,9 +156,26 @@ def main(argv: Optional[list[str]] = None) -> int:
     _write_artifacts_index((out / "02_marker_extractor"))
     manifest.record_stage("02_marker_extractor", "Completed", {"json": str(a02.relative_to(out))})
 
-    # 04
+    # 03
     pdf_dir = out / "01_annotation_processor"
-    a04_path = _step("04_section_builder", s04.run, a02, pdf_dir, out, stop_on_fail=args.stop_on_fail)
+    a03 = _step("03_suspicious_headers", s03.run, a02, pdf_dir, out, stop_on_fail=args.stop_on_fail)
+    if not a03:
+        return 1
+    results["03"] = a03
+    _write_artifacts_index((out / "03_suspicious_headers"))
+    try:
+        vcount = len(__import__("json").loads(a03.read_text()).get("blocks", []))
+    except Exception:
+        vcount = None
+    manifest.record_stage(
+        "03_suspicious_headers",
+        "Completed",
+        {"json": str(a03.relative_to(out))},
+        counts={"verified_blocks": vcount} if isinstance(vcount, int) else None,
+    )
+
+    # 04
+    a04_path = _step("04_section_builder", s04.run, a03, pdf_dir, out, stop_on_fail=args.stop_on_fail)
     if not a04_path:
         return 1
     results["04"] = a04_path
@@ -164,7 +192,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     )
 
     # 05
-    a05 = _step("05_table_extractor", s05.run, a04_path, pdf_dir, out, stop_on_fail=args.stop_on_fail)
+    a05 = _step("05_table_extractor", s05.run, pdf, out, stop_on_fail=args.stop_on_fail)
     if not a05:
         return 1
     results["05"] = a05
@@ -180,11 +208,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         counts={"tables": tcount} if isinstance(tcount, int) else None,
     )
 
-    # 05
-    a05 = _step("05_table_extractor", s05.run, a04_path, pdf_dir, out, stop_on_fail=args.stop_on_fail)
-    if not a05:
-        return 1
-    results["05"] = a05
+    # (Removed duplicate Stage 05 invocation)
 
     # 06
     a06 = _step(
@@ -346,7 +370,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     # Write manifests
     try:
         import json as _json
-        manifest = {
+        manifest_data = {
             "input_pdf": str(pdf),
             "outputs": {k: str(v) for k, v in results.items()},
             "counts": {},
@@ -363,30 +387,34 @@ def main(argv: Optional[list[str]] = None) -> int:
                 return {}
         try:
             d02 = _safe_load(out / "02_marker_extractor/json_output/02_marker_blocks.json")
-            manifest["counts"]["blocks02"] = len(d02.get("blocks", []))
+            manifest_data["counts"]["blocks02"] = len(d02.get("blocks", []))
+        except Exception:
+            pass
+        try:
+            d03 = _safe_load(out / "03_suspicious_headers/json_output/03_verified_blocks.json")
+            manifest_data["counts"]["verified03"] = len(d03.get("blocks", []))
         except Exception:
             pass
         try:
             d04 = _safe_load(out / "04_section_builder/json_output/04_sections.json")
-            manifest["counts"]["sections04"] = len(d04.get("sections", []))
+            manifest_data["counts"]["sections04"] = len(d04.get("sections", []))
         except Exception:
             pass
         try:
             d05 = _safe_load(out / "05_table_extractor/json_output/05_tables.json")
-            manifest["counts"]["tables05"] = len(d05.get("tables", []))
+            manifest_data["counts"]["tables05"] = len(d05.get("tables", []))
         except Exception:
             pass
         try:
             d06 = _safe_load(out / "06_figure_extractor/json_output/06_figures.json")
-            manifest["counts"]["figures06"] = len(d06.get("figures", [])) if isinstance(d06, dict) else 0
+            manifest_data["counts"]["figures06"] = len(d06.get("figures", [])) if isinstance(d06, dict) else 0
         except Exception:
             pass
-        (out / "manifest.json").write_text(_json.dumps(manifest, indent=2))
+        (out / "manifest.json").write_text(_json.dumps(manifest_data, indent=2))
     except Exception:
         pass
     try:
-        manifest_obj_status = "Completed"
-        manifest.finalize(manifest_obj_status)
+        manifest.finalize("Completed")
     except Exception:
         pass
     return 0

@@ -29,7 +29,7 @@ try:
 except Exception:  # pragma: no cover
     sc_completion = None  # legacy alias unused
     sc_acompletion = None  # type: ignore
-from litellm import Router  # SciLLM-compatible Router (OpenAI-like)
+from typing import Any
 from tqdm.asyncio import tqdm_asyncio
 
 from extractor.core.schema.unified_document import SourceType
@@ -149,39 +149,11 @@ from extractor.pipeline.utils.model_select import get_vlm_model, get_text_model 
 from extractor.pipeline.utils.debug_utils import ensure_logs_dir, time_block, summarize_messages, log_timing  # noqa: E402
 
 
-def _build_text_router() -> Router:
-    """Build a SciLLM Router for TEXT JSON mode using env CHUTES_* values.
+from extractor.pipeline.utils.scillm_router import get_text_router  # Router-only policy
 
-    - model_name group: "chutes/text"
-    - entries: CHUTES_TEXT_MODEL (+ ALT1/ALT2 if set)
-    - provider: openai_like with Bearer via api_key
-    """
-    base = os.environ["CHUTES_API_BASE"]
-    key = os.environ["CHUTES_API_KEY"]
-    m0 = os.environ.get("CHUTES_TEXT_MODEL", "").strip()
-    m1 = os.environ.get("CHUTES_TEXT_MODEL_ALT1", "").strip()
-    m2 = os.environ.get("CHUTES_TEXT_MODEL_ALT2", "").strip()
-    if not m0:
-        raise RuntimeError("CHUTES_TEXT_MODEL is not set")
-
-    def entry(model: str, order: int):
-        return {
-            "model_name": "chutes/text",
-            "litellm_params": {
-                "custom_llm_provider": "openai_like",
-                "model": model,
-                "api_base": base,
-                "api_key": key,
-            },
-            "order": order,
-        }
-
-    lst = [entry(m0, 1)]
-    if m1:
-        lst.append(entry(m1, 2))
-    if m2:
-        lst.append(entry(m2, 3))
-    return Router(model_list=lst)
+def _build_text_router() -> Any:
+    """Return the shared SciLLM Router (centralized)."""
+    return get_text_router()
 
 
 # Shared helper: table confidence heuristic (0.0–1.0)
@@ -335,7 +307,7 @@ def build_reflow_prompt(section_data: dict[str, Any]) -> str:
     ).strip()
 
 
-def _build_compact_prompt(
+def _build_compact_prompt_simple(
     section: dict[str, Any],
     *,
     text_char_cap: int = 1200,
@@ -1246,7 +1218,7 @@ async def reflow_section_with_llm(
                 logs_dir = ensure_logs_dir(results_base_dir, "07_reflow_section")
 
                 # Build compact user prompt with Top Summary + Layout DSL + minimal inputs
-                compact_user = _build_compact_prompt(section_data, text_char_cap=int(os.getenv("STAGE07_CONTEXT_CHARS", "1200")))
+                compact_user = _build_compact_prompt_simple(section_data, text_char_cap=int(os.getenv("STAGE07_CONTEXT_CHARS", "1200")))
 
                 # Save artifacts for this section for review (prompt + sketch)
                 try:

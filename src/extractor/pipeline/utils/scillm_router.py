@@ -48,11 +48,12 @@ def get_text_router() -> Router:
     # Optional auto-discovery from /v1/models when SCILLM_AUTO_ROUTER=1
     auto = os.getenv("SCILLM_AUTO_ROUTER", "0").lower() in {"1","true","yes","y"}
     primary = os.environ.get("CHUTES_TEXT_MODEL", "")
-    alts: List[str] = [
-        os.environ.get("CHUTES_TEXT_MODEL_ALT1", ""),
-        os.environ.get("CHUTES_TEXT_MODEL_ALT2", ""),
-    ]
-    if auto and not (primary and any(alts)):
+    # Alternates supported: ALT1/ALT2 if provided; discovery remains disabled by default
+    alt1 = os.environ.get("CHUTES_TEXT_MODEL_ALT1", "").strip()
+    alt2 = os.environ.get("CHUTES_TEXT_MODEL_ALT2", "").strip()
+    if auto:
+        raise RuntimeError("SCILLM_AUTO_ROUTER is disabled by default. Provide CHUTES_TEXT_MODEL (and optional ALT1/ALT2).")
+    if False:  # discovery branch intentionally disabled
         base = os.getenv("CHUTES_API_BASE", "").rstrip("/")
         key = os.getenv("CHUTES_API_KEY", "")
         if base and key:
@@ -82,9 +83,12 @@ def get_text_router() -> Router:
     model_list: List[Dict[str, Any]] = []
     if primary:
         model_list.append(_model_entry(primary))
-    for m in alts:
-        if m:
-            model_list.append(_model_entry(m))
+        if alt1:
+            model_list.append(_model_entry(alt1))
+        if alt2:
+            model_list.append(_model_entry(alt2))
+    else:
+        raise RuntimeError("CHUTES_TEXT_MODEL is required (alternates optional).")
     if not model_list and not auto:
         raise RuntimeError("No CHUTES_TEXT_MODEL pins provided and SCILLM_AUTO_ROUTER is disabled. Set CHUTES_TEXT_MODEL or enable SCILLM_AUTO_ROUTER=1 for dev triage.")
     _TEXT_ROUTER = Router(
@@ -101,11 +105,11 @@ def get_vlm_router() -> Router:
         return _VLM_ROUTER
     auto = os.getenv("SCILLM_AUTO_ROUTER", "0").lower() in {"1","true","yes","y"}
     primary = os.environ.get("CHUTES_VLM_MODEL", "")
-    alts: List[str] = [
-        os.environ.get("CHUTES_VLM_MODEL_ALT1", ""),
-        os.environ.get("CHUTES_VLM_MODEL_ALT2", ""),
-    ]
-    if auto and not (primary and any(alts)):
+    alt1 = os.environ.get("CHUTES_VLM_MODEL_ALT1", "").strip()
+    alt2 = os.environ.get("CHUTES_VLM_MODEL_ALT2", "").strip()
+    if auto:
+        raise RuntimeError("SCILLM_AUTO_ROUTER is disabled by default. Provide CHUTES_VLM_MODEL (and optional ALT1/ALT2).")
+    if False:
         base = os.getenv("CHUTES_API_BASE", "").rstrip("/")
         key = os.getenv("CHUTES_API_KEY", "")
         if base and key:
@@ -134,9 +138,12 @@ def get_vlm_router() -> Router:
     model_list: List[Dict[str, Any]] = []
     if primary:
         model_list.append(_model_entry_vlm(primary))
-    for m in alts:
-        if m:
-            model_list.append(_model_entry_vlm(m))
+        if alt1:
+            model_list.append(_model_entry_vlm(alt1))
+        if alt2:
+            model_list.append(_model_entry_vlm(alt2))
+    else:
+        raise RuntimeError("CHUTES_VLM_MODEL is required (alternates optional).")
     if not model_list and not auto:
         raise RuntimeError("No CHUTES_VLM_MODEL pins provided and SCILLM_AUTO_ROUTER is disabled. Set CHUTES_VLM_MODEL or enable SCILLM_AUTO_ROUTER=1 for dev triage.")
     _VLM_ROUTER = Router(
