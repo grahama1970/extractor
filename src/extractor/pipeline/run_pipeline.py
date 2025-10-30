@@ -35,7 +35,7 @@ from loguru import logger
 
 from extractor.pipeline.utils.run_manifest import RunManifest
 try:
-    # Best-effort import for global router shutdown to avoid aiohttp warnings
+    # Best-effort import for legacy router shutdown (kept as fallback)
     from extractor.pipeline.utils.scillm_router import close_all_routers  # type: ignore
 except Exception:  # pragma: no cover - optional import
     close_all_routers = None  # type: ignore
@@ -668,10 +668,21 @@ def main(argv: Optional[list[str]] = None) -> int:
         manifest.finalize("Completed")
     except Exception:
         pass
-    # Ensure any shared SciLLM routers are closed to prevent aiohttp warnings.
+    # Ensure any shared SciLLM clients are closed to prevent aiohttp warnings.
+    # Prefer paved shutdown from scillm; keep router fallback for redundancy.
     try:
+        try:
+            import scillm  # type: ignore
+            shutdown = getattr(scillm, "shutdown", None) or getattr(scillm, "shutdown_clients", None)
+            if callable(shutdown):
+                shutdown()
+        except Exception:
+            pass
         if callable(close_all_routers):
-            close_all_routers()
+            try:
+                close_all_routers()
+            except Exception:
+                pass
     except Exception:
         # Do not fail the run on best-effort cleanup.
         pass
