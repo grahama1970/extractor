@@ -27,6 +27,7 @@ import argparse
 import sys
 import time
 from pathlib import Path
+import signal
 from typing import Any, Dict, Optional
 
 from dotenv import find_dotenv, load_dotenv
@@ -35,9 +36,20 @@ from loguru import logger
 from extractor.pipeline.utils.run_manifest import RunManifest
 
 
-def _step(name: str, fn, *fargs, stop_on_fail: bool = True, **fkw) -> Optional[Path]:
+def _step(name: str, fn, *fargs, stop_on_fail: bool = True, timeout_sec: int = 0, **fkw) -> Optional[Path]:
     logger.info(f"{name}: start")
     t0 = time.monotonic()
+    # Install a per-step timeout using SIGALRM (POSIX). 0 disables.
+    def _handler(signum, frame):  # noqa: ARG001
+        raise TimeoutError(f"{name} exceeded {timeout_sec}s")
+    old_handler = None
+    if timeout_sec and timeout_sec > 0:
+        try:
+            old_handler = signal.getsignal(signal.SIGALRM)
+            signal.signal(signal.SIGALRM, _handler)
+            signal.alarm(timeout_sec)
+        except Exception:
+            old_handler = None
     try:
         rv = fn(*fargs, **fkw)
         dt = int((time.monotonic() - t0) * 1000)
@@ -50,6 +62,14 @@ def _step(name: str, fn, *fargs, stop_on_fail: bool = True, **fkw) -> Optional[P
         if stop_on_fail:
             raise
         return None
+    finally:
+        if timeout_sec and timeout_sec > 0:
+            try:
+                signal.alarm(0)
+                if old_handler is not None:
+                    signal.signal(signal.SIGALRM, old_handler)
+            except Exception:
+                pass
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -60,6 +80,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     p.add_argument("--skip-fig-descriptions", action="store_true")
     p.add_argument("--skip-export", action="store_true")
     p.add_argument("--extract-requirements", action="store_true", help="Run 07_requirements_miner after reflow")
+    p.add_argument("--stage-timeout", type=int, default=int(__import__('os').getenv('PIPELINE_STAGE_TIMEOUT','300')), help="Per-stage wall timeout in seconds (fail-fast)")
     p.add_argument(
         "--prove-requirements",
         action="store_true",
@@ -141,7 +162,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     )
 
     # 01
-    a01 = _step("01_annotation_processor", s01.run, pdf, out, stop_on_fail=args.stop_on_fail)
+    a01 = _step("01_annotation_processor", s01.run, pdf, out, stop_on_fail=args.stop_on_fail, timeout_sec=args.stage_timeout, timeout=args.stage_timeout)
     if not a01:
         return 1
     results["01"] = a01
@@ -149,7 +170,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     manifest.record_stage("01_annotation_processor", "Completed", {"json": str(a01.relative_to(out))})
 
     # 02
-    a02 = _step("02_marker_extractor", s02.run, pdf, out, stop_on_fail=args.stop_on_fail)
+    a02 = _step("02_marker_extractor", s02.run, pdf, out, stop_on_fail=args.stop_on_fail, timeout_sec=args.stage_timeout, timeout=args.stage_timeout)
     if not a02:
         return 1
     results["02"] = a02
@@ -158,7 +179,7 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     # 03
     pdf_dir = out / "01_annotation_processor"
-    a03 = _step("03_suspicious_headers", s03.run, a02, pdf_dir, out, stop_on_fail=args.stop_on_fail)
+    a03 = _step("03_suspicious_headers", s03.run, a02, pdf_dir, out, stop_on_fail=args.stop_on_fail, timeout_sec=args.stage_timeout)
     if not a03:
         return 1
     results["03"] = a03
@@ -175,7 +196,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     )
 
     # 04
-    a04_path = _step("04_section_builder", s04.run, a03, pdf_dir, out, stop_on_fail=args.stop_on_fail)
+    a04_path = _step("04_section_builder", s04.run, a03, pdf_dir, out, stop_on_fail=args.stop_on_fail, timeout_sec=args.stage_timeout)
     if not a04_path:
         return 1
     results["04"] = a04_path
@@ -192,7 +213,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     )
 
     # 05
-    a05 = _step("05_table_extractor", s05.run, pdf, out, stop_on_fail=args.stop_on_fail)
+    a05 = _step("05_table_extractor", s05.run, pdf, out, stop_on_fail=args.stop_on_fail, timeout_sec=args.stage_timeout, timeout=args.stage_timeout)
     if not a05:
         return 1
     results["05"] = a05
@@ -220,6 +241,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         out,
         skip_descriptions=args.skip_fig_descriptions,
         stop_on_fail=args.stop_on_fail,
+        timeout_sec=args.stage_timeout,
     )
     if not a06:
         return 1
@@ -248,7 +270,12 @@ def main(argv: Optional[list[str]] = None) -> int:
         None,
         out,
         args.summary_only,
+        False,  # include_images
+        False,  # allow_fallback
+        None,   # bundle
+        args.stage_timeout,  # llm_timeout
         stop_on_fail=args.stop_on_fail,
+        timeout_sec=args.stage_timeout,
     )
     if not a07:
         return 1
@@ -298,6 +325,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             out / "07_reflow_section" / "json_output" / "07_reflowed.json",
             out,
             stop_on_fail=args.stop_on_fail,
+            timeout_sec=args.stage_timeout,
         )
         if not a07r and args.stop_on_fail:
             return 1
@@ -324,6 +352,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             False,  # skip_proving=False → actually prove
             req_json_path if req_json_path and req_json_path.exists() else None,
             stop_on_fail=args.stop_on_fail,
+            timeout_sec=args.stage_timeout,
         )
         if not a08 and args.stop_on_fail:
             return 1
@@ -337,6 +366,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         out / "07_reflow_section" / "json_output" / "07_reflowed.json",
         out,
         stop_on_fail=args.stop_on_fail,
+        timeout_sec=args.stage_timeout,
     )
     if not a09:
         return 1
@@ -359,6 +389,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             "pdf_objects",
             args.skip_export,
             stop_on_fail=args.stop_on_fail,
+            timeout_sec=args.stage_timeout,
         )
         _write_artifacts_index((out / "10_arangodb_exporter"))
         manifest.record_stage("10_arangodb_exporter", "Completed", {"json": str((out / "10_arangodb_exporter" / "json_output" / "10_flattened_data.json").relative_to(out))})
