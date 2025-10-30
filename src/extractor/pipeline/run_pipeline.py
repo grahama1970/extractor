@@ -224,6 +224,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         s04_section_builder as s04,
         s05_table_extractor as s05,
         s06_figure_extractor as s06,
+        s06b_layout_sketcher as s06b,
         s07_reflow_section as s07,
         s09a_pdf_annotator as s09a,
         s07_requirements_miner as s07req,
@@ -395,6 +396,41 @@ def main(argv: Optional[list[str]] = None) -> int:
         {"json": str(a06.relative_to(out)), "latency_ms": stage_latencies.get("06_figure_extractor")},
         counts={"figures": fcount} if isinstance(fcount, int) else None,
     )
+
+    # 06b (layout sketcher) — deterministic text-first layout priors used by Stage 07
+    def _run_06b(ip: Path, op: Path) -> str:
+        try:
+            s06b.run(str(ip), str(op))
+        except Exception as _e:
+            # Respect stop_on_fail; otherwise continue with Stage 07 fallbacks
+            if args.stop_on_fail:
+                raise
+        return str(op / "06b_layout_sketcher" / "json_output" / "06b_layout_sketch.json")
+
+    a06b = _step(
+        "06b_layout_sketcher",
+        _run_06b,
+        out,
+        out,
+        stop_on_fail=args.stop_on_fail,
+        timeout_sec=args.stage_timeout,
+        log_dir_base=out,
+        on_timing=lambda n, dt: stage_latencies.update({n: dt}),
+    )
+    if a06b:
+        _write_artifacts_index((out / "06b_layout_sketcher"))
+        # Count sections in 06b output
+        try:
+            d06b = json.loads(Path(a06b).read_text())
+            s06b_count = len((d06b or {}).get("sections", {}))
+        except Exception:
+            s06b_count = None
+        manifest.record_stage(
+            "06b_layout_sketcher",
+            "Completed",
+            {"json": str(Path(a06b).relative_to(out)), "latency_ms": stage_latencies.get("06b_layout_sketcher")},
+            counts={"sections": s06b_count} if isinstance(s06b_count, int) else None,
+        )
 
     # 07 (text-only mode optional)
     tbl = out / "05_table_extractor" / "json_output" / "05_tables.json"
