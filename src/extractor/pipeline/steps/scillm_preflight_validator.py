@@ -87,25 +87,38 @@ async def probe_chat_completions_endpoint(base_url: str, api_key: str) -> Tuple[
             "temperature": 0
         }
         
+        attempts = int(os.getenv("SCILLM_PREFLIGHT_RETRIES", "2")) + 1
+        backoff = float(os.getenv("SCILLM_PREFLIGHT_BACKOFF", "0.5"))
         async with aiohttp.ClientSession() as session:
-            # Ensure proper URL construction - base_url should end with /v1
             chat_url = f"{base_url}/chat/completions"
-            async with session.post(
-                chat_url,
-                headers=headers,
-                json=payload,
-                timeout=aiohttp.ClientTimeout(total=15)
-            ) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    if data.get("choices") and len(data.get("choices", [])) > 0:
-                        logger.info("SciLLM preflight: Chat completions endpoint accessible")
-                        return True, "Chat completions endpoint accessible"
-                    else:
-                        return False, f"Invalid response format: {data}"
-                else:
-                    text = await resp.text()
-                    return False, f"Chat completions endpoint returned {resp.status}: {text}"
+            last_text = ""
+            for i in range(attempts):
+                try:
+                    async with session.post(
+                        chat_url,
+                        headers=headers,
+                        json=payload,
+                        timeout=aiohttp.ClientTimeout(total=15)
+                    ) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            if data.get("choices") and len(data.get("choices", [])) > 0:
+                                logger.info("SciLLM preflight: Chat completions endpoint accessible")
+                                return True, "Chat completions endpoint accessible"
+                            else:
+                                return False, f"Invalid response format: {data}"
+                        else:
+                            last_text = await resp.text()
+                            if 500 <= resp.status < 600 and i < attempts - 1:
+                                await asyncio.sleep(backoff)
+                                continue
+                            return False, f"Chat completions endpoint returned {resp.status}: {last_text}"
+                except Exception as ex:
+                    last_text = str(ex)
+                    if i < attempts - 1:
+                        await asyncio.sleep(backoff)
+                        continue
+                    return False, f"Chat completions endpoint probe failed: {last_text}"
     except Exception as e:
         return False, f"Chat completions endpoint probe failed: {e}"
 
