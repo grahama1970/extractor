@@ -463,43 +463,46 @@ def main(argv: Optional[list[str]] = None) -> int:
         {"json": str(a07.relative_to(out)), "latency_ms": stage_latencies.get("07_reflow_section")},
     )
 
-    # 09a PDF annotator (optional visual end-product)
-    if args.annotate_pdf:
-        try:
-            annotated = _step(
+    # 09a PDF annotator (visual collaboration product) — run unconditionally
+    try:
+        annotated = _step(
+            "09a_pdf_annotator",
+            s09a.run,
+            pdf,
+            out / "04_section_builder" / "json_output" / "04_sections.json",
+            out / "05_table_extractor" / "json_output" / "05_tables.json",
+            out / "06_figure_extractor" / "json_output" / "06_figures.json",
+            out / "07_reflow_section" / "json_output" / "07_reflowed.json",
+            out / "02_marker_extractor" / "json_output" / "02_marker_blocks.json",
+            None,  # headers03_json (auto-discovered in 09a)
+            out / "06b_layout_sketcher" / "json_output" / "06b_layout_sketch.json",
+            out,
+            "09a",
+            True,
+            12,
+            False,
+            False,
+            False,
+            stop_on_fail=args.stop_on_fail,
+            timeout_sec=args.stage_timeout,
+            log_dir_base=out,
+            on_timing=lambda n, dt: stage_latencies.update({n: dt}),
+        )
+        if annotated:
+            _write_artifacts_index((out / "09a_pdf_annotator"))
+            manifest.record_stage(
                 "09a_pdf_annotator",
-                s09a.run,
-                pdf,
-                out / "04_section_builder" / "json_output" / "04_sections.json",
-                out / "05_table_extractor" / "json_output" / "05_tables.json",
-                out / "06_figure_extractor" / "json_output" / "06_figures.json",
-                out / "07_reflow_section" / "json_output" / "07_reflowed.json",
-                out / "02_marker_extractor" / "json_output" / "02_marker_blocks.json",
-                None,  # headers03_json (auto-discovered in 09a)
-                out / "06b_layout_sketcher" / "json_output" / "06b_layout_sketch.json",
-                out,
-                "09a",
-                True,
-                12,
-                False,
-                False,
-                False,
-                stop_on_fail=args.stop_on_fail,
+                "Completed",
+                {"json": str((out / "09a_pdf_annotator" / "json_output" / "annotations.json").relative_to(out)), "latency_ms": stage_latencies.get("09a_pdf_annotator")},
             )
-            if annotated:
-                _write_artifacts_index((out / "09a_pdf_annotator"))
-                manifest.record_stage(
-                    "09a_pdf_annotator",
-                    "Completed",
-                    {"json": str((out / "09a_pdf_annotator" / "json_output" / "annotations.json").relative_to(out)), "latency_ms": stage_latencies.get("09a_pdf_annotator")},
-                )
-        except Exception as e:
-            logger.warning(f"09a_pdf_annotator failed (continuing): {e}")
+    except Exception as e:
+        logger.error(f"09a_pdf_annotator failed: {e}")
+        if args.stop_on_fail:
+            return 1
 
-    # 07½ Requirements miner (optional)
+    # 07½ Requirements miner — run unconditionally
     req_json_path: Optional[Path] = None
-    if args.extract_requirements or args.prove_requirements:
-        a07r = _step(
+    a07r = _step(
             "07_requirements_miner",
             s07req.run,
             out / "07_reflow_section" / "json_output" / "07_reflowed.json",
@@ -509,24 +512,23 @@ def main(argv: Optional[list[str]] = None) -> int:
             log_dir_base=out,
             on_timing=lambda n, dt: stage_latencies.update({n: dt}),
         )
-        if not a07r and args.stop_on_fail:
-            return 1
-        _write_artifacts_index((out / "07_requirements_miner"))
-        req_json_path = out / "07_requirements_miner" / "json_output" / "07_requirements.json"
-        try:
-            rcount = len(__import__("json").loads(req_json_path.read_text()).get("requirements", [])) if req_json_path.exists() else None
-        except Exception:
-            rcount = None
-        manifest.record_stage(
-            "07_requirements_miner",
-            "Completed",
-            {"json": str(req_json_path.relative_to(out)) if req_json_path and req_json_path.exists() else "", "latency_ms": stage_latencies.get("07_requirements_miner")},
-            counts={"requirements": rcount} if isinstance(rcount, int) else None,
-        )
+    if not a07r and args.stop_on_fail:
+        return 1
+    _write_artifacts_index((out / "07_requirements_miner"))
+    req_json_path = out / "07_requirements_miner" / "json_output" / "07_requirements.json"
+    try:
+        rcount = len(__import__("json").loads(req_json_path.read_text()).get("requirements", [])) if req_json_path.exists() else None
+    except Exception:
+        rcount = None
+    manifest.record_stage(
+        "07_requirements_miner",
+        "Completed",
+        {"json": str(req_json_path.relative_to(out)) if req_json_path and req_json_path.exists() else "", "latency_ms": stage_latencies.get("07_requirements_miner")},
+        counts={"requirements": rcount} if isinstance(rcount, int) else None,
+    )
 
-    # 08 Lean4 theorem prover (optional; default skip unless requested)
-    if args.prove_requirements:
-        a08 = _step(
+    # 08 Lean4 theorem prover — run unconditionally
+    a08 = _step(
             "08_lean4_theorem_prover",
             s08.run,
             out / "07_reflow_section" / "json_output" / "07_reflowed.json",
@@ -538,14 +540,14 @@ def main(argv: Optional[list[str]] = None) -> int:
             log_dir_base=out,
             on_timing=lambda n, dt: stage_latencies.update({n: dt}),
         )
-        if not a08 and args.stop_on_fail:
-            return 1
-        _write_artifacts_index((out / "08_lean4_theorem_prover"))
-        manifest.record_stage(
-            "08_lean4_theorem_prover",
-            "Completed",
-            {"json": str((out / "08_lean4_theorem_prover" / "json_output" / "08_theorems.json").relative_to(out)), "latency_ms": stage_latencies.get("08_lean4_theorem_prover")},
-        )
+    if not a08 and args.stop_on_fail:
+        return 1
+    _write_artifacts_index((out / "08_lean4_theorem_prover"))
+    manifest.record_stage(
+        "08_lean4_theorem_prover",
+        "Completed",
+        {"json": str((out / "08_lean4_theorem_prover" / "json_output" / "08_theorems.json").relative_to(out)), "latency_ms": stage_latencies.get("08_lean4_theorem_prover")},
+    )
 
     # 09
     a09 = _step(
