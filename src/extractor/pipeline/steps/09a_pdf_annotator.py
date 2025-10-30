@@ -5,18 +5,44 @@ Stage 09a: PDF Annotator (deterministic, no LLM)
 Overlays rectangles for sections, tables, and figures on the clean PDF to aid
 visual review and collaboration. Writes an annotated PDF and a JSON index of
 all overlays for downstream tooling.
+
+Enhancements:
+- Stage-specific log sink (stage.log)
+- Per-stage timings (timings.jsonl, timings_summary.json)
+- Stable overlay IDs and richer annotations.json summary
+- Optional true PDF annotations (commentable), with fallback to drawn rectangles
+- Overlay toggles and label sizing; per-page PNG previews for quick review
 """
 
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict
 
 from loguru import logger
 import fitz  # PyMuPDF
 
 # No CLI framework; import and call run(...)
+
+# Color map for overlay kinds (RGB in 0..1)
+COLORS: Dict[str, tuple[float, float, float]] = {
+    "section": (0.0, 0.627, 0.0),           # green
+    "section_frame": (0.0, 0.627, 0.0),
+    "header_candidate": (1.0, 0.0, 1.0),    # magenta
+    "columns": (0.0, 1.0, 1.0),             # cyan
+    "table": (0.898, 0.224, 0.207),         # red-ish
+    "figure": (0.117, 0.533, 0.902),        # blue-ish
+    "text_chunk": (1.0, 0.5, 0.0),          # orange
+    "reflow_paragraph": (0.984, 0.549, 0.0),
+    "reflow_list": (1.0, 0.761, 0.0),
+    "reflow_heading": (0.557, 0.141, 0.667),
+    "reflow_table": (0.777, 0.157, 0.157),
+    "reflow_figure": (0.223, 0.286, 0.671),
+    "requirement": (1.0, 0.843, 0.0),       # gold
+    "grid": (0.7, 0.7, 0.7),                # gray
+}
 
 
 def _safe_get_bbox(obj: dict[str, Any]) -> list[float] | None:
@@ -27,6 +53,57 @@ def _safe_get_bbox(obj: dict[str, Any]) -> list[float] | None:
         return [float(bb[0]), float(bb[1]), float(bb[2]), float(bb[3])]
     except Exception:
         return None
+
+
+def _write_artifacts_index(stage_dir: Path) -> None:
+    try:
+        json_dir = stage_dir / "json_output"
+        vis_dir = stage_dir / "visual_output"
+        idx = {
+            "pdf": [str((stage_dir / "annotated.pdf").name)],
+            "json": [p.name for p in (json_dir.glob("*.json"))] if json_dir.exists() else [],
+            "previews": [p.name for p in (vis_dir.glob("*.png"))] if vis_dir.exists() else [],
+            "logs": ["stage.log"],
+        }
+        (json_dir / "artifacts_index.json").write_text(json.dumps(idx, indent=2))
+    except Exception:
+        pass
+
+
+def _append_timing(logs_dir: Path, record: Dict[str, Any]) -> None:
+    try:
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        with (logs_dir / "timings.jsonl").open("a", encoding="utf-8") as fp:
+            fp.write(json.dumps(record) + "\n")
+    except Exception:
+        pass
+
+
+def _summarize_timings(logs_dir: Path) -> None:
+    try:
+        tfile = logs_dir / "timings.jsonl"
+        if not tfile.exists():
+            return
+        lat = []
+        count = 0
+        for line in tfile.read_text(encoding="utf-8").splitlines():
+            try:
+                rec = json.loads(line)
+                if rec.get("latency_ms") is not None:
+                    lat.append(float(rec["latency_ms"]))
+                count += 1
+            except Exception:
+                continue
+        lat.sort()
+        def _pct(p: float) -> float:
+            if not lat:
+                return 0.0
+            idx = int(max(0, min(len(lat) - 1, round(p * (len(lat) - 1)))))
+            return float(lat[idx])
+        summary = {"events": count, "p50_ms": _pct(0.50), "p95_ms": _pct(0.95)}
+        (logs_dir / "timings_summary.json").write_text(json.dumps(summary, indent=2))
+    except Exception:
+        pass
 
 
 def run(
@@ -45,6 +122,19 @@ def run(
     rewrite_headers: bool = False,
     overwrite_pdf: bool = False,
     replace_text_layer: bool = False,
+    *,
+    # New optional knobs (kw-only to preserve current callers)
+    draw_sections: bool = True,
+    draw_tables: bool = True,
+    draw_figures: bool = True,
+    draw_text_chunks: bool = True,
+    draw_headers03: bool = True,
+    draw_columns06b: bool = True,
+    draw_grid: bool = False,
+    label_font_size: int = 6,
+    stroke_width: float = 1.0,
+    pdf_annotations: bool = True,
+    render_previews: bool = True,
 ) -> Path:
     # Decide stage directory name. Prefer running after 07/08/09 when reflowed_json is available.
     tag = stage_tag
@@ -54,6 +144,27 @@ def run(
     stage_dir.mkdir(parents=True, exist_ok=True)
     json_dir = stage_dir / "json_output"
     json_dir.mkdir(exist_ok=True)
+    logs_dir = stage_dir / "logs"
+    vis_dir = stage_dir / "visual_output"
+    vis_dir.mkdir(parents=True, exist_ok=True)
+
+    # Stage-specific log sink
+    sink_id = None
+    try:
+        sink_id = logger.add(
+            str(stage_dir / "stage.log"),
+            level="INFO",
+            enqueue=True,
+            backtrace=False,
+            diagnose=False,
+            rotation="5 MB",
+            retention=5,
+        )
+    except Exception:
+        sink_id = None
+
+    t0 = time.time()
+    logger.info(f"09a_pdf_annotator: start → {pdf_path}")
 
     # Load inputs
     sections = (json.loads(sections_json.read_text(encoding="utf-8")).get("sections") or [])
@@ -120,19 +231,43 @@ def run(
         except Exception as e:
             logger.warning(f"Failed to read layout06b JSON: {e}")
 
+    # Optional: requirements overlays (Stage 07 requirements miner)
+    requirements: list[dict[str, Any]] = []
+    try:
+        req_p = output_dir / "07_requirements_miner" / "json_output" / "07_requirements.json"
+        if req_p.exists():
+            req_obj = json.loads(req_p.read_text(encoding="utf-8"))
+            requirements = req_obj.get("requirements") or []
+    except Exception:
+        requirements = []
+
     # Annotate
     # Safety: do not allow overwriting PDFs under data/input/ or external input paths
     if overwrite_pdf and str(pdf_path).startswith("data/input/"):
         raise ValueError("Refusing to overwrite a source PDF under data/input/. Use a copy or disable --overwrite-pdf.")
     doc = fitz.open(str(pdf_path))
     overlays: list[dict[str, Any]] = []
+    overlay_id = 0
+    pages_touched: set[int] = set()
 
-    def _add(page_idx: int, bbox: list[float], kind: str, payload: dict[str, Any], *, label_text: str | None = None) -> None:
-        # Accept 0-based and 1-based page indices; clamp into range
-        _pg = int(page_idx)
+    def _normalized_page_index(idx: int) -> int | None:
+        try:
+            _pg = int(idx)
+        except Exception:
+            return None
         if _pg >= len(doc) and _pg - 1 >= 0 and _pg - 1 < len(doc):
             _pg = _pg - 1
         if _pg < 0 or _pg >= len(doc):
+            return None
+        return _pg
+
+    def _color_for_kind(kind: str) -> tuple[float, float, float]:
+        return COLORS.get(kind, (0.3, 0.3, 0.3))
+
+    def _add(page_idx: int, bbox: list[float], kind: str, payload: dict[str, Any], *, label_text: str | None = None) -> None:
+        nonlocal overlay_id
+        _pg = _normalized_page_index(page_idx)
+        if _pg is None:
             logger.warning(f"Skipping overlay (kind={kind}): out-of-range page {page_idx}")
             return
         page = doc[_pg]
@@ -143,60 +278,117 @@ def run(
             logger.warning(f"Skipping overlay (kind={kind}): invalid bbox {bbox}")
             return
         rect = fitz.Rect(min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1)) & page.rect
-        # Colors: section=green, table=red, figure=blue, chunk=orange
-        color = (0, 1, 0) if kind == "section" else (1, 0, 0) if kind == "table" else (0, 0, 1) if kind == "figure" else (1, 0.5, 0)
-        page.draw_rect(rect, color=color, width=1.0, fill=None, overlay=True)
-        if labels:
+        color = _color_for_kind(kind)
+        drew = False
+        if pdf_annotations:
             try:
-                txt = label_text or payload.get("title") or payload.get("figure_id") or payload.get("table_index")
-                if txt:
-                    # Draw a tiny label at the top-left corner of the rect
-                    font_size = 6
-                    page.insert_text((rect.x0 + 2, rect.y0 + 6), str(txt)[:120], fontsize=font_size, color=color)
+                annot = page.add_rect_annot(rect)
+                annot.set_colors(stroke=color)
+                try:
+                    annot.set_border(width=max(0.5, float(stroke_width)))
+                except Exception:
+                    pass
+                try:
+                    annot.set_opacity(0.35)
+                except Exception:
+                    pass
+                try:
+                    info = {}
+                    if label_text:
+                        info["title"] = str(label_text)[:120]
+                    annot.set_info(info)
+                except Exception:
+                    pass
+                # Store compact JSON payload in comment for quick inspection
+                try:
+                    compact = json.dumps({k: v for k, v in payload.items() if k not in {"bbox"}}, ensure_ascii=False)
+                    annot.set_contents(compact[:2000])
+                except Exception:
+                    pass
+                annot.update()
+                drew = True
+            except Exception:
+                drew = False
+        if not drew:
+            try:
+                page.draw_rect(rect, color=color, width=max(0.5, float(stroke_width)), fill=None, overlay=True)
             except Exception:
                 pass
-        overlays.append({"page": _pg, "bbox": [rect.x0, rect.y0, rect.x1, rect.y1], "kind": kind, **payload})
+            if labels:
+                try:
+                    txt = label_text or payload.get("title") or payload.get("figure_id") or payload.get("table_index")
+                    if txt:
+                        page.insert_text(
+                            (rect.x0 + 2, rect.y0 + max(6, int(label_font_size))),
+                            str(txt)[:120],
+                            fontsize=max(5, int(label_font_size)),
+                            color=color,
+                        )
+                except Exception:
+                    pass
+        overlays.append({"overlay_id": overlay_id, "page": _pg, "bbox": [rect.x0, rect.y0, rect.x1, rect.y1], "kind": kind, **payload})
+        overlay_id += 1
+        pages_touched.add(_pg)
 
-    for s in sections:
-        pg0 = int(s.get("page_start") or s.get("page_idx") or -1)
-        bb = _safe_get_bbox(s)
-        if bb is not None and pg0 >= 0:
-            _add(pg0, bb, "section", {"id": s.get("id"), "title": s.get("title")}, label_text=f"SEC {s.get('id')}: {s.get('title')}")
+    # Sections
+    if draw_sections:
+        t_s = time.monotonic()
+        for s in sections:
+            pg0 = int(s.get("page_start") or s.get("page_idx") or -1)
+            bb = _safe_get_bbox(s)
+            if bb is not None and pg0 >= 0:
+                _add(pg0, bb, "section", {"id": s.get("id"), "title": s.get("title")}, label_text=f"SEC {s.get('id')}: {s.get('title')}")
+        _append_timing(logs_dir, {"stage": "09a_pdf_annotator", "event": "draw_sections", "latency_ms": int((time.monotonic()-t_s)*1000)})
 
-    for t in tables:
-        pg = int(t.get("page_index") or t.get("page_idx") or -1)
-        bb = _safe_get_bbox(t)
-        if bb is not None and pg >= 0:
-            # Try to derive a compact header preview for labels/JSON
-            headers_preview = None
-            try:
-                hdrs = t.get("headers")
-                if not hdrs:
-                    # some variants carry pandas_df/pandas_df_raw
-                    df = t.get("pandas_df_raw") or t.get("pandas_df")
-                    if isinstance(df, list) and df:
-                        row0 = df[0]
-                        if isinstance(row0, dict):
-                            hdrs = list(row0.keys())
-                        elif isinstance(row0, list):
-                            hdrs = row0
-                if isinstance(hdrs, list) and hdrs:
-                    headers_preview = " | ".join(str(h).strip() for h in hdrs[:6])
-            except Exception:
+    # Tables
+    if draw_tables:
+        t_s = time.monotonic()
+        for t in tables:
+            pg = int(t.get("page_index") or t.get("page_idx") or -1)
+            bb = _safe_get_bbox(t)
+            if bb is not None and pg >= 0:
                 headers_preview = None
-            _add(pg, bb, "table", {"table_index": t.get("table_index"), "headers_preview": headers_preview}, label_text=f"TBL {t.get('table_index')} :: {headers_preview or ''}")
+                try:
+                    hdrs = t.get("headers")
+                    if not hdrs:
+                        df = t.get("pandas_df_raw") or t.get("pandas_df")
+                        if isinstance(df, list) and df:
+                            row0 = df[0]
+                            if isinstance(row0, dict):
+                                hdrs = list(row0.keys())
+                            elif isinstance(row0, list):
+                                hdrs = row0
+                    if isinstance(hdrs, list) and hdrs:
+                        headers_preview = " | ".join(str(h).strip() for h in hdrs[:6])
+                except Exception:
+                    headers_preview = None
+                _add(
+                    pg,
+                    bb,
+                    "table",
+                    {"table_index": t.get("table_index"), "headers_preview": headers_preview},
+                    label_text=f"TBL {t.get('table_index')} :: {headers_preview or ''}",
+                )
+        _append_timing(logs_dir, {"stage": "09a_pdf_annotator", "event": "draw_tables", "latency_ms": int((time.monotonic()-t_s)*1000)})
 
-    for f in figures:
-        pg = int(f.get("page") or f.get("page_idx") or -1)
-        bb = _safe_get_bbox(f)
-        if bb is not None and pg >= 0:
-            fid = f.get("figure_id")
-            desc = fig_desc.get(str(fid), "")
-            _add(pg, bb, "figure", {"figure_id": fid, "ai_description": desc}, label_text=f"FIG {fid}")
+    # Figures
+    if draw_figures:
+        t_s = time.monotonic()
+        for f in figures:
+            pg = int(f.get("page") or f.get("page_idx") or -1)
+            bb = _safe_get_bbox(f)
+            if bb is not None and pg >= 0:
+                fid = f.get("figure_id")
+                desc = fig_desc.get(str(fid), "")
+                payload = {"figure_id": fid, "ai_description": desc}
+                if f.get("image_path"):
+                    payload["image_ref"] = f.get("image_path")
+                _add(pg, bb, "figure", payload, label_text=f"FIG {fid}")
+        _append_timing(logs_dir, {"stage": "09a_pdf_annotator", "event": "draw_figures", "latency_ms": int((time.monotonic()-t_s)*1000)})
 
-    # Knowledge chunks (from Stage 07 reflowed sections):
-    # For each block with source.block_ids, union the underlying Stage 02 block bboxes per page.
-    if reflowed_sections and block_lookup:
+    # Knowledge chunks from Stage 07 reflowed sections
+    if draw_text_chunks and reflowed_sections and block_lookup:
+        t_s = time.monotonic()
         for sec in reflowed_sections:
             blocks = (sec.get("reflowed_json", {}).get("blocks") or [])
             for idx, blk in enumerate(blocks):
@@ -205,7 +397,19 @@ def run(
                     bids = src.get("block_ids") or []
                     if not bids:
                         continue
-                    # Group bboxes by page, then draw union per page for visibility
+                    btype = str((blk.get("type") or "").lower())
+                    if btype == "paragraph":
+                        kind = "reflow_paragraph"; pref = "PAR"
+                    elif btype == "list":
+                        kind = "reflow_list"; pref = "LST"
+                    elif btype == "heading":
+                        kind = "reflow_heading"; pref = "HDG"
+                    elif btype == "table":
+                        kind = "reflow_table"; pref = "TBLB"
+                    elif btype == "figure":
+                        kind = "reflow_figure"; pref = "FIGB"
+                    else:
+                        kind = "text_chunk"; pref = "TXT"
                     per_page: dict[int, list[list[float]]] = {}
                     for bid in bids:
                         t = block_lookup.get(str(bid))
@@ -214,7 +418,6 @@ def run(
                         pg, bb = t
                         per_page.setdefault(pg, []).append(bb)
                     for pg, bbs in per_page.items():
-                        # Union as the rect covering all bbs
                         x0 = min(bb[0] for bb in bbs)
                         y0 = min(bb[1] for bb in bbs)
                         x1 = max(bb[2] for bb in bbs)
@@ -222,19 +425,44 @@ def run(
                         _add(
                             pg,
                             [x0, y0, x1, y1],
-                            "text_chunk",
+                            kind,
                             {
                                 "block_ids_count": len(bbs),
                                 "reading_index": idx,
-                                "block_kind": blk.get("type") or blk.get("kind"),
+                                "block_kind": btype or blk.get("kind"),
                             },
-                            label_text=f"TXT {idx}"
+                            label_text=f"{pref} {idx}",
                         )
                 except Exception:
                     continue
+        _append_timing(logs_dir, {"stage": "09a_pdf_annotator", "event": "draw_text_chunks", "latency_ms": int((time.monotonic()-t_s)*1000)})
 
-    # Stage 03 overlays: highlight suspicious headers if present
-    if headers03:
+    # Requirements overlays
+    if requirements:
+        t_s = time.monotonic()
+        for r in requirements:
+            try:
+                anchor = r.get("anchor") or {}
+                pg = anchor.get("page")
+                bb = anchor.get("bbox")
+                if pg is None or not bb:
+                    sec_id = r.get("section_id")
+                    if sec_id:
+                        m = next((s for s in sections if str(s.get("id")) == str(sec_id)), None)
+                        if m:
+                            pg = int(m.get("page_start") or m.get("page_idx") or -1)
+                            bb = _safe_get_bbox(m)
+                if pg is None or not bb:
+                    continue
+                label = (r.get("id") or r.get("title") or "REQ")
+                _add(int(pg), bb, "requirement", {"requirement_id": r.get("id"), "title": r.get("title")}, label_text=f"REQ {label}")
+            except Exception:
+                continue
+        _append_timing(logs_dir, {"stage": "09a_pdf_annotator", "event": "draw_requirements", "latency_ms": int((time.monotonic()-t_s)*1000)})
+
+    # Stage 03 overlays
+    if draw_headers03 and headers03:
+        t_s = time.monotonic()
         for b in headers03:
             try:
                 if not (b.get("suspicious_header") or b.get("is_suspicious")):
@@ -243,15 +471,16 @@ def run(
                 bb = _safe_get_bbox(b)
                 verdict = b.get("verdict") or ("accept" if b.get("suspicious_header") else "reject")
                 lbl = f"HDR {verdict}"
-                _add(pg, bb, "header_candidate", {"block_id": b.get("block_id"), "verdict": verdict}, label_text=lbl) if (bb and pg >= 0) else None
+                if (bb and pg >= 0):
+                    _add(pg, bb, "header_candidate", {"block_id": b.get("block_id"), "verdict": verdict}, label_text=lbl)
             except Exception:
                 continue
+        _append_timing(logs_dir, {"stage": "09a_pdf_annotator", "event": "draw_headers03", "latency_ms": int((time.monotonic()-t_s)*1000)})
 
-    # Stage 06b column bands overlay (light cyan bands per column)
-    if layout06b and isinstance(layout06b, dict):
+    # Stage 06b columns
+    if draw_columns06b and layout06b and isinstance(layout06b, dict):
+        t_s = time.monotonic()
         try:
-            # layout06b["sections"] is a map; columns are uniform; use grid + columns
-            # We'll draw vertical bands per page using grid fractions
             any_section = next(iter((layout06b.get("sections") or {}).values()), None)
             if isinstance(any_section, dict):
                 grid_n = int(any_section.get("grid") or 0)
@@ -262,67 +491,124 @@ def run(
                         r = page.rect
                         for c in cols:
                             try:
-                                gx0 = int(c.get("x0", 0))
-                                gx1 = int(c.get("x1", 0))
+                                gx0 = int(c.get("x0", 0)); gx1 = int(c.get("x1", 0))
                                 x0 = r.x0 + (r.width) * (gx0 / grid_n)
                                 x1 = r.x0 + (r.width) * (gx1 / grid_n)
                                 band = fitz.Rect(min(x0, x1), r.y0, max(x0, x1), r.y1)
-                                page.draw_rect(band, color=(0, 1, 1), width=0.2, fill=None, overlay=True)
-                                # column id label
+                                try:
+                                    if pdf_annotations:
+                                        annot = page.add_rect_annot(band)
+                                        annot.set_colors(stroke=_color_for_kind("columns"))
+                                        try:
+                                            annot.set_opacity(0.2)
+                                        except Exception:
+                                            pass
+                                        annot.update()
+                                    else:
+                                        page.draw_rect(band, color=_color_for_kind("columns"), width=0.2, fill=None, overlay=True)
+                                except Exception:
+                                    page.draw_rect(band, color=_color_for_kind("columns"), width=0.2, fill=None, overlay=True)
                                 if labels:
-                                    page.insert_text((band.x0 + 2, band.y0 + 8), f"COL {c.get('id')}", fontsize=6, color=(0, 1, 1))
+                                    page.insert_text(
+                                        (band.x0 + 2, band.y0 + max(6, int(label_font_size))),
+                                        f"COL {c.get('id')}",
+                                        fontsize=max(5, int(label_font_size)),
+                                        color=_color_for_kind("columns"),
+                                    )
+                                pages_touched.add(pidx)
                             except Exception:
                                 continue
         except Exception:
             pass
+        _append_timing(logs_dir, {"stage": "09a_pdf_annotator", "event": "draw_columns06b", "latency_ms": int((time.monotonic()-t_s)*1000)})
 
-    # Optional: draw a light grid for visual debugging
-    try:
-        if isinstance(grid, int) and grid and grid > 1:
+    # Optional grid
+    if draw_grid and isinstance(grid, int) and grid and grid > 1:
+        t_s = time.monotonic()
+        try:
             for pidx in range(len(doc)):
                 page = doc[pidx]
                 r = page.rect
                 step_x = (r.x1 - r.x0) / float(grid)
                 step_y = (r.y1 - r.y0) / float(grid)
-                # thin gray lines
-                color = (0.7, 0.7, 0.7)
+                color = _color_for_kind("grid")
                 for i in range(1, grid):
                     x = r.x0 + step_x * i
                     page.draw_line(fitz.Point(x, r.y0), fitz.Point(x, r.y1), color=color, width=0.3)
                     y = r.y0 + step_y * i
                     page.draw_line(fitz.Point(r.x0, y), fitz.Point(r.x1, y), color=color, width=0.3)
-    except Exception:
-        pass
+                pages_touched.add(pidx)
+        except Exception:
+            pass
+        _append_timing(logs_dir, {"stage": "09a_pdf_annotator", "event": "draw_grid", "latency_ms": int((time.monotonic()-t_s)*1000)})
 
-    # Save outputs
-    # Add a simple legend page at the end for color semantics
-    try:
-        legend = doc.new_page(-1, width=400, height=240)
-        y = 30
-        entries = [
-            ((0,1,0), "Section"),
-            ((1,0,0), "Table (header preview in label)"),
-            ((0,0,1), "Figure (ai_description in JSON)"),
-            ((1,0.5,0), "Text chunk (Stage 07 union)"),
-            ((0,1,1), "Layout columns (06b bands)"),
-            ((1,0,1), "Suspicious Header (Stage 03)")
-        ]
-        for color, name in entries:
-            legend.draw_rect(fitz.Rect(20, y-8, 40, y+8), color=color, width=1.2, fill=None)
-            legend.insert_text((50, y+3), name, fontsize=10, color=(0,0,0))
-            y += 24
-        legend.insert_text((20, y+20), "Labels: SEC/TBL/FIG/TXT/HDR ...", fontsize=9, color=(0,0,0))
-    except Exception:
-        pass
-
+    # Save outputs (annotated PDF first)
     annotated_pdf = stage_dir / "annotated.pdf"
-    doc.save(str(annotated_pdf))
-    doc.close()
+    try:
+        doc.save(str(annotated_pdf))
+        logger.info(f"Annotated PDF saved: {annotated_pdf}")
+    finally:
+        doc.close()
 
-    (json_dir / "annotations.json").write_text(
-        json.dumps({"overlays": overlays}, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
-    print(f"Annotated PDF saved: {annotated_pdf}")
+    # Per-page previews (only pages touched)
+    if render_previews:
+        t_s = time.monotonic()
+        try:
+            src = fitz.open(str(annotated_pdf))
+            try:
+                for pidx in sorted(pages_touched):
+                    try:
+                        page = src[pidx]
+                        zoom = 1200.0 / max(1.0, float(page.rect.width))
+                        mat = fitz.Matrix(zoom, zoom)
+                        pix = page.get_pixmap(matrix=mat, alpha=False)
+                        out_png = vis_dir / f"page_{pidx+1:04d}.png"
+                        pix.save(str(out_png))
+                    except Exception:
+                        continue
+            finally:
+                src.close()
+        except Exception as e:
+            logger.warning(f"Failed to render previews: {e}")
+        _append_timing(logs_dir, {"stage": "09a_pdf_annotator", "event": "render_previews", "latency_ms": int((time.monotonic()-t_s)*1000)})
+
+    # Write overlay JSON with summary
+    try:
+        by_kind: Dict[str, int] = {}
+        for o in overlays:
+            k = str(o.get("kind") or "")
+            by_kind[k] = by_kind.get(k, 0) + 1
+        header = {
+            "summary": {
+                "total_overlays": len(overlays),
+                "by_kind": by_kind,
+                "pages_touched": sorted(int(p)+1 for p in pages_touched),
+            },
+            "source": {
+                "pdf_path": str(pdf_path),
+                "sections_json": str(sections_json),
+                "tables_json": str(tables_json),
+                "figures_json": str(figures_json),
+                "reflowed_json": str(reflowed_json) if reflowed_json else None,
+                "blocks02_json": str(blocks02_json) if blocks02_json else None,
+                "headers03_json": str(headers03_json) if headers03_json else None,
+                "layout06b_json": str(layout06b_json) if layout06b_json else None,
+            },
+            "overlays": overlays,
+        }
+        (json_dir / "annotations.json").write_text(json.dumps(header, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as e:
+        logger.warning(f"Failed to write annotations.json: {e}")
+
+    # Legend JSON for colors
+    try:
+        legend = {
+            "colors": {k: list(v) for k, v in COLORS.items()},
+            "labels": "SEC/TBL/FIG/TXT/PAR/LST/HDG/REQ prefixes map to section/table/figure/text/paragraph/list/heading/requirement respectively.",
+        }
+        (json_dir / "legend.json").write_text(json.dumps(legend, indent=2))
+    except Exception:
+        pass
 
     # Optional: color-aware header overlay directly onto the source PDF
     if rewrite_headers:
@@ -347,14 +633,11 @@ def run(
                         pg = hdr.get("page") if hdr.get("page") is not None else hdr.get("page_idx")
                         bb = _safe_get_bbox(hdr) or _safe_get_bbox(s)
                         title = s.get("title") or ""
-                        # Color + font style from Stage 04 (if available)
                         color_hex = ((s.get("metadata") or {}).get("header_color_hex") or None)
                         color = _parse_hex_color(color_hex)
                         fsf = (hdr.get("first_span_font") or {}) if isinstance(hdr, dict) else {}
-                        # Try to honor original font family and size
                         size = float(fsf.get("size", 0) or 0) or 11.0
                         fname = str(fsf.get("name") or "").lower()
-                        # Map common families to built-ins
                         if "times" in fname:
                             fontname = "times"
                         elif "helvetica" in fname or "arial" in fname or "sans" in fname:
@@ -367,41 +650,49 @@ def run(
                             continue
                         page = src_doc[int(pg)]
                         rect = fitz.Rect(float(bb[0]), float(bb[1]), float(bb[2]), float(bb[3])) & page.rect
-                        # If requested, remove the original header text from the text layer first,
-                        # then insert the corrected title (preserving style/color).
                         if replace_text_layer:
                             try:
                                 page.add_redact_annot(rect, fill=None)
-                                # Apply only text removal; keep images unchanged (default behaviour)
                                 page.apply_redactions()
                             except Exception as _e:
                                 logger.debug(f"redaction failed on p{pg} rect={rect}: {_e}")
-                        # Draw colored title without erasing existing content (or after redaction)
                         page.insert_textbox(rect, title, fontsize=size, color=color, fontname=fontname, align=0)
                     except Exception:
                         continue
                 target_path = pdf_path if overwrite_pdf else pdf_path.with_name(pdf_path.stem + "__headers_patched.pdf")
-                # Try incremental save; if it fails (e.g., due to encryption/linearization), fall back to full save
                 try:
                     src_doc.save(str(target_path), incremental=True, deflate=True)
                 except Exception:
-                    # Full rewrite via temp file then replace if overwriting
                     tmp = target_path.with_suffix(target_path.suffix + ".tmp")
                     src_doc.save(str(tmp))
                     if overwrite_pdf:
                         try:
                             tmp.replace(target_path)
                         except Exception:
-                            # As a fallback, write side-by-side file
                             fallback = pdf_path.with_name(pdf_path.stem + "__headers_patched.pdf")
                             tmp.replace(fallback)
                             target_path = fallback
                     else:
-                        # Already a distinct output path
                         pass
-                print(f"Section headers overlaid in: {target_path}")
+                logger.info(f"Section headers overlaid in: {target_path}")
         except Exception as e:
             logger.warning(f"Header rewrite failed (continuing): {e}")
+
+    # Artifacts index and timings
+    _write_artifacts_index(stage_dir)
+    try:
+        _append_timing(logs_dir, {"stage": "09a_pdf_annotator", "event": "total", "latency_ms": int((time.time()-t0)*1000)})
+        _summarize_timings(logs_dir)
+    except Exception:
+        pass
+
+    if sink_id is not None:
+        try:
+            logger.remove(sink_id)
+        except Exception:
+            pass
+
+    return annotated_pdf
 
 
 if __name__ == "__main__":

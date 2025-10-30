@@ -34,6 +34,11 @@ from dotenv import find_dotenv, load_dotenv
 from loguru import logger
 
 from extractor.pipeline.utils.run_manifest import RunManifest
+try:
+    # Best-effort import for global router shutdown to avoid aiohttp warnings
+    from extractor.pipeline.utils.scillm_router import close_all_routers  # type: ignore
+except Exception:  # pragma: no cover - optional import
+    close_all_routers = None  # type: ignore
 import os
 import json
 import concurrent.futures
@@ -512,8 +517,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             log_dir_base=out,
             on_timing=lambda n, dt: stage_latencies.update({n: dt}),
         )
-    if not a07r and args.stop_on_fail:
-        return 1
+    # Stage 07r writes outputs directly and may return None; do not treat None as failure.
     _write_artifacts_index((out / "07_requirements_miner"))
     req_json_path = out / "07_requirements_miner" / "json_output" / "07_requirements.json"
     try:
@@ -540,8 +544,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             log_dir_base=out,
             on_timing=lambda n, dt: stage_latencies.update({n: dt}),
         )
-    if not a08 and args.stop_on_fail:
-        return 1
+    # Stage 08 writes outputs directly and may return None; do not treat None as failure.
     _write_artifacts_index((out / "08_lean4_theorem_prover"))
     manifest.record_stage(
         "08_lean4_theorem_prover",
@@ -664,6 +667,13 @@ def main(argv: Optional[list[str]] = None) -> int:
     try:
         manifest.finalize("Completed")
     except Exception:
+        pass
+    # Ensure any shared SciLLM routers are closed to prevent aiohttp warnings.
+    try:
+        if callable(close_all_routers):
+            close_all_routers()
+    except Exception:
+        # Do not fail the run on best-effort cleanup.
         pass
     return 0
 
