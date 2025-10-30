@@ -1,7 +1,7 @@
 # Code Review Summary - Provider Refactoring
 
 Date: 2025-07-25
-Branch: master
+Branch: main
 
 ## Overview
 Successfully refactored document extraction providers based on Kimi critique recommendations, focusing on practical improvements while avoiding unnecessary complexity.
