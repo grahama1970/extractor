@@ -34,28 +34,89 @@ from dotenv import find_dotenv, load_dotenv
 from loguru import logger
 
 from extractor.pipeline.utils.run_manifest import RunManifest
+import os
+import json
+import concurrent.futures
 
 
-def _step(name: str, fn, *fargs, stop_on_fail: bool = True, timeout_sec: int = 0, **fkw) -> Optional[Path]:
+def _step(
+    name: str,
+    fn,
+    *fargs,
+    stop_on_fail: bool = True,
+    timeout_sec: int = 0,
+    log_dir_base: Optional[Path] = None,
+    on_timing=None,
+    **fkw,
+) -> Optional[Path]:
     logger.info(f"{name}: start")
-    t0 = time.monotonic()
-    # Install a per-step timeout using SIGALRM (POSIX). 0 disables.
+    sink_id = None
+    stage_dir: Optional[Path] = None
+    if log_dir_base:
+        try:
+            stage_dir = (log_dir_base / name)
+            stage_dir.mkdir(parents=True, exist_ok=True)
+            sink_id = logger.add(
+                stage_dir / "stage.log",
+                level="DEBUG",
+                enqueue=True,
+                rotation="5 MB",
+                retention=3,
+            )
+        except Exception:
+            sink_id = None
+    t0_mono = time.monotonic()
+    t0_wall = time.time()
+    used_alarm = False
+    old_handler = None
+
     def _handler(signum, frame):  # noqa: ARG001
         raise TimeoutError(f"{name} exceeded {timeout_sec}s")
-    old_handler = None
-    if timeout_sec and timeout_sec > 0:
+
+    if timeout_sec and timeout_sec > 0 and hasattr(signal, "SIGALRM"):
         try:
             old_handler = signal.getsignal(signal.SIGALRM)
             signal.signal(signal.SIGALRM, _handler)
             signal.alarm(timeout_sec)
+            used_alarm = True
         except Exception:
+            used_alarm = False
             old_handler = None
+
     try:
-        rv = fn(*fargs, **fkw)
-        dt = int((time.monotonic() - t0) * 1000)
-        # Accept functions that return a path or (path, extra)
+        # Cross-platform timeout fallback using a worker thread when SIGALRM is unavailable.
+        if timeout_sec and timeout_sec > 0 and not used_alarm:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+                fut = ex.submit(fn, *fargs, **fkw)
+                try:
+                    rv = fut.result(timeout=timeout_sec)
+                except concurrent.futures.TimeoutError:
+                    raise TimeoutError(f"{name} exceeded {timeout_sec}s")
+        else:
+            rv = fn(*fargs, **fkw)
+
+        dt_ms = int((time.monotonic() - t0_mono) * 1000)
         path_like = rv[0] if isinstance(rv, (list, tuple)) and rv else rv
-        logger.info(f"{name}: ok in {dt} ms → {path_like}")
+        logger.info(f"{name}: ok in {dt_ms} ms → {path_like}")
+        # Emit timing line for observability
+        if log_dir_base:
+            try:
+                (log_dir_base).mkdir(parents=True, exist_ok=True)
+                timing_line = {
+                    "stage": name,
+                    "start_ts": t0_wall,
+                    "end_ts": time.time(),
+                    "latency_ms": dt_ms,
+                }
+                with (log_dir_base / "timings.jsonl").open("a", encoding="utf-8") as fp:
+                    fp.write(json.dumps(timing_line) + "\n")
+            except Exception:
+                pass
+        if callable(on_timing):
+            try:
+                on_timing(name, dt_ms)
+            except Exception:
+                pass
         return Path(path_like) if path_like is not None else None
     except Exception as e:
         logger.error(f"{name}: FAIL → {e}")
@@ -63,11 +124,16 @@ def _step(name: str, fn, *fargs, stop_on_fail: bool = True, timeout_sec: int = 0
             raise
         return None
     finally:
-        if timeout_sec and timeout_sec > 0:
+        if used_alarm:
             try:
                 signal.alarm(0)
                 if old_handler is not None:
                     signal.signal(signal.SIGALRM, old_handler)
+            except Exception:
+                pass
+        if sink_id is not None:
+            try:
+                logger.remove(sink_id)
             except Exception:
                 pass
 
@@ -123,6 +189,11 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     results: Dict[str, Any] = {}
     manifest = RunManifest(out)
+    stage_latencies: Dict[str, int] = {}
+    served_model = {
+        "text": os.getenv("CHUTES_TEXT_MODEL", ""),
+        "vlm": os.getenv("CHUTES_VLM_MODEL", ""),
+    }
 
     def _write_artifacts_index(stage_dir: Path) -> None:
         try:
@@ -162,24 +233,62 @@ def main(argv: Optional[list[str]] = None) -> int:
     )
 
     # 01
-    a01 = _step("01_annotation_processor", s01.run, pdf, out, stop_on_fail=args.stop_on_fail, timeout_sec=args.stage_timeout, timeout=args.stage_timeout)
+    a01 = _step(
+        "01_annotation_processor",
+        s01.run,
+        pdf,
+        out,
+        stop_on_fail=args.stop_on_fail,
+        timeout_sec=args.stage_timeout,
+        log_dir_base=out,
+        on_timing=lambda n, dt: stage_latencies.update({n: dt}),
+        timeout=args.stage_timeout,
+    )
     if not a01:
         return 1
     results["01"] = a01
     _write_artifacts_index((out / "01_annotation_processor"))
-    manifest.record_stage("01_annotation_processor", "Completed", {"json": str(a01.relative_to(out))})
+    manifest.record_stage(
+        "01_annotation_processor",
+        "Completed",
+        {"json": str(a01.relative_to(out)), "latency_ms": stage_latencies.get("01_annotation_processor")},
+    )
 
     # 02
-    a02 = _step("02_marker_extractor", s02.run, pdf, out, stop_on_fail=args.stop_on_fail, timeout_sec=args.stage_timeout, timeout=args.stage_timeout)
+    a02 = _step(
+        "02_marker_extractor",
+        s02.run,
+        pdf,
+        out,
+        stop_on_fail=args.stop_on_fail,
+        timeout_sec=args.stage_timeout,
+        log_dir_base=out,
+        on_timing=lambda n, dt: stage_latencies.update({n: dt}),
+        timeout=args.stage_timeout,
+    )
     if not a02:
         return 1
     results["02"] = a02
     _write_artifacts_index((out / "02_marker_extractor"))
-    manifest.record_stage("02_marker_extractor", "Completed", {"json": str(a02.relative_to(out))})
+    manifest.record_stage(
+        "02_marker_extractor",
+        "Completed",
+        {"json": str(a02.relative_to(out)), "latency_ms": stage_latencies.get("02_marker_extractor")},
+    )
 
     # 03
     pdf_dir = out / "01_annotation_processor"
-    a03 = _step("03_suspicious_headers", s03.run, a02, pdf_dir, out, stop_on_fail=args.stop_on_fail, timeout_sec=args.stage_timeout)
+    a03 = _step(
+        "03_suspicious_headers",
+        s03.run,
+        a02,
+        pdf_dir,
+        out,
+        stop_on_fail=args.stop_on_fail,
+        timeout_sec=args.stage_timeout,
+        log_dir_base=out,
+        on_timing=lambda n, dt: stage_latencies.update({n: dt}),
+    )
     if not a03:
         return 1
     results["03"] = a03
@@ -191,12 +300,29 @@ def main(argv: Optional[list[str]] = None) -> int:
     manifest.record_stage(
         "03_suspicious_headers",
         "Completed",
-        {"json": str(a03.relative_to(out))},
+        {"json": str(a03.relative_to(out)), "latency_ms": stage_latencies.get("03_suspicious_headers")},
         counts={"verified_blocks": vcount} if isinstance(vcount, int) else None,
     )
 
-    # 04
-    a04_path = _step("04_section_builder", s04.run, a03, pdf_dir, out, stop_on_fail=args.stop_on_fail, timeout_sec=args.stage_timeout)
+    # 04 (hard-require Stage 03 outputs)
+    try:
+        _a03_obj = json.loads(a03.read_text())
+        if not isinstance(_a03_obj, dict) or "blocks" not in _a03_obj or not isinstance(_a03_obj["blocks"], list):
+            raise ValueError("Stage 03 output missing required key 'blocks' (list)")
+    except Exception as e:
+        logger.error(f"04_section_builder: missing or invalid Stage 03 outputs → {e}")
+        return 1
+    a04_path = _step(
+        "04_section_builder",
+        s04.run,
+        a03,
+        pdf_dir,
+        out,
+        stop_on_fail=args.stop_on_fail,
+        timeout_sec=args.stage_timeout,
+        log_dir_base=out,
+        on_timing=lambda n, dt: stage_latencies.update({n: dt}),
+    )
     if not a04_path:
         return 1
     results["04"] = a04_path
@@ -208,7 +334,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     manifest.record_stage(
         "04_section_builder",
         "Completed",
-        {"json": str(a04_path.relative_to(out))},
+        {"json": str(a04_path.relative_to(out)), "latency_ms": stage_latencies.get("04_section_builder")},
         counts={"sections": sec_count} if isinstance(sec_count, int) else None,
     )
 
@@ -221,6 +347,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         out,
         stop_on_fail=args.stop_on_fail,
         timeout_sec=args.stage_timeout,
+        log_dir_base=out,
+        on_timing=lambda n, dt: stage_latencies.update({n: dt}),
     )
     if not a05:
         return 1
@@ -233,7 +361,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     manifest.record_stage(
         "05_table_extractor",
         "Completed",
-        {"json": str(a05.relative_to(out))},
+        {"json": str(a05.relative_to(out)), "latency_ms": stage_latencies.get("05_table_extractor")},
         counts={"tables": tcount} if isinstance(tcount, int) else None,
     )
 
@@ -250,6 +378,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         skip_descriptions=args.skip_fig_descriptions,
         stop_on_fail=args.stop_on_fail,
         timeout_sec=args.stage_timeout,
+        log_dir_base=out,
+        on_timing=lambda n, dt: stage_latencies.update({n: dt}),
     )
     if not a06:
         return 1
@@ -262,7 +392,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     manifest.record_stage(
         "06_figure_extractor",
         "Completed",
-        {"json": str(a06.relative_to(out))},
+        {"json": str(a06.relative_to(out)), "latency_ms": stage_latencies.get("06_figure_extractor")},
         counts={"figures": fcount} if isinstance(fcount, int) else None,
     )
 
@@ -284,12 +414,18 @@ def main(argv: Optional[list[str]] = None) -> int:
         args.stage_timeout,  # llm_timeout
         stop_on_fail=args.stop_on_fail,
         timeout_sec=args.stage_timeout,
+        log_dir_base=out,
+        on_timing=lambda n, dt: stage_latencies.update({n: dt}),
     )
     if not a07:
         return 1
     results["07"] = a07
     _write_artifacts_index((out / "07_reflow_section"))
-    manifest.record_stage("07_reflow_section", "Completed", {"json": str(a07.relative_to(out))})
+    manifest.record_stage(
+        "07_reflow_section",
+        "Completed",
+        {"json": str(a07.relative_to(out)), "latency_ms": stage_latencies.get("07_reflow_section")},
+    )
 
     # 09a PDF annotator (optional visual end-product)
     if args.annotate_pdf:
@@ -319,7 +455,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                 manifest.record_stage(
                     "09a_pdf_annotator",
                     "Completed",
-                    {"json": str((out / "09a_pdf_annotator" / "json_output" / "annotations.json").relative_to(out))},
+                    {"json": str((out / "09a_pdf_annotator" / "json_output" / "annotations.json").relative_to(out)), "latency_ms": stage_latencies.get("09a_pdf_annotator")},
                 )
         except Exception as e:
             logger.warning(f"09a_pdf_annotator failed (continuing): {e}")
@@ -334,6 +470,8 @@ def main(argv: Optional[list[str]] = None) -> int:
             out,
             stop_on_fail=args.stop_on_fail,
             timeout_sec=args.stage_timeout,
+            log_dir_base=out,
+            on_timing=lambda n, dt: stage_latencies.update({n: dt}),
         )
         if not a07r and args.stop_on_fail:
             return 1
@@ -346,7 +484,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         manifest.record_stage(
             "07_requirements_miner",
             "Completed",
-            {"json": str(req_json_path.relative_to(out)) if req_json_path and req_json_path.exists() else ""},
+            {"json": str(req_json_path.relative_to(out)) if req_json_path and req_json_path.exists() else "", "latency_ms": stage_latencies.get("07_requirements_miner")},
             counts={"requirements": rcount} if isinstance(rcount, int) else None,
         )
 
@@ -361,11 +499,17 @@ def main(argv: Optional[list[str]] = None) -> int:
             req_json_path if req_json_path and req_json_path.exists() else None,
             stop_on_fail=args.stop_on_fail,
             timeout_sec=args.stage_timeout,
+            log_dir_base=out,
+            on_timing=lambda n, dt: stage_latencies.update({n: dt}),
         )
         if not a08 and args.stop_on_fail:
             return 1
         _write_artifacts_index((out / "08_lean4_theorem_prover"))
-        manifest.record_stage("08_lean4_theorem_prover", "Completed", {"json": str((out / "08_lean4_theorem_prover" / "json_output" / "08_theorems.json").relative_to(out))})
+        manifest.record_stage(
+            "08_lean4_theorem_prover",
+            "Completed",
+            {"json": str((out / "08_lean4_theorem_prover" / "json_output" / "08_theorems.json").relative_to(out)), "latency_ms": stage_latencies.get("08_lean4_theorem_prover")},
+        )
 
     # 09
     a09 = _step(
@@ -375,12 +519,18 @@ def main(argv: Optional[list[str]] = None) -> int:
         out,
         stop_on_fail=args.stop_on_fail,
         timeout_sec=args.stage_timeout,
+        log_dir_base=out,
+        on_timing=lambda n, dt: stage_latencies.update({n: dt}),
     )
     if not a09:
         return 1
     results["09"] = a09
     _write_artifacts_index((out / "09_section_summarizer"))
-    manifest.record_stage("09_section_summarizer", "Completed", {"json": str(a09.relative_to(out))})
+    manifest.record_stage(
+        "09_section_summarizer",
+        "Completed",
+        {"json": str(a09.relative_to(out)), "latency_ms": stage_latencies.get("09_section_summarizer")},
+    )
 
     # 10 (optional DB export)
     if args.skip_export:
@@ -398,13 +548,30 @@ def main(argv: Optional[list[str]] = None) -> int:
             args.skip_export,
             stop_on_fail=args.stop_on_fail,
             timeout_sec=args.stage_timeout,
+            log_dir_base=out,
+            on_timing=lambda n, dt: stage_latencies.update({n: dt}),
         )
         _write_artifacts_index((out / "10_arangodb_exporter"))
-        manifest.record_stage("10_arangodb_exporter", "Completed", {"json": str((out / "10_arangodb_exporter" / "json_output" / "10_flattened_data.json").relative_to(out))})
+        manifest.record_stage(
+            "10_arangodb_exporter",
+            "Completed",
+            {"json": str((out / "10_arangodb_exporter" / "json_output" / "10_flattened_data.json").relative_to(out)), "latency_ms": stage_latencies.get("10_arangodb_exporter")},
+        )
 
     logger.info("pipeline: complete")
     for k, v in results.items():
         logger.info(f"  {k} → {v}")
+
+    # Write timings summary
+    try:
+        summary = {
+            "total_ms": int(sum(v for v in stage_latencies.values())),
+            "stages": [{"name": k, "latency_ms": int(v)} for k, v in stage_latencies.items()],
+            "served_model": served_model,
+        }
+        (out / "timings_summary.json").write_text(json.dumps(summary, indent=2))
+    except Exception:
+        pass
 
     # Write manifests
     try:
@@ -416,7 +583,11 @@ def main(argv: Optional[list[str]] = None) -> int:
             "flags": {
                 "summary_only": bool(args.summary_only),
                 "skip_fig_descriptions": bool(args.skip_fig_descriptions),
+                "stop_on_fail": bool(args.stop_on_fail),
+                "stage_timeout": int(args.stage_timeout),
             },
+            "served_model": served_model,
+            "timings_ms": stage_latencies,
         }
         # Best-effort counts
         def _safe_load(p):
