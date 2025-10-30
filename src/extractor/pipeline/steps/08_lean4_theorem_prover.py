@@ -1452,11 +1452,7 @@ def run(
     console.print(f"   - Successful Proofs: {stats.get('successful_proofs', 0)}")
     console.print(f"   - Failed Proofs: {stats.get('failed_proofs', 0)}")
     console.print(f"   - Results saved to: [cyan]{output_path}[/cyan]")
-    try:
-        from extractor.pipeline.utils.scillm_router import close_all_routers
-        close_all_routers()
-    except Exception:
-        pass
+    # Router lifecycle is handled by the pipeline driver via scillm.shutdown().
 
 
 def debug_bundle(

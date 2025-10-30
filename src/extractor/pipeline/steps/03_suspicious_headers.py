@@ -1437,11 +1437,7 @@ def run(
         out = json_output_dir / "03_verified_blocks.json"
         out.write_text(json.dumps(data, indent=2))
         print(f"[offline] Heuristic demotion applied; wrote {out}")
-        try:
-            from extractor.pipeline.utils.scillm_router import close_all_routers
-            close_all_routers()
-        except Exception:
-            pass
+        # Router lifecycle is handled by the pipeline driver via scillm.shutdown().
         return out
 
     # Configure logging sink per stage run
@@ -1490,11 +1486,7 @@ def run(
         verify_all_headers=verify_all_headers,
     )
     asyncio.run(process_pdf_pipeline(cfg))
-    try:
-        from extractor.pipeline.utils.scillm_router import close_all_routers
-        close_all_routers()
-    except Exception:
-        pass
+    # Router lifecycle is handled by the pipeline driver via scillm.shutdown().
     return stage_output_dir / "json_output" / "03_verified_blocks.json"
 
 

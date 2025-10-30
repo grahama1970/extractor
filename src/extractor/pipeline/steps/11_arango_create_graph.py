@@ -1010,11 +1010,7 @@ def run(
         with open(output_path, "w") as f:
             json.dump(confirmation, f, indent=2)
         console.print(f"✅ Graph creation complete. Confirmation saved to: {output_path}")
-        try:
-            from extractor.pipeline.utils.scillm_router import close_all_routers
-            close_all_routers()
-        except Exception:
-            pass
+        # Router lifecycle is handled by the pipeline driver via scillm.shutdown().
         return output_path
 
 

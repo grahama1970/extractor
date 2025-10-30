@@ -67,7 +67,8 @@ async def probe_models_endpoint(base_url: str, api_key: str) -> Tuple[bool, str]
                         await asyncio.sleep(backoff)
                         continue
                     return False, f"Models endpoint probe failed: {last_text}"
-
+    except Exception as e:
+        return False, f"Models endpoint probe failed: {e}"
 
 async def probe_chat_completions_endpoint(base_url: str, api_key: str) -> Tuple[bool, str]:
     """Probe minimal POST $CHUTES_API_BASE/chat/completions endpoint per AGENTS.md."""

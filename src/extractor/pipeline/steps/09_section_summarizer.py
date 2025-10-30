@@ -23,7 +23,7 @@ from rich.console import Console
 from extractor.pipeline.utils.json_utils import clean_json_string, restrict_top_level_keys
 from extractor.pipeline.utils.json_mode import JSON_SYSTEM_GUARD
 from tqdm import tqdm
-from extractor.pipeline.utils.scillm_router import get_text_router, close_all_routers
+from extractor.pipeline.utils.scillm_router import get_text_router
 from extractor.pipeline.utils.model_select import get_text_model
 
 # Note: Avoid import-time side effects. Tests can import this module safely.
@@ -601,11 +601,8 @@ def _cmd_run(
             )
         )
     finally:
-        # Ensure router sessions are closed (avoid aiohttp warnings)
-        try:
-            close_all_routers()
-        except Exception:
-            pass
+        # Router lifecycle is handled by the pipeline driver via scillm.shutdown().
+        pass
 
     successful_count = sum(1 for s in summaries if s.get("success"))
     console.print(f"\n✅ Generated {successful_count}/{len(sections)} summaries.")
@@ -664,10 +661,8 @@ def _cmd_debug_bundle(
             )
         )
     finally:
-        try:
-            close_all_routers()
-        except Exception:
-            pass
+        # Router lifecycle is handled by the pipeline driver via scillm.shutdown().
+        pass
     successful_count = sum(1 for s in summaries if s.get("success"))
     final_output = {
         "timestamp": datetime.now().isoformat(),

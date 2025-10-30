@@ -398,11 +398,7 @@ def run(
     console.print(
         f"stage06:done out={out_path} duration_ms={int((time.monotonic()-t0)*1000)} count={len(figures)}"
     )
-    try:
-        from extractor.pipeline.utils.scillm_router import close_all_routers
-        close_all_routers()
-    except Exception:
-        pass
+    # Router lifecycle is handled by the pipeline driver via scillm.shutdown().
     return out_path
 
 

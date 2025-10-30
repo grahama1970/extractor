@@ -489,11 +489,7 @@ def run(
     _console(
         f"Enriched titles written to: {enriched_root / '05_tables.enriched.json'} and {enriched_root / '06_figures.enriched.json'}"
     )
-    try:
-        from extractor.pipeline.utils.scillm_router import close_all_routers
-        close_all_routers()
-    except Exception:
-        pass
+    # Router lifecycle is handled by the pipeline driver via scillm.shutdown().
     return enriched_root
 
 
