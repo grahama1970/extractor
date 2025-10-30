@@ -1,4 +1,4 @@
-# Pipeline Runbook (Offline-First, Then Online)
+# Pipeline Runbook (Online-Only)
 
 Goal: Methodically validate the PDF extraction pipeline end-to-end. First run "offline" (no LLM/DB calls) to confirm structure and artifacts. Then run "online" with real LLM calls (SciLLM via `CHUTES_*`) and ArangoDB export/graph.
 
@@ -6,7 +6,7 @@ Goal: Methodically validate the PDF extraction pipeline end-to-end. First run "o
 
 - Python venv activated; project installed with extras.
 - `.env` present and loaded. Required keys:
-- `CHUTES_API_BASE`, `CHUTES_API_KEY`, and `CHUTES_TEXT_MODEL` (for online runs)
+  - `CHUTES_API_BASE`, `CHUTES_API_KEY`, `CHUTES_TEXT_MODEL`, `CHUTES_VLM_MODEL`
   - `ARANGO_HOST`, `ARANGO_PORT`, `ARANGO_USER`, `ARANGO_PASSWORD`
 - Set `PYTHONPATH=src` when running Python modules directly.
 - Canonical input PDF: `data/input/pipeline/BHT_CV32A65X_marked.pdf`
@@ -33,7 +33,7 @@ print('Arango OK:', db.version())
 PY
 ```
 
-## Offline Pass (fast, structural)
+## Offline Pass (deprecated; pipeline is online-only)
 
 Notes:
 - Avoid LLM/VLM calls; skip DB writes. Confirms PDF parsing, stitching, flattening, reporting.
@@ -108,7 +108,7 @@ python src/extractor/pipeline/steps/14_report_generator.py run data/results/pipe
 ## Online Pass (LLM + DB)
 
 Notes:
-- Provider: use the configured default model from `.env` (`DEFAULT_LITELLM_MODEL` or `LITELLM_DEFAULT_MODEL`).
+- Provider: Chutes only via pinned `CHUTES_TEXT_MODEL`/`CHUTES_VLM_MODEL` (no auto-discovery).
 - Concurrency: start with `--max-concurrent 8` for LLM-heavy steps.
 - Timeouts: Stage 06/09 `--timeout 45`, Stage 07 `--timeout 240` (more complex prompt). You can also set `STAGE07_LLM_TIMEOUT` (seconds) to control Stage 07 strictly in CI.
  - Stage 07 knobs (when providers are finicky):

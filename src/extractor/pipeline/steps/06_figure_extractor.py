@@ -176,7 +176,7 @@ async def _process_one(
         title_source: Optional[str] = None
         number_hint: Optional[str] = None
 
-        if FIGURE_DESC_ENABLED and not skip_descriptions and _bbox_area(expanded_bbox) >= FIGURE_MIN_AREA:
+        if not skip_descriptions and _bbox_area(expanded_bbox) >= FIGURE_MIN_AREA:
             meta = await _describe_and_title_multimodal(
                 image_data=image_data,
                 text_above=above_text,
@@ -315,7 +315,7 @@ def run(
     t0 = time.monotonic()
 
     # Enforce preflight if descriptions are enabled (no soft skip)
-    if not skip_descriptions and FIGURE_DESC_ENABLED:
+    if not skip_descriptions:
         from extractor.pipeline.steps.scillm_preflight_validator import require_scillm_preflight
         require_scillm_preflight()
 
