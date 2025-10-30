@@ -151,7 +151,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     p.add_argument("--skip-fig-descriptions", action="store_true")
     p.add_argument("--skip-export", action="store_true")
     p.add_argument("--extract-requirements", action="store_true", help="Run 07_requirements_miner after reflow")
-    p.add_argument("--stage-timeout", type=int, default=int(__import__('os').getenv('PIPELINE_STAGE_TIMEOUT','300')), help="Per-stage wall timeout in seconds (fail-fast)")
+    p.add_argument("--stage-timeout", type=int, default=int(__import__('os').getenv('PIPELINE_STAGE_TIMEOUT','600')), help="Per-stage wall timeout in seconds (fail-fast)")
     p.add_argument(
         "--prove-requirements",
         action="store_true",
