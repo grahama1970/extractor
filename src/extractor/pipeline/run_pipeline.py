@@ -213,7 +213,16 @@ def main(argv: Optional[list[str]] = None) -> int:
     )
 
     # 05
-    a05 = _step("05_table_extractor", s05.run, pdf, out, stop_on_fail=args.stop_on_fail, timeout_sec=args.stage_timeout, timeout=args.stage_timeout)
+    a05 = _step(
+        "05_table_extractor",
+        s05.run,
+        a04_path,
+        pdf_dir,
+        out,
+        stop_on_fail=args.stop_on_fail,
+        timeout_sec=args.stage_timeout,
+        timeout=args.stage_timeout,
+    )
     if not a05:
         return 1
     results["05"] = a05
