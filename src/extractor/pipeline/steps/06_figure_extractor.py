@@ -352,6 +352,19 @@ def run(
     img_dir.mkdir(parents=True, exist_ok=True)
 
     console.print(f"stage06:start pdf={pdf_path} blocks={len(blocks)} label={label}")
+    # Configure a stage-specific log file for debugging
+    try:
+        logger.add(
+            str(stage_dir / "stage_06_figure_extractor.log"),
+            level="INFO",
+            enqueue=True,
+            backtrace=False,
+            diagnose=False,
+            rotation="1 week",
+            retention="14 days",
+        )
+    except Exception:
+        pass
 
     figures: list[dict[str, Any]] = []
     if blocks:

@@ -2920,6 +2920,22 @@ def run(
             raise RuntimeError("Stage 07 preflight failed")
     except Exception as _e:
         raise RuntimeError(f"Stage 07 preflight error: {_e}")
+    # Configure a stage-specific log file for debugging
+    try:
+        stage_dir = output_dir / "07_reflow_section"
+        stage_dir.mkdir(parents=True, exist_ok=True)
+        logger.add(
+            str(stage_dir / "stage_07_reflow_section.log"),
+            level="INFO",
+            enqueue=True,
+            backtrace=False,
+            diagnose=False,
+            rotation="1 week",
+            retention="14 days",
+        )
+    except Exception:
+        pass
+
     run_id = get_run_id()
     diagnostics = []
     errors_count = 0

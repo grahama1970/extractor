@@ -1099,6 +1099,21 @@ def run(
 ):
     """Extracts tables from the PDF and associates them with sections."""
     console.print(f"[green]Extracting tables based on sections in: {input_json.name}[/green]")
+    # Configure a stage-specific log file for debugging
+    try:
+        stage_output_dir = output_dir / "05_table_extractor"
+        stage_output_dir.mkdir(parents=True, exist_ok=True)
+        logger.add(
+            str(stage_output_dir / "stage_05_table_extractor.log"),
+            level="INFO",
+            enqueue=True,
+            backtrace=False,
+            diagnose=False,
+            rotation="1 week",
+            retention="14 days",
+        )
+    except Exception:
+        pass
     run_id = get_run_id()
     diagnostics = []
     errors_count = 0
