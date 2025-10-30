@@ -30,9 +30,7 @@ from loguru import logger
 from rich.console import Console
 from extractor.pipeline.utils.scillm_router import get_vlm_router
 from extractor.pipeline.steps.scillm_preflight_validator import (
-    validate_scillm_env_sync,
-    require_scillm_preflight,
-    quick_scillm_check
+    quick_scillm_check,
 )
 from extractor.pipeline.utils.response_utils import normalize_json_content
 from extractor.pipeline.utils.debug_utils import ensure_logs_dir, time_block

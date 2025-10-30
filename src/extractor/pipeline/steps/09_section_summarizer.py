@@ -20,7 +20,7 @@ from textwrap import dedent
 # Third-party
 from loguru import logger
 from rich.console import Console
-from extractor.pipeline.utils.json_utils import clean_json_string
+from extractor.pipeline.utils.json_utils import clean_json_string, restrict_top_level_keys
 from extractor.pipeline.utils.json_mode import JSON_SYSTEM_GUARD
 from tqdm import tqdm
 from extractor.pipeline.utils.scillm_router import get_text_router, close_all_routers
@@ -87,6 +87,7 @@ async def summarize_section(
             error: Optional[str] = None
             served_model: Optional[str] = None
             usage: Dict[str, Any] = {}
+            content_preview: Optional[str] = None
             try:
                 resp = await router.acompletion(
                     model="chutes/text",
@@ -100,6 +101,11 @@ async def summarize_section(
                 )
                 served_model = getattr(resp, "model", None) or getattr(resp, "id", None) or "chutes/text"
                 content = (getattr(resp, "choices", [{}])[0].get("message", {}).get("content", ""))
+                try:
+                    # Keep a short preview for debugging if parsing fails downstream
+                    content_preview = str(content)[:400]
+                except Exception:
+                    content_preview = None
                 usage_obj = getattr(resp, "usage", None) or {}
                 if isinstance(usage_obj, dict):
                     usage = usage_obj
@@ -110,6 +116,12 @@ async def summarize_section(
                         "total_tokens": getattr(usage_obj, "total_tokens", None),
                     }
                 result = clean_json_string(content, return_dict=True)
+                # Strictly restrict top-level keys to the schema; tolerate extra keys by trimming
+                if isinstance(result, dict):
+                    try:
+                        result = restrict_top_level_keys(result, allowed={"summary", "key_concepts"})
+                    except Exception:
+                        pass
                 if strict_json and (
                     not isinstance(result, dict)
                     or "summary" not in result
@@ -145,6 +157,7 @@ async def summarize_section(
                         "latency_ms": latency_ms,
                         "outcome": "success" if error is None else "error",
                         "error": error,
+                        "raw_preview": content_preview if error is not None else None,
                     }
                     try:
                         async with timings_lock:

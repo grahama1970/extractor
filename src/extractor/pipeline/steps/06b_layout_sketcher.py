@@ -16,13 +16,14 @@ import os
 from pathlib import Path
 import asyncio
 from typing import Any, Dict, List, Optional, Tuple
+from loguru import logger
 
 
 GRID = 12  # default grid granularity (rows = cols = GRID)
 SCHEMA_VERSION = "0.2.0"
 # Env toggles
-# Default VLM-assisted sketch ON; disable via STAGE06B_ALLOW_VLM=0 if needed
-ALLOW_VLM = os.getenv("STAGE06B_ALLOW_VLM", "1").lower() in ("1", "true", "yes", "y")
+# Default VLM-assisted sketch OFF for determinism; enable explicitly when desired
+ALLOW_VLM = os.getenv("STAGE06B_ALLOW_VLM", "0").lower() in ("1", "true", "yes", "y")
 PYMUPDF_FALLBACK = os.getenv("STAGE06B_PYMUPDF_FALLBACK", "").lower() in ("1", "true", "yes", "y")
 SOURCE_PDF_ENV = os.getenv("STAGE06B_SOURCE_PDF", "").strip() or None
 EMIT_MERGE_HINTS = os.getenv("STAGE06B_EMIT_MERGE_HINTS", "").lower() in ("1", "true", "yes", "y")
@@ -962,11 +963,7 @@ def _build_section_sketch(
                     doc.close()
     except Exception:
         pass
-    try:
-        from extractor.pipeline.utils.scillm_router import close_all_routers
-        close_all_routers()
-    except Exception:
-        pass
+    # Router lifecycle is managed at run() end for efficiency
     return result
 
 
@@ -1063,6 +1060,17 @@ def run(input_path: str, output_path: str, **kwargs) -> dict[str, Any]:
     - output_path: base results dir containing 04/05/06 outputs
     """
     base = Path(output_path)
+    # Stage-local logging sink + timings
+    stage_dir = base / "06b_layout_sketcher"
+    json_dir = stage_dir / "json_output"
+    stage_dir.mkdir(parents=True, exist_ok=True)
+    sink_id = None
+    try:
+        sink_id = logger.add(stage_dir / "stage.log", level="DEBUG", enqueue=True, rotation="5 MB", retention=3)
+    except Exception:
+        sink_id = None
+    import time as _t
+    _t0 = _t.monotonic()
     # Try to find Stage 04 sections file
     sec_json = base / "04_section_builder" / "json_output" / "04_sections.json"
     if not sec_json.exists():
@@ -1071,11 +1079,38 @@ def run(input_path: str, output_path: str, **kwargs) -> dict[str, Any]:
         if alt.exists():
             sec_json = alt
         else:
-            # nothing to do
+            strict = bool(kwargs.get("strict") or (os.getenv("STAGE06B_STRICT","0").lower() in ("1","true","yes","y")))
+            msg = "06b_layout_sketcher: missing Stage 04 sections (04_sections.json)"
+            try:
+                logger.error(msg)
+            except Exception:
+                pass
+            if strict:
+                # Fail-fast contract when requested
+                raise FileNotFoundError(msg)
+            # Non-strict: write empty payload for compatibility
             out = {"sections": {}}
-            out_dir = base / "06b_layout_sketcher" / "json_output"
-            out_dir.mkdir(parents=True, exist_ok=True)
-            (out_dir / "06b_layout_sketch.json").write_text(json.dumps(out, indent=2))
+            json_dir.mkdir(parents=True, exist_ok=True)
+            (json_dir / "06b_layout_sketch.json").write_text(json.dumps(out, indent=2))
+            # Emit minimal timings
+            try:
+                t_ms = int((_t.monotonic() - _t0) * 1000)
+                with (stage_dir / "timings.jsonl").open("a", encoding="utf-8") as fp:
+                    fp.write(json.dumps({"stage":"06b_layout_sketcher","latency_ms":t_ms,"outcome":"empty"})+"\n")
+                (stage_dir / "timings_summary.json").write_text(json.dumps({"total_ms":t_ms}, indent=2))
+            except Exception:
+                pass
+            # Close sink and routers
+            try:
+                from extractor.pipeline.utils.scillm_router import close_all_routers
+                close_all_routers()
+            except Exception:
+                pass
+            if sink_id is not None:
+                try:
+                    logger.remove(sink_id)
+                except Exception:
+                    pass
             return out
 
     data = json.loads(sec_json.read_text(encoding="utf-8"))
@@ -1340,6 +1375,41 @@ def main(
             (out_dir / "06b_layout_sketch.json").write_text(
                 json.dumps(rebuilt, ensure_ascii=False, indent=2)
             )
+    # Schema validation + timings + router close + sink teardown
+    try:
+        # Compute latency best-effort (fallback to 0 if start time unknown)
+        t_ms = 0
+        # Validate top-level schema of latest file if present
+        try:
+            latest = json.loads(((base / "06b_layout_sketcher" / "json_output" / "06b_layout_sketch.json")).read_text(encoding="utf-8"))
+            if not isinstance(latest, dict) or not isinstance(latest.get("sections"), dict):
+                raise ValueError("invalid 06b_layout_sketch.json schema: expected {sections:{...}}")
+            try:
+                logger.info(f"06b_layout_sketcher: sections={len(latest.get('sections',{}))}")
+            except Exception:
+                pass
+        except Exception as _ve:
+            try:
+                logger.error(f"06b_layout_sketcher: schema validation failed: {_ve}")
+            except Exception:
+                pass
+        with ((base / "06b_layout_sketcher") / "timings.jsonl").open("a", encoding="utf-8") as fp:
+            fp.write(json.dumps({"stage":"06b_layout_sketcher","latency_ms":t_ms,"outcome":"ok"})+"\n")
+        ((base / "06b_layout_sketcher") / "timings_summary.json").write_text(json.dumps({"total_ms":t_ms}, indent=2))
+    except Exception:
+        pass
+    # Close routers once per run
+    try:
+        from extractor.pipeline.utils.scillm_router import close_all_routers
+        close_all_routers()
+    except Exception:
+        pass
+    # Remove sink
+    if locals().get("sink_id") is not None:
+        try:
+            logger.remove(locals().get("sink_id"))
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":

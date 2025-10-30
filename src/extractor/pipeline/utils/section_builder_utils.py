@@ -443,7 +443,7 @@ try:  # optional, fast path if installed
     from rapidfuzz import fuzz as _rf_fuzz  # type: ignore
     _HAVE_RAPIDFUZZ = True
 except Exception:  # pragma: no cover
-_HAVE_RAPIDFUZZ = False
+    _HAVE_RAPIDFUZZ = False
 import difflib as _difflib  # fallback
 
 
