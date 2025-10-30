@@ -69,6 +69,7 @@ from extractor.pipeline.utils.prompt_builder import build_llm_context  # noqa: E
 from extractor.pipeline.utils.section_builder_utils import (
     pdf_analyze_section_numbering as _pdf_analyze_numbering,
     pdf_extract_section_title as _pdf_extract_title,
+    is_probable_pdf_section_header as _is_probable_pdf_header,
 )
 
 try:
@@ -845,6 +846,22 @@ async def process_pdf_pipeline(config: Config):
             try:
                 import re as _re
                 raw_text = (target_block.get("text") or "").strip()
+                # Auto-ACCEPT: strict 'numbering Title.' line = 100% header
+                try:
+                    hdr = _is_probable_pdf_header(raw_text, target_block.get("first_span_font") or {})
+                    if hdr.get("is_header") and hdr.get("confidence") >= 0.999 and hdr.get("reason") and "strict_numbered_title_period" in hdr.get("reason"):
+                        auto_results[idx] = {
+                            "is_header": True,
+                            "reasoning": "Auto-accept: strict_numbered_title_period",
+                            "auto": True,
+                        }
+                        # Attach spans so downstream can rely on them
+                        if hdr.get("spans"):
+                            target_block["header_char_spans"] = hdr["spans"]
+                            target_block.setdefault("header_title", hdr.get("title"))
+                        continue
+                except Exception:
+                    pass
                 # Accept classic numbered headings like "1.1.1 Section Title"
                 is_numbered = bool(_re.match(r"^\s*\d+(?:[\.-]\d+){1,}\s+\S", raw_text))
                 # Short colon label (wrapper) — e.g., "Mergeable Tables:" — often not a true header

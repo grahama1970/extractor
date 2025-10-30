@@ -74,8 +74,11 @@ STAGE04_SOURCE_PDF = os.getenv("STAGE04_SOURCE_PDF", "").strip() or None
 # Optional color enrichment for headers (first-span color via PyMuPDF)
 STAGE04_COLOR_ENRICH = os.getenv("STAGE04_COLOR_ENRICH", "1").lower() in {"1", "true", "yes", "y"}
 
-# Font analysis thresholds
-LARGE_FONT_THRESHOLD = 14.0
+# Font analysis thresholds (env override via SPARTA_PDF_FONT_LARGE)
+try:
+    LARGE_FONT_THRESHOLD = float(os.getenv("SPARTA_PDF_FONT_LARGE", "14.0"))
+except Exception:
+    LARGE_FONT_THRESHOLD = 14.0
 SMALL_FONT_THRESHOLD = 8.0
 BOLD_WEIGHT_THRESHOLD = 600
 
