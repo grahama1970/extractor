@@ -66,6 +66,10 @@ def _normalize_model_alias(model: str | None) -> str:
 from extractor.pipeline.utils.model_params import build_chat_extras  # noqa: E402
 from extractor.pipeline.utils.prompt_builder import build_llm_context  # noqa: E402
 # No scillm_client wrappers; Router-only policy for SciLLM
+from extractor.pipeline.utils.section_builder_utils import (
+    pdf_analyze_section_numbering as _pdf_analyze_numbering,
+    pdf_extract_section_title as _pdf_extract_title,
+)
 
 try:
     import psutil  # type: ignore
@@ -812,6 +816,20 @@ async def process_pdf_pipeline(config: Config):
     for idx, task in enumerate(tasks):
         try:
             target_block, above_block, below_block = task.get_context_blocks()
+            # Attach deterministic header spans to the target block (if any)
+            try:
+                raw_text = (target_block.get("text") or target_block.get("content") or "").strip()
+                if raw_text:
+                    na = _pdf_analyze_numbering(raw_text)
+                    if na.get("number_span") or na.get("title_span"):
+                        target_block["header_char_spans"] = {
+                            "number": na.get("number_span"),
+                            "title": na.get("title_span"),
+                        }
+                        # Provide a normalized header title for convenience
+                        target_block.setdefault("header_title", _pdf_extract_title(raw_text))
+            except Exception:
+                pass
             # Opportunistic color enrichment for the three context blocks
             if STAGE03_COLOR_ENRICH:
                 try:

@@ -40,6 +40,8 @@ from rich.console import Console
 from extractor.pipeline.utils.section_builder_utils import (
     _bucket_color,
     _roman_to_int,
+    pdf_analyze_section_numbering as _pdf_analyze_numbering,
+    pdf_extract_section_title as _pdf_extract_title,
 )
 from extractor.pipeline.utils.diagnostics import (
     start_resource_sampler,
@@ -383,6 +385,14 @@ def build_sections_from_blocks(
                 na = analyze_section_numbering(clean_title)
                 header_level = na.get("depth_level") or detect_header_level(clean_title)
                 section_title = extract_section_title(clean_title)
+                # Compute character spans within the original block text (cleaned)
+                try:
+                    na_spans = _pdf_analyze_numbering(clean_title)
+                    number_span = na_spans.get("number_span")
+                    title_span = na_spans.get("title_span")
+                except Exception:
+                    number_span = None
+                    title_span = None
                 sec_num = na.get("number_text") or ""
                 section_depth = derive_section_depth(na)
                 try:
@@ -411,6 +421,10 @@ def build_sections_from_blocks(
                         "block_count": 1,
                         "validation_method": "stage03_or_fallback",
                         "diagnostics": [],
+                        "header_char_spans": {
+                            "number": number_span,
+                            "title": title_span,
+                        },
                     },
                 }
                 block.setdefault("page", block.get("page_idx", 0))
@@ -421,6 +435,8 @@ def build_sections_from_blocks(
                 block["section_hashes"] = [sec_hash]
                 block["section_number"] = sec_num
                 block["section_level"] = header_level
+                if number_span or title_span:
+                    block["header_char_spans"] = {"number": number_span, "title": title_span}
                 if section_depth:
                     block["section_depth"] = section_depth
             else:
