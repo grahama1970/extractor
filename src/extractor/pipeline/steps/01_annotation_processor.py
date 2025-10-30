@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 PDF Annotation Extract → Context Capture → LLM Interpretation → Clean PDF → ArangoDB
-Refactored POC with Typer CLI and easy debug mode for VS Code.
+Function-first with a minimal __main__ for VS Code debugging.
 """
 
 import os
@@ -12,7 +12,7 @@ import textwrap
 from pathlib import Path
 import sys
 from dataclasses import dataclass, field
-from typing import List, Dict, Any, Optional, cast, Annotated
+from typing import List, Dict, Any, Optional, cast
 from datetime import datetime
 import time
 
@@ -26,12 +26,14 @@ try:
 except ImportError:
     print("PyMuPDF (fitz) not installed. Stage 01 requires it.", file=sys.stderr)
     raise
-import typer
 from loguru import logger
-try:
-    from scillm import acompletion as sc_completion  # type: ignore
-except Exception:  # pragma: no cover
-    sc_completion = None  # type: ignore
+from extractor.pipeline.utils.scillm_router import get_text_router
+from extractor.pipeline.utils.debug_utils import log_timing
+from extractor.pipeline.steps.scillm_preflight_validator import (
+    validate_scillm_env_sync,
+    require_scillm_preflight,
+    quick_scillm_check
+)
 
 from extractor.pipeline.utils.diagnostics import (
     start_resource_sampler,
@@ -54,16 +56,7 @@ RENDER_DPI = 200
 ANNOT_FREETEXT = "FreeText"
 
 
-def build_cli():
-    import typer as _typer
-
-    app = _typer.Typer(help="Annotate → LLM → Clean PDF → ArangoDB", add_completion=False)
-
-    # Re-register commands inside the factory to avoid import-time side effects
-    # by referencing the existing callables.
-    app.command(name="run")(run)
-    app.command(name="debug-bundle")(debug_bundle)
-    return app
+## CLI removed: call run(...) or debug_bundle(...) from Python or use a tiny debug script.
 
 
 """Relevant-to rules config (optional file-based)."""
@@ -189,7 +182,8 @@ class Config:
     render_dpi: int = 150
     llm_model: str = field(
         default_factory=lambda: os.getenv(
-            "LITELLM_DEFAULT_MODEL", os.getenv("DEFAULT_LITELLM_MODEL", "")
+            # SciLLM-only: do not consult LITELLM/DEFAULT_LITELLM envs
+            "",
         )
     )
     llm_concurrency: int = 5
@@ -731,6 +725,19 @@ async def process_pdf_pipeline(config: Config):
     errors_count = 0
     warnings_count = 0
     resources: Dict[str, Any] = {}
+    
+    # AGENTS.md compliance: Validate SciLLM environment before processing
+    if config.llm_model or os.getenv("CHUTES_TEXT_MODEL"):
+        try:
+            require_scillm_preflight()
+        except RuntimeError as e:
+            logger.error(f"SciLLM preflight validation failed: {e}")
+            if os.getenv("PIPELINE_FAIL_FAST", "0").lower() in ("1", "true", "yes", "y"):
+                raise
+            # Continue without LLM if not in fail-fast mode
+            logger.warning("Continuing without LLM inference due to preflight failure")
+            config.llm_model = ""
+    
     sampler = (
         start_resource_sampler(float(os.getenv("SAMPLE_INTERVAL_SEC", "2")))
         if os.getenv("ENABLE_RESOURCE_SAMPLING", "0").lower() in ("1", "true", "yes", "y")
@@ -839,29 +846,67 @@ async def process_pdf_pipeline(config: Config):
             )
 
     async def _one_scillm_call(idx: int, params: Dict[str, Any]) -> Dict[str, Any]:
-        ch_base = os.getenv("CHUTES_API_BASE", "").strip()
-        ch_key = os.getenv("CHUTES_API_KEY", "").strip()
-        # Sanitize: truncate large data URLs in logs only (payload still sent)
+        # Router-only OpenAI-compatible call with AGENTS.md preflight validation
+        # Fail fast if SciLLM environment is not properly configured
+        if not quick_scillm_check():
+            raise RuntimeError(
+                "SciLLM environment not configured. "
+                "Please set CHUTES_API_BASE, CHUTES_API_KEY, and CHUTES_TEXT_MODEL"
+            )
+        router = get_text_router()
+        t0 = time.monotonic()
+        timeout_s = int(params.get("timeout", 30))
         try:
-            if os.getenv("STAGE01_SANITIZE_DATA_URLS", "redact").lower() in {"redact","truncate"}:
-                pass
-        except Exception:
-            pass
-        if sc_completion is None:
+            resp = await router.acompletion(
+                model="chutes/text",
+                messages=params.get("messages") or [],
+                response_format={"type": "json_object"},
+                temperature=params.get("temperature"),
+                timeout=timeout_s,
+                max_tokens=int(params.get("max_tokens", 1024)),
+            )
+            elapsed_ms = int((time.monotonic() - t0) * 1000)
+            # Normalize resp access
+            if isinstance(resp, dict):
+                choices = resp.get("choices") or [{}]
+                model_served = resp.get("model")
+                usage = resp.get("usage") or {}
+            else:
+                choices = getattr(resp, "choices", [{}])
+                model_served = getattr(resp, "model", None)
+                usage = getattr(resp, "usage", None) or {}
+            content = (choices or [{}])[0].get("message", {}).get("content", "")
+            log_timing(
+                "01_annotation_processor",
+                {
+                    "attempt": "interpret_annotation",
+                    "outcome": "ok",
+                    "route_name": "chutes/text",
+                    "model": model_served,
+                    "latency_ms": elapsed_ms,
+                    "timeout_s": timeout_s,
+                    "tokens_in": usage.get("prompt_tokens"),
+                    "tokens_out": usage.get("completion_tokens"),
+                    "item_index": idx,
+                },
+            )
+            return {"index": idx, "content": content}
+        except Exception as e:
+            elapsed_ms = int((time.monotonic() - t0) * 1000)
+            log_timing(
+                "01_annotation_processor",
+                {
+                    "attempt": "interpret_annotation",
+                    "outcome": "exception",
+                    "exception": type(e).__name__,
+                    "exception_msg": str(e)[:300],
+                    "latency_ms": elapsed_ms,
+                    "timeout_s": timeout_s,
+                    "item_index": idx,
+                },
+            )
+            # Return neutral content so outer parse can soft-fail
             return {"index": idx, "content": "{}"}
-        resp = await sc_completion(
-            model=params.get("model"),
-            api_base=ch_base or None,
-            api_key=ch_key,
-            custom_llm_provider="openai",
-            messages=params.get("messages") or [],
-            response_format={"type": "json_object"},
-            temperature=params.get("temperature"),
-            timeout=params.get("timeout", 30),
-            max_tokens=params.get("max_tokens", 1024),
-        )
-        content = (resp.get("choices") or [{}])[0].get("message", {}).get("content", "")
-        return {"index": idx, "content": content}
 
     try:
         t0 = time.monotonic()
@@ -1114,32 +1159,18 @@ async def process_pdf_pipeline(config: Config):
 # CLI
 # ------------------------------------------------------------------
 def run(
-    input_pdf: Annotated[Path, typer.Argument(..., help="PDF with annotations")],
-    output_dir: Annotated[
-        Path, typer.Option("-o", help="Parent directory for pipeline results")
-    ] = Path("data/results/pipeline"),
-    llm_model: Annotated[Optional[str], typer.Option("--model")] = None,
+    input_pdf: Path,
+    output_dir: Path = Path("data/results/pipeline"),
+    llm_model: Optional[str] = None,
     concurrency: int = 5,
     dpi: int = 150,
-    include_freetext: bool = typer.Option(
-        False, "--include-freetext", help="Include FreeText annotations."
-    ),
-    images: bool = typer.Option(
-        False, "--images/--no-images", help="Include annotation images in LLM prompts."
-    ),
-    debug: bool = typer.Option(
-        False, "--debug", help="Enable verbose logging to a stage log file."
-    ),
-    limit: int = typer.Option(
-        0, "--limit", help="Limit number of annotations to process (0 = all)."
-    ),
-    timeout: int = typer.Option(
-        0, "--timeout", help="Overall stage timeout in seconds (0 = no limit)."
-    ),
-    cache: bool = typer.Option(
-        True, "--cache/--no-cache", help="Enable LiteLLM cache (default: enabled)"
-    ),
-):
+    include_freetext: bool = False,
+    images: bool = False,
+    debug: bool = False,
+    limit: int = 0,
+    timeout: int = 0,
+    cache: bool = True,
+) -> Path:
     """Processes a PDF to extract and interpret annotations, saving to a structured output directory."""
 
     # Define the specific output directory for this stage
@@ -1167,7 +1198,8 @@ def run(
         output_dir=stage_output_dir,
         llm_model=llm_model
         or os.getenv(
-            "LITELLM_DEFAULT_MODEL", os.getenv("DEFAULT_LITELLM_MODEL", "openai/gpt-4o-mini")
+            # SciLLM-only: remove legacy defaults
+            "",
         ),
         llm_concurrency=concurrency,
         render_dpi=dpi,
@@ -1184,25 +1216,39 @@ def run(
         asyncio.run(process_pdf_pipeline(cfg))
     except Exception as e:
         logger.exception("Stage 01 failed")
-        typer.secho(f"Stage 01 failed: {e}", fg=typer.colors.RED)
-        raise typer.Exit(code=1)
+        print(f"Stage 01 failed: {e}")
+        raise RuntimeError(f"Stage 01 failed: {e}")
+    return stage_output_dir / "json_output" / "01_annotations.json"
 
 
 # ------------------------------------------------------------------
+# Minimal __main__ for convenience: import-safe, optional
+if __name__ == "__main__":
+    try:
+        from dotenv import find_dotenv, load_dotenv
+
+        load_dotenv(find_dotenv())
+    except Exception:
+        pass
+    import sys
+    from pathlib import Path
+    argv = sys.argv[1:]
+    if not argv or argv[0] in ("-h", "--help"):
+        print(
+            "Usage: python -m extractor.pipeline.steps.01_annotation_processor INPUT_PDF [OUT_DIR]",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    input_pdf = Path(argv[0])
+    out_dir = Path(argv[1]) if len(argv) > 1 else Path("data/results/pipeline")
+    out = run(input_pdf=input_pdf, output_dir=out_dir)
+    print(str(out))
+
 # DEBUG-BUNDLE COMMAND
 # ------------------------------------------------------------------
 def debug_bundle(
-    bundle: Path = typer.Argument(
-        ...,
-        exists=True,
-        file_okay=True,
-        dir_okay=False,
-        readable=True,
-        help="Bundle JSON with key 'pdf' and optional 'options'",
-    ),
-    output_dir: Path = typer.Option(
-        "data/results/pipeline", "-o", help="Parent directory for pipeline results."
-    ),
+    bundle: Path,
+    output_dir: Path = Path("data/results/pipeline"),
 ):
     """Run Stage 01 from a single JSON bundle.
 
@@ -1230,8 +1276,8 @@ def debug_bundle(
             raise ValueError("Bundle must include existing 'pdf' file path")
         opts = data.get("options") or {}
     except Exception as e:
-        typer.secho(f"Failed to load bundle: {e}", fg=typer.colors.RED)
-        raise typer.Exit(1)
+        print(f"Failed to load bundle: {e}")
+        raise ValueError(f"Failed to load bundle: {e}")
 
     cfg = Config(
         input_pdf=pdf_path,
@@ -1243,8 +1289,8 @@ def debug_bundle(
             opts.get(
                 "model",
                 os.getenv(
-            "LITELLM_DEFAULT_MODEL",
-                    os.getenv("DEFAULT_LITELLM_MODEL", ""),
+            # SciLLM-only: remove legacy defaults
+            "",
                 ),
             )
         ),
@@ -1257,13 +1303,12 @@ def debug_bundle(
     try:
         asyncio.run(process_pdf_pipeline(cfg))
     except Exception as e:
-        typer.secho(f"Stage 01 debug-bundle failed: {e}", fg=typer.colors.RED)
-        raise typer.Exit(1)
-    typer.secho("Debug-bundle run completed for Stage 01", fg=typer.colors.GREEN)
+        print(f"Stage 01 debug-bundle failed: {e}")
+        raise RuntimeError(f"Stage 01 debug-bundle failed: {e}")
+    print("Debug-bundle run completed for Stage 01")
 
 
 # ------------------------------------------------------------------
 # DEBUG ENTRY
 # ------------------------------------------------------------------
-if __name__ == "__main__":
-    build_cli()()
+## No __main__: use scripts/debug or import and call run(...)

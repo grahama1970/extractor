@@ -37,9 +37,21 @@ except ImportError:
         file=sys.stderr,
     )
     raise
-import typer
 from dotenv import load_dotenv, find_dotenv
 from loguru import logger
+from extractor.pipeline.utils.table_extractor_utils import (
+    _stable_table_hash,
+    _should_assist,
+    _headers_from_table,
+    _apply_headers,
+    _extract_table_text_for_heuristics,
+    sanitize_cell,
+    fragmentation_score,
+    should_retry_fragmentation,
+    has_fragmentation_improvement,
+    should_replace_table,
+    coalesce_repeated_header_rows,
+)
 from rich.console import Console
 from extractor.pipeline.utils.diagnostics import (
     start_resource_sampler,
@@ -51,12 +63,13 @@ from extractor.pipeline.utils.diagnostics import (
     build_stage_timings,
     gpu_metrics_available,
 )
-# scillm is only needed for optional LLM labeling; avoid hard import so table
-# extraction can run without model deps
-try:
-    from scillm import acompletion as sc_acompletion  # type: ignore
-except Exception:  # pragma: no cover
-    sc_acompletion = None  # type: ignore
+# SciLLM Router builder (OpenAI-compatible); avoid direct SDK calls in steps
+from extractor.pipeline.utils.scillm_router import get_text_router
+from extractor.pipeline.steps.scillm_preflight_validator import (
+    validate_scillm_env_sync,
+    quick_scillm_check
+)
+from extractor.pipeline.utils.debug_utils import log_timing, write_jsonl, ensure_logs_dir
 
 
 # --- Initialization ---
@@ -118,6 +131,15 @@ TABLE_MULTI_PAGE_MERGE_ENABLED = os.getenv("TABLE_MULTI_PAGE_MERGE_ENABLED", "tr
 )
 TABLE_MULTI_PAGE_MERGE_MIN_IOU = float(os.getenv("TABLE_MULTI_PAGE_MERGE_MIN_IOU", 0.3))
 
+# Selection behavior (quick win: stop data loss)
+# When true, keep legacy behavior of selecting exactly one primary table per page.
+# Default is false: keep ALL tables; let downstream consolidation (Stage 07) decide.
+TABLE_SELECT_ONE_PER_PAGE = os.getenv("TABLE_SELECT_ONE_PER_PAGE", "false").lower() in (
+    "1",
+    "true",
+    "yes",
+    "y",
+)
 # Feature toggles (env-configurable)
 # Important: Stage 05 shall NOT merge/stitch tables by default. Merging happens in Stage 07.
 # Default this feature OFF to avoid header/body stitching at this stage.
@@ -149,45 +171,13 @@ FRAGMENTATION_IMPROVEMENT_MIN = max(
 
 # --- Core Functions ---
 
-def _stable_table_hash(table: Dict[str, Any]) -> str:
-    import hashlib
-    h = hashlib.sha256()
-    payload = {
-        "bbox": table.get("bbox"),
-        "cols": table.get("columns") or table.get("header") or [],
-        "shape": (table.get("pandas_metrics") or {}).get("shape") or [],
-    }
-    h.update(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8"))
-    return h.hexdigest()
+## moved helpers into extractor.pipeline.utils.table_extractor_utils
 
-def _should_assist(table: Dict[str, Any]) -> bool:
-    pm = table.get("pandas_metrics") or {}
-    density = float(pm.get("data_density") or 0.0)
-    frag = int(table.get("fragmentation_score") or 0)
-    camel = table.get("camelot_metrics") or {}
-    acc = float(camel.get("accuracy") or 0.0) / 100.0
-    if frag >= int(os.getenv("TABLE_LLM_ASSIST_FRAG_MIN", "4")):
-        return True
-    if density <= float(os.getenv("TABLE_LLM_ASSIST_DENSITY_MAX", "0.25")):
-        return True
-    if acc and acc <= float(os.getenv("TABLE_LLM_ASSIST_ACCURACY_MAX", "0.55")):
-        return True
-    return False
+## moved
 
-def _headers_from_table(t: Dict[str, Any]) -> List[str]:
-    if t.get("header"):
-        return [str(x) for x in t["header"]]
-    if t.get("columns"):
-        return [str(x) for x in t["columns"]]
-    rows = t.get("rows") or []
-    return [str(x) for x in (rows[0] if rows else [])]
+## moved
 
-def _apply_headers(t: Dict[str, Any], headers: List[str]) -> None:
-    n = len(headers)
-    if t.get("header") and isinstance(t["header"], list) and len(t["header"]) == n:
-        t["header"] = headers
-    elif t.get("columns") and isinstance(t["columns"], list) and len(t["columns"]) == n:
-        t["columns"] = headers
+## moved
 
 def _attach_llm_assist_headers(result: Dict[str, Any], stage_dir: Path) -> None:
     sidecar = stage_dir / "05_tables_llm_assist.json"
@@ -196,15 +186,58 @@ def _attach_llm_assist_headers(result: Dict[str, Any], stage_dir: Path) -> None:
     except Exception:
         side_data = {}
 
-    model = os.getenv("TABLE_LLM_ASSIST_MODEL", os.getenv("LITELLM_MODEL", "gpt-4o-mini"))
+    # SciLLM-only: resolve model from TABLE_LLM_ASSIST_MODEL or CHUTES_TEXT_MODEL.
+    # Do not fall back to any LITELLM_* envs.
+    model = (os.getenv("TABLE_LLM_ASSIST_MODEL") or os.getenv("CHUTES_TEXT_MODEL") or "").strip()
+    if not model:
+        logger.debug("LLM assist disabled: no TABLE_LLM_ASSIST_MODEL/CHUTES_TEXT_MODEL set")
+        # log skip at global RUN_RESULTS_DIR
+        log_timing(
+            "05_table_extractor",
+            {"attempt": "llm_assist_headers_skip", "outcome": "skip", "reason": "model_unavailable"},
+            stage_dir=stage_dir,
+        )
+        return
     tables = result.get("tables") or []
+    # Budget gating (tokens/cost)
+    try:
+        tokens_budget = int(os.getenv("STAGE05_TOKENS_BUDGET", "120000"))
+    except Exception:
+        tokens_budget = 0
+    cost_budget = float(os.getenv("STAGE05_COST_BUDGET_USD", "0") or 0)
+    budget_enforce = os.getenv("STAGE05_BUDGET_ENFORCE", "true").lower() in ("1","true","yes","y")
+    tokens_used = 0
+    cost_used = 0.0
+    # Token usage log path
+    rd = os.getenv("RUN_RESULTS_DIR")
+    token_logs_dir = ensure_logs_dir(Path(rd), "05_table_extractor") if rd else stage_dir
     updated = 0
     for t in tables:
         try:
             if not _should_assist(t):
+                log_timing(
+                    "05_table_extractor",
+                    {
+                        "attempt": "llm_assist_headers_skip",
+                        "outcome": "skip",
+                        "reason": "doc_filtered",
+                        "table_hash": _stable_table_hash(t),
+                    },
+                    stage_dir=stage_dir,
+                )
                 continue
             headers_in = _headers_from_table(t)
             if not headers_in:
+                log_timing(
+                    "05_table_extractor",
+                    {
+                        "attempt": "llm_assist_headers_skip",
+                        "outcome": "skip",
+                        "reason": "short_headers",
+                        "table_hash": _stable_table_hash(t),
+                    },
+                    stage_dir=stage_dir,
+                )
                 continue
             table_hash = _stable_table_hash(t)
             cache_key = f"assist:{table_hash}:{model}"
@@ -212,7 +245,44 @@ def _attach_llm_assist_headers(result: Dict[str, Any], stage_dir: Path) -> None:
             if cached and isinstance(cached.get("headers"), list) and len(cached["headers"]) == len(headers_in):
                 t["llm_assist"] = {"model": model, "patch": cached}
                 _apply_headers(t, cached["headers"])
+                log_timing(
+                    "05_table_extractor",
+                    {
+                        "attempt": "llm_assist_headers",
+                        "outcome": "ok",
+                        "cached": True,
+                        "table_hash": table_hash,
+                    },
+                    stage_dir=stage_dir,
+                )
                 updated += 1
+                continue
+            # Budget gate before making a new call
+            if budget_enforce and ((tokens_budget and tokens_used >= tokens_budget) or (cost_budget and cost_used >= cost_budget)):
+                log_timing(
+                    "05_table_extractor",
+                    {
+                        "attempt": "llm_assist_headers_skip",
+                        "outcome": "skip",
+                        "reason": "budget_exceeded",
+                        "table_hash": table_hash,
+                        "tokens_used": tokens_used,
+                        "tokens_limit": tokens_budget,
+                        "cost_used_usd": round(cost_used, 6),
+                        "cost_limit_usd": cost_budget or None,
+                    },
+                    stage_dir=stage_dir,
+                )
+                write_jsonl(token_logs_dir, "token_usage.jsonl", {
+                    "ts": datetime.utcnow().isoformat()+"Z",
+                    "event": "assist_skipped",
+                    "reason": "budget_exceeded",
+                    "table_hash": table_hash,
+                    "tokens_used": tokens_used,
+                    "tokens_limit": tokens_budget,
+                    "cost_used_usd": round(cost_used, 6),
+                    "cost_limit_usd": cost_budget or None,
+                })
                 continue
             # Build strict JSON prompt
             system = (
@@ -221,37 +291,107 @@ def _attach_llm_assist_headers(result: Dict[str, Any], stage_dir: Path) -> None:
                 "Return JSON: {\"headers\": [..]} with the same length as input.\n"
             )
             user = json.dumps({"headers_input": headers_in}, ensure_ascii=False)
-            ch_base = os.getenv("CHUTES_API_BASE", "").strip()
-            ch_key = os.getenv("CHUTES_API_KEY", "").strip()
-            if sc_acompletion is None:
-                _resp = {"choices": [{"message": {"content": "{}"}}]}
-            else:
-                import asyncio as _asyncio
-                async def _call():
-                    return await sc_acompletion(
-                        model=model,
-                        api_base=ch_base or None,
-                        api_key=ch_key,
-                        custom_llm_provider="openai",
-                        messages=[
-                            {"role": "system", "content": system},
-                            {"role": "user", "content": [{"type": "text", "text": user}]},
-                        ],
-                        response_format={"type": "json_object"},
-                        temperature=0,
-                        timeout=int(os.getenv("TABLE_LLM_ASSIST_TIMEOUT", "30")),
-                        max_tokens=int(os.getenv("TABLE_LLM_ASSIST_MAX_TOKENS", "256")),
-                    )
-                _resp = _asyncio.run(_call())
-            content = (_resp.get("choices") or [{}])[0].get("message", {}).get("content", "")
+            import asyncio as _asyncio
+            import time as _time
+            async def _call():
+                router = get_text_router()
+                resp = await router.acompletion(
+                    model="chutes/text",
+                    messages=[
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": [{"type": "text", "text": user}]},
+                    ],
+                    response_format={"type": "json_object"},
+                    temperature=0,
+                    timeout=int(os.getenv("SC_TIMEOUT_STAGE_05_ASSIST", os.getenv("TABLE_LLM_ASSIST_TIMEOUT", "20"))),
+                    max_tokens=int(os.getenv("TABLE_LLM_ASSIST_MAX_TOKENS", "256")),
+                )
+                return resp
+            _t0 = _time.monotonic()
+            try:
+                resp = _asyncio.run(_call())
+                _elapsed_ms = int((_time.monotonic() - _t0) * 1000)
+                # Extract content and usage
+                content = getattr(resp, "choices", [{}])[0].get("message", {}).get("content", "")
+                usage = getattr(resp, "usage", None) or {}
+                served_model = getattr(resp, "model", None)
+                # Update budgets
+                try:
+                    tokens_used += int(usage.get("prompt_tokens") or 0) + int(usage.get("completion_tokens") or 0)
+                except Exception:
+                    pass
+                # Optional: cost tracking left as placeholder (provider-specific); keep zero unless integrated
+                write_jsonl(token_logs_dir, "token_usage.jsonl", {
+                    "ts": datetime.utcnow().isoformat()+"Z",
+                    "event": "assist_used",
+                    "table_hash": table_hash,
+                    "model": served_model,
+                    "prompt_tokens": usage.get("prompt_tokens"),
+                    "completion_tokens": usage.get("completion_tokens"),
+                    "total_tokens": usage.get("total_tokens"),
+                    "tokens_used_cumulative": tokens_used,
+                })
+                log_timing(
+                    "05_table_extractor",
+                    {
+                        "attempt": "llm_assist_headers",
+                        "outcome": "ok",
+                        "route_name": "chutes/text",
+                        "model": served_model,
+                        "latency_ms": _elapsed_ms,
+                        "timeout_s": int(os.getenv("SC_TIMEOUT_STAGE_05_ASSIST", os.getenv("TABLE_LLM_ASSIST_TIMEOUT", "20"))),
+                        "retries_conf": int(os.getenv("LITELLM_MAX_RETRIES", "0")),
+                        "tokens_in": usage.get("prompt_tokens"),
+                        "tokens_out": usage.get("completion_tokens"),
+                        "table_hash": table_hash,
+                        "cached": False,
+                    },
+                    stage_dir=stage_dir,
+                )
+            except Exception as e:
+                _elapsed_ms = int((_time.monotonic() - _t0) * 1000)
+                log_timing(
+                    "05_table_extractor",
+                    {
+                        "attempt": "llm_assist_headers",
+                        "outcome": "exception",
+                        "exception": type(e).__name__,
+                        "exception_msg": str(e)[:300],
+                        "latency_ms": _elapsed_ms,
+                        "timeout_s": int(os.getenv("SC_TIMEOUT_STAGE_05_ASSIST", os.getenv("TABLE_LLM_ASSIST_TIMEOUT", "20"))),
+                        "table_hash": table_hash,
+                    },
+                    stage_dir=stage_dir,
+                )
+                raise
             try:
                 patch = json.loads(content) if content else None
-            except Exception:
+            except Exception as pe:
+                log_timing(
+                    "05_table_extractor",
+                    {
+                        "attempt": "llm_assist_headers_parse",
+                        "outcome": "parse_error",
+                        "parse_error_message": str(pe)[:200],
+                        "table_hash": table_hash,
+                    },
+                    stage_dir=stage_dir,
+                )
                 patch = None
             if not isinstance(patch, dict):
                 continue
             new_headers = patch.get("headers")
             if not isinstance(new_headers, list) or len(new_headers) != len(headers_in):
+                log_timing(
+                    "05_table_extractor",
+                    {
+                        "attempt": "llm_assist_headers_parse",
+                        "outcome": "parse_error",
+                        "reason": "schema_mismatch",
+                        "table_hash": table_hash,
+                    },
+                    stage_dir=stage_dir,
+                )
                 continue
             # normalize whitespace
             new_headers = [" ".join(str(h).split()) for h in new_headers]
@@ -259,15 +399,27 @@ def _attach_llm_assist_headers(result: Dict[str, Any], stage_dir: Path) -> None:
             _apply_headers(t, new_headers)
             side_data[cache_key] = {"headers": new_headers}
             updated += 1
-        except Exception:
+        except Exception as e:
+            logger.warning(f"LLM assist header patch failed for table: {e}")
+            log_timing(
+                "05_table_extractor",
+                {
+                    "attempt": "llm_assist_headers",
+                    "outcome": "exception",
+                    "exception": type(e).__name__,
+                    "exception_msg": str(e)[:300],
+                    "table_hash": _stable_table_hash(t),
+                },
+                stage_dir=stage_dir,
+            )
             continue
 
     try:
         if updated:
             sidecar.write_text(json.dumps(side_data, ensure_ascii=False, indent=2))
-    except Exception:
-        pass
-
+    except Exception as e:
+        logger.warning(f"Failed to persist LLM assist sidecar: {e}")
+        
 
 def _demote_table_headers_to_text(result: Dict[str, Any]) -> None:
     """Detect one-line numbered headings captured as small tables and emit demoted text blocks for Stage 04.
@@ -317,21 +469,7 @@ def _demote_table_headers_to_text(result: Dict[str, Any]) -> None:
         result["demoted_text_blocks"] = demoted
 
 
-def _extract_table_text_for_heuristics(t: Dict[str, Any]) -> str:
-    src = t.get("pandas_df_raw") or t.get("pandas_df")
-    cells = []
-    if isinstance(src, list):
-        for r in src:
-            if isinstance(r, dict):
-                cells.extend([str(v).strip() for v in r.values()])
-            elif isinstance(r, list):
-                cells.extend([str(v).strip() for v in r])
-    elif isinstance(src, dict):
-        for r in src.values():
-            if isinstance(r, list):
-                cells.extend([str(v).strip() for v in r])
-    text = " ".join([c for c in cells if c])
-    return " ".join(text.split())
+## moved to utils: _extract_table_text_for_heuristics
 
 
 def _demote_sentence_like_single_row_tables(result: Dict[str, Any]) -> None:
@@ -395,68 +533,19 @@ def score_table(df: pd.DataFrame) -> float:
     return float(df.astype(str).ne("").sum().sum())
 
 
-def sanitize_cell(val: Any) -> str:
-    if val is None:
-        return ""
-    text = str(val).replace("\u00a0", " ").replace("\n", " ")
-    text = " ".join(text.split()).strip()
-    replacements = {
-        "Subsyste m": "Subsystem",
-        "Asynchro nous": "Asynchronous",
-        "SUBSY STEM": "SUBSYSTEM",
-        "EXECU TE": "EXECUTE",
-        "bht_updat e_i": "bht_update_i",
-        "bht_predi ction_o": "bht_prediction_o",
-        "connexi on": "Connection",
-        "Descripti on": "Description",
-    }
-    for old, new in replacements.items():
-        text = text.replace(old, new)
-    tokens = text.split()
-    if tokens and all(tok.lower() in {"in", "out", "ou", "t"} for tok in tokens):
-        merged: List[str] = []
-        i = 0
-        while i < len(tokens):
-            tok = tokens[i].lower()
-            if tok == "in":
-                merged.append("in")
-            elif tok == "out":
-                merged.append("out")
-            elif tok == "ou" and i + 1 < len(tokens) and tokens[i + 1].lower() == "t":
-                merged.append("out")
-                i += 1
-            else:
-                merged.append(tok)
-            i += 1
-        text = "/".join(merged)
-    return text
+## moved to utils: sanitize_cell
 
 
-def fragmentation_score(df: pd.DataFrame) -> int:
-    count = 0
-    for cell in df.astype(str).values.flatten():
-        if sanitize_cell(cell) != str(cell):
-            count += 1
-    return count
+## moved to utils: fragmentation_score
 
 
-def should_retry_fragmentation(score: int) -> bool:
-    """Return True when the fragmentation score exceeds the retry threshold."""
-    return score > FRAGMENTATION_RETRY_THRESHOLD
+## moved to utils: should_retry_fragmentation
 
 
-def has_fragmentation_improvement(existing: int, new: int) -> bool:
-    """Check if the new fragmentation score improves on the existing one."""
-    return (existing - new) >= FRAGMENTATION_IMPROVEMENT_MIN
+## moved to utils: has_fragmentation_improvement
 
 
-def should_replace_table(existing_frag: int, new_frag: int, existing_score: float, new_score: float) -> bool:
-    """Decide whether a new extraction should replace the existing candidate."""
-    if has_fragmentation_improvement(existing_frag, new_frag):
-        return True
-    if new_frag == existing_frag and new_score > existing_score:
-        return True
-    return False
+## moved to utils: should_replace_table
 
 
 def try_camelot_strategy(
@@ -834,151 +923,86 @@ def extract_tables_from_page(
         1 for info in page_tables.values() if info.get("quality_fallback")
     )
 
-    # Convert to output format: select exactly one best table per page
-    extracted_tables = []
-    table_idx = 0
+    # Convert to output format: KEEP ALL detected tables for this page.
+    # Legacy single-best behavior is handled later via TABLE_SELECT_ONE_PER_PAGE gating.
+    extracted_tables: List[Dict[str, Any]] = []
     if page_tables:
-        best_key = min(
-            page_tables.keys(),
-            key=lambda k: (page_tables[k].get("fragmentation", 0), -float(page_tables[k]["score"] or 0.0)),
-        )
-        table_info = page_tables[best_key]
-        table = table_info["table"]
-
-        # Extract table image
-        bbox_tuple = getattr(table, "_bbox", None)
-        if not bbox_tuple and hasattr(table, "cells") and getattr(table, "cells"):
-            try:
-                xs = [c.x1 for c in table.cells] + [c.x2 for c in table.cells]
-                ys = [c.y1 for c in table.cells] + [c.y2 for c in table.cells]
-                bbox_tuple = (min(xs), min(ys), max(xs), max(ys))
-            except Exception:
-                bbox_tuple = None
-        img_path = (
-            extract_table_image(pdf_doc, page_num, bbox_tuple, output_dir, table_idx, diagnostics)
-            if bbox_tuple
-            else None
-        )
-
-        # Optionally coalesce repeated header rows mid-body before metrics
-        df = table.df
-        if TABLE_HEADER_COALESCE_ENABLED:
-            try:
-                df = coalesce_repeated_header_rows(df, TABLE_HEADER_REPEAT_MIN_MATCH)
-            except Exception as e:
-                logger.debug("Header coalesce failed; continuing")
+        idx = 0
+        for bbox_key, table_info in page_tables.items():
+            table = table_info["table"]
+            # Extract bbox
+            bbox_tuple = getattr(table, "_bbox", None)
+            if not bbox_tuple and hasattr(table, "cells") and getattr(table, "cells"):
                 try:
-                    diagnostics.append(
-                        make_event(
-                            "05_table_extractor",
-                            "warning",
-                            "header_coalesce_failed",
-                            str(e),
-                            {"page_index": page_num, "table_idx": table_idx},
+                    xs = [c.x1 for c in table.cells] + [c.x2 for c in table.cells]
+                    ys = [c.y1 for c in table.cells] + [c.y2 for c in table.cells]
+                    bbox_tuple = (min(xs), min(ys), max(xs), max(ys))
+                except Exception:
+                    bbox_tuple = None
+            # Optionally extract an image per table
+            img_path = (
+                extract_table_image(pdf_doc, page_num, bbox_tuple, output_dir, idx, diagnostics)
+                if bbox_tuple
+                else None
+            )
+            # Optional header coalesce before metrics
+            df = table.df
+            if TABLE_HEADER_COALESCE_ENABLED:
+                try:
+                    df = coalesce_repeated_header_rows(df, TABLE_HEADER_REPEAT_MIN_MATCH)
+                except Exception as e:
+                    logger.debug("Header coalesce failed; continuing")
+                    try:
+                        diagnostics.append(
+                            make_event(
+                                "05_table_extractor",
+                                "warning",
+                                "header_coalesce_failed",
+                                str(e),
+                                {"page_index": page_num, "table_idx": idx},
+                            )
                         )
+                    except Exception:
+                        pass
+            df_clean = df.map(sanitize_cell)
+            fragmentation = fragmentation_score(df_clean)
+            table_data = {
+                "page_number": page_num + 1,
+                "page_index": page_num,
+                "table_index": idx + 1,
+                "bbox": list(bbox_tuple) if bbox_tuple else [],
+                "extraction_method": "camelot",
+                "strategy": table_info["strategy"],
+                "fragmentation_score": fragmentation,
+                "pandas_df_raw": df.to_dict("records"),
+                "pandas_df": df_clean.to_dict("records"),
+                "pandas_metrics": generate_pandas_metrics(df_clean),
+                "camelot_metrics": {
+                    "accuracy": getattr(table, "accuracy", None),
+                    "whitespace": getattr(table, "whitespace", None),
+                    "order": getattr(table, "order", None),
+                },
+                "score": table_info.get("score", 0.0),
+                "quality_fallback": bool(table_info.get("quality_fallback", False)),
+                "strategy_history": table_info.get("history", []),
+            }
+            if img_path:
+                try:
+                    table_data["table_image_path"] = str(
+                        Path(img_path).resolve().relative_to(output_dir.parent.parent.resolve())
                     )
                 except Exception:
-                    pass
-
-        df_clean = df.map(sanitize_cell)
-        fragmentation = fragmentation_score(df_clean)
-
-        # Build table data
-        table_data = {
-            "page_number": page_num + 1,
-            "page_index": page_num,
-            "table_index": table_idx + 1,
-            "bbox": list(bbox_tuple) if bbox_tuple else [],
-            "extraction_method": "camelot",
-            "strategy": table_info["strategy"],
-            "fragmentation_score": fragmentation,
-            "pandas_df_raw": df.to_dict("records"),
-            "pandas_df": df_clean.to_dict("records"),
-            "pandas_metrics": generate_pandas_metrics(df_clean),
-            "camelot_metrics": {
-                "accuracy": table.accuracy,
-                "whitespace": table.whitespace,
-                "order": table.order,
-            },
-            "score": table_info["score"],
-            "quality_fallback": bool(table_info.get("quality_fallback", False)),
-            "strategy_history": table_info.get("history", []),
-        }
-
-        if img_path:
-            # store path relative to results root (../.. from image_output)
-            try:
-                table_data["table_image_path"] = str(
-                    Path(img_path).resolve().relative_to(output_dir.parent.parent.resolve())
-                )
-            except Exception:
-                table_data["table_image_path"] = img_path
-
-        extracted_tables.append(table_data)
+                    table_data["table_image_path"] = img_path
+            extracted_tables.append(table_data)
+            idx += 1
 
     return extracted_tables, best_strategy, strategy_durations, page_metrics
 
 
-def _normalize_cell(val: Any) -> str:
-    s = str(val or "").strip()
-    s = s.replace("\u00a0", " ")  # NBSP -> space
-    s = " ".join(s.split())
-    return s.lower()
+## moved to utils: _normalize_cell
 
 
-def coalesce_repeated_header_rows(
-    df: pd.DataFrame, min_match: float = TABLE_HEADER_REPEAT_MIN_MATCH
-) -> pd.DataFrame:
-    """Remove repeated header rows that appear mid-body (common in multi-page Camelot outputs).
-
-    Strategy:
-    - Treat the first non-empty row as the header prototype (or use columns if already meaningful).
-    - For each subsequent row, compute fraction of columns equal (normalized) to header prototype; if >= min_match, drop row.
-    - Preserve original index order.
-    """
-    if df is None or df.empty:
-        return df
-
-    # Determine header prototype
-    # Prefer column labels if they are all non-empty strings and not default numeric labels
-    header_proto = None
-    try:
-        cols = list(df.columns)
-        if cols and not all(isinstance(c, int) for c in cols):
-            header_proto = [_normalize_cell(c) for c in cols]
-    except Exception:
-        header_proto = None
-    if header_proto is None:
-        # Use first non-empty row
-        for _, row in df.iterrows():
-            vals = [_normalize_cell(v) for v in row.tolist()]
-            if any(vals):
-                header_proto = vals
-                break
-    if not header_proto:
-        return df
-
-    keep_mask = []
-    for i, row in df.iterrows():
-        vals = [_normalize_cell(v) for v in row.tolist()]
-        if not any(vals):
-            keep_mask.append(True)
-            continue
-        # Compute match ratio
-        n = max(1, min(len(vals), len(header_proto)))
-        matches = sum(1 for a, b in zip(vals[:n], header_proto[:n]) if a == b and a != "")
-        ratio = matches / float(n)
-        if ratio >= min_match and i != df.index[0]:
-            # Drop this repeated header row
-            keep_mask.append(False)
-        else:
-            keep_mask.append(True)
-    try:
-        df2 = df.loc[df.index[keep_mask]].copy()
-        df2.reset_index(drop=True, inplace=True)
-        return df2
-    except Exception:
-        return df
+## moved to utils: coalesce_repeated_header_rows
 
 
 def extract_all_tables(
@@ -1069,18 +1093,27 @@ def extract_all_tables(
 
 
 def run(
-    input_json: Path = typer.Argument(..., help="Path to Stage 04 sections JSON."),
-    pdf_dir: Path = typer.Option(
-        "data/results/pipeline/01_annotation_processor",
-        "--pdf-dir",
-        help="Directory with the clean PDF from Stage 01.",
-    ),
-    output_dir: Path = typer.Option(
-        "data/results/pipeline", "-o", help="Parent directory for pipeline results."
-    ),
+    input_json: Path,
+    pdf_dir: Path = Path("data/results/pipeline/01_annotation_processor"),
+    output_dir: Path = Path("data/results/pipeline"),
 ):
     """Extracts tables from the PDF and associates them with sections."""
     console.print(f"[green]Extracting tables based on sections in: {input_json.name}[/green]")
+    # Configure a stage-specific log file for debugging
+    try:
+        stage_output_dir = output_dir / "05_table_extractor"
+        stage_output_dir.mkdir(parents=True, exist_ok=True)
+        logger.add(
+            str(stage_output_dir / "stage_05_table_extractor.log"),
+            level="INFO",
+            enqueue=True,
+            backtrace=False,
+            diagnose=False,
+            rotation="1 week",
+            retention="14 days",
+        )
+    except Exception:
+        pass
     run_id = get_run_id()
     diagnostics = []
     errors_count = 0
@@ -1113,8 +1146,7 @@ def run(
 
     # --- Input Validation ---
     if not input_json.exists():
-        console.print(f"[red]Input JSON not found: {input_json}[/red]")
-        raise typer.Exit(1)
+        raise FileNotFoundError(f"Input JSON not found: {input_json}")
 
     with open(input_json, "r") as f:
         sections_data = json.load(f)
@@ -1126,8 +1158,7 @@ def run(
         try:
             pdf_path = next(pdf_dir.glob("*_clean.pdf"))
         except StopIteration:
-            console.print(f"[red]No '*_clean.pdf' found in --pdf-dir: {pdf_dir}[/red]")
-            raise typer.Exit(1)
+            raise FileNotFoundError(f"No '*_clean.pdf' found in pdf_dir: {pdf_dir}")
     sections = sections_data.get("sections", [])
 
     # --- Directory Setup ---
@@ -1378,8 +1409,10 @@ def run(
             except Exception:
                 pass
 
-    # Select the best table per page to ensure exactly one primary table per page
-    if all_tables:
+    # Selection behavior:
+    # By default KEEP ALL filtered tables (no data loss).
+    # If TABLE_SELECT_ONE_PER_PAGE=true, keep legacy behavior (exactly one per page).
+    if TABLE_SELECT_ONE_PER_PAGE and all_tables:
         by_page: Dict[int, List[Dict[str, Any]]] = {}
         for t in all_tables:
             by_page.setdefault(int(t.get("page_index", 0)), []).append(t)
@@ -1402,7 +1435,6 @@ def run(
                 selected.append(best)
             except Exception:
                 continue
-        # Replace filtered_tables by page-best selection
         filtered_tables = selected
 
     # --- Assign captions/titles from nearby text if missing ---
@@ -1423,15 +1455,17 @@ def run(
         return s2 or hashlib.sha1(s.encode("utf-8")).hexdigest()[:8]
 
     def _infer_title_with_scillm(context: str, timeout: float = 6.0):
-        try:
-            from scillm import acompletion as _sc  # noqa: N806
-        except Exception:
-            _sc = None  # noqa: N806
-        base = os.getenv("CHUTES_API_BASE", "").strip()
-        key = os.getenv("CHUTES_API_KEY", "").strip()
-        model = (os.getenv("CHUTES_TEXT_MODEL") or os.getenv("LITELLM_DEFAULT_MODEL") or "").strip()
-        if not (_sc and base and key and model):
+        # Opt-in only to keep Stage 05 deterministic for goldens
+        if os.getenv("STAGE05_LLM_INFER", "0").lower() not in {"1","true","yes","y"}:
             return None
+        
+        # AGENTS.md compliance: Validate SciLLM environment before making calls
+        if not quick_scillm_check():
+            logger.warning("SciLLM environment not configured, skipping table title inference")
+            return None
+            
+        router = get_text_router()
+        model = "chutes/text"
         prompt = (
             "You are naming a table for a technical document. Return ONLY a short title (<=10 words).\n"
             "Do not include the word 'Table' or numbering.\n\n"
@@ -1440,23 +1474,21 @@ def run(
         try:
             import asyncio as _asyncio
             async def _call():
-                return await _sc(
+                resp = await router.acompletion(
                     model=model,
-                    api_base=base,
-                    api_key=key,
-                    custom_llm_provider="openai",
                     messages=[{"role":"user","content": prompt}],
                     response_format={"type":"json_object"},
                     max_tokens=64,
                     temperature=0.2,
                     timeout=timeout,
                 )
-            resp = _asyncio.run(_call())
-            content = (resp.get("choices") or [{}])[0].get("message", {}).get("content", "").strip()
-            # Allow plain text if provider ignores json_object
-            title = content.strip().strip('"') if content else ""
+                msg = getattr(resp, "choices", [{}])[0].get("message", {})
+                content = msg.get("content", "").strip()
+                return content.strip('"') if content else ""
+            title = _asyncio.run(_call())
             return title or None
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Title infer via SciLLM failed: {e}")
             return None
 
     # --- Assign captions/titles from nearby text if missing; infer when absent ---
@@ -1487,12 +1519,24 @@ def run(
             try:
                 df = _pd.DataFrame(t.get('pandas_df') or [])
                 if not df.empty:
-                    header = ' | '.join(str(c) for c in df.columns if str(c).strip())
+                    # Avoid numeric column indices as titles - use meaningful content instead
+                    cols = [str(c) for c in df.columns if str(c).strip()]
+                    # Filter out pure numeric column names (0, 1, 2, etc.)
+                    meaningful_cols = [c for c in cols if not c.isdigit()]
+                    if meaningful_cols:
+                        header = ' | '.join(meaningful_cols)
+                    else:
+                        # If all columns are numeric, use first row content instead
+                        try:
+                            first_row = df.iloc[0].astype(str).tolist()
+                            header = ' | '.join(str(cell) for cell in first_row if str(cell).strip())[:100]
+                        except Exception:
+                            header = ''
             except Exception:
                 pass
             ctx = f"Header: {header}\nNearby: {near}".strip()
             inferred = _infer_title_with_scillm(ctx) or (header if header else (near.split('\n',1)[0] if near else ''))
-            if inferred:
+            if inferred and inferred.strip():
                 title_txt = f"INFER: {inferred.strip()}"
                 title_src = 'infer'
         if title_txt:
@@ -1596,6 +1640,18 @@ def run(
     _demote_table_headers_to_text(result)
     _demote_sentence_like_single_row_tables(result)
 
+    # Minimal schema validation
+    try:
+        for t in result.get("tables", []):
+            assert isinstance(t.get("bbox"), (list, tuple)) and len(t.get("bbox")) == 4
+            assert isinstance(t.get("page_index"), (int, float))
+            # pandas_metrics optional but if present should expose shape/columns
+            pm = t.get("pandas_metrics", {}) or {}
+            if pm:
+                _ = pm.get("shape"), pm.get("columns")
+    except Exception as _e:
+        console.print(f"[yellow]Stage 05 schema warning: {_e}[/yellow]")
+
     output_path = json_output_dir / "05_tables.json"
     with open(output_path, "w") as f:
         json.dump(result, f, indent=2, ensure_ascii=False)
@@ -1603,20 +1659,17 @@ def run(
     console.print(
         f"✅ Table extraction complete. Saved {len(filtered_tables)} tables to: {output_path}"
     )
+    try:
+        from extractor.pipeline.utils.scillm_router import close_all_routers
+        close_all_routers()
+    except Exception:
+        pass
+    return output_path
 
 
 def debug_bundle(
-    bundle: Path = typer.Argument(
-        ...,
-        exists=True,
-        file_okay=True,
-        dir_okay=False,
-        readable=True,
-        help="Bundle with keys: sections (Stage 04 object), clean_pdf (path)",
-    ),
-    output_dir: Path = typer.Option(
-        "data/results/pipeline", "-o", help="Parent directory for pipeline results."
-    ),
+    bundle: Path,
+    output_dir: Path = Path("data/results/pipeline"),
 ):
     """Run Stage 05 with a consolidated bundle (sections + clean PDF)."""
     stage_output_dir = output_dir / "05_table_extractor"
@@ -1655,18 +1708,14 @@ def debug_bundle(
     except Exception:
         pass
 
-    try:
-        data = json.loads(bundle.read_text())
-        sections_obj = data.get("sections")
-        clean_pdf = data.get("clean_pdf")
-        if not sections_obj or not clean_pdf:
-            raise ValueError("Bundle must include 'sections' and 'clean_pdf'")
-        tmp_sections = stage_output_dir / "_bundle_sections.json"
-        tmp_sections.write_text(json.dumps({"sections": sections_obj}))
-        pdf_path = Path(clean_pdf)
-    except Exception as e:
-        typer.secho(f"Failed to load bundle: {e}", fg=typer.colors.RED)
-        raise typer.Exit(1)
+    data = json.loads(bundle.read_text())
+    sections_obj = data.get("sections")
+    clean_pdf = data.get("clean_pdf")
+    if not sections_obj or not clean_pdf:
+        raise ValueError("Bundle must include 'sections' and 'clean_pdf'")
+    tmp_sections = stage_output_dir / "_bundle_sections.json"
+    tmp_sections.write_text(json.dumps({"sections": sections_obj}))
+    pdf_path = Path(clean_pdf)
 
     # Extract tables and associate
     all_tables, strategy_summary, quality_summary = extract_all_tables(
@@ -1698,11 +1747,22 @@ def debug_bundle(
         if (rows >= TABLE_FILTER_MIN_ROWS) or (rows >= 2 and density >= TABLE_FILTER_MIN_DENSITY):
             filtered_tables.append(t)
     if not filtered_tables and all_tables:
-        try:
-            best = max(all_tables, key=lambda t: float(t.get("score", 0.0)))
-            filtered_tables = [best]
-        except Exception:
-            filtered_tables = all_tables[:1]
+        # Keep all extracted tables by default (avoid data loss on multi-table pages).
+        # Old behavior (collapse to a single "best" table) can be enabled via env flag.
+        import os as _os
+        single = (_os.getenv("STAGE05_SINGLE_PER_PAGE", "0").lower() in ("1", "true", "yes", "y"))
+        if single:
+            try:
+                best = max(all_tables, key=lambda t: float(t.get("score", 0.0)))
+                filtered_tables = [best]
+            except Exception:
+                filtered_tables = all_tables[:1]
+        else:
+            filtered_tables = all_tables
+            # Mark low-confidence carry-through so Stage 07 can decide merges or drops.
+            for t in filtered_tables:
+                t.setdefault("provenance", {})
+                t["provenance"]["stage05_filter"] = "fallback_keep_all"
 
     try:
         samples = stop_resource_sampler(sampler) if sampler else []
@@ -1777,14 +1837,14 @@ def debug_bundle(
     console.print(f"[green]Debug bundle: saved {len(filtered_tables)} tables to {output_path}")
 
 
-def build_cli():
-    import typer as _typer
-
-    app = _typer.Typer(help="Extract tables from PDFs using Camelot")
-    app.command(name="run")(run)
-    app.command(name="debug-bundle")(debug_bundle)
-    return app
+## CLI removed: import and call run(...), or use a debug harness.
 
 
 if __name__ == "__main__":
-    build_cli()()
+    # Deprecated per unified runner policy. Use: python -m extractor.pipeline
+    print(
+        "This step is not intended to be run directly.\n"
+        "Use the unified runner: python -m extractor.pipeline",
+        file=sys.stderr,
+    )
+    sys.exit(2)

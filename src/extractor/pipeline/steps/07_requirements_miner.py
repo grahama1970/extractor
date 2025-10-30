@@ -21,12 +21,11 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
-
-import typer
+from typing import Any, List, Optional
 import hashlib
+import os
 
-app = typer.Typer(add_completion=False, help="Identify requirement candidates after Stage 07.")
+## CLI removed: import and call run(...), or use a debug harness.
 
 
 MODALITY_RE = re.compile(r"\b(shall|must|should|will|may|might|could|can)\b", re.IGNORECASE)
@@ -350,10 +349,9 @@ def _summarize(cands: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-@app.command()
 def run(
-    reflowed_json: Path = typer.Argument(..., exists=True, readable=True, help="Path to 07_reflowed.json"),
-    output_dir: Path = typer.Option(Path("data/results/pipeline"), "-o", help="Results root directory"),
+    reflowed_json: Path,
+    output_dir: Path = Path("data/results/pipeline"),
 ):
     out_dir = output_dir / "07_requirements_miner" / "json_output"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -401,8 +399,52 @@ def run(
     (out_dir / "07_requirements.json").write_text(json.dumps(req_json, indent=2))
     summary = _summarize(candidates)
     (out_dir / "07_requirements_summary.json").write_text(json.dumps(summary, indent=2))
-    typer.echo(json.dumps({"ok": True, "total": summary["total"], "out": str(out_dir)}, indent=2))
+    # Optional: render overlays for requirement provenance
+    try:
+        if STAGE07REQ_VISUAL_PROOF:
+            # Resolve source PDF heuristically from sibling Stage 04 or env
+            src_pdf: Optional[Path] = None
+            try:
+                s04 = (output_dir / "04_section_builder" / "json_output" / "04_sections.json")
+                if s04.exists():
+                    sp = (json.loads(s04.read_text()) or {}).get("source_pdf")
+                    if isinstance(sp, str) and Path(sp).exists():
+                        src_pdf = Path(sp)
+            except Exception:
+                src_pdf = None
+            if not src_pdf and STAGE07REQ_SOURCE_PDF:
+                p = Path(STAGE07REQ_SOURCE_PDF)
+                src_pdf = p if p.exists() else None
+            if src_pdf and candidates:
+                from extractor.pipeline.visual.overlay import Box, draw_overlays
+                vout = output_dir / "07_requirements_miner" / "visual_output"
+                boxes: List[Box] = []
+                for r in candidates:
+                    src = r.get("source") or {}
+                    bb = src.get("bbox")
+                    pg = src.get("page_num")
+                    if isinstance(bb, list) and len(bb) == 4 and isinstance(pg, int):
+                        label = (r.get("requirement_id") or r.get("id") or "req").split()[0]
+                        boxes.append(
+                            Box(
+                                page=int(pg),
+                                x0=float(bb[0]),
+                                y0=float(bb[1]),
+                                x1=float(bb[2]),
+                                y1=float(bb[3]),
+                                label=label,
+                                color=(255, 0, 0) if r.get("from") == "paragraph" else ((0, 200, 0) if r.get("from") == "table_cell" else (180, 0, 255)),
+                                width=3,
+                            )
+                        )
+                if boxes:
+                    draw_overlays(src_pdf, boxes, vout)
+    except Exception:
+        pass
+    print(json.dumps({"ok": True, "total": summary["total"], "out": str(out_dir)}, indent=2))
 
 
 if __name__ == "__main__":
-    app()
+    print("Import and call run(...); no CLI framework required.")
+STAGE07REQ_VISUAL_PROOF = os.getenv("STAGE07REQ_VISUAL_PROOF", "").lower() in ("1","true","yes","y")
+STAGE07REQ_SOURCE_PDF = os.getenv("STAGE07REQ_SOURCE_PDF", "").strip() or None

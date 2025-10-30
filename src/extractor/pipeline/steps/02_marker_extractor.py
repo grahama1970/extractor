@@ -15,8 +15,9 @@ try:
 except Exception:
     psutil = None
 import multiprocessing as mp
+from extractor.pipeline.utils.marker_extractor_utils import fallback_simple_extract
 
-import typer
+## Typer removed; plain function signatures for easier debugging
 
 from loguru import logger
 from rich.console import Console
@@ -38,7 +39,6 @@ try:
 except Exception:
     pass
 from extractor.core.schema import BlockTypes
-import subprocess
 from extractor.pipeline.utils.diagnostics import (
     start_resource_sampler,
     stop_resource_sampler,
@@ -78,22 +78,6 @@ def _worker(pdf_str: str, q: "mp.Queue[Dict[str, Any]]", dump_dir_str: str):
         q.put({"ok": False, "error": str(exc)})
 
 
-def _fallback_simple_extract(pdf_path: Path, out_json: Path) -> List[Dict[str, Any]]:
-    """Fallback: call the bundled simple_marker_extract to produce blocks JSON."""
-    out_json.parent.mkdir(parents=True, exist_ok=True)
-    cmd = [
-        os.environ.get("PYTHON", "python"),
-        "-m",
-        "extractor.core.scripts.simple_marker_extract",
-        str(pdf_path),
-        str(out_json),
-    ]
-    try:
-        subprocess.run(cmd, check=True)
-        data = json.loads(out_json.read_text())
-        return data.get("blocks") or []
-    except Exception as e:
-        raise RuntimeError(f"Fallback simple extraction failed: {e}")
 
 
 def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool]]:
@@ -110,7 +94,7 @@ def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool
         # If imports fail, attempt simple fallback if allowed
         if os.getenv("STAGE02_ALLOW_SIMPLE", "1").lower() in ("1", "true", "yes", "y"):
             tmp = Path(os.getenv("STAGE02_TMP", "/tmp")) / f"marker_simple_{uuid.uuid4().hex}.json"
-            blocks = _fallback_simple_extract(pdf_path, tmp)
+            blocks = fallback_simple_extract(pdf_path, tmp)
             return blocks, {}
         raise RuntimeError(
             "Marker internals unavailable. Ensure project-specific Marker modules are installed "
@@ -135,7 +119,7 @@ def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool
     }
 
     # Create the PDF converter
-    strict_mode = os.getenv("OFFLINE_PDF_PREDICTORS", "1").lower() in {"0", "false"}
+    _strict_mode = os.getenv("OFFLINE_PDF_PREDICTORS", "1").lower() in {"0", "false"}
     converter = PdfConverter(
         artifact_dict=models,
         config=config,
@@ -145,12 +129,29 @@ def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool
     try:
         document = converter.build_document(str(pdf_path))
     except Exception as e:
+        logger.error(f"Marker document building failed: {e}")
         # If predictor presence is weak and fallback is allowed, try simple extractor
         if os.getenv("STAGE02_ALLOW_SIMPLE", "1").lower() in ("1", "true", "yes", "y"):
-            tmp = Path(os.getenv("STAGE02_TMP", "/tmp")) / f"marker_simple_{uuid.uuid4().hex}.json"
-            blocks = _fallback_simple_extract(pdf_path, tmp)
-            return blocks, predictor_presence
-        raise
+            logger.warning("Falling back to simple extraction mode")
+            try:
+                tmp = Path(os.getenv("STAGE02_TMP", "/tmp")) / f"marker_simple_{uuid.uuid4().hex}.json"
+                blocks = fallback_simple_extract(pdf_path, tmp)
+                logger.info(f"Simple extraction succeeded, extracted {len(blocks)} blocks")
+                return blocks, predictor_presence
+            except Exception as fallback_error:
+                logger.error(f"Simple extraction fallback also failed: {fallback_error}")
+                if os.getenv("PIPELINE_FAIL_FAST", "0").lower() in ("1", "true", "yes", "y"):
+                    raise RuntimeError(f"Both marker and simple extraction failed: {e}") from e
+                # Return empty blocks to allow pipeline to continue
+                logger.warning("Returning empty blocks to allow pipeline continuation")
+                return [], predictor_presence
+        else:
+            # Fallback disabled, fail according to pipeline policy
+            if os.getenv("PIPELINE_FAIL_FAST", "0").lower() in ("1", "true", "yes", "y"):
+                raise RuntimeError(f"Marker extraction failed: {e}") from e
+            else:
+                logger.warning("STAGE02_ALLOW_SIMPLE disabled, returning empty blocks")
+                return [], predictor_presence
 
     # Color enrichment via PyMuPDF is disabled to comply with Stage‑02 policy
     fitz_doc = None
@@ -178,7 +179,7 @@ def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool
                     if hasattr(block, "raw_text"):
                         try:
                             block_dict["text"] = block.raw_text(document)
-                        except:
+                        except Exception:
                             block_dict["text"] = getattr(block, "text", "")
                     else:
                         block_dict["text"] = getattr(block, "text", "")
@@ -234,6 +235,7 @@ def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool
                                                 ax1 <= bx0 or bx1 <= ax0 or ay1 <= by0 or by1 <= ay0
                                             )
 
+                                        page_text_cache = locals().get("page_text_cache") or {}
                                         if page_index in page_text_cache:
                                             tdict = page_text_cache[page_index]
                                         else:
@@ -397,32 +399,14 @@ def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool
 
 # --------------------------------------------------------------------------- #
 def run(
-    pdf_path: Path = typer.Argument(..., help="Path to the clean PDF file from Stage 01."),
-    output_dir: Path = typer.Option(
-        "data/results/pipeline", "--output-dir", "-o", help="Parent directory for pipeline results."
-    ),
-    timeout: int = typer.Option(
-        int(os.getenv("STAGE02_TIMEOUT", "600")),
-        "--timeout",
-        help="Max seconds allowed for extraction before timing out (default from STAGE02_TIMEOUT).",
-    ),
-    debug: bool = typer.Option(
-        False, "--debug", help="Enable verbose logging to a stage log file."
-    ),
-    no_spawn: bool = typer.Option(
-        False, "--no-spawn/--spawn", help="Run extraction inline (no subprocess, easier debugging)."
-    ),
-    mark_all_headers_suspicious: bool = typer.Option(
-        False,
-        "--mark-all-headers-suspicious/--no-mark-all-headers-suspicious",
-        help="Force every SectionHeader to include 'suspicious_header': true to feed Stage 03 verification.",
-    ),
-    output_suffix: str = typer.Option(
-        "",
-        "--output-suffix",
-        help="Append a suffix to the output JSON filename (e.g., 'verify_all' → 02_marker_blocks_verify_all.json)",
-    ),
-):
+    pdf_path: Path,
+    output_dir: Path = Path("data/results/pipeline"),
+    timeout: int = int(os.getenv("STAGE02_TIMEOUT", "600")),
+    debug: bool = False,
+    no_spawn: bool = False,
+    mark_all_headers_suspicious: bool = False,
+    output_suffix: str = "",
+) -> Path:
     """
     Extracts text and layout blocks from a PDF using Marker and saves them to a structured output directory.
     """
@@ -443,11 +427,11 @@ def run(
             if miss:
                 console.print("[red]Strict mode: missing predictors -> " + ", ".join(miss) + "[/red]")
                 console.print("[yellow]Hint: activate venv and run: `uv sync --extra accurate`[/yellow]")
-                raise typer.Exit(1)
+                raise RuntimeError("Strict preflight: missing predictors")
     except Exception as _e:
         console.print(f"[red]Strict preflight failed: {_e}[/red]")
         console.print("[yellow]Hint: `uv sync --extra accurate`[/yellow]")
-        raise typer.Exit(1)
+        raise RuntimeError(f"Strict preflight failed: {_e}")
     run_id = uuid.uuid4().hex
     diagnostics = []
     errors_count = 0
@@ -457,7 +441,7 @@ def run(
 
     if not pdf_path.exists():
         console.print(f"[red]Error: PDF not found: {pdf_path}[/red]")
-        raise typer.Exit(1)
+        raise FileNotFoundError(f"PDF not found: {pdf_path}")
 
     # Define clear output paths for this stage
     stage_output_dir = output_dir / "02_marker_extractor"
@@ -520,7 +504,13 @@ def run(
         except Exception as e:
             logger.exception("Stage 02 failed during inline extraction")
             console.print(f"[red]Stage 02 failed: {e}[/red]")
-            raise typer.Exit(1)
+            if os.getenv("PIPELINE_FAIL_FAST", "0").lower() in ("1", "true", "yes", "y"):
+                raise RuntimeError("Stage 02 inline extraction failed") from e
+            else:
+                logger.warning("Continuing with empty blocks due to fail-fast disabled")
+                blocks = []
+                predictor_presence = False
+                extract_duration_ms = int((time.monotonic() - t_ex0) * 1000)
     else:
         # Run extraction in a separate process with temp-file handoff to avoid mp.Queue backpressure
         q: "mp.Queue[Dict[str, Any]]" = mp.Queue()
@@ -532,18 +522,29 @@ def run(
         try:
             result = q.get(timeout=timeout)
         except Exception:
-            console.print(f"[red]Stage 02 extractor produced no result within {timeout}s[/red]")
+            elapsed = int((time.monotonic() - t_ex0))
+            pid = p.pid if p and p.pid else None
+            console.print(
+                f"[red]Stage 02 extractor produced no result within {timeout}s (pid={pid}, elapsed={elapsed}s)[/red]"
+            )
             try:
                 diagnostics.append(
                     make_event(
                         "02_marker_extractor",
                         "error",
                         "extractor_timeout",
-                        f"No result within {timeout}s",
-                        {"pdf_path": str(pdf_path), "timeout": timeout},
+                        f"No result within {timeout}s (pid={pid}, elapsed={elapsed}s)",
+                        {"pdf_path": str(pdf_path), "timeout": timeout, "pid": pid, "elapsed_sec": elapsed},
                     )
                 )
                 errors_count += 1
+            except Exception:
+                pass
+            # Stop sampler explicitly on timeout
+            try:
+                samples = stop_resource_sampler(sampler) if sampler else []
+                if samples:
+                    resources.setdefault("resource_samples", samples)
             except Exception:
                 pass
             if p.is_alive():
@@ -554,7 +555,7 @@ def run(
                     if p.is_alive():
                         p.kill()
                         p.join(1)
-            raise typer.Exit(1)
+            raise TimeoutError(f"Stage 02 extractor timed out after {timeout}s")
 
         # Allow child to exit; do not block indefinitely
         p.join(5)
@@ -576,18 +577,24 @@ def run(
             except Exception:
                 pass
             console.print(f"[red]Stage 02 failed: {result.get('error', 'Unknown error')}[/red]")
-            raise typer.Exit(1)
+            if os.getenv("PIPELINE_FAIL_FAST", "0").lower() in ("1", "true", "yes", "y"):
+                raise RuntimeError(f"Stage 02 failed: {result.get('error', 'Unknown error')}")
+            else:
+                logger.warning("Continuing with empty blocks due to fail-fast disabled")
+                blocks = []
+                predictor_presence = False
+                extract_duration_ms = int((time.monotonic() - t_ex0) * 1000)
 
         # Load large payload from temp file written by the child process
         tmp_path = Path(result.get("path", ""))
         if not tmp_path.exists():
             console.print("[red]Stage 02 failed: extractor output path missing[/red]")
-            raise typer.Exit(1)
+            raise FileNotFoundError("Extractor output path missing")
         try:
             tmp_data = json.loads(tmp_path.read_text(encoding="utf-8"))
         except Exception as e:
             console.print(f"[red]Stage 02 failed: could not read extractor output: {e}[/red]")
-            raise typer.Exit(1)
+            raise RuntimeError(f"Could not read extractor output: {e}")
         blocks = tmp_data.get("blocks") or []
         predictor_presence = tmp_data.get("predictors", {})
         try:
@@ -813,7 +820,7 @@ def run(
         console.print(
             f"⚠️  Found {len(suspicious_blocks)} suspicious blocks for Stage 03 verification."
         )
-
+    return out_path
 
 # --------------------------------------------------------------------------- #
 def test():
@@ -827,17 +834,8 @@ def test():
 
 
 def debug_bundle(
-    bundle: Path = typer.Argument(
-        ...,
-        exists=True,
-        file_okay=True,
-        dir_okay=False,
-        readable=True,
-        help="Bundle JSON with key 'clean_pdf'",
-    ),
-    output_dir: Path = typer.Option(
-        "data/results/pipeline", "-o", help="Parent directory for pipeline results."
-    ),
+    bundle: Path,
+    output_dir: Path = Path("data/results/pipeline"),
 ):
     """Run Stage 02 from a single JSON bundle."""
     stage_output_dir = Path(output_dir) / "02_marker_extractor"
@@ -850,14 +848,14 @@ def debug_bundle(
         if not clean_pdf.exists():
             raise ValueError("Bundle must include existing 'clean_pdf' path")
     except Exception as e:
-        typer.secho(f"Failed to load bundle: {e}", fg=typer.colors.RED)
-        raise typer.Exit(1)
+        print(f"Failed to load bundle: {e}")
+        raise ValueError(f"Failed to load bundle: {e}")
 
     try:
         blocks, _predictors = extract_blocks(clean_pdf)
     except Exception as e:
-        typer.secho(f"Extraction failed: {e}", fg=typer.colors.RED)
-        raise typer.Exit(1)
+        print(f"Extraction failed: {e}")
+        raise RuntimeError(f"Extraction failed: {e}")
 
     suspicious_blocks = [b for b in blocks if b.get("is_suspicious")]
     _timings = {
@@ -882,15 +880,27 @@ def debug_bundle(
 
 
 # --------------------------------------------------------------------------- #
-def build_cli():
-    import typer as _typer
-
-    app = _typer.Typer(help="Stage-02: native JSON block extractor")
-    app.command(name="run")(run)
-    app.command(name="test")(test)
-    app.command(name="debug-bundle")(debug_bundle)
-    return app
+## CLI removed: call run(...) directly or use a debug harness.
 
 
+## No __main__: import and call run(...)
 if __name__ == "__main__":
-    build_cli()()
+    # Minimal entry: PDF path and optional OUT_DIR
+    try:
+        from dotenv import find_dotenv, load_dotenv
+
+        load_dotenv(find_dotenv())
+    except Exception:
+        pass
+    import sys
+    argv = sys.argv[1:]
+    if not argv or argv[0] in ("-h", "--help"):
+        print(
+            "Usage: python -m extractor.pipeline.steps.02_marker_extractor INPUT_PDF [OUT_DIR]",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    pdf_path = Path(argv[0])
+    out_dir = Path(argv[1]) if len(argv) > 1 else Path("data/results/pipeline")
+    out = run(pdf_path=pdf_path, output_dir=out_dir)
+    print(str(out))

@@ -34,9 +34,8 @@ pipeline-smoke:
 
 
 .PHONY: coco-export smoke-tabbed-api help setup setup-smokes smokes-python dev stop lint fmt type test api-smokes ux-health smokes ci scaffold smoke-issue \
-		gamified-e2e gamified-all gamified-all-fast gamified-codex gamified-cli \
-		smoke-litellm smoke-litellm-image smoke-litellm-all smoke-litellm-results \
-		smoke-07-reflow-min bundle-tabbed state-of-project
+			gamified-e2e gamified-all gamified-all-fast gamified-codex gamified-cli \
+			smoke-07-reflow-min bundle-tabbed state-of-project
 
 help:
 	@echo "Common targets:"
@@ -112,12 +111,12 @@ setup:
 
 # Lean environment for Python smokes only (no heavy dev extras)
 setup-smokes:
-	python3 -m venv .venv && \
-	. .venv/bin/activate && \
-	python -m ensurepip --upgrade && \
-	python -m pip install -U pip && \
-	python -m pip install "litellm>=1.74.7" python-dotenv typer httpx loguru pillow urlextract strip_tags tqdm json-repair PyMuPDF camelot-py opencv-python-headless pandas tenacity && \
-	python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+		python3 -m venv .venv && \
+		. .venv/bin/activate && \
+		python -m ensurepip --upgrade && \
+		python -m pip install -U pip && \
+		python -m pip install python-dotenv typer httpx loguru pillow urlextract strip_tags tqdm json-repair PyMuPDF camelot-py opencv-python-headless pandas tenacity && \
+		python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
 
 # Optional: use uv to install only the minimal smokes extra
 setup-smokes-uv:
@@ -512,11 +511,9 @@ quick-pipeline:
 # Full pipeline (requires provider API keys and ArangoDB configured in env)
 pipeline-full:
 	. .venv/bin/activate 2>/dev/null || true; \
-	PYTHONPATH=src LITELLM_HTTPX=1 $(PY) src/extractor/pipeline/run_all.py \
+	PYTHONPATH=src $(PY) -m extractor.pipeline \
 		--pdf data/input/pipeline/BHT_CV32A65X_marked.pdf \
-		--results data/results/pipeline \
-		--arango-db "$${ARANGO_DATABASE:-pdf_knowledge_base_test}" \
-		$$( [ -n "$$LEAN4_CLI_CMD" ] && echo --lean4-cli "$$LEAN4_CLI_CMD" || true )
+		--out data/results/pipeline
 
 # --- Bundles for LLM code reviews ---
 BUNDLE_ROOT ?= prototypes/tabbed
@@ -752,3 +749,75 @@ run-prod:
 	  --results "$(OUT)" \
 	  --no-offline --no-skip-llm03 --no-skip-descriptions06 --full07 \
 	  --skip-export10 --skip-embeddings10 --skip-graph11 --skip-proving08
+# Deterministic golden verify (no network)
+pipeline-verify-expected:
+	. .venv/bin/activate 2>/dev/null || true; \
+	PYTHONPATH=src $(PY) -m extractor.pipeline \
+		--pdf data/input/pipeline/BHT_CV32A65X_with_requirements_noannots.pdf \
+		--out data/results/pipeline \
+		--summary-only \
+		--skip-fig-descriptions \
+		--skip-export && \
+	uv run scripts/tools/expected_verify.py \
+		--pdf data/input/pipeline/BHT_CV32A65X_with_requirements_noannots.pdf \
+		--out data/results/pipeline \
+		--expected-root data/expected/pipeline \
+		--steps 01,02,04,05,06,07,09
+# Render visual overlays for steps (PNG per page)
+pipeline-render-visuals:
+	. .venv/bin/activate 2>/dev/null || true; \
+	PYTHONPATH=src $(PY) -m extractor.pipeline \
+		--pdf data/input/pipeline/BHT_CV32A65X_with_requirements_noannots.pdf \
+		--out data/results/pipeline \
+		--summary-only \
+		--skip-fig-descriptions \
+		--skip-export && \
+	PYTHONPATH=src $(PY) -m extractor.pipeline.visual.render \
+		--pdf data/input/pipeline/BHT_CV32A65X_with_requirements_noannots.pdf \
+		--out data/results/pipeline \
+		--viz-out data/results/pipeline \
+		--steps 02,05,06
+
+# Compare rendered visuals with expected
+pipeline-verify-expected-images:
+	uv run scripts/tools/expected_imgdiff.py \
+		--expected data/expected/pipeline/BHT_CV32A65X_with_requirements_noannots \
+		--actual   data/results/pipeline \
+		--steps 02,05,06
+# Live (LLM-on) pipeline run for actual results (no deterministic flags)
+pipeline-live:
+	. .venv/bin/activate 2>/dev/null || true; \
+	PYTHONPATH=src $(PY) -m extractor.pipeline \
+		--pdf data/input/pipeline/BHT_CV32A65X_with_requirements_noannots.pdf \
+		--out data/results/pipeline
+
+# Live run + visuals + snapshot for side-by-side diff later
+pipeline-live-visuals:
+	. .venv/bin/activate 2>/dev/null || true; \
+	PYTHONPATH=src $(PY) -m extractor.pipeline \
+		--pdf data/input/pipeline/BHT_CV32A65X_with_requirements_noannots.pdf \
+		--out data/results/pipeline && \
+	PYTHONPATH=src $(PY) -m extractor.pipeline.visual.render \
+		--pdf data/input/pipeline/BHT_CV32A65X_with_requirements_noannots.pdf \
+		--out data/results/pipeline \
+		--viz-out data/results/pipeline \
+		--steps 02,05,06 && \
+	uv run scripts/tools/snapshot_pipeline_outputs.py \
+		--out data/results/pipeline \
+		--visual-dir data/results/pipeline \
+		--dest-root scripts/artifacts/snapshots
+PIPELINE_PDF ?= data/input/pipeline/BHT_CV32A65X_marked.pdf
+PIPELINE_OUT ?= data/results/pipeline
+
+.PHONY: pipeline-fast
+pipeline-fast:
+	PYTHONPATH=src \
+	python -m extractor.pipeline.run_pipeline \
+	  --pdf $(PIPELINE_PDF) \
+	  --out $(PIPELINE_OUT) \
+	  --summary-only \
+	  --skip-fig-descriptions || true
+	@mkdir -p scripts/artifacts/pipeline
+	PYTHONPATH=src \
+	python scripts/tools/collect_proofs.py $(PIPELINE_OUT) scripts/artifacts/pipeline
+	@echo "Artifacts collected under scripts/artifacts/pipeline"

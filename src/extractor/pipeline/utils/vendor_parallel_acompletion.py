@@ -1,14 +1,10 @@
 """
-Local vendored helpers for running multiple Router.acompletion calls concurrently.
+DEPRECATED: Use `scillm.Router.parallel_acompletions` directly.
 
-This mirrors the proposed litellm `router_utils/parallel_acompletion.py` API
-so our code can adopt the pattern without depending on an unmerged upstream PR.
-
-Exports:
-- RouterParallelRequest
-- RouterParallelResult
-- gather_parallel_acompletions
-- iter_parallel_acompletions
+This module previously provided a local parallel `acompletion` orchestration. To
+avoid bespoke logic, pipeline stages should import and use the official
+`Router.parallel_acompletions` from SciLLM. This file remains temporarily to
+avoid import errors; no new code should depend on it.
 """
 
 from __future__ import annotations
@@ -66,34 +62,10 @@ async def _run_one(
             return RouterParallelResult(index=idx, request=req, exception=e)
 
 
-async def gather_parallel_acompletions(
-    router: Any,
-    requests: List[RouterParallelRequest],
-    *,
-    concurrency: int = 8,
-    return_exceptions: bool = True,
-    preserve_order: bool = False,
-    batch_id: Optional[str] = None,
-) -> List[RouterParallelResult]:
-    if concurrency <= 0:
-        raise ValueError("concurrency must be >= 1")
-    sem = asyncio.Semaphore(concurrency)
-    batch_id = batch_id or uuid.uuid4().hex
-    tasks: List[asyncio.Task[RouterParallelResult]] = [
-        asyncio.create_task(_run_one(router, sem, i, r, return_exceptions, batch_id))
-        for i, r in enumerate(requests)
-    ]
-    try:
-        results = await asyncio.gather(*tasks, return_exceptions=False)
-    except BaseException:
-        for t in tasks:
-            t.cancel()
-        with contextlib.suppress(Exception):
-            await asyncio.gather(*tasks, return_exceptions=True)
-        raise
-    if preserve_order:
-        results.sort(key=lambda r: r.index)
-    return results
+async def gather_parallel_acompletions(*args, **kwargs):  # pragma: no cover
+    raise RuntimeError(
+        "vendor_parallel_acompletion is deprecated. Use scillm.Router.parallel_acompletions instead."
+    )
 
 
 async def _iter_worker(
@@ -123,31 +95,10 @@ async def _iter_worker(
         await queue.put(None)
 
 
-async def iter_parallel_acompletions(
-    router: Any,
-    requests: List[RouterParallelRequest],
-    *,
-    concurrency: int = 8,
-    return_exceptions: bool = True,
-) -> AsyncIterator[RouterParallelResult]:
-    if concurrency <= 0:
-        raise ValueError("concurrency must be >= 1")
-    queue: "asyncio.Queue[Any]" = asyncio.Queue()
-    worker = asyncio.create_task(
-        _iter_worker(router, requests, concurrency, return_exceptions, queue)
+async def iter_parallel_acompletions(*args, **kwargs):  # pragma: no cover
+    raise RuntimeError(
+        "vendor_parallel_acompletion is deprecated. Use scillm.Router.parallel_acompletions instead."
     )
-    try:
-        while True:
-            item = await queue.get()
-            if item is None:
-                break
-            if isinstance(item, BaseException):
-                raise item
-            yield item
-    finally:
-        worker.cancel()
-        with contextlib.suppress(Exception):
-            await worker
 
 
 __all__ = [

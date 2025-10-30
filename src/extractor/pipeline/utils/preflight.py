@@ -84,13 +84,5 @@ def camelot_quick_check() -> Tuple[bool, str]:
 
 
 def litellm_quick_check() -> Tuple[bool, str]:
-    try:
-        try:
-            import litellm  # type: ignore
-        except Exception:
-            return True
-
-        _ = getattr(litellm, "completion", None)
-        return True, "ok"
-    except Exception as e:  # pragma: no cover
-        return False, f"litellm import error: {e}"
+    # Deprecated: litellm not used in extractor. Keep function for callers; always OK.
+    return True, "deprecated"

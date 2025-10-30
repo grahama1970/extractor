@@ -1,0 +1,68 @@
+inputs:
+  preflight:
+    strip_annotations: true
+    normalize_rotation: true
+    dpi: 300
+    image_dedupe:
+      enabled: true
+      metric: phash
+      threshold: 6
+    colorspace: RGB
+    deskew: false  # set PREFLIGHT_DESKEW=1 to enable
+
+layout_sketch:
+  required_fields:
+    common: [id, type, page, bbox, ro]
+    paragraph: [text_preview, too_short]
+    table: [logical_table_id, rows, cols]
+    figure: [ordering_conf]
+  dedup:
+    iou_thresholds:
+      paragraph: 0.50
+      table: 0.40
+      figure: 0.30
+    tie_break: [ordering_conf, text_length, area, ro]
+
+stage07:
+  ops_first:
+    stitch_short_fragments: true
+    list_bullets_regex: "^(•|●|·|–|-|\*|o|\d+[.)])\\s+"
+    preserve_table_shapes: true
+    preserve_header_rows: true
+  figures:
+    include_by_default: true
+    omit_threshold: 0.75  # omit when ordering_conf >= 0.75
+    include_if_missing_conf: true
+  schema:
+    strict: false  # set STAGE07_STRICT_SCHEMA=1 to fail fast
+
+budgets:
+  stage05:
+    tokens_budget: 120000
+    cost_budget_usd: 2.50
+
+concurrency:
+  global_max: 4
+  stage03: 4
+  stage05: 2
+  stage07: 1
+  stage11: 2
+
+observability:
+  timings_fields:
+    - stage
+    - attempt
+    - attempt_id
+    - configured_model
+    - served_model
+    - latency_ms
+    - timeout_s
+    - tokens_in
+    - tokens_out
+    - outcome
+    - timestamp
+    - doc_id
+    - section_id
+    - page_window
+    - error
+

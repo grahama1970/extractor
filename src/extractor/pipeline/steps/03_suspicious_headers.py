@@ -20,18 +20,21 @@ import textwrap
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Annotated, Any, cast
+from typing import Any, cast
 
 import fitz  # PyMuPDF
-import typer
+# Typer removed: use plain functions for easier debugging
 from loguru import logger
 # Avoid hard dependency at import time; prefer adapter helper; direct scillm used only if present
-try:
-    from scillm import acompletion as sc_acompletion  # type: ignore
-except Exception:  # pragma: no cover
-    sc_acompletion = None  # type: ignore
+from extractor.pipeline.utils.scillm_router import get_text_router
+from extractor.pipeline.steps.scillm_preflight_validator import (
+    validate_scillm_env_sync,
+    require_scillm_preflight,
+    quick_scillm_check
+)
 
 from extractor.pipeline.utils.ann_index import query_ann_index
+from extractor.pipeline.utils.debug_utils import log_timing
 from extractor.pipeline.utils.annotations import (
     cue_from_annotation as _cue_from_annotation,
 )
@@ -54,21 +57,26 @@ from extractor.pipeline.utils.diagnostics import (
     start_resource_sampler,
     stop_resource_sampler,
 )
-from extractor.pipeline.utils.json_utils import STOP_FENCES, STRICT_JSON_GUARD
+from extractor.pipeline.utils.json_utils import STRICT_JSON_GUARD
 def _normalize_model_alias(model: str | None) -> str:
     m = (model or "").strip()
     if m.lower().startswith("openai/"):
         m = m[len("openai/"):]
     return m
-from extractor.pipeline.utils.model_params import build_chat_extras
-from extractor.pipeline.utils.prompt_builder import build_llm_context
-from extractor.pipeline.utils.scillm_client import verify_header as scillm_verify_header
+from extractor.pipeline.utils.model_params import build_chat_extras  # noqa: E402
+from extractor.pipeline.utils.prompt_builder import build_llm_context  # noqa: E402
+# No scillm_client wrappers; Router-only policy for SciLLM
+from extractor.pipeline.utils.section_builder_utils import (
+    pdf_analyze_section_numbering as _pdf_analyze_numbering,
+    pdf_extract_section_title as _pdf_extract_title,
+    is_probable_pdf_section_header as _is_probable_pdf_header,
+)
 
 try:
     import psutil  # type: ignore
 except Exception:
     psutil = None  # type: ignore
-import time
+import time  # noqa: E402
 
 # Cache initialization will be handled within command execution to avoid import-time side effects.
 
@@ -155,21 +163,12 @@ def _ensure_first_span_color(page: fitz.Page, block: dict[str, Any]) -> None:
 # ------------------------------------------------------------------
 # CONFIGURATION
 # ------------------------------------------------------------------
-def build_cli():
-    import typer as _typer
-
-    app = _typer.Typer(
-        help="Verify suspicious headers using a multimodal LLM.", add_completion=False
-    )
-    # Expose the primary runner as a subcommand
-    app.command(name="run")(run)
-    app.command(name="debug-bundle")(debug_bundle)
-    return app
+## CLI removed: import and call run(...), or use a debug harness.
 
 
 def _env_vlm_model(default: str = "") -> str:
-    """Return VLM model from environment only. No hardcoded defaults."""
-    return (os.getenv("LITELLM_VLM_MODEL") or "").strip()
+    """SciLLM-only: prefer CHUTES_VLM_MODEL; do not consult LITELLM_* envs."""
+    return (os.getenv("CHUTES_VLM_MODEL") or default).strip()
 
 
 @dataclass
@@ -183,7 +182,7 @@ class Config:
     debug: bool = False
     task_limit: int = 0  # 0 = no limit
     max_runtime_seconds: int = 0  # 0 = no limit (CLI override or STAGE03_TIMEOUT)
-    item_timeout_seconds: int = int(os.getenv("STAGE03_ITEM_TIMEOUT", "90"))
+    item_timeout_seconds: int = int(os.getenv("STAGE03_ITEM_TIMEOUT", "30"))
     # Knowledge/annotations support
     annotations_json: Path | None = None
     use_knowledge: bool = True
@@ -278,60 +277,110 @@ async def verify_header_with_llm(image_b64: str, context_text: str, model: str, 
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": user_content},
     ]
-    # Optional contracts adapter path
-    if os.getenv("USE_LLM_ADAPTER", "").lower() in ("1", "true", "yes", "y"):
-        try:
-            try:
-                from src.llm_adapter.adapter import LLMAdapter  # type: ignore
-            except Exception:
-                from llm_adapter.adapter import LLMAdapter  # type: ignore
-            adapter = LLMAdapter()
-            hv = await adapter.verify_header(
-                model=model,
-                messages=messages,
-                prompt_version=os.getenv("STAGE03_PROMPT_VERSION", "header@0.1.0"),
-                doc_id="doc",
-                section_id="hdr",
-                request_id=f"hdr_{get_run_id()}",
-                timeout=30,
-            )
-            return {"is_header": hv.verdict == "accept", "reasoning": "; ".join(hv.reasons or [])}
-        except Exception:
-            pass
-    # Prefer scillm adapter path when enabled
-    if os.getenv("USE_LLM_ADAPTER", "").lower() in ("1", "true", "yes", "y"):
-        hv = await scillm_verify_header(model=model, messages=messages, timeout=item_timeout)
-        return {"is_header": hv.verdict == "accept", "reasoning": "; ".join(hv.reasons or [])}
-
-    # Direct scillm call to Chutes with x-api-key
-    ch_base = os.getenv("CHUTES_API_BASE", "").strip()
-    ch_key = os.getenv("CHUTES_API_KEY", "").strip()
     try:
         _verify_cap = int(os.getenv("STAGE03_VERIFY_MAX_TOKENS", "256"))
     except Exception:
         _verify_cap = 256
-
-    # SciLLM async call (SciLLM-only policy)
-    if sc_acompletion is None:
-        raise RuntimeError("SciLLM not available for Stage 03")
-    resp = await sc_acompletion(
-        model=model_norm,
-        api_base=ch_base or None,
-        api_key=ch_key,
-        custom_llm_provider="openai",
-        messages=messages,
-        response_format={"type": "json_object"},
-        max_tokens=_verify_cap,
-        temperature=0,
-        timeout=item_timeout,
-    )
-    answer = (resp.get("choices") or [{}])[0].get("message", {}).get("content", "")
+    # Top-priority timeout override via env
+    try:
+        item_timeout = int(os.getenv("SC_TIMEOUT_STAGE_03", str(item_timeout)))
+    except Exception:
+        pass
+    # AGENTS.md compliance: Validate SciLLM environment before making calls (no soft skip)
+    if not quick_scillm_check():
+        raise RuntimeError("SciLLM environment not configured; header verification requires Chutes.")
+    
+    router = get_text_router()
+    # Timed SciLLM Router-only call
+    t0 = time.monotonic()
+    try:
+        resp = await router.acompletion(
+            model="chutes/text",
+            messages=messages,
+            response_format={"type": "json_object"},
+            max_tokens=_verify_cap,
+            temperature=0,
+            timeout=item_timeout,
+        )
+        elapsed_ms = int((time.monotonic() - t0) * 1000)
+    except Exception as e:
+        elapsed_ms = int((time.monotonic() - t0) * 1000)
+        log_timing(
+            "03_suspicious_headers",
+            {
+                "attempt": "verify_header",
+                "outcome": "exception",
+                "exception": type(e).__name__,
+                "exception_msg": str(e)[:300],
+                "route_name": "chutes/text",
+                "timeout_s": item_timeout,
+                "latency_ms": elapsed_ms,
+                "payload_chars": len(context_text or ""),
+                "with_image": bool(image_b64),
+                "retries_conf": int(os.getenv("LITELLM_MAX_RETRIES", "0")),
+            },
+        )
+        raise
+    # Observability: append per-attempt timing (success path, after we have resp)
+    try:
+        if isinstance(resp, dict):
+            served_model = resp.get("model")
+            usage = resp.get("usage") or {}
+        else:
+            served_model = getattr(resp, "model", None)
+            usage = getattr(resp, "usage", None) or {}
+        log_timing(
+            "03_suspicious_headers",
+            {
+                "attempt": "verify_header",
+                "outcome": "ok",
+                "route_name": "chutes/text",
+                "model": served_model,
+                "timeout_s": item_timeout,
+                "latency_ms": elapsed_ms,
+                "payload_chars": len(context_text or ""),
+                "with_image": bool(image_b64),
+                "retries_conf": int(os.getenv("LITELLM_MAX_RETRIES", "0")),
+                "tokens_in": usage.get("prompt_tokens"),
+                "tokens_out": usage.get("completion_tokens"),
+            },
+        )
+    except Exception:
+        pass
+    # Normalize response content
+    if isinstance(resp, dict):
+        choices = resp.get("choices") or [{}]
+    else:
+        choices = getattr(resp, "choices", [{}])
+    msg = (choices or [{}])[0].get("message", {}) if isinstance(choices, list) else {}
+    answer = (msg or {}).get("content", "")
     try:
         payload = json.loads(answer) if answer else {}
-    except Exception:
-        payload = {"error": {"type": "ParseError", "message": answer[:200]}}
+    except Exception as pe:
+        # Soft-fail on parse errors; log and continue
+        log_timing(
+            "03_suspicious_headers",
+            {
+                "attempt": "llm_parse",
+                "outcome": "parse_error",
+                "route_name": "chutes/text",
+                "parse_error_message": str(pe)[:200],
+            },
+        )
+        payload = {"is_header": False, "reasoning": "parse_error"}
     if isinstance(payload, dict) and payload.get("error"):
         err = payload["error"]
+        # Log explicit model error then raise
+        log_timing(
+            "03_suspicious_headers",
+            {
+                "attempt": "verify_header",
+                "outcome": "exception",
+                "exception": "LLMErrorEnvelope",
+                "exception_msg": f"{err.get('type')}:{err.get('message')}"[:300],
+                "route_name": "chutes/text",
+            },
+        )
         raise RuntimeError(f"LLM error: {err.get('type')}: {err.get('message')}")
     if not isinstance(payload, dict):
         payload = {"content": payload}
@@ -429,7 +478,12 @@ class VerificationTask:
         return target, above, below
 
     def render_context_image_b64(self) -> str:
-        """Renders an image of the block and its neighbors, saves it, and returns base64."""
+        """Renders an image of the block and its neighbors, saves it, and returns base64.
+
+        Also logs render timing and metadata to RUN_RESULTS_DIR/03_suspicious_headers/logs/timings.jsonl
+        using attempt=context_render.
+        """
+        t_start = time.monotonic()
         target, above, below = self.get_context_blocks()
 
         expanded_rect = fitz.Rect(target["bbox"])
@@ -458,7 +512,28 @@ class VerificationTask:
         self.page_blocks[self.block_idx]["context_image_path"] = str(image_path)
 
         # IMPORTANT: Encode as PNG to match data URL type
-        return base64.b64encode(pix.tobytes("png")).decode("utf-8")
+        b = pix.tobytes("png")
+        b64 = base64.b64encode(b).decode("utf-8")
+        try:
+            log_timing(
+                "03_suspicious_headers",
+                {
+                    "attempt": "context_render",
+                    "outcome": "ok",
+                    "render_ms": int((time.monotonic() - t_start) * 1000),
+                    "page_idx": int(self.page_idx),
+                    "block_idx": int(self.block_idx),
+                    "blocks_in_context": int(1 + (1 if above else 0) + (1 if below else 0)),
+                    "w": getattr(pix, "width", None),
+                    "h": getattr(pix, "height", None),
+                    "image_pixels": (getattr(pix, "width", 0) or 0) * (getattr(pix, "height", 0) or 0),
+                    "b64_bytes": len(b64),
+                    "render_cache": "miss",
+                },
+            )
+        except Exception:
+            pass
+        return b64
 
     def build_dataset_record(
         self,
@@ -742,6 +817,20 @@ async def process_pdf_pipeline(config: Config):
     for idx, task in enumerate(tasks):
         try:
             target_block, above_block, below_block = task.get_context_blocks()
+            # Attach deterministic header spans to the target block (if any)
+            try:
+                raw_text = (target_block.get("text") or target_block.get("content") or "").strip()
+                if raw_text:
+                    na = _pdf_analyze_numbering(raw_text)
+                    if na.get("number_span") or na.get("title_span"):
+                        target_block["header_char_spans"] = {
+                            "number": na.get("number_span"),
+                            "title": na.get("title_span"),
+                        }
+                        # Provide a normalized header title for convenience
+                        target_block.setdefault("header_title", _pdf_extract_title(raw_text))
+            except Exception:
+                pass
             # Opportunistic color enrichment for the three context blocks
             if STAGE03_COLOR_ENRICH:
                 try:
@@ -757,6 +846,22 @@ async def process_pdf_pipeline(config: Config):
             try:
                 import re as _re
                 raw_text = (target_block.get("text") or "").strip()
+                # Auto-ACCEPT: strict 'numbering Title.' line = 100% header
+                try:
+                    hdr = _is_probable_pdf_header(raw_text, target_block.get("first_span_font") or {})
+                    if hdr.get("is_header") and hdr.get("confidence") >= 0.999 and hdr.get("reason") and "strict_numbered_title_period" in hdr.get("reason"):
+                        auto_results[idx] = {
+                            "is_header": True,
+                            "reasoning": "Auto-accept: strict_numbered_title_period",
+                            "auto": True,
+                        }
+                        # Attach spans so downstream can rely on them
+                        if hdr.get("spans"):
+                            target_block["header_char_spans"] = hdr["spans"]
+                            target_block.setdefault("header_title", hdr.get("title"))
+                        continue
+                except Exception:
+                    pass
                 # Accept classic numbered headings like "1.1.1 Section Title"
                 is_numbered = bool(_re.match(r"^\s*\d+(?:[\.-]\d+){1,}\s+\S", raw_text))
                 # Short colon label (wrapper) — e.g., "Mergeable Tables:" — often not a true header
@@ -961,20 +1066,16 @@ async def process_pdf_pipeline(config: Config):
                 _verify_cap = 256
 
             async def _process_item(item: dict) -> str:
-                if sc_acompletion is None:
-                    return "{}"
-                resp = await sc_acompletion(
-                    model=item.get("model"),
-                    api_base=ch_base or None,
-                    api_key=ch_key,
-                    custom_llm_provider="openai",
+                router = get_text_router()
+                resp = await router.acompletion(
+                    model="chutes/text",
                     messages=item.get("messages"),
                     response_format={"type": "json_object"},
                     max_tokens=_verify_cap,
                     temperature=0,
                     timeout=config.item_timeout_seconds,
                 )
-                return (resp.get("choices") or [{}])[0].get("message", {}).get("content", "")
+                return (getattr(resp, "choices", [{}])[0].get("message", {}).get("content", ""))
 
             results = await process_items_concurrently(
                 prepared,
@@ -1028,6 +1129,7 @@ async def process_pdf_pipeline(config: Config):
                 llm_payloads.append({"error": {"type": "ParseError", "message": ans[:200]}})
 
     # 7) Apply results back to blocks — update types, suspicion fields, persist
+    parse_error_count = 0
     prep_idx = 0
     for idx, task in enumerate(tasks):
         # Determine result (auto or from batch)
@@ -1050,6 +1152,13 @@ async def process_pdf_pipeline(config: Config):
                 if payload.get("reasoning") is None:
                     payload["reasoning"] = ""
                 llm_result = payload
+
+        # Count parse_error soft-fails for observability/thresholds
+        try:
+            if str(llm_result.get("reasoning", "")).strip() == "parse_error":
+                parse_error_count += 1
+        except Exception:
+            pass
 
         # Update JSON in place
         block_to_update = marker_data["pages"][task.page_idx]["blocks"][task.block_idx]
@@ -1153,101 +1262,131 @@ async def process_pdf_pipeline(config: Config):
         pass
     marker_data["timings"] = timings
     marker_data["resources"] = resources
-    with open(output_json_path, "w") as f:
-        json.dump(marker_data, f, indent=2)
+    # Threshold policy for parse errors
+    try:
+        warn_frac = float(os.getenv("PARSE_WARN_FRAC", "0.05"))
+    except Exception:
+        warn_frac = 0.05
+    try:
+        fail_frac = float(os.getenv("PARSE_FAIL_FRAC", "0.20"))
+    except Exception:
+        fail_frac = 0.20
+    total_verified = max(1, len(tasks) - len(auto_results))
+    parse_rate = parse_error_count / float(total_verified)
 
-    print(f"\nVerification complete. Updated JSON saved to: {output_json_path}")
+    # Write output unless DRY_RUN=1
+    if os.getenv("DRY_RUN", "0").lower() not in {"1","true","yes","y"}:
+        with open(output_json_path, "w") as f:
+            json.dump(marker_data, f, indent=2)
+        print(f"\nVerification complete. Updated JSON saved to: {output_json_path}")
+    else:
+        print("[03] DRY_RUN=1 → skipped writing json_output (logs/timings still recorded)")
+
+    # Summarize timings.jsonl → timings_summary.json (best-effort)
+    try:
+        from pathlib import Path as _P
+        rd = os.getenv("RUN_RESULTS_DIR")
+        if rd:
+            logs_dir = _P(rd) / "03_suspicious_headers" / "logs"
+            tfile = logs_dir / "timings.jsonl"
+            if tfile.exists():
+                lat = []
+                attempts = 0
+                ok = 0
+                exc = 0
+                for line in tfile.read_text(encoding="utf-8").splitlines():
+                    try:
+                        rec = json.loads(line)
+                        attempts += 1
+                        if str(rec.get("outcome")) == "ok":
+                            ok += 1
+                        if str(rec.get("outcome")) == "exception":
+                            exc += 1
+                        if rec.get("latency_ms") is not None:
+                            lat.append(float(rec["latency_ms"]))
+                    except Exception:
+                        continue
+                lat_sorted = sorted(lat)
+                def _pct(p: float) -> float:
+                    if not lat_sorted:
+                        return 0.0
+                    idx = int(max(0, min(len(lat_sorted)-1, round(p * (len(lat_sorted)-1)))))
+                    return float(lat_sorted[idx])
+                summary = {
+                    "attempts": attempts,
+                    "ok": ok,
+                    "exceptions": exc,
+                    "parse_error_count": parse_error_count,
+                    "parse_error_rate": round(parse_rate, 4),
+                    "p50_ms": _pct(0.50),
+                    "p95_ms": _pct(0.95),
+                }
+                (logs_dir / "timings_summary.json").write_text(json.dumps(summary, indent=2))
+    except Exception:
+        pass
+
+    # Enforce thresholds: warn vs fail
+    if parse_rate >= fail_frac:
+        raise RuntimeError(
+            f"Stage 03 parse_error rate {parse_rate:.2%} exceeded fail threshold {fail_frac:.0%}"
+        )
+    if parse_rate >= warn_frac:
+        print(
+            f"[03] Warning: parse_error rate {parse_rate:.2%} exceeded warn threshold {warn_frac:.0%}"
+        )
 
 
 # ------------------------------------------------------------------
 # COMMAND-LINE INTERFACE
 # ------------------------------------------------------------------
 def run(
-    input_json: Annotated[
-        Path, typer.Argument(..., help="Path to the Marker JSON output from Stage 02.")
-    ],
-    pdf_dir: Annotated[
-        Path,
-        typer.Option(
-            "--pdf-dir", help="Directory containing the source and clean PDFs from Stage 01."
-        ),
-    ] = Path("data/results/pipeline/01_annotation_processor"),
-    output_dir: Annotated[
-        Path, typer.Option("-o", help="Parent directory for pipeline results.")
-    ] = Path("data/results/pipeline"),
-    model: Annotated[
-        str | None, typer.Option("--model", help="Name of the vision-capable LLM to use.")
-    ] = None,
-    concurrency: Annotated[int, typer.Option("-c", help="Number of concurrent API calls.")] = 1,
-    dpi: Annotated[
-        int, typer.Option("--dpi", help="Rendering resolution for context images.")
-    ] = 150,
-    debug: Annotated[
-        bool, typer.Option("--debug", help="Enable verbose logging to a stage log file.")
-    ] = False,
-    limit: Annotated[
-        int, typer.Option("--limit", help="Limit number of suspicious headers to verify (0 = all).")
-    ] = 0,
-    timeout: Annotated[
-        int, typer.Option("--timeout", help="Overall stage timeout in seconds (0 = no limit).")
-    ] = 0,
-    annotations_json: Annotated[
-        Path | None,
-        typer.Option("--annotations", help="Optional: Path to Stage 01 annotations JSON"),
-    ] = None,
-    use_knowledge: Annotated[
-        bool,
-        typer.Option("--use-knowledge/--no-knowledge", help="Use on-page annotations for cues"),
-    ] = True,
-    use_prior: Annotated[
-        bool,
-        typer.Option(
-            "--use-prior/--no-prior",
-            help="Use prior decisions from ArangoDB for cues (retrieval-only)",
-        ),
-    ] = True,
-    auto_reject: Annotated[
-        bool,
-        typer.Option(
-            "--auto-reject/--no-auto-reject",
-            help="Auto-reject when cues strongly disagree with header",
-        ),
-    ] = True,
-    persist_headers: Annotated[
-        bool,
-        typer.Option(
-            "--persist-headers/--no-persist-headers",
-            help="Persist decisions to ArangoDB (off by default)",
-        ),
-    ] = False,
-    verify_all_headers: Annotated[
-        bool,
-        typer.Option(
-            "--verify-all-headers/--only-suspicious",
-            help="Verify all SectionHeader blocks, not only suspicious ones",
-        ),
-    ] = False,
-    skip_llm: Annotated[
-        bool,
-        typer.Option(
-            "--skip-llm/--no-skip-llm",
-            help="Offline mode: skip LLM vision verification and pass through with structural normalization",
-        ),
-    ] = False,
-):
+    input_json: Path,
+    pdf_dir: Path = Path("data/results/pipeline/01_annotation_processor"),
+    output_dir: Path = Path("data/results/pipeline"),
+    model: str | None = None,
+    concurrency: int = 1,
+    dpi: int = 150,
+    debug: bool = False,
+    limit: int = 0,
+    timeout: int = 0,
+    annotations_json: Path | None = None,
+    use_knowledge: bool = True,
+    use_prior: bool = True,
+    auto_reject: bool = True,
+    persist_headers: bool = False,
+    verify_all_headers: bool = False,
+    skip_llm: bool = False,
+) -> Path:
     """
     Finds and verifies suspicious section headers in a Marker JSON file using a multimodal LLM.
     """
-    # Derive the clean PDF path from the pdf_dir
-    # Assumes a naming convention like '..._clean.pdf'
-    try:
-        candidates = sorted(pdf_dir.glob("*_clean.pdf"))
-        clean_pdf_path = candidates[0]
-    except (StopIteration, IndexError):
-        raise typer.BadParameter(f"No '*_clean.pdf' found in --pdf-dir: {pdf_dir}")
+    # Enforce preflight when LLM is used (no soft skip)
+    if not skip_llm:
+        from extractor.pipeline.steps.scillm_preflight_validator import require_scillm_preflight
+        require_scillm_preflight()
+
+    # Resolve a clean PDF produced by Stage 00 preflight first; fall back to legacy 01 path.
+    run_results_dir = Path(os.getenv("RUN_RESULTS_DIR", "data/results/pipeline"))
+    preflight_dir = run_results_dir / "00_preflight"
+    clean_pdf_path: Path | None = None
+    if preflight_dir.exists():
+        matches = sorted(preflight_dir.rglob("clean.pdf"))
+        if matches:
+            # Prefer a match whose parent name appears in input_json path; else take the first
+            prefer = [m for m in matches if m.parent.name in str(input_json)]
+            clean_pdf_path = prefer[0] if prefer else matches[0]
+    if clean_pdf_path is None:
+        # Legacy: derive the clean PDF path from the provided pdf_dir
+        try:
+            candidates = sorted(pdf_dir.glob("*_clean.pdf"))
+            clean_pdf_path = candidates[0]
+        except (StopIteration, IndexError):
+            raise ValueError(
+                f"No 'clean.pdf' under {preflight_dir} and no '*_clean.pdf' found in pdf_dir: {pdf_dir}"
+            )
 
     if not input_json.exists():
-        raise typer.BadParameter(f"Input JSON not found: {input_json}")
+        raise FileNotFoundError(f"Input JSON not found: {input_json}")
 
     # Define clear output paths for this stage
     stage_output_dir = output_dir / "03_suspicious_headers"
@@ -1257,13 +1396,12 @@ def run(
     json_output_dir.mkdir(exist_ok=True)
     image_output_dir.mkdir(exist_ok=True)
 
-    # Offline mode: apply lightweight heuristics to demote obvious non-headers,
-    # then pass through with structural normalization (no LLM calls).
     if skip_llm:
+        # Explicit operator override: allowed skip (not implicit soft-skip)
         try:
             data = json.loads(input_json.read_text())
         except Exception as e:
-            raise typer.BadParameter(f"Failed to load input JSON: {e}")
+            raise ValueError(f"Failed to load input JSON: {e}")
         blocks = data.get("blocks", [])
         # Heuristic demotion mirrors the pre-LLM guardrails used in the online path.
         # This reduces false top-level sections in offline/CI runs.
@@ -1298,8 +1436,13 @@ def run(
         data["status"] = "Completed"
         out = json_output_dir / "03_verified_blocks.json"
         out.write_text(json.dumps(data, indent=2))
-        typer.secho(f"[offline] Heuristic demotion applied; wrote {out}", fg=typer.colors.GREEN)
-        return
+        print(f"[offline] Heuristic demotion applied; wrote {out}")
+        try:
+            from extractor.pipeline.utils.scillm_router import close_all_routers
+            close_all_routers()
+        except Exception:
+            pass
+        return out
 
     # Configure logging sink per stage run
     try:
@@ -1347,6 +1490,12 @@ def run(
         verify_all_headers=verify_all_headers,
     )
     asyncio.run(process_pdf_pipeline(cfg))
+    try:
+        from extractor.pipeline.utils.scillm_router import close_all_routers
+        close_all_routers()
+    except Exception:
+        pass
+    return stage_output_dir / "json_output" / "03_verified_blocks.json"
 
 
 def debug_test():
@@ -1409,23 +1558,14 @@ def debug_test():
 
 
 def debug_bundle(
-    bundle: Path = typer.Argument(
-        ...,
-        exists=True,
-        file_okay=True,
-        dir_okay=False,
-        readable=True,
-        help="Bundle with keys: marker_blocks (Stage 02 output object), clean_pdf (path)",
-    ),
-    output_dir: Path = typer.Option(
-        "data/results/pipeline", "-o", help="Parent directory for pipeline results."
-    ),
-    model: str | None = typer.Option(None, "--model", help="LLM model to use (defaults to env)"),
-    concurrency: int = typer.Option(1, "-c", help="Concurrent LLM calls"),
-    dpi: int = typer.Option(150, "--dpi", help="Rendering DPI for context images"),
-    debug: bool = typer.Option(False, "--debug", help="Verbose logging"),
-    limit: int = typer.Option(0, "--limit", help="Limit suspicious headers to verify (0=all)"),
-    timeout: int = typer.Option(0, "--timeout", help="Overall timeout (0=no limit)"),
+    bundle: Path,
+    output_dir: Path = Path("data/results/pipeline"),
+    model: str | None = None,
+    concurrency: int = 1,
+    dpi: int = 150,
+    debug: bool = False,
+    limit: int = 0,
+    timeout: int = 0,
 ):
     """Run Stage 03 with a consolidated bundle.
 
@@ -1443,14 +1583,14 @@ def debug_bundle(
     try:
         data = json.loads(bundle.read_text())
     except Exception as e:
-        typer.secho(f"Failed to read bundle: {e}", fg=typer.colors.RED)
-        raise typer.Exit(1)
+        print(f"Failed to read bundle: {e}")
+        raise ValueError(f"Failed to read bundle: {e}")
 
     marker_blocks = data.get("marker_blocks")
     clean_pdf = data.get("clean_pdf")
     if not marker_blocks or not clean_pdf:
-        typer.secho("Bundle must include 'marker_blocks' and 'clean_pdf'", fg=typer.colors.RED)
-        raise typer.Exit(1)
+        print("Bundle must include 'marker_blocks' and 'clean_pdf'")
+        raise ValueError("Invalid bundle: missing keys")
 
     tmp_json = stage_output_dir / "_bundle_marker_blocks.json"
     tmp_json.write_text(json.dumps(marker_blocks))
@@ -1468,7 +1608,8 @@ def debug_bundle(
     )
     asyncio.run(process_pdf_pipeline(cfg))
     print("Debug bundle: verification complete for suspicious headers")
+    return stage_output_dir / "json_output" / "03_verified_blocks.json"
 
 
 if __name__ == "__main__":
-    build_cli()()
+    print("Import and call run(...) or use scripts/debug/stage03_debug.py")

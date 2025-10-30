@@ -172,6 +172,39 @@ class LLMAdapter:
         if timeout is not None:
             kwargs["timeout"] = timeout
 
+        # SciLLM/Chutes paved path: OpenAI-compatible + x-api-key. Avoid Bearer.
+        try:
+            import os as _os
+            ch_base = (_os.getenv("CHUTES_API_BASE") or "").strip()
+            ch_key = (_os.getenv("CHUTES_API_KEY") or "").strip()
+            if ch_base and ch_key:
+                kwargs.setdefault("custom_llm_provider", "openai_like")
+                kwargs.setdefault("api_base", ch_base)
+                # Auth style: default x-api-key, support Authorization or Bearer via env
+            # Tenant requires Authorization: Bearer for /v1/chat/completions.
+            # Default to Bearer; allow override via CHUTES_AUTH_STYLE.
+            auth_style = (_os.getenv("CHUTES_AUTH_STYLE") or "bearer").lower()
+            if auth_style == "bearer":
+                kwargs["api_key"] = None
+                extra = dict(kwargs.get("extra_headers") or {})
+                extra.setdefault("Authorization", f"Bearer {ch_key}")
+                # Optional: include x-api-key (harmless per maintainer)
+                extra.setdefault("x-api-key", ch_key)
+                kwargs["extra_headers"] = extra
+            elif auth_style == "authorization":
+                kwargs.setdefault("api_key", None)
+                extra = dict(kwargs.get("extra_headers") or {})
+                extra.setdefault("Authorization", f"Bearer {ch_key}")
+                extra.setdefault("x-api-key", ch_key)
+                kwargs["extra_headers"] = extra
+            else:
+                kwargs.setdefault("api_key", None)
+                extra = dict(kwargs.get("extra_headers") or {})
+                extra.setdefault("x-api-key", ch_key)
+                kwargs["extra_headers"] = extra
+        except Exception:
+            pass
+
         # Dump request
         try:
             (req_dir / "req.json").write_text(json.dumps({"kwargs": kwargs}, indent=2))
@@ -180,11 +213,36 @@ class LLMAdapter:
 
         start_monotonic = asyncio.get_event_loop().time()
         try:
-            # Prefer SciLLM; fall back if unavailable
-            if hasattr(litellm, "acompletion"):
-                resp = await litellm.acompletion(**kwargs)  # type: ignore[attr-defined]
-            else:
-                raise RuntimeError("SciLLM/LiteLLM client unavailable for adapter.")
+            # Follow SciLLM notebooks: prefer Router over raw acompletion
+            resp = None
+            try:
+                from scillm import Router  # type: ignore
+
+                ch_base = kwargs.pop("api_base", None)
+                extra_headers = kwargs.pop("extra_headers", None)
+                api_key = kwargs.pop("api_key", None)
+                provider = kwargs.pop("custom_llm_provider", "openai_like")
+                router = Router(
+                    model_list=[
+                        {
+                            "model_name": "chutes",
+                            "litellm_params": {
+                                "model": model,
+                                "custom_llm_provider": provider,
+                                "api_base": ch_base,
+                                "api_key": api_key,
+                                "extra_headers": extra_headers,
+                            },
+                        }
+                    ]
+                )
+                resp = await router.acompletion(**kwargs)  # type: ignore[arg-type]
+            except Exception:
+                # Fallback to direct acompletion if Router path not available
+                if hasattr(litellm, "acompletion"):
+                    resp = await litellm.acompletion(**kwargs)  # type: ignore[attr-defined]
+                else:
+                    raise
 
             # Normalize JSON content (dict-or-string) once for all call sites
             raw_text, json_obj = normalize_json_content(resp)

@@ -10,7 +10,7 @@ module under a stable alias of the form `sXX_name` (e.g., `s09_section_summarize
 
 Example usage:
     from extractor.pipeline.steps import s09_section_summarizer as step09
-    app = step09.build_cli()
+    # Call its run(...) or use its minimal __main__ entry for local debugging.
 """
 
 from __future__ import annotations
@@ -29,10 +29,21 @@ def __getattr__(name: str):  # noqa: D401
 
     This avoids import-time side effects from unrelated step modules.
     """
-    m = re.match(r"^s(\d{2})_([A-Za-z0-9_]+)$", name)
+    # Support convenience alias: step_XX[_a]_name → sXX[_a]_name
+    if name.startswith("step_"):
+        alias = "s" + name[len("step_"):]
+        # Delegate to the same loader for the canonical alias
+        mod = __getattr__(alias)
+        globals()[name] = mod
+        if name not in __all__:
+            __all__.append(name)
+        return mod
+
+    m = re.match(r"^s(\d{2}[A-Za-z]?)_([A-Za-z0-9_]+)$", name)
     if not m:
         raise AttributeError(name)
     num, stem = m.groups()
+    # Support suffix letters like '09a' mapping to '09a_stem.py'
     filename = f"{num}_{stem}.py"
     file_path = Path(__file__).parent / filename
     if not file_path.exists():
@@ -43,8 +54,9 @@ def __getattr__(name: str):  # noqa: D401
     if not spec or not spec.loader:
         raise AttributeError(name)
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)  # type: ignore[assignment]
+    # Register module before execution so decorators (e.g., @dataclass) can resolve __module__
     sys.modules[module_name] = module
+    spec.loader.exec_module(module)  # type: ignore[assignment]
     globals()[name] = module
     if name not in __all__:
         __all__.append(name)

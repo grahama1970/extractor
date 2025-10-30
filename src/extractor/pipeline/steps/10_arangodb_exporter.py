@@ -25,8 +25,7 @@ import struct
 import re
 
 # Direct, non-abstracted, top-level imports for core functionality
-import typer
-from dotenv import load_dotenv, find_dotenv
+from dotenv import find_dotenv, load_dotenv
 from loguru import logger
 from rich.console import Console
 
@@ -52,15 +51,7 @@ from extractor.core.schema.unified_document import (
 
 # --- Initialization & Configuration ---
 
-if not load_dotenv(find_dotenv(), override=True):
-    print("Warning: .env not found; proceeding with process environment only.", file=sys.stderr)
-
-logger.remove()
-logger.add(
-    sys.stderr,
-    level="INFO",
-    format="<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{function}:{line}</cyan> - <level>{message}</level>",
-)
+# Do not load .env or reconfigure logging at import time.
 
 console = Console()
 
@@ -478,30 +469,14 @@ def flatten_document_to_pdf_objects(
 
 # --- Main Orchestration and CLI ---
 def run(
-    reflowed_json: Path = typer.Option(
-        ..., "--reflowed", help="Path to Stage 07 reflowed sections JSON.", exists=True
-    ),
-    summaries_json: Path = typer.Option(
-        ..., "--summaries", help="Path to Stage 09 summaries JSON.", exists=True
-    ),
-    output_dir: Path = typer.Option(
-        "data/results/pipeline", "-o", help="Parent directory for pipeline results."
-    ),
-    collection_name: str = typer.Option("pdf_objects", help="Name of the ArangoDB collection."),
-    skip_export: bool = typer.Option(
-        False, "--skip-export", help="Prepare data but do not export to ArangoDB."
-    ),
-    skip_embeddings: bool = typer.Option(
-        False,
-        "--skip-embeddings/--no-skip-embeddings",
-        help="Offline mode: do not compute sentence embeddings; write null in 'embedding' field",
-    ),
-    fast_embeddings: bool = typer.Option(
-        False,
-        "--fast-embeddings/--no-fast-embeddings",
-        help="Use deterministic 8D hash-based embeddings (fast, CI-safe)",
-    ),
-):
+    reflowed_json: Path,
+    summaries_json: Path,
+    output_dir: Path = Path("data/results/pipeline"),
+    collection_name: str = "pdf_objects",
+    skip_export: bool = False,
+    skip_embeddings: bool = False,
+    fast_embeddings: bool = False,
+) -> Optional[Path]:
     """
     Flattens the processed document and loads it into ArangoDB.
     """
@@ -525,7 +500,7 @@ def run(
     )
     if not pdf_objects_to_load:
         console.print("[yellow]No objects to load. Exiting.[/yellow]")
-        return
+        return None
 
     # Enrich RTM with Lean4 status when Stage 08 theorems are present
     try:
@@ -587,7 +562,7 @@ def run(
         console.print(
             "[yellow]--skip-export flag is set. Skipping ArangoDB export (flattened JSON already saved).[/yellow]"
         )
-        return
+        return None
 
     try:
         host = os.getenv("ARANGO_HOST", "localhost")
@@ -606,7 +581,7 @@ def run(
         logger.success(f"Connected to ArangoDB database '{db_name}'.")
     except (ArangoError, ValueError) as e:
         console.print(f"[yellow]Arango connection failed → export skipped ({e}); flattened JSON already saved.[/yellow]")
-        return
+        return None
 
     setup_arango_collection(db, collection_name)
 
@@ -634,33 +609,12 @@ def run(
 
 
 def debug_bundle(
-    bundle: Path = typer.Argument(
-        ...,
-        exists=True,
-        file_okay=True,
-        dir_okay=False,
-        readable=True,
-        help="Bundle with key 'reflowed_sections' and optional 'summaries'",
-    ),
-    output_dir: Path = typer.Option(
-        "data/results/pipeline", "-o", help="Parent directory for pipeline results."
-    ),
-    skip_export: bool = typer.Option(
-        True, "--skip-export/--no-skip-export", help="Flatten and optionally export to ArangoDB."
-    ),
-    collection_name: str = typer.Option(
-        "pdf_objects", help="Name of the ArangoDB collection when exporting."
-    ),
-    skip_embeddings: bool = typer.Option(
-        True,
-        "--skip-embeddings/--no-skip-embeddings",
-        help="Offline mode: do not compute embeddings in debug bundle path",
-    ),
-    fast_embeddings: bool = typer.Option(
-        False,
-        "--fast-embeddings/--no-fast-embeddings",
-        help="Use deterministic 8D hash-based embeddings (fast, CI-safe)",
-    ),
+    bundle: Path,
+    output_dir: Path = Path("data/results/pipeline"),
+    skip_export: bool = True,
+    collection_name: str = "pdf_objects",
+    skip_embeddings: bool = True,
+    fast_embeddings: bool = False,
 ):
     """Run Stage 10 directly from a consolidated JSON bundle.
 
@@ -688,8 +642,7 @@ def debug_bundle(
                 "Bundle must include 'unified_document' or non-empty 'reflowed_sections'"
             )
     except Exception as e:
-        typer.secho(f"Failed to load bundle: {e}", fg=typer.colors.RED)
-        raise typer.Exit(1)
+        raise ValueError(f"Failed to load bundle: {e}")
 
     reflowed_data = data  # treat the bundle itself as the reflowed payload
     summaries_data = {"summaries": data.get("summaries") or []}
@@ -702,7 +655,7 @@ def debug_bundle(
     )
     if not pdf_objects_to_load:
         console.print("[yellow]No objects to flatten from bundle. Exiting.[/yellow]")
-        return
+        return None
 
     if skip_export:
         output_path = json_output_dir / "10_flattened_data.json"
@@ -724,7 +677,7 @@ def debug_bundle(
             console.print("[yellow]Arango not configured/available → export skipped; flattened JSON written.[/yellow]")
             output_path = json_output_dir / "10_flattened_data.json"
             output_path.write_text(json.dumps(pdf_objects_to_load, indent=2))
-            return
+            return None
 
         client = ArangoClient(hosts=f"http://{host}:{port}")
         db = client.db(db_name, username=user, password=password)
@@ -734,7 +687,7 @@ def debug_bundle(
         console.print(f"[yellow]Arango connection failed → export skipped ({e}); flattened JSON written.[/yellow]")
         output_path = json_output_dir / "10_flattened_data.json"
         output_path.write_text(json.dumps(pdf_objects_to_load, indent=2))
-        return
+        return None
 
     setup_arango_collection(db, collection_name)
     try:
@@ -756,16 +709,43 @@ def debug_bundle(
         return
 
 
-def build_cli():
-    import typer as _typer
-
-    app = _typer.Typer(
-        help="Flattens and exports final processed sections into ArangoDB, preserving document order."
-    )
-    app.command(name="run")(run)
-    app.command(name="debug-bundle")(debug_bundle)
-    return app
-
-
+# Minimal __main__ for convenience: import-safe, tiny, and optional.
 if __name__ == "__main__":
-    build_cli()()
+    # Load .env only for direct invocation
+    try:
+        load_dotenv(find_dotenv(), override=True)
+    except Exception:
+        pass
+    import sys
+
+    argv = sys.argv[1:]
+    if not argv or argv[0] in ("-h", "--help"):
+        print(
+            "Usage: python -m extractor.pipeline.steps.10_arangodb_exporter REFLOWED_JSON SUMMARIES_JSON [OUT_DIR]\n"
+            "       Set SKIP_EXPORT=1 to avoid DB writes.\n",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    try:
+        reflowed = Path(argv[0])
+        summaries = Path(argv[1])
+    except IndexError:
+        print("Missing arguments. See --help.", file=sys.stderr)
+        sys.exit(2)
+    out_dir = Path(argv[2]) if len(argv) > 2 else Path("data/results/pipeline")
+
+    skip_export = (os.getenv("SKIP_EXPORT", "0").lower() in {"1", "true", "yes"})
+    collection = os.getenv("ARANGO_COLLECTION", "pdf_objects")
+    try:
+        run(
+            reflowed_json=reflowed,
+            summaries_json=summaries,
+            output_dir=out_dir,
+            collection_name=collection,
+            skip_export=skip_export,
+            skip_embeddings=False,
+            fast_embeddings=False,
+        )
+    except Exception as e:
+        logger.error(f"Stage 10 failed: {e}")
+        sys.exit(1)

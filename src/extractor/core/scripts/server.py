@@ -60,8 +60,6 @@ try:  # pragma: no cover - optional heavy deps
     from extractor.core.converters.pdf import PdfConverter  # type: ignore
     from extractor.core.models import create_model_dict  # type: ignore
     from extractor.core.settings import settings  # type: ignore
-    from extractor.pipeline.utils.litellm_call import litellm_call  # type: ignore
-    from extractor.pipeline.utils.litellm_cache import initialize_litellm_cache  # type: ignore
     _MARKER_FEATURES_AVAILABLE = True
 except Exception:  # pragma: no cover - run without heavy deps
     PdfConverter = None  # type: ignore
@@ -69,18 +67,22 @@ except Exception:  # pragma: no cover - run without heavy deps
     settings = type("_S", (), {"OUTPUT_IMAGE_FORMAT": "PNG", "OUTPUT_ENCODING": "utf-8"})()  # minimal
     _MARKER_FEATURES_AVAILABLE = False
 
-# Import LiteLLM helpers independently of heavy Marker deps
-try:
-    from extractor.pipeline.utils.litellm_call import litellm_call  # type: ignore
-except Exception:  # pragma: no cover
-    def litellm_call(*args, **kwargs):  # type: ignore
-        raise RuntimeError("litellm_call unavailable")
+from scillm import acompletion as sc_acompletion  # type: ignore
+import json as _json
 
-try:
-    from extractor.pipeline.utils.litellm_cache import initialize_litellm_cache  # type: ignore
-except Exception:  # pragma: no cover
-    def initialize_litellm_cache():  # type: ignore
-        return None
+async def _sc_chat(messages, model: str, *, response_format: str|None=None, timeout: int=60, temperature: float=0.0):
+    resp = await sc_acompletion(
+        model=model,
+        api_base=os.getenv("CHUTES_API_BASE"),
+        api_key=os.getenv("CHUTES_API_KEY"),
+        custom_llm_provider="openai",
+        messages=messages,
+        response_format={"type": "json_object"} if response_format=="json_object" else None,
+        timeout=timeout,
+        temperature=temperature,
+    )
+    content = (resp.get("choices") or [{}])[0].get("message", {}).get("content")
+    return content
 
 
 from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
@@ -127,10 +129,6 @@ async def lifespan(app: FastAPI):
             app_data["models"] = create_model_dict()
         except Exception:
             app_data["models"] = {}
-        try:
-            initialize_litellm_cache()
-        except Exception:
-            pass
 
     yield
 
@@ -322,9 +320,9 @@ async def ws_generate(websocket: WebSocket):
 
         model = (
             data.get("model")
-            or os.getenv("LITELLM_DEFAULT_MODEL")
-            or os.getenv("DEFAULT_LITELLM_MODEL")
-            or os.getenv("LITELLM_VLM_MODEL", "gemini/gemini-2.5-flash")
+            or os.getenv("CHUTES_TEXT_MODEL")
+            or os.getenv("CHUTES_VLM_MODEL")
+            or ""
         )
         prompt = data.get("prompt") or ""
         image = data.get("image")
@@ -337,11 +335,13 @@ async def ws_generate(websocket: WebSocket):
 
         await websocket.send_json({"type": "status", "stage": "running"})
         try:
-            results = await litellm_call(
-                [params], wrap_json=True, concurrency=1, desc="UX Generate"
+            content = await _sc_chat(
+                messages=[{"role":"user","content": prompt}],
+                model=model,
+                response_format=None,
+                timeout=60,
             )
-            out = results[0] if isinstance(results, list) and results else results
-            await websocket.send_json({"type": "result", "data": out})
+            await websocket.send_json({"type": "result", "data": content})
             await websocket.close()
         except Exception as e:
             await websocket.send_json({"type": "error", "error": str(e)})
@@ -363,9 +363,9 @@ async def http_generate(payload: dict):
 
     model = (
         payload.get("model")
-        or os.getenv("LITELLM_DEFAULT_MODEL")
-        or os.getenv("DEFAULT_LITELLM_MODEL")
-        or os.getenv("LITELLM_VLM_MODEL", "gemini/gemini-2.5-flash")
+        or os.getenv("CHUTES_TEXT_MODEL")
+        or os.getenv("CHUTES_VLM_MODEL")
+        or ""
     )
     prompt = payload.get("prompt") or ""
     image = payload.get("image")
@@ -374,21 +374,15 @@ async def http_generate(payload: dict):
         params["image"] = image
     try:
         # Optional debug: include sanitized request/kwargs and exception details
-        debug_flag = str(os.getenv("LITELLM_DEBUG", "")).lower() in {"1","true","yes","y"} or bool(payload.get("debug"))
+        debug_flag = bool(payload.get("debug"))
         if debug_flag:
-            results = await litellm_call([params], wrap_json=True, concurrency=1, desc="UX Generate", response_format="json_object", show_progress=False, export="results")
-            r0 = results[0] if isinstance(results, list) and results else results
-            dbg = {}
-            try:
-                req = getattr(r0, "request", None)
-                if req:
-                    dbg["request"] = {"model": getattr(req, "model", None), "messages": getattr(req, "messages", None), "kwargs": getattr(req, "kwargs", None)}
-                dbg["content"] = getattr(r0, "content", None)
-                err = getattr(r0, "exception", None)
-                if err: dbg["exception"] = str(err)
-            except Exception:
-                pass
-            content = getattr(r0, "content", None)
+            content = await _sc_chat(
+                messages=[{"role":"user","content": prompt}],
+                model=model,
+                response_format="json_object",
+                timeout=60,
+            )
+            dbg = {"model": model}
             if isinstance(content, str):
                 try:
                     obj = _json.loads(content)
@@ -396,29 +390,22 @@ async def http_generate(payload: dict):
                 except Exception:
                     return JSONResponse({"ok": False, "error": "non_json_output", "debug": dbg}, status_code=502)
             return JSONResponse({"ok": False, "error": "empty_output", "debug": dbg}, status_code=502)
-        results = await litellm_call([params], wrap_json=True, concurrency=1, desc="UX Generate", response_format="json_object")
-        out = results[0] if isinstance(results, list) and results else results
+        content = await _sc_chat(
+            messages=[{"role":"user","content": prompt}],
+            model=model,
+            response_format="json_object",
+            timeout=60,
+        )
         # Normalize to a plain JSON-serializable object
-        if isinstance(out, str):
+        if isinstance(content, str):
             try:
-                obj = _json.loads(out)
+                obj = _json.loads(content)
                 return JSONResponse({"ok": True, "data": obj})
             except Exception:
-                return JSONResponse({"ok": True, "data": {"text": out}})
-        else:
-            content = getattr(out, "content", None)
-            if isinstance(content, str):
-                try:
-                    obj = _json.loads(content)
-                    return JSONResponse({"ok": True, "data": obj})
-                except Exception:
-                    return JSONResponse({"ok": True, "data": {"text": content}})
-            # Last resort: minimal dict
-            try:
-                from dataclasses import asdict as _asdict
-                return JSONResponse({"ok": True, "data": _asdict(out)})
-            except Exception:
-                return JSONResponse({"ok": False, "error": "unserializable_result"}, status_code=500)
+                return JSONResponse({"ok": True, "data": {"text": content}})
+        elif isinstance(content, dict):
+            return JSONResponse({"ok": True, "data": content})
+        return JSONResponse({"ok": False, "error": "empty_output"}, status_code=502)
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
@@ -553,15 +540,12 @@ async def api_health_llm(model: str | None = None, timeout: float = 20.0):
     )
     t0 = time.perf_counter()
     try:
-        results = await litellm_call(
-            [{"text": prompt, "model": eff_model}],
-            wrap_json=False,
+        out = await _sc_chat(
+            messages=[{"role":"user","content": prompt}],
+            model=eff_model,
             response_format="json_object",
-            request_timeout=timeout,
-            concurrency=1,
-            desc="LLM Health",
+            timeout=timeout,
         )
-        out = results[0] if results else ""
         elapsed_ms = int((time.perf_counter() - t0) * 1000)
         ok = False
         data = None

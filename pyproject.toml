@@ -67,6 +67,7 @@ dependencies = [
  "urlextract>=1.9.0",
  "strip_tags>=0.6",
  "sentence-transformers>=5.0.0",
+ "pyflakes>=3.4.0",
 ]
 [[project.authors]]
 name = "Graham Anderson"

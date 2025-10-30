@@ -37,7 +37,12 @@ import base64
 # Third-party
 from loguru import logger
 from rich.console import Console
-import typer
+from extractor.pipeline.utils.section_builder_utils import (
+    _bucket_color,
+    _roman_to_int,
+    pdf_analyze_section_numbering as _pdf_analyze_numbering,
+    pdf_extract_section_title as _pdf_extract_title,
+)
 from extractor.pipeline.utils.diagnostics import (
     start_resource_sampler,
     stop_resource_sampler,
@@ -63,12 +68,17 @@ console = Console()
 
 # Visuals
 MAX_VISUAL_PAGES_DEFAULT = int(os.getenv("MAX_VISUAL_PAGES", "2"))
+STAGE04_VISUAL_PROOF = os.getenv("STAGE04_VISUAL_PROOF", "").lower() in {"1", "true", "yes", "y"}
+STAGE04_SOURCE_PDF = os.getenv("STAGE04_SOURCE_PDF", "").strip() or None
 
 # Optional color enrichment for headers (first-span color via PyMuPDF)
 STAGE04_COLOR_ENRICH = os.getenv("STAGE04_COLOR_ENRICH", "1").lower() in {"1", "true", "yes", "y"}
 
-# Font analysis thresholds
-LARGE_FONT_THRESHOLD = 14.0
+# Font analysis thresholds (env override via SPARTA_PDF_FONT_LARGE)
+try:
+    LARGE_FONT_THRESHOLD = float(os.getenv("SPARTA_PDF_FONT_LARGE", "14.0"))
+except Exception:
+    LARGE_FONT_THRESHOLD = 14.0
 SMALL_FONT_THRESHOLD = 8.0
 BOLD_WEIGHT_THRESHOLD = 600
 
@@ -88,33 +98,7 @@ SECTION_NUMBER_PATTERNS = [
 # COLOR ENRICHMENT UTILITIES
 # ================================
 
-def _rgb_to_hex(rgb: Tuple[float, float, float]) -> str:
-    try:
-        r, g, b = rgb
-        r = int(max(0, min(255, round(r * (255 if r <= 1 else 1)))))
-        g = int(max(0, min(255, round(g * (255 if g <= 1 else 1)))))
-        b = int(max(0, min(255, round(b * (255 if b <= 1 else 1)))))
-        return f"#{r:02x}{g:02x}{b:02x}"
-    except Exception:
-        return "#000000"
-
-def _bucket_color(hex_str: str) -> str:
-    try:
-        h = hex_str.lstrip('#')
-        r = int(h[0:2], 16); g = int(h[2:4], 16); b = int(h[4:6], 16)
-        if r < 30 and g < 30 and b < 30:
-            return "black"
-        if r > 200 and g > 200 and b > 200:
-            return "white"
-        if r > g and r > b:
-            return "red"
-        if g > r and g > b:
-            return "green"
-        if b > r and b > g:
-            return "blue"
-        return "gray"
-    except Exception:
-        return "unknown"
+## moved to utils: _rgb_to_hex, _bucket_color
 
 def _enrich_header_colors(pdf_path: Path, sections: List[Dict[str, Any]]) -> None:
     """For each section, attach first-span fill color inferred from the header block bbox.
@@ -197,19 +181,7 @@ def _enrich_header_colors(pdf_path: Path, sections: List[Dict[str, Any]]) -> Non
 # ============================================
 
 
-def _roman_to_int(roman: str) -> int:
-    values = {"I": 1, "V": 5, "X": 10, "L": 50, "C": 100, "D": 500, "M": 1000}
-    roman = roman.upper()
-    total = 0
-    prev = 0
-    for ch in reversed(roman):
-        val = values.get(ch, 0)
-        if val < prev:
-            total -= val
-        else:
-            total += val
-            prev = val
-    return total
+## moved to utils: _roman_to_int
 
 
 def analyze_section_numbering(text: str) -> Dict[str, Any]:
@@ -416,6 +388,14 @@ def build_sections_from_blocks(
                 na = analyze_section_numbering(clean_title)
                 header_level = na.get("depth_level") or detect_header_level(clean_title)
                 section_title = extract_section_title(clean_title)
+                # Compute character spans within the original block text (cleaned)
+                try:
+                    na_spans = _pdf_analyze_numbering(clean_title)
+                    number_span = na_spans.get("number_span")
+                    title_span = na_spans.get("title_span")
+                except Exception:
+                    number_span = None
+                    title_span = None
                 sec_num = na.get("number_text") or ""
                 section_depth = derive_section_depth(na)
                 try:
@@ -444,6 +424,10 @@ def build_sections_from_blocks(
                         "block_count": 1,
                         "validation_method": "stage03_or_fallback",
                         "diagnostics": [],
+                        "header_char_spans": {
+                            "number": number_span,
+                            "title": title_span,
+                        },
                     },
                 }
                 block.setdefault("page", block.get("page_idx", 0))
@@ -454,6 +438,8 @@ def build_sections_from_blocks(
                 block["section_hashes"] = [sec_hash]
                 block["section_number"] = sec_num
                 block["section_level"] = header_level
+                if number_span or title_span:
+                    block["header_char_spans"] = {"number": number_span, "title": title_span}
                 if section_depth:
                     block["section_depth"] = section_depth
             else:
@@ -1066,7 +1052,8 @@ async def build_and_validate_sections_comprehensive(
                 for s in synth:
                     # pages: inclusive range + any continued_pages
                     try:
-                        ps = int(s.get("page_start", 0)); pe = int(s.get("page_end", ps))
+                        ps = int(s.get("page_start", 0))
+                        pe = int(s.get("page_end", ps))
                     except Exception:
                         ps = pe = 0
                     pages = list(range(ps, pe + 1))
@@ -1184,6 +1171,124 @@ async def build_and_validate_sections_comprehensive(
 
     logger.info(f"Stage 04 comprehensive analysis complete. Output: {output_path}")
 
+    # Optional: render per-page overlays (visual proof) of sections/blocks
+    try:
+        if STAGE04_VISUAL_PROOF:
+            # Resolve source PDF: prefer provided pdf_path; else from result; else env override
+            src_pdf: Optional[Path] = None
+            if pdf_path and Path(pdf_path).exists():
+                src_pdf = Path(pdf_path)
+            if not src_pdf:
+                try:
+                    tp = result.get("source_pdf")
+                    if isinstance(tp, str) and Path(tp).exists():
+                        src_pdf = Path(tp)
+                except Exception:
+                    src_pdf = None
+            if not src_pdf and STAGE04_SOURCE_PDF:
+                p = Path(STAGE04_SOURCE_PDF)
+                src_pdf = p if p.exists() else None
+
+            if src_pdf and result.get("sections"):
+                from extractor.pipeline.visual.overlay import Box, draw_overlays
+
+                # Build overlay boxes: one color per role; section union per page
+                role_colors = {
+                    "SectionHeader": (0, 200, 0),  # green
+                    "heading": (0, 200, 0),
+                    "paragraph": (0, 170, 255),  # blue
+                    "text": (0, 170, 255),
+                    "list": (180, 0, 255),  # purple
+                }
+
+                def _short(s: str, n: int = 40) -> str:
+                    s = " ".join((s or "").split())
+                    return s if len(s) <= n else s[: n - 1] + "…"
+
+                boxes: List[Box] = []
+                for s in result.get("sections", []):
+                    title = s.get("display_title") or s.get("title") or "Section"
+                    sid = s.get("id") or "sec"
+                    # Per-page section union bbox
+                    page_to_union: Dict[int, List[float]] = {}
+                    for b in (s.get("blocks") or []):
+                        bb = b.get("bbox")
+                        if not bb or len(bb) != 4:
+                            continue
+                        try:
+                            p = int(b.get("page") or b.get("page_idx") or 0)
+                        except Exception:
+                            p = 0
+                        if p not in page_to_union:
+                            page_to_union[p] = [float(bb[0]), float(bb[1]), float(bb[2]), float(bb[3])]
+                        else:
+                            ub = page_to_union[p]
+                            page_to_union[p] = [min(ub[0], bb[0]), min(ub[1], bb[1]), max(ub[2], bb[2]), max(ub[3], bb[3])]
+                        # Block-level box
+                        kind = (b.get("type") or b.get("block_type") or "text").lower()
+                        color = role_colors.get(b.get("block_type"), role_colors.get(kind, (255, 128, 0)))
+                        label = f"{sid}:{kind}"
+                        boxes.append(
+                            Box(
+                                page=p,
+                                x0=float(bb[0]),
+                                y0=float(bb[1]),
+                                x1=float(bb[2]),
+                                y1=float(bb[3]),
+                                label=label,
+                                color=color,
+                                width=3,
+                            )
+                        )
+                    # Section union per page
+                    for p, ub in page_to_union.items():
+                        boxes.append(
+                            Box(
+                                page=int(p),
+                                x0=float(ub[0]),
+                                y0=float(ub[1]),
+                                x1=float(ub[2]),
+                                y1=float(ub[3]),
+                                label=f"{sid}:{_short(title)}",
+                                color=(255, 0, 0),  # red for section envelope
+                                width=2,
+                            )
+                        )
+
+                if boxes:
+                    visual_out = output_dir / "visual_output"
+                    draw_overlays(src_pdf, boxes, visual_out)
+                    # Attach relative paths list for convenience and write artifacts index
+                    try:
+                        results_root = output_dir.parent.parent  # .../results
+                        rel_imgs = [str(p.relative_to(results_root)) for p in visual_out.glob("*.png")]
+                        if rel_imgs:
+                            result.setdefault("visual_overlays", rel_imgs)
+                            # merge into artifacts_index.json (images + visual)
+                            idx_path = json_output_dir / "artifacts_index.json"
+                            idx = {"images": [], "json": [], "text": []}
+                            if idx_path.exists():
+                                try:
+                                    idx = json.loads(idx_path.read_text())
+                                except Exception:
+                                    idx = {"images": [], "json": [], "text": []}
+                            existing_imgs = set(idx.get("images") or [])
+                            existing_imgs.update(
+                                [
+                                    str(p.relative_to(results_root))
+                                    for p in (output_dir / "image_output").rglob("*")
+                                ]
+                            )
+                            existing_imgs.update(rel_imgs)
+                            idx["images"] = sorted(existing_imgs)
+                            (json_output_dir / "artifacts_index.json").write_text(json.dumps(idx, indent=2))
+                    except Exception:
+                        pass
+            else:
+                logger.info("Stage 04 visual overlay skipped: source PDF not resolved or no sections.")
+    except Exception as _e:
+        logger.warning(f"Stage 04 visual overlay generation failed: {_e}")
+
     return output_path, result
 
 
@@ -1193,38 +1298,26 @@ async def build_and_validate_sections_comprehensive(
 
 
 def run(
-    input_json: Path = typer.Argument(..., help="Path to Stage 03 results (verified blocks)."),
-    pdf_dir: Path = typer.Option(
-        ..., "--pdf-dir", help="Directory with the clean PDF from Stage 01."
-    ),
-    output_dir: Path = typer.Option(..., "-o", help="Parent directory for pipeline results."),
-    debug: bool = typer.Option(
-        False, "--debug", help="Enable verbose logging to a stage log file."
-    ),
-    fallback_heuristics: bool = typer.Option(
-        False,
-        "--fallback-heuristics/--no-fallback-heuristics",
-        help="Enable minimal header detection if Stage 03 metadata is missing",
-    ),
-    max_visual_pages: int = typer.Option(
-        MAX_VISUAL_PAGES_DEFAULT,
-        "--max-visual-pages",
-        help="Max pages to include in a section composite image",
-    ),
+    input_json: Path,
+    pdf_dir: Path,
+    output_dir: Path,
+    debug: bool = False,
+    fallback_heuristics: bool = False,
+    max_visual_pages: int = MAX_VISUAL_PAGES_DEFAULT,
 ):
     """Runs comprehensive section building with sophisticated header validation."""
     console.print(f"[green]Building sections from verified blocks: {input_json.name}[/green]")
 
     if not input_json.exists():
         console.print(f"[red]Input JSON not found: {input_json}[/red]")
-        raise typer.Exit(1)
+        raise FileNotFoundError(f"Input JSON not found: {input_json}")
 
     # Derive the clean PDF path
     try:
         pdf_path = next(pdf_dir.glob("*_clean.pdf"))
     except StopIteration:
-        console.print(f"[red]No '*_clean.pdf' found in --pdf-dir: {pdf_dir}[/red]")
-        raise typer.Exit(1)
+        console.print(f"[red]No '*_clean.pdf' found in pdf_dir: {pdf_dir}[/red]")
+        raise FileNotFoundError(f"No '*_clean.pdf' found in {pdf_dir}")
 
     # Define clear output paths and configure logging to a file
     stage_output_dir = output_dir / "04_section_builder"
@@ -1259,32 +1352,18 @@ def run(
         console.print(f"✅ Section building complete. Output saved to: {output_path}")
         console.print(f"📄 Sections created: {result.get('section_count', 0)}")
         console.print(f"🖼️  Visual captures: {result.get('visual_captures', 0)}")
+        return output_path
     else:
         console.print("❌ Section building failed.")
-        raise typer.Exit(1)
+        raise RuntimeError("Section building failed")
 
 
 def debug_bundle(
-    bundle: Path = typer.Argument(
-        ...,
-        exists=True,
-        file_okay=True,
-        dir_okay=False,
-        readable=True,
-        help="Bundle with keys: verified_blocks (Stage 03 object), clean_pdf (path)",
-    ),
-    output_dir: Path = typer.Option(..., "-o", help="Parent directory for pipeline results."),
-    debug: bool = typer.Option(False, "--debug", help="Verbose logging"),
-    fallback_heuristics: bool = typer.Option(
-        False,
-        "--fallback-heuristics/--no-fallback-heuristics",
-        help="Enable minimal header detection if Stage 03 metadata is missing",
-    ),
-    max_visual_pages: int = typer.Option(
-        MAX_VISUAL_PAGES_DEFAULT,
-        "--max-visual-pages",
-        help="Max pages to include in a section composite image",
-    ),
+    bundle: Path,
+    output_dir: Path,
+    debug: bool = False,
+    fallback_heuristics: bool = False,
+    max_visual_pages: int = MAX_VISUAL_PAGES_DEFAULT,
 ):
     """Run Stage 04 with a consolidated bundle (verified blocks + clean PDF)."""
     stage_output_dir = output_dir / "04_section_builder"
@@ -1323,21 +1402,34 @@ def debug_bundle(
         if result.get("success"):
             console.print(f"✅ Debug bundle sections built: {output_path}")
         else:
-            typer.secho("Debug bundle section build failed.", fg=typer.colors.RED)
-            raise typer.Exit(1)
+            print("Debug bundle section build failed.")
+            raise RuntimeError("Debug bundle section build failed")
     except Exception as e:
-        typer.secho(f"Failed to run debug-bundle: {e}", fg=typer.colors.RED)
-        raise typer.Exit(1)
+        print(f"Failed to run debug-bundle: {e}")
+        raise RuntimeError(f"Failed to run debug-bundle: {e}")
 
 
-def build_cli():
-    import typer as _typer
-
-    app = _typer.Typer(help="Build sections with sophisticated header detection")
-    app.command(name="run")(run)
-    app.command(name="debug-bundle")(debug_bundle)
-    return app
+## CLI removed: import and call run(...), or use a debug harness.
 
 
 if __name__ == "__main__":
-    build_cli()()
+    # Minimal entry: INPUT_JSON, PDF_DIR, [OUT_DIR]
+    try:
+        from dotenv import find_dotenv, load_dotenv
+
+        load_dotenv(find_dotenv())
+    except Exception:
+        pass
+    import sys
+    argv = sys.argv[1:]
+    if len(argv) < 2 or argv[0] in ("-h", "--help"):
+        print(
+            "Usage: python -m extractor.pipeline.steps.04_section_builder INPUT_JSON PDF_DIR [OUT_DIR]",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    input_json = Path(argv[0])
+    pdf_dir = Path(argv[1])
+    out_dir = Path(argv[2]) if len(argv) > 2 else Path("data/results/pipeline")
+    out, _ = run(input_json=input_json, pdf_dir=pdf_dir, output_dir=out_dir)
+    print(str(out))

@@ -8,14 +8,15 @@ This note captures current state, defaults, and how to run/verify stages 01–10
 - Default LLM providers switched to OpenAI via LiteLLM using `openai/<model>`.
 - Local verification run performed for non-networked stages; LLM-heavy stages are wired but require network + API keys.
 
-## Model Defaults (env fallbacks)
+## Model & Provider Defaults (SciLLM‑first)
 
-- Text/JSON: set a default via `LITELLM_DEFAULT_MODEL` (preferred) or `DEFAULT_LITELLM_MODEL`, e.g. `LITELLM_DEFAULT_MODEL=openai/gpt-4o-mini`
-- Vision: `LITELLM_VISION_MODEL=openai/gpt-4o`
-- Vision (figures/reflow): `LITELLM_VLM_MODEL=openai/gpt-4o`
-- Lean requirement extraction: `LEAN4_MODEL=openai/gpt-4o-mini`
+- Provider: SciLLM/Chutes direct (no LiteLLM). Set in `.env`:
+  - `CHUTES_API_BASE` and `CHUTES_API_KEY` (required for online stages)
+- Stage 07 runs text‑only by default and picks a text model via `get_text_model()`.
+- Stage 06 (figures) uses `CHUTES_VLM_MODEL` for optional descriptions.
 
-Override any of these via CLI flags where available (e.g., `--model`). Ensure `OPENAI_API_KEY` is set in `.env`.
+Notes
+- Stage 06b emits deterministic layout (`conf.ordering`, `flow_stream`). Stage 07 consumes this and may omit images per section when confident (see `layout_contract.md`).
 
 ## Stage Status (01–10)
 
@@ -97,7 +98,7 @@ Override any of these via CLI flags where available (e.g., `--model`). Ensure `O
 ## Known Gaps / Next Steps
 
 - Stage 05: install `camelot-py[cv]` and Ghostscript; re-run to generate tables and images.
-- Stages 06/07/08/09: run with OpenAI credentials to regenerate live outputs (vision/text models already default to 4o / 4o-mini).
+- Stage 06/07/08/09: run with SciLLM credentials (CHUTES_API_*). Stage 07 is text‑only by default.
 - Stage 10: after running 07 and 09, rerun without `--skip-export` to load into ArangoDB (ensure DB env vars are set).
 
 ## Stage Status (11 & 14)

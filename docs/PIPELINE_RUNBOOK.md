@@ -1,4 +1,4 @@
-# Pipeline Runbook (Offline-First, Then Online)
+# Pipeline Runbook (Online-Only)
 
 Goal: Methodically validate the PDF extraction pipeline end-to-end. First run "offline" (no LLM/DB calls) to confirm structure and artifacts. Then run "online" with real LLM calls (SciLLM via `CHUTES_*`) and ArangoDB export/graph.
 
@@ -6,7 +6,7 @@ Goal: Methodically validate the PDF extraction pipeline end-to-end. First run "o
 
 - Python venv activated; project installed with extras.
 - `.env` present and loaded. Required keys:
-- `CHUTES_API_BASE`, `CHUTES_API_KEY`, and `CHUTES_TEXT_MODEL` (for online runs)
+  - `CHUTES_API_BASE`, `CHUTES_API_KEY`, `CHUTES_TEXT_MODEL`, `CHUTES_VLM_MODEL`
   - `ARANGO_HOST`, `ARANGO_PORT`, `ARANGO_USER`, `ARANGO_PASSWORD`
 - Set `PYTHONPATH=src` when running Python modules directly.
 - Canonical input PDF: `data/input/pipeline/BHT_CV32A65X_marked.pdf`
@@ -33,7 +33,7 @@ print('Arango OK:', db.version())
 PY
 ```
 
-## Offline Pass (fast, structural)
+## Offline Pass (deprecated; pipeline is online-only)
 
 Notes:
 - Avoid LLM/VLM calls; skip DB writes. Confirms PDF parsing, stitching, flattening, reporting.
@@ -108,7 +108,7 @@ python src/extractor/pipeline/steps/14_report_generator.py run data/results/pipe
 ## Online Pass (LLM + DB)
 
 Notes:
-- Provider: use the configured default model from `.env` (`DEFAULT_LITELLM_MODEL` or `LITELLM_DEFAULT_MODEL`).
+- Provider: Chutes only via pinned `CHUTES_TEXT_MODEL`/`CHUTES_VLM_MODEL` (no auto-discovery).
 - Concurrency: start with `--max-concurrent 8` for LLM-heavy steps.
 - Timeouts: Stage 06/09 `--timeout 45`, Stage 07 `--timeout 240` (more complex prompt). You can also set `STAGE07_LLM_TIMEOUT` (seconds) to control Stage 07 strictly in CI.
  - Stage 07 knobs (when providers are finicky):
@@ -233,3 +233,38 @@ Use this as a quick-reference while debugging. Mark when a step is verified.
 - If litellm_call fails due to provider JSON enforcement, toggle `--strict-json/--no-strict-json` on Stage 09.
 - For Stage 11 rationales, set `GRAPH_RATIONALE_MODEL` to your provider (e.g., Gemini) or set `GRAPH_ENABLE_RATIONALES=false`.
 - Keep `LITELLM_ATTACH_SESSION=true` (default) for better cache namespacing.
+### One Way To Call Chutes (Paved Path)
+
+We use exactly one allowed shape for Chutes calls (no alternates, no discovery):
+
+- Provider: `openai_like`
+- Auth: `Authorization: Bearer $CHUTES_API_KEY` (never x-api-key)
+- Single pinned model: `CHUTES_TEXT_MODEL` set to a vendor id that returns 200 on `/chat/completions`
+- JSON mode only: `response_format={"type":"json_object"}`
+- Router lifecycle: stages close routers automatically at the end
+
+Environment (CI/prod)
+
+```
+export CHUTES_API_BASE=https://llm.chutes.ai/v1
+export CHUTES_API_KEY=cpk_...
+export CHUTES_TEXT_MODEL=moonshotai/Kimi-K2-Instruct-0905
+unset SCILLM_AUTO_ROUTER CHUTES_TEXT_MODEL_ALT1 CHUTES_TEXT_MODEL_ALT2 CHUTES_AUTH_STYLE
+```
+
+Sanity probes (must succeed before long runs)
+
+```
+curl -sS -w '%{http_code}\n' -o /dev/null \
+  -H "Authorization: Bearer $CHUTES_API_KEY" \
+  "$CHUTES_API_BASE/models"   # expect 200
+
+printf '%s' '{"model":"'"$CHUTES_TEXT_MODEL"'","messages":[{"role":"user","content":"Return only {\"ok\":true} as JSON."}],"response_format":{"type":"json_object"}}' >/tmp/payload.json
+curl -sS -w '%{http_code}\n' -o /tmp/chat.json \
+  -H "content-type: application/json" \
+  -H "Authorization: Bearer $CHUTES_API_KEY" \
+  -d @/tmp/payload.json \
+  "$CHUTES_API_BASE/chat/completions"  # expect 200
+```
+
+If you see “Unmapped LLM provider”, your pinned model id is not routed to `/chat/completions` on this host. Set `CHUTES_TEXT_MODEL` to a routable id and re‑probe.
