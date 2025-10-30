@@ -796,6 +796,14 @@ def _df_map(df: pd.DataFrame, func):
     return df.applymap(func)
 
 
+def _usage_get(u: Any, key: str):
+    try:
+        if isinstance(u, dict):
+            return u.get(key)
+        return getattr(u, key, None)
+    except Exception:
+        return None
+
 def _build_table_block_from_stage05(table: dict[str, Any]) -> dict[str, Any] | None:
     """Return a canonical table block derived from Stage 05 output."""
     pm = table.get("pandas_metrics") or {}
@@ -1299,8 +1307,8 @@ async def reflow_section_with_llm(
                             "model": _model_served,
                             "latency_ms": _elapsed_ms,
                             "timeout_s": int(os.getenv("STAGE07_TIMEOUT","90")),
-                            "tokens_in": _usage.get("prompt_tokens"),
-                            "tokens_out": _usage.get("completion_tokens"),
+                            "tokens_in": _usage_get(_usage, "prompt_tokens"),
+                            "tokens_out": _usage_get(_usage, "completion_tokens"),
                         },
                     )
                     content_simple = _r_s.choices[0].message.get("content") if hasattr(_r_s, "choices") else None
@@ -1413,8 +1421,8 @@ async def reflow_section_with_llm(
                             "model": _model_served,
                             "latency_ms": _elapsed_ms,
                             "timeout_s": llm_timeout,
-                            "tokens_in": _usage.get("prompt_tokens"),
-                            "tokens_out": _usage.get("completion_tokens"),
+                            "tokens_in": _usage_get(_usage, "prompt_tokens"),
+                            "tokens_out": _usage_get(_usage, "completion_tokens"),
                         },
                     )
                     content_min = _r_min.choices[0].message.get("content") if hasattr(_r_min, "choices") else None
@@ -1773,8 +1781,8 @@ async def reflow_section_with_llm(
                             "served_model": _model_served,
                             "latency_ms": _elapsed_ms,
                             "timeout_s": llm_timeout,
-                            "tokens_in": _usage.get("prompt_tokens"),
-                            "tokens_out": _usage.get("completion_tokens"),
+                            "tokens_in": _usage_get(_usage, "prompt_tokens"),
+                            "tokens_out": _usage_get(_usage, "completion_tokens"),
                         },
                     )
                 except Exception:
@@ -1955,8 +1963,8 @@ async def reflow_section_with_llm(
                                 "served_model": _model_served,
                                 "latency_ms": _elapsed_ms,
                                 "timeout_s": llm_timeout,
-                                "tokens_in": _usage.get("prompt_tokens"),
-                                "tokens_out": _usage.get("completion_tokens"),
+                                "tokens_in": _usage_get(_usage, "prompt_tokens"),
+                                "tokens_out": _usage_get(_usage, "completion_tokens"),
                             },
                         )
                     except Exception:
@@ -2283,8 +2291,8 @@ async def reflow_section_with_llm(
                                 "served_model": _model_served,
                                 "latency_ms": _elapsed_ms,
                                 "timeout_s": max(30, int(os.getenv("STAGE07_TIMEOUT","90"))),
-                                "tokens_in": _usage.get("prompt_tokens"),
-                                "tokens_out": _usage.get("completion_tokens"),
+                                "tokens_in": _usage_get(_usage, "prompt_tokens"),
+                                "tokens_out": _usage_get(_usage, "completion_tokens"),
                             },
                         )
                     except Exception:
