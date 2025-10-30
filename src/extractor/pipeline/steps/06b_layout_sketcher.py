@@ -1100,12 +1100,6 @@ def run(input_path: str, output_path: str, **kwargs) -> dict[str, Any]:
                 (stage_dir / "timings_summary.json").write_text(json.dumps({"total_ms":t_ms}, indent=2))
             except Exception:
                 pass
-            # Close sink and routers
-            try:
-                from extractor.pipeline.utils.scillm_router import close_all_routers
-                close_all_routers()
-            except Exception:
-                pass
             if sink_id is not None:
                 try:
                     logger.remove(sink_id)
@@ -1377,8 +1371,8 @@ def main(
             )
     # Schema validation + timings + router close + sink teardown
     try:
-        # Compute latency best-effort (fallback to 0 if start time unknown)
-        t_ms = 0
+        # Compute latency with real start time
+        t_ms = int((_t.monotonic() - _t0) * 1000)
         # Validate top-level schema of latest file if present
         try:
             latest = json.loads(((base / "06b_layout_sketcher" / "json_output" / "06b_layout_sketch.json")).read_text(encoding="utf-8"))
@@ -1396,12 +1390,6 @@ def main(
         with ((base / "06b_layout_sketcher") / "timings.jsonl").open("a", encoding="utf-8") as fp:
             fp.write(json.dumps({"stage":"06b_layout_sketcher","latency_ms":t_ms,"outcome":"ok"})+"\n")
         ((base / "06b_layout_sketcher") / "timings_summary.json").write_text(json.dumps({"total_ms":t_ms}, indent=2))
-    except Exception:
-        pass
-    # Close routers once per run
-    try:
-        from extractor.pipeline.utils.scillm_router import close_all_routers
-        close_all_routers()
     except Exception:
         pass
     # Remove sink

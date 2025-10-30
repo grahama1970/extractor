@@ -231,6 +231,8 @@ FIGURE_FALLBACK_ENABLED = os.getenv("STAGE07_FIGURE_FALLBACK", "false").lower() 
 )
 # Max output tokens for strict JSON responses (can be tuned via env)
 STAGE07_MAX_TOKENS = int(os.getenv("STAGE07_MAX_TOKENS", "2048"))
+# Router-only SciLLM policy: disable any native client fallbacks
+ROUTER_ONLY = True
 
 # Layout sketch consumption (quick win)
 USE_LAYOUT_SKETCH = os.getenv("STAGE07_USE_LAYOUT_SKETCH", "true").lower() in (
@@ -783,6 +785,17 @@ def _sanitize_table_cell(val: Any) -> str:
     return text
 
 
+def _df_map(df: pd.DataFrame, func):
+    """
+    Elementwise mapping for DataFrames without using deprecated applymap.
+    Uses DataFrame.map when available (pandas >= 2.2) and falls back to applymap.
+    """
+    mapper = getattr(df, "map", None)
+    if callable(mapper):
+        return mapper(func)
+    return df.applymap(func)
+
+
 def _build_table_block_from_stage05(table: dict[str, Any]) -> dict[str, Any] | None:
     """Return a canonical table block derived from Stage 05 output."""
     pm = table.get("pandas_metrics") or {}
@@ -1291,7 +1304,21 @@ async def reflow_section_with_llm(
                         },
                     )
                     content_simple = _r_s.choices[0].message.get("content") if hasattr(_r_s, "choices") else None
-                except Exception:
+                except Exception as _ex:
+                    try:
+                        log_timing(
+                            "07_reflow_section",
+                            {
+                                "attempt": "strict_compact",
+                                "outcome": "exception",
+                                "route_name": "chutes/text",
+                                "served_model": None,
+                                "error": str(_ex)[:200],
+                                "raw_preview": None,
+                            },
+                        )
+                    except Exception:
+                        pass
                     content_simple = None
 
                 # If SDK came back empty, immediately try HTTP fallback with same payload
@@ -1391,7 +1418,21 @@ async def reflow_section_with_llm(
                         },
                     )
                     content_min = _r_min.choices[0].message.get("content") if hasattr(_r_min, "choices") else None
-                except Exception:
+                except Exception as _ex:
+                    try:
+                        log_timing(
+                            "07_reflow_section",
+                            {
+                                "attempt": "minimal_json",
+                                "outcome": "exception",
+                                "route_name": "chutes/text",
+                                "served_model": None,
+                                "error": str(_ex)[:200],
+                                "raw_preview": None,
+                            },
+                        )
+                    except Exception:
+                        pass
                     content_min = None
                 try:
                     (logs_dir / f"response_forced_min_{section_data.get('id','section')}.json").write_text(
@@ -1444,7 +1485,7 @@ async def reflow_section_with_llm(
                 pass
             # Fallback: try native Google client without schema, JSON mime only
             try:
-                if "gemini" in (LLM_MODEL or "").lower():
+                if ("gemini" in (LLM_MODEL or "").lower()) and (not ROUTER_ONLY):
                     from google import genai as _genai
                     logs_dir = results_base_dir / "07_reflow_section" / "logs"
                     logs_dir.mkdir(parents=True, exist_ok=True)
@@ -1546,7 +1587,7 @@ async def reflow_section_with_llm(
             extras = build_chat_extras(LLM_MODEL)
             # Avoid collisions: if using response_format for Gemini, drop generation_config from extras
             try:
-                if "gemini" in (LLM_MODEL or "").lower():
+                if ("gemini" in (LLM_MODEL or "").lower()) and (not ROUTER_ONLY):
                     extras.pop("generation_config", None)
             except Exception:
                 pass
@@ -1707,6 +1748,8 @@ async def reflow_section_with_llm(
             # Run strict call via SciLLM Router (OpenAI-compatible JSON mode)
             try:
                 _router = _build_text_router()
+                import time as _t
+                _t0 = _t.monotonic()
                 with time_block(logs_dir, "attempt_strict", section_id=str(section_data.get("id","section")), **summarize_messages(messages)):
                     _r = await _router.acompletion(
                         model="chutes/text",
@@ -1717,7 +1760,40 @@ async def reflow_section_with_llm(
                         timeout=llm_timeout,
                     )
                 content_obj = _r.choices[0].message.get("content") if hasattr(_r, "choices") else None
-            except Exception:
+                try:
+                    _elapsed_ms = int((_t.monotonic() - _t0) * 1000)
+                    _usage = getattr(_r, "usage", None) or {}
+                    _model_served = getattr(_r, "model", None)
+                    log_timing(
+                        "07_reflow_section",
+                        {
+                            "attempt": "strict_main",
+                            "outcome": "ok",
+                            "route_name": "chutes/text",
+                            "served_model": _model_served,
+                            "latency_ms": _elapsed_ms,
+                            "timeout_s": llm_timeout,
+                            "tokens_in": _usage.get("prompt_tokens"),
+                            "tokens_out": _usage.get("completion_tokens"),
+                        },
+                    )
+                except Exception:
+                    pass
+            except Exception as _ex:
+                try:
+                    log_timing(
+                        "07_reflow_section",
+                        {
+                            "attempt": "strict_main",
+                            "outcome": "exception",
+                            "route_name": "chutes/text",
+                            "served_model": None,
+                            "error": str(_ex)[:200],
+                            "raw_preview": None,
+                        },
+                    )
+                except Exception:
+                    pass
                 content_obj = None
             try:
                 from loguru import logger as _logger
@@ -1854,6 +1930,8 @@ async def reflow_section_with_llm(
                 # Compact strict pass via Router (JSON mode)
                 try:
                     _router2 = _build_text_router()
+                    import time as _t
+                    _t0 = _t.monotonic()
                     with time_block(logs_dir, "attempt_compact", section_id=str(section_data.get("id","section")), **summarize_messages(messages2)):
                         _r2 = await _router2.acompletion(
                             model="chutes/text",
@@ -1864,7 +1942,40 @@ async def reflow_section_with_llm(
                             timeout=llm_timeout,
                         )
                     content_obj2 = _r2.choices[0].message.get("content") if hasattr(_r2, "choices") else None
-                except Exception:
+                    try:
+                        _elapsed_ms = int((_t.monotonic() - _t0) * 1000)
+                        _usage = getattr(_r2, "usage", None) or {}
+                        _model_served = getattr(_r2, "model", None)
+                        log_timing(
+                            "07_reflow_section",
+                            {
+                                "attempt": "compact_main",
+                                "outcome": "ok",
+                                "route_name": "chutes/text",
+                                "served_model": _model_served,
+                                "latency_ms": _elapsed_ms,
+                                "timeout_s": llm_timeout,
+                                "tokens_in": _usage.get("prompt_tokens"),
+                                "tokens_out": _usage.get("completion_tokens"),
+                            },
+                        )
+                    except Exception:
+                        pass
+                except Exception as _ex:
+                    try:
+                        log_timing(
+                            "07_reflow_section",
+                            {
+                                "attempt": "compact_main",
+                                "outcome": "exception",
+                                "route_name": "chutes/text",
+                                "served_model": None,
+                                "error": str(_ex)[:200],
+                                "raw_preview": None,
+                            },
+                        )
+                    except Exception:
+                        pass
                     content_obj2 = None
                 try:
                     from loguru import logger as _logger
@@ -2071,7 +2182,21 @@ async def reflow_section_with_llm(
                         timeout=llm_timeout,
                     )
                     content2 = _r3.choices[0].message.get("content") if hasattr(_r3, "choices") else None
-                except Exception:
+                except Exception as _ex:
+                    try:
+                        log_timing(
+                            "07_reflow_section",
+                            {
+                                "attempt": "retry_compact",
+                                "outcome": "exception",
+                                "route_name": "chutes/text",
+                                "served_model": None,
+                                "error": str(_ex)[:200],
+                                "raw_preview": None,
+                            },
+                        )
+                    except Exception:
+                        pass
                     content2 = None
                 # Accept dict content directly
                 if isinstance(content2, dict):
@@ -2134,6 +2259,8 @@ async def reflow_section_with_llm(
                 # Relaxed pass with scillm (still strict JSON)
                 try:
                     _router4 = _build_text_router()
+                    import time as _t
+                    _t0 = _t.monotonic()
                     _r4 = await _router4.acompletion(
                         model="chutes/text",
                         messages=messages3,
@@ -2143,7 +2270,40 @@ async def reflow_section_with_llm(
                         timeout=max(30, int(os.getenv("STAGE07_TIMEOUT","90"))),
                     )
                     resp2 = _r4.choices[0].message.get("content") if hasattr(_r4, "choices") else None
-                except Exception:
+                    try:
+                        _elapsed_ms = int((_t.monotonic() - _t0) * 1000)
+                        _usage = getattr(_r4, "usage", None) or {}
+                        _model_served = getattr(_r4, "model", None)
+                        log_timing(
+                            "07_reflow_section",
+                            {
+                                "attempt": "relaxed_json",
+                                "outcome": "ok",
+                                "route_name": "chutes/text",
+                                "served_model": _model_served,
+                                "latency_ms": _elapsed_ms,
+                                "timeout_s": max(30, int(os.getenv("STAGE07_TIMEOUT","90"))),
+                                "tokens_in": _usage.get("prompt_tokens"),
+                                "tokens_out": _usage.get("completion_tokens"),
+                            },
+                        )
+                    except Exception:
+                        pass
+                except Exception as _ex:
+                    try:
+                        log_timing(
+                            "07_reflow_section",
+                            {
+                                "attempt": "relaxed_json",
+                                "outcome": "exception",
+                                "route_name": "chutes/text",
+                                "served_model": None,
+                                "error": str(_ex)[:200],
+                                "raw_preview": None,
+                            },
+                        )
+                    except Exception:
+                        pass
                     resp2 = None
                 try:
                     from loguru import logger as _logger
@@ -2239,6 +2399,13 @@ async def reflow_section_with_llm(
                 "Stage 07: LLM returned invalid JSON. See logs in 07_reflow_section/logs and verify the model returns strict JSON (no code fences) matching schema mode expectations."
             )
 
+        # Enforce strict top-level keys for all successful parses
+        try:
+            _allowed = {"reflowed_json", "ocr_corrections", "improvements_made", "summary"}
+            if isinstance(result, dict):
+                result = restrict_top_level_keys(result, _allowed)
+        except Exception:
+            pass
         # Enforce schema presence; do not accept wrappers or missing keys
         if SCHEMA_MODE == "reflow_json":
             if not (isinstance(result, dict) and result.get("reflowed_json")):
@@ -2664,8 +2831,9 @@ def consolidate_data(
                                 hdr = pd.DataFrame(t1.get("pandas_df") or [])
                                 body = pd.DataFrame(t2.get("pandas_df") or [])
                                 def _collapse_ws_df(df: pd.DataFrame) -> pd.DataFrame:
-                                    return df.applymap(
-                                        lambda v: _sanitize_table_cell(v) if not pd.isna(v) else ""
+                                    return _df_map(
+                                        df,
+                                        lambda v: _sanitize_table_cell(v) if not pd.isna(v) else "",
                                     )
                                 # Apply header row as column names if shape aligns
                                 if len(body.columns) == len(hdr.columns):
@@ -2692,8 +2860,9 @@ def consolidate_data(
                                 df1 = pd.DataFrame(t1.get("pandas_df") or [])
                                 df2 = pd.DataFrame(t2.get("pandas_df") or [])
                                 def _collapse(df: pd.DataFrame) -> pd.DataFrame:
-                                    return df.applymap(
-                                        lambda v: _sanitize_table_cell(v) if not pd.isna(v) else ""
+                                    return _df_map(
+                                        df,
+                                        lambda v: _sanitize_table_cell(v) if not pd.isna(v) else "",
                                     )
                                 if len(df1.columns) == len(df2.columns):
                                     out = pd.concat([_collapse(df1), _collapse(df2)], ignore_index=True)
@@ -3427,11 +3596,6 @@ def run(
                     "p95_ms": _pct(0.95),
                 }
                 (ldir / "timings_summary.json").write_text(json.dumps(summary, indent=2))
-    except Exception:
-        pass
-    try:
-        from extractor.pipeline.utils.scillm_router import close_all_routers as _close_routers
-        _close_routers()
     except Exception:
         pass
     return output_path

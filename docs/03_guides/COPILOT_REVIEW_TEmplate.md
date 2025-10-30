@@ -1,8 +1,9 @@
 # Generalized Copilot Request — Patch + Answers (No PRs, No Links)
 
 **AGENT INSTRUCTIONS**
-Remember to commit and push the current branch to the repo first
-Do NOT IGNORE!!!!!!!
+- Remember to git commit and push the current branch to the repo first
+- DO NOT INCLUDE this instruction in  IN THE REVIEW REQUEST
+
 
 
 **Project**
