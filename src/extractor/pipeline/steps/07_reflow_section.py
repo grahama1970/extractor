@@ -23,13 +23,7 @@ import pandas as pd
 # (dotenv loaded by caller/debug harness)
 from loguru import logger
 from rich.console import Console
-# Avoid hard dependency on scillm so deterministic prep paths can run
-try:
-    from scillm import acompletion as sc_acompletion  # type: ignore
-except Exception:  # pragma: no cover
-    sc_completion = None  # legacy alias unused
-    sc_acompletion = None  # type: ignore
-from typing import Any
+# Router-only SciLLM policy (no direct scillm imports in steps)
 from tqdm.asyncio import tqdm_asyncio
 
 from extractor.core.schema.unified_document import SourceType
@@ -133,7 +127,7 @@ def _build_compact_prompt(
     lines.append("")
     lines.append("Return ONLY the JSON; keep it compact.")
     return "\n".join(lines)
-from extractor.pipeline.utils.response_utils import extract_content  # noqa: E402
+# extract_content no longer used here; keep JSON-mode path only
 from extractor.pipeline.utils.log_utils import sanitize_messages_for_return  # noqa: E402
 from extractor.pipeline.utils.metrics_logger import log_metric  # noqa: E402
 from extractor.pipeline.utils.model_params import (  # noqa: E402
@@ -149,7 +143,7 @@ from extractor.pipeline.utils.model_select import get_vlm_model, get_text_model 
 from extractor.pipeline.utils.debug_utils import ensure_logs_dir, time_block, summarize_messages, log_timing  # noqa: E402
 
 
-from extractor.pipeline.utils.scillm_router import get_text_router  # Router-only policy
+from extractor.pipeline.utils.scillm_router import get_text_router  # Router-only policy  # noqa: E402
 
 def _build_text_router() -> Any:
     """Return the shared SciLLM Router (centralized)."""
@@ -2137,12 +2131,13 @@ async def reflow_section_with_llm(
                 except Exception:
                     pass
 
-                # Relaxed pass with scillm (no response_format)
+                # Relaxed pass with scillm (still strict JSON)
                 try:
                     _router4 = _build_text_router()
                     _r4 = await _router4.acompletion(
                         model="chutes/text",
                         messages=messages3,
+                        response_format={"type": "json_object"},
                         temperature=0,
                         max_tokens=int(call_params.get("max_tokens") or 1024),
                         timeout=max(30, int(os.getenv("STAGE07_TIMEOUT","90"))),
