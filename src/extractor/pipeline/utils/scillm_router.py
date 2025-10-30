@@ -4,6 +4,7 @@ import os
 from typing import Any, Dict, List
 
 from scillm import Router
+import asyncio
 import json
 from subprocess import run, PIPE
 
@@ -154,11 +155,35 @@ def get_vlm_router() -> Router:
     return _VLM_ROUTER
 
 
+def _safe_async_close(obj) -> None:
+    try:
+        aclose = getattr(obj, "aclose", None)
+        if aclose is not None:
+            res = aclose()
+            if asyncio.iscoroutine(res):
+                try:
+                    asyncio.run(res)
+                except RuntimeError:
+                    # Already in a loop; best effort fallback
+                    try:
+                        loop = asyncio.get_event_loop()
+                        loop.create_task(res)  # fire and forget
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+
+
 def close_text_router() -> None:
     global _TEXT_ROUTER
     try:
         if _TEXT_ROUTER is not None:
-            _TEXT_ROUTER.close()
+            # Prefer async close when available to ensure aiohttp connector shuts down
+            _safe_async_close(_TEXT_ROUTER)
+            try:
+                _TEXT_ROUTER.close()
+            except Exception:
+                pass
     finally:
         _TEXT_ROUTER = None
 
@@ -167,7 +192,11 @@ def close_vlm_router() -> None:
     global _VLM_ROUTER
     try:
         if _VLM_ROUTER is not None:
-            _VLM_ROUTER.close()
+            _safe_async_close(_VLM_ROUTER)
+            try:
+                _VLM_ROUTER.close()
+            except Exception:
+                pass
     finally:
         _VLM_ROUTER = None
 

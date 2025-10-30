@@ -14,12 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from loguru import logger
-
-try:
-    import fitz  # PyMuPDF
-except Exception as e:  # pragma: no cover
-    raise RuntimeError("PyMuPDF (fitz) is required for 09a_pdf_annotator") from e
-
+import fitz  # PyMuPDF
 
 # No CLI framework; import and call run(...)
 
