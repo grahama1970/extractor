@@ -171,15 +171,17 @@ def main(argv: Optional[list[str]] = None) -> int:
     except Exception:
         pass
 
-    # Enforce SciLLM/Chutes preflight for an online-only pipeline.
-    # If Chutes is not reachable or misconfigured, fail fast (no offline bypasses).
-    try:
-        from extractor.pipeline.steps.scillm_preflight_validator import require_scillm_preflight
+    # Enforce SciLLM/Chutes preflight only when online stages are enabled.
+    # Allow deterministic offline runs when --summary-only and --skip-fig-descriptions are both set.
+    online_needed = not (bool(args.summary_only) and bool(args.skip_fig_descriptions))
+    if online_needed:
+        try:
+            from extractor.pipeline.steps.scillm_preflight_validator import require_scillm_preflight
 
-        require_scillm_preflight()
-    except Exception as e:
-        logger.error(f"SciLLM preflight failed: {e}")
-        return 1
+            require_scillm_preflight()
+        except Exception as e:
+            logger.error(f"SciLLM preflight failed: {e}")
+            return 1
 
     pdf = args.pdf
     out = args.out
@@ -221,7 +223,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         except Exception:
             pass
 
-    # Import steps lazily to avoid import-time side effects
+    # Import steps lazily to avoid import-time side effects.
+    # Avoid importing online-only steps when running in deterministic offline mode.
     from extractor.pipeline.steps import (
         s01_annotation_processor as s01,
         s02_marker_extractor as s02,
@@ -233,10 +236,17 @@ def main(argv: Optional[list[str]] = None) -> int:
         s07_reflow_section as s07,
         s09a_pdf_annotator as s09a,
         s07_requirements_miner as s07req,
-        s08_lean4_theorem_prover as s08,
         s09_section_summarizer as s09,
-        s10_arangodb_exporter as s10,
     )
+    s08 = None
+    s10 = None
+    if not (bool(args.summary_only) and bool(args.skip_fig_descriptions)):
+        from extractor.pipeline.steps import (
+            s08_lean4_theorem_prover as _s08,
+            s10_arangodb_exporter as _s10,
+        )
+        s08 = _s08
+        s10 = _s10
 
     # 01
     a01 = _step(
@@ -531,50 +541,55 @@ def main(argv: Optional[list[str]] = None) -> int:
         counts={"requirements": rcount} if isinstance(rcount, int) else None,
     )
 
-    # 08 Lean4 theorem prover — run unconditionally
-    a08 = _step(
+    # 08 Lean4 theorem prover — skip in deterministic offline mode
+    if s08 is not None:
+        a08 = _step(
+                "08_lean4_theorem_prover",
+                s08.run,
+                out / "07_reflow_section" / "json_output" / "07_reflowed.json",
+                out,
+                False,  # skip_proving=False → actually prove
+                req_json_path if req_json_path and req_json_path.exists() else None,
+                stop_on_fail=args.stop_on_fail,
+                timeout_sec=args.stage_timeout,
+                log_dir_base=out,
+                on_timing=lambda n, dt: stage_latencies.update({n: dt}),
+            )
+        _write_artifacts_index((out / "08_lean4_theorem_prover"))
+        manifest.record_stage(
             "08_lean4_theorem_prover",
-            s08.run,
+            "Completed",
+            {"json": str((out / "08_lean4_theorem_prover" / "json_output" / "08_theorems.json").relative_to(out)), "latency_ms": stage_latencies.get("08_lean4_theorem_prover")},
+        )
+    else:
+        logger.info("08_lean4_theorem_prover: skipped (deterministic offline mode)")
+
+    # 09 — skip in deterministic offline mode if summarizer requires LLM in this environment
+    if not bool(args.summary_only):
+        a09 = _step(
+            "09_section_summarizer",
+            s09._cmd_run,
             out / "07_reflow_section" / "json_output" / "07_reflowed.json",
             out,
-            False,  # skip_proving=False → actually prove
-            req_json_path if req_json_path and req_json_path.exists() else None,
             stop_on_fail=args.stop_on_fail,
             timeout_sec=args.stage_timeout,
             log_dir_base=out,
             on_timing=lambda n, dt: stage_latencies.update({n: dt}),
         )
-    # Stage 08 writes outputs directly and may return None; do not treat None as failure.
-    _write_artifacts_index((out / "08_lean4_theorem_prover"))
-    manifest.record_stage(
-        "08_lean4_theorem_prover",
-        "Completed",
-        {"json": str((out / "08_lean4_theorem_prover" / "json_output" / "08_theorems.json").relative_to(out)), "latency_ms": stage_latencies.get("08_lean4_theorem_prover")},
-    )
-
-    # 09
-    a09 = _step(
-        "09_section_summarizer",
-        s09._cmd_run,
-        out / "07_reflow_section" / "json_output" / "07_reflowed.json",
-        out,
-        stop_on_fail=args.stop_on_fail,
-        timeout_sec=args.stage_timeout,
-        log_dir_base=out,
-        on_timing=lambda n, dt: stage_latencies.update({n: dt}),
-    )
-    if not a09:
-        return 1
-    results["09"] = a09
-    _write_artifacts_index((out / "09_section_summarizer"))
-    manifest.record_stage(
-        "09_section_summarizer",
-        "Completed",
-        {"json": str(a09.relative_to(out)), "latency_ms": stage_latencies.get("09_section_summarizer")},
-    )
+        if not a09:
+            return 1
+        results["09"] = a09
+        _write_artifacts_index((out / "09_section_summarizer"))
+        manifest.record_stage(
+            "09_section_summarizer",
+            "Completed",
+            {"json": str(a09.relative_to(out)), "latency_ms": stage_latencies.get("09_section_summarizer")},
+        )
+    else:
+        logger.info("09_section_summarizer: skipped (deterministic offline mode)")
 
     # 10 (optional DB export)
-    if args.skip_export:
+    if args.skip_export or s10 is None:
         logger.info("10_arangodb_exporter: skipped (--skip-export)")
     else:
         reflowed = out / "07_reflow_section" / "json_output" / "07_reflowed.json"

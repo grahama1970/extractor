@@ -214,7 +214,12 @@ def _attach_llm_assist_headers(result: Dict[str, Any], stage_dir: Path) -> None:
     updated = 0
     for t in tables:
         try:
-            if not _should_assist(t):
+            pm = t.get("pandas_metrics") or {}
+            shape = pm.get("shape") or [0, 0]
+            rows = int(shape[0] or 0) if isinstance(shape, (list, tuple)) else 0
+            cols = int(shape[1] or 0) if isinstance(shape, (list, tuple)) else 0
+            force_low_dim = (rows == 1) or (cols == 1)
+            if not (force_low_dim or _should_assist(t)):
                 log_timing(
                     "05_table_extractor",
                     {
@@ -227,6 +232,21 @@ def _attach_llm_assist_headers(result: Dict[str, Any], stage_dir: Path) -> None:
                 )
                 continue
             headers_in = _headers_from_table(t)
+            # Prefer first-row cell texts when (a) headers missing, or (b) numeric/generic headers from Camelot
+            try:
+                shp = (t.get("pandas_metrics") or {}).get("shape") or []
+                r = int(shp[0] or 0) if isinstance(shp, (list, tuple)) else 0
+                use_row0 = (r == 1) and (not headers_in or all(str(h).strip().isdigit() for h in headers_in))
+                if use_row0:
+                    df0 = (t.get("pandas_df") or [])
+                    if isinstance(df0, list) and df0:
+                        row0 = df0[0]
+                        if isinstance(row0, dict):
+                            headers_in = [str(v).strip() for v in row0.values()]
+                        elif isinstance(row0, list):
+                            headers_in = [str(v).strip() for v in row0]
+            except Exception:
+                pass
             if not headers_in:
                 log_timing(
                     "05_table_extractor",
@@ -244,7 +264,9 @@ def _attach_llm_assist_headers(result: Dict[str, Any], stage_dir: Path) -> None:
             cached = side_data.get(cache_key)
             if cached and isinstance(cached.get("headers"), list) and len(cached["headers"]) == len(headers_in):
                 t["llm_assist"] = {"model": model, "patch": cached}
-                _apply_headers(t, cached["headers"])
+                # Metadata-only: record inferred headers
+                t["header_inferred"] = [sanitize_cell(h) for h in cached["headers"]]
+                t["header_provenance"] = "llm_assist"
                 log_timing(
                     "05_table_extractor",
                     {
@@ -396,7 +418,9 @@ def _attach_llm_assist_headers(result: Dict[str, Any], stage_dir: Path) -> None:
             # normalize whitespace
             new_headers = [" ".join(str(h).split()) for h in new_headers]
             t["llm_assist"] = {"model": model, "patch": {"headers": new_headers}}
-            _apply_headers(t, new_headers)
+            # Metadata-only: do not mutate the DataFrame; record inferred headers instead
+            t["header_inferred"] = [sanitize_cell(h) for h in new_headers]
+            t["header_provenance"] = "llm_assist"
             side_data[cache_key] = {"headers": new_headers}
             updated += 1
         except Exception as e:
@@ -1174,6 +1198,184 @@ def run(
         pdf_path, image_output_dir, diagnostics
     )
 
+    # --- Repair: reconstruct collapsed single-column header rows (page header-only tables)
+    # Some PDFs cause Camelot to collapse a 1-row, multi-column header into a single text cell.
+    # We attempt a deterministic reconstruction via PDF word spans; optionally reinforce with an LLM split.
+    def _reconstruct_single_col_header(table: Dict[str, Any]) -> bool:
+        try:
+            pm = table.get("pandas_metrics") or {}
+            shape = pm.get("shape") or [0, 0]
+            rows = int(shape[0] or 0)
+            cols = int(shape[1] or 0)
+            if rows != 1 or cols != 1:
+                return False
+            bbox = table.get("bbox") or []
+            if not bbox:
+                return False
+            import re as _re
+            import fitz as _fitz
+            page_idx = int(table.get("page_index", 0) or 0)
+            with _fitz.open(str(pdf_path)) as _doc:
+                _page = _doc[page_idx]
+                x0, y0, x1, y1 = bbox
+                # Convert Camelot coords (origin bottom-left) to PyMuPDF rect (origin top-left)
+                # page height reference
+                _H = _page.rect.height
+                rect = _fitz.Rect(x0, _H - y1, x1, _H - y0)
+                words = _page.get_text("words", clip=rect) or []  # (x0,y0,x1,y1,word,block_no,line_no,word_no)
+                words = [w for w in words if (w[4] or "").strip()]
+                if not words:
+                    return False
+                # First try robust whitespace/pipes split from the original single cell text
+                try:
+                    src_df = pd.DataFrame(table.get("pandas_df") or [])
+                    raw_txt = ""
+                    if not src_df.empty:
+                        raw_txt = str(list(src_df.iloc[0].values)[0])
+                    tokens_ws = [t.strip() for t in _re.split(r"\s{2,}|\s\|\s|\t+", raw_txt) if t.strip()]
+                except Exception:
+                    tokens_ws = []
+                # Columnize by X clusters as fallback/primary
+                words_sorted = sorted(words, key=lambda w: (float(w[0]), float(w[1])))
+                cols_spans: list[list[tuple[float, float, str]]] = []
+                GAP_MIN = 10.0  # points
+                cur: list[tuple[float, float, str]] = []
+                prev_x1 = None
+                for (wx0, wy0, wx1, wy1, wtxt, *_rest) in words_sorted:
+                    if prev_x1 is None:
+                        cur = [(wx0, wx1, wtxt)]
+                        prev_x1 = wx1
+                        continue
+                    if (wx0 - prev_x1) >= GAP_MIN:
+                        if cur:
+                            cols_spans.append(cur)
+                        cur = [(wx0, wx1, wtxt)]
+                    else:
+                        cur.append((wx0, wx1, wtxt))
+                    prev_x1 = max(prev_x1, wx1) if prev_x1 is not None else wx1
+                if cur:
+                    cols_spans.append(cur)
+                # Normalize columns text
+                col_texts = [" ".join([t[2] for t in col]).strip() for col in cols_spans]
+                # Pick best between whitespace split and spatial split
+                candidates = [tokens_ws, col_texts]
+                best = max(candidates, key=lambda L: len(L or []))
+                best = [sanitize_cell(t) for t in (best or []) if t]
+                # Guardrails: require 3–10 columns to accept; else bail to LLM path
+                if len(best) < 3:
+                    return False
+                # Build a 1xN dataframe so metrics reflect proper column count
+                try:
+                    df = pd.DataFrame([best], columns=best)
+                except Exception:
+                    # If duplicate names, uniquify
+                    uniq: list[str] = []
+                    seen = set()
+                    for h in best:
+                        hh = h
+                        k = 1
+                        while hh in seen:
+                            k += 1
+                            hh = f"{h}_{k}"
+                        uniq.append(hh)
+                        seen.add(hh)
+                    df = pd.DataFrame([uniq], columns=uniq)
+                # Do not mutate Camelot DataFrame; record inferred headers as metadata only
+                table["header_inferred"] = best
+                table["header_provenance"] = "spatial"
+                return True
+        except Exception:
+            return False
+
+    def _llm_split_single_col_header(table: Dict[str, Any]) -> bool:
+        """Use SciLLM to split a single-cell header into multiple column names.
+        Returns True if table was updated.
+        """
+        try:
+            if os.getenv("STAGE05_LLM_SPLIT_1COL", "1").lower() not in {"1","true","yes","y"}:
+                return False
+            if not quick_scillm_check():
+                return False
+            pm = table.get("pandas_metrics") or {}
+            shp = pm.get("shape") or [0, 0]
+            rows = int(shp[0] or 0); cols = int(shp[1] or 0)
+            if rows != 1 or cols != 1:
+                return False
+            # Extract the lone cell text
+            src_df = pd.DataFrame(table.get("pandas_df") or [])
+            if src_df.empty:
+                return False
+            cell_text = str(list(src_df.iloc[0].values)[0]).strip()
+            if not cell_text:
+                return False
+            import asyncio as _asyncio
+            async def _call():
+                router = get_text_router()
+                system = (
+                    "You split a single table header cell into distinct column names.\n"
+                    "Return strict JSON: {\"columns\":[\"...\"]}.\n"
+                    "Do not invent domain-specific terms beyond the text."
+                )
+                user = json.dumps({"header_text": cell_text}, ensure_ascii=False)
+                resp = await router.acompletion(
+                    model=os.getenv("CHUTES_TEXT_MODEL", "chutes/text"),
+                    messages=[
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": [{"type": "text", "text": user}]},
+                    ],
+                    response_format={"type": "json_object"},
+                    temperature=0,
+                    max_tokens=256,
+                    timeout=int(os.getenv("SC_TIMEOUT_STAGE_05_SPLIT_1COL", "20")),
+                )
+                return resp
+            resp = _asyncio.run(_call())
+            content = getattr(resp, "choices", [{}])[0].get("message", {}).get("content", "")
+            cols_out: list[str] = []
+            try:
+                data = json.loads(content) if isinstance(content, str) else content
+                cols_out = [sanitize_cell(c) for c in (data.get("columns") or []) if c]
+            except Exception:
+                cols_out = []
+            if len(cols_out) < 3:
+                return False
+            # Update table with the split columns
+            try:
+                df = pd.DataFrame([cols_out], columns=cols_out)
+            except Exception:
+                df = pd.DataFrame([cols_out])
+            # Do not mutate Camelot DataFrame; record inferred headers as metadata only
+            table["header_inferred"] = cols_out
+            table["header_provenance"] = "llm"
+            table["llm_assist"] = {"model": os.getenv("CHUTES_TEXT_MODEL", "chutes/text"), "patch": {"split_1col": True}}
+            log_timing(
+                "05_table_extractor",
+                {"attempt": "llm_split_1col", "outcome": "ok", "table_hash": _stable_table_hash(table)},
+                stage_dir=stage_output_dir,
+            )
+            return True
+        except Exception as e:
+            log_timing(
+                "05_table_extractor",
+                {"attempt": "llm_split_1col", "outcome": "error", "error": str(e)},
+                stage_dir=stage_output_dir,
+            )
+            return False
+
+    # Apply reconstruction, then LLM split for any 1-column header-only table
+    repaired = 0
+    for t in all_tables:
+        fixed = _reconstruct_single_col_header(t)
+        if not fixed:
+            fixed = _llm_split_single_col_header(t)
+        if fixed:
+            repaired += 1
+    if repaired:
+        try:
+            diagnostics.append(make_event("05_table_extractor", "info", "single_col_repairs", f"Repaired {repaired} tables", {"count": repaired}))
+        except Exception:
+            pass
+
     # --- Heuristic merge: stitch header-only tables with body tables across pages
     def is_header_row_table(t: Dict[str, Any]) -> bool:
         """Keyword-agnostic heuristic for header-only tables.
@@ -1378,7 +1580,63 @@ def run(
             if pick:
                 t["section_id"] = pick["id"]
 
-    # Heuristic filtering: accept solid multi-row tables; drop header-only/sparse artifacts
+    # Heuristic filtering: accept solid multi-row tables; allow header-only tables with reconstructed multi-columns
+    # Optional LLM confirmation for low-confidence/empty DataFrames
+    def _llm_confirm_is_table(t: Dict[str, Any]) -> bool | None:
+        if os.getenv("STAGE05_LLM_CONFIRM_LOWCONF", "1").lower() not in {"1","true","yes","y"}:
+            return None
+        if not quick_scillm_check():
+            return None
+        pm = t.get("pandas_metrics") or {}
+        cm = t.get("camelot_metrics") or {}
+        src = t.get("pandas_df") or []
+        rows_preview: list[list[str]] = []
+        if isinstance(src, list):
+            for r in src[:3]:
+                if isinstance(r, dict):
+                    rows_preview.append([str(v) for v in list(r.values())[:8]])
+                elif isinstance(r, list):
+                    rows_preview.append([str(v) for v in r[:8]])
+        payload = {
+            "rows_preview": rows_preview,
+            "metrics": {
+                "shape": pm.get("shape"),
+                "density": pm.get("data_density"),
+                "camelot_accuracy": cm.get("accuracy"),
+                "fragmentation": t.get("fragmentation_score"),
+            },
+        }
+        import asyncio as _asyncio
+        async def _call():
+            router = get_text_router()
+            import json as _json
+            system = (
+                "You are a strict classifier for tabular vs non-tabular content.\n"
+                "Return ONLY JSON: {\"is_table\": true|false}.\n"
+                "If content looks like prose or lacks column structure, return false."
+            )
+            return await router.acompletion(
+                model=os.getenv("CHUTES_TEXT_MODEL", "chutes/text"),
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": [{"type": "text", "text": _json.dumps(payload, ensure_ascii=False)}]},
+                ],
+                response_format={"type": "json_object"},
+                temperature=0,
+                max_tokens=40,
+                timeout=int(os.getenv("SC_TIMEOUT_STAGE_05_CONFIRM", "12")),
+            )
+        try:
+            resp = _asyncio.run(_call())
+            content = getattr(resp, "choices", [{}])[0].get("message", {}).get("content", "")
+            import json as _json
+            data = _json.loads(content) if isinstance(content, str) else content
+            val = data.get("is_table")
+            return bool(val) if isinstance(val, bool) else None
+        except Exception:
+            return None
+
+    demoted_llm: list[dict[str, Any]] = []
     filtered_tables = []
     for t in all_tables:
         metrics = t.get("pandas_metrics", {}) or {}
@@ -1386,8 +1644,39 @@ def run(
         rows = int(shape[0]) if isinstance(shape, (list, tuple)) and shape else 0
         cols = int(shape[1]) if isinstance(shape, (list, tuple)) and shape else 0
         density = float(metrics.get("data_density", 0.0) or 0.0)
-        # Accept dense multi-row tables only (Stage 07 handles merging logic, not Stage 05)
-        if (rows >= TABLE_FILTER_MIN_ROWS) or (rows >= 2 and density >= TABLE_FILTER_MIN_DENSITY):
+        try:
+            acc = float((t.get("camelot_metrics") or {}).get("accuracy") or 0.0)
+        except Exception:
+            acc = 0.0
+
+        # If Camelot couldn't form a DF or confidence is low, confirm via LLM (live only)
+        is_empty_df = (rows == 0 or cols == 0)
+        very_sparse = (rows * cols <= 3 and density < 0.2)
+        low_acc = (acc and acc < float(os.getenv("STAGE05_CAMELOT_ACC_MIN", "60")))
+        if is_empty_df or very_sparse or low_acc:
+            verdict = _llm_confirm_is_table(t)
+            if verdict is False:
+                try:
+                    demoted_llm.append({
+                        "page_idx": int(t.get("page_index", 0) or 0),
+                        "bbox": t.get("bbox") or [],
+                        "text": _extract_table_text_for_heuristics(t),
+                        "reason": "llm_not_table",
+                    })
+                except Exception:
+                    pass
+                try:
+                    diagnostics.append(
+                        make_event("05_table_extractor", "info", "llm_demote_not_table", "Demoted by LLM confirm", {
+                            "rows": rows, "cols": cols, "density": density, "acc": acc
+                        })
+                    )
+                except Exception:
+                    pass
+                continue
+        # Accept dense multi-row tables; additionally, retain 1-row header-only tables when they have >=3 columns
+        # so downstream (06b/07/09a) can merge them with the next-page body.
+        if (rows >= TABLE_FILTER_MIN_ROWS) or (rows >= 2 and density >= TABLE_FILTER_MIN_DENSITY) or (rows == 1 and cols >= 3):
             filtered_tables.append(t)
         else:
             try:
@@ -1636,7 +1925,23 @@ def run(
         "resources": resources,
         "metrics": metrics_payload,
     }
+    # Optional: LLM header assist (metadata-only). Enable with TABLE_LLM_ASSIST=1.
+    try:
+        if os.getenv("TABLE_LLM_ASSIST", "0").lower() in ("1","true","yes","y"):
+            _attach_llm_assist_headers(result, stage_output_dir)
+    except Exception as _assist_e:
+        diagnostics.append(
+            make_event(
+                "05_table_extractor",
+                "warning",
+                "llm_assist_failed",
+                str(_assist_e),
+                {},
+            )
+        )
     # Emit demoted text blocks so Stage 04 can merge heuristics
+    if demoted_llm:
+        result.setdefault("demoted_text_blocks", []).extend(demoted_llm)
     _demote_table_headers_to_text(result)
     _demote_sentence_like_single_row_tables(result)
 

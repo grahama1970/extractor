@@ -78,6 +78,7 @@ help:
 	@echo "  make smokes-python  # run Python-only smokes with PYTHONPATH=src"
 	@echo "  make quick-pipeline # run 01→09 & 14 with gold checks; skip heavy 10–11"
 	@echo "  make pipeline-full  # run all stages (01→14) end-to-end (requires keys/DB)"
+	@echo "  make ci-live        # self-hosted: run live LLM pipeline + verify (OUT=data/results/pipeline_live)"
 	@echo "  make smokes-pipeline-offline  # run offline pipeline smokes (no DB/LLM)"
 	@echo "  make run-all-offline         # run run_all offline on fixture PDF"
 	@echo "  make smokes-pipeline-db      # run DB-backed Stage 10→12 smokes (Arango required)"
@@ -514,6 +515,41 @@ pipeline-full:
 	PYTHONPATH=src $(PY) -m extractor.pipeline \
 		--pdf data/input/pipeline/BHT_CV32A65X_marked.pdf \
 		--out data/results/pipeline
+
+# --- Live CI helper (self-hosted) ---
+# Runs LLM stages on the BHT sample (noannots) and verifies outputs.
+# Expects CHUTES_* env set (API base/key/models); skips DB export.
+LIVE_PDF ?= data/input/pipeline/BHT_CV32A65X_with_requirements_noannots.pdf
+LIVE_OUT ?= data/results/pipeline_live
+
+.PHONY: ci-live
+ci-live:
+	. .venv/bin/activate 2>/dev/null || true; \
+		python -m pip install --upgrade pip >/dev/null 2>&1 || true; \
+		python -m pip install -e .[dev]; \
+		set -a; test -f ./.env && . ./.env || true; set +a; \
+		export PYTHONPATH=$$(pwd)/src; \
+		TABLE_LLM_ASSIST=1 \
+		python -m extractor.pipeline.run_pipeline \
+		  --pdf $(LIVE_PDF) \
+		  --out $(LIVE_OUT) \
+		  --stop-on-fail \
+		  --stage-timeout $${PIPELINE_STAGE_TIMEOUT:-900} \
+		  --skip-export; \
+		python scripts/ci/verify_live_pipeline.py --out $(LIVE_OUT)
+
+.PHONY: ci-det
+ci-det:
+	. .venv/bin/activate 2>/dev/null || true; \
+		python -m pip install --upgrade pip >/dev/null 2>&1 || true; \
+		python -m pip install -e .[dev]; \
+		export PYTHONPATH=$$(pwd)/src; \
+		STAGE05_LLM_SPLIT_1COL=0 STAGE06B_EMIT_MERGE_HINTS=0 \
+		python -m extractor.pipeline.run_pipeline \
+		  --pdf data/input/pipeline/BHT_CV32A65X_with_requirements_noannots.pdf \
+		  --out data/results/pipeline_det \
+		  --summary-only --skip-fig-descriptions --annotate-pdf --stop-on-fail; \
+		pytest -q tests/contract/test_contract_bht_det.py
 
 # --- Bundles for LLM code reviews ---
 BUNDLE_ROOT ?= prototypes/tabbed

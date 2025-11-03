@@ -1,0 +1,49 @@
+name: Offline Pipeline Annotator CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  test-offline-annotator:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install system deps (camelot/ghostscript)
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y ghostscript poppler-utils
+
+      - name: Install minimal Python deps for offline pipeline
+        run: |
+          python -m pip install --upgrade pip
+          pip install \
+            pytest==8.* \
+            pytest-asyncio==0.24.* \
+            loguru>=0.7,<0.8 \
+            python-dotenv>=1,<2 \
+            rich>=13,<14 \
+            numpy \
+            pandas \
+            lxml \
+            beautifulsoup4 \
+            pdfplumber \
+            pymupdf \
+            camelot-py \
+            opencv-python-headless
+
+      - name: Run tests (offline annotator)
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src
+        run: |
+          pytest -q tests/test_pipeline_annotator_offline.py
+

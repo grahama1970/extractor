@@ -805,29 +805,41 @@ def _usage_get(u: Any, key: str):
         return None
 
 def _build_table_block_from_stage05(table: dict[str, Any]) -> dict[str, Any] | None:
-    """Return a canonical table block derived from Stage 05 output."""
+    """Return a canonical table block derived from Stage 05 output.
+
+    Uses Camelot's original column order for row extraction, but prefers
+    Stage 05 `header_inferred` for display column names when present.
+    """
     pm = table.get("pandas_metrics") or {}
-    orig_columns = pm.get("columns") or []
-    columns = [_sanitize_table_cell(c) for c in orig_columns]
+    # Source (for indexing): original Camelot columns
+    orig_keys: list[str] = [str(c) for c in (pm.get("columns") or [])]
+    # Display: prefer inferred headers when available and aligned in length
+    inferred = table.get("header_inferred")
+    display_cols: list[str] = []
+    if isinstance(inferred, list) and inferred and len(inferred) == len(orig_keys):
+        display_cols = [_sanitize_table_cell(c) for c in inferred]
+    else:
+        display_cols = [_sanitize_table_cell(c) for c in orig_keys]
+
     rows_raw = table.get("pandas_df") or []
     rows: list[list[Any]] = []
-    if columns and isinstance(rows_raw, list):
+    if display_cols and isinstance(rows_raw, list):
         for row in rows_raw:
             if isinstance(row, dict):
                 rows.append([
-                    _sanitize_table_cell(row.get(orig, ""))
-                    for orig, _ in zip(orig_columns, columns)
+                    _sanitize_table_cell(row.get(k, ""))
+                    for k in orig_keys[: len(display_cols)]
                 ])
             elif isinstance(row, list):
-                padded = [_sanitize_table_cell(v) for v in list(row)[: len(columns)]]
-                if len(padded) < len(columns):
-                    padded.extend([None] * (len(columns) - len(padded)))
+                padded = [_sanitize_table_cell(v) for v in list(row)[: len(display_cols)]]
+                if len(padded) < len(display_cols):
+                    padded.extend([None] * (len(display_cols) - len(padded)))
                 rows.append(padded)
     rows = [
         ["" if cell is None else cell for cell in r]
         for r in rows
     ]
-    if not columns and not rows:
+    if not display_cols and not rows:
         return None
 
     confidence: dict[str, Any] = {
@@ -843,15 +855,25 @@ def _build_table_block_from_stage05(table: dict[str, Any]) -> dict[str, Any] | N
     except Exception:
         confidence["density"] = None
 
+    # Compute header_norm and logical_table_id for grouping
+    def _norm_hdr(h: str) -> str:
+        s = " ".join(str(h or "").strip().lower().split())
+        return s.replace(" ", "_")
+    header_norm = "|".join([_norm_hdr(h) for h in display_cols]) if display_cols else ""
+    import hashlib as _hl
+    logical_table_id = f"lt_{_hl.sha1(header_norm.encode('utf-8')).hexdigest()[:10]}" if header_norm else None
+
     block = {
         "type": "table",
         "title": None,
-        "columns": columns,
+        "columns": display_cols,
         "rows": rows,
         "confidence": confidence,
         "markdown": None,
         "markdown_provenance": None,
         "image_refs": [],
+        "header_norm": header_norm,
+        "logical_table_id": logical_table_id,
         "source": {
             "table_indices": [table.get("table_index")] if table.get("table_index") is not None else [],
             "page_indices": [table.get("page_index")] if table.get("page_index") is not None else [],
@@ -3074,24 +3096,26 @@ def run(
     _ALLOW_IMAGES = os.getenv("STAGE07_ALLOW_IMAGES", "0").lower() in ("1", "true", "yes", "y")
     include_images = bool(include_images and _ALLOW_IMAGES)
     global LLM_MODEL
-    try:
-        # Choose model based on whether images are included
-        LLM_MODEL = get_vlm_model() if include_images else get_text_model()
-    except Exception as _e:
-        console.print(f"[red]Stage 07 model selection failed: {_e}[/red]")
-        raise RuntimeError("Stage 07 model selection failed")
-    # Early sanity: scillm/Chutes must be reachable to avoid hangs
-    try:
-        from extractor.pipeline.utils.preflight import scillm_quick_check
+    # Offline deterministic runs should not require model selection or preflight
+    if not summary_only:
+        try:
+            # Choose model based on whether images are included
+            LLM_MODEL = get_vlm_model() if include_images else get_text_model()
+        except Exception as _e:
+            console.print(f"[red]Stage 07 model selection failed: {_e}[/red]")
+            raise RuntimeError("Stage 07 model selection failed")
+        # Early sanity: scillm/Chutes must be reachable to avoid hangs
+        try:
+            from extractor.pipeline.utils.preflight import scillm_quick_check
 
-        ok, reason = scillm_quick_check(timeout=3.0)
-        if not ok:
-            console.print(
-                f"[red]Stage 07 preflight failed: {reason}. Set CHUTES_API_BASE/CHUTES_API_KEY or use --summary-only.[/red]"
-            )
-            raise RuntimeError("Stage 07 preflight failed")
-    except Exception as _e:
-        raise RuntimeError(f"Stage 07 preflight error: {_e}")
+            ok, reason = scillm_quick_check(timeout=3.0)
+            if not ok:
+                console.print(
+                    f"[red]Stage 07 preflight failed: {reason}. Set CHUTES_API_BASE/CHUTES_API_KEY or use --summary-only.[/red]"
+                )
+                raise RuntimeError("Stage 07 preflight failed")
+        except Exception as _e:
+            raise RuntimeError(f"Stage 07 preflight error: {_e}")
     # Configure a stage-specific log file for debugging
     try:
         stage_dir = output_dir / "07_reflow_section"
@@ -3376,6 +3400,34 @@ def run(
 
         processed_sections = asyncio.run(run_tasks_first())
     logger.debug(f"processed_sections_count={len(processed_sections)}")
+
+    # Consolidate sections that are obvious continuations (e.g., titles ending with '(continued)')
+    try:
+        if os.getenv("STAGE07_CONSOLIDATE_CONTINUED", "1").lower() in ("1","true","yes","y") and processed_sections:
+            consolidated: list[dict[str, Any]] = []
+            prev: dict[str, Any] | None = None
+            for sec in processed_sections:
+                title = str(sec.get("title") or "").strip()
+                if prev and title and title.lower().endswith("(continued)"):
+                    # Merge blocks/text into previous section
+                    pjson = prev.get("reflowed_json") or {}
+                    sjson = sec.get("reflowed_json") or {}
+                    pblocks = (pjson.get("blocks") or []) if isinstance(pjson, dict) else []
+                    sblocks = (sjson.get("blocks") or []) if isinstance(sjson, dict) else []
+                    if isinstance(prev.get("reflowed_json"), dict):
+                        prev["reflowed_json"]["blocks"] = (pblocks + sblocks)
+                    else:
+                        prev["reflowed_json"] = {"blocks": sblocks}
+                    # Optionally concatenate text placeholders
+                    if isinstance(prev.get("reflowed_text"), str) and isinstance(sec.get("reflowed_text"), str):
+                        prev["reflowed_text"] = (prev["reflowed_text"] + "\n" + sec["reflowed_text"]).strip()
+                    continue
+                consolidated.append(sec)
+                prev = sec
+            processed_sections = consolidated
+            logger.debug(f"processed_sections_consolidated={len(processed_sections)}")
+    except Exception as _e:
+        logger.debug(f"section consolidation skipped due to error: {_e}")
 
     # --- Final Output ---
     # Attach resource samples

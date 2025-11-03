@@ -392,7 +392,35 @@ def _build_section_sketch(
         bbox = t.get("bbox") or [0, 0, 0, 0]
         pm = t.get("pandas_metrics") or {}
         camel = t.get("camelot_metrics") or {}
-        hdr = t.get("header") or t.get("columns") or pm.get("columns") or []
+        # Prefer Stage 05 inferred headers (metadata), fall back to Camelot columns/metrics.
+        # If still empty/generic and table looks like a single-row header, derive header from the first DF row values.
+        hdr = (
+            t.get("header_inferred")
+            or t.get("header")
+            or t.get("columns")
+            or pm.get("columns")
+            or []
+        )
+        try:
+            shp_local = pm.get("shape") or [0, 0]
+            rows_local = int(shp_local[0] or 0)
+            # Generic header if all entries look like digits (e.g., '0','1','2',..)
+            hdr_is_generic = bool(hdr) and all(str(h).strip().isdigit() for h in hdr)
+            if (not hdr or hdr_is_generic) and rows_local == 1:
+                df0 = t.get("pandas_df") or []
+                if isinstance(df0, list) and df0:
+                    row0 = df0[0]
+                    if isinstance(row0, dict):
+                        cand = [str(v).strip() for v in list(row0.values())]
+                    elif isinstance(row0, list):
+                        cand = [str(v).strip() for v in row0]
+                    else:
+                        cand = []
+                    # Accept candidate header if it has 3+ short tokens (typical of column names)
+                    if len([c for c in cand if c]) >= 3:
+                        hdr = cand
+        except Exception:
+            pass
         hdr_text = " | ".join([str(h) for h in hdr])
         # Normalize header string for logical grouping
         def _norm_hdr(h: str) -> str:
@@ -1181,6 +1209,22 @@ def run(input_path: str, output_path: str, **kwargs) -> dict[str, Any]:
             grid=GRID,
         )
 
+    # Keep a flat list of all Stage 05 tables for fallback association
+    all_tables: list[dict[str, Any]] = []
+    try:
+        tpath2 = base / "05_table_extractor" / "json_output" / "05_tables.json"
+        if tpath2.exists():
+            all_tables = json.loads(tpath2.read_text(encoding="utf-8")).get("tables") or []
+    except Exception:
+        all_tables = []
+
+    def _rect_intersects(a: list[float], b: list[float]) -> bool:
+        try:
+            ax0, ay0, ax1, ay1 = map(float, a); bx0, by0, bx1, by1 = map(float, b)
+            return not (ax1 <= bx0 or bx1 <= ax0 or ay1 <= by0 or by1 <= ay0)
+        except Exception:
+            return False
+
     sketches: dict[str, Any] = {"sections": {}}
     for sec in sections:
         sid = str(sec.get("id"))
@@ -1189,6 +1233,29 @@ def run(input_path: str, output_path: str, **kwargs) -> dict[str, Any]:
         if ALLOW_VLM:
             sketch = _build_section_sketch_llm(sec, base, grid=GRID)
         if not sketch:
+            # Ensure we always pass tables into the sketcher: if no section_id matches,
+            # fall back to page-range + bbox overlap association.
+            _tables_for_sec = list(tabs_by_sec.get(sid, []))
+            if not _tables_for_sec and all_tables:
+                try:
+                    ps = int(sec.get("page_start", 0)); pe = int(sec.get("page_end", ps))
+                except Exception:
+                    ps, pe = 0, 0
+                sb = sec.get("bbox") or []
+                for t in all_tables:
+                    try:
+                        tp = int(t.get("page_index", 0) or 0)
+                    except Exception:
+                        tp = 0
+                    if tp < ps or tp > pe:
+                        continue
+                    tb = t.get("bbox") or []
+                    if sb and tb and _rect_intersects(sb, tb):
+                        _tables_for_sec.append(t)
+                # As a last resort, if still empty but within the same pages, allow loose include
+                if not _tables_for_sec:
+                    _tables_for_sec = [t for t in all_tables if ps <= int(t.get("page_index", 0) or 0) <= pe]
+
             sketch = _build_section_sketch(
                 sec,
                 GRID,
@@ -1198,7 +1265,7 @@ def run(input_path: str, output_path: str, **kwargs) -> dict[str, Any]:
                 place_floats=kwargs.get("place_floats", "inline") if isinstance(kwargs.get("place_floats", "inline"), str) else "inline",
                 include_flow=True,
                 page_layout=page_layout,
-                tables_for_section=tabs_by_sec.get(sid, []),
+                tables_for_section=_tables_for_sec,
                 figures_for_section=figs_by_sec.get(sid, []),
                 emit_merge_hints=EMIT_MERGE_HINTS,
             )

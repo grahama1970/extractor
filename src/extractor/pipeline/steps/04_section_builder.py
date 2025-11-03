@@ -507,6 +507,32 @@ def build_sections_from_blocks(
     if current_section:
         sections.append(current_section)
 
+    # Post-process: merge obvious continuation and promo subheads into previous section
+    try:
+        merged: list[Dict[str, Any]] = []
+        for sec in sections:
+            title = str(sec.get("title") or "").strip()
+            # Merge titles marked as continued into previous
+            if merged and title and ("(continued)" in title.lower() or title.lower().endswith("- continued")):
+                prev = merged[-1]
+                # Extend page_end and bbox
+                prev["page_end"] = max(prev.get("page_end", 0), sec.get("page_end", prev.get("page_end", 0)))
+                # Move blocks across
+                prev["blocks"].extend(sec.get("blocks", []))
+                prev["metadata"]["block_count"] = prev["metadata"].get("block_count", 0) + len(sec.get("blocks", []))
+                continue
+            # Demote headings that end with a colon or semicolon by policy (never sections)
+            if merged and (title.endswith(":") or title.endswith(";")):
+                prev = merged[-1]
+                prev["blocks"].extend(sec.get("blocks", []))
+                prev["metadata"]["block_count"] = prev["metadata"].get("block_count", 0) + len(sec.get("blocks", []))
+                prev["page_end"] = max(prev.get("page_end", 0), sec.get("page_end", prev.get("page_end", 0)))
+                continue
+            merged.append(sec)
+        sections = merged
+    except Exception:
+        pass
+
     for i, section in enumerate(sections):
         section["id"] = f"section_{i}"
         section["parent_id"] = find_parent_section_advanced(sections[:i], section["level"])

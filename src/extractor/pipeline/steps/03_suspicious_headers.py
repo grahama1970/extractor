@@ -1231,6 +1231,27 @@ async def process_pdf_pipeline(config: Config):
 
     # Flatten the pages structure back to a simple list of blocks
     final_blocks = [block for page in marker_data["pages"] for block in page["blocks"]]
+    # Policy guardrail: demote any remaining SectionHeader whose text ends with ':' or ';'
+    # and any title containing '(continued)' or '- Continued'.
+    try:
+        import re as _re
+        for b in final_blocks:
+            bt = b.get("type") or b.get("block_type")
+            if bt != "SectionHeader":
+                continue
+            txt = (b.get("text") or b.get("content") or "").strip()
+            low = txt.lower()
+            if txt.endswith(":") or txt.endswith(";") or "(continued" in low or "- continued" in low:
+                # Demote to Text
+                b["block_type"] = "Text"
+                b["type"] = "Text"
+                # Clear any prior header flags
+                if b.get("suspicious_header"):
+                    b["suspicious_header"] = False
+                b.setdefault("llm_verification", {})
+                b["llm_verification"]["result"] = {"is_header": False, "reasoning": "policy_auto_reject_colon_semicolon_or_continued"}
+    except Exception:
+        pass
     marker_data["blocks"] = final_blocks
     del marker_data["pages"]
 

@@ -1,0 +1,49 @@
+name: Live Pipeline (Self-Hosted)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 7 * * *'
+
+jobs:
+  live-pipeline:
+    runs-on: self-hosted
+    env:
+      # Optional: pick up from repository/org secrets if you prefer
+      CHUTES_API_BASE: ${{ secrets.CHUTES_API_BASE }}
+      CHUTES_API_KEY: ${{ secrets.CHUTES_API_KEY }}
+      CHUTES_TEXT_MODEL: ${{ secrets.CHUTES_TEXT_MODEL }}
+      CHUTES_VLM_MODEL: ${{ secrets.CHUTES_VLM_MODEL }}
+      PIPELINE_STAGE_TIMEOUT: 900
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: System deps (ghostscript/poppler)
+        run: |
+          if command -v apt-get >/dev/null 2>&1; then \
+            sudo apt-get update -y && \
+            sudo apt-get install -y ghostscript poppler-utils; \
+          fi
+
+      - name: Install project
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[dev]
+
+      - name: Run live pipeline + verify
+        run: |
+          make ci-live
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-live
+          path: |
+            data/results/pipeline_live/**
+
