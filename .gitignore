@@ -285,6 +285,7 @@ deprecated/
 *.json
 !package.json
 !tsconfig.json
+!config/invariants/*.json
 !pyproject.toml
 
 # Ignore additional env variants

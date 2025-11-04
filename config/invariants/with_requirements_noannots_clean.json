@@ -1,0 +1,107 @@
+{
+  "version": 1,
+  "defaults": {
+    "out_dir": "data/results/tmp_invariants"
+  },
+  "checks": [
+    {
+      "id": "stage04_sections_eq3",
+      "path": "04_section_builder/json_output/04_sections.json",
+      "json_pointer": "/section_count",
+      "metric": "value",
+      "op": "==",
+      "value": 3,
+      "why": "Clean BHT PDF emits three top-level sections"
+    },
+    {
+      "id": "stage04_title_0_exact",
+      "path": "04_section_builder/json_output/04_sections.json",
+      "json_pointer": "/sections/0/title",
+      "metric": "text",
+      "op": "==",
+      "value": "4.1.5.4. BHT (Branch History Table) submodule",
+      "why": "First section title must match gold"
+    },
+    {
+      "id": "stage04_title_1_exact",
+      "path": "04_section_builder/json_output/04_sections.json",
+      "json_pointer": "/sections/1/title",
+      "metric": "text",
+      "op": "==",
+      "value": "4.1.5.4.1. REQUIREMENTS (Simulated)",
+      "why": "Second section title must match gold"
+    },
+    {
+      "id": "stage04_title_2_exact",
+      "path": "04_section_builder/json_output/04_sections.json",
+      "json_pointer": "/sections/2/title",
+      "metric": "text",
+      "op": "==",
+      "value": "4.1.5. TABLE MERGE SCENARIOS (Simulated)",
+      "why": "Third section title must match gold"
+    },
+    {
+      "id": "stage05_tables_ge5",
+      "path": "05_table_extractor/json_output/05_tables.json",
+      "json_pointer": "/tables",
+      "metric": "len",
+      "op": ">=",
+      "value": 5,
+      "why": "Raw table fragments must include header/body parts"
+    },
+    {
+      "id": "stage06_figures_eq1",
+      "path": "06_figure_extractor/json_output/06_figures.json",
+      "json_pointer": "/figures",
+      "metric": "len",
+      "op": "==",
+      "value": 1,
+      "why": "Clean PDF contains exactly one figure"
+    },
+    {
+      "id": "stage07_reflowed_sections_eq3",
+      "path": "07_reflow_section/json_output/07_reflowed.json",
+      "json_pointer": "/section_count",
+      "metric": "value",
+      "op": "==",
+      "value": 3,
+      "why": "Reflow must keep three sections"
+    },
+    {
+      "id": "stage07_merged_tables_eq1",
+      "path": "07_reflow_section/json_output/07_reflowed.json",
+      "json_pointer": "/merged_tables",
+      "metric": "len_or_zero",
+      "op": "==",
+      "value": 1,
+      "why": "Pages 0–1 tables must appear as a single logical merge"
+    },
+    {
+      "id": "stage07r_requirements_eq36",
+      "path": "07_requirements_miner/json_output/07_requirements.json",
+      "json_pointer": "/requirements",
+      "metric": "len",
+      "op": "==",
+      "value": 36,
+      "why": "Requirements miner output is deterministic for the clean PDF"
+    },
+    {
+      "id": "stage07r_conditional_eq2",
+      "path": "07_requirements_miner/json_output/07_requirements_summary.json",
+      "json_pointer": "/with_condition",
+      "metric": "value",
+      "op": "==",
+      "value": 2,
+      "why": "Exactly two requirements contain strict conditionals"
+    },
+    {
+      "id": "stage09a_overlays_counts",
+      "path": "09a_pdf_annotator/json_output/annotations.json",
+      "json_pointer": "/overlays",
+      "metric": "len",
+      "op": "==",
+      "value": 53,
+      "why": "Annotated PDF must render the expected overlay count"
+    }
+  ]
+}
