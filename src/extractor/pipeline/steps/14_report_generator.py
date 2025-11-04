@@ -769,6 +769,13 @@ if __name__ == "__main__":
         pass
     import sys
     argv = sys.argv[1:]
+    if argv and argv[0] == "sanity":
+        from extractor.pipeline.steps.sanity_helper import sanity_run
+        # Produce 07 (and earlier) to populate minimal report inputs
+        sanity_run("07")
+        out, _ = run_report(Path("data/results/pipeline"))
+        print(str(out))
+        sys.exit(0)
     if not argv or argv[0] in ("-h", "--help"):
         print(
             "Usage: python -m extractor.pipeline.steps.14_report_generator [RESULTS_DIR] | --bundle BUNDLE_JSON [OUT_DIR]",

@@ -413,6 +413,11 @@ if __name__ == "__main__":
         pass
     import sys
     argv = sys.argv[1:]
+    if argv and argv[0] == "sanity":
+        from extractor.pipeline.steps.sanity_helper import sanity_run
+        p = sanity_run("06")
+        print(str(p))
+        sys.exit(0)
     if not argv or argv[0] in ("-h", "--help"):
         print(
             "Usage: python -m extractor.pipeline.steps.06_figure_extractor --bundle BUNDLE [OUT_DIR] [--skip-descriptions]\n"

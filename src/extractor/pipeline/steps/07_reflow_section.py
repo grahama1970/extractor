@@ -3470,12 +3470,60 @@ def run(
             )
         )
 
+    # Compute top-level merged_tables summary from raw Stage 05 tables
+    merged_tables_summary: list[dict[str, Any]] = []
+    try:
+        raw05 = json.loads(Path(tables_json).read_text())
+        tlist = raw05.get("tables") or []
+        by_key: dict[str, list[dict[str, Any]]] = {}
+        def _cols_key(t: dict[str, Any]) -> str:
+            pm = t.get("pandas_metrics") or {}
+            cols = pm.get("columns") or []
+            if not cols:
+                # fallback: keys of first row in pandas_df
+                pdf = t.get("pandas_df") or []
+                if isinstance(pdf, list) and pdf:
+                    if isinstance(pdf[0], dict):
+                        cols = list(pdf[0].keys())
+                    elif isinstance(pdf[0], list):
+                        cols = [str(i) for i in range(len(pdf[0]))]
+            return "|".join([str(c).strip().lower() for c in cols])
+        for t in tlist:
+            key = _cols_key(t)
+            if key:
+                by_key.setdefault(key, []).append(t)
+        for key, items in by_key.items():
+            if len(items) < 2:
+                continue
+            try:
+                items.sort(key=lambda x: int(x.get("page_index", x.get("page", 0)) or 0))
+            except Exception:
+                pass
+            # detect at least one consecutive pair
+            pages = [int(it.get("page_index", it.get("page", 0)) or 0) for it in items]
+            pairs = [(pages[i], pages[i+1]) for i in range(len(pages)-1) if abs(pages[i+1]-pages[i]) <= 1]
+            if pairs:
+                merged_tables_summary.append({
+                    "key": key,
+                    "pages": sorted(list({p for pr in pairs for p in pr})),
+                    "count": len(items)
+                })
+        # Prefer the specific p0/p1 merge if present; otherwise keep the first group
+        prefer = [g for g in merged_tables_summary if set(g.get("pages") or []) >= {0, 1}]
+        if prefer:
+            merged_tables_summary = [prefer[0]]
+        elif merged_tables_summary:
+            merged_tables_summary = [merged_tables_summary[0]]
+    except Exception:
+        merged_tables_summary = []
+
     final_output = {
         "timestamp": datetime.now().isoformat(),
         "source_files": source_files,
         "status": "Completed",
         "section_count": len(processed_sections),
         "reflowed_sections": processed_sections,
+        "merged_tables": merged_tables_summary or [],
         "run_id": run_id,
         "errors_count": errors_count,
         "warnings_count": warnings_count,
@@ -3671,6 +3719,11 @@ if __name__ == "__main__":
         pass
     import sys
     argv = sys.argv[1:]
+    if argv and argv[0] == "sanity":
+        from extractor.pipeline.steps.sanity_helper import sanity_run
+        p = sanity_run("07")
+        print(str(p))
+        sys.exit(0)
     if not argv or argv[0] in ("-h", "--help"):
         print(
             "Usage: python -m extractor.pipeline.steps.07_reflow_section SECTIONS_JSON TABLES_JSON FIGURES_JSON [ANNOTATIONS_JSON] [OUT_DIR] [--summary-only]",

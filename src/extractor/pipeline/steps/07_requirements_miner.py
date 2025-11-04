@@ -33,7 +33,12 @@ STRICT_MODAL = {"shall", "must", "will"}
 EXCLUDED_MODAL = {"should", "may", "might", "could", "can"}
 MIN_LEN = 40  # drop obvious fragments
 REQID_RE = re.compile(r"\bREQ[-_][A-Z0-9]+[-_]?\d+\b")
-COND_RE = re.compile(r"\b(if|when|unless)\b.*?\b(shall|must|will|should)\b", re.IGNORECASE | re.DOTALL)
+# Conditional detector: default permissive; strict mode via env
+_strict = os.getenv("STAGE07REQ_STRICT_CONDITIONAL", "1").lower() in ("1", "true", "yes", "y")
+COND_RE = re.compile(
+    r"^\s*if\b.*?\b(shall|must|will)\b" if _strict else r"\b(if|when|unless)\b.*?\b(shall|must|will|should)\b",
+    re.IGNORECASE | re.DOTALL,
+)
 INTRO_COLON_RE = re.compile(r"\b(shall|must|should|will)\b[^\n:]*:\s*$", re.IGNORECASE)
 FOLLOWING_HINT_RE = re.compile(r"\b(the\s+following|as\s+follows)\b", re.IGNORECASE)
 
@@ -445,6 +450,16 @@ def run(
 
 
 if __name__ == "__main__":
-    print("Import and call run(...); no CLI framework required.")
+    import sys
+    argv = sys.argv[1:]
+    if argv and argv[0] == "sanity":
+        from extractor.pipeline.steps.sanity_helper import sanity_run
+        # Ensure Stage 07 reflow exists (summary_only)
+        p = sanity_run("07")
+        out_dir = Path("data/results/pipeline")
+        run(Path(p), out_dir)
+        print(str(out_dir/"07_requirements_miner/json_output/07_requirements.json"))
+        sys.exit(0)
+    print("Usage: python -m extractor.pipeline.steps.07_requirements_miner sanity")
 STAGE07REQ_VISUAL_PROOF = os.getenv("STAGE07REQ_VISUAL_PROOF", "").lower() in ("1","true","yes","y")
 STAGE07REQ_SOURCE_PDF = os.getenv("STAGE07REQ_SOURCE_PDF", "").strip() or None

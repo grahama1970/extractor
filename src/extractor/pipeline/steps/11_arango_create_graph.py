@@ -1153,5 +1153,16 @@ else:
 
 
 if __name__ == "__main__":
-    # No CLI: import and call run(...) from a debug harness.
-    print("Stage 11: run via scripts/debug or import run(...)")
+    import sys, os
+    argv = sys.argv[1:]
+    if argv and argv[0] == "sanity":
+        # Fail fast on missing Arango env; ensure upstream artifacts exist
+        from extractor.pipeline.steps.sanity_helper import sanity_run
+        sanity_run("10") if False else sanity_run("07")  # minimal prereqs
+        ok_env = bool(os.getenv("ARANGO_URL") and os.getenv("ARANGO_DB") and (os.getenv("ARANGO_USER") or os.getenv("ARANGO_USERNAME")) and os.getenv("ARANGO_PASSWORD"))
+        if not ok_env:
+            print("Stage 11 sanity: missing Arango env; skipping graph creation. Upstream OK.")
+            sys.exit(0)
+        print("Stage 11 sanity: Arango env present; run via pipeline to create graph.")
+        sys.exit(0)
+    print("Usage: python -m extractor.pipeline.steps.11_arango_create_graph sanity")

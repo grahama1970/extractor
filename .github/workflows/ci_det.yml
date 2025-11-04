@@ -1,0 +1,29 @@
+name: CI (Deterministic Contract)
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'src/extractor/pipeline/steps/**'
+      - 'tests/contract/**'
+      - '.github/workflows/ci_det.yml'
+
+jobs:
+  det-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+            python-version: '3.12'
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[dev]
+      - name: Run deterministic contract test
+        env:
+          STAGE06B_HEADER_PROPAGATION: '1'
+        run: |
+          PYTHONPATH=src \
+          pytest -q tests/contract/test_bht_06b_09a.py

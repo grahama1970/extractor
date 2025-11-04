@@ -57,6 +57,17 @@ def __getattr__(name: str):  # noqa: D401
     # Register module before execution so decorators (e.g., @dataclass) can resolve __module__
     sys.modules[module_name] = module
     spec.loader.exec_module(module)  # type: ignore[assignment]
+    # Inject a build_cli() factory if the step exposes debug_bundle
+    try:
+        if not hasattr(module, "build_cli"):
+            from extractor.pipeline.cli_factories import make_step_app
+
+            def _build_cli(mod=module, a=name):  # late-binding default args
+                return make_step_app(mod, a)
+
+            setattr(module, "build_cli", _build_cli)
+    except Exception:
+        pass
     globals()[name] = module
     if name not in __all__:
         __all__.append(name)

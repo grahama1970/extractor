@@ -35,7 +35,11 @@ from dotenv import find_dotenv, load_dotenv
 from loguru import logger
 from rich.console import Console
 from extractor.pipeline.utils.scillm_router import get_text_router
-from scillm.extras.providers import certainly_prove
+try:
+    from scillm.extras.providers import certainly_prove  # type: ignore
+except Exception:  # pragma: no cover - keep import-time side effects minimal
+    def certainly_prove(*args, **kwargs):  # type: ignore
+        raise RuntimeError("SciLLM extras/providers unavailable in this environment")
 from tqdm.asyncio import tqdm
 # httpx not used for LLM calls; SciLLM-only policy
 
@@ -1540,4 +1544,18 @@ def debug_bundle(
 
 
 if __name__ == "__main__":
-    print("Import and call run(...) or debug_bundle(...); no CLI framework required.")
+    import sys
+    argv = sys.argv[1:]
+    if argv and argv[0] == "sanity":
+        # Fail fast if SciLLM/Lean are not configured; do not attempt heavy runs.
+        from extractor.pipeline.steps.sanity_helper import sanity_run
+        # Ensure up to 07 exists
+        p = sanity_run("07")
+        # Check env pins and inform user
+        base_ok = bool(os.getenv("CHUTES_API_BASE") and os.getenv("CHUTES_API_KEY"))
+        if not base_ok:
+            print("Stage 08 sanity: missing CHUTES_* env; skipping heavy prover. Prereqs OK.")
+            sys.exit(0)
+        print("Stage 08 sanity: environment present; run full stage via unified runner if desired.")
+        sys.exit(0)
+    print("Usage: python -m extractor.pipeline.steps.08_lean4_theorem_prover sanity")

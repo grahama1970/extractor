@@ -900,7 +900,26 @@ if __name__ == "__main__":
             file=sys.stderr,
         )
         sys.exit(2)
-    pdf_path = Path(argv[0])
-    out_dir = Path(argv[1]) if len(argv) > 1 else Path("data/results/pipeline")
+    if argv[0] == "sanity":
+        from extractor.pipeline.steps.sanity_helper import sanity_run
+        out = sanity_run("02")
+        print(str(out))
+        sys.exit(0)
+    # Compatibility with runners using `run <PDF> -o <OUT>`
+    if argv[0] == "run":
+        try:
+            pdf_path = Path(argv[1])
+        except Exception:
+            print("Missing input PDF", file=sys.stderr)
+            sys.exit(2)
+        out_dir = Path("data/results/pipeline")
+        if "-o" in argv:
+            try:
+                out_dir = Path(argv[argv.index("-o") + 1])
+            except Exception:
+                pass
+    else:
+        pdf_path = Path(argv[0])
+        out_dir = Path(argv[1]) if len(argv) > 1 else Path("data/results/pipeline")
     out = run(pdf_path=pdf_path, output_dir=out_dir)
     print(str(out))

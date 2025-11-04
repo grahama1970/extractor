@@ -320,4 +320,15 @@ def debug_bundle(
 
 
 if __name__ == "__main__":
-    print("Stage 12: run via scripts/debug or import run(...)")
+    import sys, os
+    argv = sys.argv[1:]
+    if argv and argv[0] == "sanity":
+        from extractor.pipeline.steps.sanity_helper import sanity_run
+        sanity_run("10") if False else sanity_run("07")  # ensure base artifacts
+        ok_env = bool(os.getenv("ARANGO_URL") and os.getenv("ARANGO_DB") and (os.getenv("ARANGO_USER") or os.getenv("ARANGO_USERNAME")) and os.getenv("ARANGO_PASSWORD"))
+        if not ok_env:
+            print("Stage 12 sanity: missing Arango env; skipping DB insert. Upstream OK.")
+            sys.exit(0)
+        print("Stage 12 sanity: Arango env present; run via pipeline for insert.")
+        sys.exit(0)
+    print("Usage: python -m extractor.pipeline.steps.12_insert_annotations sanity")

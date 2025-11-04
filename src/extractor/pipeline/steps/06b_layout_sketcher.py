@@ -27,6 +27,9 @@ ALLOW_VLM = os.getenv("STAGE06B_ALLOW_VLM", "0").lower() in ("1", "true", "yes",
 PYMUPDF_FALLBACK = os.getenv("STAGE06B_PYMUPDF_FALLBACK", "").lower() in ("1", "true", "yes", "y")
 SOURCE_PDF_ENV = os.getenv("STAGE06B_SOURCE_PDF", "").strip() or None
 EMIT_MERGE_HINTS = os.getenv("STAGE06B_EMIT_MERGE_HINTS", "").lower() in ("1", "true", "yes", "y")
+# Safety switch: enable/disable header→body propagation without reverting code.
+# Default ON (insurance only; turn OFF by exporting STAGE06B_HEADER_PROPAGATION=0)
+HEADER_PROPAGATION = os.getenv("STAGE06B_HEADER_PROPAGATION", "1").lower() in ("1", "true", "yes", "y")
 VISUAL_PROOF = os.getenv("STAGE06B_VISUAL_PROOF", "").lower() in ("1", "true", "yes", "y")
 
 
@@ -610,7 +613,8 @@ def _build_section_sketch(
 
     # Optional: table merge hints (non-binding)
     table_merge_hints: List[Dict[str, Any]] = []
-    if emit_merge_hints and tables_for_section and len(tables_for_section) > 1:
+    # Always compute merge hints for local propagation; emission to JSON remains gated by emit_merge_hints.
+    if tables_for_section and len(tables_for_section) > 1:
         def _rows_cols(t: Dict[str, Any]) -> Tuple[int, int]:
             m = t.get("pandas_metrics") or {}
             shp = m.get("shape") or [0, 0]
@@ -628,29 +632,33 @@ def _build_section_sketch(
             except Exception:
                 return 0.0
         tabs = sorted(list(tables_for_section), key=lambda t: (int(t.get("page_index", 0) or 0), int(t.get("table_index", 0) or 0)))
-        for i in range(len(tabs) - 1):
-            t1, t2 = tabs[i], tabs[i + 1]
-            r1, c1 = _rows_cols(t1)
-            r2, c2 = _rows_cols(t2)
-            if c1 <= 0 or c1 != c2:
-                continue
-            if int(t2.get("page_index", 0) or 0) > int(t1.get("page_index", 0) or 0) + 1:
-                continue
-            iou = _h_iou(t1.get("bbox", []) or [0, 0, 0, 0], t2.get("bbox", []) or [0, 0, 0, 0])
-            if iou < 0.2:
-                continue
-            header_body = (r1 == 1 and r2 >= 2)
-            density1 = float((t1.get("pandas_metrics") or {}).get("data_density") or 0.0)
-            density2 = float((t2.get("pandas_metrics") or {}).get("data_density") or 0.0)
-            conf = 0.5 + 0.3 * iou + 0.1 * (1.0 if header_body else 0.0) + 0.1 * (1.0 if abs(density1 - density2) <= 0.2 else 0.0)
-            table_merge_hints.append({
-                "group_id": f"G_tbl_{t1.get('table_index')}_{t2.get('table_index')}",
-                "tables": [t1.get("id") or f"tbl_{t1.get('table_index')}", t2.get("id") or f"tbl_{t2.get('table_index')}"],
-                "reason": ["same_columns", "adjacent_pages_or_same", f"h_iou>={iou:.2f}"] + (["header_body"] if header_body else []),
-                "scores": {"h_iou": round(iou, 2), "density_compat": round(1.0 - abs(density1 - density2), 2)},
-                "header_body": header_body,
-                "conf": round(min(0.95, conf), 2),
-            })
+        for i in range(len(tabs)):
+            for j in range(i + 1, len(tabs)):
+                t1, t2 = tabs[i], tabs[j]
+                p1 = int(t1.get("page_index", 0) or 0)
+                p2 = int(t2.get("page_index", 0) or 0)
+                # Stop if pages drift beyond adjacent (sorted by page)
+                if p2 > p1 + 1:
+                    break
+                r1, c1 = _rows_cols(t1)
+                r2, c2 = _rows_cols(t2)
+                if c1 <= 0 or c1 != c2:
+                    continue
+                iou = _h_iou(t1.get("bbox", []) or [0, 0, 0, 0], t2.get("bbox", []) or [0, 0, 0, 0])
+                if iou < 0.2:
+                    continue
+                header_body = (r1 == 1 and r2 >= 2)
+                density1 = float((t1.get("pandas_metrics") or {}).get("data_density") or 0.0)
+                density2 = float((t2.get("pandas_metrics") or {}).get("data_density") or 0.0)
+                conf = 0.5 + 0.3 * iou + 0.1 * (1.0 if header_body else 0.0) + 0.1 * (1.0 if abs(density1 - density2) <= 0.2 else 0.0)
+                table_merge_hints.append({
+                    "group_id": f"G_tbl_{t1.get('table_index')}_{t2.get('table_index')}",
+                    "tables": [t1.get("id") or f"tbl_{t1.get('table_index')}", t2.get("id") or f"tbl_{t2.get('table_index')}"],
+                    "reason": ["same_columns", "adjacent_pages_or_same", f"h_iou>={iou:.2f}"] + (["header_body"] if header_body else []),
+                    "scores": {"h_iou": round(iou, 2), "density_compat": round(1.0 - abs(density1 - density2), 2)},
+                    "header_body": header_body,
+                    "conf": round(min(0.95, conf), 2),
+                })
     # Helper: build a compact, instructive DSL (plain text) for prompts
     def _build_instructive_dsl(
         sec_id: str,
@@ -811,6 +819,11 @@ def _build_section_sketch(
                     "fragmentation": m.get("fragmentation"),
                 },
             })
+            try:
+                if out.get("page") is not None and out.get("page_index") is None:
+                    out["page_index"] = int(out.get("page"))
+            except Exception:
+                pass
         elif e.get("kind") == "figure":
             out.update({
                 "caption_hint": _summ(e.get("summary") or "", 160),
@@ -849,6 +862,101 @@ def _build_section_sketch(
             if o.get("page") is None:
                 o.pop("page", None)
         objects_v2.append(o)
+    # If header/body merge hints exist, propagate header_norm/logical_table_id
+    try:
+        if HEADER_PROPAGATION and 'table_merge_hints' in locals() and table_merge_hints:
+            by_id: Dict[str, dict] = {}
+            for o in objects_v2:
+                try:
+                    oid = str(o.get('id'))
+                    by_id[oid] = o
+                except Exception:
+                    continue
+            import re as _re
+            for hint in (table_merge_hints or []):
+                try:
+                    tlist = hint.get('tables') or []
+                    if len(tlist) != 2:
+                        continue
+                    h_id, b_id = str(tlist[0]), str(tlist[1])
+                    h = by_id.get(h_id); b = by_id.get(b_id)
+                    if not (h and b):
+                        continue
+                    hnorm = h.get('header_norm')
+                    if not hnorm:
+                        continue
+                    # Detect generic body header like "0|1|2|3|4"
+                    bnorm = b.get('header_norm') or ""
+                    is_generic = bool(bnorm) and all(tok.isdigit() for tok in bnorm.split('|'))
+                    # Also propagate when columns match and pages are adjacent with reasonable horizontal alignment.
+                    reason = hint.get('reason') or []
+                    scores = hint.get('scores') or {}
+                    try:
+                        hiou = float(scores.get('h_iou') or 0.0)
+                    except Exception:
+                        hiou = 0.0
+                    same_cols = ('same_columns' in reason)
+                    adjacent = any('adjacent' in str(r) for r in reason)
+                    should_propagate = bool(hint.get('header_body') or is_generic or (same_cols and adjacent and hiou >= 0.2))
+                    # Propagate if flagged as header_body OR when body header looks generic OR heuristic matches
+                    if should_propagate:
+                        b['header_norm'] = hnorm
+                    # Recompute shared logical_table_id
+                    import hashlib as _hl
+                    lid = f"lt_{_hl.sha1(hnorm.encode('utf-8')).hexdigest()[:10]}"
+                    h['logical_table_id'] = lid
+                    b['logical_table_id'] = lid
+                except Exception:
+                    continue
+    except Exception:
+        pass
+    # Secondary deterministic propagation: header (rows==1, non-generic header_norm) → body on next page
+    # when columns match and horizontal IoU is reasonable. This does not depend on merge_hints.
+    try:
+        if not HEADER_PROPAGATION:
+            raise RuntimeError("header propagation disabled")
+        def _is_generic_hdr(h: str) -> bool:
+            return bool(h) and all(tok.isdigit() for tok in h.split('|'))
+        def _h_iou_bbox(a: list[float], b: list[float]) -> float:
+            try:
+                ax0, _, ax1, _ = a; bx0, _, bx1, _ = b
+                inter = max(0.0, min(float(ax1), float(bx1)) - max(float(ax0), float(bx0)))
+                uni = max(float(ax1), float(bx1)) - min(float(ax0), float(bx0))
+                return float(inter / uni) if uni > 0 else 0.0
+            except Exception:
+                return 0.0
+        tables_v2 = [o for o in objects_v2 if o.get('type') == 'table']
+        by_page: Dict[int, List[dict]] = {}
+        for o in tables_v2:
+            try:
+                by_page.setdefault(int(o.get('page', section_page_idx)), []).append(o)
+            except Exception:
+                continue
+        for p, hdrs in by_page.items():
+            nxt = by_page.get(p + 1) or []
+            for h in hdrs:
+                try:
+                    if int(h.get('rows', 0)) != 1:
+                        continue
+                    hn = (h.get('header_norm') or '').strip()
+                    if not hn or _is_generic_hdr(hn):
+                        continue
+                    cols_h = int(h.get('cols', 0))
+                    for b in nxt:
+                        if int(b.get('cols', 0)) != cols_h:
+                            continue
+                        if _h_iou_bbox(h.get('bbox') or [0,0,0,0], b.get('bbox') or [0,0,0,0]) < 0.2:
+                            continue
+                        # Propagate header_norm and logical_table_id
+                        b['header_norm'] = hn
+                        import hashlib as _hl
+                        lid = f"lt_{_hl.sha1(hn.encode('utf-8')).hexdigest()[:10]}"
+                        h['logical_table_id'] = lid
+                        b['logical_table_id'] = lid
+                except Exception:
+                    continue
+    except Exception:
+        pass
     # Mark table continuity/merge by logical_table_id
     try:
         by_lt: Dict[str, List[dict]] = {}
@@ -1468,4 +1576,13 @@ def main(
 
 
 if __name__ == "__main__":
-    print("Import and call run(...) or main(...); no CLI framework required.")
+    import sys
+    argv = sys.argv[1:]
+    if argv and argv[0] == "sanity":
+        from extractor.pipeline.steps.sanity_helper import sanity_run
+        sanity_run("04")
+        base = Path("data/results/pipeline")
+        run(input_path=str(base), output_path=str(base))
+        print(str(base/"06b_layout_sketcher/json_output/06b_layout_sketch.json"))
+        sys.exit(0)
+    print("Usage: python -m extractor.pipeline.steps.06b_layout_sketcher sanity")

@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
+import subprocess  # kept for tests that monkeypatch api.subprocess.run
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 import time
@@ -59,7 +60,11 @@ def _paths(base: Path) -> PipelinePaths:
 def extract_sections(
     pdf_path: Path | str, output_dir: Path | str = DEFAULT_RESULTS_DIR, debug: bool = False
 ) -> Tuple[List[Dict[str, Any]], Path]:
-    """Run key steps and return (sections, sections_json_path)."""
+    """Run key steps and return (sections, sections_json_path).
+
+    Uses subprocess to invoke per-step scripts so tests can monkeypatch
+    `api.subprocess.run` and stub artifacts deterministically.
+    """
     pdf_path = Path(pdf_path)
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -74,19 +79,21 @@ def extract_sections(
     def _log(status: str, step: str, details: str = "") -> None:
         execution_log.append({"timestamp": datetime.utcnow().isoformat(timespec="seconds") + "Z", "status": status, "step": step, "details": details})
 
-    # Import steps lazily and call functions directly (no subprocess)
-    from extractor.pipeline.steps import (
-        s01_annotation_processor as s01,
-        s02_marker_extractor as s02,
-        s03_suspicious_headers as s03,
-        s04_section_builder as s04,
-    )
+    steps_dir = Path(__file__).resolve().parent / "steps"
 
-    # Stage 01: annotation/cleaner — produces cleaned PDF in p.anno_dir
+    # Stage 01
     _log("started", "01_annotation_processor", os.fspath(pdf_path))
     t0 = time.time()
     try:
-        s01.run(pdf_path, out)
+        cmd = [
+            "python",
+            os.fspath(steps_dir / "01_annotation_processor.py"),
+            "run",
+            os.fspath(pdf_path),
+            "-o",
+            os.fspath(out),
+        ]
+        _run(cmd)
         took = time.time() - t0
         results["01_annotation_processor"] = {"success": True, "duration": took}
         _log("completed", "01_annotation_processor", f"ok in {took:.3f}s")
@@ -99,11 +106,19 @@ def extract_sections(
 
     clean_pdf = _find_clean_pdf(p.anno_dir)
 
-    # Stage 02: marker blocks
+    # Stage 02
     _log("started", "02_marker_extractor", os.fspath(clean_pdf))
     t0 = time.time()
     try:
-        s02.run(clean_pdf, out)
+        cmd = [
+            "python",
+            os.fspath(steps_dir / "02_marker_extractor.py"),
+            "run",
+            os.fspath(clean_pdf),
+            "-o",
+            os.fspath(out),
+        ]
+        _run(cmd)
         took = time.time() - t0
         results["02_marker_extractor"] = {"success": True, "duration": took, "output": os.fspath(p.blocks_json)}
         output_files.append(os.fspath(p.blocks_json))
@@ -115,11 +130,20 @@ def extract_sections(
         _write_summary(pdf_path, out, t_start, execution_log, results, output_files)
         raise
 
-    # Stage 03: suspicious header verify
+    # Stage 03
     _log("started", "03_suspicious_headers", os.fspath(p.blocks_json))
     t0 = time.time()
     try:
-        s03.run(p.blocks_json, p.anno_dir, out)
+        cmd = [
+            "python",
+            os.fspath(steps_dir / "03_suspicious_headers.py"),
+            "run",
+            os.fspath(p.blocks_json),
+            os.fspath(p.anno_dir),
+            "-o",
+            os.fspath(out),
+        ]
+        _run(cmd)
         took = time.time() - t0
         results["03_suspicious_headers"] = {"success": True, "duration": took, "output": os.fspath(p.verified_json)}
         output_files.append(os.fspath(p.verified_json))
@@ -131,11 +155,20 @@ def extract_sections(
         _write_summary(pdf_path, out, t_start, execution_log, results, output_files)
         raise
 
-    # Stage 04: section builder
+    # Stage 04
     _log("started", "04_section_builder", os.fspath(p.verified_json))
     t0 = time.time()
     try:
-        s04.run(p.verified_json, p.anno_dir, out)
+        cmd = [
+            "python",
+            os.fspath(steps_dir / "04_section_builder.py"),
+            "run",
+            os.fspath(p.verified_json),
+            os.fspath(p.anno_dir),
+            "-o",
+            os.fspath(out),
+        ]
+        _run(cmd)
         took = time.time() - t0
         results["04_section_builder"] = {"success": True, "duration": took, "output": os.fspath(p.sections_json)}
         output_files.append(os.fspath(p.sections_json))
@@ -173,6 +206,14 @@ def _write_summary(pdf_path: Path, out: Path, t_start: float, execution_log: Lis
     except Exception:
         # Never raise from diagnostics write
         pass
+
+
+def _run(cmd: List[str], cwd: Path | None = None, env: Dict[str, str] | None = None) -> None:
+    """Thin wrapper so tests can monkeypatch command execution.
+
+    Default behavior: call subprocess.run with provided cwd/env.
+    """
+    subprocess.run(cmd, cwd=cwd, env=env)  # type: ignore[attr-defined]
 
 
 def build_cli() -> typer.Typer:

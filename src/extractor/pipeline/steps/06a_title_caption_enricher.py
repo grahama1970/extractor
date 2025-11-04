@@ -494,4 +494,12 @@ def run(
 
 
 if __name__ == "__main__":
-    print("Import and call run(...), or use scripts/debug/stage06_debug.py")
+    import sys
+    argv = sys.argv[1:]
+    if argv and argv[0] == "sanity":
+        from extractor.pipeline.steps.sanity_helper import sanity_run
+        # Produce 05/06 outputs; enrichment is optional/no‑network for sanity
+        sanity_run("06")
+        print("06a sanity: prior artifacts ready (05_tables/06_figures)")
+        sys.exit(0)
+    print("Usage: python -m extractor.pipeline.steps.06a_title_caption_enricher sanity")

@@ -3,7 +3,6 @@ from __future__ import annotations
 import os
 from typing import Any, Dict, List
 
-from scillm import Router
 import asyncio
 import json
 from subprocess import run, PIPE
@@ -42,7 +41,23 @@ def _model_entry_vlm(model: str) -> Dict[str, Any]:
     return {"model_name": "chutes/vlm", "litellm_params": lp}
 
 
-def get_text_router() -> Router:
+def _import_router_cls():
+    """Import and return the SciLLM Router class lazily.
+
+    Avoids hard import-time dependency on an external scillm install, which can
+    break deterministic/offline tests that never exercise LLM calls.
+    """
+    try:
+        from scillm import Router as _Router  # type: ignore
+
+        return _Router
+    except Exception as e:  # pragma: no cover - only used in constrained CI envs
+        raise ImportError(
+            "SciLLM Router unavailable; ensure sibling 'litellm/scillm' is present or install scillm."
+        ) from e
+
+
+def get_text_router():
     global _TEXT_ROUTER
     if _TEXT_ROUTER is not None:
         return _TEXT_ROUTER
@@ -94,13 +109,14 @@ def get_text_router() -> Router:
         raise RuntimeError("No CHUTES_TEXT_MODEL pins provided and SCILLM_AUTO_ROUTER is disabled. Set CHUTES_TEXT_MODEL or enable SCILLM_AUTO_ROUTER=1 for dev triage.")
     # Router now handles transient retries natively; avoid layering retries here
     # to prevent duplicate backoffs. Use Router defaults.
+    Router = _import_router_cls()
     _TEXT_ROUTER = Router(
         model_list=model_list or [{}],
     )
     return _TEXT_ROUTER
 
 
-def get_vlm_router() -> Router:
+def get_vlm_router():
     global _VLM_ROUTER
     if _VLM_ROUTER is not None:
         return _VLM_ROUTER
@@ -147,10 +163,12 @@ def get_vlm_router() -> Router:
         raise RuntimeError("CHUTES_VLM_MODEL is required (alternates optional).")
     if not model_list and not auto:
         raise RuntimeError("No CHUTES_VLM_MODEL pins provided and SCILLM_AUTO_ROUTER is disabled. Set CHUTES_VLM_MODEL or enable SCILLM_AUTO_ROUTER=1 for dev triage.")
+    Router = _import_router_cls()
     _VLM_ROUTER = Router(
         model_list=model_list or [{}],
     )
     return _VLM_ROUTER
+
 
 
 def _safe_async_close(obj) -> None:

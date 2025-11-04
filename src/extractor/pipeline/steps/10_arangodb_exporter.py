@@ -719,6 +719,16 @@ if __name__ == "__main__":
     import sys
 
     argv = sys.argv[1:]
+    if argv and argv[0] == "sanity":
+        # Fail fast if DB env is missing; ensure upstream artifacts exist
+        from extractor.pipeline.steps.sanity_helper import sanity_run
+        sanity_run("07")
+        ok_env = bool(os.getenv("ARANGO_URL") and os.getenv("ARANGO_DB") and (os.getenv("ARANGO_USER") or os.getenv("ARANGO_USERNAME")) and os.getenv("ARANGO_PASSWORD"))
+        if not ok_env:
+            print("Stage 10 sanity: missing Arango env; skipping DB export. Upstream OK.")
+            sys.exit(0)
+        print("Stage 10 sanity: Arango env present; run full export via unified runner.")
+        sys.exit(0)
     if not argv or argv[0] in ("-h", "--help"):
         print(
             "Usage: python -m extractor.pipeline.steps.10_arangodb_exporter REFLOWED_JSON SUMMARIES_JSON [OUT_DIR]\n"

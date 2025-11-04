@@ -101,6 +101,7 @@ help:
 	@echo "  make smoke-07-reflow-min  # minimal Stage 07 reflow smoke (results mode)"
 	@echo "  make smoke-ui        # Playwright CDP console-error smoke"
 	@echo "  make smoke-ui-strict # Same, exits non-zero and prints artifacts"
+	@echo "  make pipeline-verify-invariants  # check global invariants (counts, etc.)"
 
 setup:
 	@if command -v uv >/dev/null 2>&1; then \
@@ -196,6 +197,17 @@ type:
 
 test:
 	- pytest -q
+
+.PHONY: pipeline-verify-invariants
+pipeline-verify-invariants:
+	PYTHONPATH=$(PWD)/src \
+	python scripts/tools/verify_invariants.py
+
+# Deterministic pipeline contract test only (avoids unrelated suite failures)
+.PHONY: test-contract-bht
+test-contract-bht:
+	PYTHONPATH=$(PWD)/src \
+	pytest -q tests/contract/test_bht_06b_09a.py
 
 api-smokes:
 	BASE_URL=$(BASE_URL) node scripts/smokes/api_generate_model.mjs

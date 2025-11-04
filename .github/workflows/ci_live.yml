@@ -1,0 +1,57 @@
+name: CI (Live, Self-Hosted)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  live-contract:
+    runs-on: self-hosted
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[dev]
+      - name: Load .env (if present)
+        shell: bash
+        run: |
+          set -a
+          if [ -f .env ]; then source .env; fi
+          set +a
+          echo "Loaded .env keys where available."
+      - name: Live pipeline run (SciLLM enabled)
+        env:
+          OUT: data/results/pipeline_live_ci
+          TABLE_LLM_ASSIST: '1'
+          STAGE05_LLM_SPLIT_1COL: '1'
+          STAGE05_LLM_CONFIRM_LOWCONF: '1'
+          STAGE06B_EMIT_MERGE_HINTS: '1'
+          STAGE06B_HEADER_PROPAGATION: '1'
+          CONTRACT_EXPECT_SECTIONS: '3'
+        run: |
+          PYTHONPATH=src \
+          python -m extractor.pipeline.run_pipeline \
+            --pdf data/input/pipeline/BHT_CV32A65X_with_requirements_noannots.pdf \
+            --out "$OUT" \
+            --annotate-pdf \
+            --stop-on-fail
+      - name: Verify live artifacts
+        env:
+          OUT: data/results/pipeline_live_ci
+          CONTRACT_EXPECT_SECTIONS: '3'
+        run: |
+          PYTHONPATH=src \
+          python scripts/smokes/smoke_ci_live_verify.py
+      - name: Analyze live artifacts (summary)
+        env:
+          OUT: data/results/pipeline_live_ci
+        run: |
+          PYTHONPATH=src \
+          python scripts/tools/analyze_live_artifacts.py | tee scripts/artifacts/live_run_report.json
+          echo "Live run summary:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          cat scripts/artifacts/live_run_report.md >> $GITHUB_STEP_SUMMARY

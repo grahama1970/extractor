@@ -1625,4 +1625,46 @@ def debug_bundle(
 
 
 if __name__ == "__main__":
-    print("Import and call run(...) or use scripts/debug/stage03_debug.py")
+    # Minimal entry: support `run <BLOCKS_JSON> <ANNO_DIR> -o <OUT>`
+    try:
+        from dotenv import find_dotenv, load_dotenv
+
+        load_dotenv(find_dotenv())
+    except Exception:
+        pass
+    import sys
+    argv = sys.argv[1:]
+    if not argv or argv[0] in ("-h", "--help"):
+        print(
+            "Usage: python -m extractor.pipeline.steps.03_suspicious_headers <BLOCKS_JSON> <ANNO_DIR> [OUT_DIR]",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    if argv[0] == "sanity":
+        from extractor.pipeline.steps.sanity_helper import sanity_run
+        out = sanity_run("03")
+        print(str(out))
+        sys.exit(0)
+    if argv[0] == "run":
+        try:
+            blocks_json = Path(argv[1])
+            anno_dir = Path(argv[2])
+        except Exception:
+            print("Missing args", file=sys.stderr)
+            sys.exit(2)
+        out_dir = Path("data/results/pipeline")
+        if "-o" in argv:
+            try:
+                out_dir = Path(argv[argv.index("-o") + 1])
+            except Exception:
+                pass
+    else:
+        try:
+            blocks_json = Path(argv[0])
+            anno_dir = Path(argv[1])
+        except Exception:
+            print("Missing args", file=sys.stderr)
+            sys.exit(2)
+        out_dir = Path(argv[2]) if len(argv) > 2 else Path("data/results/pipeline")
+    out = run(blocks_json, anno_dir, out_dir)
+    print(str(out))

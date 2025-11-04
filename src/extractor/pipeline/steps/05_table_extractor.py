@@ -2142,10 +2142,16 @@ def debug_bundle(
 
 
 if __name__ == "__main__":
-    # Deprecated per unified runner policy. Use: python -m extractor.pipeline
+    # Minimal sanity for local debugging
+    import sys
+    argv = sys.argv[1:]
+    if argv and argv[0] == "sanity":
+        from extractor.pipeline.steps.sanity_helper import sanity_run
+        p = sanity_run("05")
+        print(str(p))
+        sys.exit(0)
     print(
-        "This step is not intended to be run directly.\n"
-        "Use the unified runner: python -m extractor.pipeline",
+        "Usage: python -m extractor.pipeline.steps.05_table_extractor sanity",
         file=sys.stderr,
     )
     sys.exit(2)

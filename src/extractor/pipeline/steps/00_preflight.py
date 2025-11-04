@@ -98,8 +98,14 @@ def run(pdf_path: str) -> int:
 
 if __name__ == "__main__":  # pragma: no cover
     import sys
-
-    if len(sys.argv) < 2:
-        print("Usage: python -m extractor.pipeline.steps.00_preflight <input.pdf>")
+    argv = sys.argv[1:]
+    if argv and argv[0] == "sanity":
+        pdf = Path("data/input/pipeline/BHT_CV32A65X_with_requirements_noannots.pdf")
+        if not pdf.exists():
+            print("00_preflight sanity: sample PDF missing", file=sys.stderr)
+            raise SystemExit(1)
+        raise SystemExit(run(str(pdf)))
+    if len(argv) < 1:
+        print("Usage: python -m extractor.pipeline.steps.00_preflight <input.pdf> | sanity")
         raise SystemExit(2)
-    raise SystemExit(run(sys.argv[1]))
+    raise SystemExit(run(argv[0]))

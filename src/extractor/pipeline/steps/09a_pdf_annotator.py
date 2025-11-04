@@ -57,6 +57,18 @@ def _safe_get_bbox(obj: dict[str, Any]) -> list[float] | None:
         return None
 
 
+def _coerce_page(*values: Any) -> int | None:
+    """Return the first non-None value coerced to int, allowing zero."""
+    for value in values:
+        if value is None:
+            continue
+        try:
+            return int(value)
+        except Exception:
+            continue
+    return None
+
+
 def _write_artifacts_index(stage_dir: Path) -> None:
     try:
         json_dir = stage_dir / "json_output"
@@ -254,13 +266,12 @@ def run(
     overlay_id = 0
     pages_touched: set[int] = set()
 
-    def _normalized_page_index(idx: int) -> int | None:
-        try:
-            _pg = int(idx)
-        except Exception:
+    def _normalized_page_index(idx: Any) -> int | None:
+        _pg = _coerce_page(idx)
+        if _pg is None:
             return None
-        if _pg >= len(doc) and _pg - 1 >= 0 and _pg - 1 < len(doc):
-            _pg = _pg - 1
+        if _pg >= len(doc) and (_pg - 1) in range(len(doc)):
+            _pg -= 1
         if _pg < 0 or _pg >= len(doc):
             return None
         return _pg
@@ -341,6 +352,21 @@ def run(
         pages_touched.add(_pg)
 
     # Sections (prefer reflowed sections when available)
+    # Build continuation map from Stage 04 sections metadata: section_id -> set(page_indices)
+    cont_pages_by_sid: dict[str, set[int]] = {}
+    try:
+        for _s in sections:
+            _sid = str(_s.get("id")) if _s.get("id") is not None else None
+            if not _sid:
+                continue
+            md = (_s.get("metadata") or {}) if isinstance(_s.get("metadata"), dict) else {}
+            cpgs = md.get("continued_pages") or []
+            try:
+                cont_pages_by_sid[_sid] = {int(p) for p in cpgs if isinstance(p, (int, float, str))}
+            except Exception:
+                cont_pages_by_sid[_sid] = set()
+    except Exception:
+        cont_pages_by_sid = {}
     if draw_sections:
         t_s = time.monotonic()
         drew = 0
@@ -361,16 +387,26 @@ def run(
                     for pg, bbs in per_page.items():
                         x0 = min(bb[0] for bb in bbs); y0 = min(bb[1] for bb in bbs)
                         x1 = max(bb[2] for bb in bbs); y1 = max(bb[3] for bb in bbs)
-                        _add(pg, [x0, y0, x1, y1], "section", {"id": sid, "title": s.get("title")}, label_text=f"SEC {sid}: {s.get('title')}")
+                        # Continuation label marker if this page is listed as a continuation for the base section
+                        is_cont = False
+                        try:
+                            is_cont = int(pg) in (cont_pages_by_sid.get(str(sid)) or set())
+                        except Exception:
+                            is_cont = False
+                        label = f"SEC {sid}: {s.get('title')}" + (" (cont.)" if is_cont else "")
+                        payload = {"id": sid, "title": s.get("title")}
+                        if is_cont:
+                            payload["continuation"] = True
+                        _add(pg, [x0, y0, x1, y1], "section", payload, label_text=label)
                         drew += 1
                 except Exception:
                     continue
         if drew == 0:
             # Fallback to raw sections
             for s in sections:
-                pg0 = int(s.get("page_start") or s.get("page_idx") or -1)
+                pg0 = _coerce_page(s.get("page_start"), s.get("page_idx"), s.get("page"))
                 bb = _safe_get_bbox(s)
-                if bb is not None and pg0 >= 0:
+                if bb is not None and pg0 is not None:
                     _add(pg0, bb, "section", {"id": s.get("id"), "title": s.get("title")}, label_text=f"SEC {s.get('id')}: {s.get('title')}")
                     drew += 1
         if drew == 0:
@@ -419,9 +455,9 @@ def run(
         if drew == 0:
             # Fallback to raw tables
             for t in tables:
-                pg = int(t.get("page_index") or t.get("page_idx") or -1)
+                pg = _coerce_page(t.get("page_index"), t.get("page_idx"), t.get("page"))
                 bb = _safe_get_bbox(t)
-                if bb is not None and pg >= 0:
+                if bb is not None and pg is not None:
                     headers_preview = None
                     try:
                         hdrs = t.get("headers")
@@ -445,7 +481,87 @@ def run(
                         label_text=f"TBL {t.get('table_index')} :: {headers_preview or ''}",
                     )
                     drew += 1
-        if drew == 0:
+        if merged_groups == 0:
+            # Fallback (also applicable in addition to raw table overlays):
+            # use 06b sketch_v2 logical_table_id groups to draw merged overlays
+            try:
+                layout_dir = Path(layout06b_json).parent if isinstance(layout06b_json, Path) else None
+                v2_path = (layout_dir / "06b_layout_sketch_v2.json") if (layout_dir and (layout_dir / "06b_layout_sketch_v2.json").exists()) else None
+                tables_v2 = []
+                if v2_path:
+                    v2 = json.loads(v2_path.read_text(encoding="utf-8"))
+                    for _sid, sv2 in (v2.get("sections") or {}).items():
+                        for obj in (sv2.get("objects") or []):
+                            if obj.get("type") == "table":
+                                tables_v2.append(obj)
+                else:
+                    # fall back to per-section sketch_v2 in layout06b
+                    secs = (layout06b.get("sections") or {}) if isinstance(layout06b, dict) else {}
+                    for _sid, _sk in secs.items():
+                        sv2 = (_sk.get("sketch_v2") or {}) if isinstance(_sk, dict) else {}
+                        for obj in (sv2.get("objects") or []):
+                            if obj.get("type") == "table":
+                                tables_v2.append(obj)
+                # group by lid
+                by_lid = {}
+                for o in tables_v2:
+                    lid = o.get("logical_table_id")
+                    if not lid:
+                        continue
+                    by_lid.setdefault(lid, []).append(o)
+                for lid, items in by_lid.items():
+                    pages = sorted({p for p in (_coerce_page(i.get("page_index"), i.get("page")) for i in items) if p is not None})
+                    if len(pages) <= 1:
+                        continue
+                    for p in pages:
+                        bbs = [i.get("bbox") for i in items if _coerce_page(i.get("page_index"), i.get("page")) == p]
+                        bbs = [bb for bb in bbs if isinstance(bb, (list,tuple)) and len(bb)==4]
+                        if not bbs:
+                            continue
+                        x0=min(bb[0] for bb in bbs); y0=min(bb[1] for bb in bbs)
+                        x1=max(bb[2] for bb in bbs); y1=max(bb[3] for bb in bbs)
+                        _add(p, [x0,y0,x1,y1], "table_merged", {"logical_table_key": lid, "pages_in_group": [pp+1 for pp in pages]}, label_text=f"TBL M {lid}")
+                        drew += 1
+                merged_groups = sum(1 for lid, arr in by_lid.items() if len({p for p in (_coerce_page(i.get("page_index"), i.get("page")) for i in arr) if p is not None})>1)
+                # If still no groups, derive header→body by header_norm non-digit + same cols and horizontal alignment
+                if merged_groups == 0 and tables_v2:
+                    # index by page
+                    by_page: dict[int, list[dict[str, Any]]] = {}
+                    for o in tables_v2:
+                        p = _coerce_page(o.get("page_index"), o.get("page"))
+                        by_page.setdefault(p, []).append(o)
+                    def _is_generic(h: str) -> bool:
+                        return bool(h) and all(tok.isdigit() for tok in h.split('|'))
+                    def _h_iou(a, b):
+                        try:
+                            ax0,_,ax1,_ = a; bx0,_,bx1,_ = b
+                            inter = max(0.0, min(ax1,bx1)-max(ax0,bx0))
+                            uni = max(ax1,bx1)-min(ax0,bx0)
+                            return float(inter/uni) if uni>0 else 0.0
+                        except Exception:
+                            return 0.0
+                    for p, hdrs in by_page.items():
+                        nxt = by_page.get(p+1) or []
+                        for h in hdrs:
+                            hn = (h.get('header_norm') or '').strip()
+                            if not hn or _is_generic(hn):
+                                continue
+                            cols_h = int(h.get('cols') or 0)
+                            for b in nxt:
+                                cols_b = int(b.get('cols') or 0)
+                                if cols_b != cols_h:
+                                    continue
+                                if _h_iou(h.get('bbox') or [0,0,0,0], b.get('bbox') or [0,0,0,0]) < 0.2:
+                                    continue
+                                # draw merged on both pages
+                                for pp, oset in ((p,[h]), (p+1,[b])):
+                                    bbx = (oset[0].get('bbox') or [0,0,0,0])
+                                    _add(pp, bbx, "table_merged", {"logical_table_key": f"hn::{hn}", "pages_in_group": [p+1, p+2]}, label_text=f"TBL M hn::{hn[:14]}")
+                                    drew += 1
+                                merged_groups = max(merged_groups, 1)
+            except Exception:
+                pass
+        if drew == 0 and merged_groups == 0:
             logger.warning("09a: no table overlays drawn (check reflow/table JSON and block ids)")
         _append_timing(logs_dir, {"stage": "09a_pdf_annotator", "event": "draw_tables", "latency_ms": int((time.monotonic()-t_s)*1000)})
 
@@ -454,9 +570,9 @@ def run(
         t_s = time.monotonic()
         figs_drawn = 0
         for f in figures:
-            pg = int(f.get("page") or f.get("page_idx") or -1)
+            pg = _coerce_page(f.get("page"), f.get("page_idx"))
             bb = _safe_get_bbox(f)
-            if bb is not None and pg >= 0:
+            if bb is not None and pg is not None:
                 fid = f.get("figure_id")
                 desc = fig_desc.get(str(fid), "")
                 title = f.get("title") or ""
@@ -532,26 +648,34 @@ def run(
     if requirements:
         t_s = time.monotonic()
         req_drawn = 0
+        sections_by_id = {str(s.get("id")): s for s in sections if s.get("id") is not None}
         for r in requirements:
             try:
                 anchor = r.get("anchor") or {}
                 pg = anchor.get("page")
                 bb = anchor.get("bbox")
+                src = r.get("source") or {}
+                if (pg is None or not bb) and isinstance(src, dict):
+                    pg = src.get("page_num", pg)
+                    bb = src.get("bbox", bb)
+                sec_id = r.get("section_id") or src.get("section_id")
                 if pg is None or not bb:
-                    sec_id = r.get("section_id")
                     if sec_id:
-                        m = next((s for s in sections if str(s.get("id")) == str(sec_id)), None)
+                        m = sections_by_id.get(str(sec_id))
                         if m:
-                            pg = int(m.get("page_start") or m.get("page_idx") or -1)
+                            pg = _coerce_page(m.get("page_start"), m.get("page_idx"), m.get("page"))
                             bb = _safe_get_bbox(m)
                 if pg is None or not bb:
+                    continue
+                pg_int = _coerce_page(pg)
+                if pg_int is None:
                     continue
                 label = (r.get("id") or r.get("title") or "REQ")
                 is_cond = bool(r.get("is_conditional")) or ("conditional" in str(r.get("category", "")).lower()) or bool(r.get("condition"))
                 kind = "requirement"
                 if is_cond:
                     label = f"COND {label}"
-                _add(int(pg), bb, kind, {"requirement_id": r.get("id"), "title": r.get("title"), "conditional": bool(is_cond)}, label_text=f"REQ {label}")
+                _add(pg_int, bb, kind, {"requirement_id": r.get("id"), "title": r.get("title"), "conditional": bool(is_cond)}, label_text=f"REQ {label}")
                 req_drawn += 1
             except Exception:
                 continue
@@ -565,7 +689,7 @@ def run(
             # Identify header on page 0 from 05 tables
             t05 = json.loads(Path(tables_json).read_text(encoding="utf-8")) if isinstance(tables_json, (str, Path)) and Path(tables_json).exists() else {"tables": []}
             tabs05 = t05.get("tables", [])
-            page0_tabs = [t for t in tabs05 if int(t.get("page_index") or t.get("page_idx") or -1) == 0]
+            page0_tabs = [t for t in tabs05 if _coerce_page(t.get("page_index"), t.get("page_idx"), t.get("page")) == 0]
             if page0_tabs:
                 hdr0 = None
                 try:
@@ -581,7 +705,7 @@ def run(
                 # Find a best match on page 1 with same column count
                 if isinstance(hdr0, list) and hdr0:
                     c0 = len(hdr0)
-                    page1_tabs = [t for t in tabs05 if int(t.get("page_index") or t.get("page_idx") or -1) == 1]
+                    page1_tabs = [t for t in tabs05 if _coerce_page(t.get("page_index"), t.get("page_idx"), t.get("page")) == 1]
                     match = None
                     for t in page1_tabs:
                         try:
@@ -596,9 +720,9 @@ def run(
                     if match:
                         # Draw merged boxes on both pages
                         for t in (page0_tabs[0], match):
-                            pg = int(t.get("page_index") or t.get("page_idx") or -1)
+                            pg = _coerce_page(t.get("page_index"), t.get("page_idx"), t.get("page"))
                             bb = _safe_get_bbox(t)
-                            if bb is not None and pg >= 0:
+                            if bb is not None and pg is not None:
                                 _add(pg, bb, "table_merged", {"logical_table_key": "p0p1_header_match"}, label_text="TBL M header-match")
                                 merged_groups = 1
         except Exception:
@@ -611,11 +735,11 @@ def run(
             try:
                 if not (b.get("suspicious_header") or b.get("is_suspicious")):
                     continue
-                pg = int(b.get("page_idx") if b.get("page_idx") is not None else b.get("page") or -1)
+                pg = _coerce_page(b.get("page_idx"), b.get("page"))
                 bb = _safe_get_bbox(b)
                 verdict = b.get("verdict") or ("accept" if b.get("suspicious_header") else "reject")
                 lbl = f"HDR {verdict}"
-                if (bb and pg >= 0):
+                if bb and pg is not None:
                     _add(pg, bb, "header_candidate", {"block_id": b.get("block_id"), "verdict": verdict}, label_text=lbl)
             except Exception:
                 continue
@@ -866,4 +990,11 @@ def run(
 
 
 if __name__ == "__main__":
-    print("Import and call run(...); no CLI framework required.")
+    import sys
+    argv = sys.argv[1:]
+    if argv and argv[0] == "sanity":
+        from extractor.pipeline.steps.sanity_helper import sanity_run
+        p = sanity_run("09a")
+        print(str(p))
+        sys.exit(0)
+    print("Usage: python -m extractor.pipeline.steps.09a_pdf_annotator sanity")

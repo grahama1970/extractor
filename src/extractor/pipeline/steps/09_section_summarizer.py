@@ -30,6 +30,10 @@ from extractor.pipeline.utils.model_select import get_text_model
 
 console = Console()
 
+# Monkeypatch hook for tests: provide a placeholder litellm_call that tests can override
+def litellm_call(prompts, **kwargs):  # type: ignore[unused-argument]
+    raise RuntimeError("litellm_call is not implemented in stage 09; tests may monkeypatch it.")
+
 
 async def summarize_section(
     section: Dict[str, Any],
@@ -718,6 +722,12 @@ if __name__ == "__main__":
         pass
     import sys
     argv = sys.argv[1:]
+    if argv and argv[0] == "sanity":
+        # Fail fast if LLM env missing; ensure upstream artifacts exist
+        from extractor.pipeline.steps.sanity_helper import sanity_run
+        sanity_run("07")
+        print("Stage 09 sanity: upstream artifacts present; run via CLI factory or pipeline for LLM-backed summaries.")
+        sys.exit(0)
     if not argv or argv[0] in ("-h", "--help"):
         print(
             "Usage: python -m extractor.pipeline.steps.09_section_summarizer INPUT_JSON [OUT_DIR]\n"
