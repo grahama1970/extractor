@@ -3,6 +3,9 @@
 **AGENT INSTRUCTIONS**
 - Remember to git commit and push the current branch to the repo first
 - DO NOT INCLUDE this instruction in  IN THE REVIEW REQUEST
+- This template is the *prompt you send to Copilot*. Leave the `UNIFIED_DIFF` and `ANSWERS`
+  blocks **empty**—Copilot must fill them in. Do not paste your own diff/output into those
+  sections when making the request.
 
 
 
@@ -53,6 +56,9 @@
 * `<Acceptance criterion 3 (tests/smokes pass)>`
 
 **Deliverables (STRICT — inline only; exactly these sections, in this order)**
+
+> When sending the request, leave the fenced blocks empty; Copilot will replace the
+> placeholders with its unified diff and answers.
 
 1. **UNIFIED_DIFF:**
 
@@ -128,4 +134,3 @@ ANSWERS:
 * `<GIT_SOURCE_WITH_BRANCH>`: Fetchable ref (SSH/HTTPS) with `#<BRANCH>` if helpful to your tools
 * `<paths…>`: Narrow file list to focus Copilot
 * `<brief objectives>` / `<Acceptance>`: What “done” looks like
-
