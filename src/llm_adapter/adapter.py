@@ -172,36 +172,18 @@ class LLMAdapter:
         if timeout is not None:
             kwargs["timeout"] = timeout
 
-        # SciLLM/Chutes paved path: OpenAI-compatible + x-api-key. Avoid Bearer.
+        # SciLLM/Chutes paved path: OpenAI-compatible + api_key only (no manual headers)
         try:
             import os as _os
             ch_base = (_os.getenv("CHUTES_API_BASE") or "").strip()
             ch_key = (_os.getenv("CHUTES_API_KEY") or "").strip()
-            if ch_base and ch_key:
+            if ch_base:
                 kwargs.setdefault("custom_llm_provider", "openai_like")
                 kwargs.setdefault("api_base", ch_base)
-                # Auth style: default x-api-key, support Authorization or Bearer via env
-            # Tenant requires Authorization: Bearer for /v1/chat/completions.
-            # Default to Bearer; allow override via CHUTES_AUTH_STYLE.
-            auth_style = (_os.getenv("CHUTES_AUTH_STYLE") or "bearer").lower()
-            if auth_style == "bearer":
-                kwargs["api_key"] = None
-                extra = dict(kwargs.get("extra_headers") or {})
-                extra.setdefault("Authorization", f"Bearer {ch_key}")
-                # Optional: include x-api-key (harmless per maintainer)
-                extra.setdefault("x-api-key", ch_key)
-                kwargs["extra_headers"] = extra
-            elif auth_style == "authorization":
-                kwargs.setdefault("api_key", None)
-                extra = dict(kwargs.get("extra_headers") or {})
-                extra.setdefault("Authorization", f"Bearer {ch_key}")
-                extra.setdefault("x-api-key", ch_key)
-                kwargs["extra_headers"] = extra
-            else:
-                kwargs.setdefault("api_key", None)
-                extra = dict(kwargs.get("extra_headers") or {})
-                extra.setdefault("x-api-key", ch_key)
-                kwargs["extra_headers"] = extra
+            if ch_key:
+                kwargs["api_key"] = ch_key
+            # Remove any manual header hacks
+            kwargs.pop("extra_headers", None)
         except Exception:
             pass
 
@@ -219,7 +201,6 @@ class LLMAdapter:
                 from scillm import Router  # type: ignore
 
                 ch_base = kwargs.pop("api_base", None)
-                extra_headers = kwargs.pop("extra_headers", None)
                 api_key = kwargs.pop("api_key", None)
                 provider = kwargs.pop("custom_llm_provider", "openai_like")
                 router = Router(
@@ -231,7 +212,6 @@ class LLMAdapter:
                                 "custom_llm_provider": provider,
                                 "api_base": ch_base,
                                 "api_key": api_key,
-                                "extra_headers": extra_headers,
                             },
                         }
                     ]

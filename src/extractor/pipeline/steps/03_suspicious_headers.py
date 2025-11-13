@@ -57,6 +57,7 @@ from extractor.pipeline.utils.diagnostics import (
     start_resource_sampler,
     stop_resource_sampler,
 )
+from extractor.pipeline.utils.step_sanity import run_step_sanity
 from extractor.pipeline.utils.json_utils import STRICT_JSON_GUARD
 def _normalize_model_alias(model: str | None) -> str:
     m = (model or "").strip()
@@ -77,6 +78,12 @@ try:
 except Exception:
     psutil = None  # type: ignore
 import time  # noqa: E402
+
+STEP_NAME = "03_suspicious_headers"
+
+
+def sanity() -> int:
+    return run_step_sanity(STEP_NAME)
 
 # Cache initialization will be handled within command execution to avoid import-time side effects.
 
@@ -251,7 +258,7 @@ def _retrieve_prior_decisions(header_text_norm: str, font_sig: str, limit: int =
 async def verify_header_with_llm(image_b64: str, context_text: str, model: str, *, item_timeout: int = 90) -> dict[str, Any]:
     """Verify header using scillm (vision required) with strict JSON intent via Chutes.
 
-    - Uses api_base=CHUTES_API_BASE, api_key=None, extra_headers={'x-api-key': CHUTES_API_KEY}
+    - Uses SciLLM Router + api_key (no manual headers)
     - Sends a single image + trimmed text context
     - Enforces response_format=json_object and stop fences for non-Gemini models
     """
@@ -1641,10 +1648,7 @@ if __name__ == "__main__":
         )
         sys.exit(2)
     if argv[0] == "sanity":
-        from extractor.pipeline.steps.sanity_helper import sanity_run
-        out = sanity_run("03")
-        print(str(out))
-        sys.exit(0)
+        sys.exit(sanity())
     if argv[0] == "run":
         try:
             blocks_json = Path(argv[1])

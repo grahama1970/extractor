@@ -34,10 +34,18 @@ from loguru import logger
 from extractor.pipeline.utils.scillm_router import get_text_router
 from extractor.pipeline.utils.response_utils import normalize_json_content
 from extractor.pipeline.utils.preflight import require_scillm_env
+from extractor.pipeline.steps.scillm_preflight_validator import require_scillm_preflight
 from typing import Iterable
+from extractor.pipeline.utils.step_sanity import run_step_sanity
 
 
 ## CLI removed: import and call run(...), or use a debug harness.
+
+STEP_NAME = "06a_title_caption_enricher"
+
+
+def sanity() -> int:
+    return run_step_sanity(STEP_NAME)
 
 
 def _load_json(p: Path) -> Dict[str, Any]:
@@ -476,6 +484,11 @@ def run(
 ) -> Path:
     def _console(msg: str) -> None:
         logger.info(msg)
+    try:
+        require_scillm_preflight()
+    except RuntimeError as exc:
+        _console(f"SciLLM preflight failed: {exc}")
+        raise
     t = _load_json(tables_json)
     f = _load_json(figures_json)
     page_blocks = _flatten_section_blocks(sections_json) if sections_json else {}
@@ -497,9 +510,5 @@ if __name__ == "__main__":
     import sys
     argv = sys.argv[1:]
     if argv and argv[0] == "sanity":
-        from extractor.pipeline.steps.sanity_helper import sanity_run
-        # Produce 05/06 outputs; enrichment is optional/no‑network for sanity
-        sanity_run("06")
-        print("06a sanity: prior artifacts ready (05_tables/06_figures)")
-        sys.exit(0)
+        sys.exit(sanity())
     print("Usage: python -m extractor.pipeline.steps.06a_title_caption_enricher sanity")

@@ -20,6 +20,7 @@ from typing import List, Optional, Any, Dict
 from PIL import Image
 
 from extractor.core.providers import ProviderPageLines, BaseProvider, ProviderOutput
+from extractor.core.providers.fetcher_bridge import ensure_local_source
 from extractor.core.schema.polygon import PolygonBox
 try:
     from pdftext.schema import Reference  # type: ignore
@@ -30,10 +31,12 @@ except Exception:  # pragma: no cover - optional dependency in minimal/offline m
 
 class ImageProvider(BaseProvider):
     def __init__(self, filepath: str, config: Optional[Dict[str, Any]] = None):
-        super().__init__(filepath, config)
+        resolved_path, fetch_download = ensure_local_source(filepath)
+        super().__init__(str(resolved_path), config)
+        self.fetch_download = fetch_download
 
         # Open image and detect if it's multi-page (TIFF, GIF, etc.)
-        self.image = Image.open(filepath)
+        self.image = Image.open(str(resolved_path))
         self.image_count = getattr(self.image, "n_frames", 1)
         self.page_lines: ProviderPageLines = {i: [] for i in range(self.image_count)}
 

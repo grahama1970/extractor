@@ -9,6 +9,7 @@ General Rules
 - Steps must not have import-time side effects. Loading `.env` happens in the driver or under `if __name__ == "__main__"` only.
 - Each step writes to `data/results/<run>/<step>/{json_output,image_output,visual_output,logs}`.
 - `stage.log` present per step when the driver provides a log sink.
+- Each step exposes `sanity()` + `python -m <step> sanity` which emits a Sparta-style JSON summary via `run_step_sanity`.
 
 Required Artifacts (deterministic mode)
 - 01_annotation_processor/json_output/01_annotations.json

@@ -25,10 +25,17 @@ from extractor.pipeline.utils.json_mode import JSON_SYSTEM_GUARD
 from tqdm import tqdm
 from extractor.pipeline.utils.scillm_router import get_text_router
 from extractor.pipeline.utils.model_select import get_text_model
+from extractor.pipeline.utils.step_sanity import run_step_sanity
+from extractor.pipeline.steps.scillm_preflight_validator import require_scillm_preflight
 
 # Note: Avoid import-time side effects. Tests can import this module safely.
 
 console = Console()
+STEP_NAME = "09_section_summarizer"
+
+
+def sanity() -> int:
+    return run_step_sanity(STEP_NAME)
 
 # Monkeypatch hook for tests: provide a placeholder litellm_call that tests can override
 def litellm_call(prompts, **kwargs):  # type: ignore[unused-argument]
@@ -573,6 +580,11 @@ def _cmd_run(
 ):
     """Generates summaries for all sections using concurrent processing."""
     console.print("[bold green]Starting Section Summarization (Stage 09)[/bold green]")
+    try:
+        require_scillm_preflight()
+    except RuntimeError as exc:
+        console.print(f"[red]Stage 09 SciLLM preflight failed: {exc}[/red]")
+        raise
 
     # --- Directory and Data Setup ---
     stage_output_dir = output_dir / "09_section_summarizer"
@@ -638,6 +650,11 @@ def _cmd_debug_bundle(
     request_timeout: int = 120,
 ):
     """Run Stage 09 summarization from a consolidated list of sections."""
+    try:
+        require_scillm_preflight()
+    except RuntimeError as exc:
+        console.print(f"[red]Stage 09 SciLLM preflight failed: {exc}[/red]")
+        raise
     stage_output_dir = output_dir / "09_section_summarizer"
     json_output_dir = stage_output_dir / "json_output"
     stage_output_dir.mkdir(parents=True, exist_ok=True)
@@ -683,6 +700,11 @@ def _cmd_debug_bundle(
 
 def _cmd_test():
     """Test with a single section."""
+    try:
+        require_scillm_preflight()
+    except RuntimeError as exc:
+        console.print(f"[red]Stage 09 SciLLM preflight failed: {exc}[/red]")
+        raise
 
     test_section = {
         "id": "test_001",
@@ -723,11 +745,7 @@ if __name__ == "__main__":
     import sys
     argv = sys.argv[1:]
     if argv and argv[0] == "sanity":
-        # Fail fast if LLM env missing; ensure upstream artifacts exist
-        from extractor.pipeline.steps.sanity_helper import sanity_run
-        sanity_run("07")
-        print("Stage 09 sanity: upstream artifacts present; run via CLI factory or pipeline for LLM-backed summaries.")
-        sys.exit(0)
+        sys.exit(sanity())
     if not argv or argv[0] in ("-h", "--help"):
         print(
             "Usage: python -m extractor.pipeline.steps.09_section_summarizer INPUT_JSON [OUT_DIR]\n"

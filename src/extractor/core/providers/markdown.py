@@ -15,6 +15,7 @@ from typing import List, Dict, Any, Optional, Union
 
 from loguru import logger
 from extractor.core.providers.utils import emit_list_blocks, normalize_heading_level
+from extractor.core.providers.fetcher_bridge import ensure_local_source, attach_fetcher_metadata
 
 from extractor.core.schema.unified_document import (
     UnifiedDocument,
@@ -37,7 +38,8 @@ class MarkdownProvider:
         self.block_counter = 0
 
     def extract_document(self, filepath: Union[str, Path]) -> UnifiedDocument:
-        filepath = Path(filepath)
+        resolved_path, fetch_download = ensure_local_source(filepath)
+        filepath = Path(resolved_path)
         logger.info(f"Extracting Markdown document: {filepath}")
         text = filepath.read_text(encoding="utf-8", errors="ignore")
 
@@ -113,6 +115,7 @@ class MarkdownProvider:
 
         hierarchy = self._build_hierarchy(blocks)
         meta = DocumentMetadata(title=filepath.stem, format_metadata={"file_type": "markdown"})
+        attach_fetcher_metadata(meta, fetch_download)
         return UnifiedDocument(
             id=self._doc_id(filepath),
             source_type=SourceType.MD,

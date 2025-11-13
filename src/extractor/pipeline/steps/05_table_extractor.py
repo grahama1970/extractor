@@ -63,11 +63,12 @@ from extractor.pipeline.utils.diagnostics import (
     build_stage_timings,
     gpu_metrics_available,
 )
+from extractor.pipeline.utils.step_sanity import run_step_sanity
 # SciLLM Router builder (OpenAI-compatible); avoid direct SDK calls in steps
 from extractor.pipeline.utils.scillm_router import get_text_router
 from extractor.pipeline.steps.scillm_preflight_validator import (
-    validate_scillm_env_sync,
-    quick_scillm_check
+    require_scillm_preflight,
+    quick_scillm_check,
 )
 from extractor.pipeline.utils.debug_utils import log_timing, write_jsonl, ensure_logs_dir
 
@@ -83,6 +84,11 @@ logger.add(
 )
 
 console = Console()
+STEP_NAME = "05_table_extractor"
+
+
+def sanity() -> int:
+    return run_step_sanity(STEP_NAME)
 
 # Camelot extraction strategies
 CAMELOT_STRATEGIES = {
@@ -1138,6 +1144,21 @@ def run(
         )
     except Exception:
         pass
+    # Fail fast when any SciLLM-powered feature is enabled (split/confirm/assist)
+    def _env_true(name: str, default: str = "0") -> bool:
+        return os.getenv(name, default).lower() in {"1", "true", "yes", "y"}
+
+    llm_features_enabled = (
+        _env_true("STAGE05_LLM_SPLIT_1COL", "1")
+        or _env_true("STAGE05_LLM_CONFIRM_LOWCONF", "1")
+        or _env_true("TABLE_LLM_ASSIST", "0")
+    )
+    if llm_features_enabled:
+        try:
+            require_scillm_preflight()
+        except RuntimeError as exc:
+            console.print(f"[red]Stage 05 SciLLM preflight failed: {exc}[/red]")
+            raise
     run_id = get_run_id()
     diagnostics = []
     errors_count = 0
@@ -1318,7 +1339,7 @@ def run(
                 )
                 user = json.dumps({"header_text": cell_text}, ensure_ascii=False)
                 resp = await router.acompletion(
-                    model=os.getenv("CHUTES_TEXT_MODEL", "chutes/text"),
+                    model="chutes/text",
                     messages=[
                         {"role": "system", "content": system},
                         {"role": "user", "content": [{"type": "text", "text": user}]},
@@ -1347,7 +1368,8 @@ def run(
             # Do not mutate Camelot DataFrame; record inferred headers as metadata only
             table["header_inferred"] = cols_out
             table["header_provenance"] = "llm"
-            table["llm_assist"] = {"model": os.getenv("CHUTES_TEXT_MODEL", "chutes/text"), "patch": {"split_1col": True}}
+            recorded_model = os.getenv("CHUTES_TEXT_MODEL") or "chutes/text"
+            table["llm_assist"] = {"model": recorded_model, "patch": {"split_1col": True}}
             log_timing(
                 "05_table_extractor",
                 {"attempt": "llm_split_1col", "outcome": "ok", "table_hash": _stable_table_hash(table)},
@@ -1616,7 +1638,7 @@ def run(
                 "If content looks like prose or lacks column structure, return false."
             )
             return await router.acompletion(
-                model=os.getenv("CHUTES_TEXT_MODEL", "chutes/text"),
+                model="chutes/text",
                 messages=[
                     {"role": "system", "content": system},
                     {"role": "user", "content": [{"type": "text", "text": _json.dumps(payload, ensure_ascii=False)}]},
@@ -2142,14 +2164,11 @@ def debug_bundle(
 
 
 if __name__ == "__main__":
-    # Minimal sanity for local debugging
     import sys
+
     argv = sys.argv[1:]
     if argv and argv[0] == "sanity":
-        from extractor.pipeline.steps.sanity_helper import sanity_run
-        p = sanity_run("05")
-        print(str(p))
-        sys.exit(0)
+        sys.exit(sanity())
     print(
         "Usage: python -m extractor.pipeline.steps.05_table_extractor sanity",
         file=sys.stderr,

@@ -41,6 +41,7 @@ from extractor.core.schema.unified_document import (
     HierarchyNode,
     TableCell,
 )
+from extractor.core.providers.fetcher_bridge import ensure_local_source, attach_fetcher_metadata
 
 # Default configuration constants
 DEFAULT_MAX_IMAGE_SIZE_MB = 10
@@ -66,7 +67,8 @@ class PPTXProvider:
 
     def extract_document(self, filepath: Union[str, Path]) -> UnifiedDocument:
         """Extract PPTX content to unified document format"""
-        filepath = Path(filepath)
+        resolved_path, fetch_download = ensure_local_source(filepath)
+        filepath = Path(resolved_path)
         if not filepath.exists():
             raise FileNotFoundError(filepath)
 
@@ -77,6 +79,7 @@ class PPTXProvider:
 
         # Extract metadata
         metadata = self._extract_metadata(prs, filepath)
+        attach_fetcher_metadata(metadata, fetch_download)
 
         # Extract all slides with structure
         blocks = []

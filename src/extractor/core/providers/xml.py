@@ -56,6 +56,7 @@ from extractor.core.schema.unified_document import (
     HierarchyNode,
     TableCell,
 )
+from extractor.core.providers.fetcher_bridge import ensure_local_source, attach_fetcher_metadata
 
 
 class XMLProvider:
@@ -84,7 +85,8 @@ class XMLProvider:
 
     def extract_document(self, filepath: Union[str, Path]) -> UnifiedDocument:
         """Extract XML content to unified document format"""
-        filepath = Path(filepath)
+        resolved_path, fetch_download = ensure_local_source(filepath)
+        filepath = Path(resolved_path)
         logger.info(f"Extracting XML document: {filepath}")
 
         # Parse XML with comprehensive exception handling
@@ -146,6 +148,7 @@ class XMLProvider:
 
         # Extract metadata
         metadata = self._extract_metadata(root, filepath)
+        attach_fetcher_metadata(metadata, fetch_download)
         if self._wrapped_root:
             fm = metadata.format_metadata or {}
             fm["wrapped_root"] = True

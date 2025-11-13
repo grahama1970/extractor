@@ -36,6 +36,7 @@ from extractor.core.schema.unified_document import (
     TableCell,
 )
 from extractor.core.providers.utils import emit_list_blocks, normalize_heading_level
+from extractor.core.providers.fetcher_bridge import ensure_local_source, attach_fetcher_metadata
 
 
 class RSTProvider:
@@ -59,7 +60,8 @@ class RSTProvider:
     # Public API
     # ------------------------------------------------------------------
     def extract_document(self, filepath: Union[str, Path]) -> UnifiedDocument:
-        filepath = Path(filepath)
+        resolved_path, fetch_download = ensure_local_source(filepath)
+        filepath = Path(resolved_path)
         logger.info(f"Extracting RST document: {filepath}")
 
         # 1. Parse RST -> docutils doctree with SystemMessage handling
@@ -96,13 +98,16 @@ class RSTProvider:
         hierarchy = self._build_hierarchy(blocks)
 
         # 4. Compose UnifiedDocument
+        metadata = self._extract_metadata(filepath)
+        attach_fetcher_metadata(metadata, fetch_download)
+
         doc = UnifiedDocument(
             id=self._generate_doc_id(filepath),
             source_type=SourceType.RST,
             source_path=str(filepath),
             blocks=blocks,
             hierarchy=hierarchy,
-            metadata=self._extract_metadata(filepath),
+            metadata=metadata,
             full_text=self._extract_full_text(blocks),
             keywords=self._extract_keywords(doctree),
         )

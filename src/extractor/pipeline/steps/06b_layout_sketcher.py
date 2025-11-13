@@ -17,10 +17,17 @@ from pathlib import Path
 import asyncio
 from typing import Any, Dict, List, Optional, Tuple
 from loguru import logger
+from extractor.pipeline.utils.step_sanity import run_step_sanity
+from extractor.pipeline.steps.scillm_preflight_validator import require_scillm_preflight
 
 
 GRID = 12  # default grid granularity (rows = cols = GRID)
 SCHEMA_VERSION = "0.2.0"
+STEP_NAME = "06b_layout_sketcher"
+
+
+def sanity() -> int:
+    return run_step_sanity(STEP_NAME)
 # Env toggles
 # Default VLM-assisted sketch OFF for determinism; enable explicitly when desired
 ALLOW_VLM = os.getenv("STAGE06B_ALLOW_VLM", "0").lower() in ("1", "true", "yes", "y")
@@ -1205,6 +1212,12 @@ def run(input_path: str, output_path: str, **kwargs) -> dict[str, Any]:
         sink_id = logger.add(stage_dir / "stage.log", level="DEBUG", enqueue=True, rotation="5 MB", retention=3)
     except Exception:
         sink_id = None
+    if ALLOW_VLM:
+        try:
+            require_scillm_preflight()
+        except RuntimeError as exc:
+            logger.error(f"Stage 06b SciLLM preflight failed: {exc}")
+            raise
     import time as _t
     _t0 = _t.monotonic()
     # Try to find Stage 04 sections file
@@ -1579,10 +1592,5 @@ if __name__ == "__main__":
     import sys
     argv = sys.argv[1:]
     if argv and argv[0] == "sanity":
-        from extractor.pipeline.steps.sanity_helper import sanity_run
-        sanity_run("04")
-        base = Path("data/results/pipeline")
-        run(input_path=str(base), output_path=str(base))
-        print(str(base/"06b_layout_sketcher/json_output/06b_layout_sketch.json"))
-        sys.exit(0)
+        sys.exit(sanity())
     print("Usage: python -m extractor.pipeline.steps.06b_layout_sketcher sanity")

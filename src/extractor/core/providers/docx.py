@@ -28,6 +28,7 @@ from docx2python.iterators import iter_at_depth, iter_tables
 from docx import Document as PythonDocxDocument
 from loguru import logger
 from extractor.core.providers.utils import emit_list_blocks, normalize_heading_level
+from extractor.core.providers.fetcher_bridge import ensure_local_source, attach_fetcher_metadata
 
 from extractor.core.schema.unified_document import (
     UnifiedDocument,
@@ -62,7 +63,8 @@ class DOCXProvider:
 
     def extract_document(self, filepath: Union[str, Path]) -> UnifiedDocument:
         """Extract DOCX content to unified document format"""
-        filepath = Path(filepath)
+        resolved_path, fetch_download = ensure_local_source(filepath)
+        filepath = Path(resolved_path)
         logger.info(f"Extracting DOCX document: {filepath}")
 
         # Optional: build numbering depth map (v2 opt-in)
@@ -76,6 +78,7 @@ class DOCXProvider:
         with docx2python(str(filepath)) as docx_content:
             # Extract all components
             metadata = self._extract_metadata(docx_content)
+            attach_fetcher_metadata(metadata, fetch_download)
             blocks = self._extract_blocks(docx_content, filepath)
 
             # Post-process: promote numbered headings in mangled docs

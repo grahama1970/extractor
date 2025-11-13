@@ -20,7 +20,7 @@ def _env(name: str) -> str:
 
 def smoke_models():
     base=_env('CHUTES_API_BASE'); key=_env('CHUTES_API_KEY')
-    r=httpx.get(base.rstrip('/')+'/models', headers={'x-api-key':key}, timeout=10)
+    r=httpx.get(base.rstrip('/')+'/models', headers={'Authorization': f'Bearer {key}'}, timeout=10)
     print(f'MODELS_HTTP {r.status_code}')
     if r.status_code!=200: sys.exit(21)
     try:
@@ -36,8 +36,7 @@ def smoke_json():
             model=model,
             custom_llm_provider='openai_like',
             api_base=os.environ['CHUTES_API_BASE'],
-            api_key=None,
-            extra_headers={'x-api-key': os.environ['CHUTES_API_KEY']},
+            api_key=os.environ['CHUTES_API_KEY'],
             messages=[{'role':'user','content':'Return only {"ok":true} as JSON.'}],
             response_format={'type':'json_object'},
             timeout=20,
@@ -78,8 +77,7 @@ def smoke_vlm():
                 model=model,
                 custom_llm_provider='openai_like',
                 api_base=os.environ['CHUTES_API_BASE'],
-                api_key=None,
-                extra_headers={'x-api-key': os.environ['CHUTES_API_KEY']},
+                api_key=os.environ['CHUTES_API_KEY'],
                 messages=messages,
                 timeout=20,
             )

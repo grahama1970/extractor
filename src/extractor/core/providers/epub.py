@@ -22,6 +22,8 @@ from ebooklib import epub
 from bs4 import BeautifulSoup, Tag, NavigableString, Comment
 from loguru import logger
 
+from extractor.core.providers.fetcher_bridge import ensure_local_source, attach_fetcher_metadata
+
 from extractor.core.schema.unified_document import (
     UnifiedDocument,
     BlockType,
@@ -47,7 +49,8 @@ class EPUBProvider:
     # Public API
     # ------------------------------------------------------------------
     def extract_document(self, filepath: Union[str, Path]) -> UnifiedDocument:
-        filepath = Path(filepath)
+        resolved_path, fetch_download = ensure_local_source(filepath)
+        filepath = Path(resolved_path)
         logger.info(f"Extracting EPUB document: {filepath}")
 
         book = epub.read_epub(str(filepath))
@@ -58,6 +61,7 @@ class EPUBProvider:
 
         # 1. Metadata
         metadata = self._extract_metadata(book, filepath)
+        attach_fetcher_metadata(metadata, fetch_download)
 
         # 2. Blocks
         blocks: List[BaseBlock] = []

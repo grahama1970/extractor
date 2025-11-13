@@ -4,8 +4,6 @@ import os
 from typing import Any, Dict, List
 
 import asyncio
-import json
-from subprocess import run, PIPE
 
 _TEXT_ROUTER: Router | None = None
 _VLM_ROUTER: Router | None = None
@@ -14,19 +12,11 @@ _VLM_ROUTER: Router | None = None
 def _auth_params() -> Dict[str, Any]:
     """Return litellm auth params for Chutes chat/completions.
 
-    Enforce Bearer-only for chat on this tenant, regardless of CHUTES_AUTH_STYLE.
-    If CHUTES_AUTH_STYLE is set and not 'bearer', print a one-line warning and
-    proceed with Bearer headers.
+    Use api_key only and let SciLLM canonicalize headers for Chutes.
     """
-    style = (os.environ.get("CHUTES_AUTH_STYLE") or "bearer").strip().lower()
     base = os.environ.get("CHUTES_API_BASE", "")
     key = os.environ.get("CHUTES_API_KEY", "")
-    if style and style != "bearer":
-        try:
-            print(f"[scillm_router] WARNING: CHUTES_AUTH_STYLE='{style}' ignored for chat; using Bearer.")
-        except Exception:
-            pass
-    return {"api_base": base, "api_key": None, "extra_headers": {"Authorization": f"Bearer {key}"}}
+    return {"api_base": base, "api_key": key}
 
 
 def _model_entry(model: str) -> Dict[str, Any]:
@@ -69,33 +59,6 @@ def get_text_router():
     alt2 = os.environ.get("CHUTES_TEXT_MODEL_ALT2", "").strip()
     if auto:
         raise RuntimeError("SCILLM_AUTO_ROUTER is disabled by default. Provide CHUTES_TEXT_MODEL (and optional ALT1/ALT2).")
-    if False:  # discovery branch intentionally disabled
-        base = os.getenv("CHUTES_API_BASE", "").rstrip("/")
-        key = os.getenv("CHUTES_API_KEY", "")
-        if base and key:
-            r = run([
-                "curl","-sS","--max-time","3","-H",f"Authorization: Bearer {key}",f"{base}/models"
-            ], check=False, stdout=PIPE, text=True)
-            try:
-                data = json.loads(r.stdout)
-                ids = [d.get("id","") for d in (data.get("data") or [])]
-                # crude filter: exclude obvious VLMs
-                text_ids = [i for i in ids if i and not any(tok in i.lower() for tok in ["-vl","/vl","vision"])]
-                pref = [
-                    "Qwen/Qwen3-235B-A22B-Instruct-2507",
-                    "deepseek-ai/DeepSeek-V3.1",
-                    "zai-org/GLM-4.6-FP8",
-                ]
-                ordered = [i for i in pref if i in text_ids] + [i for i in text_ids if i not in pref]
-                if not primary and ordered:
-                    primary = ordered[0]
-                fill = [i for i in ordered if i != primary][:2]
-                if not alts[0:1] and fill:
-                    alts[0:1] = [fill[0]]
-                if len(fill) > 1 and len(alts) < 2:
-                    alts = (alts + [fill[1]])[:2]
-            except Exception:
-                pass
     model_list: List[Dict[str, Any]] = []
     if primary:
         model_list.append(_model_entry(primary))
@@ -126,32 +89,6 @@ def get_vlm_router():
     alt2 = os.environ.get("CHUTES_VLM_MODEL_ALT2", "").strip()
     if auto:
         raise RuntimeError("SCILLM_AUTO_ROUTER is disabled by default. Provide CHUTES_VLM_MODEL (and optional ALT1/ALT2).")
-    if False:
-        base = os.getenv("CHUTES_API_BASE", "").rstrip("/")
-        key = os.getenv("CHUTES_API_KEY", "")
-        if base and key:
-            r = run([
-                "curl","-sS","--max-time","3","-H",f"Authorization: Bearer {key}",f"{base}/models"
-            ], check=False, stdout=PIPE, text=True)
-            try:
-                data = json.loads(r.stdout)
-                ids = [d.get("id","") for d in (data.get("data") or [])]
-                vlm_ids = [i for i in ids if i and any(tok in i.lower() for tok in ["-vl","/vl","vision"])]
-                pref = [
-                    "Qwen/Qwen3-VL-235B-A22B-Instruct",
-                    "Qwen/Qwen2.5-VL-32B-Instruct",
-                    "OpenGVLab/InternVL3-78B",
-                ]
-                ordered = [i for i in pref if i in vlm_ids] + [i for i in vlm_ids if i not in pref]
-                if not primary and ordered:
-                    primary = ordered[0]
-                fill = [i for i in ordered if i != primary][:2]
-                if not alts[0:1] and fill:
-                    alts[0:1] = [fill[0]]
-                if len(fill) > 1 and len(alts) < 2:
-                    alts = (alts + [fill[1]])[:2]
-            except Exception:
-                pass
     model_list: List[Dict[str, Any]] = []
     if primary:
         model_list.append(_model_entry_vlm(primary))

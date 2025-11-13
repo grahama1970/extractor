@@ -63,29 +63,12 @@ def _unset_openai_envs() -> bool:
 def _call_direct(base: str, key: str, model: str) -> Dict[str, Any]:
     from scillm import completion  # type: ignore
 
-    try:
-        return completion(
-            model=model,
-            api_base=base.rstrip("/"),
-            api_key=None,  # prefer x-api-key path
-            custom_llm_provider="openai_like",
-            extra_headers={"x-api-key": key},
-            messages=[
-                {
-                    "role": "user",
-                    "content": "Return only {\"ok\":true} as JSON.",
-                }
-            ],
-            response_format={"type": "json_object"},
-            timeout=60,
-        )
-    except Exception:
-        # Fallback: Bearer via 'openai'
-        return completion(
+    # Single paved call: let SciLLM canonicalize headers
+    return completion(
         model=model,
         api_base=base.rstrip("/"),
         api_key=key,
-        custom_llm_provider="openai",
+        custom_llm_provider="openai_like",
         messages=[
             {
                 "role": "user",

@@ -77,6 +77,15 @@
       "why": "Pages 0–1 tables must appear as a single logical merge"
     },
     {
+      "id": "stage07_merged_tables_pages_0_1",
+      "path": "07_reflow_section/json_output/07_reflowed.json",
+      "json_pointer": "/merged_tables/0/pages",
+      "metric": "value",
+      "op": "==",
+      "value": [0, 1],
+      "why": "Merged tables summary must explicitly report pages [0,1]"
+    },
+    {
       "id": "stage07r_requirements_eq36",
       "path": "07_requirements_miner/json_output/07_requirements.json",
       "json_pointer": "/requirements",
@@ -102,6 +111,33 @@
       "op": "==",
       "value": 53,
       "why": "Annotated PDF must render the expected overlay count"
+    },
+    {
+      "id": "stage09a_requirements_eq36",
+      "path": "09a_pdf_annotator/json_output/annotations.json",
+      "json_pointer": "/summary/by_kind/requirement",
+      "metric": "value",
+      "op": "==",
+      "value": 36,
+      "why": "Overlay breakdown must include 36 requirements"
+    },
+    {
+      "id": "stage09a_figures_ge1",
+      "path": "09a_pdf_annotator/json_output/annotations.json",
+      "json_pointer": "/summary/by_kind/figure",
+      "metric": "value",
+      "op": ">=",
+      "value": 1,
+      "why": "Overlay breakdown must include the single figure"
+    },
+    {
+      "id": "stage09a_table_groups_ge1",
+      "path": "09a_pdf_annotator/json_output/annotations.json",
+      "json_pointer": "/summary/by_kind/table_merged",
+      "metric": "value",
+      "op": ">=",
+      "value": 1,
+      "why": "Overlay breakdown must include merged table highlights"
     }
   ]
 }

@@ -235,6 +235,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         s06b_layout_sketcher as s06b,
         s07_reflow_section as s07,
         s09a_pdf_annotator as s09a,
+        s09b_audit as s09b,
         s07_requirements_miner as s07req,
         s09_section_summarizer as s09,
     )
@@ -514,6 +515,27 @@ def main(argv: Optional[list[str]] = None) -> int:
         logger.error(f"09a_pdf_annotator failed: {e}")
         if args.stop_on_fail:
             return 1
+
+    # 09b audit — summarize artifacts before downstream export
+    a09b = _step(
+        "09b_audit",
+        s09b.run,
+        out,
+        stop_on_fail=args.stop_on_fail,
+        timeout_sec=args.stage_timeout,
+        log_dir_base=out,
+        on_timing=lambda n, dt: stage_latencies.update({n: dt}),
+    )
+    if not a09b:
+        logger.error("09b_audit reported blocking issues; aborting before Stage 10/11.")
+        return 1
+    results["09b"] = a09b
+    _write_artifacts_index((out / "09b_audit"))
+    manifest.record_stage(
+        "09b_audit",
+        "Completed",
+        {"json": str((out / "09b_audit" / "json_output" / "09b_audit.json").relative_to(out)), "latency_ms": stage_latencies.get("09b_audit")},
+    )
 
     # 07½ Requirements miner — run unconditionally
     req_json_path: Optional[Path] = None

@@ -26,10 +26,10 @@ Based on [OpenAI Prompting Guide](https://cookbook.openai.com/examples/gpt-5/gpt
 
 ## SciLLM Protocol (must follow)
 
-- Router‑only: use `scillm.Router(.acompletion)` everywhere; no httpx/OpenAI fallbacks.
+- Router: use `scillm.Router` or paved router helpers; do not re‑implement or fall back to raw HTTP.
 - Models: read `CHUTES_TEXT_MODEL` (+ `ALT1/ALT2`) and `CHUTES_VLM_MODEL` (+ `ALT1/ALT2`).
-- Auth (this tenant): Chat requires Bearer. Keep `CHUTES_AUTH_STYLE=bearer` (default). Do not flip to `x-api-key` without approval.
-- Preflight: probe `GET $CHUTES_API_BASE/models` and a minimal `POST $CHUTES_API_BASE/chat/completions` (Bearer). Fail fast on non‑200.
+- Auth: pass `api_key=CHUTES_API_KEY`; do not set `extra_headers` manually. SciLLM canonicalizes headers for Chutes.
+- Preflight: use `scillm.paved.list_models_openai_like` + `scillm.paved.sanity_preflight` (short‑wall, parallel). Do not use raw HTTP in code.
 - JSON mode: `response_format={"type":"json_object"}`, temp=0, strict “no fences/extra keys”. Accept dict or string; normalize to dict.
 - Logging: write per‑attempt `timings.jsonl` (served_model, tokens, latency_ms, outcome) and `timings_summary.json` per stage.
 - No bespoke wrappers: centralize in `extractor/pipeline/utils/scillm_router.py`. No stage‑local clients.
@@ -475,7 +475,7 @@ resp = completion(
   custom_llm_provider="openai_like",
   messages=[{"role":"user","content":"Return only {\"ok\":true} as JSON."}],
   response_format={"type":"json_object"},
-  extra_headers={"x-api-key": os.environ["CHUTES_API_KEY"]},
+  api_key=os.environ["CHUTES_API_KEY"],
   timeout=60,
 )
 ```
@@ -483,7 +483,7 @@ resp = completion(
 Troubleshooting (summary; see SCILLM_USAGE.md for details):
 - Flip base with/without `/v1` if you see 404.
 - Ensure the model id exists in `GET $CHUTES_API_BASE/models` for your tenant.
-- Keep `api_key=None` and supply `x-api-key` in `extra_headers` exactly once.
+- Keep calls simple: provide `api_key=` and let SciLLM canonicalize headers.
 
 ---
 

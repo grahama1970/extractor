@@ -69,7 +69,7 @@ def run(
             response_format=resp_format,
             temperature=0,
             timeout=timeout,
-            extra_headers={"x-api-key": key},
+            api_key=key,
         )
 
     # Check 1: strict JSON echo with image present
@@ -119,4 +119,3 @@ def run(
 
 if __name__ == "__main__":
     app()
-

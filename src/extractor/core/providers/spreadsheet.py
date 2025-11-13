@@ -39,6 +39,7 @@ from extractor.core.schema.unified_document import (
     HierarchyNode,
     TableCell,
 )
+from extractor.core.providers.fetcher_bridge import ensure_local_source, attach_fetcher_metadata
 
 
 class SpreadsheetProvider:
@@ -52,7 +53,8 @@ class SpreadsheetProvider:
     # Public API
     # ------------------------------------------------------------------
     def extract_document(self, filepath: Union[str, Path]) -> UnifiedDocument:
-        filepath = Path(filepath)
+        resolved_path, fetch_download = ensure_local_source(filepath)
+        filepath = Path(resolved_path)
         logger.info(f"Extracting spreadsheet: {filepath}")
 
         suffix = filepath.suffix.lower()
@@ -63,6 +65,8 @@ class SpreadsheetProvider:
             blocks, metadata = self._extract_ods(filepath)
         else:
             raise ValueError(f"Unsupported spreadsheet format: {suffix}")
+
+        attach_fetcher_metadata(metadata, fetch_download)
 
         # Build hierarchy: Workbook → Worksheets → Tables
         hierarchy = self._build_hierarchy(blocks)

@@ -29,7 +29,9 @@ from rich.console import Console  # noqa: E402
 from rich.progress import Progress, SpinnerColumn, TextColumn  # noqa: E402
 from extractor.pipeline.utils.diagnostics import get_run_id  # noqa: E402,F401
 from extractor.pipeline.utils.scillm_router import get_text_router  # noqa: E402
+from extractor.pipeline.steps.scillm_preflight_validator import require_scillm_preflight  # noqa: E402
 from extractor.pipeline.utils.debug_utils import log_timing  # noqa: E402
+from extractor.pipeline.utils.step_sanity import run_step_sanity
 
 try:
     from arango import ArangoClient
@@ -51,6 +53,11 @@ logger.remove()
 logger.add(sys.stderr, level="INFO")
 
 console = Console()
+STEP_NAME = "11_arango_create_graph"
+
+
+def sanity() -> int:
+    return run_step_sanity(STEP_NAME)
 
 # Optional FAISS dependency with NumPy fallback
 try:
@@ -799,6 +806,13 @@ def run(
             )
         return
 
+    if GRAPH_ENABLE_RATIONALES:
+        try:
+            require_scillm_preflight()
+        except RuntimeError as exc:
+            console.print(f"[red]Stage 11 SciLLM preflight failed: {exc}[/red]")
+            raise
+
     docs_with_embed = [doc for doc in documents if doc.get("embedding")]
     if not docs_with_embed:
         # Try proves/conflicts-only offline path when proofs/normalized units exist
@@ -1156,13 +1170,5 @@ if __name__ == "__main__":
     import sys, os
     argv = sys.argv[1:]
     if argv and argv[0] == "sanity":
-        # Fail fast on missing Arango env; ensure upstream artifacts exist
-        from extractor.pipeline.steps.sanity_helper import sanity_run
-        sanity_run("10") if False else sanity_run("07")  # minimal prereqs
-        ok_env = bool(os.getenv("ARANGO_URL") and os.getenv("ARANGO_DB") and (os.getenv("ARANGO_USER") or os.getenv("ARANGO_USERNAME")) and os.getenv("ARANGO_PASSWORD"))
-        if not ok_env:
-            print("Stage 11 sanity: missing Arango env; skipping graph creation. Upstream OK.")
-            sys.exit(0)
-        print("Stage 11 sanity: Arango env present; run via pipeline to create graph.")
-        sys.exit(0)
+        sys.exit(sanity())
     print("Usage: python -m extractor.pipeline.steps.11_arango_create_graph sanity")

@@ -18,33 +18,181 @@ from __future__ import annotations
 
 import json
 import time
+from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict
 
 from loguru import logger
 import fitz  # PyMuPDF
+from extractor.pipeline.utils.step_sanity import run_step_sanity
 
 # No CLI framework; import and call run(...)
 
-# Color map for overlay kinds (RGB in 0..1)
+STEP_NAME = "09a_pdf_annotator"
+
+
+def sanity() -> int:
+    return run_step_sanity(STEP_NAME)
+
+# ---- Visual design ----------------------------------------------------------
+# Stroke colors (0..1 RGB) chosen for readability & CVD safety.
 COLORS: Dict[str, tuple[float, float, float]] = {
-    "section": (0.0, 0.627, 0.0),           # green
-    "section_frame": (0.0, 0.627, 0.0),
-    "header_candidate": (1.0, 0.0, 1.0),    # magenta
-    "columns": (0.0, 1.0, 1.0),             # cyan
-    "table": (0.898, 0.224, 0.207),         # red-ish
-    "table_merged": (0.6, 0.0, 0.0),        # darker red for logical merged tables
-    "figure": (0.117, 0.533, 0.902),        # blue-ish
-    "text_chunk": (1.0, 0.5, 0.0),          # orange
-    "reflow_paragraph": (0.984, 0.549, 0.0),
-    "reflow_list": (1.0, 0.761, 0.0),
-    "reflow_heading": (0.557, 0.141, 0.667),
-    "reflow_table": (0.777, 0.157, 0.157),
-    "reflow_figure": (0.223, 0.286, 0.671),
-    "requirement": (1.0, 0.843, 0.0),       # gold
-    "grid": (0.7, 0.7, 0.7),                # gray
-    "table_rejected": (0.35, 0.35, 0.35),   # dark gray for demoted not-table
+    "section": (0.051, 0.580, 0.533),       # #0D9488 teal-600
+    "section_frame": (0.051, 0.580, 0.533),
+    "text_chunk": (0.392, 0.455, 0.545),    # #64748B slate-500
+    "reflow_paragraph": (0.392, 0.455, 0.545),
+    "reflow_list": (0.392, 0.455, 0.545),
+    "reflow_heading": (0.051, 0.580, 0.533),
+    "figure": (0.145, 0.388, 0.922),        # #2563EB blue-600
+    "reflow_figure": (0.145, 0.388, 0.922),
+    "table": (0.863, 0.149, 0.149),         # #DC2626 red-600
+    "reflow_table": (0.730, 0.100, 0.100),
+    "table_merged": (0.730, 0.100, 0.100),  # darker red
+    "requirement": (0.851, 0.467, 0.024),   # #D97706 amber-600
+    "grid": (0.612, 0.639, 0.686),          # slate-400
+    "columns": (0.055, 0.647, 0.655),       # teal-ish
+    "header_candidate": (0.851, 0.024, 0.851),
+    "table_rejected": (0.35, 0.35, 0.35),
 }
+
+# Light fills + opacities per kind (figure a bit stronger so watermark reads)
+def _lighten(rgb, f=0.95):
+    r, g, b = rgb
+    return (1 - (1 - r) * f, 1 - (1 - g) * f, 1 - (1 - b) * f)
+
+def _style_for_kind(kind: str) -> tuple[tuple[float, float, float], tuple[float, float, float], float]:
+    stroke = COLORS.get(kind, (0.3, 0.3, 0.3))
+    fill = _lighten(stroke, 0.95)
+    opacity = 0.24 if kind == "figure" else 0.18
+    return stroke, fill, opacity
+
+# Human-friendly gutter labels
+HUMAN_KIND = {
+    "section": "Section Header",
+    "reflow_heading": "Section Header",
+    "reflow_paragraph": "Text Block",
+    "reflow_list": "Text Block",
+    "text_chunk": "Text Block",
+    "figure": "Figure",
+    "reflow_figure": "Figure",
+    "table": "Table",
+    "table_merged": "Table",
+    "requirement": "Requirement",
+}
+
+# Gutter lane + adornments
+GUTTER_SIDE = "left"
+GUTTER_WIDTH = 84.0
+GUTTER_PAD = 8.0
+PLAQUE_PAD_X = 6.0
+PLAQUE_PAD_Y = 4.0
+
+LABEL_MARGIN_PTS = 14.0
+LABEL_MIN_FONT = 8
+LABEL_BG = (1.0, 0.98, 0.85)
+LABEL_TEXT_COLOR = (0.1, 0.1, 0.1)
+PREVIEW_DPI = 144
+MAX_TABS_PER_PAGE = 12
+TAB_GUTTER_WIDTH = 48.0
+TAB_HEIGHT = 34.0
+TAB_GAP = 6.0
+TAB_COLORS = {
+    "section": (0.82, 0.92, 0.82),
+    "table": (0.95, 0.85, 0.85),
+    "more": (0.9, 0.9, 0.9),
+}
+
+
+def _draw_page_gutter_side(page: fitz.Page, side: str = "left") -> fitz.Rect:
+    """Draw a single gutter lane on the requested side and return its rect."""
+    r = page.rect
+    if side == "left":
+        lane = fitz.Rect(r.x0 + 6, r.y0 + 6, r.x0 + 6 + GUTTER_WIDTH, r.y1 - 6)
+    else:
+        lane = fitz.Rect(r.x1 - 6 - GUTTER_WIDTH, r.y0 + 6, r.x1 - 6, r.y1 - 6)
+    page.draw_rect(lane, fill=(0.985, 0.985, 0.985), color=(0.92, 0.92, 0.92), width=0.4, overlay=True)
+    return lane
+
+def _draw_page_gutter(page: fitz.Page) -> fitz.Rect:
+    """Backward-compatible helper: draw using global GUTTER_SIDE."""
+    return _draw_page_gutter_side(page, GUTTER_SIDE)
+
+
+def _draw_gutter_tag(page: fitz.Page, lane: fitz.Rect, target: fitz.Rect, text: str, color=(0.12, 0.12, 0.12), font=9.0) -> None:
+    if not text:
+        return
+    txt_w = page.get_text_length(text, fontsize=font)
+    max_w = max(12.0, lane.width - 2 * GUTTER_PAD)
+    t = text
+    if txt_w > max_w:
+        while txt_w > max_w and len(t) > 3:
+            t = t[:-1]
+            txt_w = page.get_text_length(t + "…", fontsize=font)
+        t = (t + "…") if len(t) > 3 else t
+    plaque_h = font * 1.6
+    cy = target.y0 + target.height / 2.0
+    top = max(lane.y0 + GUTTER_PAD, min(cy - plaque_h / 2.0, lane.y1 - GUTTER_PAD - plaque_h))
+    left = lane.x0 + GUTTER_PAD
+    plaque = fitz.Rect(left, top, left + page.get_text_length(t, fontsize=font) + 2 * PLAQUE_PAD_X, top + plaque_h)
+    page.draw_rect(plaque, fill=(1, 1, 1), color=(0.8, 0.8, 0.8), width=0.4, overlay=True)
+    page.insert_text((plaque.x0 + PLAQUE_PAD_X, plaque.y0 + font * 1.2 - 1), t, fontsize=font, color=color, overlay=True)
+    p_from = fitz.Point(plaque.x1, plaque.y0 + plaque.height / 2.0)
+    p_to = fitz.Point(target.x0, min(max(target.y0 + 4, p_from.y), target.y1 - 4))
+    page.draw_line(p_from, p_to, color=(0.65, 0.65, 0.65), width=0.5)
+
+
+def _draw_t_endcaps(page: fitz.Page, lane: fitz.Rect, y0: float, y1: float, color=(0.25, 0.25, 0.25)) -> None:
+    x = lane.x1 - 10.0
+    page.draw_line(fitz.Point(x, y0), fitz.Point(x, y1), color=color, width=0.8)
+    page.draw_line(fitz.Point(x - 6, y0), fitz.Point(x + 6, y0), color=color, width=0.8)
+    page.draw_line(fitz.Point(x - 6, y1), fitz.Point(x + 6, y1), color=color, width=0.8)
+
+
+def _draw_section_title_plaque(page: fitz.Page, rect: fitz.Rect, text: str, stroke=(0.86, 0.25, 0.2), font=11.0) -> None:
+    if not text:
+        return
+    t = text.strip()
+    max_w = min(rect.width * 0.9, 360.0)
+    while page.get_text_length(t, fontsize=font) > max_w and len(t) > 5:
+        t = t[:-1]
+    if t != text:
+        t = t.rstrip(" .,;") + "…"
+    h = font * 1.8
+    top = max(page.rect.y0 + 6, rect.y0 - h - 6)
+    left = rect.x0 + 6
+    plaque = fitz.Rect(left, top, left + page.get_text_length(t, fontsize=font) + 2 * PLAQUE_PAD_X, top + h)
+    page.draw_rect(plaque, fill=(1, 1, 1), color=stroke, width=0.9, overlay=True)
+    page.insert_text((plaque.x0 + PLAQUE_PAD_X, plaque.y0 + font * 1.2 - 1), t, fontsize=font, color=stroke, overlay=True)
+
+
+def _draw_figure_watermark(page: fitz.Page, rect: fitz.Rect, text: str) -> None:
+    if not text:
+        return
+    font = max(12.0, rect.height * 0.08)
+    box = fitz.Rect(rect.x0 + 8, rect.y0 + 8, rect.x1 - 8, rect.y1 - 8)
+    page.insert_textbox(box, text, fontsize=font, color=(0.4, 0.4, 0.4), align=1, overlay=True)
+
+
+def _draw_table_metrics(page: fitz.Page, rect: fitz.Rect, headers_preview: str | None, camelot_acc: float | None, pandas_acc: float | None, color=(0.0, 0.0, 0.0)) -> None:
+    y = rect.y1 - 6
+    x = rect.x0 + 8
+    font1 = 9.5
+    font2 = 9.0
+    if headers_preview:
+        page.insert_text((x, y - font1), f"Data: {headers_preview}", fontsize=font1, color=color, overlay=True)
+        y -= font1 + 2
+    metrics: list[str] = []
+    if camelot_acc is not None:
+        try:
+            metrics.append(f"camelot={float(camelot_acc):.2f}")
+        except Exception:
+            pass
+    if pandas_acc is not None:
+        try:
+            metrics.append(f"pandas={float(pandas_acc):.2f}")
+        except Exception:
+            pass
+    page.insert_text((x, y - font2), f"Metrics: {', '.join(metrics) if metrics else '—'}", fontsize=font2, color=color, overlay=True)
 
 
 def _safe_get_bbox(obj: dict[str, Any]) -> list[float] | None:
@@ -56,6 +204,516 @@ def _safe_get_bbox(obj: dict[str, Any]) -> list[float] | None:
     except Exception:
         return None
 
+
+def _rect_from_pdf_bbox(page: fitz.Page, bbox: list[float]) -> fitz.Rect:
+    """Convert a PDF-space bbox (origin bottom-left) to a PyMuPDF rect (origin top-left)."""
+    x0, y0, x1, y1 = bbox
+    x_lo, x_hi = sorted((x0, x1))
+    y_lo, y_hi = sorted((y0, y1))
+    height = float(page.rect.height)
+    top = height - y_hi
+    bottom = height - y_lo
+    # Clamp to the page bounds and ensure positive area
+    rect = fitz.Rect(x_lo, top, x_hi, bottom)
+    rect = rect & page.rect
+    if rect.y1 < rect.y0:
+        rect = fitz.Rect(rect.x0, rect.y1, rect.x1, rect.y0)
+    if rect.width <= 0 or rect.height <= 0:
+        # Expand minimally to avoid zero-area overlays
+        rect = fitz.Rect(rect.x0, rect.y0, rect.x0 + max(1.0, rect.width), rect.y0 + max(1.0, rect.height)) & page.rect
+    return rect
+
+
+def _wrap_label_lines(page: fitz.Page, text: str, font: float, max_width: float, max_lines: int = 3) -> list[str]:
+    text = (text or "").strip()
+    if not text:
+        return []
+    if max_width <= font * 3:
+        truncated = text
+        while fitz.get_text_length(truncated, fontsize=font) > max_width and len(truncated) > 1:
+            truncated = truncated[:-1]
+        if len(truncated) < len(text):
+            truncated = truncated.rstrip(" .,;") + "…"
+        return [truncated]
+    words = text.split()
+    if not words:
+        return []
+    lines: list[str] = []
+    idx = 0
+    while idx < len(words) and len(lines) < max_lines:
+        current = words[idx]
+        idx += 1
+        while idx < len(words):
+            candidate = f"{current} {words[idx]}"
+            if fitz.get_text_length(candidate, fontsize=font) <= max_width:
+                current = candidate
+                idx += 1
+            else:
+                break
+        lines.append(current)
+    if idx < len(words) and lines:
+        lines[-1] = lines[-1].rstrip(" .,;") + "…"
+    return lines
+
+
+def _format_label(kind: str, payload: dict[str, Any], override: str | None) -> str:
+    if override:
+        base = str(override)
+    elif kind.startswith("table") and kind != "table_rejected":
+        idx = payload.get("table_index") or payload.get("tableNumber")
+        name = payload.get("title") or payload.get("caption") or payload.get("logical_table_key")
+        pages = payload.get("pages_in_group") or payload.get("page_indices")
+        page_str = ""
+        if isinstance(pages, list) and pages:
+            try:
+                page_str = f" (pages {', '.join(str(int(p)) for p in pages)})"
+            except Exception:
+                page_str = f" (pages {', '.join(str(p) for p in pages)})"
+        if idx and name:
+            base = f"Table {idx}: {name}{page_str}"
+        elif idx:
+            base = f"Table {idx}{page_str}"
+        elif name:
+            base = f"Table: {name}{page_str}"
+        else:
+            base = "Table"
+    elif kind == "table_rejected":
+        reason = payload.get("reason") or ""
+        base = f"Rejected table{': ' + reason if reason else ''}"
+    elif kind == "table_merged":
+        key = payload.get("logical_table_key") or payload.get("group")
+        pages = payload.get("pages_in_group")
+        if isinstance(pages, list) and pages:
+            try:
+                page_str = f" (pages {', '.join(str(int(p)) for p in pages)})"
+            except Exception:
+                page_str = f" (pages {', '.join(str(p) for p in pages)})"
+        else:
+            page_str = ""
+        base = f"Merged table {key}{page_str}" if key else f"Merged table{page_str}"
+    elif kind == "section":
+        title = payload.get("title") or payload.get("heading") or payload.get("id")
+        if title and payload.get("continuation"):
+            title = f"{title} (cont.)"
+        base = f"Section: {title}" if title else "Section"
+    elif kind == "figure":
+        fid = payload.get("figure_id")
+        title = payload.get("title") or payload.get("caption")
+        if fid and title:
+            base = f"Figure {fid}: {title}"
+        elif fid:
+            base = f"Figure {fid}"
+        elif title:
+            base = f"Figure: {title}"
+        else:
+            base = "Figure"
+    elif kind == "header_candidate":
+        verdict = payload.get("verdict")
+        base = f"Header candidate: {verdict}" if verdict else "Header candidate"
+    elif kind.startswith("requirement"):
+        rid = payload.get("requirement_id") or payload.get("id")
+        title = payload.get("title")
+        if rid and title:
+            base = f"Requirement {rid}: {title}"
+        elif rid:
+            base = f"Requirement {rid}"
+        elif title:
+            base = f"Requirement: {title}"
+        else:
+            base = "Requirement"
+        if payload.get("conditional"):
+            base += " (conditional)"
+    else:
+        base = override or kind.replace("_", " ").title()
+    base = " ".join(str(base).split())
+    return base[:140]
+
+
+def _stable_overlay_id(kind: str, page_index: int, payload: dict[str, Any], fallback: int) -> str:
+    """Generate a stable identifier for an overlay based on its semantic identity."""
+    page_token = f"@{page_index + 1}" if page_index >= 0 else ""
+
+    def _first_str(keys: list[str]) -> str | None:
+        for key in keys:
+            val = payload.get(key)
+            if val is None:
+                continue
+            if isinstance(val, (list, tuple)):
+                if not val:
+                    continue
+                return str(val[0])
+            return str(val)
+        return None
+
+    if kind == "section":
+        sid = _first_str(["id", "section_id", "sectionId"])
+        if sid:
+            return f"SEC::{sid}{page_token}"
+    if kind in {"table", "table_merged", "table_rejected"}:
+        key = _first_str(["logical_table_key", "group", "table_index", "tableNumber"])
+        if key:
+            return f"TBL::{key}{page_token}"
+    if kind == "figure":
+        fid = _first_str(["figure_id", "id"])
+        if fid:
+            return f"FIG::{fid}{page_token}"
+    if kind.startswith("requirement"):
+        rid = _first_str(["requirement_id", "id"])
+        if rid:
+            return f"REQ::{rid}{page_token}"
+    if kind.startswith("reflow_"):
+        block_id = _first_str(["block_id", "source_block_id", "hash"])
+        if block_id:
+            return f"RFL::{block_id}{page_token}"
+    if kind == "header_candidate":
+        bid = _first_str(["block_id", "id"])
+        if bid:
+            return f"HDR::{bid}{page_token}"
+    return f"{kind.upper()}::ov{fallback}{page_token}"
+
+
+def _draw_label(
+    page: fitz.Page,
+    rect: fitz.Rect,
+    text: str,
+    color: tuple[float, float, float],
+    font_size: float,
+) -> None:
+    try:
+        if not text:
+            return
+        text = text.strip()
+        if not text:
+            return
+        font = max(float(font_size), LABEL_MIN_FONT)
+        line_height = font * 1.2
+        y_center = rect.y0 + rect.height / 2.0
+        left_space = rect.x0 - page.rect.x0
+        right_space = page.rect.x1 - rect.x1
+
+        def _draw_lines(x: float, top: float, width: float, lines: list[str]) -> fitz.Point:
+            height = line_height * len(lines)
+            bg = fitz.Rect(x - 2, top - 2, x + width + 2, top + height + 2)
+            text_block = "\n".join(lines)
+            try:
+                annot = page.add_freetext_annot(
+                    bg,
+                    text_block,
+                    fontsize=font,
+                    text_color=LABEL_TEXT_COLOR,
+                    fill_color=LABEL_BG,
+                )
+                try:
+                    annot.set_border(width=0.4)
+                    annot.set_colors(stroke=color)
+                    annot.set_opacity(0.95)
+                    annot.update()
+                except Exception:
+                    pass
+            except Exception:
+                page.draw_rect(bg, color=color, width=0.4, fill=LABEL_BG, overlay=False)
+                y = top + font
+                for ln in lines:
+                    page.insert_text((x, y), ln, fontsize=font, color=LABEL_TEXT_COLOR, overlay=False)
+                    y += line_height
+            return fitz.Point(bg.x0 + width / 2.0, bg.y0 + height / 2.0)
+
+        # Try left margin first
+        avail_left = left_space - LABEL_MARGIN_PTS * 2
+        if avail_left > font * 3:
+            lines = _wrap_label_lines(page, text, font, avail_left)
+            if lines:
+                width = max(fitz.get_text_length(ln, fontsize=font) for ln in lines)
+                if left_space >= width + LABEL_MARGIN_PTS * 2:
+                    text_height = line_height * len(lines)
+                    top = y_center - text_height / 2.0
+                    top = max(page.rect.y0 + 2, min(page.rect.y1 - text_height - 2, top))
+                    x = rect.x0 - LABEL_MARGIN_PTS - width
+                    center = _draw_lines(x, top, width, lines)
+                    end = fitz.Point(rect.x0, max(rect.y0, min(rect.y1, center.y)))
+                    page.draw_line(center, end, color=color, width=0.4)
+                    return
+
+        # Try right margin
+        avail_right = right_space - LABEL_MARGIN_PTS * 2
+        if avail_right > font * 3:
+            lines = _wrap_label_lines(page, text, font, avail_right)
+            if lines:
+                width = max(fitz.get_text_length(ln, fontsize=font) for ln in lines)
+                if right_space >= width + LABEL_MARGIN_PTS * 2:
+                    text_height = line_height * len(lines)
+                    top = y_center - text_height / 2.0
+                    top = max(page.rect.y0 + 2, min(page.rect.y1 - text_height - 2, top))
+                    x = rect.x1 + LABEL_MARGIN_PTS
+                    center = _draw_lines(x, top, width, lines)
+                    end = fitz.Point(rect.x1, max(rect.y0, min(rect.y1, center.y)))
+                    page.draw_line(end, center, color=color, width=0.4)
+                    return
+
+        # Fallback above/below
+        max_available = min(page.rect.width - LABEL_MARGIN_PTS * 2, max(rect.width, font * 6))
+        lines = _wrap_label_lines(page, text, font, max_available)
+        if not lines:
+            return
+        width = max(fitz.get_text_length(ln, fontsize=font) for ln in lines)
+        text_height = line_height * len(lines)
+        top = rect.y0 - LABEL_MARGIN_PTS - text_height
+        if top >= page.rect.y0 + 2:
+            x = max(page.rect.x0 + LABEL_MARGIN_PTS, min(rect.x0, page.rect.x1 - width - LABEL_MARGIN_PTS))
+            center = _draw_lines(x, top, width, lines)
+            end = fitz.Point(rect.x0 + rect.width / 2.0, rect.y0)
+            page.draw_line(center, end, color=color, width=0.4)
+            return
+        top = rect.y1 + LABEL_MARGIN_PTS
+        if top + text_height > page.rect.y1 - 2:
+            top = page.rect.y1 - text_height - 2
+        x = max(page.rect.x0 + LABEL_MARGIN_PTS, min(rect.x0, page.rect.x1 - width - LABEL_MARGIN_PTS))
+        center = _draw_lines(x, top, width, lines)
+        end = fitz.Point(rect.x0 + rect.width / 2.0, rect.y1)
+        page.draw_line(end, center, color=color, width=0.4)
+    except Exception:
+        pass
+
+
+def _collect_tabs(sections: list[dict[str, Any]], overlays: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    tabs: list[dict[str, Any]] = []
+    section_index: dict[str, dict[str, Any]] = {}
+    for s in sections:
+        sid_raw = s.get("id") or s.get("section_id")
+        sid = str(sid_raw) if sid_raw is not None else None
+        if not sid:
+            continue
+        base_page = _coerce_page(s.get("page_start"), s.get("page_idx"), s.get("page"))
+        if base_page is None:
+            continue
+        metadata = s.get("metadata") or {}
+        continued = metadata.get("continued_pages") or []
+        pages = {int(base_page)}
+        for p in continued:
+            pg = _coerce_page(p)
+            if pg is not None:
+                pages.add(int(pg))
+        section = section_index.setdefault(
+            sid,
+            {
+                "key": f"SEC::{sid}",
+                "label": s.get("title") or s.get("display_title") or sid,
+                "kind": "section",
+                "pages": set(),
+            },
+        )
+        section["pages"].update(pages)
+    for section in section_index.values():
+        section["pages"] = sorted(section["pages"])
+        section["primary_page"] = section["pages"][0] if section["pages"] else 0
+        section["stable_id"] = f"{section['key']}@{section['primary_page'] + 1}" if section["pages"] else section["key"]
+        tabs.append(section)
+
+    merged_groups: dict[str, dict[str, Any]] = {}
+    for o in overlays:
+        if o.get("kind") != "table_merged":
+            continue
+        key_raw = o.get("logical_table_key") or o.get("group")
+        key = str(key_raw) if key_raw is not None else None
+        if not key:
+            continue
+        group = merged_groups.setdefault(
+            key,
+            {
+                "key": f"TBL::{key}",
+                "label": o.get("_label") or f"Table {key}",
+                "kind": "table",
+                "pages": set(),
+            },
+        )
+        group["pages"].add(int(o.get("page", 0)))
+        extra = o.get("pages_in_group") or []
+        if isinstance(extra, list):
+            for p in extra:
+                try:
+                    pg = int(p) - 1
+                except Exception:
+                    pg = _coerce_page(p)
+                if pg is not None:
+                    group["pages"].add(int(pg))
+    for group in merged_groups.values():
+        group["pages"] = sorted(group["pages"])
+        if not group["pages"]:
+            continue
+        group["primary_page"] = group["pages"][0]
+        group["stable_id"] = f"{group['key']}@{group['primary_page'] + 1}"
+        tabs.append(group)
+
+    tabs.sort(key=lambda t: (t.get("primary_page", 0), 0 if t.get("kind") == "section" else 1, t.get("label", "")))
+    for idx, tab in enumerate(tabs):
+        tab["_rank"] = idx
+    return tabs
+
+
+def _draw_vertical_tabs(
+    doc: fitz.Document,
+    tabs: list[dict[str, Any]],
+    *,
+    side: str = "right",
+    gutter_w: float = TAB_GUTTER_WIDTH,
+    tab_h: float = TAB_HEIGHT,
+    tab_gap: float = TAB_GAP,
+    max_tabs_per_page: int = MAX_TABS_PER_PAGE,
+) -> dict[str, Any]:
+    summary = {
+        "mode": "none",
+        "sections": 0,
+        "tables": 0,
+        "total": 0,
+        "pages_overflow_initial": [],
+        "pages_overflow": [],
+        "downgraded": False,
+    }
+    if not tabs:
+        return summary
+
+    def _build_per_page(candidates: list[dict[str, Any]]) -> defaultdict[int, list[dict[str, Any]]]:
+        mapping: defaultdict[int, list[dict[str, Any]]] = defaultdict(list)
+        for tab in candidates:
+            for pg in tab.get("pages", []):
+                if 0 <= pg < len(doc):
+                    mapping[pg].append(tab)
+        return mapping
+
+    per_page_all = _build_per_page(tabs)
+    overflow_initial = sorted(pg for pg, lst in per_page_all.items() if len(lst) > max_tabs_per_page)
+    use_tabs = tabs
+    downgraded = False
+    if overflow_initial and any(tab.get("kind") == "table" for tab in tabs):
+        use_tabs = [tab for tab in tabs if tab.get("kind") == "section"]
+        per_page_all = _build_per_page(use_tabs)
+        downgraded = True
+        if downgraded:
+            logger.info(
+                "09a tabs: downgraded to sections_only due to overflow on pages %s",
+                overflow_initial,
+            )
+    per_page = per_page_all
+    overflow_after = sorted(pg for pg, lst in per_page.items() if len(lst) > max_tabs_per_page)
+
+    summary.update(
+        {
+            "mode": "both" if not downgraded and any(tab.get("kind") == "table" for tab in tabs) else ("sections_only" if use_tabs else "none"),
+            "sections": sum(1 for tab in use_tabs if tab.get("kind") == "section"),
+            "tables": sum(1 for tab in use_tabs if tab.get("kind") == "table"),
+            "total": len(use_tabs),
+            "pages_overflow_initial": overflow_initial,
+            "pages_overflow": overflow_after,
+            "downgraded": downgraded,
+        }
+    )
+
+    for pno, tab_list in per_page.items():
+        if not tab_list:
+            continue
+        page = doc[pno]
+        rect = page.rect
+        if side == "right":
+            gutter = fitz.Rect(rect.x1 - gutter_w, rect.y0, rect.x1, rect.y1)
+            offset = rect.x1 - gutter_w
+            rotate = 90
+        else:
+            gutter = fitz.Rect(rect.x0, rect.y0, rect.x0 + gutter_w, rect.y1)
+            offset = rect.x0
+            rotate = 270
+        page.draw_rect(gutter, fill=(0.96, 0.96, 0.96), color=None, width=0)
+        ordered = sorted(
+            tab_list,
+            key=lambda t: (0 if t.get("kind") == "section" else 1, t.get("_rank", 0)),
+        )
+        display_tabs = ordered[: max_tabs_per_page]
+        overflow = len(ordered) > max_tabs_per_page
+        if overflow and display_tabs:
+            target = ordered[max_tabs_per_page - 1].get("primary_page", pno)
+            display_tabs = ordered[: max_tabs_per_page - 1] + [
+                {
+                    "key": f"MORE::{pno}",
+                    "label": "⋯ More",
+                    "kind": "more",
+                    "pages": [pno],
+                    "primary_page": target,
+                    "_rank": 10_000,
+                }
+            ]
+        y = 24.0
+        for tab in display_tabs:
+            tab_rect = fitz.Rect(0, y, gutter_w, y + tab_h)
+            tab_rect = tab_rect + (offset, 0, offset, 0)
+            y += tab_h + tab_gap
+            color = TAB_COLORS.get(tab.get("kind"), (0.85, 0.85, 0.85))
+            page.draw_rect(tab_rect, fill=color, color=None, width=0)
+            label = tab.get("label") or tab.get("key")
+            if pno not in (tab.get("pages") or []):
+                text = label
+            elif pno != tab.get("primary_page"):
+                text = f"{label} (cont.)"
+            else:
+                text = label
+            page.insert_textbox(
+                tab_rect,
+                text[:64],
+                fontsize=9,
+                fontname="helv",
+                color=LABEL_TEXT_COLOR,
+                rotate=rotate,
+                align=1,
+            )
+            try:
+                page.insert_link(
+                    {
+                        "kind": fitz.LINK_GOTO,
+                        "from": tab_rect,
+                        "page": int(tab.get("primary_page", pno)),
+                        "zoom": 0,
+                    }
+                )
+            except Exception:
+                continue
+
+    return summary
+
+
+def _emit_overlay_map(stage_dir: Path, overlays: list[dict[str, Any]], pages_touched: set[int], dpi: int = PREVIEW_DPI) -> None:
+    vis_dir = stage_dir / "visual_output"
+    vis_dir.mkdir(parents=True, exist_ok=True)
+    scale = dpi / 72.0
+    by_page: defaultdict[int, list[dict[str, Any]]] = defaultdict(list)
+    for ov in overlays:
+        by_page[int(ov.get("page", 0))].append(ov)
+    payload = {"dpi": dpi, "pages": []}
+    page_keys = sorted({int(p) for p in pages_touched} | set(by_page.keys()))
+    for pg in page_keys:
+        overlays_px = []
+        for ov in by_page.get(pg, []):
+            rb = ov.get("render_bbox") or ov.get("bbox") or [0, 0, 0, 0]
+            x0, y0, x1, y1 = rb
+            meta = {k: v for k, v in ov.items() if k not in {"bbox", "render_bbox", "page", "kind", "_label"}}
+            meta.setdefault("_label", ov.get("_label"))
+            overlays_px.append(
+                {
+                    "id": ov.get("stable_id") or f"ov{ov.get('overlay_id')}",
+                    "kind": ov.get("kind"),
+                    "label": ov.get("_label"),
+                    "meta": meta,
+                    "px_rect": [x0 * scale, y0 * scale, x1 * scale, y1 * scale],
+                }
+            )
+        payload["pages"].append(
+            {
+                "index": pg,
+                "image": f"page_{pg+1:04d}.png",
+                "overlays": overlays_px,
+            }
+        )
+    (vis_dir / "overlay_map.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    comments_path = vis_dir / "comments.jsonl"
+    if not comments_path.exists():
+        comments_path.write_text("", encoding="utf-8")
 
 def _coerce_page(*values: Any) -> int | None:
     """Return the first non-None value coerced to int, allowing zero."""
@@ -147,10 +805,21 @@ def run(
     draw_headers03: bool = True,
     draw_columns06b: bool = True,
     draw_grid: bool = False,
-    label_font_size: int = 6,
+    label_font_size: int = 12,
     stroke_width: float = 1.0,
     pdf_annotations: bool = True,
     render_previews: bool = True,
+    # NEW: visual simplifications for quick debugging
+    draw_gutter: bool = True,
+    # Dual-gutter controls: left shows element kinds; right shows section T endcaps
+    gutter_left_tags: bool = True,
+    gutter_right_section_caps: bool = True,
+    draw_section_plaques: bool = True,
+    draw_figure_watermark: bool = True,
+    draw_table_callouts: bool = True,
+    labels_verbose: bool = False,
+    mode: str = "all",            # "structure" | "tables" | "reflow" | "all"
+    max_text_overlays_per_page: int = 64,
 ) -> Path:
     # Decide stage directory name. Prefer running after 07/08/09 when reflowed_json is available.
     tag = stage_tag
@@ -221,6 +890,18 @@ def run(
         except Exception as e:
             logger.warning(f"Failed to read blocks02 JSON: {e}")
 
+    section_header_blocks: dict[str, dict[str, Any]] = {}
+    for sec in sections:
+        sid = sec.get("id") or sec.get("section_id") or sec.get("sectionId")
+        if sid is None:
+            continue
+        sid_str = str(sid)
+        for blk in sec.get("blocks") or []:
+            btype = (blk.get("block_type") or blk.get("type") or "").lower()
+            if btype == "sectionheader":
+                section_header_blocks[sid_str] = blk
+                break
+
     # Stage 03 suspicious headers (optional)
     headers03: list[dict[str, Any]] = []
     if headers03_json is None:
@@ -262,6 +943,36 @@ def run(
     if overwrite_pdf and str(pdf_path).startswith("data/input/"):
         raise ValueError("Refusing to overwrite a source PDF under data/input/. Use a copy or disable --overwrite-pdf.")
     doc = fitz.open(str(pdf_path))
+
+    # Optional: mode presets (cheap switch for QA)
+    try:
+        m = (mode or "structure").lower().strip()
+        if m == "structure":
+            draw_text_chunks = False
+            draw_headers03 = False
+        elif m == "tables":
+            draw_sections = False; draw_figures = False
+            draw_text_chunks = False; draw_headers03 = False
+        elif m == "reflow":
+            draw_sections = False; draw_tables = False; draw_figures = False
+        elif m == "all":
+            pass
+    except Exception:
+        pass
+
+    # Per-page gutter lanes
+    lane_left_by_page: dict[int, fitz.Rect] = {}
+    lane_right_by_page: dict[int, fitz.Rect] = {}
+    if draw_gutter:
+        try:
+            for _p in range(len(doc)):
+                if gutter_left_tags:
+                    lane_left_by_page[_p] = _draw_page_gutter_side(doc[_p], "left")
+                if gutter_right_section_caps:
+                    lane_right_by_page[_p] = _draw_page_gutter_side(doc[_p], "right")
+        except Exception:
+            lane_left_by_page = {}
+            lane_right_by_page = {}
     overlays: list[dict[str, Any]] = []
     overlay_id = 0
     pages_touched: set[int] = set()
@@ -279,7 +990,16 @@ def run(
     def _color_for_kind(kind: str) -> tuple[float, float, float]:
         return COLORS.get(kind, (0.3, 0.3, 0.3))
 
-    def _add(page_idx: int, bbox: list[float] | None, kind: str, payload: dict[str, Any], *, label_text: str | None = None) -> None:
+    def _add(
+        page_idx: int,
+        bbox: list[float] | None,
+        kind: str,
+        payload: dict[str, Any],
+        *,
+        source_stage: str,
+        source_ids: list[str] | None = None,
+        label_text: str | None = None,
+    ) -> None:
         nonlocal overlay_id
         _pg = _normalized_page_index(page_idx)
         if _pg is None:
@@ -295,28 +1015,27 @@ def run(
         except Exception:
             logger.warning(f"Skipping overlay (kind={kind}): non-numeric bbox {bbox}")
             return
-        rect = fitz.Rect(min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1)) & page.rect
-        # Avoid zero-area: expand minimally when degenerate
-        if rect.width <= 0.1 or rect.height <= 0.1:
-            rect = fitz.Rect(rect.x0, rect.y0, rect.x0 + max(1.0, rect.width), rect.y0 + max(1.0, rect.height)) & page.rect
-        color = _color_for_kind(kind)
+        pdf_bbox = [x0, y0, x1, y1]
+        rect = _rect_from_pdf_bbox(page, pdf_bbox)
+        stroke_color, fill_color, fill_opacity = _style_for_kind(kind)
+        label = _format_label(kind, payload, label_text)
         drew = False
         if pdf_annotations:
             try:
                 annot = page.add_rect_annot(rect)
-                annot.set_colors(stroke=color)
+                annot.set_colors(stroke=stroke_color, fill=fill_color)
                 try:
-                    annot.set_border(width=max(0.5, float(stroke_width)))
+                    annot.set_border(width=max(1.2, float(stroke_width)))
                 except Exception:
                     pass
                 try:
-                    annot.set_opacity(0.35)
+                    annot.set_opacity(fill_opacity)
                 except Exception:
                     pass
                 try:
                     info = {}
-                    if label_text:
-                        info["title"] = str(label_text)[:120]
+                    if label:
+                        info["title"] = str(label)[:120]
                     annot.set_info(info)
                 except Exception:
                     pass
@@ -332,85 +1051,133 @@ def run(
                 drew = False
         if not drew:
             try:
-                page.draw_rect(rect, color=color, width=max(0.5, float(stroke_width)), fill=None, overlay=True)
+                page.draw_rect(rect, color=stroke_color, width=max(1.2, float(stroke_width)), fill=fill_color, overlay=True)
             except Exception:
                 pass
-            if labels:
-                try:
-                    txt = label_text or payload.get("title") or payload.get("figure_id") or payload.get("table_index")
-                    if txt:
-                        page.insert_text(
-                            (rect.x0 + 2, rect.y0 + max(6, int(label_font_size))),
-                            str(txt)[:120],
-                            fontsize=max(5, int(label_font_size)),
-                            color=color,
-                        )
-                except Exception:
-                    pass
-        overlays.append({"overlay_id": overlay_id, "page": _pg, "bbox": [rect.x0, rect.y0, rect.x1, rect.y1], "kind": kind, **payload})
+        try:
+            # Left gutter: element type tags
+            human = HUMAN_KIND.get(kind)
+            lane_left = lane_left_by_page.get(_pg)
+            if lane_left and human:
+                _draw_gutter_tag(page, lane_left, rect, human, color=(0.12, 0.12, 0.12), font=9.0)
+            # Right gutter: section T endcaps
+            if kind == "section":
+                lane_t = lane_right_by_page.get(_pg) or lane_left_by_page.get(_pg)
+                if lane_t:
+                    _draw_t_endcaps(page, lane_t, rect.y0, rect.y1)
+                if draw_section_plaques:
+                    _draw_section_title_plaque(page, rect, payload.get("title") or label, stroke=COLORS.get("table", (0.86, 0.25, 0.2)), font=11.0)
+            if kind == "figure" and draw_figure_watermark:
+                _draw_figure_watermark(page, rect, payload.get("ai_description") or "LLM Generated Description of Figure")
+            if kind in ("table", "table_merged") and draw_table_callouts:
+                _draw_table_metrics(
+                    page,
+                    rect,
+                    headers_preview=payload.get("headers_preview"),
+                    camelot_acc=payload.get("camelot_accuracy"),
+                    pandas_acc=payload.get("pandas_accuracy"),
+                    color=(0, 0, 0),
+                )
+        except Exception:
+            pass
+        if labels and labels_verbose and label:
+            _draw_label(page, rect, label, stroke_color, float(label_font_size))
+        payload_copy = dict(payload)
+        if label:
+            payload_copy.setdefault("_label", label)
+        payload_copy.setdefault("pdf_bbox", pdf_bbox)
+        render_bbox = [rect.x0, rect.y0, rect.x1, rect.y1]
+        stable_id = _stable_overlay_id(kind, _pg, payload_copy, overlay_id)
+        cleaned_source_ids: list[str] = []
+        for sid in list(source_ids or []):
+            if not sid:
+                continue
+            sid_str = str(sid)
+            if sid_str not in cleaned_source_ids:
+                cleaned_source_ids.append(sid_str)
+        overlays.append(
+            {
+                "overlay_id": overlay_id,
+                "page": _pg,
+                "bbox": pdf_bbox,
+                "render_bbox": render_bbox,
+                "kind": kind,
+                "stable_id": stable_id,
+                "source_stage": source_stage,
+                "source_ids": cleaned_source_ids,
+                **payload_copy,
+            }
+        )
         overlay_id += 1
         pages_touched.add(_pg)
 
-    # Sections (prefer reflowed sections when available)
-    # Build continuation map from Stage 04 sections metadata: section_id -> set(page_indices)
-    cont_pages_by_sid: dict[str, set[int]] = {}
-    try:
-        for _s in sections:
-            _sid = str(_s.get("id")) if _s.get("id") is not None else None
-            if not _sid:
-                continue
-            md = (_s.get("metadata") or {}) if isinstance(_s.get("metadata"), dict) else {}
-            cpgs = md.get("continued_pages") or []
-            try:
-                cont_pages_by_sid[_sid] = {int(p) for p in cpgs if isinstance(p, (int, float, str))}
-            except Exception:
-                cont_pages_by_sid[_sid] = set()
-    except Exception:
-        cont_pages_by_sid = {}
+    # Sections (precise headers preferred)
     if draw_sections:
         t_s = time.monotonic()
         drew = 0
-        if prefer_reflow_sections and reflowed_sections and block_lookup:
+        missing_sections: list[dict[str, Any]] = []
+        for sec in sections:
+            sid = sec.get("id") or sec.get("section_id") or sec.get("sectionId")
+            if sid is None:
+                continue
+            sid_str = str(sid)
+            header_blk = section_header_blocks.get(sid_str)
+            if header_blk:
+                pg = _coerce_page(header_blk.get("page_idx"), header_blk.get("page"))
+                bb = _safe_get_bbox(header_blk)
+                if bb is not None and pg is not None:
+                    payload = {"id": sid_str, "title": sec.get("title")}
+                    _add(
+                        pg,
+                        bb,
+                        "section",
+                        payload,
+                        source_stage="04_section_builder",
+                        source_ids=[f"section_id:{sid_str}"],
+                    )
+                    drew += 1
+                else:
+                    missing_sections.append(sec)
+            else:
+                missing_sections.append(sec)
+        if missing_sections and prefer_reflow_sections and reflowed_sections and block_lookup:
             for s in reflowed_sections:
-                try:
-                    sid = s.get("id") or s.get("section_id") or s.get("sectionId")
-                    blocks = (s.get("reflowed_json", {}) or {}).get("blocks", [])
-                    per_page: dict[int, list[list[float]]] = {}
-                    for blk in blocks:
-                        bids = ((blk.get("source") or {}).get("block_ids") or [])
-                        for bid in bids:
-                            t = block_lookup.get(str(bid))
-                            if not t:
-                                continue
-                            pg, bb = t
-                            per_page.setdefault(pg, []).append(bb)
-                    for pg, bbs in per_page.items():
-                        x0 = min(bb[0] for bb in bbs); y0 = min(bb[1] for bb in bbs)
-                        x1 = max(bb[2] for bb in bbs); y1 = max(bb[3] for bb in bbs)
-                        # Continuation label marker if this page is listed as a continuation for the base section
-                        is_cont = False
-                        try:
-                            is_cont = int(pg) in (cont_pages_by_sid.get(str(sid)) or set())
-                        except Exception:
-                            is_cont = False
-                        label = f"SEC {sid}: {s.get('title')}" + (" (cont.)" if is_cont else "")
-                        payload = {"id": sid, "title": s.get("title")}
-                        if is_cont:
-                            payload["continuation"] = True
-                        _add(pg, [x0, y0, x1, y1], "section", payload, label_text=label)
-                        drew += 1
-                except Exception:
+                sid = s.get("id") or s.get("section_id") or s.get("sectionId")
+                if sid is None:
                     continue
-        if drew == 0:
-            # Fallback to raw sections
-            for s in sections:
-                pg0 = _coerce_page(s.get("page_start"), s.get("page_idx"), s.get("page"))
-                bb = _safe_get_bbox(s)
-                if bb is not None and pg0 is not None:
-                    _add(pg0, bb, "section", {"id": s.get("id"), "title": s.get("title")}, label_text=f"SEC {s.get('id')}: {s.get('title')}")
+                sid_str = str(sid)
+                if sid_str in section_header_blocks:
+                    continue
+                blocks = (s.get("reflowed_json", {}) or {}).get("blocks", [])
+                per_page: dict[int, list[list[float]]] = {}
+                for blk in blocks:
+                    btype = (blk.get("type") or blk.get("block_type") or "").lower()
+                    if btype == "figure":
+                        continue
+                    bids = ((blk.get("source") or {}).get("block_ids") or [])
+                    for bid in bids:
+                        lookup = block_lookup.get(str(bid))
+                        if not lookup:
+                            continue
+                        pg, bb = lookup
+                        per_page.setdefault(pg, []).append(bb)
+                for pg, bbs in per_page.items():
+                    if not bbs:
+                        continue
+                    x0 = min(bb[0] for bb in bbs); y0 = min(bb[1] for bb in bbs)
+                    x1 = max(bb[2] for bb in bbs); y1 = max(bb[3] for bb in bbs)
+                    payload = {"id": sid_str, "title": s.get("title"), "continuation": True}
+                    _add(
+                        pg,
+                        [x0, y0, x1, y1],
+                        "section",
+                        payload,
+                        source_stage="07_reflow_section",
+                        source_ids=[f"section_id:{sid_str}"],
+                    )
                     drew += 1
         if drew == 0:
-            logger.warning("09a: no section overlays drawn (check reflow/sections JSON and block ids)")
+            logger.warning("09a: no section overlays drawn (check section headers in Stage 04 output)")
         _append_timing(logs_dir, {"stage": "09a_pdf_annotator", "event": "draw_sections", "latency_ms": int((time.monotonic()-t_s)*1000)})
 
     # Tables (prefer logical merged tables from reflow when available)
@@ -448,7 +1215,22 @@ def run(
                     try:
                         x0 = min(bb[0] for bb in bbs); y0 = min(bb[1] for bb in bbs)
                         x1 = max(bb[2] for bb in bbs); y1 = max(bb[3] for bb in bbs)
-                        _add(pg, [x0, y0, x1, y1], kind, {"logical_table_key": gkey, "pages_in_group": sorted(int(p)+1 for p in page_set)}, label_text=f"TBL {'M' if kind=='table_merged' else ''} {gkey}")
+                        payload = {
+                            "logical_table_key": gkey,
+                            "pages_in_group": sorted(int(p) + 1 for p in page_set),
+                        }
+                        source_ids = []
+                        ltk = payload.get("logical_table_key")
+                        if ltk:
+                            source_ids.append(f"logical_table_key:{ltk}")
+                        _add(
+                            pg,
+                            [x0, y0, x1, y1],
+                            kind,
+                            payload,
+                            source_stage="07_reflow_section",
+                            source_ids=source_ids,
+                        )
                         drew += 1
                     except Exception:
                         continue
@@ -473,12 +1255,47 @@ def run(
                             headers_preview = " | ".join(str(h).strip() for h in hdrs[:6])
                     except Exception:
                         headers_preview = None
+                    camelot_acc = None
+                    pandas_acc = None
+                    # Prefer Stage 05 field 'camelot_metrics.accuracy'; fall back to older keys.
+                    try:
+                        camelot_acc = float((t.get("camelot_metrics", {}) or {}).get("accuracy"))
+                    except Exception:
+                        pass
+                    if camelot_acc is None:
+                        try:
+                            camelot_acc = float((t.get("camelot", {}) or {}).get("accuracy"))
+                        except Exception:
+                            camelot_acc = t.get("camelot_accuracy")
+                    # Pandas metric proxy: use data_density if present.
+                    try:
+                        pandas_acc = float((t.get("pandas_metrics", {}) or {}).get("data_density"))
+                    except Exception:
+                        pass
+                    if pandas_acc is None:
+                        try:
+                            pandas_acc = float((t.get("pandas", {}) or {}).get("accuracy"))
+                        except Exception:
+                            pandas_acc = t.get("pandas_accuracy")
+                    payload = {
+                        "table_index": t.get("table_index"),
+                        "title": t.get("title"),
+                        "caption": t.get("caption"),
+                        "headers_preview": headers_preview,
+                        "camelot_accuracy": camelot_acc,
+                        "pandas_accuracy": pandas_acc,
+                    }
+                    source_ids = []
+                    idx_val = payload.get("table_index")
+                    if idx_val is not None:
+                        source_ids.append(f"table_index:{idx_val}")
                     _add(
                         pg,
                         bb,
                         "table",
-                        {"table_index": t.get("table_index"), "headers_preview": headers_preview},
-                        label_text=f"TBL {t.get('table_index')} :: {headers_preview or ''}",
+                        payload,
+                        source_stage="05_table_extractor",
+                        source_ids=source_ids,
                     )
                     drew += 1
         if merged_groups == 0:
@@ -520,7 +1337,20 @@ def run(
                             continue
                         x0=min(bb[0] for bb in bbs); y0=min(bb[1] for bb in bbs)
                         x1=max(bb[2] for bb in bbs); y1=max(bb[3] for bb in bbs)
-                        _add(p, [x0,y0,x1,y1], "table_merged", {"logical_table_key": lid, "pages_in_group": [pp+1 for pp in pages]}, label_text=f"TBL M {lid}")
+                        payload = {
+                            "logical_table_key": lid,
+                            "pages_in_group": [pp + 1 for pp in pages],
+                        }
+                        ltk = payload.get("logical_table_key")
+                        source_ids = [f"logical_table_key:{ltk}"] if ltk else []
+                        _add(
+                            p,
+                            [x0, y0, x1, y1],
+                            "table_merged",
+                            payload,
+                            source_stage="06b_layout_sketcher",
+                            source_ids=source_ids,
+                        )
                         drew += 1
                 merged_groups = sum(1 for lid, arr in by_lid.items() if len({p for p in (_coerce_page(i.get("page_index"), i.get("page")) for i in arr) if p is not None})>1)
                 # If still no groups, derive header→body by header_norm non-digit + same cols and horizontal alignment
@@ -556,7 +1386,20 @@ def run(
                                 # draw merged on both pages
                                 for pp, oset in ((p,[h]), (p+1,[b])):
                                     bbx = (oset[0].get('bbox') or [0,0,0,0])
-                                    _add(pp, bbx, "table_merged", {"logical_table_key": f"hn::{hn}", "pages_in_group": [p+1, p+2]}, label_text=f"TBL M hn::{hn[:14]}")
+                                    payload = {
+                                        "logical_table_key": f"hn::{hn}",
+                                        "pages_in_group": [p + 1, p + 2],
+                                    }
+                                    ltk = payload.get("logical_table_key")
+                                    source_ids = [f"logical_table_key:{ltk}"] if ltk else []
+                                    _add(
+                                        pp,
+                                        bbx,
+                                        "table_merged",
+                                        payload,
+                                        source_stage="07_reflow_section",
+                                        source_ids=source_ids,
+                                    )
                                     drew += 1
                                 merged_groups = max(merged_groups, 1)
             except Exception:
@@ -565,6 +1408,7 @@ def run(
             logger.warning("09a: no table overlays drawn (check reflow/table JSON and block ids)")
         _append_timing(logs_dir, {"stage": "09a_pdf_annotator", "event": "draw_tables", "latency_ms": int((time.monotonic()-t_s)*1000)})
 
+    # Tabs (sections + merged tables)
     # Figures
     if draw_figures:
         t_s = time.monotonic()
@@ -579,13 +1423,16 @@ def run(
                 payload = {"figure_id": fid, "ai_description": desc, "title": title}
                 if f.get("image_path"):
                     payload["image_ref"] = f.get("image_path")
-                # Include title or first words of description in the label for readability
-                label = f"FIG {fid}"
-                if isinstance(title, str) and title.strip():
-                    label += f": {title[:60]}"
-                elif isinstance(desc, str) and desc.strip():
-                    label += f": {desc[:60]}"
-                _add(pg, bb, "figure", payload, label_text=label)
+                fid = payload.get("figure_id")
+                source_ids = [f"figure_id:{fid}"] if fid is not None else []
+                _add(
+                    pg,
+                    bb,
+                    "figure",
+                    payload,
+                    source_stage="06_figure_extractor",
+                    source_ids=source_ids,
+                )
                 figs_drawn += 1
             else:
                 logger.warning(f"09a: skipping figure overlay (page/bbox invalid) fid={f.get('figure_id')} page={f.get('page')}")
@@ -596,6 +1443,7 @@ def run(
     # Knowledge chunks from Stage 07 reflowed sections
     if draw_text_chunks and reflowed_sections and block_lookup:
         t_s = time.monotonic()
+        _text_budget: Dict[int, int] = {}
         for sec in reflowed_sections:
             blocks = (sec.get("reflowed_json", {}).get("blocks") or [])
             for idx, blk in enumerate(blocks):
@@ -625,10 +1473,16 @@ def run(
                         pg, bb = t
                         per_page.setdefault(pg, []).append(bb)
                     for pg, bbs in per_page.items():
+                        if kind in ("reflow_paragraph", "reflow_list", "text_chunk"):
+                            _text_budget.setdefault(pg, max_text_overlays_per_page)
+                            if _text_budget[pg] <= 0:
+                                continue
+                            _text_budget[pg] -= 1
                         x0 = min(bb[0] for bb in bbs)
                         y0 = min(bb[1] for bb in bbs)
                         x1 = max(bb[2] for bb in bbs)
                         y1 = max(bb[3] for bb in bbs)
+                        source_ids = [f"block_id:{bid}" for bid in bids]
                         _add(
                             pg,
                             [x0, y0, x1, y1],
@@ -638,6 +1492,8 @@ def run(
                                 "reading_index": idx,
                                 "block_kind": btype or blk.get("kind"),
                             },
+                            source_stage="07_reflow_section",
+                            source_ids=source_ids,
                             label_text=f"{pref} {idx}",
                         )
                 except Exception:
@@ -670,12 +1526,26 @@ def run(
                 pg_int = _coerce_page(pg)
                 if pg_int is None:
                     continue
-                label = (r.get("id") or r.get("title") or "REQ")
                 is_cond = bool(r.get("is_conditional")) or ("conditional" in str(r.get("category", "")).lower()) or bool(r.get("condition"))
-                kind = "requirement"
-                if is_cond:
-                    label = f"COND {label}"
-                _add(pg_int, bb, kind, {"requirement_id": r.get("id"), "title": r.get("title"), "conditional": bool(is_cond)}, label_text=f"REQ {label}")
+                payload = {
+                    "requirement_id": r.get("id"),
+                    "title": r.get("title"),
+                    "conditional": bool(is_cond),
+                }
+                source_ids = []
+                rid = payload.get("requirement_id")
+                if rid is not None:
+                    source_ids.append(f"requirement_id:{rid}")
+                if sec_id:
+                    source_ids.append(f"section_id:{sec_id}")
+                _add(
+                    pg_int,
+                    bb,
+                    "requirement",
+                    payload,
+                    source_stage="07_requirements_miner",
+                    source_ids=source_ids,
+                )
                 req_drawn += 1
             except Exception:
                 continue
@@ -723,10 +1593,31 @@ def run(
                             pg = _coerce_page(t.get("page_index"), t.get("page_idx"), t.get("page"))
                             bb = _safe_get_bbox(t)
                             if bb is not None and pg is not None:
-                                _add(pg, bb, "table_merged", {"logical_table_key": "p0p1_header_match"}, label_text="TBL M header-match")
+                                payload = {"logical_table_key": "p0p1_header_match"}
+                                _add(
+                                    pg,
+                                    bb,
+                                    "table_merged",
+                                    payload,
+                                    source_stage="05_table_extractor",
+                                    source_ids=["logical_table_key:p0p1_header_match"],
+                                )
                                 merged_groups = 1
         except Exception:
             pass
+
+    tabs_summary = {"mode": "none"}
+    try:
+        tabs = _collect_tabs(sections, overlays)
+        logger.debug(f"09a tabs collected kinds: {[tab.get('kind') for tab in tabs]}")
+        for tab in tabs:
+            for pg in tab.get("pages", []):
+                pages_touched.add(int(pg))
+        tabs_summary = _draw_vertical_tabs(doc, tabs)
+        logger.debug(f"09a tabs summary: {tabs_summary}")
+    except Exception as e:
+        logger.warning(f"Failed to draw tabs gutter: {e}")
+        tabs_summary = {"mode": "error", "error": str(e)}
 
     # Stage 03 overlays
     if draw_headers03 and headers03:
@@ -740,7 +1631,18 @@ def run(
                 verdict = b.get("verdict") or ("accept" if b.get("suspicious_header") else "reject")
                 lbl = f"HDR {verdict}"
                 if bb and pg is not None:
-                    _add(pg, bb, "header_candidate", {"block_id": b.get("block_id"), "verdict": verdict}, label_text=lbl)
+                    bid = b.get("block_id")
+                    payload = {"block_id": bid, "verdict": verdict}
+                    source_ids = [f"block_id:{bid}"] if bid else []
+                    _add(
+                        pg,
+                        bb,
+                        "header_candidate",
+                        payload,
+                        source_stage="03_suspicious_headers",
+                        source_ids=source_ids,
+                        label_text=lbl,
+                    )
             except Exception:
                 continue
         _append_timing(logs_dir, {"stage": "09a_pdf_annotator", "event": "draw_headers03", "latency_ms": int((time.monotonic()-t_s)*1000)})
@@ -804,7 +1706,18 @@ def run(
                 bb = _safe_get_bbox(b)
                 reason = (b.get("reason") or "demoted").upper()
                 if bb is not None and pg >= 0:
-                    _add(pg, bb, "table_rejected", {"reason": b.get("reason"), "text": (b.get("text") or "")[:80]}, label_text=f"TBL REJ: {reason}")
+                    payload = {"reason": b.get("reason"), "text": (b.get("text") or "")[:80]}
+                    source_ids = []
+                    if b.get("block_id") is not None:
+                        source_ids.append(f"block_id:{b.get('block_id')}")
+                    _add(
+                        pg,
+                        bb,
+                        "table_rejected",
+                        payload,
+                        source_stage="05_table_extractor",
+                        source_ids=source_ids,
+                    )
             except Exception:
                 continue
         _append_timing(logs_dir, {"stage": "09a_pdf_annotator", "event": "draw_demoted05", "latency_ms": int((time.monotonic()-t_s)*1000)})
@@ -846,8 +1759,8 @@ def run(
                 for pidx in sorted(pages_touched):
                     try:
                         page = src[pidx]
-                        zoom = 1200.0 / max(1.0, float(page.rect.width))
-                        mat = fitz.Matrix(zoom, zoom)
+                        scale = PREVIEW_DPI / 72.0
+                        mat = fitz.Matrix(scale, scale)
                         pix = page.get_pixmap(matrix=mat, alpha=False)
                         out_png = vis_dir / f"page_{pidx+1:04d}.png"
                         pix.save(str(out_png))
@@ -858,6 +1771,12 @@ def run(
         except Exception as e:
             logger.warning(f"Failed to render previews: {e}")
         _append_timing(logs_dir, {"stage": "09a_pdf_annotator", "event": "render_previews", "latency_ms": int((time.monotonic()-t_s)*1000)})
+
+    # Overlay map bundle for web viewer
+    try:
+        _emit_overlay_map(stage_dir, overlays, pages_touched, PREVIEW_DPI)
+    except Exception as e:
+        logger.warning(f"Failed to emit overlay_map.json: {e}")
 
     # Write overlay JSON with summary
     try:
@@ -877,6 +1796,7 @@ def run(
                 "by_kind": by_kind,
                 "pages_touched": sorted(int(p)+1 for p in pages_touched),
                 "merged_table_groups": merged_groups,
+                "tabs": tabs_summary,
             },
             "source": {
                 "pdf_path": str(pdf_path),
@@ -898,7 +1818,7 @@ def run(
     try:
         legend = {
             "colors": {k: list(v) for k, v in COLORS.items()},
-            "labels": "SEC/TBL/FIG/TXT/PAR/LST/HDG/REQ prefixes map to section/table/figure/text/paragraph/list/heading/requirement respectively.",
+            "labels": "SEC/TBL/FIG/TXT/PAR/LST/HDG/REQ prefixes map to section/table/figure/text/paragraph/list/heading/requirement respectively. Section spans in left gutter show T (start) and ⊥ (end).",
         }
         (json_dir / "legend.json").write_text(json.dumps(legend, indent=2))
     except Exception:
@@ -993,8 +1913,5 @@ if __name__ == "__main__":
     import sys
     argv = sys.argv[1:]
     if argv and argv[0] == "sanity":
-        from extractor.pipeline.steps.sanity_helper import sanity_run
-        p = sanity_run("09a")
-        print(str(p))
-        sys.exit(0)
+        sys.exit(sanity())
     print("Usage: python -m extractor.pipeline.steps.09a_pdf_annotator sanity")

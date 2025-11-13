@@ -68,6 +68,8 @@ dependencies = [
  "strip_tags>=0.6",
  "sentence-transformers>=5.0.0",
  "pyflakes>=3.4.0",
+ # Shared web-ingestion toolkit (local path per AGENT guidance)
+ "fetcher @ file:///home/graham/workspace/experiments/fetcher",
 ]
 [[project.authors]]
 name = "Graham Anderson"

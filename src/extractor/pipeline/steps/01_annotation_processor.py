@@ -34,6 +34,7 @@ from extractor.pipeline.steps.scillm_preflight_validator import (
     require_scillm_preflight,
     quick_scillm_check
 )
+from extractor.pipeline.utils.step_sanity import run_step_sanity
 
 from extractor.pipeline.utils.diagnostics import (
     start_resource_sampler,
@@ -54,6 +55,11 @@ from extractor.pipeline.utils.json_utils import clean_json_string
 DEBUG = False
 RENDER_DPI = 200
 ANNOT_FREETEXT = "FreeText"
+STEP_NAME = "01_annotation_processor"
+
+
+def sanity() -> int:
+    return run_step_sanity(STEP_NAME)
 
 
 ## CLI removed: call run(...) or debug_bundle(...) from Python or use a tiny debug script.
@@ -1240,11 +1246,7 @@ if __name__ == "__main__":
         )
         sys.exit(2)
     if argv[0] == "sanity":
-        from extractor.pipeline.steps.sanity_helper import sanity_run
-
-        out = sanity_run("01")
-        print(str(out))
-        sys.exit(0)
+        sys.exit(sanity())
     # Compatibility: accept `run <PDF> -o <OUT>` shape used by runners
     if argv[0] == "run":
         try:

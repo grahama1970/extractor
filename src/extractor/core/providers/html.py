@@ -42,6 +42,7 @@ from extractor.core.schema.unified_document import (
     HierarchyNode,
     TableCell,
 )
+from extractor.core.providers.fetcher_bridge import ensure_local_source, attach_fetcher_metadata
 
 
 class HTMLProvider:
@@ -56,7 +57,8 @@ class HTMLProvider:
 
     def extract_document(self, filepath: Union[str, Path]) -> UnifiedDocument:
         """Extract HTML content to unified document format"""
-        filepath = Path(filepath)
+        resolved_path, fetch_download = ensure_local_source(filepath)
+        filepath = Path(resolved_path)
         logger.info(f"Extracting HTML document: {filepath}")
 
         # Reset state for each document
@@ -86,6 +88,7 @@ class HTMLProvider:
 
         # Legacy path
         metadata = self._extract_metadata(soup)
+        attach_fetcher_metadata(metadata, fetch_download)
         blocks = self._extract_blocks(soup)
         hierarchy = self._build_hierarchy(blocks)
 
@@ -100,6 +103,8 @@ class HTMLProvider:
             keywords=self._extract_keywords(soup),
         )
 
+        if fetch_download and fetch_download.windows:
+            logger.info("HTML provider ingested %d rolling windows", len(fetch_download.windows))
         logger.info(f"Extracted {len(blocks)} blocks from HTML")
         return doc
 

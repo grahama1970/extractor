@@ -2,11 +2,10 @@
 """
 SciLLM Preflight Validator - AGENTS.md Compliance
 
-Per AGENTS.md requirements:
-- Router-only: use scillm.Router(.acompletion) everywhere
-- Preflight: probe GET $CHUTES_API_BASE/models and minimal POST $CHUTES_API_BASE/chat/completions
-- Bearer auth only: CHUTES_AUTH_STYLE=bearer
-- Fail fast on non-200 responses
+Per paved-path requirements:
+- Use scillm Router/helpers; do not re-implement routing.
+- Preflight via `scillm.paved.list_models_openai_like` + `scillm.paved.sanity_preflight`.
+- Fail fast on non-200 responses (short wall, parallel strict JSON probe).
 """
 
 import os
@@ -20,107 +19,30 @@ logger = logging.getLogger(__name__)
 
 
 async def probe_models_endpoint(base_url: str, api_key: str) -> Tuple[bool, str]:
-    """Probe GET $CHUTES_API_BASE/models endpoint per AGENTS.md."""
+    from scillm.paved import list_models_openai_like  # type: ignore
     try:
-        headers = {"Authorization": f"Bearer {api_key}"}
-        attempts = int(os.getenv("SCILLM_PREFLIGHT_RETRIES", "1")) + 1
-        backoff = float(os.getenv("SCILLM_PREFLIGHT_BACKOFF", "0.75"))
-        async with aiohttp.ClientSession() as session:
-            models_url = f"{base_url}/models"
-            last_text = ""
-            for i in range(attempts):
-                try:
-                    async with session.get(
-                        models_url,
-                        headers=headers,
-                        timeout=aiohttp.ClientTimeout(total=10)
-                    ) as resp:
-                        if resp.status == 200:
-                            data = await resp.json()
-                            models = data.get("data", [])
-                            text_model = os.getenv("CHUTES_TEXT_MODEL")
-                            vlm_model = os.getenv("CHUTES_VLM_MODEL")
-                            model_ids = [m.get("id", "") for m in models]
-                            if text_model and text_model not in model_ids:
-                                similar_text = [m for m in model_ids if text_model.split("/")[-1] in m]
-                                if not similar_text:
-                                    return False, f"Text model '{text_model}' not found in available models"
-                                else:
-                                    logger.warning(f"Requested text model '{text_model}' not found, similar models: {similar_text}")
-                            if vlm_model and vlm_model not in model_ids:
-                                similar_vlm = [m for m in model_ids if "vlm" in m.lower() or "vision" in m.lower()]
-                                if not similar_vlm:
-                                    return False, f"VLM model '{vlm_model}' not found in available models"
-                                else:
-                                    logger.warning(f"Requested VLM model '{vlm_model}' not found, VLM models available: {similar_vlm}")
-                            logger.info(f"SciLLM preflight: Found {len(model_ids)} total models")
-                            return True, "Models endpoint accessible"
-                        else:
-                            last_text = await resp.text()
-                            if 500 <= resp.status < 600 and i < attempts - 1:
-                                await asyncio.sleep(backoff)
-                                continue
-                            return False, f"Models endpoint returned {resp.status}: {last_text}"
-                except Exception as ex:
-                    last_text = str(ex)
-                    if i < attempts - 1:
-                        await asyncio.sleep(backoff)
-                        continue
-                    return False, f"Models endpoint probe failed: {last_text}"
+        ids = list_models_openai_like(api_base=base_url, api_key=api_key, timeout=10.0) or []
+        if not ids:
+            return False, "No models returned"
+        text_model = os.getenv("CHUTES_TEXT_MODEL")
+        vlm_model = os.getenv("CHUTES_VLM_MODEL")
+        if text_model and text_model not in ids:
+            return False, f"Text model '{text_model}' not in model list"
+        if vlm_model and vlm_model not in ids:
+            logger.warning("Requested VLM model not in list; continuing")
+        logger.info(f"SciLLM preflight: Found {len(ids)} total models")
+        return True, "Models endpoint accessible"
     except Exception as e:
         return False, f"Models endpoint probe failed: {e}"
 
 async def probe_chat_completions_endpoint(base_url: str, api_key: str) -> Tuple[bool, str]:
-    """Probe minimal POST $CHUTES_API_BASE/chat/completions endpoint per AGENTS.md."""
+    from scillm.paved import sanity_preflight  # type: ignore
+    text_model = os.getenv("CHUTES_TEXT_MODEL") or "deepseek-ai/DeepSeek-R1"
     try:
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
-        }
-        # Use the configured text model or a reasonable default for probing
-        text_model = os.getenv("CHUTES_TEXT_MODEL") or "deepseek-ai/DeepSeek-R1"
-        payload = {
-            "model": text_model,
-            "messages": [{"role": "user", "content": "Return only {\"ok\": true} as JSON."}],
-            "response_format": {"type": "json_object"},
-            "max_tokens": 20,
-            "temperature": 0
-        }
-        
-        attempts = int(os.getenv("SCILLM_PREFLIGHT_RETRIES", "2")) + 1
-        backoff = float(os.getenv("SCILLM_PREFLIGHT_BACKOFF", "0.5"))
-        async with aiohttp.ClientSession() as session:
-            chat_url = f"{base_url}/chat/completions"
-            last_text = ""
-            for i in range(attempts):
-                try:
-                    async with session.post(
-                        chat_url,
-                        headers=headers,
-                        json=payload,
-                        timeout=aiohttp.ClientTimeout(total=15)
-                    ) as resp:
-                        if resp.status == 200:
-                            data = await resp.json()
-                            if data.get("choices") and len(data.get("choices", [])) > 0:
-                                logger.info("SciLLM preflight: Chat completions endpoint accessible")
-                                return True, "Chat completions endpoint accessible"
-                            else:
-                                return False, f"Invalid response format: {data}"
-                        else:
-                            last_text = await resp.text()
-                            if 500 <= resp.status < 600 and i < attempts - 1:
-                                await asyncio.sleep(backoff)
-                                continue
-                            return False, f"Chat completions endpoint returned {resp.status}: {last_text}"
-                except Exception as ex:
-                    last_text = str(ex)
-                    if i < attempts - 1:
-                        await asyncio.sleep(backoff)
-                        continue
-                    return False, f"Chat completions endpoint probe failed: {last_text}"
+        ok, _, details = sanity_preflight(api_base=base_url, api_key=api_key, model=text_model, wall_time_s=20, timeout=10, parallel=3)
+        return (True, "Chat completions accessible") if ok else (False, f"Chat preflight failed: {details}")
     except Exception as e:
-        return False, f"Chat completions endpoint probe failed: {e}"
+        return False, f"Chat preflight exception: {e}"
 
 
 async def validate_scillm_preflight() -> Tuple[bool, str]:

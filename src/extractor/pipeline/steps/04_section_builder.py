@@ -52,6 +52,7 @@ from extractor.pipeline.utils.diagnostics import (
     get_run_id,
     gpu_metrics_available,
 )
+from extractor.pipeline.utils.step_sanity import run_step_sanity
 
 # (removed unused report utils import)
 
@@ -63,6 +64,11 @@ except ImportError:
 
 # Initialize (console for printing). CLI factory provided below.
 console = Console()
+STEP_NAME = "04_section_builder"
+
+
+def sanity() -> int:
+    return run_step_sanity(STEP_NAME)
 
 # (env/log configured in CLI)
 
@@ -1547,10 +1553,7 @@ if __name__ == "__main__":
         )
         sys.exit(2)
     if argv[0] == "sanity":
-        from extractor.pipeline.steps.sanity_helper import sanity_run
-        _p = sanity_run("04")
-        print(str(_p))
-        sys.exit(0)
+        sys.exit(sanity())
     if argv[0] == "run":
         try:
             input_json = Path(argv[1])

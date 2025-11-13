@@ -137,6 +137,8 @@ from extractor.pipeline.utils.model_params import (  # noqa: E402
 from extractor.pipeline.utils.text_utils import sanitize_text  # noqa: E402
 from extractor.pipeline.utils.unified_conversion import build_unified_document_from_reflow  # noqa: E402
 from extractor.pipeline.utils.vision import preflight_vision_support  # noqa: E402
+from extractor.pipeline.utils.step_sanity import run_step_sanity
+from extractor.pipeline.steps.scillm_preflight_validator import require_scillm_preflight
 
 # Model selection (place imports at top to satisfy E402)
 from extractor.pipeline.utils.model_select import get_vlm_model, get_text_model  # noqa: E402
@@ -184,6 +186,11 @@ logger.add(
 
 STAGE07_DEBUG = os.getenv("STAGE07_DEBUG", "").lower() in ("1", "true", "yes", "y")
 console = Console()
+STEP_NAME = "07_reflow_section"
+
+
+def sanity() -> int:
+    return run_step_sanity(STEP_NAME)
 
 # Hybrid search removed; Stage 07 runs fully offline
 
@@ -3104,16 +3111,14 @@ def run(
         except Exception as _e:
             console.print(f"[red]Stage 07 model selection failed: {_e}[/red]")
             raise RuntimeError("Stage 07 model selection failed")
-        # Early sanity: scillm/Chutes must be reachable to avoid hangs
+        # Early sanity: paved-path preflight required when LLM is enabled
         try:
-            from extractor.pipeline.utils.preflight import scillm_quick_check
-
-            ok, reason = scillm_quick_check(timeout=3.0)
-            if not ok:
-                console.print(
-                    f"[red]Stage 07 preflight failed: {reason}. Set CHUTES_API_BASE/CHUTES_API_KEY or use --summary-only.[/red]"
-                )
-                raise RuntimeError("Stage 07 preflight failed")
+            require_scillm_preflight()
+        except RuntimeError as exc:
+            console.print(
+                f"[red]Stage 07 SciLLM preflight failed: {exc}. Set CHUTES_API_BASE/CHUTES_API_KEY or use --summary-only.[/red]"
+            )
+            raise
         except Exception as _e:
             raise RuntimeError(f"Stage 07 preflight error: {_e}")
     # Configure a stage-specific log file for debugging
@@ -3720,10 +3725,7 @@ if __name__ == "__main__":
     import sys
     argv = sys.argv[1:]
     if argv and argv[0] == "sanity":
-        from extractor.pipeline.steps.sanity_helper import sanity_run
-        p = sanity_run("07")
-        print(str(p))
-        sys.exit(0)
+        sys.exit(sanity())
     if not argv or argv[0] in ("-h", "--help"):
         print(
             "Usage: python -m extractor.pipeline.steps.07_reflow_section SECTIONS_JSON TABLES_JSON FIGURES_JSON [ANNOTATIONS_JSON] [OUT_DIR] [--summary-only]",

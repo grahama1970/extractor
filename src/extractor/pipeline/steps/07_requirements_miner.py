@@ -25,7 +25,15 @@ from typing import Any, List, Optional
 import hashlib
 import os
 
+from extractor.pipeline.utils.step_sanity import run_step_sanity
+
 ## CLI removed: import and call run(...), or use a debug harness.
+
+STEP_NAME = "07_requirements_miner"
+
+
+def sanity() -> int:
+    return run_step_sanity(STEP_NAME)
 
 
 MODALITY_RE = re.compile(r"\b(shall|must|should|will|may|might|could|can)\b", re.IGNORECASE)
@@ -453,13 +461,7 @@ if __name__ == "__main__":
     import sys
     argv = sys.argv[1:]
     if argv and argv[0] == "sanity":
-        from extractor.pipeline.steps.sanity_helper import sanity_run
-        # Ensure Stage 07 reflow exists (summary_only)
-        p = sanity_run("07")
-        out_dir = Path("data/results/pipeline")
-        run(Path(p), out_dir)
-        print(str(out_dir/"07_requirements_miner/json_output/07_requirements.json"))
-        sys.exit(0)
+        sys.exit(sanity())
     print("Usage: python -m extractor.pipeline.steps.07_requirements_miner sanity")
 STAGE07REQ_VISUAL_PROOF = os.getenv("STAGE07REQ_VISUAL_PROOF", "").lower() in ("1","true","yes","y")
 STAGE07REQ_SOURCE_PDF = os.getenv("STAGE07REQ_SOURCE_PDF", "").strip() or None

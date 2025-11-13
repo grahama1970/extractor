@@ -46,11 +46,17 @@ from extractor.pipeline.utils.figure_extractor_utils import (
     _assemble_result,
     intersect_sections,
 )
+from extractor.pipeline.utils.step_sanity import run_step_sanity
 
 # Load environment (project standard). Does not override existing env vars.
 load_dotenv(find_dotenv())
 
 console = Console()
+STEP_NAME = "06_figure_extractor"
+
+
+def sanity() -> int:
+    return run_step_sanity(STEP_NAME)
 
 
 # Tunables (env‑driven)
@@ -414,10 +420,7 @@ if __name__ == "__main__":
     import sys
     argv = sys.argv[1:]
     if argv and argv[0] == "sanity":
-        from extractor.pipeline.steps.sanity_helper import sanity_run
-        p = sanity_run("06")
-        print(str(p))
-        sys.exit(0)
+        sys.exit(sanity())
     if not argv or argv[0] in ("-h", "--help"):
         print(
             "Usage: python -m extractor.pipeline.steps.06_figure_extractor --bundle BUNDLE [OUT_DIR] [--skip-descriptions]\n"

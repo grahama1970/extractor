@@ -45,6 +45,7 @@ from extractor.pipeline.utils.diagnostics import (
     make_event,
     gpu_metrics_available,
 )
+from extractor.pipeline.utils.step_sanity import run_step_sanity
 
 # --------------------------------------------------------------------------- #
 # Marker import
@@ -58,6 +59,11 @@ from extractor.pipeline.utils.diagnostics import (
 # Do not mutate global logger configuration at import time
 # Stage-scoped logging is configured within the CLI run() function.
 console = Console()
+STEP_NAME = "02_marker_extractor"
+
+
+def sanity() -> int:
+    return run_step_sanity(STEP_NAME)
 
 DEBUG = False
 
@@ -901,10 +907,7 @@ if __name__ == "__main__":
         )
         sys.exit(2)
     if argv[0] == "sanity":
-        from extractor.pipeline.steps.sanity_helper import sanity_run
-        out = sanity_run("02")
-        print(str(out))
-        sys.exit(0)
+        sys.exit(sanity())
     # Compatibility with runners using `run <PDF> -o <OUT>`
     if argv[0] == "run":
         try:

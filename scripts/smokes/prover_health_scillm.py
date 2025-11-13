@@ -48,7 +48,7 @@ def main(
         api_key=None,
         messages=messages,
         response_format={"type": "json_object"},
-        extra_headers={"x-api-key": key},
+        api_key=key,
         timeout=timeout,
         temperature=0,
     )
@@ -66,4 +66,3 @@ def main(
 
 if __name__ == "__main__":
     app()
-
