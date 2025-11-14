@@ -1168,7 +1168,6 @@ def run(
     t0 = time.monotonic()
     stage_start_ts = iso_now()
     resources = snapshot_resources("start")
-    import os
 
     sampler = (
         start_resource_sampler(float(os.getenv("SAMPLE_INTERVAL_SEC", "2")))
@@ -2010,7 +2009,6 @@ def debug_bundle(
     t0 = time.monotonic()
     stage_start_ts = iso_now()
     resources = snapshot_resources("start")
-    import os
 
     sampler = (
         start_resource_sampler(float(os.getenv("SAMPLE_INTERVAL_SEC", "2")))
@@ -2072,8 +2070,7 @@ def debug_bundle(
     if not filtered_tables and all_tables:
         # Keep all extracted tables by default (avoid data loss on multi-table pages).
         # Old behavior (collapse to a single "best" table) can be enabled via env flag.
-        import os as _os
-        single = (_os.getenv("STAGE05_SINGLE_PER_PAGE", "0").lower() in ("1", "true", "yes", "y"))
+        single = (os.getenv("STAGE05_SINGLE_PER_PAGE", "0").lower() in ("1", "true", "yes", "y"))
         if single:
             try:
                 best = max(all_tables, key=lambda t: float(t.get("score", 0.0)))

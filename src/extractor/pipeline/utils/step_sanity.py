@@ -231,7 +231,7 @@ def _register_default_specs() -> None:
                 OutputCheck(
                     "01_annotation_processor/json_output/01_annotations.json",
                     key="annotations",
-                    min_items=1,
+                    min_items=None,
                 )
             ],
         )

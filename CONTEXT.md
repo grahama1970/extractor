@@ -1,68 +1,41 @@
-Context: Pipeline Hardening (Step 07 focus)
-Date: 2025-10-11
+Context: 09a Visual Integrity + 09b Audit Digest
+Date: 2025-11-14
 
 Scope
-- Harden Stage 07 (reflow) JSON discipline and determinism without removing LLM usage.
-- Keep low-confidence table image assists (Stage 05→07) and vision preflight.
-- Maintain strict JSON on first/compact passes; allow repair only as a gated fallback.
+- Harden Stage 09a overlays so auditors can visually verify sections/tables/figures without guessing what the colors mean.
+- Keep the 09b audit authoritative (zero warnings) while still flagging multi-page table merges.
+- Ensure downstream reviewers have both the annotated PDF and the preview PNG paths in every run so collaboration stays visual-first.
 
-Key Changes
-- Added strict JSON utilities
-  - `src/extractor/pipeline/utils/json_utils.py`:
-    - `STRICT_JSON_GUARD`: single-sourced guard text for prompts.
-    - `parse_json_strict(text)`: requires a single JSON object/array; forbids NaN/Infinity; no repair.
+Current Status (2025-11-14)
+1. 09a overlay renderer (`src/extractor/pipeline/steps/09a_pdf_annotator.py`)
+   - Gutters are back: left rail shows semantic labels, right rail shows section endcaps.
+   - Section headers have their own overlays and plaques, proving Stage 04 IDs flow through.
+   - Table overlays pull Stage 07 rows/headers into the PDF so reviewers see the extracted data without opening JSON.
+   - Figures now render the LLM caption (or an explicit “unavailable” notice) inside the overlay.
+   - Annotated PDF regenerated at `data/results/pipeline/09a_pdf_annotator/annotated.pdf`; preview PNG refreshed under `data/results/pipeline/09b_audit/previews/`.
+2. 09b audit (`data/results/pipeline/09b_audit/json_output/09b_audit.json`)
+   - Still passes with 0 errors / 0 warnings, but records the two logical table merges (`lt_b216dfd584`, `lt_081135eae9`).
+   - Serves as the single “expected results” manifest for this BHT PDF.
 
-- Stage 07 tightening
-  - `src/extractor/pipeline/steps/07_reflow_section.py`:
-    - Uses `STRICT_JSON_GUARD` in system prompt (compact and full).
-    - Adds `stop=["```"]` for non‑Gemini providers on strict/compact/relaxed attempts.
-    - Parses strict responses via `parse_json_strict` first; if `STAGE07_STRICT_PARSE_ONLY=1`, fail fast; else falls back to `clean_json_string`.
+Known Issues
+- Multi-page table `lt_081135eae9` (pages 4–5) still appears as a merged group. Audit only enforces contiguity, so we need a semantic check to prove the merge is intentional.
+- Figure captions rely on cached AI descriptions; when running fully offline we fall back to “unavailable,” which is acceptable but not ideal for UX reviews.
 
-- Tests
-  - `tests/pipeline/test_json_strict.py`: unit tests for strict parser and guard text.
-  - Updated `tests/conftest.py` to prepend `src/` to `sys.path` so local code is tested.
+Verification Steps
+```bash
+source .venv/bin/activate && \
+set -a && [ -f .env ] && source .env && set +a && \
+python -m extractor.pipeline \
+  --pdf data/input/pipeline/BHT_CV32A65X_with_requirements_noannots_clean.pdf \
+  --out data/results/pipeline \
+  --stop-on-fail
+```
+Artifacts to review:
+- Annotated PDF: `data/results/pipeline/09a_pdf_annotator/annotated.pdf`
+- Preview PNG: `data/results/pipeline/09b_audit/previews/annotated_preview_page1.png`
+- Audit JSON: `data/results/pipeline/09b_audit/json_output/09b_audit.json`
 
-- Hygiene
-  - Expanded `.gitignore` with heavy local outputs: `artifacts/`, `scripts/artifacts/`, `benchmarks/`, `data/`, `memory/`, `screenshots/`, `prototypes/tabbed/screenshots/`, `prototypes/tabbed/pdfs/`, plus caches.
-
-What remains the same
-- Stage 07 still supports image attachments for low‑confidence tables and optional figures (env‑gated).
-- scillm adapter path remains available via `USE_LLM_ADAPTER=1`.
-- No removal of LLM calls: Stage 05 images feed 07 when confidence is low.
-
-How to run quick verification
-- Unit test:
-  ```bash
-  source .venv/bin/activate || true
-  pytest -q tests/pipeline/test_json_strict.py
-  ```
-
-- Minimal pipeline slice (example):
-  ```bash
-  PDF="prototypes/tabbed/pdfs/BHT CV32A65X.pdf" \
-  OUT="data/results/pipeline_mvp/BHT_CV32A65X" \
-  LITELLM_VLM_MODEL="gemini/gemini-2.5-flash" \
-  STAGE07_STRICT_PARSE_ONLY=0 \
-  python src/extractor/pipeline/steps/01_annotation_processor.py run "$PDF" -o "$OUT" && \
-  python src/extractor/pipeline/steps/02_marker_extractor.py run "$OUT/tmp_pdf/$(basename "${PDF%.*}")_clean.pdf" -o "$OUT" --no-spawn && \
-  python src/extractor/pipeline/steps/04_section_builder.py run "$OUT/03_suspicious_headers/json_output/03_verified_blocks.json" --pdf-dir "$OUT/tmp_pdf" -o "$OUT" && \
-  python src/extractor/pipeline/steps/05_table_extractor.py run "$OUT/04_section_builder/json_output/04_sections.json" --pdf-dir "$OUT/tmp_pdf" -o "$OUT" && \
-  python src/extractor/pipeline/steps/06_figure_extractor.py run "$OUT/03_suspicious_headers/json_output/03_verified_blocks.json" --sections "$OUT/04_section_builder/json_output/04_sections.json" --pdf-dir "$OUT/tmp_pdf" -o "$OUT" && \
-  python src/extractor/pipeline/steps/07_reflow_section.py run --sections "$OUT/04_section_builder/json_output/04_sections.json" --tables "$OUT/05_table_extractor/json_output/05_tables.json" --figures "$OUT/06_figure_extractor/json_output/06_figures.json" -o "$OUT"
-  ```
-
-Notes for Copilot/CodeRabbit
-- This branch keeps JSON/prompt hardening small and testable. The next step is to request a review focusing on:
-  - Strict JSON discipline in Stage 07, stop tokens, and determinism knobs.
-  - Whether `STRICT_JSON_GUARD` should be shared with Stage 03/09 for consistency.
-  - Suggestions for trimming the relaxed fallback while keeping reliability.
-
-Env flags of interest
-- `STAGE07_VLM_MODEL`: model id (falls back to `LITELLM_VLM_MODEL`).
-- `STAGE07_IMAGE_PROMPT_MAX_TOKENS` (default 1792) / `STAGE07_MAX_TOKENS`.
-- `STAGE07_STRICT_PARSE_ONLY` (0|1): if 1, forbid repair fallback.
-- `STAGE07_INCLUDE_FIGURES` (0|1), `STAGE07_ATTACH_SECTION_IMAGE` (0|1).
-- `USE_LLM_ADAPTER` (0|1): route through scillm adapter.
-
-Owner
-- Graham; pipeline steps under `src/extractor/pipeline/steps`.
+Next Steps
+1. Diagnose the lt_081135eae9 merge by tracing Stage 07’s `tables[*].normalized_id` and confirming whether two physically separate tables get collapsed. Add a semantic guardrail (e.g., require identical headers or `continued=True`).
+2. Decide how to persist figure captions when the SciLLM router is offline (cache, mock data, or queued re-run) so auditors never see the “unavailable” placeholder.
+3. Layer a Markdown digest generator on top of `09b_audit.json` so humans receive the same top-line metrics you summarized manually.

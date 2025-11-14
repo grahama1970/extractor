@@ -21,6 +21,11 @@ Based on [OpenAI Prompting Guide](https://cookbook.openai.com/examples/gpt-5/gpt
   ```bash
   source .venv/bin/activate && set -a && [ -f .env ] && source .env && set +a
   ```
+* Keep CONTEXT.md current (especially after Codex restarts):
+
+  ```bash
+  scripts/context.py
+  ```
 
 ---
 

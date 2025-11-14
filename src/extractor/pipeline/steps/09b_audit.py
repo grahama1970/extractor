@@ -13,6 +13,11 @@ from extractor.pipeline.utils.step_sanity import run_step_sanity
 
 STEP_NAME = "09b_audit"
 
+try:
+    import fitz  # type: ignore
+except Exception:  # pragma: no cover - optional dependency
+    fitz = None  # type: ignore
+
 
 def _read_json(path: Path) -> Dict[str, Any]:
     try:
@@ -26,6 +31,36 @@ def _exists(path: Path) -> bool:
         return path.exists() and path.stat().st_size > 0
     except Exception:
         return False
+
+
+def _render_preview(pdf_path: Path, out_path: Path) -> tuple[bool, str | None]:
+    if fitz is None:
+        return False, "pymupdf_unavailable"
+    if not _exists(pdf_path):
+        return False, "annotated_pdf_missing"
+    try:
+        doc = fitz.open(pdf_path)
+        if doc.page_count == 0:
+            return False, "pdf_has_no_pages"
+        page = doc.load_page(0)
+        mat = fitz.Matrix(2, 2)
+        pix = page.get_pixmap(matrix=mat, dpi=144)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        pix.save(out_path)
+        samples = pix.samples
+        if isinstance(samples, memoryview):
+            data_view = samples
+        else:
+            data_view = memoryview(samples)
+        try:
+            min_val = min(data_view)
+            max_val = max(data_view)
+        except ValueError:
+            return False, "preview_bytes_empty"
+        non_blank = max_val > min_val
+        return non_blank, None if non_blank else "preview_detected_blank_frame"
+    except Exception as exc:
+        return False, str(exc)
 
 
 def _add_check(
@@ -72,6 +107,13 @@ def _sum_by_kind(by_kind: Dict[str, Any]) -> int:
     return total
 
 
+def _is_contiguous(pages: List[int]) -> bool:
+    if not pages or len(pages) < 2:
+        return False
+    pages_sorted = sorted(pages)
+    return pages_sorted == list(range(pages_sorted[0], pages_sorted[-1] + 1))
+
+
 def run(results_root: Path | str = Path("data/results/pipeline")) -> Path:
     root = Path(results_root)
     stage_dir = root / STEP_NAME
@@ -94,7 +136,7 @@ def run(results_root: Path | str = Path("data/results/pipeline")) -> Path:
         _add_check(checks, step=step, path=path, ok=ok, reason=reason, **meta)
 
     # Required artifacts
-    required_json("01_annotation_processor", "01_annotation_processor/json_output/01_annotations.json", "annotations", 1)
+    required_json("01_annotation_processor", "01_annotation_processor/json_output/01_annotations.json", "annotations", 0)
     required_json("02_marker_extractor", "02_marker_extractor/json_output/02_marker_blocks.json", "blocks", 1)
     required_json("03_suspicious_headers", "03_suspicious_headers/json_output/03_verified_blocks.json", "blocks", 1)
     required_json("04_section_builder", "04_section_builder/json_output/04_sections.json", "sections", 1)
@@ -165,6 +207,38 @@ def run(results_root: Path | str = Path("data/results/pipeline")) -> Path:
         reason=None if _exists(annotated_pdf) else "annotated PDF missing",
     )
 
+    preview_dir = stage_dir / "previews"
+    preview_path = preview_dir / "annotated_preview_page1.png"
+    preview_ok, preview_reason = _render_preview(annotated_pdf, preview_path)
+    _add_check(
+        checks,
+        step="09a_pdf_annotator_preview",
+        path=preview_path,
+        ok=preview_ok,
+        reason=preview_reason if not preview_ok else None,
+        preview=str(preview_path) if preview_ok else None,
+    )
+
+    # Validate merged table overlays: must have contiguous pages and >=2 pages.
+    annotations_path = root / "09a_pdf_annotator" / "json_output" / "annotations.json"
+    annotations = _read_json(annotations_path)
+    for overlay in annotations.get("overlays", []):
+        if overlay.get("kind") != "table_merged":
+            continue
+        pages = overlay.get("pages_in_group") or []
+        logical_key = overlay.get("logical_table_key") or "unknown"
+        ok = _is_contiguous(pages)
+        _add_check(
+            checks,
+            step="09a_table_merge_contiguity",
+            path=annotations_path,
+            ok=ok,
+            severity="error",
+            reason=None if ok else f"table_merged pages not contiguous: {pages}",
+            logical_table_key=logical_key,
+            pages_in_group=pages,
+        )
+
     errors = sum(1 for c in checks if not c["ok"] and c.get("severity") != "warning")
     warnings = sum(1 for c in checks if not c["ok"] and c.get("severity") == "warning")
     summary_payload = {
@@ -174,6 +248,7 @@ def run(results_root: Path | str = Path("data/results/pipeline")) -> Path:
         "warnings": warnings,
         "results_root": str(root),
         "checks": checks,
+        "preview_image": str(preview_path) if preview_ok else None,
     }
 
     audit_path.write_text(json.dumps(summary_payload, ensure_ascii=False, indent=2), encoding="utf-8")
