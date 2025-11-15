@@ -230,6 +230,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         s02_marker_extractor as s02,
         s03_suspicious_headers as s03,
         s04_section_builder as s04,
+        s04a_layout_audit as s04a,
         s05_table_extractor as s05,
         s06_figure_extractor as s06,
         s06b_layout_sketcher as s06b,
@@ -354,6 +355,26 @@ def main(argv: Optional[list[str]] = None) -> int:
         {"json": str(a04_path.relative_to(out)), "latency_ms": stage_latencies.get("04_section_builder")},
         counts={"sections": sec_count} if isinstance(sec_count, int) else None,
     )
+
+    # 04a – layout audit (fail fast on ordering issues before tables/figures)
+    a04a = _step(
+        "04a_layout_audit",
+        s04a.run,
+        out,
+        stop_on_fail=args.stop_on_fail,
+        timeout_sec=args.stage_timeout,
+        log_dir_base=out,
+        on_timing=lambda n, dt: stage_latencies.update({n: dt}),
+    )
+    if not a04a and args.stop_on_fail:
+        return 1
+    if a04a:
+        _write_artifacts_index((out / "04a_layout_audit"))
+        manifest.record_stage(
+            "04a_layout_audit",
+            "Completed",
+            {"json": str(a04a.relative_to(out)), "latency_ms": stage_latencies.get("04a_layout_audit")},
+        )
 
     # 05
     a05 = _step(

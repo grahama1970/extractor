@@ -48,6 +48,32 @@ class JSONOutput(BaseModel):
     metadata: dict
 
 
+def _canonical_json_block_order_key(block: Dict[str, Any]) -> Tuple[float, float, int]:
+    """Deterministic per-block sort key for JSON children.
+
+    Uses (y0, x0, implicit index) to approximate visual reading order on a page.
+    The page dimension is implicit because we only apply this within a single page.
+    """
+    bbox = block.get("bbox") or []
+    if isinstance(bbox, (list, tuple)) and len(bbox) == 4:
+        try:
+            x0 = float(bbox[0])
+            y0 = float(bbox[1])
+        except Exception:
+            x0 = 0.0
+            y0 = 0.0
+    else:
+        x0 = 0.0
+        y0 = 1e9
+    # Fallback tie-breaker based on optional block_id-like fields
+    bid_raw = block.get("block_id") or block.get("id") or 0
+    try:
+        bid = int(str(bid_raw).split("/")[-1].split("_")[-1])
+    except Exception:
+        bid = 0
+    return (y0, x0, bid)
+
+
 def reformat_section_hierarchy(section_hierarchy):
     if section_hierarchy is None:
         return None
@@ -150,7 +176,16 @@ class JSONRenderer(BaseRenderer):
 
         json_output = []
         for page_output in document_output.children:
-            json_output.append(self.extract_json(document, page_output))
+            page_dict = self.extract_json(document, page_output)
+            children = page_dict.get("children")
+            if isinstance(children, list) and children:
+                try:
+                    page_dict["children"] = sorted(
+                        children, key=_canonical_json_block_order_key
+                    )
+                except Exception:
+                    pass
+            json_output.append(page_dict)
 
         return {
             "children": json_output,

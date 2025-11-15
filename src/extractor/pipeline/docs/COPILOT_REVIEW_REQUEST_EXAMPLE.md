@@ -97,5 +97,6 @@ In `sparta/workflows/paywall_detector.py`:
 
 ## Deliverable
 
-- Reply with a single fenced code block containing a unified diff that meets the constraints above
-- in the chat, provide answers to each clarifying questions
+- Reply with a single fenced code block containing a unified diff that meets the constraints above (no prose before/after the fence)
+- In the chat, provide answers to each clarifying question explicitly so reviewers do not need to guess
+- Do not mark the request complete if either piece is missing; the review will be considered incomplete without both the diff block and the clarifying-answers section

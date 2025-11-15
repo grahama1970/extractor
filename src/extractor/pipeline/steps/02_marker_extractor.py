@@ -16,6 +16,7 @@ except Exception:
     psutil = None
 import multiprocessing as mp
 from extractor.pipeline.utils.marker_extractor_utils import fallback_simple_extract
+from extractor.pipeline.utils.section_builder_utils import canonical_block_order_key
 
 ## Typer removed; plain function signatures for easier debugging
 
@@ -501,6 +502,11 @@ def run(
     except Exception:
         pass
 
+    # Allow env override to force inline (no-spawn) execution — useful on
+    # platforms where multiprocessing.Queue triggers PermissionError.
+    if not no_spawn and os.getenv("STAGE02_NO_SPAWN", "0").lower() in ("1", "true", "yes", "y"):
+        no_spawn = True
+
     if no_spawn:
         # Inline execution (best for debugging)
         try:
@@ -616,8 +622,6 @@ def run(
                     b["suspicious_header"] = True
         except Exception:
             pass
-
-    suspicious_blocks = [b for b in blocks if b.get("is_suspicious")]
 
     # --- Optional: synthesize Figure blocks from embedded images when none exist ---
     try:
@@ -764,6 +768,17 @@ def run(
             )
         except Exception:
             pass
+
+    # Enforce deterministic reading order for all downstream consumers.
+    # Sort at the very end so that both native and synthesized blocks are
+    # included in the canonical layout.
+    try:
+        blocks.sort(key=canonical_block_order_key)
+    except Exception:
+        # Best-effort ordering; never fail Stage 02 solely on sort issues.
+        pass
+
+    suspicious_blocks = [b for b in blocks if b.get("is_suspicious")]
     # predictor mode flags
     strict = os.getenv("OFFLINE_PDF_PREDICTORS", "1").lower() in {"0", "false"}
     missing = [k for k, v in (predictor_presence or {}).items() if not v]

@@ -29,6 +29,47 @@ def get_pdf_large_font_threshold() -> float:
         return PDF_LARGE_FONT_THRESHOLD
 
 
+def canonical_block_order_key(block: Dict[str, Any]) -> Tuple[int, float, float, int]:
+    """Canonical per-block sort key used across stages.
+
+    Order priority:
+      1) page index
+      2) y0 (top coordinate)
+      3) x0 (left coordinate)
+      4) block_id (stable tiebreaker)
+
+    The goal is to enforce a deterministic reading order that matches
+    visual layout for all consumers (02, 04, 04a, 06b, 07, 09a, etc.).
+    """
+    try:
+        raw_page = block.get("page")
+        if raw_page is None:
+            raw_page = block.get("page_idx", block.get("page_index", 0))
+        page = int(raw_page)
+    except Exception:
+        page = 0
+
+    bbox = block.get("bbox") or []
+    if isinstance(bbox, (list, tuple)) and len(bbox) == 4:
+        try:
+            x0 = float(bbox[0])
+            y0 = float(bbox[1])
+        except Exception:
+            x0 = 0.0
+            y0 = 0.0
+    else:
+        # Sentinel: unknown geometry → push towards the end of the page.
+        x0 = 0.0
+        y0 = 1e9
+
+    try:
+        bid = int(block.get("block_id", 0))
+    except Exception:
+        bid = 0
+
+    return (page, y0, x0, bid)
+
+
 def _rgb_to_hex(rgb: Tuple[float, float, float]) -> str:
     try:
         r, g, b = rgb

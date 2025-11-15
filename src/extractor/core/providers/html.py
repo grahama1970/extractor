@@ -104,8 +104,8 @@ class HTMLProvider:
         )
 
         if fetch_download and fetch_download.windows:
-            logger.info("HTML provider ingested %d rolling windows", len(fetch_download.windows))
-        logger.info(f"Extracted {len(blocks)} blocks from HTML")
+            logger.info("HTML provider ingested {count} rolling windows", count=len(fetch_download.windows))
+        logger.info("Extracted {count} blocks from HTML", count=len(blocks))
         return doc
 
     def _generate_doc_id(self, filepath: Path) -> str:
@@ -382,7 +382,7 @@ class HTMLProvider:
             try:
                 text = md(str(element), strip=["p"])
             except Exception as e:
-                logger.warning(f"Markdownify failed for paragraph: {e}, falling back to plain text")
+                logger.warning("Markdownify failed for paragraph: {error}, falling back to plain text", error=e)
                 text = element.get_text(strip=True)
 
         if not text.strip():
@@ -506,7 +506,7 @@ class HTMLProvider:
                     item_text = md(str(li), strip=["li"])
                 except Exception as e:
                     logger.warning(
-                        f"Markdownify failed for list item: {e}, falling back to plain text"
+                        "Markdownify failed for list item: {error}, falling back to plain text", error=e
                     )
                     item_text = li.get_text(strip=True)
 
@@ -613,7 +613,7 @@ class HTMLProvider:
         try:
             quote_text = md(str(element), strip=["blockquote"])
         except Exception as e:
-            logger.warning(f"Markdownify failed for blockquote: {e}, falling back to plain text")
+            logger.warning("Markdownify failed for blockquote: {error}, falling back to plain text", error=e)
             quote_text = element.get_text(strip=True)
 
         if quote_text.strip():

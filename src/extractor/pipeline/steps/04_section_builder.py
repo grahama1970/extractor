@@ -41,7 +41,6 @@ from extractor.pipeline.utils.section_builder_utils import (
     _bucket_color,
     _roman_to_int,
     pdf_analyze_section_numbering as _pdf_analyze_numbering,
-    pdf_extract_section_title as _pdf_extract_title,
 )
 from extractor.pipeline.utils.diagnostics import (
     start_resource_sampler,
@@ -99,6 +98,151 @@ SECTION_NUMBER_PATTERNS = [
     r"^\([ivxlcdm]+\)",  # (i) (ii)
     r"^\d+\)",  # 1)
 ]
+
+
+def _normalize_section_number(value: Optional[str]) -> str:
+    if not value:
+        return ""
+    return str(value).strip().rstrip(".")
+
+
+def _coerce_depth(depth: Any) -> List[int]:
+    if isinstance(depth, list):
+        normalized: List[int] = []
+        for item in depth:
+            try:
+                normalized.append(int(item))
+            except Exception:
+                continue
+        if normalized:
+            return normalized
+    return []
+
+
+def _derive_parent_number(sec_num: str) -> Optional[str]:
+    trimmed = _normalize_section_number(sec_num)
+    if not trimmed:
+        return None
+    parts = [p for p in trimmed.split(".") if p]
+    if len(parts) <= 1:
+        return None
+    return ".".join(parts[:-1])
+
+
+def _normalize_breadcrumbs(value: Any) -> Tuple[List[Dict[str, Any]], List[str]]:
+    nodes: List[Dict[str, Any]] = []
+    titles: List[str] = []
+    if isinstance(value, list):
+        for item in value:
+            if isinstance(item, dict):
+                title = str(item.get("title") or item.get("label") or "").strip()
+                node = {
+                    "id": item.get("id"),
+                    "title": title,
+                    "section_number": _normalize_section_number(item.get("section_number")),
+                    "level": item.get("level"),
+                    "section_hash": item.get("section_hash"),
+                }
+                nodes.append({k: v for k, v in node.items() if v not in (None, "")})
+                if title:
+                    titles.append(title)
+            else:
+                title = str(item).strip()
+                if title:
+                    nodes.append({"title": title})
+                    titles.append(title)
+    elif isinstance(value, str):
+        parts = [p.strip() for p in value.split(">")]
+        for part in parts:
+            if part:
+                nodes.append({"title": part})
+                titles.append(part)
+    return nodes, titles
+
+
+def _breadcrumb_label(section: Dict[str, Any], sec_num: str) -> str:
+    meta = section.get("metadata") or {}
+    display = section.get("display_title") or meta.get("title_display") or ""
+    fallback = section.get("title") or ""
+    label = str(display or fallback or sec_num or "").strip()
+    if sec_num:
+        normalized = _normalize_section_number(sec_num)
+        if label and not label.lower().startswith(normalized.lower()):
+            return f"{normalized} {label}".strip()
+        return label or normalized
+    return label
+
+
+def _prepare_section_hierarchy(sections: List[Dict[str, Any]]) -> None:
+    """Normalize numbering, derive parents, and attach breadcrumb metadata."""
+    id_map = {s.get("id"): s for s in sections if s.get("id")}
+    order_map = {s.get("id"): idx for idx, s in enumerate(sections) if s.get("id")}
+    number_map: Dict[str, Dict[str, Any]] = {}
+
+    for section in sections:
+        meta = section.setdefault("metadata", {})
+        sec_num = _normalize_section_number(meta.get("section_number") or section.get("section_number"))
+        if sec_num:
+            meta["section_number"] = sec_num
+            section["section_number"] = sec_num
+            number_map[sec_num] = section
+        depth = _coerce_depth(meta.get("section_depth") or section.get("section_depth"))
+        if not depth and sec_num and all(part.isdigit() for part in sec_num.split(".")):
+            try:
+                depth = [int(part) for part in sec_num.split(".") if part]
+            except Exception:
+                depth = []
+        if depth:
+            meta["section_depth"] = depth
+            section["section_depth"] = depth
+
+    for section in sections:
+        sec_num = section.get("section_number") or section.get("metadata", {}).get("section_number")
+        parent_candidate = _derive_parent_number(sec_num or "") if sec_num else None
+        parent_section = number_map.get(parent_candidate) if parent_candidate else None
+        if parent_section and parent_section.get("id") != section.get("id"):
+            parent_idx = order_map.get(parent_section.get("id"))
+            current_idx = order_map.get(section.get("id"))
+            if parent_idx is not None and current_idx is not None and parent_idx < current_idx:
+                section["parent_id"] = parent_section.get("id")
+
+    for section in sections:
+        meta = section.setdefault("metadata", {})
+        breadcrumbs_existing = meta.get("breadcrumbs")
+        breadcrumb_titles_existing = meta.get("breadcrumb_titles")
+        if breadcrumbs_existing and breadcrumb_titles_existing:
+            continue
+        path: List[Dict[str, Any]] = []
+        titles: List[str] = []
+        current = section
+        visited: set[str] = set()
+        while current and current.get("id") not in visited:
+            visited.add(current.get("id"))
+            cur_meta = current.get("metadata") or {}
+            cur_num = cur_meta.get("section_number") or current.get("section_number")
+            label = _breadcrumb_label(current, cur_num or "")
+            entry = {
+                "id": current.get("id"),
+                "title": label,
+                "section_number": cur_num,
+                "level": current.get("level"),
+                "section_hash": cur_meta.get("section_hash"),
+            }
+            path.append({k: v for k, v in entry.items() if v not in (None, "")})
+            if label:
+                titles.append(label)
+            parent_id = current.get("parent_id")
+            current = id_map.get(parent_id)
+        path.reverse()
+        titles.reverse()
+        if path and not breadcrumbs_existing:
+            meta["breadcrumbs"] = path
+        if titles and not breadcrumb_titles_existing:
+            meta["breadcrumb_titles"] = titles
+        if titles:
+            for block in section.get("blocks", []):
+                if isinstance(block, dict) and not block.get("section_breadcrumbs"):
+                    block["section_breadcrumbs"] = titles
 
 # ================================
 # COLOR ENRICHMENT UTILITIES
@@ -191,42 +335,47 @@ def _enrich_header_colors(pdf_path: Path, sections: List[Dict[str, Any]]) -> Non
 
 
 def analyze_section_numbering(text: str) -> Dict[str, Any]:
-    """Analyze section numbering patterns with depth detection (minimal)."""
-    res = {
-        "has_numbering": False,
-        "numbering_type": "none",
-        "depth_level": 0,
-        "number_confidence": 0.0,
-        "number_text": "",
-        "title_text": "",
-    }
+    """Analyze section numbering patterns with depth detection (delegates to utils)."""
     t = (text or "").strip()
     if not t:
-        return res
-    import re
+        return {
+            "has_numbering": False,
+            "numbering_type": "none",
+            "depth_level": 0,
+            "number_confidence": 0.0,
+            "number_text": "",
+            "title_text": "",
+        }
 
-    patterns = [
-        (r"^(?:\d+\.){3}\d+", ("decimal", 4)),  # 1.1.1.1
-        (r"^(?:\d+\.){2}\d+", ("decimal", 3)),  # 1.1.1
-        (r"^(?:\d+\.)\d+", ("decimal", 2)),  # 1.1
-        (r"^(\d+\.)", ("decimal", 1)),  # 1.
-        (r"^[A-Z]\.", ("alpha_upper", 1)),
-        (r"^[a-z]\)", ("alpha_lower", 2)),
-        (r"^\([ivxlcdm]+\)", ("roman", 3)),
-        (r"^(\d+)\)", ("decimal_paren", 1)),
-    ]
-    for pat, (typ, depth) in patterns:
-        m = re.match(pat, t)
-        if m:
-            res["has_numbering"] = True
-            res["numbering_type"] = typ
-            res["depth_level"] = depth
-            res["number_confidence"] = 0.9
-            num_text = m.group(0)
-            res["number_text"] = num_text
-            res["title_text"] = t[len(num_text) :].strip()
-            break
-    return res
+    try:
+        analysis = _pdf_analyze_numbering(t)
+    except Exception:
+        analysis = {
+            "has_numbering": False,
+            "numbering_type": "none",
+            "depth_level": 0,
+            "number_confidence": 0.0,
+            "number_text": "",
+            "title_text": t,
+        }
+    # Suppress lowercase roman numerals that are likely false positives (e.g., "m Clock")
+    num_text = analysis.get("number_text") or ""
+    if analysis.get("numbering_type") == "roman" and num_text.islower():
+        analysis.update(
+            has_numbering=False,
+            numbering_type="none",
+            number_confidence=0.0,
+            number_text="",
+            depth_level=0,
+        )
+    # Ensure baseline keys always exist for downstream callers
+    analysis.setdefault("title_text", t)
+    analysis.setdefault("number_text", "")
+    analysis.setdefault("depth_level", 0)
+    analysis.setdefault("numbering_type", "none")
+    analysis.setdefault("number_confidence", 0.0)
+    analysis.setdefault("has_numbering", False)
+    return analysis
 
 
 def derive_section_depth(numbering_analysis: Dict[str, Any]) -> List[int]:
@@ -423,6 +572,14 @@ def build_sections_from_blocks(
                 na = analyze_section_numbering(clean_title)
                 header_level = na.get("depth_level") or detect_header_level(clean_title)
                 section_title = extract_section_title(clean_title)
+                block_meta = block.get("metadata") if isinstance(block.get("metadata"), dict) else {}
+                stage03_number = block_meta.get("section_number") or block.get("section_number")
+                stage03_depth = block_meta.get("section_depth") or block.get("section_depth")
+                breadcrumb_nodes, breadcrumb_titles = _normalize_breadcrumbs(
+                    block_meta.get("section_breadcrumbs")
+                    or block_meta.get("breadcrumbs")
+                    or block.get("section_breadcrumbs")
+                )
                 # Compute character spans within the original block text (cleaned)
                 try:
                     na_spans = _pdf_analyze_numbering(clean_title)
@@ -431,8 +588,8 @@ def build_sections_from_blocks(
                 except Exception:
                     number_span = None
                     title_span = None
-                sec_num = na.get("number_text") or ""
-                section_depth = derive_section_depth(na)
+                sec_num = _normalize_section_number(stage03_number or na.get("number_text") or "")
+                section_depth = _coerce_depth(stage03_depth) or derive_section_depth(na)
                 try:
                     import hashlib
 
@@ -465,6 +622,10 @@ def build_sections_from_blocks(
                         },
                     },
                 }
+                if breadcrumb_nodes:
+                    current_section["metadata"]["breadcrumbs"] = breadcrumb_nodes
+                if breadcrumb_titles:
+                    current_section["metadata"]["breadcrumb_titles"] = breadcrumb_titles
                 block.setdefault("page", block.get("page_idx", 0))
                 display_title = (na.get("title_text") or section_title).lstrip(". ").strip()
                 current_section["display_title"] = display_title
@@ -477,6 +638,8 @@ def build_sections_from_blocks(
                     block["header_char_spans"] = {"number": number_span, "title": title_span}
                 if section_depth:
                     block["section_depth"] = section_depth
+                if breadcrumb_titles and not block.get("section_breadcrumbs"):
+                    block["section_breadcrumbs"] = breadcrumb_titles
             else:
                 # not accepted: treat as content
                 if current_section:
@@ -607,6 +770,8 @@ def build_sections_from_blocks(
             md["page_count"] = len(section["pages"])
         except Exception:
             section.setdefault("pages", [])
+
+    _prepare_section_hierarchy(sections)
 
     logger.info(f"Built {len(sections)} sections from {len(blocks)} blocks")
     return sections
@@ -1261,7 +1426,6 @@ async def build_and_validate_sections_comprehensive(
                                 # Mark this matched heading as a continuation instance
                                 # so downstream consumers can identify it explicitly.
                                 # (This is a synthetic section; annotate its metadata field.)
-                                entry_meta = {"section_header_continuation": True}
                                 prev.setdefault("metadata", {}).setdefault("continuation_markers", []).append({
                                     "page": p,
                                     "title": match,

@@ -6,8 +6,7 @@ Based on [OpenAI Prompting Guide](https://cookbook.openai.com/examples/gpt-5/gpt
 
 ### Agent Quickstart (Codex CLI)
 
-* **Activation**: Start with the prompt:  
-  `Activate the current dir as project using serena`
+* **Activation**: Ensure you are in the repo root in the Codex CLI before running commands.
 * **Planning**: Use `update_plan` for multi-step work.
 * **Editing**: Apply changes via `apply_patch` (minimal, targeted diffs).
 * **Search**: Use `rg` for fast project search.
@@ -15,7 +14,6 @@ Based on [OpenAI Prompting Guide](https://cookbook.openai.com/examples/gpt-5/gpt
 
 #### Always Do This First
 
-* Activate Serena project.
 * Activate venv & load env:
 
   ```bash

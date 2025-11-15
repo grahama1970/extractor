@@ -1,41 +1,43 @@
-Context: 09a Visual Integrity + 09b Audit Digest
-Date: 2025-11-14
+Context: Stage 09a gutter regression + Copilot escalation
+Date: 2025-11-14 (afternoon)
 
 Scope
-- Harden Stage 09a overlays so auditors can visually verify sections/tables/figures without guessing what the colors mean.
-- Keep the 09b audit authoritative (zero warnings) while still flagging multi-page table merges.
-- Ensure downstream reviewers have both the annotated PDF and the preview PNG paths in every run so collaboration stays visual-first.
+- Re-establish clear gutters/plaques in `09a_pdf_annotator.py` so auditors see section/table labels without zoom gymnastics.
+- Keep Stage 09b audit untouched while we focus on the visual regression.
+- Capture the problem precisely for Copilot (request logged under `src/extractor/pipeline/docs/COPILOT_REVIEW_REQUEST_2025-11-14_gutter.md`).
 
-Current Status (2025-11-14)
-1. 09a overlay renderer (`src/extractor/pipeline/steps/09a_pdf_annotator.py`)
-   - Gutters are back: left rail shows semantic labels, right rail shows section endcaps.
-   - Section headers have their own overlays and plaques, proving Stage 04 IDs flow through.
-   - Table overlays pull Stage 07 rows/headers into the PDF so reviewers see the extracted data without opening JSON.
-   - Figures now render the LLM caption (or an explicit “unavailable” notice) inside the overlay.
-   - Annotated PDF regenerated at `data/results/pipeline/09a_pdf_annotator/annotated.pdf`; preview PNG refreshed under `data/results/pipeline/09b_audit/previews/`.
-2. 09b audit (`data/results/pipeline/09b_audit/json_output/09b_audit.json`)
-   - Still passes with 0 errors / 0 warnings, but records the two logical table merges (`lt_b216dfd584`, `lt_081135eae9`).
-   - Serves as the single “expected results” manifest for this BHT PDF.
+Current Status
+1. `feature/extractor-sanity-refactor` carries the gutter tweaks (stronger fills + plaque autosizing) but **artifacts still look blank** at 100% zoom because column guides are drawn above the gutters and plaques are skipped on overflow. The latest PNGs are:
+   - Old render: `scripts/artifacts/annot_preview_request-1.png`
+   - New render: `scripts/artifacts/annot_preview_request-1-1.png` (sha256 `5351de5a...da7b`)
+   Users report no visible difference, so the change is ineffective.
+2. Copilot review request has been committed documenting the issue and desired fix. Waiting on review because DNS hiccups blocked the initial push (manual push completed afterward).
+3. Stage 09b audit (`data/results/pipeline/09b_audit/json_output/09b_audit.json`) still reports zero warnings; no additional work there yet.
 
-Known Issues
-- Multi-page table `lt_081135eae9` (pages 4–5) still appears as a merged group. Audit only enforces contiguity, so we need a semantic check to prove the merge is intentional.
-- Figure captions rely on cached AI descriptions; when running fully offline we fall back to “unavailable,” which is acceptable but not ideal for UX reviews.
+Known Issues / Gaps
+- Gutters draw behind the grid overlay; plaques disappear whenever `MAX_TABS_PER_PAGE` is exceeded.
+- Operators rightly distrust the artifacts because they can’t see labels even though the code says they exist.
+- Multi-page table merge (`lt_081135eae9`) remains unresolved but is deprioritized until the gutter fix lands.
 
-Verification Steps
+Verification Steps (repeatable repro)
 ```bash
 source .venv/bin/activate && \
 set -a && [ -f .env ] && source .env && set +a && \
-python -m extractor.pipeline \
-  --pdf data/input/pipeline/BHT_CV32A65X_with_requirements_noannots_clean.pdf \
-  --out data/results/pipeline \
-  --stop-on-fail
+python -m extractor.pipeline.steps.09a_pdf_annotator \
+  data/input/pipeline/BHT_CV32A65X_with_requirements_noannots_clean.pdf \
+  data/results/pipeline/04_section_builder/json_output/04_sections.json \
+  data/results/pipeline/05_table_extractor/json_output/05_tables.json \
+  data/results/pipeline/06_figure_extractor/json_output/06_figures.json \
+  --reflowed-json data/results/pipeline/07_reflow_section/json_output/07_reflowed.json
+pdftoppm -f 1 -l 1 -png data/results/pipeline/09a_pdf_annotator/annotated.pdf \
+  scripts/artifacts/annot_preview_request-1
 ```
-Artifacts to review:
+Artifacts to inspect:
 - Annotated PDF: `data/results/pipeline/09a_pdf_annotator/annotated.pdf`
-- Preview PNG: `data/results/pipeline/09b_audit/previews/annotated_preview_page1.png`
-- Audit JSON: `data/results/pipeline/09b_audit/json_output/09b_audit.json`
+- New/old PNG pair: `scripts/artifacts/annot_preview_request-1.png` vs `scripts/artifacts/annot_preview_request-1-1.png`
+- Copilot request doc: `src/extractor/pipeline/docs/COPILOT_REVIEW_REQUEST_2025-11-14_gutter.md`
 
 Next Steps
-1. Diagnose the lt_081135eae9 merge by tracing Stage 07’s `tables[*].normalized_id` and confirming whether two physically separate tables get collapsed. Add a semantic guardrail (e.g., require identical headers or `continued=True`).
-2. Decide how to persist figure captions when the SciLLM router is offline (cache, mock data, or queued re-run) so auditors never see the “unavailable” placeholder.
-3. Layer a Markdown digest generator on top of `09b_audit.json` so humans receive the same top-line metrics you summarized manually.
+1. Wait for Copilot/code review response on the gutter fix (or implement our own follow-up) to ensure gutters render above the grid and plaques never drop.
+2. Once visuals are correct, revisit the multi-page table merge guardrail.
+3. After fixes land, regenerate artifacts and attach them to the Copilot request so future reviewers can trust the visuals.

@@ -77,6 +77,7 @@ HUMAN_KIND = {
     "reflow_figure": "Figure",
     "table": "Table",
     "table_merged": "Table",
+    "reflow_table": "Table",
     "requirement": "Requirement",
 }
 
@@ -86,11 +87,11 @@ GUTTER_WIDTH = 84.0
 GUTTER_PAD = 8.0
 PLAQUE_PAD_X = 6.0
 PLAQUE_PAD_Y = 4.0
-GUTTER_FILL = (0.80, 0.90, 0.98)
-GUTTER_BORDER = (0.30, 0.52, 0.78)
+GUTTER_FILL = (0.76, 0.86, 0.96)
+GUTTER_BORDER = (0.24, 0.44, 0.68)
 PLAQUE_FILL = (0.97, 0.99, 1.0)
-PLAQUE_BORDER = (0.68, 0.77, 0.88)
-PLAQUE_FONT_MIN = 6.5
+PLAQUE_BORDER = (0.62, 0.72, 0.84)
+PLAQUE_FONT_MIN = 5.5
 
 LABEL_MARGIN_PTS = 14.0
 LABEL_MIN_FONT = 8
@@ -111,19 +112,12 @@ TAB_COLORS = {
 
 
 def _draw_page_gutter_side(page: fitz.Page, side: str = "left") -> fitz.Rect:
-    """Draw a single gutter lane on the requested side and return its rect."""
+    """Return the gutter rect on the requested side (no fill/stroke)."""
     r = page.rect
     if side == "left":
         lane = fitz.Rect(r.x0 + 6, r.y0 + 6, r.x0 + 6 + GUTTER_WIDTH, r.y1 - 6)
     else:
         lane = fitz.Rect(r.x1 - 6 - GUTTER_WIDTH, r.y0 + 6, r.x1 - 6, r.y1 - 6)
-    page.draw_rect(
-        lane,
-        fill=GUTTER_FILL,
-        color=GUTTER_BORDER,
-        width=1.2,
-        overlay=True,
-    )
     return lane
 
 def _draw_page_gutter(page: fitz.Page) -> fitz.Rect:
@@ -132,11 +126,13 @@ def _draw_page_gutter(page: fitz.Page) -> fitz.Rect:
 
 
 def _draw_gutter_tag(page: fitz.Page, lane: fitz.Rect, target: fitz.Rect, text: str, color=(0.12, 0.12, 0.12), font=9.0) -> None:
-    if not text:
+    if not text or lane is None:
         return
-    txt_w = page.get_text_length(text, fontsize=font)
-    max_w = max(12.0, lane.width - 2 * GUTTER_PAD)
     t = text.strip()
+    if not t:
+        return
+    txt_w = page.get_text_length(t, fontsize=font)
+    max_w = max(12.0, lane.width - 2 * GUTTER_PAD)
     font_size = font
     iterations = 0
     while txt_w > max_w and font_size > PLAQUE_FONT_MIN:
@@ -154,24 +150,62 @@ def _draw_gutter_tag(page: fitz.Page, lane: fitz.Rect, target: fitz.Rect, text: 
     left = lane.x0 + GUTTER_PAD
     plaque_w = page.get_text_length(t, fontsize=font_size) + 2 * PLAQUE_PAD_X
     plaque = fitz.Rect(left, top, left + plaque_w, top + plaque_h)
-    page.draw_rect(plaque, fill=PLAQUE_FILL, color=PLAQUE_BORDER, width=0.6, overlay=True)
-    page.insert_text(
-        (plaque.x0 + PLAQUE_PAD_X, plaque.y0 + font_size * 1.2 - 1),
-        t,
-        fontsize=font_size,
-        color=color,
-        overlay=True,
-    )
+    # Prefer FreeText annotations so downstream checks can detect and reason about plaques.
+    # Fall back to a drawn rectangle + inserted text if annotations fail.
+    try:
+        annot = page.add_freetext_annot(
+            plaque, t, fontsize=font_size, text_color=color, fill_color=PLAQUE_FILL
+        )
+        try:
+            annot.set_border(width=0.6)
+        except Exception:
+            pass
+        try:
+            annot.set_colors(stroke=PLAQUE_BORDER)
+        except Exception:
+            pass
+        try:
+            annot.set_opacity(0.98)
+        except Exception:
+            pass
+        annot.update()
+    except Exception:
+        page.draw_rect(plaque, fill=PLAQUE_FILL, color=PLAQUE_BORDER, width=0.6, overlay=True)
+        page.insert_text(
+            (plaque.x0 + PLAQUE_PAD_X, plaque.y0 + font_size * 1.2 - 1),
+            t,
+            fontsize=font_size,
+            color=color,
+            overlay=True,
+        )
     p_from = fitz.Point(plaque.x1, plaque.y0 + plaque.height / 2.0)
     p_to = fitz.Point(target.x0, min(max(target.y0 + 4, p_from.y), target.y1 - 4))
-    page.draw_line(p_from, p_to, color=GUTTER_BORDER, width=0.7)
+    try:
+        connector = page.add_line_annot(p_from, p_to)
+        connector.set_colors(stroke=GUTTER_BORDER)
+        connector.set_border(width=0.7)
+        connector.update()
+    except Exception:
+        page.draw_line(p_from, p_to, color=GUTTER_BORDER, width=0.7)
 
 
 def _draw_t_endcaps(page: fitz.Page, lane: fitz.Rect, y0: float, y1: float, color=(0.25, 0.25, 0.25)) -> None:
+    if lane is None:
+        return
     x = lane.x1 - 10.0
-    page.draw_line(fitz.Point(x, y0), fitz.Point(x, y1), color=color, width=0.8)
-    page.draw_line(fitz.Point(x - 6, y0), fitz.Point(x + 6, y0), color=color, width=0.8)
-    page.draw_line(fitz.Point(x - 6, y1), fitz.Point(x + 6, y1), color=color, width=0.8)
+    try:
+        vertical = page.add_line_annot(fitz.Point(x, y0), fitz.Point(x, y1))
+        vertical.set_colors(stroke=color)
+        vertical.set_border(width=1.0)
+        vertical.update()
+        top_bar = page.add_line_annot(fitz.Point(x - 6, y0), fitz.Point(x + 6, y0))
+        top_bar.set_colors(stroke=color); top_bar.set_border(width=1.0); top_bar.update()
+        bottom_bar = page.add_line_annot(fitz.Point(x - 6, y1), fitz.Point(x + 6, y1))
+        bottom_bar.set_colors(stroke=color); bottom_bar.set_border(width=1.0); bottom_bar.update()
+    except Exception:
+        page.draw_line(fitz.Point(x, y0), fitz.Point(x, y1), color=color, width=1.0)
+        page.draw_line(fitz.Point(x - 6, y0), fitz.Point(x + 6, y0), color=color, width=1.0)
+        page.draw_line(fitz.Point(x - 6, y1), fitz.Point(x + 6, y1), color=color, width=1.0)
 
 
 def _draw_section_title_plaque(page: fitz.Page, rect: fitz.Rect, text: str, stroke=(0.86, 0.25, 0.2), font=11.0) -> None:
@@ -1094,6 +1128,22 @@ def run(
         raise ValueError("Refusing to overwrite a source PDF under data/input/. Use a copy or disable --overwrite-pdf.")
     doc = fitz.open(str(pdf_path))
 
+    lane_left_by_page: dict[int, fitz.Rect] = {}
+    lane_right_by_page: dict[int, fitz.Rect] = {}
+    if draw_gutter:
+        try:
+            for pidx in range(len(doc)):
+                try:
+                    page = doc[pidx]
+                except Exception:
+                    continue
+                if gutter_left_tags:
+                    lane_left_by_page[pidx] = _draw_page_gutter_side(page, "left")
+                if gutter_right_section_caps:
+                    lane_right_by_page[pidx] = _draw_page_gutter_side(page, "right")
+        except Exception as e:
+            logger.warning(f"Failed to prepare gutter lanes: {e}")
+
     # Optional: mode presets (cheap switch for QA)
     try:
         m = (mode or "structure").lower().strip()
@@ -1110,19 +1160,10 @@ def run(
     except Exception:
         pass
 
-    # Per-page gutter lanes
-    lane_left_by_page: dict[int, fitz.Rect] = {}
-    lane_right_by_page: dict[int, fitz.Rect] = {}
-    if draw_gutter:
-        try:
-            for _p in range(len(doc)):
-                if gutter_left_tags:
-                    lane_left_by_page[_p] = _draw_page_gutter_side(doc[_p], "left")
-                if gutter_right_section_caps:
-                    lane_right_by_page[_p] = _draw_page_gutter_side(doc[_p], "right")
-        except Exception:
-            lane_left_by_page = {}
-            lane_right_by_page = {}
+    # Queue of gutter plaques to render in a final pass (after overlays/grid)
+    # {_pg -> [ { "rect": fitz.Rect, "label": str, "color": (r,g,b) }, ... ]}
+    pending_left_tags: defaultdict[int, list[dict[str, Any]]] = defaultdict(list)
+    pending_right_tags: defaultdict[int, list[dict[str, Any]]] = defaultdict(list)
     overlays: list[dict[str, Any]] = []
     overlay_id = 0
     pages_touched: set[int] = set()
@@ -1205,18 +1246,16 @@ def run(
             except Exception:
                 pass
         try:
-            # Left gutter: semantic label tags
-            lane_left = lane_left_by_page.get(_pg)
-            gutter_label = label or HUMAN_KIND.get(kind)
-            if lane_left and gutter_label:
-                _draw_gutter_tag(page, lane_left, rect, gutter_label, color=stroke_color, font=9.0)
-            # Right gutter: section T endcaps
-            if kind == "section":
-                lane_t = lane_right_by_page.get(_pg) or lane_left_by_page.get(_pg)
-                if lane_t:
-                    _draw_t_endcaps(page, lane_t, rect.y0, rect.y1)
-                if draw_section_plaques:
-                    _draw_section_title_plaque(page, rect, payload.get("title") or label, stroke=COLORS.get("table", (0.86, 0.25, 0.2)), font=11.0)
+            if draw_gutter:
+                gutter_label = (label or HUMAN_KIND.get(kind) or "").strip()
+                if gutter_left_tags and gutter_label and rect and lane_left_by_page.get(_pg):
+                    pending_left_tags[_pg].append(
+                        {"rect": rect, "label": gutter_label, "color": (0.12, 0.12, 0.12), "font": 9.0}
+                    )
+                if gutter_right_section_caps and kind == "section" and rect:
+                    pending_right_tags[_pg].append((rect.y0, rect.y1))
+            if kind == "section" and draw_section_plaques:
+                _draw_section_title_plaque(page, rect, payload.get("title") or label, stroke=COLORS.get("table", (0.86, 0.25, 0.2)), font=11.0)
             if kind == "figure":
                 desc = payload.get("ai_description") or payload.get("description") or payload.get("title")
                 if draw_figure_watermark:
@@ -1862,6 +1901,53 @@ def run(
         except Exception:
             pass
         _append_timing(logs_dir, {"stage": "09a_pdf_annotator", "event": "draw_grid", "latency_ms": int((time.monotonic()-t_s)*1000)})
+
+    # Final gutter pass: draw plaques last so they sit above lanes/overlays
+    try:
+        logger.info("Final gutter pass")
+        for _pg, items in sorted(pending_left_tags.items()):
+            if not items:
+                continue
+            lane = lane_left_by_page.get(_pg)
+            if not lane:
+                continue
+            try:
+                page = doc[_pg]
+            except Exception:
+                continue
+            for it in items:
+                try:
+                    rect = it.get("rect")
+                    label = str(it.get("label") or "").strip()
+                    if not rect or not label:
+                        continue
+                    _draw_gutter_tag(
+                        page,
+                        lane,
+                        rect,
+                        label,
+                        color=(it.get("color") or (0.12, 0.12, 0.12)),
+                        font=float(it.get("font", 9.0)),
+                    )
+                except Exception:
+                    continue
+        for _pg, caps in sorted(pending_right_tags.items()):
+            if not caps:
+                continue
+            lane = lane_right_by_page.get(_pg) or lane_left_by_page.get(_pg)
+            if not lane:
+                continue
+            try:
+                page = doc[_pg]
+            except Exception:
+                continue
+            for (y0, y1) in caps:
+                try:
+                    _draw_t_endcaps(page, lane, y0, y1)
+                except Exception:
+                    continue
+    except Exception as e:
+        logger.warning(f"Gutter final pass failed: {e}")
 
     # Save outputs (annotated PDF first)
     annotated_pdf = stage_dir / "annotated.pdf"

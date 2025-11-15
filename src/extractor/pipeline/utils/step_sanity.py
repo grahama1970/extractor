@@ -193,6 +193,107 @@ def _extra_requirements(context: SanityContext) -> List[SanityIssue]:
     return []
 
 
+def _extra_sections(context: SanityContext) -> List[SanityIssue]:
+    """Ensure Stage 04 emits the known section hierarchy for the BHT sample."""
+
+    rel = "04_section_builder/json_output/04_sections.json"
+    data = context.outputs_data.get(rel) or {}
+    sections = data.get("sections") or []
+    if not isinstance(sections, list):
+        return [
+            SanityIssue(
+                "sections_not_list",
+                {"path": str(context.results_root / rel), "observed_type": type(sections).__name__},
+            )
+        ]
+
+    issues: List[SanityIssue] = []
+    by_title: Dict[str, Any] = {}
+    for sec in sections:
+        if isinstance(sec, dict) and sec.get("title"):
+            title = str(sec["title"]).strip()
+            if title:
+                by_title[title] = sec
+
+    expected = [
+        {
+            "title": "4.1.5.4. BHT (Branch History Table) submodule",
+            "parent": None,
+            "number": "4.1.5.4",
+        },
+        {
+            "title": "4.1.5.4.1. REQUIREMENTS (Simulated)",
+            "parent": "4.1.5.4. BHT (Branch History Table) submodule",
+            "number": "4.1.5.4.1",
+        },
+        {
+            "title": "4.1.5. TABLE MERGE SCENARIOS (Simulated)",
+            "parent": None,
+            "number": "4.1.5",
+        },
+    ]
+
+    for spec in expected:
+        title = spec["title"]
+        sec = by_title.get(title)
+        if not sec:
+            issues.append(
+                SanityIssue(
+                    "missing_section_header",
+                    {"title": title, "path": str(context.results_root / rel)},
+                )
+            )
+            continue
+        number = spec.get("number")
+        if number:
+            meta = sec.get("metadata") or {}
+            observed = meta.get("section_number") or sec.get("section_number")
+            if observed != number:
+                issues.append(
+                    SanityIssue(
+                        "section_number_mismatch",
+                        {
+                            "title": title,
+                            "expected": number,
+                            "observed": observed,
+                        },
+                    )
+                )
+        parent_title = spec.get("parent")
+        if parent_title:
+            parent_sec = by_title.get(parent_title)
+            if not parent_sec:
+                issues.append(
+                    SanityIssue(
+                        "missing_parent_section",
+                        {"title": parent_title},
+                    )
+                )
+            else:
+                parent_id = sec.get("parent_id")
+                expected_parent_id = parent_sec.get("id")
+                if not parent_id:
+                    issues.append(
+                        SanityIssue(
+                            "section_missing_parent",
+                            {"title": title, "expected_parent": parent_title},
+                        )
+                    )
+                elif parent_id != expected_parent_id:
+                    issues.append(
+                        SanityIssue(
+                            "section_parent_mismatch",
+                            {
+                                "title": title,
+                                "expected_parent": parent_title,
+                                "expected_parent_id": expected_parent_id,
+                                "observed_parent_id": parent_id,
+                            },
+                        )
+                    )
+    return issues
+
+
 def _extra_summaries(context: SanityContext) -> List[SanityIssue]:
     rel = "09_section_summarizer/json_output/09_summaries.json"
     data = context.outputs_data.get(rel) or {}
@@ -271,6 +372,19 @@ def _register_default_specs() -> None:
                     "04_section_builder/json_output/04_sections.json",
                     key="sections",
                     min_items=1,
+                )
+            ],
+            extra=_extra_sections,
+        )
+    )
+    register_step_sanity(
+        StepSanitySpec(
+            step="04a_layout_audit",
+            description="Section layout audit (reading order invariants)",
+            outputs=[
+                OutputCheck(
+                    "04a_layout_audit/json_output/04a_layout_audit.json",
+                    kind="json",
                 )
             ],
         )
