@@ -1,0 +1,83 @@
+name: knowledge-first-smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      binary_url:
+        description: "(Optional) URL to codex/cxplus binary (Linux x86_64). If empty, auto-use latest release; fallback to build from source."
+        required: false
+        type: string
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare binary directory
+        run: mkdir -p dist/bin
+
+      - name: Download provided binary
+        if: ${{ inputs.binary_url != '' }}
+        run: |
+          curl -fsSL "${{ inputs.binary_url }}" -o dist/bin/codex
+          chmod +x dist/bin/codex
+
+      - name: Query latest release asset (codex)
+        id: query
+        if: ${{ inputs.binary_url == '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          sudo apt-get update >/dev/null 2>&1 || true
+          sudo apt-get install -y jq >/dev/null 2>&1 || true
+          rel=$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
+            https://api.github.com/repos/grahama1970/codex/releases/latest || true)
+          url=$(echo "$rel" | jq -r '.assets[] | select(.name=="codex") | .browser_download_url' 2>/dev/null || true)
+          if [ -n "$url" ] && [ "$url" != "null" ]; then
+            echo "url=$url" >> "$GITHUB_OUTPUT"
+          else
+            echo "url=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download latest release asset
+        if: ${{ inputs.binary_url == '' && steps.query.outputs.url != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -L "${{ steps.query.outputs.url }}" -o dist/bin/codex
+          chmod +x dist/bin/codex
+
+      - name: Build cxplus from source (fallback)
+        if: ${{ inputs.binary_url == '' && steps.query.outputs.url == '' }}
+        run: |
+          git clone https://github.com/grahama1970/codex _codex
+          cd _codex
+          make package
+          cp dist/bin/codex ../dist/bin/codex
+
+      - name: Sanity check binary
+        run: ./dist/bin/codex --help >/dev/null
+
+      - name: Verify fixture presence
+        run: |
+          test -f scenarios/fixtures/knowledge_fixture.json || {
+            echo "Missing fixture at scenarios/fixtures/knowledge_fixture.json"; exit 1;
+          }
+
+      - name: Run Knowledge-First (fixture)
+        env:
+          CONTEXT_MCP_FIXTURE: scenarios/fixtures/knowledge_fixture.json
+        run: |
+          ./dist/bin/codex -c context.provider=arango exec "hello fixture" --seed 42 || true
+          echo "First NDJSON line:" && head -n1 ./.codex/runs/*-events.ndjson | tee /dev/stderr
+
+      - name: Optional strict checks
+        if: ${{ always() }}
+        run: |
+          sudo apt-get update >/dev/null 2>&1 || true
+          sudo apt-get install -y jq >/dev/null 2>&1 || true
+          first=$(head -n1 ./.codex/runs/*-events.ndjson)
+          kind=$(echo "$first" | jq -r '.kind // empty')
+          echo "kind=$kind"
+          test "$kind" = "context.summary" || { echo "expected kind=context.summary"; exit 1; }

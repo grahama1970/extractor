@@ -302,3 +302,4 @@ deprecated/
 /repos/
 /logs/
 /tmp/
+.codex/runs/
