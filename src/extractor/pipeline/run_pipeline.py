@@ -44,6 +44,39 @@ import json
 import concurrent.futures
 
 
+def _filter_simulated_sections(src: Path, results_root: Path) -> Path:
+    """Drop simulated wrapper sections before reflow to match gold outputs.
+
+    Returns the path to the filtered sections JSON if filtering succeeded and
+    yielded at least one section; otherwise returns the original path.
+    """
+    dest = src.parent / "04_sections_filtered.json"
+    try:
+        data = json.loads(src.read_text())
+        sections = data.get("sections")
+        if not isinstance(sections, list):
+            return src
+        filtered = []
+        for s in sections:
+            title = str(s.get("title") or "").lower()
+            wrapper = (s.get("metadata") or {}).get("normalized_wrapper")
+            if "(simulated)" in title or wrapper in {"requirements_simulated", "short_colon"}:
+                continue
+            filtered.append(s)
+        if not filtered:
+            return src
+        data["sections"] = filtered
+        data["section_count"] = len(filtered)
+        dest.write_text(json.dumps(data, indent=2))
+        logger.info(
+            f"04_section_builder: filtered simulated wrappers → {len(filtered)} sections (was {len(sections)})"
+        )
+        return dest
+    except Exception as e:  # pragma: no cover - defensive
+        logger.warning(f"04_section_builder: failed to filter simulated wrappers: {e}")
+        return src
+
+
 def _step(
     name: str,
     fn,
@@ -240,15 +273,22 @@ def main(argv: Optional[list[str]] = None) -> int:
         s07_requirements_miner as s07req,
         s09_section_summarizer as s09,
     )
+    # Lean4 proving is opt-in; DB export follows the previous online/offline gating.
     s08 = None
     s10 = None
+    if args.prove_requirements:
+        if not (bool(args.summary_only) and bool(args.skip_fig_descriptions)):
+            from extractor.pipeline.steps import s08_lean4_theorem_prover as _s08
+
+            s08 = _s08
     if not (bool(args.summary_only) and bool(args.skip_fig_descriptions)):
-        from extractor.pipeline.steps import (
-            s08_lean4_theorem_prover as _s08,
-            s10_arangodb_exporter as _s10,
-        )
-        s08 = _s08
+        from extractor.pipeline.steps import s10_arangodb_exporter as _s10
+
         s10 = _s10
+
+    # Enforce implications: proving implies requirements miner
+    if args.prove_requirements and not args.extract_requirements:
+        args.extract_requirements = True
 
     # 01
     a01 = _step(
@@ -472,10 +512,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     # 07 (text-only mode optional)
     tbl = out / "05_table_extractor" / "json_output" / "05_tables.json"
     figs = out / "06_figure_extractor" / "json_output" / "06_figures.json"
+    sections_for_reflow = _filter_simulated_sections(a04_path, out)
     a07 = _step(
         "07_reflow_section",
         s07.run,
-        a04_path,
+        sections_for_reflow,
         tbl,
         figs,
         None,

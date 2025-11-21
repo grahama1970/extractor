@@ -9,13 +9,28 @@ Per paved-path requirements:
 """
 
 import os
+import sys
 import asyncio
 import aiohttp
 import logging
+from pathlib import Path
 from typing import Tuple, Optional, Dict, Any
 from urllib.parse import urljoin
 
 logger = logging.getLogger(__name__)
+
+# Ensure the local SciLLM / litellm repo is on sys.path first so that
+# `scillm.paved` is importable even when an older PyPI scillm is also
+# installed. This keeps the extractor pinned to the paved-path contract.
+try:
+    _litellm_repo = Path.home() / "workspace" / "experiments" / "litellm"
+    if _litellm_repo.exists():
+        _litellm_str = str(_litellm_repo)
+        if _litellm_str not in sys.path:
+            sys.path.insert(0, _litellm_str)
+except Exception:
+    # Best-effort bootstrap; never block preflight on this convenience hook.
+    pass
 
 
 async def probe_models_endpoint(base_url: str, api_key: str) -> Tuple[bool, str]:
@@ -39,7 +54,20 @@ async def probe_chat_completions_endpoint(base_url: str, api_key: str) -> Tuple[
     from scillm.paved import sanity_preflight  # type: ignore
     text_model = os.getenv("CHUTES_TEXT_MODEL") or "deepseek-ai/DeepSeek-R1"
     try:
-        ok, _, details = sanity_preflight(api_base=base_url, api_key=api_key, model=text_model, wall_time_s=20, timeout=10, parallel=3)
+        # sanity_preflight is synchronous and internally uses asyncio.run;
+        # run it in a thread so we do not nest event loops inside our async preflight.
+        loop = asyncio.get_running_loop()
+        ok, _, details = await loop.run_in_executor(
+            None,
+            lambda: sanity_preflight(
+                api_base=base_url,
+                api_key=api_key,
+                model=text_model,
+                wall_time_s=20,
+                timeout=10,
+                parallel=3,
+            ),
+        )
         return (True, "Chat completions accessible") if ok else (False, f"Chat preflight failed: {details}")
     except Exception as e:
         return False, f"Chat preflight exception: {e}"

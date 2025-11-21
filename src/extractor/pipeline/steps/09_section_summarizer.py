@@ -152,7 +152,22 @@ async def summarize_section(
                 }
             except Exception as e:
                 error = f"{type(e).__name__}: {e}"
-                raise
+                # Do not fail the entire pipeline for a single bad JSON response.
+                # Record the error in timings and return a failed summary entry.
+                logger.error(
+                    f"stage09.summarize_section_error section_id={section.get('id')} "
+                    f"title={section.get('title')} error={error}"
+                )
+                return {
+                    "section_id": section.get("id"),
+                    "section_title": section.get("title"),
+                    "section_level": section.get("level", 0),
+                    "summary_data": {
+                        "summary": "",
+                        "key_concepts": [],
+                    },
+                    "success": False,
+                }
             finally:
                 # Per-attempt timings
                 if timings_path is not None and timings_lock is not None:

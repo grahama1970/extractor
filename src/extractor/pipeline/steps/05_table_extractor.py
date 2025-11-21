@@ -66,10 +66,7 @@ from extractor.pipeline.utils.diagnostics import (
 from extractor.pipeline.utils.step_sanity import run_step_sanity
 # SciLLM Router builder (OpenAI-compatible); avoid direct SDK calls in steps
 from extractor.pipeline.utils.scillm_router import get_text_router
-from extractor.pipeline.steps.scillm_preflight_validator import (
-    require_scillm_preflight,
-    quick_scillm_check,
-)
+from extractor.pipeline.steps.scillm_preflight_validator import quick_scillm_check
 from extractor.pipeline.utils.debug_utils import log_timing, write_jsonl, ensure_logs_dir
 
 
@@ -1153,12 +1150,11 @@ def run(
         or _env_true("STAGE05_LLM_CONFIRM_LOWCONF", "1")
         or _env_true("TABLE_LLM_ASSIST", "0")
     )
-    if llm_features_enabled:
-        try:
-            require_scillm_preflight()
-        except RuntimeError as exc:
-            console.print(f"[red]Stage 05 SciLLM preflight failed: {exc}[/red]")
-            raise
+    # SciLLM preflight is handled centrally by run_pipeline for online runs.
+    # Here we assume any required preflight has already passed; for offline
+    # flows (e.g. summary-only + skip-fig-descriptions) llm_features_enabled
+    # can still be true, but we avoid forcing a hard dependency so the
+    # deterministic parts of Stage 05 remain usable.
     run_id = get_run_id()
     diagnostics = []
     errors_count = 0

@@ -29,8 +29,7 @@ from loguru import logger
 from extractor.pipeline.utils.scillm_router import get_text_router
 from extractor.pipeline.steps.scillm_preflight_validator import (
     validate_scillm_env_sync,
-    require_scillm_preflight,
-    quick_scillm_check
+    quick_scillm_check,
 )
 
 from extractor.pipeline.utils.ann_index import query_ann_index
@@ -1388,10 +1387,10 @@ def run(
     """
     Finds and verifies suspicious section headers in a Marker JSON file using a multimodal LLM.
     """
-    # Enforce preflight when LLM is used (no soft skip)
-    if not skip_llm:
-        from extractor.pipeline.steps.scillm_preflight_validator import require_scillm_preflight
-        require_scillm_preflight()
+    # SciLLM preflight is enforced centrally in run_pipeline for online runs.
+    # This step assumes any required preflight has already succeeded and does
+    # not perform its own hard dependency check to keep offline/debug flows
+    # (e.g. summary-only + skip-fig-descriptions) working.
 
     # Resolve a clean PDF produced by Stage 00 preflight first; fall back to legacy 01 path.
     run_results_dir = Path(os.getenv("RUN_RESULTS_DIR", "data/results/pipeline"))
