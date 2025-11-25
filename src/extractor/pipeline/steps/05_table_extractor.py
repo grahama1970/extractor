@@ -91,15 +91,15 @@ def sanity() -> int:
 CAMELOT_STRATEGIES = {
     "lattice_default": {
         "flavor": "lattice",
-        "params": {"process_background": True, "line_scale": 15},
+        "params": {"process_background": False, "line_scale": 15},
     },
     "lattice_strong": {
         "flavor": "lattice",
-        "params": {"process_background": True, "line_scale": 40},
+        "params": {"process_background": False, "line_scale": 40},
     },
     "lattice_sensitive": {
         "flavor": "lattice",
-        "params": {"process_background": True, "line_scale": 5},
+        "params": {"process_background": False, "line_scale": 5},
     },
     # Fallback for text-lined tables without ruling lines
     "stream_default": {
@@ -590,6 +590,7 @@ def try_camelot_strategy(
             flavor=strategy["flavor"],
             **strategy["params"],
         )
+        print(f"DEBUG: Page {page_num+1} Strategy {strategy.get('name')} found {len(tables)} tables")
         return list(tables)  # type: ignore[call-arg, return-value]
     except Exception as e:
         logger.warning(
@@ -695,23 +696,25 @@ def extract_tables_from_page(
     }
 
     # Strategy policy:
-    # - Try baseline lattice(line_scale=15) first
-    # - Only if no tables detected on this page, fall back to other strategies
+    # - Prefer the last strategy that succeeded on a prior page *iff* it is a lattice
+    #   variant (avoid sticking to stream).
+    # - Default to lattice(line_scale=15) on the first page.
+    # - Only fall back to alternates when the page still "needs more" (no tables
+    #   or high fragmentation).
     strategies_to_try = []
     baseline_name = "lattice_default"
+    if last_good_strategy in CAMELOT_STRATEGIES:
+        if CAMELOT_STRATEGIES[last_good_strategy]["flavor"] == "lattice":
+            baseline_name = last_good_strategy
     strategies_to_try.append({"name": baseline_name, **CAMELOT_STRATEGIES[baseline_name]})
     fallback_strategies = []
-    if (
-        last_good_strategy
-        and last_good_strategy in CAMELOT_STRATEGIES
-        and last_good_strategy != baseline_name
-    ):
-        fallback_strategies.append(
-            {"name": last_good_strategy, **CAMELOT_STRATEGIES[last_good_strategy]}
-        )
-    for name, config in CAMELOT_STRATEGIES.items():
-        if name not in {baseline_name, last_good_strategy}:
-            fallback_strategies.append({"name": name, **config})
+
+    # Prioritize Lattice variants over Stream in fallback
+    other_strategies = [k for k in CAMELOT_STRATEGIES.keys() if k != baseline_name]
+    other_strategies.sort(key=lambda x: (0 if "lattice" in CAMELOT_STRATEGIES[x]["flavor"] else 1))
+
+    for name in other_strategies:
+        fallback_strategies.append({"name": name, **CAMELOT_STRATEGIES[name]})
 
     # Track per-strategy durations
     strategy_durations = {}
@@ -763,6 +766,15 @@ def extract_tables_from_page(
         if existing is not None:
             existing_frag = int(existing.get("fragmentation", 0) or 0)
             existing_score = float(existing.get("score", 0.0) or 0.0)
+            existing_strategy = existing.get("strategy", "")
+            
+            # Guard: Don't let stream replace lattice unless lattice is very poor
+            # Stream often has 0 fragmentation (prose) but poor structure
+            if "lattice" in existing_strategy and "stream" in strategy_name:
+                # Only replace if lattice is effectively empty or extremely sparse
+                if existing_score > 10 and existing_frag < 100:
+                    return "skipped", bool(existing.get("quality_fallback", False))
+
             if not should_replace_table(existing_frag, new_frag, existing_score, score_val):
                 return "skipped", bool(existing.get("quality_fallback", False))
             history = list(existing.get("history", []))
@@ -825,20 +837,20 @@ def extract_tables_from_page(
                 continue
             bbox_q = _quantize_bbox(bbox_tuple)
 
-            # De-dup by IoU; allow multiple distinct tables
-            replaced_existing = False
+            replaced_existing_high_iou = False  # ensure flag is defined per table
             for existing_key in list(page_tables.keys()):
                 iou = _iou(bbox_q, existing_key)
-                if iou >= 0.90:
+                print(
+                    f"DEBUG: Comparing bbox_q={bbox_q} with existing_key={existing_key}. IOU={iou:.4f}",
+                    file=sys.stderr,
+                )
+                if iou >= 0.70:
+                    replaced_existing_high_iou = True
                     action, quality_flag = _register_table(
                         strategy["name"], table, existing_key, score
                     )
-                    replaced_existing = action != "skipped"
-                    if action == "replaced" and quality_flag:
-                        strategy_durations[nm].setdefault("quality_upgrades", 0)
-                        strategy_durations[nm]["quality_upgrades"] += 1
-                    break
-            if not replaced_existing:
+                    break  # Break after finding an overlapping existing table
+            if not replaced_existing_high_iou:
                 action, quality_flag = _register_table(
                     strategy["name"], table, bbox_q, score
                 )
@@ -877,6 +889,7 @@ def extract_tables_from_page(
 
             _t0 = _t.monotonic()
             tables = try_camelot_strategy(pdf_path, page_num, strategy, diagnostics)
+
             _dt = int((_t.monotonic() - _t0) * 1000)
             nm = strategy.get("name")
             strategy_durations.setdefault(nm, {"count": 0, "total_ms": 0})
@@ -919,19 +932,17 @@ def extract_tables_from_page(
                 if score == 0 or not bbox_tuple:
                     continue
                 bbox_q = _quantize_bbox(bbox_tuple)
-                replaced_existing = False
+                
+                replaced_existing_high_iou = False # Initialize here
                 for existing_key in list(page_tables.keys()):
                     iou = _iou(bbox_q, existing_key)
-                    if iou >= 0.90:
+                    if iou >= 0.70:
+                        replaced_existing_high_iou = True
                         action, quality_flag = _register_table(
                             strategy["name"], table, existing_key, score
                         )
-                        replaced_existing = action != "skipped"
-                        if action == "replaced" and quality_flag:
-                            strategy_durations[nm].setdefault("quality_upgrades", 0)
-                            strategy_durations[nm]["quality_upgrades"] += 1
                         break
-                if not replaced_existing:
+                if not replaced_existing_high_iou:
                     action, quality_flag = _register_table(
                         strategy["name"], table, bbox_q, score
                     )
@@ -943,7 +954,10 @@ def extract_tables_from_page(
 
             strategy_durations[nm].setdefault("found", {})[page_num] = int(found_count)
             if stop_after_first and found_count > 0:
-                break
+                if page_num == 4:
+                     print(f"DEBUG: Page 5 would stop here (found {found_count} with {nm}), but continuing for debug.")
+                else:
+                     break
 
     page_metrics["fallback_applied"] = fallback_applied_for_page
     page_metrics["fallback_tables"] = sum(
@@ -1116,7 +1130,55 @@ def extract_all_tables(
     finally:
         pdf_doc.close()
 
-    return all_tables, strategy_summary, quality_summary
+    # Final regression guard: de-dupe high-IOU overlaps per page (safety net)
+    def _iou(a: List[float], b: List[float]) -> float:
+        try:
+            ax0, ay0, ax1, ay1 = a
+            bx0, by0, bx1, by1 = b
+            inter_w = max(0.0, min(ax1, bx1) - max(ax0, bx0))
+            inter_h = max(0.0, min(ay1, by1) - max(ay0, by0))
+            inter = inter_w * inter_h
+            area_a = max(0.0, (ax1 - ax0)) * max(0.0, (ay1 - ay0))
+            area_b = max(0.0, (bx1 - bx0)) * max(0.0, (by1 - by0))
+            union = area_a + area_b - inter
+            return float(inter / union) if union > 0 else 0.0
+        except Exception:
+            return 0.0
+
+    deduped: List[Dict[str, Any]] = []
+    by_page: Dict[int, List[Dict[str, Any]]] = {}
+    for t in all_tables:
+        by_page.setdefault(int(t.get("page_index", t.get("page_number", 0)) or 0), []).append(t)
+
+    for page, tables in by_page.items():
+        kept: List[Dict[str, Any]] = []
+        for t in tables:
+            bbox = t.get("bbox") or []
+            if len(bbox) != 4:
+                kept.append(t)
+                continue
+            overlap = False
+            for k in kept:
+                kbbox = k.get("bbox") or []
+                if len(kbbox) != 4:
+                    continue
+                if _iou(bbox, kbbox) >= 0.70:
+                    overlap = True
+                    # Keep higher-score table
+                    if float(t.get("score", 0) or 0.0) > float(k.get("score", 0) or 0.0):
+                        k.update(t)
+                    break
+            if not overlap:
+                kept.append(t)
+        deduped.extend(kept)
+
+    if len(deduped) < len(all_tables):
+        logger.info(
+            f"05_table_extractor: de-duped high-IOU overlaps "
+            f"({len(all_tables)} → {len(deduped)})"
+        )
+
+    return deduped, strategy_summary, quality_summary
 
 
 def run(
@@ -1213,6 +1275,59 @@ def run(
     all_tables, strategy_summary, quality_summary = extract_all_tables(
         pdf_path, image_output_dir, diagnostics
     )
+
+    # --- Filter out single-column tables that match section headers (stage 04 already handled them) ---
+    section_titles = set()
+    for section in sections:
+        title = section.get("title", "").strip()
+        if title:
+            # Normalize: remove extra whitespace, lowercase for comparison
+            normalized = " ".join(title.split()).lower()
+            section_titles.add(normalized)
+    
+    if section_titles:
+        def _is_section_header_table(table: dict) -> bool:
+            pm = table.get("pandas_metrics", {}) or {}
+            shape = pm.get("shape", [0, 0])
+            cols = int(shape[1]) if isinstance(shape, (list, tuple)) and len(shape) > 1 else 0
+            # Only check single-column tables
+            if cols != 1:
+                return False
+            # Extract text from all cells
+            df_data = table.get("pandas_df", [])
+            if not df_data:
+                return False
+            # Concatenate all cell text
+            table_text_parts = []
+            for row in df_data:
+                if isinstance(row, dict):
+                    for val in row.values():
+                        table_text_parts.append(str(val).strip())
+                elif isinstance(row, list):
+                    for val in row:
+                        table_text_parts.append(str(val).strip())
+            table_text = " ".join(table_text_parts)
+            normalized_table = " ".join(table_text.split()).lower()
+            # Check if it fuzzy-matches any section header (98% threshold to handle OCR errors)
+            try:
+                from rapidfuzz import fuzz
+                for section_title in section_titles:
+                    ratio = fuzz.ratio(normalized_table, section_title)
+                    if ratio >= 98:
+                        return True
+                return False
+            except ImportError:
+                # Fallback to exact match if rapidfuzz not available
+                return normalized_table in section_titles
+        
+        before_count = len(all_tables)
+        all_tables = [t for t in all_tables if not _is_section_header_table(t)]
+        removed = before_count - len(all_tables)
+        if removed > 0:
+            try:
+                diagnostics.append(make_event("05_table_extractor", "info", "filtered_section_headers", f"Removed {removed} single-column tables matching section headers", {"count": removed}))
+            except Exception:
+                pass
 
     # --- Repair: reconstruct collapsed single-column header rows (page header-only tables)
     # Some PDFs cause Camelot to collapse a 1-row, multi-column header into a single text cell.
@@ -1691,9 +1806,29 @@ def run(
                 except Exception:
                     pass
                 continue
-        # Accept dense multi-row tables; additionally, retain 1-row header-only tables when they have >=3 columns
-        # so downstream (06b/07/09a) can merge them with the next-page body.
-        if (rows >= TABLE_FILTER_MIN_ROWS) or (rows >= 2 and density >= TABLE_FILTER_MIN_DENSITY) or (rows == 1 and cols >= 3):
+        # Reject tables with suspiciously large bboxes (stream strategy false positives)
+        # Standard US Letter page is 612x792 points
+        try:
+            import fitz as _fitz
+            bbox_rect = _fitz.Rect(t.get("bbox", []))
+            bbox_area = bbox_rect.width * bbox_rect.height
+            # Reject if bbox covers >90% of standard page (612x792 = 484704)
+            if bbox_area > 0.9 * 612 * 792:
+                try:
+                    diagnostics.append(
+                        make_event("05_table_extractor", "warning", "table_bbox_too_large",
+                                   f"Rejected table with suspiciously large bbox (area={bbox_area:.0f})",
+                                   {"bbox": t.get("bbox"), "page": t.get("page_index")})
+                    )
+                except Exception:
+                    pass
+                continue
+        except Exception:
+            pass
+
+        # Accept dense multi-row tables with at least 2 columns (single-column = prose/headers, not tabular data).
+        # Additionally, retain 1-row header-only tables when they have >=3 columns so downstream can merge with body.
+        if cols >= 2 and ((rows >= TABLE_FILTER_MIN_ROWS) or (rows >= 2 and density >= TABLE_FILTER_MIN_DENSITY) or (rows == 1 and cols >= 3)):
             filtered_tables.append(t)
         else:
             try:

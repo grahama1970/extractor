@@ -55,15 +55,22 @@ COLORS: Dict[str, tuple[float, float, float]] = {
     "table_rejected": (0.35, 0.35, 0.35),
 }
 
-# Light fills + opacities per kind (figure a bit stronger so watermark reads)
-def _lighten(rgb, f=0.95):
+# Light fills + opacities per kind
+def _lighten(rgb, f=0.98):
     r, g, b = rgb
     return (1 - (1 - r) * f, 1 - (1 - g) * f, 1 - (1 - b) * f)
 
 def _style_for_kind(kind: str) -> tuple[tuple[float, float, float], tuple[float, float, float], float]:
     stroke = COLORS.get(kind, (0.3, 0.3, 0.3))
-    fill = _lighten(stroke, 0.95)
-    opacity = 0.24 if kind == "figure" else 0.18
+    # Use stroke-only overlays for core kinds to avoid tinting content.
+    fill = None
+    opacity = 0.0
+    if kind in {"figure", "table", "table_merged", "section", "requirement"}:
+        fill = None
+        opacity = 0.0
+    else:
+        fill = _lighten(stroke, 0.98)
+        opacity = 0.10
     return stroke, fill, opacity
 
 # Human-friendly gutter labels
@@ -83,14 +90,14 @@ HUMAN_KIND = {
 
 # Gutter lane + adornments
 GUTTER_SIDE = "left"
-GUTTER_WIDTH = 84.0
-GUTTER_PAD = 8.0
-PLAQUE_PAD_X = 6.0
-PLAQUE_PAD_Y = 4.0
-GUTTER_FILL = (0.76, 0.86, 0.96)
-GUTTER_BORDER = (0.24, 0.44, 0.68)
-PLAQUE_FILL = (0.97, 0.99, 1.0)
-PLAQUE_BORDER = (0.62, 0.72, 0.84)
+GUTTER_WIDTH = 0.0
+GUTTER_PAD = 0.0
+PLAQUE_PAD_X = 0.0
+PLAQUE_PAD_Y = 0.0
+GUTTER_FILL = None
+GUTTER_BORDER = None
+PLAQUE_FILL = None
+PLAQUE_BORDER = None
 PLAQUE_FONT_MIN = 5.5
 
 LABEL_MARGIN_PTS = 14.0
@@ -110,15 +117,14 @@ TAB_COLORS = {
     "more": (0.9, 0.9, 0.9),
 }
 
+# Toggle: draw figure caption callout box on the page (off to avoid duplicate description;
+# description is surfaced in the data pane instead).
+DRAW_FIGURE_CAPTION_BOX = False
+
 
 def _draw_page_gutter_side(page: fitz.Page, side: str = "left") -> fitz.Rect:
     """Return the gutter rect on the requested side (no fill/stroke)."""
-    r = page.rect
-    if side == "left":
-        lane = fitz.Rect(r.x0 + 6, r.y0 + 6, r.x0 + 6 + GUTTER_WIDTH, r.y1 - 6)
-    else:
-        lane = fitz.Rect(r.x1 - 6 - GUTTER_WIDTH, r.y0 + 6, r.x1 - 6, r.y1 - 6)
-    return lane
+    return fitz.Rect()
 
 def _draw_page_gutter(page: fitz.Page) -> fitz.Rect:
     """Backward-compatible helper: draw using global GUTTER_SIDE."""
@@ -390,22 +396,33 @@ def _safe_get_bbox(obj: dict[str, Any]) -> list[float] | None:
 
 
 def _rect_from_pdf_bbox(page: fitz.Page, bbox: list[float]) -> fitz.Rect:
-    """Convert a PDF-space bbox (origin bottom-left) to a PyMuPDF rect (origin top-left)."""
+    """
+    Convert bbox to PyMuPDF rect assuming the bbox is already in page-top-left coordinates.
+    """
     x0, y0, x1, y1 = bbox
     x_lo, x_hi = sorted((x0, x1))
     y_lo, y_hi = sorted((y0, y1))
-    height = float(page.rect.height)
-    top = height - y_hi
-    bottom = height - y_lo
-    # Clamp to the page bounds and ensure positive area
-    rect = fitz.Rect(x_lo, top, x_hi, bottom)
-    rect = rect & page.rect
+    rect = fitz.Rect(x_lo, y_lo, x_hi, y_hi) & page.rect
     if rect.y1 < rect.y0:
         rect = fitz.Rect(rect.x0, rect.y1, rect.x1, rect.y0)
     if rect.width <= 0 or rect.height <= 0:
-        # Expand minimally to avoid zero-area overlays
         rect = fitz.Rect(rect.x0, rect.y0, rect.x0 + max(1.0, rect.width), rect.y0 + max(1.0, rect.height)) & page.rect
     return rect
+
+
+def _rect_for_kind(page: fitz.Page, bbox: list[float], kind: str) -> fitz.Rect:
+    """
+    Convert bbox to page rect with per-kind origin rules:
+    - Camelot/requirements (table, table_merged, table_rejected, requirement) are PDF-origin bottom-left.
+    - Others (section, figure, header_candidate, text_chunk, etc.) are top-left.
+    """
+    if kind in {"table", "table_merged", "table_rejected", "requirement"}:
+        # Flip Y for bottom-left origin bboxes
+        x0, y0, x1, y1 = bbox
+        h = float(page.rect.height)
+        flipped = [x0, h - y1, x1, h - y0]
+        return _rect_from_pdf_bbox(page, flipped)
+    return _rect_from_pdf_bbox(page, bbox)
 
 
 def _wrap_label_lines(page: fitz.Page, text: str, font: float, max_width: float, max_lines: int = 3) -> list[str]:
@@ -987,19 +1004,19 @@ def run(
     draw_figures: bool = True,
     draw_text_chunks: bool = True,
     draw_headers03: bool = True,
-    draw_columns06b: bool = True,
+    draw_columns06b: bool = False,
     draw_grid: bool = False,
     label_font_size: int = 12,
     stroke_width: float = 1.0,
     pdf_annotations: bool = True,
     render_previews: bool = True,
     # NEW: visual simplifications for quick debugging
-    draw_gutter: bool = True,
+    draw_gutter: bool = False,
     # Dual-gutter controls: left shows element kinds; right shows section T endcaps
-    gutter_left_tags: bool = True,
-    gutter_right_section_caps: bool = True,
+    gutter_left_tags: bool = False,
+    gutter_right_section_caps: bool = False,
     draw_section_plaques: bool = True,
-    draw_figure_watermark: bool = True,
+    draw_figure_watermark: bool = False,
     draw_table_callouts: bool = True,
     labels_verbose: bool = False,
     mode: str = "all",            # "structure" | "tables" | "reflow" | "all"
@@ -1207,20 +1224,20 @@ def run(
             logger.warning(f"Skipping overlay (kind={kind}): non-numeric bbox {bbox}")
             return
         pdf_bbox = [x0, y0, x1, y1]
-        rect = _rect_from_pdf_bbox(page, pdf_bbox)
+        rect = _rect_for_kind(page, pdf_bbox, kind)
         stroke_color, fill_color, fill_opacity = _style_for_kind(kind)
         label = _format_label(kind, payload, label_text)
         drew = False
         if pdf_annotations:
             try:
                 annot = page.add_rect_annot(rect)
-                annot.set_colors(stroke=stroke_color, fill=fill_color)
+                annot.set_colors(stroke=stroke_color, fill=None)
                 try:
-                    annot.set_border(width=max(1.2, float(stroke_width)))
+                    annot.set_border(width=max(2.5, float(stroke_width)))
                 except Exception:
                     pass
                 try:
-                    annot.set_opacity(fill_opacity)
+                    annot.set_opacity(1.0)
                 except Exception:
                     pass
                 try:
@@ -1242,7 +1259,7 @@ def run(
                 drew = False
         if not drew:
             try:
-                page.draw_rect(rect, color=stroke_color, width=max(1.2, float(stroke_width)), fill=fill_color, overlay=True)
+                page.draw_rect(rect, color=stroke_color, width=max(2.5, float(stroke_width)), fill=None, overlay=True)
             except Exception:
                 pass
         try:
@@ -1257,10 +1274,8 @@ def run(
             if kind == "section" and draw_section_plaques:
                 _draw_section_title_plaque(page, rect, payload.get("title") or label, stroke=COLORS.get("table", (0.86, 0.25, 0.2)), font=11.0)
             if kind == "figure":
-                desc = payload.get("ai_description") or payload.get("description") or payload.get("title")
-                if draw_figure_watermark:
-                    _draw_figure_watermark(page, rect, desc or "LLM description unavailable")
-                _draw_figure_caption_box(page, rect, desc or "LLM description unavailable")
+                # Keep only the overlay; captions/watermarks are shown in the data pane.
+                pass
             if kind in ("table", "table_merged") and draw_table_callouts:
                 _draw_table_metrics(
                     page,
@@ -1903,51 +1918,52 @@ def run(
         _append_timing(logs_dir, {"stage": "09a_pdf_annotator", "event": "draw_grid", "latency_ms": int((time.monotonic()-t_s)*1000)})
 
     # Final gutter pass: draw plaques last so they sit above lanes/overlays
-    try:
-        logger.info("Final gutter pass")
-        for _pg, items in sorted(pending_left_tags.items()):
-            if not items:
-                continue
-            lane = lane_left_by_page.get(_pg)
-            if not lane:
-                continue
-            try:
-                page = doc[_pg]
-            except Exception:
-                continue
-            for it in items:
+    if draw_gutter:
+        try:
+            logger.info("Final gutter pass")
+            for _pg, items in sorted(pending_left_tags.items()):
+                if not items:
+                    continue
+                lane = lane_left_by_page.get(_pg)
+                if not lane:
+                    continue
                 try:
-                    rect = it.get("rect")
-                    label = str(it.get("label") or "").strip()
-                    if not rect or not label:
+                    page = doc[_pg]
+                except Exception:
+                    continue
+                for it in items:
+                    try:
+                        rect = it.get("rect")
+                        label = str(it.get("label") or "").strip()
+                        if not rect or not label:
+                            continue
+                        _draw_gutter_tag(
+                            page,
+                            lane,
+                            rect,
+                            label,
+                            color=(it.get("color") or (0.12, 0.12, 0.12)),
+                            font=float(it.get("font", 9.0)),
+                        )
+                    except Exception:
                         continue
-                    _draw_gutter_tag(
-                        page,
-                        lane,
-                        rect,
-                        label,
-                        color=(it.get("color") or (0.12, 0.12, 0.12)),
-                        font=float(it.get("font", 9.0)),
-                    )
-                except Exception:
+            for _pg, caps in sorted(pending_right_tags.items()):
+                if not caps:
                     continue
-        for _pg, caps in sorted(pending_right_tags.items()):
-            if not caps:
-                continue
-            lane = lane_right_by_page.get(_pg) or lane_left_by_page.get(_pg)
-            if not lane:
-                continue
-            try:
-                page = doc[_pg]
-            except Exception:
-                continue
-            for (y0, y1) in caps:
+                lane = lane_right_by_page.get(_pg) or lane_left_by_page.get(_pg)
+                if not lane:
+                    continue
                 try:
-                    _draw_t_endcaps(page, lane, y0, y1)
+                    page = doc[_pg]
                 except Exception:
                     continue
-    except Exception as e:
-        logger.warning(f"Gutter final pass failed: {e}")
+                for (y0, y1) in caps:
+                    try:
+                        _draw_t_endcaps(page, lane, y0, y1)
+                    except Exception:
+                        continue
+        except Exception as e:
+            logger.warning(f"Gutter final pass failed: {e}")
 
     # Save outputs (annotated PDF first)
     annotated_pdf = stage_dir / "annotated.pdf"

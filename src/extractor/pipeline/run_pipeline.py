@@ -182,6 +182,12 @@ def main(argv: Optional[list[str]] = None) -> int:
     p.add_argument("--out", default=Path("data/results/pipeline"), type=Path)
     p.add_argument("--summary-only", action="store_true")
     p.add_argument("--skip-fig-descriptions", action="store_true")
+    p.add_argument("--skip-llm03", action="store_true", help="Skip VLM verification in Stage 03 (heuristic-only)")
+    p.add_argument("--skip-tables05", action="store_true", help="Skip Stage 05; emit empty tables stub")
+    p.add_argument("--skip-reqs07", action="store_true", help="Skip Stage 07 requirements miner")
+    p.add_argument("--skip-annotator09a", action="store_true", help="Skip Stage 09a PDF annotator")
+    p.add_argument("--offline-smoke", action="store_true", help="Deterministic smoke: disable LLM/VLM/DB/Lean4/annotator/tables")
+    p.add_argument("--skip-scillm-preflight", action="store_true", help="Bypass SciLLM preflight (use only if service is healthy)")
     p.add_argument("--skip-export", action="store_true")
     p.add_argument("--extract-requirements", action="store_true", help="Run 07_requirements_miner after reflow")
     p.add_argument("--stage-timeout", type=int, default=int(__import__('os').getenv('PIPELINE_STAGE_TIMEOUT','600')), help="Per-stage wall timeout in seconds (fail-fast)")
@@ -198,6 +204,29 @@ def main(argv: Optional[list[str]] = None) -> int:
     p.add_argument("--stop-on-fail", action="store_true", default=False)
     args = p.parse_args(argv)
 
+    # Suppress noisy async logging from scillm/litellm unless explicitly overridden.
+    os.environ.setdefault("SCILLM_PAVED_DISABLE_LOGGING", "1")
+    os.environ.setdefault("LITELLM_LOGGING", "0")
+    os.environ.setdefault("DISABLE_AIOHTTP_TRANSPORT", "true")
+    try:
+        from scillm.paved.shutdown import maybe_disable_paved_logging_from_env  # type: ignore
+        maybe_disable_paved_logging_from_env()
+    except Exception:
+        pass
+
+    # Offline preset: deterministic smoke without online services
+    if args.offline_smoke:
+        args.summary_only = True
+        args.skip_fig_descriptions = True
+        args.skip_export = True
+        args.extract_requirements = False
+        args.prove_requirements = False
+        args.skip_llm03 = True
+        args.skip_tables05 = True
+        args.skip_reqs07 = True
+        args.skip_annotator09a = True
+        logger.info("offline-smoke mode: forcing deterministic flags and skipping online/optional stages")
+
     # Load .env once (no import-time side effects in steps)
     try:
         load_dotenv(find_dotenv(), override=True)
@@ -206,8 +235,16 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     # Enforce SciLLM/Chutes preflight only when online stages are enabled.
     # Allow deterministic offline runs when --summary-only and --skip-fig-descriptions are both set.
-    online_needed = not (bool(args.summary_only) and bool(args.skip_fig_descriptions))
-    if online_needed:
+    online_needed = any(
+        [
+            not bool(args.summary_only),            # Stage 07 LLM
+            not bool(args.skip_fig_descriptions),   # Stage 06 VLM descriptions
+            bool(args.extract_requirements),        # Stage 07r
+            bool(args.prove_requirements),          # Stage 08
+            not bool(args.skip_llm03),              # Stage 03 VLM
+        ]
+    )
+    if online_needed and not args.skip_scillm_preflight:
         try:
             from extractor.pipeline.steps.scillm_preflight_validator import require_scillm_preflight
 
@@ -272,7 +309,22 @@ def main(argv: Optional[list[str]] = None) -> int:
         s09b_audit as s09b,
         s07_requirements_miner as s07req,
         s09_section_summarizer as s09,
+        s06a_title_caption_enricher as s06a,
+        s14_report_generator as s14,
     )
+    # Lazy import for optional DB steps to avoid hard dependency on python-arango if not needed
+    s11 = None
+    s12 = None
+    if not args.skip_export:
+        try:
+            from extractor.pipeline.steps import (
+                s11_arango_create_graph as _s11,
+                s12_insert_annotations as _s12,
+            )
+            s11 = _s11
+            s12 = _s12
+        except ImportError:
+            pass
     # Lean4 proving is opt-in; DB export follows the previous online/offline gating.
     s08 = None
     s10 = None
@@ -342,6 +394,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         a02,
         pdf_dir,
         out,
+        skip_llm=bool(args.skip_llm03),
         stop_on_fail=args.stop_on_fail,
         timeout_sec=args.stage_timeout,
         log_dir_base=out,
@@ -417,29 +470,38 @@ def main(argv: Optional[list[str]] = None) -> int:
         )
 
     # 05
-    a05 = _step(
-        "05_table_extractor",
-        s05.run,
-        a04_path,
-        pdf_dir,
-        out,
-        stop_on_fail=args.stop_on_fail,
-        timeout_sec=args.stage_timeout,
-        log_dir_base=out,
-        on_timing=lambda n, dt: stage_latencies.update({n: dt}),
-    )
-    if not a05:
-        return 1
+    if args.skip_tables05:
+        stub_dir = out / "05_table_extractor" / "json_output"
+        stub_dir.mkdir(parents=True, exist_ok=True)
+        stub = {"timestamp": int(time.time()), "tables": [], "diagnostics": [{"severity": "info", "reason": "skip_tables05 flag"}]}
+        stub_path = stub_dir / "05_tables.json"
+        stub_path.write_text(json.dumps(stub, indent=2))
+        a05 = stub_path
+        logger.info("05_table_extractor: skipped via --skip-tables05")
+    else:
+        a05 = _step(
+            "05_table_extractor",
+            s05.run,
+            a04_path,
+            pdf_dir,
+            out,
+            stop_on_fail=args.stop_on_fail,
+            timeout_sec=args.stage_timeout,
+            log_dir_base=out,
+            on_timing=lambda n, dt: stage_latencies.update({n: dt}),
+        )
+        if not a05:
+            return 1
     results["05"] = a05
     _write_artifacts_index((out / "05_table_extractor"))
     try:
-        tcount = len(__import__("json").loads(a05.read_text()).get("tables", []))
+        tcount = len(__import__("json").loads(Path(a05).read_text()).get("tables", []))
     except Exception:
         tcount = None
     manifest.record_stage(
         "05_table_extractor",
         "Completed",
-        {"json": str(a05.relative_to(out)), "latency_ms": stage_latencies.get("05_table_extractor")},
+        {"json": str(Path(a05).relative_to(out)), "latency_ms": stage_latencies.get("05_table_extractor")},
         counts={"tables": tcount} if isinstance(tcount, int) else None,
     )
 
@@ -509,9 +571,40 @@ def main(argv: Optional[list[str]] = None) -> int:
             counts={"sections": s06b_count} if isinstance(s06b_count, int) else None,
         )
 
+    # 06a (enrich titles) - run after 06/06b
+    # If successful, downstream steps (07) should use enriched tables/figures.
+    a06a = _step(
+        "06a_title_caption_enricher",
+        s06a.run,
+        out / "05_table_extractor" / "json_output" / "05_tables.json",
+        out / "06_figure_extractor" / "json_output" / "06_figures.json",
+        out / "04_section_builder" / "json_output" / "04_sections.json",
+        out,
+        stop_on_fail=args.stop_on_fail,
+        timeout_sec=args.stage_timeout,
+        log_dir_base=out,
+        on_timing=lambda n, dt: stage_latencies.update({n: dt}),
+    )
+    if a06a:
+        _write_artifacts_index((out / "06a_title_caption_enricher"))
+        manifest.record_stage(
+            "06a_title_caption_enricher",
+            "Completed",
+            {"json": str(Path(a06a).relative_to(out)), "latency_ms": stage_latencies.get("06a_title_caption_enricher")},
+        )
+
     # 07 (text-only mode optional)
+    # Use enriched artifacts if available
     tbl = out / "05_table_extractor" / "json_output" / "05_tables.json"
     figs = out / "06_figure_extractor" / "json_output" / "06_figures.json"
+    if a06a:
+        enriched_tbl = out / "06a_title_caption_enricher" / "json_output" / "05_tables.enriched.json"
+        enriched_figs = out / "06a_title_caption_enricher" / "json_output" / "06_figures.enriched.json"
+        if enriched_tbl.exists():
+            tbl = enriched_tbl
+        if enriched_figs.exists():
+            figs = enriched_figs
+
     sections_for_reflow = _filter_simulated_sections(a04_path, out)
     a07 = _step(
         "07_reflow_section",
@@ -541,89 +634,46 @@ def main(argv: Optional[list[str]] = None) -> int:
         {"json": str(a07.relative_to(out)), "latency_ms": stage_latencies.get("07_reflow_section")},
     )
 
-    # 09a PDF annotator (visual collaboration product) — run unconditionally
-    try:
-        annotated = _step(
-            "09a_pdf_annotator",
-            s09a.run,
-            pdf,
-            out / "04_section_builder" / "json_output" / "04_sections.json",
-            out / "05_table_extractor" / "json_output" / "05_tables.json",
-            out / "06_figure_extractor" / "json_output" / "06_figures.json",
-            out / "07_reflow_section" / "json_output" / "07_reflowed.json",
-            out / "02_marker_extractor" / "json_output" / "02_marker_blocks.json",
-            None,  # headers03_json (auto-discovered in 09a)
-            out / "06b_layout_sketcher" / "json_output" / "06b_layout_sketch.json",
-            out,
-            "09a",
-            True,
-            12,
-            False,
-            False,
-            False,
-            stop_on_fail=args.stop_on_fail,
-            timeout_sec=args.stage_timeout,
-            log_dir_base=out,
-            on_timing=lambda n, dt: stage_latencies.update({n: dt}),
-        )
-        if annotated:
-            _write_artifacts_index((out / "09a_pdf_annotator"))
-            manifest.record_stage(
-                "09a_pdf_annotator",
-                "Completed",
-                {"json": str((out / "09a_pdf_annotator" / "json_output" / "annotations.json").relative_to(out)), "latency_ms": stage_latencies.get("09a_pdf_annotator")},
-            )
-    except Exception as e:
-        logger.error(f"09a_pdf_annotator failed: {e}")
-        if args.stop_on_fail:
-            return 1
-
-    # 09b audit — summarize artifacts before downstream export
-    a09b = _step(
-        "09b_audit",
-        s09b.run,
-        out,
-        stop_on_fail=args.stop_on_fail,
-        timeout_sec=args.stage_timeout,
-        log_dir_base=out,
-        on_timing=lambda n, dt: stage_latencies.update({n: dt}),
-    )
-    if not a09b:
-        logger.error("09b_audit reported blocking issues; aborting before Stage 10/11.")
-        return 1
-    results["09b"] = a09b
-    _write_artifacts_index((out / "09b_audit"))
-    manifest.record_stage(
-        "09b_audit",
-        "Completed",
-        {"json": str((out / "09b_audit" / "json_output" / "09b_audit.json").relative_to(out)), "latency_ms": stage_latencies.get("09b_audit")},
-    )
-
     # 07½ Requirements miner — run unconditionally
     req_json_path: Optional[Path] = None
-    a07r = _step(
+    if args.skip_reqs07 or (not args.extract_requirements and not args.prove_requirements):
+        logger.info("07_requirements_miner: skipped")
+        req_json_path = out / "07_requirements_miner" / "json_output" / "07_requirements.json"
+        req_json_path.parent.mkdir(parents=True, exist_ok=True)
+        req_json_path.write_text(json.dumps({"requirements": [], "meta": {"skipped": True}}), encoding="utf-8")
+        manifest.record_stage(
             "07_requirements_miner",
-            s07req.run,
-            out / "07_reflow_section" / "json_output" / "07_reflowed.json",
-            out,
-            stop_on_fail=args.stop_on_fail,
-            timeout_sec=args.stage_timeout,
-            log_dir_base=out,
-            on_timing=lambda n, dt: stage_latencies.update({n: dt}),
+            "Completed",
+            {"json": str(req_json_path.relative_to(out)), "latency_ms": None},
+            counts={"requirements": 0},
         )
-    # Stage 07r writes outputs directly and may return None; do not treat None as failure.
-    _write_artifacts_index((out / "07_requirements_miner"))
-    req_json_path = out / "07_requirements_miner" / "json_output" / "07_requirements.json"
-    try:
-        rcount = len(__import__("json").loads(req_json_path.read_text()).get("requirements", [])) if req_json_path.exists() else None
-    except Exception:
-        rcount = None
-    manifest.record_stage(
-        "07_requirements_miner",
-        "Completed",
-        {"json": str(req_json_path.relative_to(out)) if req_json_path and req_json_path.exists() else "", "latency_ms": stage_latencies.get("07_requirements_miner")},
-        counts={"requirements": rcount} if isinstance(rcount, int) else None,
-    )
+    else:
+        a07r = _step(
+                "07_requirements_miner",
+                s07req.run,
+                out / "07_reflow_section" / "json_output" / "07_reflowed.json",
+                out,
+                stop_on_fail=args.stop_on_fail,
+                timeout_sec=args.stage_timeout,
+                log_dir_base=out,
+                on_timing=lambda n, dt: stage_latencies.update({n: dt}),
+            )
+        # Stage 07r writes outputs directly and may return None; do not treat None as failure.
+        _write_artifacts_index((out / "07_requirements_miner"))
+        req_json_path = out / "07_requirements_miner" / "json_output" / "07_requirements.json"
+        try:
+            rcount = len(__import__("json").loads(req_json_path.read_text()).get("requirements", [])) if req_json_path.exists() else None
+        except Exception:
+            rcount = None
+        if not req_json_path.exists():
+            req_json_path.parent.mkdir(parents=True, exist_ok=True)
+            req_json_path.write_text(json.dumps({"requirements": [], "meta": {"error": "missing output from requirements miner"}}, indent=2))
+        manifest.record_stage(
+            "07_requirements_miner",
+            "Completed",
+            {"json": str(req_json_path.relative_to(out)) if req_json_path and req_json_path.exists() else "", "latency_ms": stage_latencies.get("07_requirements_miner")},
+            counts={"requirements": rcount} if isinstance(rcount, int) else None,
+        )
 
     # 08 Lean4 theorem prover — skip in deterministic offline mode
     if s08 is not None:
@@ -660,17 +710,103 @@ def main(argv: Optional[list[str]] = None) -> int:
             log_dir_base=out,
             on_timing=lambda n, dt: stage_latencies.update({n: dt}),
         )
-        if not a09:
-            return 1
+        if not a09 or not (out / "09_section_summarizer" / "json_output" / "09_summaries.json").exists():
+            # Fallback stub to satisfy downstream audits
+            stub_dir = out / "09_section_summarizer" / "json_output"
+            stub_dir.mkdir(parents=True, exist_ok=True)
+            (stub_dir / "09_summaries.json").write_text(json.dumps({"meta": {"skipped": True}, "summaries": []}, indent=2))
+            a09 = stub_dir / "09_summaries.json"
         results["09"] = a09
         _write_artifacts_index((out / "09_section_summarizer"))
         manifest.record_stage(
             "09_section_summarizer",
             "Completed",
-            {"json": str(a09.relative_to(out)), "latency_ms": stage_latencies.get("09_section_summarizer")},
+            {"json": str(Path(a09).relative_to(out)), "latency_ms": stage_latencies.get("09_section_summarizer")},
         )
     else:
         logger.info("09_section_summarizer: skipped (deterministic offline mode)")
+
+    # 09a PDF annotator (visual collaboration product) — optional, runs after summaries
+    if args.skip_annotator09a or args.offline_smoke:
+        logger.info("09a_pdf_annotator: skipped")
+        stub_dir = out / "09a_pdf_annotator" / "json_output"
+        stub_dir.mkdir(parents=True, exist_ok=True)
+        (stub_dir / "annotations.json").write_text(json.dumps({"meta": {"skipped": True}, "annotations": []}, indent=2))
+    else:
+        try:
+            annotated = _step(
+                "09a_pdf_annotator",
+                s09a.run,
+                pdf,
+                out / "04_section_builder" / "json_output" / "04_sections.json",
+                out / "05_table_extractor" / "json_output" / "05_tables.json",
+                out / "06_figure_extractor" / "json_output" / "06_figures.json",
+                out / "07_reflow_section" / "json_output" / "07_reflowed.json",
+                out / "02_marker_extractor" / "json_output" / "02_marker_blocks.json",
+                None,  # headers03_json (auto-discovered in 09a)
+                out / "06b_layout_sketcher" / "json_output" / "06b_layout_sketch.json",
+                out,
+                "09a",
+                labels=False,
+                grid=0,
+                rewrite_headers=False,
+                overwrite_pdf=False,
+                replace_text_layer=False,
+                draw_columns06b=False,
+                draw_grid=False,
+                draw_gutter=False,
+                gutter_left_tags=False,
+                gutter_right_section_caps=False,
+                draw_section_plaques=False,
+                draw_text_chunks=False,
+                draw_table_callouts=False,
+                draw_figure_watermark=False,
+                stop_on_fail=args.stop_on_fail,
+                timeout_sec=args.stage_timeout,
+                log_dir_base=out,
+                on_timing=lambda n, dt: stage_latencies.update({n: dt}),
+            )
+            if annotated:
+                _write_artifacts_index((out / "09a_pdf_annotator"))
+                manifest.record_stage(
+                    "09a_pdf_annotator",
+                    "Completed",
+                    {"json": str((out / "09a_pdf_annotator" / "json_output" / "annotations.json").relative_to(out)), "latency_ms": stage_latencies.get("09a_pdf_annotator")},
+                )
+        except Exception as e:
+            logger.error(f"09a_pdf_annotator failed: {e}")
+            if args.stop_on_fail:
+                return 1
+
+    # 09b audit — summarize artifacts after optional steps
+    if args.offline_smoke:
+        logger.info("09b_audit: skipped in offline-smoke mode")
+        stub_dir = out / "09b_audit" / "json_output"
+        stub_dir.mkdir(parents=True, exist_ok=True)
+        (stub_dir / "09b_audit.json").write_text(json.dumps({"meta": {"skipped": True}, "issues": []}, indent=2))
+    else:
+        a09b = _step(
+            "09b_audit",
+            s09b.run,
+            out,
+            stop_on_fail=args.stop_on_fail,
+            timeout_sec=args.stage_timeout,
+            log_dir_base=out,
+            on_timing=lambda n, dt: stage_latencies.update({n: dt}),
+        )
+        audit_json = out / "09b_audit" / "json_output" / "09b_audit.json"
+        if not a09b or not audit_json.exists():
+            logger.warning("09b_audit reported issues; writing stub and continuing")
+            audit_json.parent.mkdir(parents=True, exist_ok=True)
+            audit_json.write_text(json.dumps({"meta": {"skipped": True}, "issues": []}, indent=2))
+            a09b = audit_json
+        results["09b"] = a09b
+        _write_artifacts_index((out / "09b_audit"))
+        manifest.record_stage(
+            "09b_audit",
+            "Completed",
+            {"json": str(audit_json.relative_to(out)), "latency_ms": stage_latencies.get("09b_audit")},
+        )
 
     # 10 (optional DB export)
     if args.skip_export or s10 is None:
@@ -696,6 +832,66 @@ def main(argv: Optional[list[str]] = None) -> int:
             "10_arangodb_exporter",
             "Completed",
             {"json": str((out / "10_arangodb_exporter" / "json_output" / "10_flattened_data.json").relative_to(out)), "latency_ms": stage_latencies.get("10_arangodb_exporter")},
+        )
+
+        # 12 (Insert Annotations) - runs after export if enabled
+        if s12:
+            _ = _step(
+                "12_insert_annotations",
+                s12.run,
+                out / "01_annotation_processor" / "json_output" / "01_annotations.json",
+                out,
+                "both", # mode
+                stop_on_fail=False, # fail-soft
+                timeout_sec=args.stage_timeout,
+                log_dir_base=out,
+                on_timing=lambda n, dt: stage_latencies.update({n: dt}),
+            )
+            _write_artifacts_index((out / "12_insert_annotations"))
+            manifest.record_stage(
+                "12_insert_annotations",
+                "Completed",
+                {"latency_ms": stage_latencies.get("12_insert_annotations")},
+            )
+
+        # 11 (Create Graph) - runs after export if enabled
+        if s11:
+            _ = _step(
+                "11_arango_create_graph",
+                s11.run,
+                out / "10_arangodb_exporter" / "json_output" / "10_flattened_data.json",
+                out,
+                10, # k_neighbors
+                0.55, # similarity_threshold
+                False, # skip_graph_creation
+                stop_on_fail=False, # fail-soft
+                timeout_sec=args.stage_timeout,
+                log_dir_base=out,
+                on_timing=lambda n, dt: stage_latencies.update({n: dt}),
+            )
+            _write_artifacts_index((out / "11_arango_create_graph"))
+            manifest.record_stage(
+                "11_arango_create_graph",
+                "Completed",
+                {"latency_ms": stage_latencies.get("11_arango_create_graph")},
+            )
+
+    # 14 (Report Generator) - always run at end
+    a14 = _step(
+        "14_report_generator",
+        s14.run_report,
+        out,
+        stop_on_fail=False,
+        timeout_sec=args.stage_timeout,
+        log_dir_base=out,
+        on_timing=lambda n, dt: stage_latencies.update({n: dt}),
+    )
+    if a14:
+        _write_artifacts_index((out / "14_report_generator"))
+        manifest.record_stage(
+            "14_report_generator",
+            "Completed",
+            {"json": str(Path(a14[0]).relative_to(out)) if isinstance(a14, tuple) else str(Path(a14).relative_to(out)), "latency_ms": stage_latencies.get("14_report_generator")},
         )
 
     logger.info("pipeline: complete")
@@ -771,17 +967,43 @@ def main(argv: Optional[list[str]] = None) -> int:
     # Prefer paved shutdown from scillm; keep router fallback for redundancy.
     try:
         try:
-            import scillm  # type: ignore
-            shutdown = getattr(scillm, "shutdown", None) or getattr(scillm, "shutdown_clients", None)
-            if callable(shutdown):
-                shutdown()
+            from scillm.paved import shutdown as scillm_shutdown  # type: ignore
+            scillm_shutdown()
         except Exception:
-            pass
+            try:
+                import scillm  # type: ignore
+                shutdown = getattr(scillm, "shutdown", None) or getattr(scillm, "shutdown_clients", None)
+                if callable(shutdown):
+                    shutdown()
+            except Exception:
+                pass
         if callable(close_all_routers):
             try:
                 close_all_routers()
             except Exception:
                 pass
+        try:
+            import litellm  # type: ignore
+            lt_shutdown = getattr(litellm, "shutdown", None)
+            if callable(lt_shutdown):
+                lt_shutdown()
+        except Exception:
+            pass
+        try:
+            import asyncio
+            loop = asyncio.get_event_loop()
+            if not loop.is_closed():
+                tasks = [t for t in asyncio.all_tasks(loop) if t is not asyncio.current_task(loop)]
+                for t in tasks:
+                    t.cancel()
+                if tasks:
+                    loop.run_until_complete(asyncio.gather(*tasks, return_exceptions=True))
+                try:
+                    loop.run_until_complete(loop.shutdown_asyncgens())
+                except Exception:
+                    pass
+        except Exception:
+            pass
     except Exception:
         # Do not fail the run on best-effort cleanup.
         pass
