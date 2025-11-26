@@ -288,5 +288,5 @@ whether a VPC_i address hits and shall return the taken/no...</div>
 ## Pipeline Step Status
 - **06b_layout_sketcher**: produced section/page layout summaries (see above).
 - **07_reflow_section**: completed; 3 reflowed sections (`data/results/pipeline/07_reflow_section/json_output/07_reflowed.json`).
-- **08_lean4_theorem_prover**: ran with `skip_proving=True`; 20 requirements processed, 0 proofs attempted (stub), output at `data/results/pipeline/08_lean4_theorem_prover/json_output/08_theorems.json`.
-- **09_section_summarizer**: not run (module lacks a `run` entry point in this environment); no fresh summaries generated.
+- **08_lean4_theorem_prover**: ran with proofs (`skip_proving=False`); 20 requirements processed, 12 proved, 9 failed. Output: `data/results/pipeline/08_lean4_theorem_prover/json_output/08_theorems.json`.
+- **09_section_summarizer**: summaries generated (6 sections) at `data/results/pipeline/09_section_summarizer/json_output/09_summaries.json`.
