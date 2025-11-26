@@ -244,24 +244,43 @@ whether a VPC_i address hits and shall return the taken/no...</div>
 ## Layout Sketcher (text)
       - Section 0.0.0.1: 4.1.5.4. BHT (Branch History Table) submodule (pages 1-2)
         - Page 1: text_blocks=18, tables=1, figures=1
-          - Table: 1x5, density=1.00, acc=100.00000000000001, area=34951.45664950015, title=INFER: Signal | IO | Description | Connection | Type
+          - Dominant column: 2 (0.89 char share)
+          - Table: 1x5, density=1.00, acc=100.00000000000001, area=34951.45664950015, w=469.91999999999996, h=74.3774613753408, nw=None, nh=None, aspect=None, title=INFER: Signal | IO | Description | Connection | Type
+          - Text col 2: blocks=7, chars=568, y_norm=0.0012626262626262627, order=0, snippet="4.1.5.4. BHT (Branch History Table) subm … ACHE. It states whether the current bra…"
+          - Text col 0: blocks=1, chars=47, y_norm=0.005050505050505051, order=1, snippet="instructions as shown in the following f … ctions as shown in the following figure."
+          - Text col 1: blocks=1, chars=3, y_norm=0.011363636363636364, order=2, snippet="on"
+          - Text col 2: blocks=2, chars=90, y_norm=0.005050505050505051, order=3, snippet="should be taken or not. The two bit coun … text"
+          - Text col 2: blocks=1, chars=93, y_norm=0.008838383838383838, order=4, snippet="When a branch instruction is pre-decoded …  by instr_scan submodule, the BHT valid…"
         - Page 2: text_blocks=37, tables=1, figures=0
-          - Table: 4x5, density=1.00, acc=100.0, area=191218.2918630718, title=INFER: clk_i | in | Subsystem Clock | SUBSYSTEM | logic
-          - Text col 0: blocks=2, chars=24, snippet="clk_i in Subsyste … logic"
-          - Text col 1: blocks=1, chars=8, snippet="m Clock"
-          - Text col 2: blocks=2, chars=11, snippet="SUBSY … STEM"
+          - Dominant column: 0 (0.67 char share)
+          - Table: 4x5, density=1.00, acc=100.0, area=191218.2918630718, w=469.91999999999996, h=406.916691911542, nw=None, nh=None, aspect=None, title=INFER: clk_i | in | Subsystem Clock | SUBSYSTEM | logic
+          - Text col 0: blocks=2, chars=24, y_norm=0.0012626262626262627, order=0, snippet="clk_i in Subsyste … logic"
+          - Text col 1: blocks=1, chars=8, y_norm=0.0012626262626262627, order=1, snippet="m Clock"
+          - Text col 2: blocks=2, chars=11, y_norm=0.0012626262626262627, order=2, snippet="SUBSY … STEM"
+          - Text col 0: blocks=2, chars=25, y_norm=0.0025252525252525255, order=3, snippet="rst_ni in Asynchro … logic"
+          - Text col 1: blocks=2, chars=22, y_norm=0.0025252525252525255, order=4, snippet="nous reset … active low"
           - Section 0.0.0.1.0.1: 4.1.5.4.1. REQUIREMENTS (Simulated) (page 3)
             - Page 3: text_blocks=35, tables=0, figures=0
-              - Text col 0: blocks=1, chars=36, snippet="4.1.5.4.1. REQUIREMENTS (Simulated)"
-              - Text col 1: blocks=1, chars=203, snippet="This simulated section provides formal, hardware-oriented re … on provides formal, hardware-oriented requirements for the …"
-              - Text col 0: blocks=2, chars=51, snippet="predictions to the front end. … Formal Requirements:"
+              - Dominant column: 1 (0.86 char share)
+              - Text col 0: blocks=1, chars=36, y_norm=0.0012626262626262627, order=0, snippet="4.1.5.4.1. REQUIREMENTS (Simulated)"
+              - Text col 1: blocks=1, chars=203, y_norm=0.0012626262626262627, order=1, snippet="This simulated section provides formal,  … hardware-oriented requirements for the …"
+              - Text col 0: blocks=2, chars=51, y_norm=0.0025252525252525255, order=2, snippet="predictions to the front end. … Formal Requirements:"
+              - Text col 1: blocks=1, chars=94, y_norm=0.0025252525252525255, order=3, snippet="of the Virtual PC (VPC), is updated upon …  branch resolution in the execute stage…"
+              - Text col 0: blocks=1, chars=34, y_norm=0.003787878787878788, order=4, snippet="and shall saturate at its limits."
     - Section 0.0.1: 4.1.5. TABLE MERGE SCENARIOS (Simulated) (pages 4-5)
       - Page 4: text_blocks=8, tables=1, figures=0
-        - Table: 7x4, density=1.00, acc=99.99999999999997, area=58626.522387155375, title=INFER: PC Range | Outcome | Count | Accuracy
+        - Dominant column: 2 (0.96 char share)
+        - Table: 7x4, density=1.00, acc=99.99999999999997, area=58626.522387155375, w=461.03999999999996, h=127.16146622235681, nw=None, nh=None, aspect=None, title=INFER: PC Range | Outcome | Count | Accuracy
+        - Text col 2: blocks=2, chars=279, y_norm=0.0012626262626262627, order=0, snippet="4.1.5. TABLE MERGE SCENARIOS (Simulated) … ection formatting and introduces two ta…"
+        - Text col 0: blocks=2, chars=33, y_norm=0.0025252525252525255, order=1, snippet="not be merged. … Mergeable Tables:"
+        - Text col 2: blocks=2, chars=322, y_norm=0.0025252525252525255, order=2, snippet="Table 4-1. BHT Prediction Outcomes (Part … 000-0x8000_00FF taken 124 91.2% 0x8000_…"
       - Page 5: text_blocks=18, tables=3, figures=0
-        - Table: 7x4, density=1.00, acc=99.99999999999997, area=45568.066694940935, title=INFER: 0x8000_0600-0x8000_06FF | not-taken | 67 | 85.2%
-        - Table: 5x3, density=1.00, acc=97.89541724496593, area=45688.29906089064, title=INFER: Signal | Description | Width
-        - Table: 5x3, density=1.00, acc=100.00000000000001, area=58515.90630717963, title=INFER: Parameter | Value | Notes
-        - Text col 2: blocks=4, chars=482, snippet="4.1.5. TABLE MERGE SCENARIOS (Simulated) - Continued … 6FF not-taken 67 85.2% 0x8000_0700-0x8000_07FF taken 189 94…"
-        - Text col 0: blocks=2, chars=51, snippet="Non-Mergeable Tables: … Table 4-2. Interface Signals"
-        - Text col 2: blocks=4, chars=280, snippet="Paragraph for Table 4-1 (continued): Additional rows belong  … clk_i Subsystem clock 1 rst_ni Async reset (active-low) 1"
+        - Dominant column: 2 (0.94 char share)
+        - Table: 7x4, density=1.00, acc=99.99999999999997, area=45568.066694940935, w=461.03999999999996, h=126.92153892759768, nw=None, nh=None, aspect=None, title=INFER: 0x8000_0600-0x8000_06FF | not-taken | 67 | 85.2%
+        - Table: 5x3, density=1.00, acc=97.89541724496593, area=45688.29906089064, w=501.12, h=91.17237200848228, nw=None, nh=None, aspect=None, title=INFER: Signal | Description | Width
+        - Table: 5x3, density=1.00, acc=100.00000000000001, area=58515.90630717963, w=501.12, h=90.93244471372313, nw=None, nh=None, aspect=None, title=INFER: Parameter | Value | Notes
+        - Text col 2: blocks=4, chars=482, y_norm=0.0012626262626262627, order=0, snippet="4.1.5. TABLE MERGE SCENARIOS (Simulated) … 2% 0x8000_0700-0x8000_07FF taken 189 94…"
+        - Text col 0: blocks=2, chars=51, y_norm=0.005050505050505051, order=1, snippet="Non-Mergeable Tables: … Table 4-2. Interface Signals"
+        - Text col 2: blocks=4, chars=280, y_norm=0.005050505050505051, order=2, snippet="Paragraph for Table 4-1 (continued): Add … lock 1 rst_ni Async reset (active-low) 1"
+        - Text col 0: blocks=1, chars=26, y_norm=0.007575757575757576, order=3, snippet="Table 4-3. BHT Parameters"
+        - Text col 2: blocks=7, chars=403, y_norm=0.007575757575757576, order=4, snippet="vpc_i Virtual PC input CVA6Cfg.VLEN … ry distinct from interface signals abov…"

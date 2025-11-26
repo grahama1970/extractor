@@ -6,6 +6,8 @@ import html
 from pathlib import Path
 from datetime import date
 
+HEAD_TAIL_LEN = 40  # chars for text snippets
+
 
 def _table_rect(table, page_height):
     """Return a fitz.Rect for a Camelot-style bbox (x0,y0,x1,y1 with origin bottom-left)."""
@@ -109,12 +111,32 @@ def generate_enhanced_walkthrough(pdf_path, output_dir):
         shape = pm.get("shape", [0, 0])
         density = pm.get("data_density")
         acc = cm.get("accuracy") or cm.get("accuracy_score")
+        bbox = t.get("bbox")
+        bw = bh = norm_w = norm_h = aspect = None
+        if bbox:
+            try:
+                bw = bbox[2] - bbox[0]
+                bh = bbox[3] - bbox[1]
+                w, h = page_dims.get(p, (None, None))
+                if w and h:
+                    norm_w = bw / w
+                    norm_h = bh / h
+                if bh:
+                    aspect = bw / bh
+            except Exception:
+                pass
         table_metrics_by_page.setdefault(p, []).append(
             {
                 "title": t.get("title") or t.get("title_hint") or "(table)",
                 "shape": shape,
                 "density": density,
                 "acc": acc,
+                "bbox": bbox,
+                "bw": bw,
+                "bh": bh,
+                "norm_w": norm_w,
+                "norm_h": norm_h,
+                "aspect": aspect,
             }
         )
     for f in figures:
@@ -140,6 +162,7 @@ def generate_enhanced_walkthrough(pdf_path, output_dir):
     ]
 
     layout_sketches = []
+    page_dims = {i: (doc[i].rect.width, doc[i].rect.height) for i in range(len(doc))}
     layout06b_pages = {}
     layout06b_groups = {}
     layout06b_table_areas = {}
@@ -177,6 +200,7 @@ def generate_enhanced_walkthrough(pdf_path, output_dir):
                             "first": it,
                             "last": it,
                             "last_y0": y0,
+                            "y0_min": y0,
                             "char_sum": (it.get("char_count") or 0),
                             "area_sum": (it.get("area") or 0),
                         }
@@ -187,6 +211,7 @@ def generate_enhanced_walkthrough(pdf_path, output_dir):
                         cur["last_y0"] = y0
                         cur["char_sum"] += it.get("char_count") or 0
                         cur["area_sum"] += it.get("area") or 0
+                        cur["y0_min"] = min(cur["y0_min"], y0)
                 layout06b_groups[page_idx] = groups
         except Exception:
             layout06b_pages = {}
@@ -468,9 +493,24 @@ def generate_enhanced_walkthrough(pdf_path, output_dir):
                 counts = {}
                 for it in items:
                     counts[it["kind"]] = counts.get(it["kind"], 0) + 1
+                col_totals = {}
+                for it in items:
+                    if it["kind"] != "text":
+                        continue
+                    col_totals[it.get("col")] = col_totals.get(it.get("col"), 0) + (it.get("char_count") or 0)
+                total_chars = sum(col_totals.values()) or 1
+                dominant_col = None
+                dominant_share = None
+                if col_totals:
+                    dominant_col, dominant_val = max(col_totals.items(), key=lambda x: x[1])
+                    dominant_share = dominant_val / total_chars
                 md_lines.append(
                     f"{indent}  - Page {page_idx+1}: text_blocks={counts.get('text',0)}, tables={counts.get('table',0)}, figures={counts.get('figure',0)}"
                 )
+                if dominant_col is not None:
+                    md_lines.append(
+                        f"{indent}    - Dominant column: {dominant_col} ({dominant_share:.2f} char share)"
+                    )
                 # quick table metrics on this page
                 for idx, t in enumerate(table_metrics_by_page.get(page_idx, [])[:3]):
                     shape = t.get("shape", [0, 0])
@@ -479,21 +519,43 @@ def generate_enhanced_walkthrough(pdf_path, output_dir):
                     areas = layout06b_table_areas.get(page_idx, [])
                     area_val = areas[idx] if idx < len(areas) else None
                     md_lines.append(
-                        f"{indent}    - Table: {shape[0]}x{shape[1]}, density={density if density is not None else 0:.2f}, acc={acc if acc is not None else 'n/a'}, area={area_val if area_val is not None else 'n/a'}, title={t.get('title')}"
+                        f"{indent}    - Table: {shape[0]}x{shape[1]}, density={density if density is not None else 0:.2f}, acc={acc if acc is not None else 'n/a'}, area={area_val if area_val is not None else 'n/a'}, w={t.get('bw')}, h={t.get('bh')}, nw={t.get('norm_w')}, nh={t.get('norm_h')}, aspect={t.get('aspect')}, title={t.get('title')}"
                     )
-            groups = layout06b_groups.get(page_idx, [])
-            for g in groups[:3]:
-                first = g["first"].get("summary", "")
-                last = g["last"].get("summary", "")
-                head = first[:60]
-                tail = last[-60:] if last else ""
-                if head and tail and head != tail:
-                    snippet = f"{head} … {tail}"
-                else:
-                    snippet = head or tail
-                md_lines.append(
-                    f"{indent}    - Text col {g['col']}: blocks={len(g['items'])}, chars={g['char_sum']}, snippet=\"{snippet}\""
-                )
+                groups = layout06b_groups.get(page_idx, [])
+                if groups:
+                    cap = 5 if counts.get("text", 0) > 8 or len(col_totals) > 2 else 3
+                    col_groups = {}
+                    for g in groups:
+                        col_groups.setdefault(g["col"], []).append(g)
+                    for cg in col_groups.values():
+                        cg.sort(key=lambda x: x.get("y0_min", 0))
+                    selected = []
+                    for cg in col_groups.values():
+                        if cg:
+                            selected.append(cg[0])
+                    remaining = [g for g in groups if g not in selected]
+                    remaining.sort(key=lambda x: x.get("y0_min", 0))
+                    for g in remaining:
+                        if len(selected) >= cap:
+                            break
+                        selected.append(g)
+                    selected = selected[:cap]
+                    page_h = page_dims.get(page_idx, (None, None))[1]
+                    for order_idx, g in enumerate(selected):
+                        first = g["first"].get("summary", "")
+                        last = g["last"].get("summary", "")
+                        head = first[:HEAD_TAIL_LEN]
+                        tail = last[-HEAD_TAIL_LEN:] if last else ""
+                        if head and tail and head != tail:
+                            snippet = f"{head} … {tail}"
+                        else:
+                            snippet = head or tail
+                        y_norm = None
+                        if page_h:
+                            y_norm = g.get("y0_min", 0) / page_h
+                        md_lines.append(
+                            f"{indent}    - Text col {g['col']}: blocks={len(g['items'])}, chars={g['char_sum']}, y_norm={y_norm if y_norm is not None else 'n/a'}, order={order_idx}, snippet=\"{snippet}\""
+                        )
     elif layout_sketches:
         for entry in layout_sketches:
             md_lines.append(f"- Page {entry['page']}")
