@@ -290,3 +290,4 @@ whether a VPC_i address hits and shall return the taken/no...</div>
 - **07_reflow_section**: completed; 3 reflowed sections (`data/results/pipeline/07_reflow_section/json_output/07_reflowed.json`).
 - **08_lean4_theorem_prover**: ran with proofs (`skip_proving=False`); 20 requirements processed, 12 proved, 9 failed. Output: `data/results/pipeline/08_lean4_theorem_prover/json_output/08_theorems.json`.
 - **09_section_summarizer**: summaries generated (6 sections) at `data/results/pipeline/09_section_summarizer/json_output/09_summaries.json`.
+- **10_arangodb_exporter**: flattened 59 objects to `data/results/pipeline/10_arangodb_exporter/json_output/10_flattened_data.json` (sample keys: `_key`, `doc_id`, `doc_set_id`, `page_num`, `bbox`, `object_type`); confirmation at `10_export_confirmation.json`.
