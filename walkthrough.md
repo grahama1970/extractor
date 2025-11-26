@@ -291,3 +291,9 @@ whether a VPC_i address hits and shall return the taken/no...</div>
 - **08_lean4_theorem_prover**: ran with proofs (`skip_proving=False`); 20 requirements processed, 12 proved, 9 failed. Output: `data/results/pipeline/08_lean4_theorem_prover/json_output/08_theorems.json`.
 - **09_section_summarizer**: summaries generated (6 sections) at `data/results/pipeline/09_section_summarizer/json_output/09_summaries.json`.
 - **10_arangodb_exporter**: flattened 59 objects to `data/results/pipeline/10_arangodb_exporter/json_output/10_flattened_data.json` (sample keys: `_key`, `doc_id`, `doc_set_id`, `page_num`, `bbox`, `object_type`); confirmation at `10_export_confirmation.json`.
+
+## Lean4 Proofs (Stage 08 snapshot)
+- Requirements processed: 20; proved: 12; failed: 9.
+- Proof results file: `data/results/pipeline/08_lean4_theorem_prover/json_output/08_theorems.json` (see `proof_results` array).
+- Sample failed reason: incomplete requirement text (“REQ-BHT-9…”) led to prompt error; suggested reformulation is recorded in the result payload.
+- Sample proved items: present in `proof_results` with `success=true` and Lean code attached.
