@@ -282,7 +282,7 @@ node_modules/
 deprecated/
 
 # Large output files
-*.json
+# *.json
 !package.json
 !tsconfig.json
 !config/invariants/*.json
@@ -303,3 +303,8 @@ deprecated/
 /repos/
 /logs/
 /tmp/
+
+# Generated artifacts and pipeline outputs
+/scripts/artifacts/
+/local/results/
+/out_fast/

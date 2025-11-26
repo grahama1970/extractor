@@ -1,29 +1,36 @@
+# Extraction Journal
+
+## 2025-11-26 Full pipeline rerun
+- Ran stages 01→07 (tables, figures, reflow, requirements) + 06b layout + 09a annotator after fixes.
+- Results: 6 raw tables, 1 figure, 3 sections, 20 requirements; annotated PNGs under scripts/artifacts/annotated_latest-*.png.
+- Visual report below is regenerated via scripts/generate_enhanced_walkthrough.py (connectors removed; pairing via order + color swatches). Self-contained copy: scripts/artifacts/visuals_pipeline/walkthrough_local.md.
+
 # Enhanced Pipeline Walkthrough
 
-**Date:** 2025-11-25  
-**Run:** `data/results/latest_run` (pipeline 01–11; tables=6, figures=1; lattice-first sticky strategy with IOU dedupe guard; requirements enabled)
-
-## Annotated Pages (latest_run)
+**Date:** 2025-11-26
+**Format:** Side-by-side visualization of extracted artifacts.
 
 ### Page 1
 <table>
 <tr>
 <td width="60%" style="vertical-align: top; border: 1px solid #ddd; padding: 0;">
-  <img src="scripts/artifacts/annotated_latest-1.png" width="100%" style="display:block;" />
+<img src="scripts/artifacts/visuals_pipeline/annotated_p1_enhanced.png" width="100%" />
 </td>
-<td width="40%" style="vertical-align: top; padding: 14px; background-color: #fff;">
-<div style='font-size: 0.85em; color: #777;'>Order on page: S1 → F1 → T1 (top to bottom)</div>
-<h4>Sections</h4>
-<div><a href="#section-s1">[S1]</a> 4.1.5.4. BHT (Branch History Table) submodule</div>
-<div style='font-size: 0.85em; color: #777;'>Header overlay at top of page</div>
-<h4>Figures</h4>
-<div><a href="#figure-f1">[F1]</a> BHT State Transition Diagram</div>
-<div style='font-size: 0.9em; color: #555;'>page 1 • bbox [73.5, 323.9, 541.5, 504.8]</div>
-<div style='font-size: 0.9em; color: #555; margin-top:6px;'>The figure illustrates a four-state two-bit saturating counter used in a Branch History Table (BHT) to predict branch outcomes. States transition between ‘strongly not taken,’ ‘weakly not taken,’ ‘weakly taken,’ and ‘strongly taken’ based on whether a branch is taken or not taken. Arrows indicate state transitions triggered by branch execution results.</div>
-<h4>Tables</h4>
-<div><a href="#table-t1">[T1]</a> Signal | IO | Description | Connection | Type</div>
-<div style='font-size: 0.9em; color: #555;'>1×5 • density 1.00 • acc 100%</div>
-<div style='font-size: 0.85em; color: #777;'>Merged table continues onto page 2</div>
+<td width="40%" style="vertical-align: top; padding: 15px; background-color: #fff;">
+<div style='font-size:0.9em; color:#666; margin-bottom:8px;'>Order on page: S1 → F1 → T1 (top to bottom)</div>
+<div><span style='display:inline-block;width:10px;height:10px;border-radius:50%;background:#198754;margin-right:6px;'></span><strong>[S1] 4.1.5.4. BHT (Branch History Table) submodule</strong></div>
+<hr style='border: 0; border-top: 1px solid #eee; margin: 8px 0;'>
+<div><span style='display:inline-block;width:10px;height:10px;border-radius:50%;background:#0d6efd;margin-right:6px;'></span><strong>[F1] Figure</strong></div>
+<div style='font-size:0.85em;color:#555;'>page 1 • bbox [73.5, 323.9186492919922, 541.5, 504.8186859130859]</div>
+<div style='font-size: 0.9em; font-style: italic; margin-bottom: 8px;'>The figure illustrates a four-state two-bit saturating counter used in a Branch History Table (BHT) to predict branch outcomes. States transition between &#x27;strongly not taken,&#x27; &#x27;weakly not taken,&#x27; &#x27;weakly taken,&#x27; and &#x27;strongly taken&#x27; based on whether branches are taken or not taken. Arrows indicate state transitions triggered by actual branch behavior.</div>
+<hr style='border: 0; border-top: 1px solid #eee; margin: 8px 0;'>
+<div><span style='display:inline-block;width:10px;height:10px;border-radius:50%;background:#dc3545;margin-right:6px;'></span><strong>[T1] INFER: Signal | IO | Description | Connection | Type</strong></div>
+<div style='font-size:0.85em;color:#555;'>page 1 • bbox [72.0, 106.2877915783096, 541.92, 180.6652529536504]</div>
+<div style='font-size: 0.9em; color: #555; margin-bottom: 4px;'>Dim: 1x5 | Density: 1.00</div>
+<div style='font-size:0.8em;color:#666;'>Camelot acc: 100.00</div>
+<div style='font-size: 0.8em; font-family: monospace; color: #666;'>Cols: 0, 1, 2, 3, 4</div>
+<div style='font-size: 0.8em; font-family: monospace; background: #f5f5f5; padding: 2px;'>Signal | IO | Description | Connection</div>
+<hr style='border: 0; border-top: 1px solid #eee; margin: 8px 0;'>
 </td>
 </tr>
 </table>
@@ -32,15 +39,23 @@
 <table>
 <tr>
 <td width="60%" style="vertical-align: top; border: 1px solid #ddd; padding: 0;">
-<img src="scripts/artifacts/annotated_latest-2.png" width="100%" />
+<img src="scripts/artifacts/visuals_pipeline/annotated_p2_enhanced.png" width="100%" />
 </td>
-<td width="40%" style="vertical-align: top; padding: 14px; background-color: #fff;">
-<h4>Tables</h4>
-<div><a href="#table-t2">[T2]</a> clk_i | in | Subsystem Clock | SUBSYSTEM | logic</div>
-<div style='font-size: 0.9em; color: #555;'>4×5 • density 1.00 • acc 100%</div>
+<td width="40%" style="vertical-align: top; padding: 15px; background-color: #fff;">
+<div style='font-size:0.9em; color:#666; margin-bottom:8px;'>Order on page: T1 (top to bottom)</div>
+<div><span style='display:inline-block;width:10px;height:10px;border-radius:50%;background:#dc3545;margin-right:6px;'></span><strong>[T1] INFER: clk_i | in | Subsystem Clock | SUBSYSTEM | logic</strong></div>
+<div style='font-size:0.85em;color:#555;'>page 2 • bbox [72.0, 313.10511966070885, 541.92, 720.0218115722508]</div>
+<div style='font-size: 0.9em; color: #555; margin-bottom: 4px;'>Dim: 4x5 | Density: 1.00</div>
+<div style='font-size:0.8em;color:#666;'>Camelot acc: 100.00</div>
+<div style='font-size: 0.8em; font-family: monospace; color: #666;'>Cols: 0, 1, 2, 3, 4</div>
+<div style='font-size: 0.8em; font-family: monospace; background: #f5f5f5; padding: 2px;'>clk_i | in | Subsystem Clock | SUBSYSTEM</div>
+<hr style='border: 0; border-top: 1px solid #eee; margin: 8px 0;'>
 <h4>Requirements</h4>
-<div><a href="#req-r1">[R1]</a> Requirement inferred from T2 (see R1 below)</div>
-<div style='font-size: 0.85em; color: #777;'>Requirement overlay shares bbox with T2</div>
+<div style='background-color: #f5f5f5; padding: 6px; margin: 4px 0; border-left: 3px solid #ff6b35;'>
+<div style='font-size: 0.85em; font-weight: bold; color: #ff6b35;'>req_000000</div>
+<div style='font-size: 0.85em;'>All constraints specified by Table 1 shall hold for the document. Columns: Signal | IO | Description | Connection | Type.</div>
+<div style='font-size: 0.75em; color: #666; margin-top: 2px;'>Modality: shall • Confidence: 0.60</div>
+</div>
 </td>
 </tr>
 </table>
@@ -49,11 +64,100 @@
 <table>
 <tr>
 <td width="60%" style="vertical-align: top; border: 1px solid #ddd; padding: 0;">
-<img src="scripts/artifacts/annotated_latest-3.png" width="100%" />
+<img src="scripts/artifacts/visuals_pipeline/annotated_p3_enhanced.png" width="100%" />
 </td>
-<td width="40%" style="vertical-align: top; padding: 14px; background-color: #fff;">
-<h4>Sections</h4>
-<div><a href="#section-s2">[S2]</a> 4.1.5.4.1. REQUIREMENTS (Simulated)</div>
+<td width="40%" style="vertical-align: top; padding: 15px; background-color: #fff;">
+<div style='font-size:0.9em; color:#666; margin-bottom:8px;'>Order on page: S1 (top to bottom)</div>
+<div><span style='display:inline-block;width:10px;height:10px;border-radius:50%;background:#198754;margin-right:6px;'></span><strong>[S1] 4.1.5.4.1. REQUIREMENTS (Simulated)</strong></div>
+<hr style='border: 0; border-top: 1px solid #eee; margin: 8px 0;'>
+<h4>Requirements</h4>
+<div style='background-color: #fff9e6; padding: 6px; margin: 4px 0; border-left: 3px solid #ff6b35;'>
+<div style='font-size: 0.85em; font-weight: bold; color: #ff6b35;'>REQ-BHT-1</div>
+<div style='font-size: 0.85em;'>REQ-BHT-1: The BHT shall implement BHTDepth entries and index them using the lower bits of</div>
+<div style='font-size: 0.75em; color: #666; margin-top: 2px;'>Modality: shall • Confidence: 0.90</div>
+</div>
+<div style='background-color: #f5f5f5; padding: 6px; margin: 4px 0; border-left: 3px solid #ff6b35;'>
+<div style='font-size: 0.85em; font-weight: bold; color: #ff6b35;'>req_000002</div>
+<div style='font-size: 0.85em;'>The width of VPC_i shall match CVA6Cfg.VLEN.</div>
+<div style='font-size: 0.75em; color: #666; margin-top: 2px;'>Modality: shall • Confidence: 0.70</div>
+</div>
+<div style='background-color: #fff9e6; padding: 6px; margin: 4px 0; border-left: 3px solid #ff6b35;'>
+<div style='font-size: 0.85em; font-weight: bold; color: #ff6b35;'>REQ-BHT-2</div>
+<div style='font-size: 0.85em;'>REQ-BHT-2: Each BHT entry shall contain a two-bit saturating counter that encodes taken/not-taken</div>
+<div style='font-size: 0.75em; color: #666; margin-top: 2px;'>Modality: shall • Confidence: 0.90</div>
+</div>
+<div style='background-color: #fff9e6; padding: 6px; margin: 4px 0; border-left: 3px solid #ff6b35;'>
+<div style='font-size: 0.85em; font-weight: bold; color: #ff6b35;'>REQ-BHT-3</div>
+<div style='font-size: 0.85em;'>REQ-BHT-3: The BHT shall accept update information from the execute stage (bht_update_i)
+including the branch PC and resolved outcome, and shall updat...</div>
+<div style='font-size: 0.75em; color: #666; margin-top: 2px;'>Modality: shall • Confidence: 0.90</div>
+</div>
+<div style='background-color: #fff9e6; padding: 6px; margin: 4px 0; border-left: 3px solid #ff6b35;'>
+<div style='font-size: 0.85em; font-weight: bold; color: #ff6b35;'>REQ-BHT-4</div>
+<div style='font-size: 0.85em;'>REQ-BHT-4: The BHT shall provide a prediction output (bht_prediction_o) aligned with the</div>
+<div style='font-size: 0.75em; color: #666; margin-top: 2px;'>Modality: shall • Confidence: 0.90</div>
+</div>
+<div style='background-color: #fff9e6; padding: 6px; margin: 4px 0; border-left: 3px solid #ff6b35;'>
+<div style='font-size: 0.85em; font-weight: bold; color: #ff6b35;'>REQ-BHT-5</div>
+<div style='font-size: 0.85em;'>REQ-BHT-5: The BHT shall not be flushed by pipeline events.</div>
+<div style='font-size: 0.75em; color: #666; margin-top: 2px;'>Modality: shall • Confidence: 0.90</div>
+</div>
+<div style='background-color: #fff9e6; padding: 6px; margin: 4px 0; border-left: 3px solid #ff6b35;'>
+<div style='font-size: 0.85em; font-weight: bold; color: #ff6b35;'>REQ-BHT-6</div>
+<div style='font-size: 0.85em;'>REQ-BHT-6: The subsystem clock clk_i and asynchronous active-low reset rst_ni shall be the only</div>
+<div style='font-size: 0.75em; color: #666; margin-top: 2px;'>Modality: shall • Confidence: 0.90</div>
+</div>
+<div style='background-color: #fff9e6; padding: 6px; margin: 4px 0; border-left: 3px solid #ff6b35;'>
+<div style='font-size: 0.85em; font-weight: bold; color: #ff6b35;'>REQ-BHT-7</div>
+<div style='font-size: 0.85em;'>REQ-BHT-7: When a branch is pre-decoded by the instr_scan submodule, the BHT shall indicate
+whether a VPC_i address hits and shall return the taken/no...</div>
+<div style='font-size: 0.75em; color: #666; margin-top: 2px;'>Modality: shall • Confidence: 0.90</div>
+</div>
+<div style='background-color: #fff9e6; padding: 6px; margin: 4px 0; border-left: 3px solid #ff6b35;'>
+<div style='font-size: 0.85em; font-weight: bold; color: #ff6b35;'>REQ-BHT-8</div>
+<div style='font-size: 0.85em;'>REQ-BHT-8: In cv32a65x configuration, flush_bp_i shall be tied to 0.</div>
+<div style='font-size: 0.75em; color: #666; margin-top: 2px;'>Modality: shall • Confidence: 0.90</div>
+</div>
+<div style='background-color: #f5f5f5; padding: 6px; margin: 4px 0; border-left: 3px solid #ff6b35;'>
+<div style='font-size: 0.85em; font-weight: bold; color: #ff6b35;'>req_000010</div>
+<div style='font-size: 0.85em;'>debug_mode_i shall be tied to 0 and shall not appear as an external port.</div>
+<div style='font-size: 0.75em; color: #666; margin-top: 2px;'>Modality: shall • Confidence: 0.70</div>
+</div>
+<div style='background-color: #fff9e6; padding: 6px; margin: 4px 0; border-left: 3px solid #ff6b35;'>
+<div style='font-size: 0.85em; font-weight: bold; color: #ff6b35;'>REQ-BHT-9</div>
+<div style='font-size: 0.85em;'>REQ-BHT-9: All signal widths and types exposed by the BHT interfaces shall be consistent with the</div>
+<div style='font-size: 0.75em; color: #666; margin-top: 2px;'>Modality: shall • Confidence: 0.90</div>
+</div>
+<div style='background-color: #fff9e6; padding: 6px; margin: 4px 0; border-left: 3px solid #ff6b35;'>
+<div style='font-size: 0.85em; font-weight: bold; color: #ff6b35;'>REQ-BHT-10</div>
+<div style='font-size: 0.85em;'>REQ-BHT-10: The prediction datapath shall not introduce structural hazards with instruction fetch;</div>
+<div style='font-size: 0.75em; color: #666; margin-top: 2px;'>Modality: shall • Confidence: 0.90</div>
+</div>
+<div style='background-color: #f5f5f5; padding: 6px; margin: 4px 0; border-left: 3px solid #ff6b35;'>
+<div style='font-size: 0.85em; font-weight: bold; color: #ff6b35;'>req_000013</div>
+<div style='font-size: 0.85em;'>updates from the execute stage shall not stall front-end prediction availability.</div>
+<div style='font-size: 0.75em; color: #666; margin-top: 2px;'>Modality: shall • Confidence: 0.70</div>
+</div>
+<div style='background-color: #f5f5f5; padding: 6px; margin: 4px 0; border-left: 3px solid #ff6b35;'>
+<div style='font-size: 0.85em; font-weight: bold; color: #ff6b35;'>req_000014</div>
+<div style='font-size: 0.85em;'>The BHT shall locate the entry indexed by the provided VPC and shall increment or decrement the</div>
+<div style='font-size: 0.75em; color: #666; margin-top: 2px;'>Modality: shall • Confidence: 0.70</div>
+</div>
+<div style='background-color: #f5f5f5; padding: 6px; margin: 4px 0; border-left: 3px solid #ff6b35;'>
+<div style='font-size: 0.85em; font-weight: bold; color: #ff6b35;'>req_000015</div>
+<div style='font-size: 0.85em;'>The update shall saturate at the counter bounds and shall not invalidate other entries.</div>
+<div style='font-size: 0.75em; color: #666; margin-top: 2px;'>Modality: shall • Confidence: 0.70</div>
+</div>
+<div style='background-color: #f5f5f5; padding: 6px; margin: 4px 0; border-left: 3px solid #ff6b35;'>
+<div style='font-size: 0.85em; font-weight: bold; color: #ff6b35;'>req_000016</div>
+<div style='font-size: 0.85em;'>If the indexed entry exists, the BHT shall return the current prediction in bht_prediction_o aligned to</div>
+<div style='font-size: 0.75em; color: #666; margin-top: 2px;'>Modality: shall • Confidence: 0.70</div>
+</div>
+<div style='background-color: #f5f5f5; padding: 6px; margin: 4px 0; border-left: 3px solid #ff6b35;'>
+<div style='font-size: 0.85em; font-weight: bold; color: #ff6b35;'>req_000017</div>
+<div style='font-size: 0.85em;'>If the indexed entry does not exist, the BHT shall return a default not-taken prediction (unless</div>
+<div style='font-size: 0.75em; color: #666; margin-top: 2px;'>Modality: shall • Confidence: 0.70</div>
+</div>
 </td>
 </tr>
 </table>
@@ -62,14 +166,25 @@
 <table>
 <tr>
 <td width="60%" style="vertical-align: top; border: 1px solid #ddd; padding: 0;">
-<img src="scripts/artifacts/annotated_latest-4.png" width="100%" />
+<img src="scripts/artifacts/visuals_pipeline/annotated_p4_enhanced.png" width="100%" />
 </td>
-<td width="40%" style="vertical-align: top; padding: 14px; background-color: #fff;">
-<h4>Sections</h4>
-<div><a href="#section-s3">[S3]</a> 4.1.5. TABLE MERGE SCENARIOS (Simulated)</div>
-<h4>Tables</h4>
-<div><a href="#table-t3">[T3]</a> PC Range | Outcome | Count | Accuracy</div>
-<div style='font-size: 0.9em; color: #555;'>7×4 • density 1.00 • acc 100%</div>
+<td width="40%" style="vertical-align: top; padding: 15px; background-color: #fff;">
+<div style='font-size:0.9em; color:#666; margin-bottom:8px;'>Order on page: S1 → T1 (top to bottom)</div>
+<div><span style='display:inline-block;width:10px;height:10px;border-radius:50%;background:#198754;margin-right:6px;'></span><strong>[S1] 4.1.5. TABLE MERGE SCENARIOS (Simulated)</strong></div>
+<hr style='border: 0; border-top: 1px solid #eee; margin: 8px 0;'>
+<div><span style='display:inline-block;width:10px;height:10px;border-radius:50%;background:#dc3545;margin-right:6px;'></span><strong>[T1] INFER: PC Range | Outcome | Count | Accuracy</strong></div>
+<div style='font-size:0.85em;color:#555;'>page 4 • bbox [53.519999999999996, 471.6970614965162, 514.56, 598.858527718873]</div>
+<div style='font-size: 0.9em; color: #555; margin-bottom: 4px;'>Dim: 7x4 | Density: 1.00</div>
+<div style='font-size:0.8em;color:#666;'>Camelot acc: 100.00</div>
+<div style='font-size: 0.8em; font-family: monospace; color: #666;'>Cols: 0, 1, 2, 3</div>
+<div style='font-size: 0.8em; font-family: monospace; background: #f5f5f5; padding: 2px;'>PC Range | Outcome | Count | Accuracy</div>
+<hr style='border: 0; border-top: 1px solid #eee; margin: 8px 0;'>
+<h4>Requirements</h4>
+<div style='background-color: #f5f5f5; padding: 6px; margin: 4px 0; border-left: 3px solid #ff6b35;'>
+<div style='font-size: 0.85em; font-weight: bold; color: #ff6b35;'>req_000019</div>
+<div style='font-size: 0.85em;'>All constraints specified by Table 1 shall hold for the document. Columns: 0 | 1 | 2 | 3.</div>
+<div style='font-size: 0.75em; color: #666; margin-top: 2px;'>Modality: shall • Confidence: 0.60</div>
+</div>
 </td>
 </tr>
 </table>
@@ -78,80 +193,75 @@
 <table>
 <tr>
 <td width="60%" style="vertical-align: top; border: 1px solid #ddd; padding: 0;">
-<img src="scripts/artifacts/annotated_latest-5.png" width="100%" />
+<img src="scripts/artifacts/visuals_pipeline/annotated_p5_enhanced.png" width="100%" />
 </td>
-<td width="40%" style="vertical-align: top; padding: 14px; background-color: #fff;">
-<h4>Headers</h4>
-<div>Header candidate overlay (page 5) at bbox [54.0, 295.07, 174.15, 306.57]</div>
-<h4>Tables</h4>
-<div><a href="#table-t4">[T4]</a> 0x8000_0600-0x8000_06FF | not-taken | 67 | 85.2%</div>
-<div style='font-size: 0.9em; color: #555;'>7×4 • density 1.00 • acc 100%</div>
-<div><a href="#table-t5">[T5]</a> Signal | Description | Width</div>
-<div style='font-size: 0.9em; color: #555;'>5×3 • density 1.00 • acc 97.9%</div>
-<div><a href="#table-t6">[T6]</a> Parameter | Value | Notes</div>
-<div style='font-size: 0.9em; color: #555;'>5×3 • density 1.00 • acc 100%</div>
-<h4>Sections</h4>
-<div><a href="#section-s3">[S3]</a> 4.1.5. TABLE MERGE SCENARIOS (Simulated)</div>
+<td width="40%" style="vertical-align: top; padding: 15px; background-color: #fff;">
+<div style='font-size:0.9em; color:#666; margin-bottom:8px;'>Order on page: T1 → T2 → T3 (top to bottom)</div>
+<div><span style='display:inline-block;width:10px;height:10px;border-radius:50%;background:#dc3545;margin-right:6px;'></span><strong>[T1] INFER: 0x8000_0600-0x8000_06FF | not-taken | 67 | 85.2%</strong></div>
+<div style='font-size:0.85em;color:#555;'>page 5 • bbox [53.519999999999996, 520.1623750378673, 514.56, 647.083913965465]</div>
+<div style='font-size: 0.9em; color: #555; margin-bottom: 4px;'>Dim: 7x4 | Density: 1.00</div>
+<div style='font-size:0.8em;color:#666;'>Camelot acc: 100.00</div>
+<div style='font-size: 0.8em; font-family: monospace; color: #666;'>Cols: 0, 1, 2, 3</div>
+<div style='font-size: 0.8em; font-family: monospace; background: #f5f5f5; padding: 2px;'>0x8000_0600-0x8000_0 | not-taken | 67 | 85.2%</div>
+<hr style='border: 0; border-top: 1px solid #eee; margin: 8px 0;'>
+<div><span style='display:inline-block;width:10px;height:10px;border-radius:50%;background:#dc3545;margin-right:6px;'></span><strong>[T2] INFER: Signal | Description | Width</strong></div>
+<div style='font-size:0.85em;color:#555;'>page 5 • bbox [53.519999999999996, 347.65465010602844, 554.64, 438.8270221145107]</div>
+<div style='font-size: 0.9em; color: #555; margin-bottom: 4px;'>Dim: 5x3 | Density: 1.00</div>
+<div style='font-size:0.8em;color:#666;'>Camelot acc: 97.90</div>
+<div style='font-size: 0.8em; font-family: monospace; color: #666;'>Cols: 0, 1, 2</div>
+<div style='font-size: 0.8em; font-family: monospace; background: #f5f5f5; padding: 2px;'>Signal | Description | Width</div>
+<hr style='border: 0; border-top: 1px solid #eee; margin: 8px 0;'>
+<div><span style='display:inline-block;width:10px;height:10px;border-radius:50%;background:#dc3545;margin-right:6px;'></span><strong>[T3] INFER: Parameter | Value | Notes</strong></div>
+<div style='font-size:0.85em;color:#555;'>page 5 • bbox [53.519999999999996, 218.5737655255983, 554.64, 309.50621023932143]</div>
+<div style='font-size: 0.9em; color: #555; margin-bottom: 4px;'>Dim: 5x3 | Density: 1.00</div>
+<div style='font-size:0.8em;color:#666;'>Camelot acc: 100.00</div>
+<div style='font-size: 0.8em; font-family: monospace; color: #666;'>Cols: 0, 1, 2</div>
+<div style='font-size: 0.8em; font-family: monospace; background: #f5f5f5; padding: 2px;'>Parameter | Value | Notes</div>
+<hr style='border: 0; border-top: 1px solid #eee; margin: 8px 0;'>
+<h4>Requirements</h4>
+<div style='background-color: #f5f5f5; padding: 6px; margin: 4px 0; border-left: 3px solid #ff6b35;'>
+<div style='font-size: 0.85em; font-weight: bold; color: #ff6b35;'>req_000018</div>
+<div style='font-size: 0.85em;'>Table 4-2 and Table 4-3 are distinct datasets and shall not be merged.</div>
+<div style='font-size: 0.75em; color: #666; margin-top: 2px;'>Modality: shall • Confidence: 0.70</div>
+</div>
 </td>
 </tr>
 </table>
 
 ## Section Hierarchy
-- <a id="section-s1"></a><strong>4.1.5.4. BHT (Branch History Table) submodule</strong> (pages 1–2)
-  - <a id="section-s2"></a><strong>4.1.5.4.1. REQUIREMENTS (Simulated)</strong> (page 3)
-- <a id="section-s3"></a><strong>4.1.5. TABLE MERGE SCENARIOS (Simulated)</strong> (pages 4–5)
+      - 0.0.0.1 4.1.5.4. BHT (Branch History Table) submodule (pages 1-2)
+          - 0.0.0.1.0.1 4.1.5.4.1. REQUIREMENTS (Simulated) (page 3)
+    - 0.0.1 4.1.5. TABLE MERGE SCENARIOS (Simulated) (pages 4-5)
 
-## Table Catalog (metrics & links)
-- <a id="table-t1"></a>**T1 — Signal | IO | Description | Connection | Type** (page 1)  
-  Shape 1×5 • density 1.00 • acc 100% • bbox 469.9×74.4 pts • image `data/results/latest_run/05_table_extractor/image_output/page_1_table_1.png`  
-  Preview: `Signal | IO | Description | Connection | Type`
-- <a id="table-t2"></a>**T2 — clk_i | in | Subsystem Clock | SUBSYSTEM | logic** (page 2)  
-  Shape 4×5 • density 1.00 • acc 100% • bbox 469.9×406.9 pts • image `data/results/latest_run/05_table_extractor/image_output/page_2_table_1.png`  
-  Preview: `clk_i | in | Subsystem Clock | SUBSYSTEM | logic`
-- <a id="table-t3"></a>**T3 — PC Range | Outcome | Count | Accuracy** (page 4)  
-  Shape 7×4 • density 1.00 • acc 100% • bbox 461.0×127.2 pts • image `data/results/latest_run/05_table_extractor/image_output/page_4_table_1.png`  
-  Preview: `PC Range | Outcome | Count | Accuracy`
-- <a id="table-t4"></a>**T4 — 0x8000_0600-0x8000_06FF | not-taken | 67 | 85.2%** (page 5)  
-  Shape 7×4 • density 1.00 • acc 100% • bbox 461.0×126.9 pts • image `data/results/latest_run/05_table_extractor/image_output/page_5_table_1.png`  
-  Preview: `0x8000_0600-0x8000_06FF | not-taken | 67 | 85.2%`
-- <a id="table-t5"></a>**T5 — Signal | Description | Width** (page 5)  
-  Shape 5×3 • density 1.00 • acc 97.9% • bbox 501.1×91.2 pts • image `data/results/latest_run/05_table_extractor/image_output/page_5_table_2.png`  
-  Preview: `Signal | Description | Width`
-- <a id="table-t6"></a>**T6 — Parameter | Value | Notes** (page 5)  
-  Shape 5×3 • density 1.00 • acc 100% • bbox 501.1×90.9 pts • image `data/results/latest_run/05_table_extractor/image_output/page_5_table_3.png`  
-  Preview: `Parameter | Value | Notes`
+## Table Data (full)
+- (p1) INFER: Signal | IO | Description | Connection | Type: 1x5, density=1.00, camelot_acc=100.00
+- (p2) INFER: clk_i | in | Subsystem Clock | SUBSYSTEM | logic: 4x5, density=1.00, camelot_acc=100.00
+- (p4) INFER: PC Range | Outcome | Count | Accuracy: 7x4, density=1.00, camelot_acc=100.00
+- (p5) INFER: Parameter | Value | Notes: 5x3, density=1.00, camelot_acc=100.00
+- (p5) INFER: Signal | Description | Width: 5x3, density=1.00, camelot_acc=97.90
+- (p5) INFER: 0x8000_0600-0x8000_06FF | not-taken | 67 | 85.2%: 7x4, density=1.00, camelot_acc=100.00
 
-**Deduping note:** Previous duplicates came from an uninitialized overlap flag. Now we: (1) stick to the last successful *lattice* strategy per page, (2) fall back only when the page is empty/fragmented, and (3) apply a final IOU≥0.70 guard that keeps the higher-score table. Result: 6 unique tables (matches gold target).
-
-## Figures
-- <a id="figure-f1"></a>**F1 — BHT State Transition Diagram** (page 1)  
-  bbox [73.5, 323.9, 541.5, 504.8]; image `data/results/latest_run/06_figure_extractor/image_output/figure_001.png`  
-  Summary: four-state two-bit saturating counter for branch prediction.
-
-## Requirements
-- <a id="req-r1"></a>**R1 — Table-derived requirement (page 2)**  
-  Text: “All constraints specified by Table 1 shall hold for the document. Columns: Signal | IO | Description | Connection | Type.”  
-  From table T2 (bbox [72.0, 313.11, 541.92, 720.02]); modality: shall; confidence 0.6.
-
-## Layout Sketcher (textual)
-- **S1 layout (pages 1–2, grid=12, cols=3):** 55 text blocks, 2 tables, 1 figure. Largest elements: Table T2 (page 2, area≈191k), Figure F1 (page 1, area≈84k), main paragraph block (area≈70k). Columns overlap lightly (overlapped=true on some text).  
-  Assets: T1 `page_1_table_1.png`, T2 `page_2_table_1.png`, F1 `figure_001.png`.
-- **S2 layout (page 3, grid=12, cols=2):** 35 text blocks, no tables/figures. Tall narrow paragraphs dominate (top area≈13k). Good for linear reflow.
-- **S3 layout (pages 4–5, grid=12, cols=3):** 26 text blocks, 4 tables. Largest tables: T3 (page 4, area≈58.6k), T4 (page 5, area≈58.5k); followed by text block (area≈48k). Assets: T3 `page_4_table_1.png`, T4 `page_5_table_1.png`, T5 `page_5_table_2.png`, T6 `page_5_table_3.png`.
-
-## Reflowed JSON (flattened for ArangoDB)
-- Source: `data/results/latest_run/10_arangodb_exporter/json_output/10_flattened_data.json`
-- Objects exported: 53 (text + tables + figure) with summaries attached; see `10_export_confirmation.json`.
-- Sample (pretty-printed):
-
-```json
-[
-  {"_key":"0e8e2163bd32ef50e9b8a42a6d94d4bf","page":0,"object_type":"Text","section_title":"4.1.5.4. BHT (Branch History Table) submodule","text_preview":"4.1.5.4. BHT (Branch History Table) submodule"},
-  {"_key":"4b27a3c36d6f037e8a3d8384fe65ded9","page":2,"object_type":"Table","section_title":"4.1.5.4. BHT (Branch History Table) submodule","text_preview":"clk_i | in | Subsystem Clock | SUBSYSTEM | logic\n--- | --- | --- | --- | ---\nvpc"},
-  {"_key":"de89b2d4780869a60c62d8b8fbb1851f","page":0,"object_type":"Figure","section_title":"4.1.5.4. BHT (Branch History Table) submodule","text_preview":"Figure: BHT State Transition Diagram\nThe figure illustrates a four-state two-bit"}
-]
-```
-
-## Notes
-- Requirements miner (with `--extract-requirements`) extracted 1 requirement (`req_000000`) from the page-2 interface table (Signal|IO|Description|Connection|Type). `07_requirements.json` now populated; Arango export includes it.
-- Annotated previews for all pages are saved under `scripts/artifacts/annotated_latest-*.png` for visual confirmation.
+## Layout Sketcher (text)
+      - Section 0.0.0.1: 4.1.5.4. BHT (Branch History Table) submodule (pages 1-2)
+        - Page 1: text_blocks=18, tables=1, figures=1
+          - Table: 1x5, density=1.00, acc=100.00000000000001, area=34951.45664950015, title=INFER: Signal | IO | Description | Connection | Type
+        - Page 2: text_blocks=37, tables=1, figures=0
+          - Table: 4x5, density=1.00, acc=100.0, area=191218.2918630718, title=INFER: clk_i | in | Subsystem Clock | SUBSYSTEM | logic
+          - Text col 0: blocks=2, chars=24, snippet="clk_i in Subsyste … logic"
+          - Text col 1: blocks=1, chars=8, snippet="m Clock"
+          - Text col 2: blocks=2, chars=11, snippet="SUBSY … STEM"
+          - Section 0.0.0.1.0.1: 4.1.5.4.1. REQUIREMENTS (Simulated) (page 3)
+            - Page 3: text_blocks=35, tables=0, figures=0
+              - Text col 0: blocks=1, chars=36, snippet="4.1.5.4.1. REQUIREMENTS (Simulated)"
+              - Text col 1: blocks=1, chars=203, snippet="This simulated section provides formal, hardware-oriented re … on provides formal, hardware-oriented requirements for the …"
+              - Text col 0: blocks=2, chars=51, snippet="predictions to the front end. … Formal Requirements:"
+    - Section 0.0.1: 4.1.5. TABLE MERGE SCENARIOS (Simulated) (pages 4-5)
+      - Page 4: text_blocks=8, tables=1, figures=0
+        - Table: 7x4, density=1.00, acc=99.99999999999997, area=58626.522387155375, title=INFER: PC Range | Outcome | Count | Accuracy
+      - Page 5: text_blocks=18, tables=3, figures=0
+        - Table: 7x4, density=1.00, acc=99.99999999999997, area=45568.066694940935, title=INFER: 0x8000_0600-0x8000_06FF | not-taken | 67 | 85.2%
+        - Table: 5x3, density=1.00, acc=97.89541724496593, area=45688.29906089064, title=INFER: Signal | Description | Width
+        - Table: 5x3, density=1.00, acc=100.00000000000001, area=58515.90630717963, title=INFER: Parameter | Value | Notes
+        - Text col 2: blocks=4, chars=482, snippet="4.1.5. TABLE MERGE SCENARIOS (Simulated) - Continued … 6FF not-taken 67 85.2% 0x8000_0700-0x8000_07FF taken 189 94…"
+        - Text col 0: blocks=2, chars=51, snippet="Non-Mergeable Tables: … Table 4-2. Interface Signals"
+        - Text col 2: blocks=4, chars=280, snippet="Paragraph for Table 4-1 (continued): Additional rows belong  … clk_i Subsystem clock 1 rst_ni Async reset (active-low) 1"
