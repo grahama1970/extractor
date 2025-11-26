@@ -284,3 +284,9 @@ whether a VPC_i address hits and shall return the taken/no...</div>
         - Text col 2: blocks=4, chars=280, y_norm=0.005050505050505051, order=2, snippet="Paragraph for Table 4-1 (continued): Add … lock 1 rst_ni Async reset (active-low) 1"
         - Text col 0: blocks=1, chars=26, y_norm=0.007575757575757576, order=3, snippet="Table 4-3. BHT Parameters"
         - Text col 2: blocks=7, chars=403, y_norm=0.007575757575757576, order=4, snippet="vpc_i Virtual PC input CVA6Cfg.VLEN … ry distinct from interface signals abov…"
+
+## Pipeline Step Status
+- **06b_layout_sketcher**: produced section/page layout summaries (see above).
+- **07_reflow_section**: completed; 3 reflowed sections (`data/results/pipeline/07_reflow_section/json_output/07_reflowed.json`).
+- **08_lean4_theorem_prover**: ran with `skip_proving=True`; 20 requirements processed, 0 proofs attempted (stub), output at `data/results/pipeline/08_lean4_theorem_prover/json_output/08_theorems.json`.
+- **09_section_summarizer**: not run (module lacks a `run` entry point in this environment); no fresh summaries generated.
