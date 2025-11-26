@@ -296,4 +296,15 @@ whether a VPC_i address hits and shall return the taken/no...</div>
 - Requirements processed: 20; proved: 12; failed: 9.
 - Proof results file: `data/results/pipeline/08_lean4_theorem_prover/json_output/08_theorems.json` (see `proof_results` array).
 - Sample failed reason: incomplete requirement text (“REQ-BHT-9…”) led to prompt error; suggested reformulation is recorded in the result payload.
-- Sample proved items: present in `proof_results` with `success=true` and Lean code attached.
+- Sample proved items (from `proof_results`, success=true):
+  - If the indexed entry exists, the BHT shall return the current prediction in bht_prediction… (4.1.5.4.1 REQUIREMENTS)
+  - If the indexed entry does not exist, the BHT shall return a default not-taken prediction… (4.1.5.4.1 REQUIREMENTS)
+  - REQ-BHT-10: Prediction datapath shall not introduce structural hazards… (4.1.5.4.1 REQUIREMENTS)
+  - REQ-BHT-6: clk_i and rst_ni shall be the only clock/reset inputs… (4.1.5.4.1 REQUIREMENTS)
+  - VPC_i width shall match CVA6Cfg.VLEN. (4.1.5.4.1 REQUIREMENTS)
+- Sample failed items (success=false):
+  - REQ-BHT-9: All signal widths/types shall be consistent… (4.1.5.4.1 REQUIREMENTS) — text incomplete.
+  - REQ-BHT-5: The BHT shall not be flushed by pipeline events. (4.1.5.4.1 REQUIREMENTS)
+  - REQ-BHT-1: BHTDepth entries indexed by lower bits… (4.1.5.4.1 REQUIREMENTS)
+  - Table 4-2 and Table 4-3 are distinct datasets and shall not be merged. (4.1.5. TABLE MERGE SCENARIOS)
+  - REQ-BHT-7: instr_scan pre-decode shall indicate VPC hits… (4.1.5.4.1 REQUIREMENTS)
