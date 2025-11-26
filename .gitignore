@@ -304,6 +304,28 @@ deprecated/
 /logs/
 /tmp/
 
+# Pipeline and artifact outputs (ignore; generated per run)
+/scripts/artifacts/
+/data/results/
+/local/results/
+/out_fast/
+/workspace/
+/run_*/
+
+# Transient screenshots and dumps
+/image-*.png
+
+# Tool outputs (optional, noisy)
+/bench/results/
+/.mcp*
+/.claude/
+/conf/*.json
+/config/pipeline_invariants.json
+
+# Node/npm lockfiles from auxiliary tools/prototypes
+/package-lock.json
+/prototypes/**/package-lock.json
+
 # Generated artifacts and pipeline outputs
 /scripts/artifacts/
 /local/results/
