@@ -18,7 +18,9 @@ import time
 
 try:
     import psutil  # type: ignore
-except Exception:  # pragma: no cover
+except Exception as exc:
+    log_stage_error('01_annotation_processor', exc, {'context': '01'})
+    raise
     psutil = None  # type: ignore
 
 try:
@@ -27,6 +29,7 @@ except ImportError:
     print("PyMuPDF (fitz) not installed. Stage 01 requires it.", file=sys.stderr)
     raise
 from loguru import logger
+from extractor.pipeline.utils.reliability import log_stage_error
 from extractor.pipeline.utils.scillm_router import get_text_router
 from extractor.pipeline.utils.debug_utils import log_timing
 from extractor.pipeline.steps.scillm_preflight_validator import (
@@ -75,7 +78,9 @@ def _load_relevant_rules() -> Dict[str, Any]:
         if here.exists():
             with open(here, "r") as f:
                 return cast(Dict[str, Any], json.load(f))
-    except Exception:
+    except Exception as exc:
+        log_stage_error('01_annotation_processor', exc, {'context': '01'})
+        raise
         pass
     # Defaults – small, maintainable ruleset
     return {
@@ -132,7 +137,9 @@ def _compute_relevant_to_for_annotation(a: Dict[str, Any]) -> List[str]:
             inf = interp.get("inferred_object") or {}
             if isinstance(inf, dict):
                 inferred_type = str(inf.get("type") or "").lower()
-        except Exception:
+        except Exception as exc:
+            log_stage_error('01_annotation_processor', exc, {'context': '01'})
+            raise
             pass
         texts = [note, echo] + labels
         # 1) keyword rules
@@ -144,7 +151,9 @@ def _compute_relevant_to_for_annotation(a: Dict[str, Any]) -> List[str]:
                     for s in st or []:
                         if s not in stages:
                             stages.append(s)
-            except Exception:
+            except Exception as exc:
+                log_stage_error('01_annotation_processor', exc, {'context': '01'})
+                raise
                 continue
         # 2) inferred object type
         if inferred_type:
@@ -167,9 +176,13 @@ def _compute_relevant_to_for_annotation(a: Dict[str, Any]) -> List[str]:
                     for s in rule.get("stages") or []:
                         if s not in stages:
                             stages.append(s)
-            except Exception:
+            except Exception as exc:
+                log_stage_error('01_annotation_processor', exc, {'context': '01'})
+                raise
                 continue
-    except Exception:
+    except Exception as exc:
+        log_stage_error('01_annotation_processor', exc, {'context': '01'})
+        raise
         return stages
     return sorted(stages)
 
@@ -320,7 +333,9 @@ def _collect_font_sizes(blocks: List[Dict[str, Any]]) -> List[float]:
                     sz = float(sp.get("size")) if sp.get("size") is not None else None
                     if sz:
                         sizes.append(sz)
-                except Exception:
+                except Exception as exc:
+                    log_stage_error('01_annotation_processor', exc, {'context': '01'})
+                    raise
                     continue
     return sizes
 
@@ -346,7 +361,9 @@ def _union_bbox(blocks: List[Dict[str, Any]]) -> Optional[fitz.Rect]:
                 continue
             r = fitz.Rect(b)
             rect = r if rect is None else (rect | r)
-        except Exception:
+        except Exception as exc:
+            log_stage_error('01_annotation_processor', exc, {'context': '01'})
+            raise
             continue
     return rect
 
@@ -367,7 +384,9 @@ def _compute_alignment(page_rect: fitz.Rect, inner_rect: Optional[fitz.Rect]) ->
         if inner_rect.x1 >= page_rect.x1 - threshold:
             return "right"
         return "left"
-    except Exception:
+    except Exception as exc:
+        log_stage_error('01_annotation_processor', exc, {'context': '01'})
+        raise
         return None
 
 
@@ -381,13 +400,17 @@ def _compute_spacing(
             # nearest above is the first (sorted earlier during collection)
             b = fitz.Rect(above_blocks[0].get("bbox"))
             spacing_above = max(0.0, original_rect.y0 - b.y1)
-    except Exception:
+    except Exception as exc:
+        log_stage_error('01_annotation_processor', exc, {'context': '01'})
+        raise
         spacing_above = None
     try:
         if below_blocks:
             b = fitz.Rect(below_blocks[0].get("bbox"))
             spacing_below = max(0.0, b.y0 - original_rect.y1)
-    except Exception:
+    except Exception as exc:
+        log_stage_error('01_annotation_processor', exc, {'context': '01'})
+        raise
         spacing_below = None
     return {"spacing_above": spacing_above, "spacing_below": spacing_below}
 
@@ -470,7 +493,9 @@ def _gridline_features(image_path: str) -> Dict[str, Optional[float]]:
         feats["gridlines_v_density"] = v_density
         # Conservative threshold: both present but small
         feats["gridlines_detected"] = bool(h_density > 0.002 and v_density > 0.002)
-    except Exception:
+    except Exception as exc:
+        log_stage_error('01_annotation_processor', exc, {'context': '01'})
+        raise
         pass
     return feats
 
@@ -479,7 +504,9 @@ def extract_annotations_data(pdf_path: Path, config: Config) -> List[Dict[str, A
     annots_out = []
     try:
         doc = fitz.open(pdf_path)
-    except Exception as e:
+    except Exception as exc:
+        log_stage_error('01_annotation_processor', exc, {'context': '01'})
+        raise
         logger.exception(f"Failed to open PDF {pdf_path}")
         raise RuntimeError(f"Stage 01 failed to open PDF: {pdf_path}") from e
 
@@ -501,12 +528,16 @@ def extract_annotations_data(pdf_path: Path, config: Config) -> List[Dict[str, A
                 try:
                     info = getattr(a, "info", None) or {}
                     note = info.get("content") or info.get("title") or info.get("subject")
-                except Exception:
+                except Exception as exc:
+                    log_stage_error('01_annotation_processor', exc, {'context': '01'})
+                    raise
                     note = None
                 if not note:
                     try:
                         note = getattr(a, "contents", None)
-                    except Exception:
+                    except Exception as exc:
+                        log_stage_error('01_annotation_processor', exc, {'context': '01'})
+                        raise
                         note = None
                 freetext_notes.append({"rect": a.rect, "note": note})
             page_text_dict = page.get_text("dict")  # type: ignore[attr-defined]
@@ -543,7 +574,9 @@ def extract_annotations_data(pdf_path: Path, config: Config) -> List[Dict[str, A
                             new_rect = new_rect | blk_rect
                     # Clamp to page bounds
                     expanded_rect = new_rect & page.rect
-                except Exception:
+                except Exception as exc:
+                    log_stage_error('01_annotation_processor', exc, {'context': '01'})
+                    raise
                     pass
                 context_blocks = _get_context_blocks(
                     original_rect, expanded_rect, page_text_dict, config.context_blocks
@@ -576,7 +609,9 @@ def extract_annotations_data(pdf_path: Path, config: Config) -> List[Dict[str, A
                         if d < best_d and d <= 200:
                             best_d = d
                             nearest_note = ft.get("note")
-                except Exception:
+                except Exception as exc:
+                    log_stage_error('01_annotation_processor', exc, {'context': '01'})
+                    raise
                     nearest_note = None
 
                 # Parse machine-readable keys from nearest_note if present
@@ -607,41 +642,110 @@ def extract_annotations_data(pdf_path: Path, config: Config) -> List[Dict[str, A
                 inside_plain = _extract_plain_text(inside_blocks) or ""
                 numbering = _detect_numbering(inside_plain)
                 grid = _gridline_features(str(img_path))
-                annots_out.append(
-                    {
-                        "id": f"p{pno}_a{idx}",
-                        "page": pno,
-                        "type": annot.type[1],
-                        "original_rect": [
-                            float(original_rect.x0),
-                            float(original_rect.y0),
-                            float(original_rect.x1),
-                            float(original_rect.y1),
-                        ],
-                        "expanded_rect": [
-                            float(expanded_rect.x0),
-                            float(expanded_rect.y0),
-                            float(expanded_rect.x1),
-                            float(expanded_rect.y1),
-                        ],
-                        "inside_blocks": inside_blocks,
-                        "above_blocks": above_blocks,
-                        "below_blocks": below_blocks,
-                        "image_path": str(img_path),
-                        "human_note": nearest_note,
-                        "machine_note": machine_note if machine_note else None,
-                        "computed_features": {
-                            "avg_font_size_inside": avg_size_inside,
-                            "avg_font_size_above": avg_size_above,
-                            "avg_font_size_below": avg_size_below,
-                            "bold_detected_inside": bold_inside,
-                            "alignment": align,
-                            **spacing,
-                            **numbering,
-                            **grid,
                         },
                     }
                 )
+    
+    # ------------------------------------------------------------------
+    # SIDECAR INGESTION (Interactive Workflow)
+    # ------------------------------------------------------------------
+    try:
+        sidecar_path = pdf_path.parent / f".{pdf_path.name}.annotations.json"
+        if sidecar_path.exists():
+            logger.info(f"Found sidecar annotations: {sidecar_path}")
+            sidecar_data = json.loads(sidecar_path.read_text())
+            boxes_by_page = sidecar_data.get("boxes_by_page", {})
+            
+            # Iterate through pages in the sidecar
+            for p_str, boxes in boxes_by_page.items():
+                try:
+                    pno = int(p_str) - 1  # UI uses 1-based, fitz uses 0-based
+                except ValueError:
+                    continue
+                
+                if pno < 0 or pno >= len(doc):
+                    continue
+                    
+                page = doc.load_page(pno)
+                page_text_dict = page.get_text("dict")
+                
+                for idx, box in enumerate(boxes):
+                    # Convert UI box to fitz.Rect
+                    # UI: [x, y, w, h] (normalized or absolute? Assuming absolute based on server.py)
+                    # server.py uses: x * pw, y * ph... wait, server.py implies normalized [x, y, w, h]
+                    # Let's verify server.py logic: 
+                    # rect = fitz.Rect(x * pw, y * ph, (x + w) * pw, (y + h) * ph)
+                    # So UI sends NORMALIZED coordinates [0..1]
+                    
+                    bbox = box.get("bounding_box") or box.get("bbox")
+                    if not bbox or len(bbox) != 4:
+                        continue
+                        
+                    nx, ny, nw, nh = bbox
+                    pw, ph = page.rect.width, page.rect.height
+                    
+                    # Denormalize to PDF points
+                    x0 = nx * pw
+                    y0 = ny * ph
+                    x1 = (nx + nw) * pw
+                    y1 = (ny + nh) * ph
+                    
+                    rect = fitz.Rect(x0, y0, x1, y1) & page.rect
+                    
+                    # Create a synthetic annotation object for consistency
+                    # We treat these as "high confidence" human notes
+                    human_note = box.get("label") or box.get("type") or "User Annotation"
+                    
+                    # Reuse context extraction logic
+                    # For sidecar, we skip expansion/heuristics and trust the box
+                    context_blocks = _get_context_blocks(
+                        rect, rect, page_text_dict, config.context_blocks
+                    )
+                    
+                    # Render image for this box
+                    matrix = fitz.Matrix(config.render_dpi / 72, config.render_dpi / 72)
+                    pix = page.get_pixmap(matrix=matrix, clip=rect, annots=False)
+                    
+                    img_dir = config.output_dir / "image_output"
+                    img_dir.mkdir(parents=True, exist_ok=True)
+                    # Use a distinct ID prefix for sidecar items
+                    img_path = img_dir / f"sidecar_p{pno}_a{idx}.png"
+                    pix.save(str(img_path))
+                    
+                    # Compute features (subset)
+                    inside_blocks = context_blocks["inside"]
+                    inside_plain = _extract_plain_text(inside_blocks) or ""
+                    numbering = _detect_numbering(inside_plain)
+                    
+                    annots_out.append({
+                        "id": f"sidecar_p{pno}_a{idx}",
+                        "page": pno,
+                        "type": "Sidecar", # Distinguish from "FreeText" etc.
+                        "original_rect": [rect.x0, rect.y0, rect.x1, rect.y1],
+                        "expanded_rect": [rect.x0, rect.y0, rect.x1, rect.y1], # No expansion for user boxes
+                        "inside_blocks": inside_blocks,
+                        "above_blocks": context_blocks["above"],
+                        "below_blocks": context_blocks["below"],
+                        "image_path": str(img_path),
+                        "human_note": human_note, # The label from the UI
+                        "machine_note": {"type": box.get("type"), "id": box.get("instance_id")},
+                        "computed_features": {
+                            "avg_font_size_inside": None, # Skip expensive checks for now
+                            "avg_font_size_above": None,
+                            "avg_font_size_below": None,
+                            "bold_detected_inside": _has_bold(inside_blocks),
+                            "alignment": None,
+                            **numbering,
+                            "gridlines_detected": False, # TODO: run grid check if needed
+                        },
+                        "provenance": "sidecar" # Explicit marker
+                    })
+                    
+    except Exception as exc:
+        log_stage_error('01_annotation_processor', exc, {'context': 'sidecar_ingestion'})
+        # Do not raise; failure to load sidecar should not block legacy pipeline
+        logger.warning(f"Failed to load sidecar annotations: {exc}")
+
     return annots_out
 
 
@@ -706,7 +810,9 @@ def create_clean_pdf(input_path: Path, output_dir: Path) -> str:
     clean_path = output_dir / f"{input_path.stem}_clean.pdf"
     try:
         doc = fitz.open(input_path)
-    except Exception as e:
+    except Exception as exc:
+        log_stage_error('01_annotation_processor', exc, {'context': '01'})
+        raise
         logger.error(f"Failed to open PDF {input_path} for cleaning: {e}")
         raise
 
@@ -755,7 +861,9 @@ async def process_pdf_pipeline(config: Config):
             resources["proc_rss_mb_start"] = int((proc.memory_info().rss or 0) / (1024 * 1024))
             vm = psutil.virtual_memory()
             resources["vmem_used_mb_start"] = int((getattr(vm, "used", 0)) / (1024 * 1024))
-    except Exception:
+    except Exception as exc:
+        log_stage_error('01_annotation_processor', exc, {'context': '01'})
+        raise
         pass
     # removed duplicate re-initialization of run_id/diagnostics/counters
     # Removed legacy LiteLLM cache init (SciLLM-only policy)
@@ -828,7 +936,9 @@ async def process_pdf_pipeline(config: Config):
             if "gpt-5" not in _model_l:
                 params["temperature"] = 0.1
             items.append(params)
-        except Exception as e:
+        except Exception as exc:
+            log_stage_error('01_annotation_processor', exc, {'context': '01'})
+            raise
             logger.exception(f"Failed to build messages for {d.get('id')}: {e}")
             d["interpretation"] = {"error": f"message_build_failed: {e}"}
             try:
@@ -842,7 +952,9 @@ async def process_pdf_pipeline(config: Config):
                     )
                 )
                 errors_count += 1
-            except Exception:
+            except Exception as exc:
+                log_stage_error('01_annotation_processor', exc, {'context': '01'})
+                raise
                 pass
             items.append(
                 {
@@ -897,7 +1009,9 @@ async def process_pdf_pipeline(config: Config):
                 },
             )
             return {"index": idx, "content": content}
-        except Exception as e:
+        except Exception as exc:
+            log_stage_error('01_annotation_processor', exc, {'context': '01'})
+            raise
             elapsed_ms = int((time.monotonic() - t0) * 1000)
             log_timing(
                 "01_annotation_processor",
@@ -938,13 +1052,17 @@ async def process_pdf_pipeline(config: Config):
                     {"items": len(items)},
                 )
             )
-        except Exception:
+        except Exception as exc:
+            log_stage_error('01_annotation_processor', exc, {'context': '01'})
+            raise
             pass
         if os.getenv("PIPELINE_FAIL_FAST", "0").lower() in ("1", "true", "yes", "y"):
             raise
         results = []
         t_llm_ms = 0
-    except Exception as e:
+    except Exception as exc:
+        log_stage_error('01_annotation_processor', exc, {'context': '01'})
+        raise
         msg_info = classify_llm_error(e)
         try:
             diagnostics.append(
@@ -956,7 +1074,9 @@ async def process_pdf_pipeline(config: Config):
                     {"items": len(items)},
                 )
             )
-        except Exception:
+        except Exception as exc:
+            log_stage_error('01_annotation_processor', exc, {'context': '01'})
+            raise
             pass
         if os.getenv("PIPELINE_FAIL_FAST", "0").lower() in ("1", "true", "yes", "y"):
             raise
@@ -981,7 +1101,9 @@ async def process_pdf_pipeline(config: Config):
                     _logger.info(
                         f"stage01_interpret: model={getattr(getattr(r,'request',object()),'model',None)} ok={r.exception is None}"
                     )
-                except Exception:
+                except Exception as exc:
+                    log_stage_error('01_annotation_processor', exc, {'context': '01'})
+                    raise
                     pass
                 if not isinstance(content_str, str) or not content_str.strip():
                     d["interpretation"] = {"error": "Empty content from LLM"}
@@ -1014,13 +1136,17 @@ async def process_pdf_pipeline(config: Config):
                             )
                         )
                         errors_count += 1
-                    except Exception:
+                    except Exception as exc:
+                        log_stage_error('01_annotation_processor', exc, {'context': '01'})
+                        raise
                         pass
                     d["interpretation"] = {
                         "error": "Invalid JSON response from LLM",
                         "raw_response": cleaned,
                     }
-            except Exception as e:
+            except Exception as exc:
+                log_stage_error('01_annotation_processor', exc, {'context': '01'})
+                raise
                 logger.exception(
                     f"Failed to parse LLM response for {d.get('id')}: {e}"
                 )
@@ -1060,7 +1186,9 @@ async def process_pdf_pipeline(config: Config):
             if gh > 0.01 and gv > 0.01:
                 table_score += 0.2
                 reasons.append("high_gridline_density")
-        except Exception:
+        except Exception as exc:
+            log_stage_error('01_annotation_processor', exc, {'context': '01'})
+            raise
             pass
         suggestion: Optional[Dict[str, Any]] = None
         if header_score > 0.4 or table_score > 0.4:
@@ -1076,7 +1204,9 @@ async def process_pdf_pipeline(config: Config):
     try:
         for d in data:
             d["relevant_to"] = _compute_relevant_to_for_annotation(d)
-    except Exception:
+    except Exception as exc:
+        log_stage_error('01_annotation_processor', exc, {'context': '01'})
+        raise
         pass
 
     # Create the cleaned PDF in the stage's output directory
@@ -1090,13 +1220,17 @@ async def process_pdf_pipeline(config: Config):
             resources["proc_rss_mb_end"] = int((proc.memory_info().rss or 0) / (1024 * 1024))
             vm = psutil.virtual_memory()
             resources["vmem_used_mb_end"] = int((getattr(vm, "used", 0)) / (1024 * 1024))
-    except Exception:
+    except Exception as exc:
+        log_stage_error('01_annotation_processor', exc, {'context': '01'})
+        raise
         pass
     try:
         samples = stop_resource_sampler(sampler) if sampler else []
         if samples:
             resources.setdefault("resource_samples", samples)
-    except Exception:
+    except Exception as exc:
+        log_stage_error('01_annotation_processor', exc, {'context': '01'})
+        raise
         pass
 
     timings = {
@@ -1138,14 +1272,18 @@ async def process_pdf_pipeline(config: Config):
                     {"count": len(data)},
                 )
             )
-    except Exception as e:
+    except Exception as exc:
+        log_stage_error('01_annotation_processor', exc, {'context': '01'})
+        raise
         try:
             diagnostics.append(
                 make_event(
                     "01_annotation_processor", "warning", "ann_index_build_failed", str(e), {}
                 )
             )
-        except Exception:
+        except Exception as exc:
+            log_stage_error('01_annotation_processor', exc, {'context': '01'})
+            raise
             pass
 
     # Save final JSON output
@@ -1196,7 +1334,9 @@ def run(
             rotation="1 week",
             retention="14 days",
         )
-    except Exception:
+    except Exception as exc:
+        log_stage_error('01_annotation_processor', exc, {'context': '01'})
+        raise
         pass
 
     cfg = Config(
@@ -1220,7 +1360,9 @@ def run(
         print(f"DEBUG: include_freetext = {cfg.include_freetext}")
     try:
         asyncio.run(process_pdf_pipeline(cfg))
-    except Exception as e:
+    except Exception as exc:
+        log_stage_error('01_annotation_processor', exc, {'context': '01'})
+        raise
         logger.exception("Stage 01 failed")
         print(f"Stage 01 failed: {e}")
         raise RuntimeError(f"Stage 01 failed: {e}")
@@ -1234,7 +1376,9 @@ if __name__ == "__main__":
         from dotenv import find_dotenv, load_dotenv
 
         load_dotenv(find_dotenv())
-    except Exception:
+    except Exception as exc:
+        log_stage_error('01_annotation_processor', exc, {'context': '01'})
+        raise
         pass
     import sys
     from pathlib import Path
@@ -1251,14 +1395,18 @@ if __name__ == "__main__":
     if argv[0] == "run":
         try:
             input_pdf = Path(argv[1])
-        except Exception:
+        except Exception as exc:
+            log_stage_error('01_annotation_processor', exc, {'context': '01'})
+            raise
             print("Missing input PDF", file=sys.stderr)
             sys.exit(2)
         out_dir = Path("data/results/pipeline")
         if "-o" in argv:
             try:
                 out_dir = Path(argv[argv.index("-o") + 1])
-            except Exception:
+            except Exception as exc:
+                log_stage_error('01_annotation_processor', exc, {'context': '01'})
+                raise
                 pass
     else:
         input_pdf = Path(argv[0])
@@ -1297,7 +1445,9 @@ def debug_bundle(
         if not pdf_path or not pdf_path.exists():
             raise ValueError("Bundle must include existing 'pdf' file path")
         opts = data.get("options") or {}
-    except Exception as e:
+    except Exception as exc:
+        log_stage_error('01_annotation_processor', exc, {'context': '01'})
+        raise
         print(f"Failed to load bundle: {e}")
         raise ValueError(f"Failed to load bundle: {e}")
 
@@ -1324,7 +1474,9 @@ def debug_bundle(
     )
     try:
         asyncio.run(process_pdf_pipeline(cfg))
-    except Exception as e:
+    except Exception as exc:
+        log_stage_error('01_annotation_processor', exc, {'context': '01'})
+        raise
         print(f"Stage 01 debug-bundle failed: {e}")
         raise RuntimeError(f"Stage 01 debug-bundle failed: {e}")
     print("Debug-bundle run completed for Stage 01")
