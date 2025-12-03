@@ -1,23 +1,31 @@
 from __future__ import annotations
 
+from extractor.pipeline.utils.reliability import log_stage_error
 from datetime import datetime
 from typing import Any, Dict, Optional
 import uuid
 
 try:
     import psutil  # type: ignore
-except Exception:  # pragma: no cover
+except Exception:
     psutil = None  # type: ignore
 # NVML (GPU) support optional
 try:
-    import pynvml  # type: ignore
-
-    _nvml_ok = True
+    # prefer nvidia-ml-py; fall back to pynvml if available
     try:
-        pynvml.nvmlInit()
+        import pynvml as _nvml  # type: ignore
     except Exception:
-        _nvml_ok = False
-except Exception:  # pragma: no cover
+        _nvml = None  # type: ignore
+    pynvml = _nvml
+    _nvml_ok = False
+    if pynvml is not None:
+        try:
+            pynvml.nvmlInit()
+            _nvml_ok = True
+        except Exception as exc:
+            log_stage_error('diagnostics.py', exc, {'context': 'diagnostics.py'})
+            _nvml_ok = False
+except Exception:
     pynvml = None  # type: ignore
     _nvml_ok = False
 
@@ -69,10 +77,12 @@ def snapshot_resources(prefix: str) -> Dict[str, Any]:
                     util.append(int(getattr(u, "gpu", 0)))
                 out[f"gpu_mem_used_mb_{prefix}"] = gpumem
                 out[f"gpu_util_percent_{prefix}"] = util
-            except Exception:
-                pass
-    except Exception:
-        pass
+            except Exception as exc:
+                log_stage_error('diagnostics.py', exc, {'context': 'diagnostics.py'})
+                raise
+    except Exception as exc:
+        log_stage_error('diagnostics.py', exc, {'context': 'diagnostics.py'})
+        raise
     return out
 
 
@@ -118,8 +128,9 @@ def start_resource_sampler(interval_sec: float = 2.0):
                         u = pynvml.nvmlDeviceGetUtilizationRates(h)
                         gpu_mem = int(mem.used / (1024 * 1024))
                         gpu_util = int(getattr(u, "gpu", 0))
-                except Exception:
-                    pass
+                except Exception as exc:
+                    log_stage_error('diagnostics.py', exc, {'context': 'diagnostics.py'})
+                    raise
                 samples.append(
                     {
                         "ts": iso_now(),
@@ -130,8 +141,9 @@ def start_resource_sampler(interval_sec: float = 2.0):
                         "gpu_util_percent": gpu_util,
                     }
                 )
-            except Exception:
-                pass
+            except Exception as exc:
+                log_stage_error('diagnostics.py', exc, {'context': 'diagnostics.py'})
+                raise
             _time.sleep(interval_sec)
 
     th = threading.Thread(target=_run, daemon=True)
@@ -148,7 +160,9 @@ def stop_resource_sampler(sampler):
             if th:
                 th.join(timeout=1.0)
             return sampler.get("samples", [])
-    except Exception:
+    except Exception as exc:
+        log_stage_error('diagnostics.py', exc, {'context': 'diagnostics.py'})
+        raise
         return []
     return []
 

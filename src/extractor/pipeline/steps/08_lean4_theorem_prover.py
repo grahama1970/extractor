@@ -3,21 +3,36 @@
 Pipeline Stage 8: Lean 4 Theorem Proving for Requirements
 =========================================================
 
-This stage processes reflowed sections from stage 07 to extract and prove
-formal requirements using the Lean 4 theorem prover.
+What this stage does (read before editing)
+- Input: Stage 07 reflowed sections (07_reflowed.json).
+- Step A: For each section, call SciLLM (Router, chutes/text, JSON mode) to extract
+  requirement candidates + table constraints (single LLM call per section).
+- Step B: Prove each requirement via:
+    * SciLLM extras `certainly_prove` (preferred paved path) — flow:
+        1) send requirement + strategy to Certainly/Lean4 bridge (LLM writes Lean code),
+        2) bridge returns multiple candidate theorems,
+        3) container compiles each in Lean4,
+        4) pick a compiling candidate (or return failure with compiler feedback).
+    * OR external CLI if `LEAN4_CLI_CMD` is set (stdin/file JSON/JSONL contracts).
+- Output: 08_theorems.json (proof results, diagnostics).
 
-Key Features:
-- Processes already-reflowed text from stage 07
-- Single LLM call per section to identify all requirements
-- Treats theorem prover as an LLM-like service (30-300s processing)
-- Returns success with proof OR detailed feedback for fixes
-- Handles text requirements, bullet lists, and table constraints
+Paved-path + safety
+- No manual headers or raw HTTP; SciLLM Router handles auth/headers.
+- Preflight enforced via `require_scillm_preflight`.
+- Heavy calls are throttled by MAX_CONCURRENT_LLM and MAX_CONCURRENT_LEAN4 envs.
+- Long-running proofs: 30–300s each; treat as LLM-like service.
+
+When this stage runs
+- Only when proving is enabled (not in deterministic/offline runs).
+- If Lean4 CLI or SciLLM extras aren’t available, proofs will fail; ensure one of them
+  is configured (LEAN4_CLI_CMD or certainly_prove via scillm extras).
 """
 
 import asyncio
 import hashlib
 import json
 import os
+import re
 import shlex
 import sys
 import tempfile
@@ -112,9 +127,10 @@ def sanity() -> int:
 # LLM Configuration
 LEAN4_MODEL = os.getenv("LEAN4_MODEL", "openai/gpt-5-mini")  # extraction LLM
 LEAN4_PROVER_MODEL = os.getenv("LEAN4_PROVER_MODEL", os.getenv("LEAN4_MODEL", "certainly/lean4"))
-MAX_CONCURRENT_LLM = int(os.getenv("MAX_CONCURRENT_LLM_CALLS", 5))
+# Throttle defaults to be gentle on Chutes / prover: lower by default
+MAX_CONCURRENT_LLM = int(os.getenv("MAX_CONCURRENT_LLM_CALLS", 1))
 MAX_CONCURRENT_LEAN4 = int(
-    os.getenv("MAX_CONCURRENT_LEAN4_CALLS", 2)
+    os.getenv("MAX_CONCURRENT_LEAN4_CALLS", 1)
 )  # Lean 4 is heavy (30-300s per theorem)
 
 # Optional external CLI integration (portable; avoids Docker coupling)
@@ -131,12 +147,22 @@ async def identify_requirements_in_section(
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """
     Single LLM call to identify ALL requirements in a reflowed section.
-    Processes the clean, reflowed text from stage 07.
+
+    Logic (keep in sync):
+    - Prefer `reflowed_text`; fallback to `merged_text` then `raw_text`.
+    - If no requirements are returned but the text contains modal verbs (shall/must/will),
+      treat that as a hard failure so the caller can surface a meaningful error.
+    - Uses SciLLM Router (chutes/text) with strict JSON mode.
     """
     async with semaphore:
         try:
             # Get reflowed text and tables from stage 07 output
-            reflowed_text = section.get("reflowed_text", "")
+            reflowed_text = (
+                section.get("reflowed_text")
+                or section.get("merged_text")
+                or section.get("raw_text")
+                or ""
+            )
             tables = section.get("tables", [])
 
             # Build comprehensive prompt for the entire section
@@ -197,9 +223,7 @@ async def identify_requirements_in_section(
             """
             ).strip()
 
-            # scillm + Chutes x-api-key, JSON mode
-            ch_base = os.getenv("CHUTES_API_BASE", "").strip()
-            ch_key = os.getenv("CHUTES_API_KEY", "").strip()
+            # SciLLM Router call (paved path, no manual headers)
             async def _do_scillm():
                 logger.info(
                     "req_extract.call", extra={
@@ -251,10 +275,8 @@ async def identify_requirements_in_section(
                     except Exception:
                         content = None
             if not isinstance(content, str) or not content.strip():
-                logger.warning(
-                    "Requirement extraction returned empty content; defaulting to empty lists."
-                )
-                return [], []
+                logger.error("Requirement extraction returned empty content; treating as failure")
+                raise RuntimeError("empty content from requirement extraction")
             parsed_obj: Any = clean_json_string(content, return_dict=True)
             # Normalize string JSON to object
             if isinstance(parsed_obj, str):
@@ -273,6 +295,11 @@ async def identify_requirements_in_section(
             else:
                 requirements, constraints = [], []
 
+            if not requirements:
+                # If text has modals but no requirements returned, raise to signal a hard failure.
+                if any(w in reflowed_text.lower() for w in (" shall", " must", " will")):
+                    raise RuntimeError("requirements likely present but extraction returned none")
+
             # Add section context to all items
             for req in requirements:
                 req["section_context"] = reflowed_text[:500]  # First 500 chars for context
@@ -290,8 +317,9 @@ async def identify_requirements_in_section(
             logger.error(
                 f"Failed to extract requirements from section '{section.get('title', 'Unknown')}': {e}"
             )
-            logger.debug(f"Section content: {section.get('reflowed_text', '')[:200]}...")
-            return [], []
+            snippet = (section.get("reflowed_text") or section.get("merged_text") or section.get("raw_text") or "")[:200]
+            logger.debug(f"Section content: {snippet}...")
+            raise
 
 
 # --- Theorem Proving with Feedback ---
@@ -1245,19 +1273,16 @@ async def process_reflowed_sections(
         except Exception as e:
             logger.warning(f"Batch CLI path failed, falling back to per-item proving: {e}")
 
-    proof_tasks = [
-        prove_with_feedback(item["item"], item["type"], lean4_semaphore) for item in all_items
-    ]
-
     proof_results = []
     successful_proofs = 0
-    for f in tqdm(
-        asyncio.as_completed(proof_tasks), total=len(proof_tasks), desc="Proving Theorems"
-    ):
-        result = await f
+    for item in all_items:
+        rid = item["item"].get("requirement_id") or item["item"].get("id") or "<no id>"
+        logger.info(f"[prove] start id={rid} type={item['type']}")
+        result = await prove_with_feedback(item["item"], item["type"], lean4_semaphore)
         proof_results.append(result)
         if result["success"]:
             successful_proofs += 1
+        logger.info(f"[prove] done id={rid} success={result['success']}")
 
     # --- Final Statistics ---
     stats = {
@@ -1307,11 +1332,20 @@ def run(
     except Exception:
         pass
 
-    try:
-        require_scillm_preflight()
-    except RuntimeError as exc:
-        console.print(f"[red]Stage 08 SciLLM preflight failed: {exc}[/red]")
-        raise
+    skip_pf = os.getenv("SKIP_SCILLM_PREFLIGHT", "0").lower() in ("1", "true", "yes", "y")
+    if skip_pf:
+        console.print("[yellow]Skipping SciLLM preflight because SKIP_SCILLM_PREFLIGHT=1[/yellow]")
+    else:
+        console.print("[cyan]Running SciLLM preflight...[/cyan]")
+        try:
+            require_scillm_preflight()
+            console.print("[green]SciLLM preflight OK[/green]")
+        except RuntimeError as exc:
+            console.print(f"[red]Stage 08 SciLLM preflight failed: {exc}[/red]")
+            raise
+        except Exception as exc:
+            console.print(f"[red]Stage 08 SciLLM preflight raised: {type(exc).__name__}: {exc}[/red]")
+            raise
 
     # Minimal diagnostics to align with other stages
     run_id = get_run_id()
@@ -1342,6 +1376,10 @@ def run(
 
     with open(input_json) as f:
         pipeline_data = json.load(f)
+    console.print(f"[cyan]Sections to process: {len(pipeline_data.get('reflowed_sections') or [])}[/cyan]")
+    if not pipeline_data.get("reflowed_sections"):
+        console.print("[yellow]No sections found; exiting.[/yellow]")
+        return None
 
     # Inject miner requirements when provided (or auto-discover sibling output)
     try:
@@ -1553,12 +1591,29 @@ def debug_bundle(
     console.print(f"[green]Debug bundle: saved theorem results to {output_path}")
 
 
-## CLI removed: import and call run(...), or use a debug harness.
+def _cli() -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Stage 08 Lean4 theorem prover",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    sub = parser.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("sanity", help="Run sanity check")
+    run_p = sub.add_parser("run", help="Run theorem proving on reflowed sections")
+    run_p.add_argument("reflowed_json", type=Path, help="Path to 07_reflowed.json")
+    run_p.add_argument(
+        "-o", "--output-dir", type=Path, default=Path("data/results/pipeline"), help="Results root"
+    )
+    args = parser.parse_args()
+
+    if args.cmd == "sanity":
+        return sanity()
+    if args.cmd == "run":
+        rc = run(args.reflowed_json, args.output_dir)
+        return 0 if rc else 1
+    return 1
 
 
 if __name__ == "__main__":
-    import sys
-    argv = sys.argv[1:]
-    if argv and argv[0] == "sanity":
-        sys.exit(sanity())
-    print("Usage: python -m extractor.pipeline.steps.08_lean4_theorem_prover sanity")
+    sys.exit(_cli())

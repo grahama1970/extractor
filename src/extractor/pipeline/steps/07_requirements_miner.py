@@ -1,8 +1,20 @@
 #!/usr/bin/env python3
 """
-Stage 07½ — Requirements Miner
+Stage 07½ — Requirements Miner (deterministic, offline-friendly)
 
-Deterministic, offline‑friendly identification of requirement candidates after reflow (Stage 07).
+What it does (read before editing)
+- Scans Stage 07 reflow output (07_reflowed.json) for requirement candidates.
+- Sources:
+  - Paragraph sentences: keep sentences >= MIN_LEN that contain strict modals (shall/must/will),
+    skip weak modals (should/may/might/could/can); optional condition detection; capture REQ IDs.
+  - “Shall lines”: lines starting with REQ-…: … accumulate until next ID; flushed as one requirement.
+  - Lists: mined similarly (modal + length gates).
+  - Tables: mine modal cells and also emit a table-level requirement stub.
+- Metadata stored per requirement: section_id/title, heading_path/section_path, page_num, bbox,
+  block_ids, req_id + hint, modality, condition, confidence, text_sha1.
+- Confidence: modal presence + ID + source type (paragraph > bullet > table).
+- Fallback: if no requirement_id was found, re-scan 04_sections.json for REQ lines to avoid empty output.
+- No LLMs. Deterministic heuristics only. Optional visual overlays if STAGE07REQ_VISUAL_PROOF=1.
 
 Inputs
 - 07_reflowed.json from Stage 07
@@ -11,9 +23,9 @@ Outputs
 - 07_requirements.json (see docs/tasks/009_requirements_miner_and_workbench.md)
 - 07_requirements_summary.json (counts and simple histograms)
 
-Notes
-- No LLM required. Optional assists can be added behind env toggles later.
-- Keeps the Happy Path single surface; run by run_all between 07 and 08.
+Usage / lifecycle
+- Invoked by run_all between 07_reflow_section and 08_lean4_theorem_prover.
+- Returns the path to 07_requirements.json (caller uses this path).
 """
 from __future__ import annotations
 
@@ -41,6 +53,7 @@ STRICT_MODAL = {"shall", "must", "will"}
 EXCLUDED_MODAL = {"should", "may", "might", "could", "can"}
 MIN_LEN = 40  # drop obvious fragments
 REQID_RE = re.compile(r"\bREQ[-_][A-Z0-9]+[-_]?\d+\b")
+REQLINE_RE = re.compile(r"^\s*(REQ[-_][A-Za-z0-9]+[-_]?\d+)\s*:\s*(.*)$")
 # Conditional detector: default permissive; strict mode via env
 _strict = os.getenv("STAGE07REQ_STRICT_CONDITIONAL", "1").lower() in ("1", "true", "yes", "y")
 COND_RE = re.compile(
@@ -141,6 +154,68 @@ def _mine_from_paragraph(block: dict[str, Any], section_id: str | None, section_
                 "requirement_id": _normalize_req_id(rid.group(0)) if rid else None,
                 "req_id_hint": rid.group(0) if rid else None,
                 "text_sha1": _text_sha1(sent),
+            }
+        )
+    return out
+
+
+def _mine_shall_lines(block: dict[str, Any], section_id: str | None, section_title: str | None, heading_path: list[str] | None, section_path: str | None) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    raw = str(block.get("text") or block.get("content") or "").strip()
+    if not raw:
+        return out
+    lines = raw.splitlines()
+    current_id = None
+    buf: list[str] = []
+    results = []
+    def flush():
+        if not current_id:
+            return
+        text = " ".join(buf).strip()
+        if len(text) < MIN_LEN:
+            return
+        if "shall" not in text.lower():
+            return
+        results.append((current_id, text))
+
+    for line in lines:
+        m = REQLINE_RE.match(line)
+        if m:
+            flush()
+            current_id = _normalize_req_id(m.group(1))
+            buf = [m.group(2).strip()]
+        else:
+            if current_id and line.strip():
+                buf.append(line.strip())
+    flush()
+
+    if not results:
+        return out
+    page_num = int(block.get("page", block.get("page_idx", 0))) if block.get("page") is not None or block.get("page_idx") is not None else None
+    bbox = block.get("bbox") if isinstance(block.get("bbox"), list) else None
+    for rid, text in results:
+        out.append(
+            {
+                "from": "shall_line",
+                "text_raw": text,
+                "text_canonical": text,
+                "modality": "shall",
+                "condition": None,
+                "confidence": _confidence(text, True, "paragraph"),
+                "source": {
+                    "section_id": section_id,
+                    "page_num": page_num,
+                    "bbox": bbox,
+                    "block_ids": [str(block.get("id") or "")],
+                    "section_title": section_title,
+                    "heading_path": heading_path,
+                    "section_path": section_path,
+                },
+                "tags": [],
+                "units": [],
+                "requirement_id": rid,
+                "req_id_hint": rid,
+                "text_sha1": _text_sha1(text),
             }
         )
     return out
@@ -271,16 +346,15 @@ def _mine_from_table(table: dict[str, Any], section_id: str | None, section_titl
 
 
 def _table_level_requirement(table: dict[str, Any], section_id: str | None, section_title: str | None, heading_path: list[str] | None, section_path: str | None) -> dict[str, Any] | None:
-    """Emit a table-level requirement item for every table, regardless of modal verbs.
+    """Emit a table-level requirement only when a traceable ID can be formed.
 
-    Canonical, deterministic text designed to be consumed by Stage 08. We include a compact
-    payload (headers + small preview) for downstream context while keeping the main text concise.
+    ID priority: explicit REQ-* in title -> table id -> normalized title/section. If no ID, drop.
+    Always enforce a "shall" phrasing for formal modality.
     """
     try:
         page_num = int(table.get("page_index", table.get("page_number", 0))) if table.get("page_index") is not None or table.get("page_number") is not None else None
         bbox = table.get("bbox") if isinstance(table.get("bbox"), list) else None
         tid = table.get("id") or table.get("table_id") or table.get("table_index")
-        # Headers
         headers = []
         if isinstance(table.get("header"), list) and table.get("header"):
             headers = [str(h) for h in table.get("header")[:12]]
@@ -292,30 +366,35 @@ def _table_level_requirement(table: dict[str, Any], section_id: str | None, sect
                 r0 = rows0[0]
                 if isinstance(r0, dict):
                     headers = [str(k) for k in list(r0.keys())[:12]]
-        # Preview
         preview_rows = []
         rows = table.get("pandas_df") or []
         if isinstance(rows, list) and rows:
             for r in rows[:3]:
                 if isinstance(r, dict):
                     preview_rows.append({k: str(v) for k, v in list(r.items())[:len(headers) or 8]})
-        # Canonical requirement text
         hdr_text = " | ".join(headers) if headers else "(no headers)"
-        rid_hint = None
-        # If table carries a recognizable requirement id, surface it
-        if isinstance(tid, str) and tid:
+        ttitle = (table.get("title") or table.get("name") or table.get("caption") or table.get("description") or "").strip()
+        rid_match = REQID_RE.search(ttitle) if ttitle else None
+        if rid_match:
+            rid_hint = _normalize_req_id(rid_match.group(0))
+        elif isinstance(tid, str) and tid:
             rid_hint = f"REQ-TABLE-{tid}"
-        req_text = (
-            f"All constraints specified by Table {tid if tid is not None else ''} shall hold for the document. "
-            f"Columns: {hdr_text}."
-        ).strip()
+        else:
+            base = ttitle or section_title or "TABLE"
+            base = re.sub(r"[^A-Za-z0-9]+", "_", base).strip("_") or "TABLE"
+            rid_hint = f"REQ-{base.upper()}"
+        if not rid_hint:
+            return None
+        text = ttitle or (f"Table {tid}" if tid else "Table requirement")
+        if "shall" not in text.lower():
+            text = f"{text}: This table shall satisfy its listed constraints. Columns: {hdr_text}."
         return {
             "from": "table",
-            "text_raw": req_text,
-            "text_canonical": req_text,
+            "text_raw": text,
+            "text_canonical": text,
             "modality": "shall",
             "condition": None,
-            "confidence": 0.6,
+            "confidence": _confidence(text, True, "table_cell"),
             "source": {
                 "section_id": section_id,
                 "page_num": page_num,
@@ -328,6 +407,7 @@ def _table_level_requirement(table: dict[str, Any], section_id: str | None, sect
             "tags": ["table"],
             "units": [],
             "req_id_hint": rid_hint,
+            "requirement_id": rid_hint,
             "table_payload": {
                 "headers": headers,
                 "preview_rows": preview_rows,
@@ -394,6 +474,7 @@ def run(
             bt = str(b.get("block_type") or b.get("type") or "").lower()
             if bt in {"text", "paragraph", "listitem"}:
                 candidates.extend(_mine_from_paragraph(b, sec_id, sec_title, heading_path, section_path))
+                candidates.extend(_mine_shall_lines(b, sec_id, sec_title, heading_path, section_path))
                 prev_para_text = (b.get("text") or b.get("content") or "").strip()
             elif bt in {"list", "bullet_list", "ordered_list"} or b.get("items"):
                 candidates.extend(_mine_from_list(b, sec_id, prev_para_text, sec_title, heading_path, section_path))
@@ -406,6 +487,25 @@ def run(
             tr = _table_level_requirement(t, sec_id, sec_title, heading_path, section_path)
             if tr:
                 candidates.append(tr)
+
+    # Fallback: if no requirements detected with IDs, mine from Stage 04 sections JSON (preserves columns)
+    if not any(r.get("requirement_id") for r in candidates):
+        alt_path = output_dir / "04_section_builder" / "json_output" / "04_sections.json"
+        if alt_path.exists():
+            try:
+                alt = json.loads(alt_path.read_text())
+                for s in alt.get("sections") or []:
+                    sec_id = s.get("id") or s.get("section_id") or None
+                    sec_title = s.get("title") or s.get("heading") or None
+                    hp = s.get("heading_path") or s.get("title_path") or None
+                    heading_path = [hp] if isinstance(hp, str) else [str(x) for x in hp] if isinstance(hp, list) else None
+                    section_path = " > ".join(heading_path) if heading_path else (str(sec_title) if sec_title else None)
+                    for b in s.get("blocks") or []:
+                        bt = str(b.get("block_type") or b.get("type") or "").lower()
+                        if bt in {"text", "paragraph", "listitem"}:
+                            candidates.extend(_mine_shall_lines(b, sec_id, sec_title, heading_path, section_path))
+            except Exception as exc:
+                log_stage_error('07_requirements_miner', exc, {'context': '07r_fallback'})
 
     _assign_ids(candidates)
     req_json = {"requirements": candidates}
@@ -423,7 +523,9 @@ def run(
                     sp = (json.loads(s04.read_text()) or {}).get("source_pdf")
                     if isinstance(sp, str) and Path(sp).exists():
                         src_pdf = Path(sp)
-            except Exception:
+            except Exception as exc:
+                log_stage_error('07_requirements_miner', exc, {'context': '07r'})
+                raise
                 src_pdf = None
             if not src_pdf and STAGE07REQ_SOURCE_PDF:
                 p = Path(STAGE07REQ_SOURCE_PDF)
@@ -452,9 +554,12 @@ def run(
                         )
                 if boxes:
                     draw_overlays(src_pdf, boxes, vout)
-    except Exception:
+    except Exception as exc:
+        log_stage_error('07_requirements_miner', exc, {'context': '07r'})
+        raise
         pass
     print(json.dumps({"ok": True, "total": summary["total"], "out": str(out_dir)}, indent=2))
+    return out_dir / "07_requirements.json"
 
 
 if __name__ == "__main__":

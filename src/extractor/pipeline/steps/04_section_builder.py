@@ -7,6 +7,14 @@ Purpose:
 - Validate headers with deterministic heuristics (font, numbering, context).
 - Optionally capture visuals for each section from the clean PDF.
 
+How hierarchy is built (read before editing):
+- Pick header blocks (trust Stage 03; optionally uplift with light heuristics).
+- Parse numbering/title spans -> derive section_number and depth list.
+- Link parents by stripping the last number component (e.g., 4.1.5.4.1 → parent 4.1.5.4) and preserving document order.
+- Assign IDs, section_hash (MD5 of title), breadcrumbs and breadcrumb_titles; copy breadcrumbs onto each block in the section.
+- Normalize titles (number stripped) and keep header metadata (font/size/color if available).
+- Optional: enrich header color from the clean PDF; optional header snapshots when enabled.
+
 Inputs/Outputs:
 - Input JSON: Stage 03 output (verified blocks), flat or pages[].blocks[].
 - Clean PDF: Cleaned file from Stage 01 (for visuals).
@@ -38,9 +46,23 @@ import base64
 from loguru import logger
 from rich.console import Console
 from extractor.pipeline.utils.section_builder_utils import (
-    _bucket_color,
-    _roman_to_int,
     pdf_analyze_section_numbering as _pdf_analyze_numbering,
+)
+import extractor.pipeline.utils.section_builder_utils_local as sbul
+from extractor.pipeline.utils.section_builder_utils_local import (
+    normalize_section_number,
+    coerce_depth,
+    derive_parent_number,
+    normalize_breadcrumbs,
+    breadcrumb_label,
+    analyze_section_numbering,
+    derive_section_depth,
+    extract_section_title,
+    clean_section_title,
+    detect_header_level,
+    looks_like_header_text,
+    enrich_header_colors,
+    prepare_section_hierarchy,
 )
 from extractor.pipeline.utils.diagnostics import (
     start_resource_sampler,
@@ -100,149 +122,9 @@ SECTION_NUMBER_PATTERNS = [
 ]
 
 
-def _normalize_section_number(value: Optional[str]) -> str:
-    if not value:
-        return ""
-    return str(value).strip().rstrip(".")
-
-
-def _coerce_depth(depth: Any) -> List[int]:
-    if isinstance(depth, list):
-        normalized: List[int] = []
-        for item in depth:
-            try:
-                normalized.append(int(item))
-            except Exception:
-                continue
-        if normalized:
-            return normalized
-    return []
-
-
-def _derive_parent_number(sec_num: str) -> Optional[str]:
-    trimmed = _normalize_section_number(sec_num)
-    if not trimmed:
-        return None
-    parts = [p for p in trimmed.split(".") if p]
-    if len(parts) <= 1:
-        return None
-    return ".".join(parts[:-1])
-
-
-def _normalize_breadcrumbs(value: Any) -> Tuple[List[Dict[str, Any]], List[str]]:
-    nodes: List[Dict[str, Any]] = []
-    titles: List[str] = []
-    if isinstance(value, list):
-        for item in value:
-            if isinstance(item, dict):
-                title = str(item.get("title") or item.get("label") or "").strip()
-                node = {
-                    "id": item.get("id"),
-                    "title": title,
-                    "section_number": _normalize_section_number(item.get("section_number")),
-                    "level": item.get("level"),
-                    "section_hash": item.get("section_hash"),
-                }
-                nodes.append({k: v for k, v in node.items() if v not in (None, "")})
-                if title:
-                    titles.append(title)
-            else:
-                title = str(item).strip()
-                if title:
-                    nodes.append({"title": title})
-                    titles.append(title)
-    elif isinstance(value, str):
-        parts = [p.strip() for p in value.split(">")]
-        for part in parts:
-            if part:
-                nodes.append({"title": part})
-                titles.append(part)
-    return nodes, titles
-
-
-def _breadcrumb_label(section: Dict[str, Any], sec_num: str) -> str:
-    meta = section.get("metadata") or {}
-    display = section.get("display_title") or meta.get("title_display") or ""
-    fallback = section.get("title") or ""
-    label = str(display or fallback or sec_num or "").strip()
-    if sec_num:
-        normalized = _normalize_section_number(sec_num)
-        if label and not label.lower().startswith(normalized.lower()):
-            return f"{normalized} {label}".strip()
-        return label or normalized
-    return label
-
-
 def _prepare_section_hierarchy(sections: List[Dict[str, Any]]) -> None:
-    """Normalize numbering, derive parents, and attach breadcrumb metadata."""
-    id_map = {s.get("id"): s for s in sections if s.get("id")}
-    order_map = {s.get("id"): idx for idx, s in enumerate(sections) if s.get("id")}
-    number_map: Dict[str, Dict[str, Any]] = {}
-
-    for section in sections:
-        meta = section.setdefault("metadata", {})
-        sec_num = _normalize_section_number(meta.get("section_number") or section.get("section_number"))
-        if sec_num:
-            meta["section_number"] = sec_num
-            section["section_number"] = sec_num
-            number_map[sec_num] = section
-        depth = _coerce_depth(meta.get("section_depth") or section.get("section_depth"))
-        if not depth and sec_num and all(part.isdigit() for part in sec_num.split(".")):
-            try:
-                depth = [int(part) for part in sec_num.split(".") if part]
-            except Exception:
-                depth = []
-        if depth:
-            meta["section_depth"] = depth
-            section["section_depth"] = depth
-
-    for section in sections:
-        sec_num = section.get("section_number") or section.get("metadata", {}).get("section_number")
-        parent_candidate = _derive_parent_number(sec_num or "") if sec_num else None
-        parent_section = number_map.get(parent_candidate) if parent_candidate else None
-        if parent_section and parent_section.get("id") != section.get("id"):
-            parent_idx = order_map.get(parent_section.get("id"))
-            current_idx = order_map.get(section.get("id"))
-            if parent_idx is not None and current_idx is not None and parent_idx < current_idx:
-                section["parent_id"] = parent_section.get("id")
-
-    for section in sections:
-        meta = section.setdefault("metadata", {})
-        breadcrumbs_existing = meta.get("breadcrumbs")
-        breadcrumb_titles_existing = meta.get("breadcrumb_titles")
-        if breadcrumbs_existing and breadcrumb_titles_existing:
-            continue
-        path: List[Dict[str, Any]] = []
-        titles: List[str] = []
-        current = section
-        visited: set[str] = set()
-        while current and current.get("id") not in visited:
-            visited.add(current.get("id"))
-            cur_meta = current.get("metadata") or {}
-            cur_num = cur_meta.get("section_number") or current.get("section_number")
-            label = _breadcrumb_label(current, cur_num or "")
-            entry = {
-                "id": current.get("id"),
-                "title": label,
-                "section_number": cur_num,
-                "level": current.get("level"),
-                "section_hash": cur_meta.get("section_hash"),
-            }
-            path.append({k: v for k, v in entry.items() if v not in (None, "")})
-            if label:
-                titles.append(label)
-            parent_id = current.get("parent_id")
-            current = id_map.get(parent_id)
-        path.reverse()
-        titles.reverse()
-        if path and not breadcrumbs_existing:
-            meta["breadcrumbs"] = path
-        if titles and not breadcrumb_titles_existing:
-            meta["breadcrumb_titles"] = titles
-        if titles:
-            for block in section.get("blocks", []):
-                if isinstance(block, dict) and not block.get("section_breadcrumbs"):
-                    block["section_breadcrumbs"] = titles
+    # Delegates to shared helper (prevents duplication in this file)
+    prepare_section_hierarchy(sections)
 
 # ================================
 # COLOR ENRICHMENT UTILITIES
@@ -251,80 +133,8 @@ def _prepare_section_hierarchy(sections: List[Dict[str, Any]]) -> None:
 ## moved to utils: _rgb_to_hex, _bucket_color
 
 def _enrich_header_colors(pdf_path: Path, sections: List[Dict[str, Any]]) -> None:
-    """For each section, attach first-span fill color inferred from the header block bbox.
-
-    Writes into the first block of the section under `first_span_font.color_*` and mirrors a
-    compact summary onto section.metadata.header_color_* for downstream use.
-    """
-    try:
-        doc = fitz.open(str(pdf_path))
-    except Exception:
-        return
-
-    for s in sections:
-        if not s.get("blocks"):
-            continue
-        hdr = s["blocks"][0]
-        fsf_existing = hdr.get("first_span_font") or {}
-        if fsf_existing.get("color_hex") or fsf_existing.get("color_bucket"):
-            # Already enriched upstream (e.g., Stage 03) — skip recompute
-            continue
-        page_idx = int(hdr.get("page", hdr.get("page_idx", s.get("page_start", 0))))
-        if page_idx < 0 or page_idx >= len(doc):
-            continue
-        bbox = hdr.get("bbox") or s.get("bbox")
-        if not bbox:
-            continue
-        try:
-            page = doc[page_idx]
-            td = page.get_text("dict")
-            hx0, hy0, hx1, hy1 = bbox
-            found_rgb = None
-            # Walk spans to find the first span intersecting the header bbox
-            for blk in td.get("blocks", []):
-                for line in blk.get("lines", []):
-                    for span in line.get("spans", []):
-                        sb = span.get("bbox")
-                        if not sb:
-                            continue
-                        sx0, sy0, sx1, sy1 = sb
-                        if not (sx1 < hx0 or sx0 > hx1 or sy1 < hy0 or sy0 > hy1):
-                            col = span.get("color")
-                            if isinstance(col, (list, tuple)) and len(col) >= 3:
-                                found_rgb = (float(col[0]), float(col[1]), float(col[2]))
-                            elif isinstance(col, (int, float)):
-                                # PyMuPDF older: color as int 0xRRGGBB
-                                v = int(col)
-                                found_rgb = ((v >> 16) & 255, (v >> 8) & 255, v & 255)
-                            # Stop at the first matching span
-                            break
-                    if found_rgb:
-                        break
-                if found_rgb:
-                    break
-
-            if found_rgb is None:
-                continue
-            # Normalize to 0..255 ints for RGB if needed
-            if all(0.0 <= c <= 1.0 for c in found_rgb):
-                rgb255 = (int(found_rgb[0] * 255), int(found_rgb[1] * 255), int(found_rgb[2] * 255))
-            else:
-                rgb255 = tuple(int(c) for c in found_rgb)
-            hexv = f"#{rgb255[0]:02x}{rgb255[1]:02x}{rgb255[2]:02x}"
-            bucket = _bucket_color(hexv)
-
-            fsf = hdr.setdefault("first_span_font", {})
-            fsf["color_rgb"] = list(rgb255)
-            fsf["color_hex"] = hexv
-            fsf["color_bucket"] = bucket
-            s.setdefault("metadata", {})["header_color_hex"] = hexv
-            s["metadata"]["header_color_bucket"] = bucket
-        except Exception:
-            continue
-    try:
-        doc.close()
-    except Exception:
-        pass
+    """Delegates to shared helper; kept for backward compatibility in this step."""
+    enrich_header_colors(pdf_path, sections)
 
 # ============================================
 # SOPHISTICATED HEADER DETECTION FUNCTIONS
@@ -515,6 +325,21 @@ def _looks_like_header_text(text: str) -> bool:
     if "bht (branch history table) submodule" in lt:
         return True
     return False
+
+# Override local helpers with shared utils to reduce drift
+_normalize_section_number = sbul.normalize_section_number
+_coerce_depth = sbul.coerce_depth
+_derive_parent_number = sbul.derive_parent_number
+_normalize_breadcrumbs = sbul.normalize_breadcrumbs
+_breadcrumb_label = sbul.breadcrumb_label
+analyze_section_numbering = sbul.analyze_section_numbering
+derive_section_depth = sbul.derive_section_depth
+extract_section_title = sbul.extract_section_title
+clean_section_title = sbul.clean_section_title
+detect_header_level = sbul.detect_header_level
+_looks_like_header_text = sbul.looks_like_header_text
+_enrich_header_colors = sbul.enrich_header_colors
+_prepare_section_hierarchy = sbul.prepare_section_hierarchy
 
 
 def build_sections_from_blocks(

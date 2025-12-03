@@ -80,6 +80,8 @@ async def validate_scillm_preflight() -> Tuple[bool, str]:
     Returns:
         Tuple[bool, str]: (success, reason)
     """
+    # Hard cap to prevent hangs
+    timeout_s = float(os.getenv("SCILLM_PREFLIGHT_TIMEOUT", "15"))
     base_url = os.getenv("CHUTES_API_BASE", "").rstrip("/")
     api_key = os.getenv("CHUTES_API_KEY", "")
 
@@ -115,7 +117,8 @@ async def validate_scillm_preflight() -> Tuple[bool, str]:
 
 
 def validate_scillm_env_sync() -> Tuple[bool, str]:
-    """Synchronous wrapper for validate_scillm_preflight()."""
+    """Synchronous wrapper for validate_scillm_preflight() with a timeout."""
+    timeout_s = float(os.getenv("SCILLM_PREFLIGHT_TIMEOUT", "15"))
     try:
         # Handle existing event loop gracefully
         try:
@@ -126,7 +129,7 @@ def validate_scillm_env_sync() -> Tuple[bool, str]:
                 try:
                     import nest_asyncio
                     nest_asyncio.apply()
-                    return asyncio.run(validate_scillm_preflight())
+                    return asyncio.run(asyncio.wait_for(validate_scillm_preflight(), timeout=timeout_s))
                 except ImportError:
                     # Fallback: assume environment is valid if basic vars are set
                     if quick_scillm_check():
@@ -135,7 +138,7 @@ def validate_scillm_env_sync() -> Tuple[bool, str]:
                         return False, "Basic environment check failed"
         except RuntimeError:
             # No event loop running, safe to use asyncio.run
-            return asyncio.run(validate_scillm_preflight())
+            return asyncio.run(asyncio.wait_for(validate_scillm_preflight(), timeout=timeout_s))
     except Exception as e:
         return False, f"Preflight validation error: {e}"
 

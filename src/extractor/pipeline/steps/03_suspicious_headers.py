@@ -1,21 +1,51 @@
 #!/usr/bin/env python3
 """
-Suspicious Header Verifier
---------------------------
-This pipeline step takes the output JSON from a Marker process (which has been
-run through the SuspiciousHeaderFixer) and a corresponding PDF. It finds all
-blocks flagged with `suspicious_header: true`, captures an image of the block
-and its immediate context, and uses a multimodal LLM to verify if the block is
-truly a section header.
+Suspicious Header Verifier (Stage 03)
+-------------------------------------
+Purpose
+- Takes Stage 02 Marker output + clean PDF.
+- For every block flagged as `suspicious_header` (or verify-all), decides keep/demote.
+- Writes 03_verified_blocks.json with suspicion cleared and llm_verification filled.
 
-The script updates the JSON with the LLM's findings and saves a new version.
+Heuristics before LLM (cheap guardrails)
+- Auto-accept: strict numbered headers (e.g., “4.1.2 Title.” with number/title spans parsed).
+- Auto-reject when *not numbered* and any of:
+  * bullet prefix (•, ●, ▪, ‣, ⁃, –, —, -, *, +, ·)
+  * short label ending with “:” (<=40 chars)
+  * caption patterns “Table|Figure N[.M][.:]”
+  * sentence-like endings “.” or “;”
+  * “(continued)” / “- continued” (policy demotion also runs post-flatten)
+- Optional human cues: negative/positive annotations near the bbox can auto-reject.
+
+Signals sent to LLM
+- Text context (above/target/below) plus “Signals:” line containing font name/size, bold/italic,
+  color bucket, suspicion/quality scores, and numbering/title spans when available.
+- Optional rendered context image (unless STAGE03_TEXT_ONLY=1).
+
+Behavior
+- If LLM (SciLLM vision) rejects → block_type set to Text, suspicious flags annotated.
+- If accepts → header retained; suspicion cleared.
+- Color enrichment and font signals are preserved for downstream scoring/audits.
+
+Operator notes
+- Misclassification in Stage 02 is expected; this step is the main filter.
+- Do not skip this step in “live” runs; for deterministic/offline use `skip_llm` which
+  applies only the heuristic demotions.
+
+Heuristic → Code map (keep in sync)
+- Bullet prefix (• ● ▪ ‣ ⁃ – — - * + ·): auto-reject if unnumbered  (prep loop & offline branch via has_bullet_prefix)
+- Short colon label (<=40 chars, ends “:”): auto-reject if unnumbered (prep loop)
+- Caption patterns “Table|Figure N[.N][.:]”: auto-reject if unnumbered (prep loop)
+- Sentence-like endings (“.” or “;”): auto-reject if unnumbered (prep loop)
+- “(continued)” / “- continued”: policy demotion post-flatten
+- Auto-accept strict numbered header with parsed number/title spans (prep loop via pdf_analyze_numbering)
 """
 
 import asyncio
 import base64
-import hashlib
 import json
 import os
+import warnings
 import textwrap
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -25,12 +55,16 @@ from typing import Any, cast
 import fitz  # PyMuPDF
 # Typer removed: use plain functions for easier debugging
 from loguru import logger
-# Avoid hard dependency at import time; prefer adapter helper; direct scillm used only if present
-from extractor.pipeline.utils.scillm_router import get_text_router
-from extractor.pipeline.steps.scillm_preflight_validator import (
-    validate_scillm_env_sync,
-    quick_scillm_check,
+from extractor.pipeline.utils.reliability import log_stage_error
+from extractor.pipeline.utils.suspicious_headers_utils import (
+    norm_text,
+    text_sha1,
+    has_bullet_prefix,
+    ensure_first_span_color,
 )
+# Avoid hard dependency at import time; prefer adapter helper; direct scillm used only if present
+from extractor.pipeline.utils.scillm_router import get_text_router, get_vlm_router
+from extractor.pipeline.steps.scillm_preflight_validator import quick_scillm_check
 
 from extractor.pipeline.utils.ann_index import query_ann_index
 from extractor.pipeline.utils.debug_utils import log_timing
@@ -74,7 +108,9 @@ from extractor.pipeline.utils.section_builder_utils import (
 
 try:
     import psutil  # type: ignore
-except Exception:
+except Exception as exc:
+    log_stage_error('03_suspicious_headers', exc, {'context': '03'})
+    raise
     psutil = None  # type: ignore
 import time  # noqa: E402
 
@@ -87,84 +123,7 @@ def sanity() -> int:
 # Cache initialization will be handled within command execution to avoid import-time side effects.
 
 
-def _norm_text(s: str) -> str:
-    return " ".join((s or "").split())
-
-
-def _text_sha1(s: str) -> str:
-    return hashlib.sha1(_norm_text(s).encode("utf-8")).hexdigest()
-
-
-# ------------------------------------------------------------------
-# OPTIONAL COLOR ENRICHMENT (first-span color)
-# ------------------------------------------------------------------
 STAGE03_COLOR_ENRICH = os.getenv("STAGE03_COLOR_ENRICH", "1").lower() in {"1", "true", "yes", "y"}
-
-def _bucket_color_hex(hex_str: str) -> str:
-    try:
-        h = hex_str.lstrip('#')
-        r = int(h[0:2], 16)
-        g = int(h[2:4], 16)
-        b = int(h[4:6], 16)
-        if r < 30 and g < 30 and b < 30:
-            return "black"
-        if r > 200 and g > 200 and b > 200:
-            return "white"
-        if r > g and r > b:
-            return "red"
-        if g > r and g > b:
-            return "green"
-        if b > r and b > g:
-            return "blue"
-        return "gray"
-    except Exception:
-        return "unknown"
-
-def _ensure_first_span_color(page: fitz.Page, block: dict[str, Any]) -> None:
-    """Populate block.first_span_font.color_{hex,bucket,rgb} if missing, using span intersect."""
-    try:
-        fsf = block.setdefault("first_span_font", {}) if isinstance(block.get("first_span_font"), dict) else block.setdefault("first_span_font", {})
-        if fsf.get("color_hex") or fsf.get("color_bucket"):
-            return
-        bb = block.get("bbox")
-        if not bb:
-            return
-        x0, y0, x1, y1 = bb
-        td = page.get_text("dict")
-        found = None
-        for blk in td.get("blocks", []):
-            for line in blk.get("lines", []):
-                for span in line.get("spans", []):
-                    sb = span.get("bbox")
-                    if not sb:
-                        continue
-                    sx0, sy0, sx1, sy1 = sb
-                    if not (sx1 < x0 or sx0 > x1 or sy1 < y0 or sy0 > y1):
-                        col = span.get("color")
-                        if isinstance(col, (list, tuple)) and len(col) >= 3:
-                            r, g, b = col[0], col[1], col[2]
-                            # Normalize if 0..1
-                            if 0.0 <= r <= 1.0 and 0.0 <= g <= 1.0 and 0.0 <= b <= 1.0:
-                                r, g, b = int(r*255), int(g*255), int(b*255)
-                            else:
-                                r, g, b = int(r), int(g), int(b)
-                            found = (r, g, b)
-                        elif isinstance(col, (int, float)):
-                            v = int(col)
-                            found = ((v >> 16) & 255, (v >> 8) & 255, v & 255)
-                        break
-                if found:
-                    break
-            if found:
-                break
-        if not found:
-            return
-        hexv = f"#{found[0]:02x}{found[1]:02x}{found[2]:02x}"
-        fsf["color_rgb"] = list(found)
-        fsf["color_hex"] = hexv
-        fsf["color_bucket"] = _bucket_color_hex(hexv)
-    except Exception:
-        return
 
 # ------------------------------------------------------------------
 # CONFIGURATION
@@ -266,11 +225,15 @@ async def verify_header_with_llm(image_b64: str, context_text: str, model: str, 
     extras = build_chat_extras(model_norm)
     try:
         logger.info(f"stage03.verify_header: effective_model={model_norm} extras_keys={list(extras.keys())}")
-    except Exception:
+    except Exception as exc:
+        log_stage_error('03_suspicious_headers', exc, {'context': '03'})
+        raise
         pass
     try:
         _trim = int(os.getenv("STAGE03_VERIFY_TRIM_CHARS", "800"))
-    except Exception:
+    except Exception as exc:
+        log_stage_error('03_suspicious_headers', exc, {'context': '03'})
+        raise
         _trim = 800
     if isinstance(context_text, str) and len(context_text) > _trim:
         context_text = context_text[:_trim]
@@ -285,23 +248,28 @@ async def verify_header_with_llm(image_b64: str, context_text: str, model: str, 
     ]
     try:
         _verify_cap = int(os.getenv("STAGE03_VERIFY_MAX_TOKENS", "256"))
-    except Exception:
+    except Exception as exc:
+        log_stage_error('03_suspicious_headers', exc, {'context': '03'})
+        raise
         _verify_cap = 256
     # Top-priority timeout override via env
     try:
         item_timeout = int(os.getenv("SC_TIMEOUT_STAGE_03", str(item_timeout)))
-    except Exception:
+    except Exception as exc:
+        log_stage_error('03_suspicious_headers', exc, {'context': '03'})
+        raise
         pass
     # AGENTS.md compliance: Validate SciLLM environment before making calls (no soft skip)
     if not quick_scillm_check():
         raise RuntimeError("SciLLM environment not configured; header verification requires Chutes.")
     
-    router = get_text_router()
+    router = get_text_router() if text_only else get_vlm_router()
+    route_model = "chutes/text" if text_only else "chutes/vlm"
     # Timed SciLLM Router-only call
     t0 = time.monotonic()
     try:
         resp = await router.acompletion(
-            model="chutes/text",
+            model=route_model,
             messages=messages,
             response_format={"type": "json_object"},
             max_tokens=_verify_cap,
@@ -309,7 +277,9 @@ async def verify_header_with_llm(image_b64: str, context_text: str, model: str, 
             timeout=item_timeout,
         )
         elapsed_ms = int((time.monotonic() - t0) * 1000)
-    except Exception as e:
+    except Exception as exc:
+        log_stage_error('03_suspicious_headers', exc, {'context': '03'})
+        raise
         elapsed_ms = int((time.monotonic() - t0) * 1000)
         log_timing(
             "03_suspicious_headers",
@@ -351,7 +321,9 @@ async def verify_header_with_llm(image_b64: str, context_text: str, model: str, 
                 "tokens_out": usage.get("completion_tokens"),
             },
         )
-    except Exception:
+    except Exception as exc:
+        log_stage_error('03_suspicious_headers', exc, {'context': '03'})
+        raise
         pass
     # Normalize response content
     if isinstance(resp, dict):
@@ -362,7 +334,9 @@ async def verify_header_with_llm(image_b64: str, context_text: str, model: str, 
     answer = (msg or {}).get("content", "")
     try:
         payload = json.loads(answer) if answer else {}
-    except Exception as pe:
+    except Exception as exc:
+        log_stage_error('03_suspicious_headers', exc, {'context': '03'})
+        raise
         # Soft-fail on parse errors; log and continue
         log_timing(
             "03_suspicious_headers",
@@ -445,7 +419,9 @@ class VerificationTask:
             x0, y0, x1, y1 = bb
             try:
                 return (float(x1) - float(x0)) > 0 and (float(y1) - float(y0)) > 0
-            except Exception:
+            except Exception as exc:
+                log_stage_error('03_suspicious_headers', exc, {'context': '03'})
+                raise
                 return False
 
         def _non_empty(b: dict[str, Any] | None) -> bool:
@@ -537,7 +513,9 @@ class VerificationTask:
                     "render_cache": "miss",
                 },
             )
-        except Exception:
+        except Exception as exc:
+            log_stage_error('03_suspicious_headers', exc, {'context': '03'})
+            raise
             pass
         return b64
 
@@ -559,8 +537,8 @@ class VerificationTask:
             "page_idx": int(self.page_idx),
             "block_idx": int(self.block_idx),
             "header_text": t_text,
-            "header_text_norm": _norm_text(t_text),
-            "text_sha1": _text_sha1(t_text + "|" + font_sig),
+            "header_text_norm": norm_text(t_text),
+            "text_sha1": text_sha1(t_text + "|" + font_sig),
             "font_signature": font_sig,
             "context_text": context_text,
             "label_is_header": bool(final_label),
@@ -572,7 +550,9 @@ class VerificationTask:
         # Include saved context image path if present
         try:
             rec["context_image_path"] = target.get("context_image_path")
-        except Exception:
+        except Exception as exc:
+            log_stage_error('03_suspicious_headers', exc, {'context': '03'})
+            raise
             pass
         return rec
 
@@ -606,6 +586,11 @@ async def process_pdf_pipeline(config: Config):
     - write_suspicion_fields: reflect outcomes in suspicion_* fields.
     """
     # 1) Init — inputs and output layout
+    warnings.filterwarnings(
+        "ignore",
+        message="Task was destroyed but it is pending",
+        category=RuntimeWarning,
+    )
     run_id = get_run_id()
     diagnostics = []
     errors_count = 0
@@ -615,7 +600,6 @@ async def process_pdf_pipeline(config: Config):
     stage_start_ts = datetime.now().isoformat()
     t_stage0 = time.monotonic()
     resources = snapshot_resources("start")
-    import os
 
     sampler = (
         start_resource_sampler(float(os.getenv("SAMPLE_INTERVAL_SEC", "2")))
@@ -633,7 +617,9 @@ async def process_pdf_pipeline(config: Config):
                     {},
                 )
             )
-    except Exception:
+    except Exception as exc:
+        log_stage_error('03_suspicious_headers', exc, {'context': '03'})
+        raise
         pass
     try:
         if psutil is not None:
@@ -641,7 +627,9 @@ async def process_pdf_pipeline(config: Config):
             resources["proc_rss_mb_start"] = int((proc.memory_info().rss or 0) / (1024 * 1024))
             vm = psutil.virtual_memory()
             resources["vmem_used_mb_start"] = int(getattr(vm, "used", 0) / (1024 * 1024))
-    except Exception:
+    except Exception as exc:
+        log_stage_error('03_suspicious_headers', exc, {'context': '03'})
+        raise
         pass
 
     # Define clear output paths
@@ -656,7 +644,9 @@ async def process_pdf_pipeline(config: Config):
 
     try:
         pdf_doc = fitz.open(config.input_pdf)
-    except Exception as e:
+    except Exception as exc:
+        log_stage_error('03_suspicious_headers', exc, {'context': '03'})
+        raise
         print(f"Failed to open PDF {config.input_pdf}: {e}")
         return {"success": False, "error": str(e)}
 
@@ -686,7 +676,9 @@ async def process_pdf_pipeline(config: Config):
                 p = int(a.get("page", -1))
                 if p >= 0:
                     annotations_by_page.setdefault(p, []).append(a)
-        except Exception as e:
+        except Exception as exc:
+            log_stage_error('03_suspicious_headers', exc, {'context': '03'})
+            raise
             logger.warning(f"Failed to load annotations from {config.annotations_json}: {e}")
 
     # Load saved FAISS index from Stage 01 if present; else build ephemeral
@@ -695,6 +687,30 @@ async def process_pdf_pipeline(config: Config):
 
     # 3) Candidate discovery — suspicious headers and fallbacks (or verify-all)
     # Preflight happens once we know we have candidates.
+
+    # Pre-enrich blocks with numbering spans and optional color once per block
+    text_only_mode = os.getenv("STAGE03_TEXT_ONLY", "1").lower() in ("1", "true", "yes", "y")
+    if STAGE03_COLOR_ENRICH or True:  # numbering spans always enabled
+        for p_idx, page_data in enumerate(marker_data.get("pages", [])):
+            page_blocks = page_data.get("blocks", [])
+            page_obj = pdf_doc[p_idx]
+            for block in page_blocks:
+                try:
+                    raw_text = (block.get("text") or block.get("content") or "").strip()
+                    if raw_text:
+                        na = _pdf_analyze_numbering(raw_text)
+                        if na.get("number_span") or na.get("title_span"):
+                            block["header_char_spans"] = {
+                                "number": na.get("number_span"),
+                                "title": na.get("title_span"),
+                            }
+                            block.setdefault("header_title", _pdf_extract_title(raw_text))
+                    if STAGE03_COLOR_ENRICH:
+                        ensure_first_span_color(page_obj, block)
+                except Exception as exc:
+                    log_stage_error('03_suspicious_headers', exc, {'context': '03'})
+                    raise
+                    continue
 
     # Identify candidate tasks (suspicious headers, suspicious SectionHeaders, or all SectionHeaders with --verify-all-headers)
     tasks: list[VerificationTask] = []
@@ -739,7 +755,9 @@ async def process_pdf_pipeline(config: Config):
         try:
             _err = sum(1 for _d in (diagnostics or []) if str(_d.get("severity")) == "error")
             _wrn = sum(1 for _d in (diagnostics or []) if str(_d.get("severity")) == "warning")
-        except Exception:
+        except Exception as exc:
+            log_stage_error('03_suspicious_headers', exc, {'context': '03'})
+            raise
             _err, _wrn = errors_count, warnings_count
         marker_data["errors_count"] = _err
         marker_data["warnings_count"] = _wrn
@@ -756,7 +774,9 @@ async def process_pdf_pipeline(config: Config):
         eff_model = _normalize_model_alias(config.llm_model)
         eff_extras = build_chat_extras(eff_model)
         logger.info(f"stage03.batch: effective_model={eff_model} extras_keys={list(eff_extras.keys())}")
-    except Exception:
+    except Exception as exc:
+        log_stage_error('03_suspicious_headers', exc, {'context': '03'})
+        raise
         pass
     try:
         diagnostics.append(
@@ -768,7 +788,9 @@ async def process_pdf_pipeline(config: Config):
                 {"tasks": len(tasks)},
             )
         )
-    except Exception:
+    except Exception as exc:
+        log_stage_error('03_suspicious_headers', exc, {'context': '03'})
+        raise
         pass
 
     # 4) Preflight — verify model supports vision using a real candidate clip
@@ -785,9 +807,13 @@ async def process_pdf_pipeline(config: Config):
             try:
                 import os as _os
                 _os.environ["VISION_PREFLIGHT_ASSUME_OK"] = "1"
-            except Exception:
+            except Exception as exc:
+                log_stage_error('03_suspicious_headers', exc, {'context': '03'})
+                raise
                 pass
-    except Exception as e:
+    except Exception as exc:
+        log_stage_error('03_suspicious_headers', exc, {'context': '03'})
+        raise
         pdf_doc.close()
         raise RuntimeError(f"Selected model does not support vision or call failed: {e}")
 
@@ -823,30 +849,6 @@ async def process_pdf_pipeline(config: Config):
     for idx, task in enumerate(tasks):
         try:
             target_block, above_block, below_block = task.get_context_blocks()
-            # Attach deterministic header spans to the target block (if any)
-            try:
-                raw_text = (target_block.get("text") or target_block.get("content") or "").strip()
-                if raw_text:
-                    na = _pdf_analyze_numbering(raw_text)
-                    if na.get("number_span") or na.get("title_span"):
-                        target_block["header_char_spans"] = {
-                            "number": na.get("number_span"),
-                            "title": na.get("title_span"),
-                        }
-                        # Provide a normalized header title for convenience
-                        target_block.setdefault("header_title", _pdf_extract_title(raw_text))
-            except Exception:
-                pass
-            # Opportunistic color enrichment for the three context blocks
-            if STAGE03_COLOR_ENRICH:
-                try:
-                    _ensure_first_span_color(task.page_obj, target_block)
-                    if above_block and int(above_block.get("page", task.page_idx)) == task.page_idx:
-                        _ensure_first_span_color(task.page_obj, above_block)
-                    if below_block and int(below_block.get("page", task.page_idx)) == task.page_idx:
-                        _ensure_first_span_color(task.page_obj, below_block)
-                except Exception:
-                    pass
             # --- Heuristic guardrails BEFORE any LLM call ---
             # Demote common false positives early to reduce noise and cost.
             try:
@@ -866,12 +868,15 @@ async def process_pdf_pipeline(config: Config):
                             target_block["header_char_spans"] = hdr["spans"]
                             target_block.setdefault("header_title", hdr.get("title"))
                         continue
-                except Exception:
+                except Exception as exc:
+                    log_stage_error('03_suspicious_headers', exc, {'context': '03'})
+                    raise
                     pass
                 # Accept classic numbered headings like "1.1.1 Section Title"
                 is_numbered = bool(_re.match(r"^\s*\d+(?:[\.-]\d+){1,}\s+\S", raw_text))
                 # Short colon label (wrapper) — e.g., "Mergeable Tables:" — often not a true header
                 short_colon = len(raw_text) <= 40 and raw_text.endswith(":")
+                bullet_prefix = raw_text.startswith("•") or raw_text.startswith("●")
                 # Captions that look like Table/Figure labels
                 is_caption = bool(
                     _re.match(r"^\s*(Table|Figure)\s+\d+(?:[-–]\d+)?[.:]", raw_text, _re.IGNORECASE)
@@ -888,7 +893,9 @@ async def process_pdf_pipeline(config: Config):
                         "auto": True,
                     }
                     continue
-            except Exception:
+            except Exception as exc:
+                log_stage_error('03_suspicious_headers', exc, {'context': '03'})
+                raise
                 pass
             # Optional FAISS advisory cue: similar annotations
             try:
@@ -905,7 +912,9 @@ async def process_pdf_pipeline(config: Config):
                                 {"top_k": len(sims)},
                             )
                         )
-            except Exception:
+            except Exception as exc:
+                log_stage_error('03_suspicious_headers', exc, {'context': '03'})
+                raise
                 pass
 
             # --- Build human annotations cues (if available) ---
@@ -920,7 +929,9 @@ async def process_pdf_pipeline(config: Config):
                 def _is_relevant_03(a: dict[str, Any]) -> bool:
                     try:
                         return "03" in (a.get("relevant_to") or [])
-                    except Exception:
+                    except Exception as exc:
+                        log_stage_error('03_suspicious_headers', exc, {'context': '03'})
+                        raise
                         return False
 
                 anns_sorted = sorted(anns, key=lambda x: (not _is_relevant_03(x)))
@@ -945,7 +956,9 @@ async def process_pdf_pipeline(config: Config):
                                 weight = min(1.0, weight * boost)
                                 if pol < 0:
                                     any_relevant_negative = True
-                        except Exception:
+                        except Exception as exc:
+                            log_stage_error('03_suspicious_headers', exc, {'context': '03'})
+                            raise
                             pass
                         cues.append((pol, weight, lbl))
                 human_summary, _ = _summarize_cues(cues)
@@ -995,7 +1008,9 @@ async def process_pdf_pipeline(config: Config):
                             auto_reason = (
                                 f"Auto-reject due to prior decisions: {len(rej)} strong rejections"
                             )
-                except Exception as e:
+                except Exception as exc:
+                    log_stage_error('03_suspicious_headers', exc, {'context': '03'})
+                    raise
                     logger.debug(f"Prior processing failed: {e}")
 
             combined_human_summary = human_summary
@@ -1039,7 +1054,9 @@ async def process_pdf_pipeline(config: Config):
             try:
                 _m_eff = _normalize_model_alias(config.llm_model)
                 _extras = build_chat_extras(_m_eff)
-            except Exception:
+            except Exception as exc:
+                log_stage_error('03_suspicious_headers', exc, {'context': '03'})
+                raise
                 _m_eff = config.llm_model
                 _extras = {}
             prepared.append(
@@ -1053,7 +1070,9 @@ async def process_pdf_pipeline(config: Config):
             task_refs.append(task)
             prepared_ctx.append(context_text)
 
-        except Exception as e:
+        except Exception as exc:
+            log_stage_error('03_suspicious_headers', exc, {'context': '03'})
+            raise
             logger.exception(
                 f"Preparation failed for page {task.page_idx} block {task.block_idx}: {e}"
             )
@@ -1064,17 +1083,20 @@ async def process_pdf_pipeline(config: Config):
     if prepared:
         try:
             t_llm0 = time.monotonic()
-            ch_base = os.getenv("CHUTES_API_BASE", "").strip()
-            ch_key = os.getenv("CHUTES_API_KEY", "").strip()
             try:
                 _verify_cap = int(os.getenv("STAGE03_VERIFY_MAX_TOKENS", "256"))
-            except Exception:
+            except Exception as exc:
+                log_stage_error('03_suspicious_headers', exc, {'context': '03'})
+                raise
                 _verify_cap = 256
 
+            text_only_batch = text_only_mode
+            router_instance = get_text_router() if text_only_batch else get_vlm_router()
+            route_model = "chutes/text" if text_only_batch else "chutes/vlm"
+
             async def _process_item(item: dict) -> str:
-                router = get_text_router()
-                resp = await router.acompletion(
-                    model="chutes/text",
+                resp = await router_instance.acompletion(
+                    model=route_model,
                     messages=item.get("messages"),
                     response_format={"type": "json_object"},
                     max_tokens=_verify_cap,
@@ -1103,12 +1125,16 @@ async def process_pdf_pipeline(config: Config):
                     )
                 )
                 errors_count += 1
-            except Exception:
+            except Exception as exc:
+                log_stage_error('03_suspicious_headers', exc, {'context': '03'})
+                raise
                 pass
             results = [
                 json.dumps({"error": {"type": "Timeout", "message": info.get("message")}})
             ] * len(prepared)
-        except Exception as e:
+        except Exception as exc:
+            log_stage_error('03_suspicious_headers', exc, {'context': '03'})
+            raise
             logger.error(f"Stage 03 model calls failed: {e}")
             info = classify_llm_error(e)
             try:
@@ -1122,7 +1148,9 @@ async def process_pdf_pipeline(config: Config):
                     )
                 )
                 errors_count += 1
-            except Exception:
+            except Exception as exc:
+                log_stage_error('03_suspicious_headers', exc, {'context': '03'})
+                raise
                 pass
             results = [
                 json.dumps({"error": {"type": type(e).__name__, "message": info.get("message")}})
@@ -1131,7 +1159,9 @@ async def process_pdf_pipeline(config: Config):
         for ans in results:
             try:
                 llm_payloads.append(json.loads(ans) if ans else {})
-            except Exception:
+            except Exception as exc:
+                log_stage_error('03_suspicious_headers', exc, {'context': '03'})
+                raise
                 llm_payloads.append({"error": {"type": "ParseError", "message": ans[:200]}})
 
     # 7) Apply results back to blocks — update types, suspicion fields, persist
@@ -1163,7 +1193,9 @@ async def process_pdf_pipeline(config: Config):
         try:
             if str(llm_result.get("reasoning", "")).strip() == "parse_error":
                 parse_error_count += 1
-        except Exception:
+        except Exception as exc:
+            log_stage_error('03_suspicious_headers', exc, {'context': '03'})
+            raise
             pass
 
         # Update JSON in place
@@ -1200,7 +1232,9 @@ async def process_pdf_pipeline(config: Config):
                     block_to_update["suspicion_confidence"] = (
                         float(conf) if isinstance(conf, (int, float)) else 0.9
                     )
-                except Exception:
+                except Exception as exc:
+                    log_stage_error('03_suspicious_headers', exc, {'context': '03'})
+                    raise
                     block_to_update["suspicion_confidence"] = 0.9
                 block_to_update["requires_review"] = True
 
@@ -1215,7 +1249,9 @@ async def process_pdf_pipeline(config: Config):
                         ctx = build_llm_context(tgt, abv, bel)
                     else:
                         ctx = prepared_ctx[prep_idx - 1] if (prep_idx - 1) < len(prepared_ctx) else ""
-                except Exception:
+                except Exception as exc:
+                    log_stage_error('03_suspicious_headers', exc, {'context': '03'})
+                    raise
                     ctx = ""
                 rec = task.build_dataset_record(
                     context_text=ctx,
@@ -1228,7 +1264,9 @@ async def process_pdf_pipeline(config: Config):
                 run_file = ds_dir / f"{run_id}.jsonl"
                 with open(run_file, "a", encoding="utf-8") as fp:
                     fp.write(json.dumps(rec, ensure_ascii=False) + "\n")
-        except Exception as _e:
+        except Exception as exc:
+            log_stage_error('03_suspicious_headers', exc, {'context': '03'})
+            raise
             logger.warning(f"dataset_dump_failed: {_e}")
     pdf_doc.close()
 
@@ -1256,7 +1294,9 @@ async def process_pdf_pipeline(config: Config):
                     b["suspicious_header"] = False
                 b.setdefault("llm_verification", {})
                 b["llm_verification"]["result"] = {"is_header": False, "reasoning": "policy_auto_reject_colon_semicolon_or_continued"}
-    except Exception:
+    except Exception as exc:
+        log_stage_error('03_suspicious_headers', exc, {'context': '03'})
+        raise
         pass
     marker_data["blocks"] = final_blocks
     del marker_data["pages"]
@@ -1272,7 +1312,9 @@ async def process_pdf_pipeline(config: Config):
             resources["proc_rss_mb_end"] = int((proc.memory_info().rss or 0) / (1024 * 1024))
             vm = psutil.virtual_memory()
             resources["vmem_used_mb_end"] = int(getattr(vm, "used", 0) / (1024 * 1024))
-    except Exception:
+    except Exception as exc:
+        log_stage_error('03_suspicious_headers', exc, {'context': '03'})
+        raise
         pass
     timings = {
         "stage_start_ts": stage_start_ts,
@@ -1285,18 +1327,24 @@ async def process_pdf_pipeline(config: Config):
         samples = stop_resource_sampler(sampler) if sampler else []
         if samples:
             resources.setdefault("resource_samples", samples)
-    except Exception:
+    except Exception as exc:
+        log_stage_error('03_suspicious_headers', exc, {'context': '03'})
+        raise
         pass
     marker_data["timings"] = timings
     marker_data["resources"] = resources
     # Threshold policy for parse errors
     try:
         warn_frac = float(os.getenv("PARSE_WARN_FRAC", "0.05"))
-    except Exception:
+    except Exception as exc:
+        log_stage_error('03_suspicious_headers', exc, {'context': '03'})
+        raise
         warn_frac = 0.05
     try:
         fail_frac = float(os.getenv("PARSE_FAIL_FRAC", "0.20"))
-    except Exception:
+    except Exception as exc:
+        log_stage_error('03_suspicious_headers', exc, {'context': '03'})
+        raise
         fail_frac = 0.20
     total_verified = max(1, len(tasks) - len(auto_results))
     parse_rate = parse_error_count / float(total_verified)
@@ -1331,7 +1379,9 @@ async def process_pdf_pipeline(config: Config):
                             exc += 1
                         if rec.get("latency_ms") is not None:
                             lat.append(float(rec["latency_ms"]))
-                    except Exception:
+                    except Exception as exc:
+                        log_stage_error('03_suspicious_headers', exc, {'context': '03'})
+                        raise
                         continue
                 lat_sorted = sorted(lat)
                 def _pct(p: float) -> float:
@@ -1349,7 +1399,9 @@ async def process_pdf_pipeline(config: Config):
                     "p95_ms": _pct(0.95),
                 }
                 (logs_dir / "timings_summary.json").write_text(json.dumps(summary, indent=2))
-    except Exception:
+    except Exception as exc:
+        log_stage_error('03_suspicious_headers', exc, {'context': '03'})
+        raise
         pass
 
     # Enforce thresholds: warn vs fail
@@ -1427,7 +1479,9 @@ def run(
         # Explicit operator override: allowed skip (not implicit soft-skip)
         try:
             data = json.loads(input_json.read_text())
-        except Exception as e:
+        except Exception as exc:
+            log_stage_error('03_suspicious_headers', exc, {'context': '03'})
+            raise
             raise ValueError(f"Failed to load input JSON: {e}")
         blocks = data.get("blocks", [])
         # Heuristic demotion mirrors the pre-LLM guardrails used in the online path.
@@ -1438,20 +1492,23 @@ def run(
                 continue
             b["suspicious_header"] = False
             if (b.get("block_type") == "SectionHeader"):
-                raw_text = (b.get("text") or "").strip()
+                raw_text = (b.get("text") or "")
                 is_numbered = bool(_re.match(r"^\s*\d+(?:[\.-]\d+){1,}\s+\S", raw_text))
                 short_colon = len(raw_text) <= 40 and raw_text.endswith(":")
+                bullet_prefix = has_bullet_prefix(raw_text)
                 is_caption = bool(
                     _re.match(r"^\s*(Table|Figure)\s+\d+(?:[-–]\d+)?[.:]", raw_text, _re.IGNORECASE)
                 )
                 has_terminal_punct = raw_text.endswith(".") or raw_text.endswith(";")
-                if (not is_numbered) and (short_colon or is_caption or has_terminal_punct):
+                if (not is_numbered) and (short_colon or is_caption or has_terminal_punct or bullet_prefix):
                     # Demote to plain text; annotate reasons for downstream debugging if desired
                     b["block_type"] = "Text"
                     reasons = list(b.get("suspicious_reasons") or [])
                     tag = (
                         "not_header_colon" if short_colon else (
-                            "caption_pattern" if is_caption else "not_header_sentence"
+                            "caption_pattern" if is_caption else (
+                                "bullet_prefix" if bullet_prefix else "not_header_sentence"
+                            )
                         )
                     )
                     if tag not in [str(r) for r in reasons]:
@@ -1481,7 +1538,9 @@ def run(
             rotation="1 week",
             retention="14 days",
         )
-    except Exception:
+    except Exception as exc:
+        log_stage_error('03_suspicious_headers', exc, {'context': '03'})
+        raise
         pass
 
     # Enforce design: defer ArangoDB until after Step 09
@@ -1490,7 +1549,9 @@ def run(
             logger.warning(
                 "Ignoring --persist-headers: ArangoDB persistence is deferred until after Step 09 (export stages handle DB)."
             )
-        except Exception:
+        except Exception as exc:
+            log_stage_error('03_suspicious_headers', exc, {'context': '03'})
+            raise
             pass
         persist_headers = False
 
@@ -1601,7 +1662,9 @@ def debug_bundle(
 
     try:
         data = json.loads(bundle.read_text())
-    except Exception as e:
+    except Exception as exc:
+        log_stage_error('03_suspicious_headers', exc, {'context': '03'})
+        raise
         print(f"Failed to read bundle: {e}")
         raise ValueError(f"Failed to read bundle: {e}")
 
@@ -1636,7 +1699,9 @@ if __name__ == "__main__":
         from dotenv import find_dotenv, load_dotenv
 
         load_dotenv(find_dotenv())
-    except Exception:
+    except Exception as exc:
+        log_stage_error('03_suspicious_headers', exc, {'context': '03'})
+        raise
         pass
     import sys
     argv = sys.argv[1:]
@@ -1652,20 +1717,26 @@ if __name__ == "__main__":
         try:
             blocks_json = Path(argv[1])
             anno_dir = Path(argv[2])
-        except Exception:
+        except Exception as exc:
+            log_stage_error('03_suspicious_headers', exc, {'context': '03'})
+            raise
             print("Missing args", file=sys.stderr)
             sys.exit(2)
         out_dir = Path("data/results/pipeline")
         if "-o" in argv:
             try:
                 out_dir = Path(argv[argv.index("-o") + 1])
-            except Exception:
+            except Exception as exc:
+                log_stage_error('03_suspicious_headers', exc, {'context': '03'})
+                raise
                 pass
     else:
         try:
             blocks_json = Path(argv[0])
             anno_dir = Path(argv[1])
-        except Exception:
+        except Exception as exc:
+            log_stage_error('03_suspicious_headers', exc, {'context': '03'})
+            raise
             print("Missing args", file=sys.stderr)
             sys.exit(2)
         out_dir = Path(argv[2]) if len(argv) > 2 else Path("data/results/pipeline")
