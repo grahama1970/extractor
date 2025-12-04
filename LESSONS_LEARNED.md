@@ -55,9 +55,18 @@ This file captures repeat issues we’ve hit and the playbooks/checks that preve
 - API sanity:
   - `curl http://127.0.0.1:8000/api/build`
 
+## Section Builder Coverage (Stage 04 → table merges)
+
+- Problem: Parent headings were dropped when a child existed, so early pages (0–1) had no section; tables there never got merge tags, breaking Stage 07/09a contiguity checks.
+- Playbook:
+  - Run Stage 04 with `fallback_heuristics=True` to promote numbered headings into sections.
+  - Add a safety net: if any blocks/pages precede the first emitted section, create a section from the first numbered heading on those pages (not a generic “Prelude”).
+  - Verify `04_sections.json` spans all pages that contain tables; rerun if section_count unexpectedly drops.
+- Never again:
+  - If merges disappear for early pages, inspect `04_sections.json` and ensure a section covers those pages before debugging Stage 07.
+
 ## How to Contribute a Lesson
 
 - Keep it short: problem → playbook → automation/guard → “never again” line.
 - Prefer wiring a lesson to an executable: a smoke, a dev flag, or a VS Code task.
 - Edit this file in PRs alongside the code that implements the guard.
-

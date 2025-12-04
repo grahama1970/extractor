@@ -859,12 +859,60 @@ async def process_sections_comprehensive(
     blocks: List[Dict[str, Any]],
     pdf_path: Optional[Path] = None,
     image_output_dir: Optional[Path] = None,
-    fallback_heuristics: bool = False,
+    fallback_heuristics: bool = True,
     max_visual_pages: int = MAX_VISUAL_PAGES_DEFAULT,
 ) -> Dict[str, Any]:
     """Process blocks into sections with comprehensive validation and enhanced visuals."""
 
     sections = build_sections_from_blocks(blocks, fallback_heuristics=fallback_heuristics)
+
+    # Safety net: if there are blocks before the first emitted section, promote the first numbered heading on those pages
+    # into a proper section (instead of a generic Prelude), so parent headings are preserved.
+    try:
+        first_start = min((s.get("page_start", 10**9) for s in sections), default=10**9)
+        min_page = min((b.get("page", b.get("page_idx", 0)) for b in blocks), default=0)
+        if min_page < first_start:
+            leading_blocks = [b for b in blocks if (b.get("page", b.get("page_idx", 0)) or 0) < first_start]
+            # Find the first numbered heading candidate
+            heading = next(
+                (b for b in leading_blocks if analyze_section_numbering(b.get("text", "")).get("has_numbering")),
+                None,
+            )
+            if heading:
+                txt = heading.get("text", "")
+                na = analyze_section_numbering(txt)
+                clean_title = clean_section_title(txt)
+                header_level = na.get("depth_level") or detect_header_level(clean_title)
+                section_title = extract_section_title(clean_title)
+                sec_num = _normalize_section_number(na.get("number_text") or "")
+                try:
+                    import hashlib
+                    sec_hash = hashlib.md5(
+                        (na.get("title_text") or section_title or clean_title).lstrip(". ").strip().encode("utf-8")
+                    ).hexdigest()
+                except Exception:
+                    sec_hash = ""
+                page_num = heading.get("page", heading.get("page_idx", min_page))
+                synth_sec = {
+                    "id": "section_prelude",
+                    "title": clean_title,
+                    "level": header_level,
+                    "blocks": leading_blocks,
+                    "page_start": min_page,
+                    "page_end": first_start - 1 if first_start < 10**8 else min_page,
+                    "bbox": heading.get("bbox", [0, 0, 100, 100]),
+                    "metadata": {
+                        "block_count": len(leading_blocks),
+                        "auto_generated": True,
+                        "reason": "prelude_missing_section",
+                        "section_number": sec_num,
+                        "section_depth": na.get("depth_level"),
+                        "section_hash": sec_hash,
+                    },
+                }
+                sections.insert(0, synth_sec)
+    except Exception:
+        pass
 
     # --- Optional: enrich header color from the PDF (first span only)
     if STAGE04_COLOR_ENRICH and pdf_path and pdf_path.exists():
@@ -983,7 +1031,7 @@ async def build_and_validate_sections_comprehensive(
     blocks_path: Path,
     pdf_path: Optional[Path] = None,
     output_dir: Optional[Path] = None,
-    fallback_heuristics: bool = False,
+    fallback_heuristics: bool = True,
     max_visual_pages: int = MAX_VISUAL_PAGES_DEFAULT,
 ) -> Tuple[Path, Dict[str, Any]]:
     """Main pipeline: Build sections with comprehensive validation and enhanced analysis."""
