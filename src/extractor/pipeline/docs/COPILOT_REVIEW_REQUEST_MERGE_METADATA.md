@@ -3,7 +3,7 @@
 ## Repository and branch
 
 - **Repo:** `experiments/extractor`
-- **Branch:** current working tree (uncommitted); please advise whether to base on an existing feature branch or create a new one.
+- **Branch:** `feature/merge-metadata-prop` (pushed)
 - **Paths of interest:**
   - `src/extractor/pipeline/steps/07_reflow_section.py`
   - `src/extractor/pipeline/utils/unified_conversion.py`
@@ -49,4 +49,3 @@
 1) Can we rely on the Stage 05 `normalized_id` as the primary key for tables across stages, or should we derive our own logical key?
 2) Is it acceptable to add a small helper to normalize column signatures (columns + ncol + title) to make merge matching more robust?
 3) Should walkthrough/annotator display the `logical_table_key`, or is it sufficient to keep it in the JSON only?
-
