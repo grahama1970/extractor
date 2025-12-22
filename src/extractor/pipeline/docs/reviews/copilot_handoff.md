@@ -1,29 +1,33 @@
-# Copilot Handoff: LLM Telemetry Implementation
+# Copilot Handoff: LLM Telemetry + Pipeline Refactoring
 
-## ✅ Already Implemented (by Antigravity)
+**Branch:** `feature/merge-metadata-prop`  
+**Latest Commit:** `19e100f1`  
+**Updated:** 2025-12-22
 
-### 1) `schemas/llm_call.py` — LLMCallRecord Schema
+---
+
+## ✅ Phase 1: Schema & Helper (Complete)
+
+### `schemas/llm_call.py` — LLMCallRecord Schema
 
 ```python
 class LLMCallRecord(BaseModel):
-    ts: str                                    # ISO timestamp (auto-added)
+    ts: str                                    # ISO timestamp
     stage: str                                 # "07_reflow_section"
     task_kind: str                             # "reflow", "summarize", etc.
     route: Literal["chutes/text", "chutes/vlm"]
-    model: str                                 # from get_text_model() / get_vlm_model()
+    model: str
     section_id: str | None = None
     success: bool
-    error_class: str | None = None             # "timeout", "parse_fail", "validation_fail"
+    error_class: str | None = None             # "timeout", "parse_fail", etc.
     latency_ms: int | None = None
     tokens_in: int | None = None
     tokens_out: int | None = None
-    attempt_count: int | None = None           # null = unknown (as you suggested)
-    raw_preview: str | None = None             # only on error, max 400 chars
-
-    model_config = {"extra": "forbid"}
+    attempt_count: int | None = None
+    raw_preview: str | None = None
 ```
 
-### 2) `debug_utils.log_llm_call()` — Helper Function
+### `debug_utils.log_llm_call()` — Helper
 
 ```python
 from extractor.pipeline.utils.debug_utils import log_llm_call
@@ -32,103 +36,85 @@ log_llm_call(
     stage_key="07_reflow_section",
     task_kind="reflow",
     route="chutes/text",
-    model=get_text_model(),  # from model_select.py
+    model=get_text_model(),
     success=True,
     section_id="sec_001",
     latency_ms=1500,
     tokens_in=100,
     tokens_out=200,
-    # error_class, raw_preview only on failure
 )
 ```
 
-Writes to `{stage}/logs/timings.jsonl` via existing `log_timing()`.
+---
 
-### 3) Tests
+## ✅ Phase 2: Utility Packages (Complete)
 
-- 34 schema tests passing
-- Committed: `cf054175` on `feature/merge-metadata-prop`
+**7 packages created, 3,528 lines extracted:**
+
+| Package           | Stage | Lines | Key Functions                        |
+| ----------------- | ----- | ----- | ------------------------------------ |
+| `utils/reflow/`   | 07    | 1,217 | prompts, tables, layout, llm_helpers |
+| `utils/headers/`  | 03    | 380   | heuristics, llm, priors              |
+| `utils/tables/`   | 05    | 618   | extraction, metrics, heuristics      |
+| `utils/visuals/`  | 09a   | 559   | colors, geometry, formatting         |
+| `utils/prover/`   | 08    | 259   | execution (CLI/Docker)               |
+| `utils/layout/`   | 06b   | 289   | geometry, columns                    |
+| `utils/sections/` | 04    | 206   | parsing (numbering, titles)          |
+
+**Commits:**
+
+- `c36c1c9a` — utils/headers/
+- `14e1d40b` — utils/tables/, utils/visuals/, step_refactors docs
+- `19e100f1` — utils/prover/, utils/layout/, utils/sections/
 
 ---
 
-## ❌ Still Needed: Stage Call Site Stamping
+## ❌ Phase 3: Remaining Work for Copilot
 
-### Task Kind Vocabulary (confirmed)
+### Task A: Wire Imports + Delete Duplicates
 
-| Stage         | task_kind                |
-| ------------- | ------------------------ |
-| 03 VLM        | `"verify_header"`        |
-| 06 VLM        | `"figure_describe"`      |
-| 07 text       | `"reflow"`               |
-| 07r reqs      | `"extract_requirements"` |
-| 08 Lean4      | `"lean4_formalize"`      |
-| 09 summary    | `"summarize"`            |
-| 09 checkpoint | `"checkpoint_summary"`   |
+For each stage, `07_reflow_section.py` etc:
+
+1. Add imports from the new `utils/` package
+2. Delete the inline duplicate function definitions
+3. Expected reduction: ~16,000 → ~2,600 lines
+
+### Task B: Stamp LLM Call Sites
+
+| Stage | task_kind           | Call Sites                                           |
+| ----- | ------------------- | ---------------------------------------------------- |
+| 03    | `"verify_header"`   | `verify_header_with_llm()`                           |
+| 06    | `"figure_describe"` | VLM calls                                            |
+| 07    | `"reflow"`          | `_direct_scillm_json()`, `reflow_section_with_llm()` |
+| 08    | `"lean4_formalize"` | `identify_requirements_in_section()`                 |
+| 09    | `"summarize"`       | `_direct_scillm_summary_call()`                      |
+
+### Task C: Tests
+
+- Run `pytest tests/pipeline/schemas/` — currently 34/34 passing
+- Run smoke test after wiring imports
 
 ---
 
-## Key Call Sites to Stamp
+## Step Refactor Documentation
 
-### Stage 03: `03_suspicious_headers.py`
+Detailed plans for each stage are in:
 
-```python
-# Line ~890: VLM call in verify_header_with_llm()
-router = get_vlm_router()
-resp = await router.acompletion(messages=msgs, ...)
-# ADD after call:
-log_llm_call("03_suspicious_headers", "verify_header", "chutes/vlm", get_vlm_model(), ...)
 ```
-
-### Stage 07: `07_reflow_section.py`
-
-```python
-# Line ~371-409: _direct_scillm_json()
-router = get_text_router()
-resp = await router.acompletion(...)
-# ADD after call
-
-# Line ~1318-3827: reflow_section_with_llm() - multiple router calls
-# Each router.acompletion() needs stamping
-```
-
-### Stage 09: `09_section_summarizer.py`
-
-```python
-# Line ~200-270: _direct_scillm_summary_call()
-router = get_text_router()
-resp = await router.acompletion(...)
-# Already has timing logic - extend with log_llm_call()
+src/extractor/pipeline/docs/step_refactors/
+├── README.md          # Overview
+├── stage05.md         # Table Extractor
+├── stage06_sketcher.md
+├── stage08_lean4.md
+├── stage09_refactor.md
+└── stage09a_annotator.md
 ```
 
 ---
 
-## Answers to Copilot's Questions
+## Recommended Order
 
-1. **attempt_count**: Use `None` (null) to make "unknown" explicit ✅
-2. **model source**: Use `get_text_model()` / `get_vlm_model()` as canonical ✅
-   - If `resp.model` available, could optionally add `served_model` field later
-3. **PR approach**: Schema + helper already done; just need call site stamping
-
----
-
-## File Size Blocker
-
-~~The large stage files (07=5385 lines, 09=890 lines) still need Phase 2 extraction before Copilot can read them fully.~~
-
-**UPDATE**: Phase 2 started. New `utils/reflow/` package created:
-
-```
-src/extractor/pipeline/utils/reflow/
-├── __init__.py
-├── tables.py   # 280 lines - merge logic, cell sanitization, confidence
-├── layout.py   # 130 lines - IoU, figure blocks, layout ordering
-├── prompts.py  # TODO - prompt formatting
-├── llm_helpers.py  # TODO - router wrappers
-└── data_loader.py  # TODO - consolidate_data
-```
-
-Copilot can proceed with:
-
-1. Creating remaining modules (prompts.py, llm_helpers.py, data_loader.py)
-2. Updating `07_reflow_section.py` imports to use new package
-3. Removing extracted functions from `07_reflow_section.py`
+1. **Wire imports** for one stage (e.g., 07)
+2. **Delete duplicates** from that stage
+3. **Add `log_llm_call()` stamps** to that stage
+4. **Test** → repeat for other stages
