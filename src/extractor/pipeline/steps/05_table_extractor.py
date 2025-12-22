@@ -564,31 +564,7 @@ def _demote_sentence_like_single_row_tables(result: Dict[str, Any]) -> None:
         result["demoted_text_blocks"] = demoted
 
 
-def generate_pandas_metrics(df: pd.DataFrame) -> Dict[str, Any]:
-    """Generate comprehensive metrics from a DataFrame for analysis."""
-    if df.empty:
-        return {"shape": [0, 0], "error": "Empty DataFrame"}
-
-    total_cells = df.size
-    non_empty_cells = df.astype(str).ne("").sum().sum()
-
-    metrics = {
-        "shape": list(df.shape),
-        "columns": [str(c) for c in df.columns],
-        "dtypes": {str(k): str(v) for k, v in df.dtypes.to_dict().items()},
-        "null_counts": {str(k): int(v) for k, v in df.isnull().sum().to_dict().items()},
-        "total_cells": int(total_cells),
-        "non_empty_cells": int(non_empty_cells),
-        "data_density": float(non_empty_cells / total_cells) if total_cells > 0 else 0.0,
-    }
-    return metrics
-
-
-def score_table(df: pd.DataFrame) -> float:
-    """Score a table based on non-empty cell count."""
-    if df.empty:
-        return 0.0
-    return float(df.astype(str).ne("").sum().sum())
+# generate_pandas_metrics and score_table removed - now imported from utils/tables
 
 
 ## moved to utils: sanitize_cell
@@ -874,7 +850,7 @@ def extract_tables_from_page(
 
         for table in tables:
             bbox_tuple = _bbox_tuple_for(table)
-            score = score_table(table.df)
+            score = _score_table(table.df)
             if score == 0:
                 continue
             if not bbox_tuple:
@@ -977,7 +953,7 @@ def extract_tables_from_page(
 
             for table in tables:
                 bbox_tuple = _bbox_tuple_for(table)
-                score = score_table(table.df)
+                score = _score_table(table.df)
                 if score == 0 or not bbox_tuple:
                     continue
                 bbox_q = _quantize_bbox(bbox_tuple)
@@ -1072,7 +1048,7 @@ def extract_tables_from_page(
                 "fragmentation_score": fragmentation,
                 "pandas_df_raw": df.to_dict("records"),
                 "pandas_df": df_clean.to_dict("records"),
-                "pandas_metrics": generate_pandas_metrics(df_clean),
+                "pandas_metrics": _generate_pandas_metrics(df_clean),
                 "camelot_metrics": {
                     "accuracy": getattr(table, "accuracy", None),
                     "whitespace": getattr(table, "whitespace", None),
@@ -1695,7 +1671,7 @@ def run(
                             body_df.columns = new_cols
                             # Update best table payload and metrics
                             best["pandas_df"] = body_df.to_dict("records")
-                            best["pandas_metrics"] = generate_pandas_metrics(body_df)
+                            best["pandas_metrics"] = _generate_pandas_metrics(body_df)
                             used_headers.add(header_idx)
                     except Exception as exc:
                         log_stage_error('05_table_extractor', exc, {'context': '05'})
@@ -2140,7 +2116,7 @@ def run(
                 if to_drop:
                     df = df.drop(index=to_drop).reset_index(drop=True)
                     t["pandas_df"] = df.to_dict("records")
-                    t["pandas_metrics"] = generate_pandas_metrics(df)
+                    t["pandas_metrics"] = _generate_pandas_metrics(df)
             except Exception as exc:
                 log_stage_error('05_table_extractor', exc, {'context': '05'})
                 raise
