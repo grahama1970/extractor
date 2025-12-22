@@ -2,13 +2,13 @@
 
 ## Branch: `feature/merge-metadata-prop`
 
-## Latest Commit: `9422459b`
+## Latest Commit: `85e79cdf`
 
 ---
 
 ## Summary
 
-Refactored the extractor pipeline to extract utility functions into structured packages under `utils/`. All major stages are now properly wired to use these packages.
+Refactored the extractor pipeline to extract utility functions into structured packages under `utils/`. Stages 04, 05, 08, and 09a are now properly wired to use these packages, with significant dead code removal.
 
 ---
 
@@ -38,63 +38,51 @@ Refactored the extractor pipeline to extract utility functions into structured p
 
 ---
 
-## Phase 3: Stage Wiring ✅
+## Phase 3: Stage Wiring & Cleanup ✅
 
 ### Stage 04 (Section Builder) - FULLY WIRED
 
-```python
-from extractor.pipeline.utils.sections import (
-    SECTION_NUMBER_PATTERNS,
-    analyze_section_numbering,
-    detect_header_level,
-    extract_section_title,
-    ...
-)
-```
+- **Status**: Wired to `utils/sections`. Dead code removed.
+- **Reduction**: 1620 → 1436 lines (-184 lines).
+- **Imports**: `analyze_section_numbering`, `detect_header_level`.
 
-- **Verified:** `analyze_section_numbering.__module__` = `utils.sections.parsing`
-- sbul retained only for: `normalize_breadcrumbs`, `breadcrumb_label`, `enrich_header_colors`, `prepare_section_hierarchy`
+### Stage 05 (Table Extractor) - FULLY WIRED
 
-### Stage 05 (Table Extractor) - Imports Added
-
-```python
-from extractor.pipeline.utils.tables import (
-    generate_pandas_metrics as _generate_pandas_metrics,
-    score_table as _score_table,
-    iou as _table_iou,
-)
-```
+- **Status**: Wired to `utils/tables`. Inline duplicates removed.
+- **Reduction**: 2456 → 2431 lines (-25 lines).
+- **Removed**: Inline `generate_pandas_metrics`, `score_table`.
+- **Imports**: `_generate_pandas_metrics`, `_score_table`.
 
 ### Stage 06b (Layout Sketcher) - API Aligned
 
-- `utils/layout/`: `summ()`, `norm_text()`, `assign_cols_and_span()` match inline behavior
+- **Status**: Utility API aligned with stage behavior.
+- **Imports**: `utils/layout` aligned, ready for wiring.
 
-### Stage 08 (Lean4 Theorem Prover) - Imports Added
+### Stage 08 (Lean4 Theorem Prover) - FULLY WIRED
 
-```python
-from extractor.pipeline.utils.prover import (
-    ProofResult, prove_via_cli, execute_lean_code_docker,
-)
-```
+- **Status**: Wired to `utils/prover`. Inline duplicates removed.
+- **Reduction**: 1634 → 1331 lines (-303 lines).
+- **Removed**: Inline `_prove_via_cli`, `_prove_batch_via_cli`, `execute_lean_code`.
+- **Imports**: `_prove_via_cli`, `_execute_lean_code_docker`.
 
-### Stage 09a (PDF Annotator) - Imports Added
+### Stage 09a (PDF Annotator) - FULLY WIRED
 
-```python
-from extractor.pipeline.utils.visuals import (
-    COLORS, style_for_kind, stable_overlay_id, ...
-)
-```
+- **Status**: Wired to `utils/visuals`. Inline duplicates removed.
+- **Reduction**: 2305 → 2252 lines (-53 lines).
+- **Removed**: Inline `COLORS`, `HUMAN_KIND`, `_lighten`, `_style_for_kind`.
+- **Imports**: `COLORS`, `HUMAN_KIND`, `style_for_kind` (aliased).
 
 ---
 
 ## Verification Results
 
 ```
-✅ Stage 04: analyze_section_numbering from utils.sections.parsing
-✅ Stage 05: _generate_pandas_metrics from utils.tables.metrics
-✅ Stage 08: _ProofResult from utils.prover.execution
-✅ Stage 09a: imports verified
+✅ Stage 04: analyze_section_numbering using utils.sections
+✅ Stage 05: _generate_pandas_metrics using utils.tables
+✅ Stage 08: _execute_lean_code_docker using utils.prover
+✅ Stage 09a: COLORS using utils.visuals
 ✅ 34/34 tests passing
+✅ Total cleanup: ~565 lines removed
 ```
 
 ---
@@ -102,31 +90,30 @@ from extractor.pipeline.utils.visuals import (
 ## Commit History
 
 ```
-9422459b refactor(04): wire Stage 04 to utils/sections per Copilot analysis
+85e79cdf refactor(09a): remove inline color/style duplicates
+4712a438 refactor(08): remove inline CLI/docker functions (-303 lines)
+b7ad2c3c refactor(05): remove inline generate_pandas_metrics/score_table
+d969610b docs: update walkthrough - Stage 04 now fully wired
+9422459b refactor(04): wire Stage 04 to utils/sections
 3a0468d9 docs: add comprehensive Copilot walkthrough for refactoring
-365f5091 refactor: wire stages 05/08/09a to use utils packages
-8a93e866 fix(layout): align utils/layout API with 06b inline behavior
-239cdf7e refactor(04): apply Copilot cleanup + align utils/sections API
 ```
 
 ---
 
 ## Remaining Work
 
-### 1. Remove Inline Duplicate Functions in 05/08/09a
+### 1. Stamp `log_llm_call()` at LLM Call Sites
 
-Stages now have dual definitions. Safe to remove:
+Stages with LLM calls needing telemetry:
 
-- **Stage 05:** `generate_pandas_metrics()`, `score_table()`
-- **Stage 08:** `_prove_via_cli()`, `execute_lean_code()`
-- **Stage 09a:** Color/formatting functions
+- Stage 03 (header verification)
+- Stage 06 (VLM calls)
+- Stage 07 (reflow LLM calls)
+- Stage 08 (requirement extraction)
+- Stage 09 (summarization)
 
-### 2. Stamp `log_llm_call()` at LLM Call Sites
+### 2. Wire Stage 03, 06, 07
 
-Stages with LLM calls needing telemetry: 03, 06, 07, 08, 09
-
-### 3. Wire Stage 03, 06, 07
-
-Stage 03: `utils/headers/`
-Stage 06: Add VLM telemetry
-Stage 07: `utils/reflow/`
+- **Stage 03**: Wire to `utils/headers/`
+- **Stage 06**: Add VLM telemetry
+- **Stage 07**: Wire to `utils/reflow/`
