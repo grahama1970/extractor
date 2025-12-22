@@ -57,6 +57,34 @@ from extractor.pipeline.utils.json_utils import (
 )
 from extractor.pipeline.utils.prompt_loader import load_prompt
 
+# Extracted reflow utilities (Phase 2 refactoring)
+from extractor.pipeline.utils.reflow import (
+    # Tables
+    sanitize_table_cell as _sanitize_table_cell,
+    compute_table_confidence as _table_confidence,
+    compute_table_merges as _compute_table_merges,
+    build_table_block_from_stage05 as _build_table_block_from_stage05,
+    df_map as _df_map,
+    normalize_table_text as _normalize_table_text,
+    # Layout
+    iou_rect as _iou_rect,
+    horizontal_iou as _h_iou,
+    build_figure_block_from_stage06 as _build_figure_block_from_stage06,
+    apply_layout_ordering as _apply_layout_ordering,
+    # LLM Helpers
+    extract_router_content as _router_content,
+    content_to_json_dict as _content_to_json_dict,
+    direct_scillm_json as _direct_scillm_json,
+    get_usage_field as _usage_get,
+    # Prompts
+    build_reflow_prompt,
+    build_compact_prompt as _build_compact_prompt,
+    build_compact_prompt_simple as _build_compact_prompt_simple,
+    # Data Loader
+    consolidate_data,
+    merge_section_tables as _merge_section_tables,
+)
+
 
 def _build_compact_prompt(
     *,
