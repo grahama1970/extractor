@@ -53,61 +53,18 @@ STEP_NAME = "09a_pdf_annotator"
 def sanity() -> int:
     return run_step_sanity(STEP_NAME)
 
-# ---- Visual design ----------------------------------------------------------
-# Stroke colors (0..1 RGB) chosen for readability & CVD safety.
-COLORS: Dict[str, tuple[float, float, float]] = {
-    "section": (0.051, 0.580, 0.533),       # #0D9488 teal-600
-    "section_frame": (0.051, 0.580, 0.533),
-    "text_chunk": (0.392, 0.455, 0.545),    # #64748B slate-500
-    "reflow_paragraph": (0.392, 0.455, 0.545),
-    "reflow_list": (0.392, 0.455, 0.545),
-    "reflow_heading": (0.051, 0.580, 0.533),
-    "figure": (0.145, 0.388, 0.922),        # #2563EB blue-600
-    "reflow_figure": (0.145, 0.388, 0.922),
-    "table": (0.863, 0.149, 0.149),         # #DC2626 red-600
-    "reflow_table": (0.730, 0.100, 0.100),
-    "table_merged": (0.730, 0.100, 0.100),  # darker red
-    "requirement": (0.851, 0.467, 0.024),   # #D97706 amber-600
-    "grid": (0.612, 0.639, 0.686),          # slate-400
-    "columns": (0.055, 0.647, 0.655),       # teal-ish
-    "header_candidate": (0.851, 0.024, 0.851),
-    "table_rejected": (0.35, 0.35, 0.35),
-}
 
-# Light fills + opacities per kind
-def _lighten(rgb, f=0.98):
-    r, g, b = rgb
-    return (1 - (1 - r) * f, 1 - (1 - g) * f, 1 - (1 - b) * f)
 
-def _style_for_kind(kind: str) -> tuple[tuple[float, float, float], tuple[float, float, float], float]:
-    stroke = COLORS.get(kind, (0.3, 0.3, 0.3))
-    # Use stroke-only overlays for core kinds to avoid tinting content.
-    fill = None
-    opacity = 0.0
-    if kind in {"figure", "table", "table_merged", "section", "requirement"}:
-        fill = None
-        opacity = 0.0
-    else:
-        fill = _lighten(stroke, 0.98)
-        opacity = 0.10
-    return stroke, fill, opacity
+# Toggle: draw figure caption callout box on the page (off to avoid duplicate description;
+# description is surfaced in the data pane instead).
+DRAW_FIGURE_CAPTION_BOX = False
 
-# Human-friendly gutter labels
-HUMAN_KIND = {
-    "section": "Section Header",
-    "reflow_heading": "Section Header",
-    "reflow_paragraph": "Text Block",
-    "reflow_list": "Text Block",
-    "text_chunk": "Text Block",
-    "figure": "Figure",
-    "reflow_figure": "Figure",
-    "table": "Table",
-    "table_merged": "Table",
-    "reflow_table": "Table",
-    "requirement": "Requirement",
-}
+# Aliases for imported constants (backward compatibility)
+COLORS = _COLORS
+HUMAN_KIND = _HUMAN_KIND
+TAB_COLORS = _TAB_COLORS
 
-# Gutter lane + adornments
+# Local-only constants (not in utils/visuals)
 GUTTER_SIDE = "left"
 GUTTER_WIDTH = 0.0
 GUTTER_PAD = 0.0
@@ -118,7 +75,6 @@ GUTTER_BORDER = None
 PLAQUE_FILL = None
 PLAQUE_BORDER = None
 PLAQUE_FONT_MIN = 5.5
-
 LABEL_MARGIN_PTS = 14.0
 LABEL_MIN_FONT = 8
 LABEL_BG = (1.0, 0.98, 0.85)
@@ -130,15 +86,6 @@ MAX_TABS_PER_PAGE = 12
 TAB_GUTTER_WIDTH = 48.0
 TAB_HEIGHT = 34.0
 TAB_GAP = 6.0
-TAB_COLORS = {
-    "section": (0.82, 0.92, 0.82),
-    "table": (0.95, 0.85, 0.85),
-    "more": (0.9, 0.9, 0.9),
-}
-
-# Toggle: draw figure caption callout box on the page (off to avoid duplicate description;
-# description is surfaced in the data pane instead).
-DRAW_FIGURE_CAPTION_BOX = False
 
 
 def _draw_page_gutter_side(page: fitz.Page, side: str = "left") -> fitz.Rect:
