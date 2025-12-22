@@ -69,6 +69,14 @@ from extractor.pipeline.utils.diagnostics import (
     start_resource_sampler,
     stop_resource_sampler,
 )
+# Import from new utils/prover package (extracted execution functions)
+from extractor.pipeline.utils.prover import (
+    ProofResult as _ProofResult,
+    prove_via_cli as _prove_via_cli,
+    prove_batch_via_cli as _prove_batch_via_cli,
+    execute_lean_code_docker as _execute_lean_code_docker,
+    get_cli_cmd,
+)
 from extractor.pipeline.utils.json_mode import JSON_SYSTEM_GUARD
 from extractor.pipeline.utils.step_sanity import run_step_sanity
 

@@ -19,11 +19,17 @@ def log_stage_error(stage: str, exc: BaseException, context: Optional[Dict[str, 
     logger.error(json.dumps(payload, ensure_ascii=False))
 
 
+def log_and_raise(stage: str, exc: BaseException, context: Optional[Dict[str, Any]] = None) -> None:
+    """Log error and re-raise. Use in except blocks for fail-fast with telemetry."""
+    log_stage_error(stage, exc, context)
+    raise exc
+
+
 def write_json_strict(path: Path, obj: Any, stage: str = "", ensure_ascii: bool = False) -> None:
     """Write JSON and surface failures instead of swallowing them."""
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(obj, indent=2, ensure_ascii=ensure_ascii), encoding="utf-8")
     except Exception as exc:
-        log_stage_error(stage or "write_json_strict", exc, {"path": str(path)})
-        raise
+        log_and_raise(stage or "write_json_strict", exc, {"path": str(path)})
+

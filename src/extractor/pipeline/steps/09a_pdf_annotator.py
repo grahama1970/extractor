@@ -26,6 +26,24 @@ from loguru import logger
 from extractor.pipeline.utils.reliability import log_stage_error
 import fitz  # PyMuPDF
 from extractor.pipeline.utils.step_sanity import run_step_sanity
+# Import from new utils/visuals package (extracted functions)
+from extractor.pipeline.utils.visuals import (
+    COLORS as _COLORS,
+    HUMAN_KIND as _HUMAN_KIND,
+    TAB_COLORS as _TAB_COLORS,
+    lighten as _lighten,
+    style_for_kind as _style_for_kind,
+    color_for_kind as _color_for_kind,
+    safe_get_bbox as _safe_get_bbox,
+    rect_from_pdf_bbox as _rect_from_pdf_bbox,
+    rect_for_kind as _rect_for_kind,
+    wrap_label_lines as _wrap_label_lines,
+    format_label as _format_label,
+    stable_overlay_id as _stable_overlay_id,
+    headers_preview_from_table as _headers_preview_from_table,
+    rows_preview_from_table as _rows_preview_from_table,
+    table_payload_from_obj as _table_payload_from_obj,
+)
 
 # No CLI framework; import and call run(...)
 
