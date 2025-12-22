@@ -48,19 +48,24 @@ from rich.console import Console
 from extractor.pipeline.utils.section_builder_utils import (
     pdf_analyze_section_numbering as _pdf_analyze_numbering,
 )
-import extractor.pipeline.utils.section_builder_utils_local as sbul
-from extractor.pipeline.utils.section_builder_utils_local import (
+# Import from new utils/sections package (primary section parsing functions)
+from extractor.pipeline.utils.sections import (
+    SECTION_NUMBER_PATTERNS,
     normalize_section_number,
     coerce_depth,
     derive_parent_number,
-    normalize_breadcrumbs,
-    breadcrumb_label,
     analyze_section_numbering,
     derive_section_depth,
     extract_section_title,
     clean_section_title,
     detect_header_level,
     looks_like_header_text,
+)
+# Keep sbul for helpers not yet in utils/sections
+import extractor.pipeline.utils.section_builder_utils_local as sbul
+from extractor.pipeline.utils.section_builder_utils_local import (
+    normalize_breadcrumbs,
+    breadcrumb_label,
     enrich_header_colors,
     prepare_section_hierarchy,
 )
@@ -109,17 +114,7 @@ except Exception:
 SMALL_FONT_THRESHOLD = 8.0
 BOLD_WEIGHT_THRESHOLD = 600
 
-# Section numbering patterns (match deepest first to capture full number)
-SECTION_NUMBER_PATTERNS = [
-    r"^\d+\.\d+\.\d+\.\d+",  # 1.1.1.1
-    r"^\d+\.\d+\.\d+",  # 1.1.1
-    r"^\d+\.\d+",  # 1.1
-    r"^\d+\.",  # 1.
-    r"^[A-Z]\.",  # A.
-    r"^[a-z]\)",  # a)
-    r"^\([ivxlcdm]+\)",  # (i) (ii)
-    r"^\d+\)",  # 1)
-]
+# SECTION_NUMBER_PATTERNS imported from utils/sections
 
 
 def _prepare_section_hierarchy(sections: List[Dict[str, Any]]) -> None:
@@ -140,21 +135,16 @@ def _enrich_header_colors(pdf_path: Path, sections: List[Dict[str, Any]]) -> Non
 # SOPHISTICATED HEADER DETECTION FUNCTIONS
 # ============================================
 
-# All functions delegated to section_builder_utils_local (sbul) to avoid duplication.
-# See: extractor.pipeline.utils.section_builder_utils_local
+# Core functions now imported from extractor.pipeline.utils.sections
+# sbul-only helpers (normalize_breadcrumbs, breadcrumb_label, etc.) still from sbul
 
-# Override local helpers with shared utils to reduce drift
-_normalize_section_number = sbul.normalize_section_number
-_coerce_depth = sbul.coerce_depth
-_derive_parent_number = sbul.derive_parent_number
+# Aliases for internal use (underscore prefix indicates private)
+_normalize_section_number = normalize_section_number
+_coerce_depth = coerce_depth
+_derive_parent_number = derive_parent_number
 _normalize_breadcrumbs = sbul.normalize_breadcrumbs
 _breadcrumb_label = sbul.breadcrumb_label
-analyze_section_numbering = sbul.analyze_section_numbering
-derive_section_depth = sbul.derive_section_depth
-extract_section_title = sbul.extract_section_title
-clean_section_title = sbul.clean_section_title
-detect_header_level = sbul.detect_header_level
-_looks_like_header_text = sbul.looks_like_header_text
+_looks_like_header_text = looks_like_header_text
 _enrich_header_colors = sbul.enrich_header_colors
 _prepare_section_hierarchy = sbul.prepare_section_hierarchy
 
