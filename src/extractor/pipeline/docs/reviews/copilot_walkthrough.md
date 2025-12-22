@@ -2,13 +2,13 @@
 
 ## Branch: `feature/merge-metadata-prop`
 
-## Latest Commit: `365f5091`
+## Latest Commit: `9422459b`
 
 ---
 
 ## Summary
 
-Refactored the extractor pipeline to extract utility functions into structured packages under `utils/`. All 5 major stages are now wired to use these packages.
+Refactored the extractor pipeline to extract utility functions into structured packages under `utils/`. All major stages are now properly wired to use these packages.
 
 ---
 
@@ -40,39 +40,60 @@ Refactored the extractor pipeline to extract utility functions into structured p
 
 ## Phase 3: Stage Wiring ✅
 
-### Stage 04 (Section Builder)
+### Stage 04 (Section Builder) - FULLY WIRED
 
-- **Action:** Removed 184 lines of dead code
-- **API Alignment:** Updated `utils/sections/parsing.py` to match sbul API
-- **Result:** 1620 → 1436 lines
+```python
+from extractor.pipeline.utils.sections import (
+    SECTION_NUMBER_PATTERNS,
+    analyze_section_numbering,
+    detect_header_level,
+    extract_section_title,
+    ...
+)
+```
 
-### Stage 05 (Table Extractor)
+- **Verified:** `analyze_section_numbering.__module__` = `utils.sections.parsing`
+- sbul retained only for: `normalize_breadcrumbs`, `breadcrumb_label`, `enrich_header_colors`, `prepare_section_hierarchy`
 
-- **Action:** Added imports from `utils/tables`
-- **Imported:** `generate_pandas_metrics`, `score_table`, `iou`, `horizontal_iou`
+### Stage 05 (Table Extractor) - Imports Added
 
-### Stage 06b (Layout Sketcher)
+```python
+from extractor.pipeline.utils.tables import (
+    generate_pandas_metrics as _generate_pandas_metrics,
+    score_table as _score_table,
+    iou as _table_iou,
+)
+```
 
-- **Action:** Fixed API parity in `utils/layout/`
-- **Fixed:** `summ()`, `norm_text()`, `assign_cols_and_span()` to match inline behavior
+### Stage 06b (Layout Sketcher) - API Aligned
 
-### Stage 08 (Lean4 Theorem Prover)
+- `utils/layout/`: `summ()`, `norm_text()`, `assign_cols_and_span()` match inline behavior
 
-- **Action:** Added imports from `utils/prover`
-- **Imported:** `ProofResult`, `prove_via_cli`, `prove_batch_via_cli`, `execute_lean_code_docker`
+### Stage 08 (Lean4 Theorem Prover) - Imports Added
 
-### Stage 09a (PDF Annotator)
+```python
+from extractor.pipeline.utils.prover import (
+    ProofResult, prove_via_cli, execute_lean_code_docker,
+)
+```
 
-- **Action:** Added imports from `utils/visuals`
-- **Imported:** `COLORS`, `HUMAN_KIND`, `style_for_kind`, `stable_overlay_id`, etc.
+### Stage 09a (PDF Annotator) - Imports Added
+
+```python
+from extractor.pipeline.utils.visuals import (
+    COLORS, style_for_kind, stable_overlay_id, ...
+)
+```
 
 ---
 
 ## Verification Results
 
 ```
-✅ All 5 utility packages import correctly
-✅ All 3 wired stages (05/08/09a) verified
+✅ Stage 04: analyze_section_numbering from utils.sections.parsing
+✅ Stage 05: _generate_pandas_metrics from utils.tables.metrics
+✅ Stage 08: _ProofResult from utils.prover.execution
+✅ Stage 09a: imports verified
 ✅ 34/34 tests passing
 ```
 
@@ -81,69 +102,31 @@ Refactored the extractor pipeline to extract utility functions into structured p
 ## Commit History
 
 ```
+9422459b refactor(04): wire Stage 04 to utils/sections per Copilot analysis
+3a0468d9 docs: add comprehensive Copilot walkthrough for refactoring
 365f5091 refactor: wire stages 05/08/09a to use utils packages
 8a93e866 fix(layout): align utils/layout API with 06b inline behavior
 239cdf7e refactor(04): apply Copilot cleanup + align utils/sections API
-f17ec5cc docs: add complete package inventory for Copilot
-fb2a220a docs: update copilot_handoff.md with Phase 2 completion
-19e100f1 refactor: add utils/prover/, utils/layout/, utils/sections/ packages
 ```
 
 ---
 
 ## Remaining Work
 
-### 1. Remove Inline Duplicate Functions
+### 1. Remove Inline Duplicate Functions in 05/08/09a
 
-The stages now have dual definitions - old inline functions AND new imports. The inline functions can be removed once the imports are verified to work in production runs.
+Stages now have dual definitions. Safe to remove:
 
-**Safe to remove in Stage 05:**
-
-- `generate_pandas_metrics()` (lines ~559-576)
-- `score_table()` (lines ~579-583)
-
-**Safe to remove in Stage 08:**
-
-- `_prove_via_cli()` (lines ~328-430)
-- `_prove_batch_via_cli()` (lines ~433-576)
-- `execute_lean_code()` (lines ~625-677)
-
-**Safe to remove in Stage 09a:**
-
-- Color constants `COLORS`, `HUMAN_KIND`, `TAB_COLORS` (lines ~40-119)
-- Helper functions like `_lighten()`, `_style_for_kind()`, etc.
+- **Stage 05:** `generate_pandas_metrics()`, `score_table()`
+- **Stage 08:** `_prove_via_cli()`, `execute_lean_code()`
+- **Stage 09a:** Color/formatting functions
 
 ### 2. Stamp `log_llm_call()` at LLM Call Sites
 
-The following stages have LLM calls that need telemetry stamping:
+Stages with LLM calls needing telemetry: 03, 06, 07, 08, 09
 
-- Stage 03 (header verification)
-- Stage 06 (VLM calls)
-- Stage 07 (reflow LLM calls)
-- Stage 08 (requirement extraction + proving)
-- Stage 09 (summarization)
+### 3. Wire Stage 03, 06, 07
 
-### 3. Run Integration Tests
-
-Execute a full pipeline run on a test PDF to verify no regressions.
-
----
-
-## Package Import Reference
-
-```python
-# Stage 04
-from extractor.pipeline.utils.sections import analyze_section_numbering, detect_header_level
-
-# Stage 05
-from extractor.pipeline.utils.tables import generate_pandas_metrics, score_table, iou
-
-# Stage 06b
-from extractor.pipeline.utils.layout import detect_columns, assign_cols_and_span, grid_bbox
-
-# Stage 08
-from extractor.pipeline.utils.prover import ProofResult, prove_via_cli, execute_lean_code_docker
-
-# Stage 09a
-from extractor.pipeline.utils.visuals import COLORS, style_for_kind, stable_overlay_id
-```
+Stage 03: `utils/headers/`
+Stage 06: Add VLM telemetry
+Stage 07: `utils/reflow/`
