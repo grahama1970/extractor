@@ -2,7 +2,7 @@
 
 ## Branch: `feature/merge-metadata-prop`
 
-## Latest Commit: `85e79cdf`
+## Latest Commit: `cab5825b`
 
 ---
 
@@ -45,6 +45,7 @@ Refactored the extractor pipeline to extract utility functions into structured p
 - **Status**: Wired to `utils/sections`. Dead code removed.
 - **Reduction**: 1620 → 1436 lines (-184 lines).
 - **Imports**: `analyze_section_numbering`, `detect_header_level`.
+- **Verified**: Commit `9422459b` confirmed correct wiring.
 
 ### Stage 05 (Table Extractor) - FULLY WIRED
 
@@ -65,12 +66,16 @@ Refactored the extractor pipeline to extract utility functions into structured p
 - **Removed**: Inline `_prove_via_cli`, `_prove_batch_via_cli`, `execute_lean_code`.
 - **Imports**: `_prove_via_cli`, `_execute_lean_code_docker`.
 
-### Stage 09a (PDF Annotator) - FULLY WIRED
+### Stage 09a (PDF Annotator) - FULLY DE-DUPLICATED
 
-- **Status**: Wired to `utils/visuals`. Inline duplicates removed.
-- **Reduction**: 2305 → 2252 lines (-53 lines).
-- **Removed**: Inline `COLORS`, `HUMAN_KIND`, `_lighten`, `_style_for_kind`.
-- **Imports**: `COLORS`, `HUMAN_KIND`, `style_for_kind` (aliased).
+- **Status**: Wired to `utils/visuals`. All inline components removed.
+- **Reduction**: 2305 → 1985 lines (-320 lines total).
+- **Removed**:
+  - Constants: `COLORS`, `HUMAN_KIND`, `TAB_COLORS`
+  - Visual helpers: `_lighten`, `_style_for_kind`
+  - Logic helpers: `_safe_get_bbox`, `_rect_from_pdf_bbox`, `_format_label`, `_stable_overlay_id`
+  - Table previews: `_headers_preview_from_table`, `_rows_preview_from_table`, `_table_payload_from_obj`
+- **Imports**: All functions imported from `utils/visuals` and aliased.
 
 ---
 
@@ -80,9 +85,9 @@ Refactored the extractor pipeline to extract utility functions into structured p
 ✅ Stage 04: analyze_section_numbering using utils.sections
 ✅ Stage 05: _generate_pandas_metrics using utils.tables
 ✅ Stage 08: _execute_lean_code_docker using utils.prover
-✅ Stage 09a: COLORS using utils.visuals
+✅ Stage 09a: All helpers using utils.visuals (full deduplication)
 ✅ 34/34 tests passing
-✅ Total cleanup: ~565 lines removed
+✅ Total cleanup: ~830 lines removed
 ```
 
 ---
@@ -90,10 +95,11 @@ Refactored the extractor pipeline to extract utility functions into structured p
 ## Commit History
 
 ```
+cab5825b refactor(09a): full deduplication of visual helpers (-270 lines)
+02f48c21 docs: update Copilot walkthrough
 85e79cdf refactor(09a): remove inline color/style duplicates
 4712a438 refactor(08): remove inline CLI/docker functions (-303 lines)
 b7ad2c3c refactor(05): remove inline generate_pandas_metrics/score_table
-d969610b docs: update walkthrough - Stage 04 now fully wired
 9422459b refactor(04): wire Stage 04 to utils/sections
 3a0468d9 docs: add comprehensive Copilot walkthrough for refactoring
 ```
