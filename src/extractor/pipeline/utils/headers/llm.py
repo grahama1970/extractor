@@ -13,7 +13,7 @@ from typing import Any, Dict, List
 
 from loguru import logger
 
-from extractor.pipeline.utils.debug_utils import log_timing
+from extractor.pipeline.utils.debug_utils import log_llm_call, log_timing
 from extractor.pipeline.utils.model_params import build_chat_extras
 from extractor.pipeline.utils.prompt_loader import load_prompt
 from extractor.pipeline.utils.reliability import log_stage_error
@@ -109,19 +109,15 @@ async def verify_header_with_llm(
         elapsed_ms = int((time.monotonic() - t0) * 1000)
     except Exception as e:
         elapsed_ms = int((time.monotonic() - t0) * 1000)
-        log_timing(
-            "03_suspicious_headers",
-            {
-                "attempt": "verify_header",
-                "outcome": "exception",
-                "exception": type(e).__name__,
-                "exception_msg": str(e)[:300],
-                "route_name": route_model,
-                "timeout_s": item_timeout,
-                "latency_ms": elapsed_ms,
-                "payload_chars": len(context_text or ""),
-                "with_image": bool(image_b64),
-            },
+        log_llm_call(
+            stage_key="03_suspicious_headers",
+            task_kind="verify_header",
+            route=route_model,
+            model=normalize_model_alias(model),
+            success=False,
+            error_class=type(e).__name__,
+            latency_ms=elapsed_ms,
+            raw_preview=str(e),
         )
         raise
     
@@ -133,20 +129,16 @@ async def verify_header_with_llm(
         else:
             served_model = getattr(resp, "model", None)
             usage = getattr(resp, "usage", None) or {}
-        log_timing(
-            "03_suspicious_headers",
-            {
-                "attempt": "verify_header",
-                "outcome": "ok",
-                "route_name": route_model,
-                "model": served_model,
-                "timeout_s": item_timeout,
-                "latency_ms": elapsed_ms,
-                "payload_chars": len(context_text or ""),
-                "with_image": bool(image_b64),
-                "tokens_in": usage.get("prompt_tokens"),
-                "tokens_out": usage.get("completion_tokens"),
-            },
+        
+        log_llm_call(
+            stage_key="03_suspicious_headers",
+            task_kind="verify_header",
+            route=route_model,
+            model=served_model or normalize_model_alias(model),
+            success=True,
+            latency_ms=elapsed_ms,
+            tokens_in=usage.get("prompt_tokens"),
+            tokens_out=usage.get("completion_tokens"),
         )
     except Exception:
         pass

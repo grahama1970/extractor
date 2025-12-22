@@ -56,6 +56,7 @@ import fitz  # PyMuPDF
 # Typer removed: use plain functions for easier debugging
 from loguru import logger
 from extractor.pipeline.utils.reliability import log_stage_error
+from extractor.pipeline.utils.headers.llm import verify_header_with_llm as _verify_header_with_llm
 from extractor.pipeline.utils.suspicious_headers_utils import (
     norm_text,
     text_sha1,
@@ -193,168 +194,9 @@ def _retrieve_prior_decisions(header_text_norm: str, font_sig: str, limit: int =
 
 
 # --- Verify the User has selected a Multmodal (Vision) model
-async def verify_header_with_llm(image_b64: str, context_text: str, model: str, *, item_timeout: int = 90) -> dict[str, Any]:
-    """Verify header using scillm (vision required) with strict JSON intent via Chutes.
 
-    - Uses SciLLM Router + api_key (no manual headers)
-    - Sends a single image + trimmed text context
-    - Enforces response_format=json_object and stop fences for non-Gemini models
-    """
-    # Normalize model + provider/json extras; conservative trim; log effective config
-    model_norm = _normalize_model_alias(model)
-    extras = build_chat_extras(model_norm)
-    try:
-        logger.info(f"stage03.verify_header: effective_model={model_norm} extras_keys={list(extras.keys())}")
-    except Exception as exc:
-        log_stage_error('03_suspicious_headers', exc, {'context': '03'})
-        raise
-        pass
-    try:
-        _trim = int(os.getenv("STAGE03_VERIFY_TRIM_CHARS", "800"))
-    except Exception as exc:
-        log_stage_error('03_suspicious_headers', exc, {'context': '03'})
-        raise
-        _trim = 800
-    if isinstance(context_text, str) and len(context_text) > _trim:
-        context_text = context_text[:_trim]
+# Inline verify_header_with_llm removed - now imported from utils.headers.llm
 
-    text_only = os.getenv("STAGE03_TEXT_ONLY", "1").lower() in ("1", "true", "yes", "y")
-    user_content: Any = [{"type": "text", "text": context_text}]
-    if not text_only and image_b64:
-        user_content.append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_b64}"}})
-    messages = [
-        {"role": "system", "content": PROMPT["system"]},
-        {"role": "user", "content": user_content},
-    ]
-    try:
-        _verify_cap = int(os.getenv("STAGE03_VERIFY_MAX_TOKENS", "256"))
-    except Exception as exc:
-        log_stage_error('03_suspicious_headers', exc, {'context': '03'})
-        raise
-        _verify_cap = 256
-    # Top-priority timeout override via env
-    try:
-        item_timeout = int(os.getenv("SC_TIMEOUT_STAGE_03", str(item_timeout)))
-    except Exception as exc:
-        log_stage_error('03_suspicious_headers', exc, {'context': '03'})
-        raise
-        pass
-    # AGENTS.md compliance: Validate SciLLM environment before making calls (no soft skip)
-    if not quick_scillm_check():
-        raise RuntimeError("SciLLM environment not configured; header verification requires Chutes.")
-    
-    router = get_text_router() if text_only else get_vlm_router()
-    route_model = "chutes/text" if text_only else "chutes/vlm"
-    # Timed SciLLM Router-only call
-    t0 = time.monotonic()
-    try:
-        resp = await router.acompletion(
-            model=route_model,
-            messages=messages,
-            response_format={"type": "json_object"},
-            max_tokens=_verify_cap,
-            temperature=0,
-            timeout=item_timeout,
-        )
-        elapsed_ms = int((time.monotonic() - t0) * 1000)
-    except Exception as exc:
-        log_stage_error('03_suspicious_headers', exc, {'context': '03'})
-        raise
-        elapsed_ms = int((time.monotonic() - t0) * 1000)
-        log_timing(
-            "03_suspicious_headers",
-            {
-                "attempt": "verify_header",
-                "outcome": "exception",
-                "exception": type(e).__name__,
-                "exception_msg": str(e)[:300],
-                "route_name": "chutes/text",
-                "timeout_s": item_timeout,
-                "latency_ms": elapsed_ms,
-                "payload_chars": len(context_text or ""),
-                "with_image": bool(image_b64),
-                "retries_conf": int(os.getenv("LITELLM_MAX_RETRIES", "0")),
-            },
-        )
-        raise
-    # Observability: append per-attempt timing (success path, after we have resp)
-    try:
-        if isinstance(resp, dict):
-            served_model = resp.get("model")
-            usage = resp.get("usage") or {}
-        else:
-            served_model = getattr(resp, "model", None)
-            usage = getattr(resp, "usage", None) or {}
-        log_timing(
-            "03_suspicious_headers",
-            {
-                "attempt": "verify_header",
-                "outcome": "ok",
-                "route_name": "chutes/text",
-                "model": served_model,
-                "timeout_s": item_timeout,
-                "latency_ms": elapsed_ms,
-                "payload_chars": len(context_text or ""),
-                "with_image": bool(image_b64),
-                "retries_conf": int(os.getenv("LITELLM_MAX_RETRIES", "0")),
-                "tokens_in": usage.get("prompt_tokens"),
-                "tokens_out": usage.get("completion_tokens"),
-            },
-        )
-    except Exception as exc:
-        log_stage_error('03_suspicious_headers', exc, {'context': '03'})
-        raise
-        pass
-    # Normalize response content
-    if isinstance(resp, dict):
-        choices = resp.get("choices") or [{}]
-    else:
-        choices = getattr(resp, "choices", [{}])
-    msg = (choices or [{}])[0].get("message", {}) if isinstance(choices, list) else {}
-    answer = (msg or {}).get("content", "")
-    try:
-        payload = json.loads(answer) if answer else {}
-    except Exception as exc:
-        log_stage_error('03_suspicious_headers', exc, {'context': '03'})
-        # Soft-fail on parse errors
-        payload = {"verdict": "reject", "confidence": 0.0, "reasons": ["parse_error"]}
-
-    if isinstance(payload, dict) and payload.get("error"):
-        err = payload["error"]
-        log_timing(
-            "03_suspicious_headers",
-            {
-                "attempt": "verify_header",
-                "outcome": "exception",
-                "exception": "LLMErrorEnvelope",
-                "exception_msg": f"{err.get('type')}:{err.get('message')}"[:300],
-                "route_name": "chutes/text",
-            },
-        )
-        raise RuntimeError(f"LLM error: {err.get('type')}: {err.get('message')}")
-
-    if not isinstance(payload, dict):
-        payload = {"verdict": "reject", "confidence": 0.0, "reasons": ["non_dict_payload"]}
-
-    verdict = str(payload.get("verdict", "reject")).lower()
-    is_header = verdict == "accept"
-    reasons = payload.get("reasons")
-    if isinstance(reasons, list):
-        reasons_str = "; ".join(str(r) for r in reasons if r is not None)
-    else:
-        reasons_str = str(payload.get("reasoning", ""))
-    conf = payload.get("confidence")
-    try:
-        confidence = float(conf) if conf is not None else 0.0
-    except Exception:
-        confidence = 0.0
-
-    return {
-        "is_header": is_header,
-        "reasoning": reasons_str,
-        "confidence": confidence,
-        "raw_payload": payload,
-    }
 
 
 # ------------------------------------------------------------------
@@ -787,7 +629,7 @@ async def process_pdf_pipeline(config: Config):
         if os.getenv("STAGE03_TEXT_ONLY", "1").lower() not in ("1", "true", "yes", "y"):
             sample_image_b64 = tasks[0].render_context_image_b64()
             t_pf0 = time.monotonic()
-            _ = await verify_header_with_llm(
+            _ = await _verify_header_with_llm(
                 sample_image_b64, "Preflight vision capability check.", config.llm_model
             )
             preflight_duration_ms = int((time.monotonic() - t_pf0) * 1000)
@@ -1038,20 +880,18 @@ async def process_pdf_pipeline(config: Config):
                 },
             ]
             # Inject normalized model id + provider/json extras per prepared item
+            # Inject normalized model id
             try:
                 _m_eff = _normalize_model_alias(config.llm_model)
-                _extras = build_chat_extras(_m_eff)
             except Exception as exc:
                 log_stage_error('03_suspicious_headers', exc, {'context': '03'})
                 raise
                 _m_eff = config.llm_model
-                _extras = {}
             prepared.append(
                 {
                     "model": _m_eff,
-                    "messages": messages,
-                    "response_format": {"type": "json_object"},
-                    "kwargs": _extras,
+                    "image_b64": image_b64,
+                    "context_text": context_text,
                 }
             )
             task_refs.append(task)
@@ -1077,20 +917,14 @@ async def process_pdf_pipeline(config: Config):
                 raise
                 _verify_cap = 256
 
-            text_only_batch = text_only_mode
-            router_instance = get_text_router() if text_only_batch else get_vlm_router()
-            route_model = "chutes/text" if text_only_batch else "chutes/vlm"
 
-            async def _process_item(item: dict) -> str:
-                resp = await router_instance.acompletion(
-                    model=route_model,
-                    messages=item.get("messages"),
-                    response_format={"type": "json_object"},
-                    max_tokens=_verify_cap,
-                    temperature=0,
-                    timeout=config.item_timeout_seconds,
+            async def _process_item(item: dict) -> dict:
+                return await _verify_header_with_llm(
+                    item["image_b64"],
+                    item["context_text"],
+                    item["model"],
+                    item_timeout=config.item_timeout_seconds,
                 )
-                return (getattr(resp, "choices", [{}])[0].get("message", {}).get("content", ""))
 
             results = await process_items_concurrently(
                 prepared,
@@ -1145,11 +979,12 @@ async def process_pdf_pipeline(config: Config):
 
         for ans in results:
             try:
-                llm_payloads.append(json.loads(ans) if ans else {})
+                # ans is already a dict from _verify_header_with_llm (or empty dict on error fallback)
+                llm_payloads.append(ans if isinstance(ans, dict) else {})
             except Exception as exc:
                 log_stage_error('03_suspicious_headers', exc, {'context': '03'})
                 raise
-                llm_payloads.append({"error": {"type": "ParseError", "message": ans[:200]}})
+                llm_payloads.append({})
 
     # 7) Apply results back to blocks — update types, suspicion fields, persist
     parse_error_count = 0
