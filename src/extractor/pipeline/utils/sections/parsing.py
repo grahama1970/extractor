@@ -2,6 +2,7 @@
 """Section parsing utilities for Stage 04 (Section Builder).
 
 Handles numbering analysis, title extraction, and depth detection.
+Matches API contract from section_builder_utils_local (sbul).
 """
 
 from __future__ import annotations
@@ -9,7 +10,12 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
-# Section numbering patterns
+from extractor.pipeline.utils.section_builder_utils import (
+    _roman_to_int,
+    pdf_analyze_section_numbering as _pdf_analyze_numbering,
+)
+
+# Section numbering patterns (match deepest first)
 SECTION_NUMBER_PATTERNS = [
     r"^\d+\.\d+\.\d+\.\d+",  # 1.1.1.1
     r"^\d+\.\d+\.\d+",       # 1.1.1
@@ -23,75 +29,140 @@ SECTION_NUMBER_PATTERNS = [
 
 
 def roman_to_int(roman: str) -> int:
-    """Convert Roman numeral to integer."""
-    values = {"i": 1, "v": 5, "x": 10, "l": 50, "c": 100, "d": 500, "m": 1000}
-    roman = roman.lower()
-    result = 0
-    prev = 0
-    for char in reversed(roman):
-        val = values.get(char, 0)
-        if val < prev:
-            result -= val
-        else:
-            result += val
-        prev = val
-    return result
+    """Convert Roman numeral to integer (delegates to shared impl)."""
+    return _roman_to_int(roman)
+
+
+def normalize_section_number(value: Optional[str]) -> str:
+    """Normalize a section number string."""
+    if not value:
+        return ""
+    return str(value).strip().rstrip(".")
+
+
+def coerce_depth(depth: Any) -> List[int]:
+    """Coerce depth to list of integers."""
+    if isinstance(depth, list):
+        normalized: List[int] = []
+        for item in depth:
+            try:
+                normalized.append(int(item))
+            except Exception:
+                continue
+        if normalized:
+            return normalized
+    return []
+
+
+def derive_parent_number(sec_num: str) -> Optional[str]:
+    """Derive parent section number from a child section number."""
+    trimmed = normalize_section_number(sec_num)
+    if not trimmed:
+        return None
+    parts = [p for p in trimmed.split(".") if p]
+    if len(parts) <= 1:
+        return None
+    return ".".join(parts[:-1])
 
 
 def analyze_section_numbering(text: str) -> Dict[str, Any]:
-    """Analyze section numbering patterns with depth detection."""
-    text = (text or "").strip()
-    if not text:
-        return {"has_numbering": False}
+    """Analyze section numbering patterns with depth detection.
     
-    result: Dict[str, Any] = {"has_numbering": False, "raw_text": text}
+    Returns dict with keys:
+        - has_numbering: bool
+        - numbering_type: str ("decimal", "roman", "alpha_upper", etc.)
+        - depth_level: int
+        - number_confidence: float
+        - number_text: str
+        - title_text: str
+    """
+    t = (text or "").strip()
+    if not t:
+        return {
+            "has_numbering": False,
+            "numbering_type": "none",
+            "depth_level": 0,
+            "number_confidence": 0.0,
+            "number_text": "",
+            "title_text": "",
+        }
     
-    # Try each pattern
-    for pattern in SECTION_NUMBER_PATTERNS:
-        match = re.match(pattern, text, re.IGNORECASE)
-        if match:
-            number_text = match.group(0)
-            result["has_numbering"] = True
-            result["number_text"] = number_text
-            result["pattern"] = pattern
-            
-            # Detect type
-            if re.match(r"^\d+(\.\d+)+", number_text):
-                result["type"] = "decimal_multi"
-                parts = [int(p) for p in number_text.rstrip(".").split(".") if p.isdigit()]
-                result["depth"] = len(parts)
-                result["parts"] = parts
-            elif re.match(r"^\d+\.$", number_text):
-                result["type"] = "decimal_single"
-                result["depth"] = 1
-                result["parts"] = [int(number_text.rstrip("."))]
-            elif re.match(r"^[A-Z]\.$", number_text):
-                result["type"] = "alpha_upper"
-                result["depth"] = 1
-                result["parts"] = [ord(number_text[0]) - ord("A") + 1]
-            elif re.match(r"^[a-z]\)$", number_text):
-                result["type"] = "alpha_lower_paren"
-                result["depth"] = 2
-                result["parts"] = [ord(number_text[0]) - ord("a") + 1]
-            elif re.match(r"^\([ivxlcdm]+\)$", number_text, re.IGNORECASE):
-                result["type"] = "roman"
-                roman_num = number_text[1:-1]
-                result["depth"] = 2
-                result["parts"] = [roman_to_int(roman_num)]
-            elif re.match(r"^\d+\)$", number_text):
-                result["type"] = "decimal_paren"
-                result["depth"] = 2
-                result["parts"] = [int(number_text.rstrip(")"))]
-            break
+    try:
+        analysis = _pdf_analyze_numbering(t)
+    except Exception:
+        analysis = {
+            "has_numbering": False,
+            "numbering_type": "none",
+            "depth_level": 0,
+            "number_confidence": 0.0,
+            "number_text": "",
+            "title_text": t,
+        }
     
-    return result
+    # Suppress lowercase roman numerals that are likely false positives
+    num_text = analysis.get("number_text") or ""
+    if analysis.get("numbering_type") == "roman" and num_text.islower():
+        analysis.update(
+            has_numbering=False,
+            numbering_type="none",
+            number_confidence=0.0,
+            number_text="",
+            depth_level=0,
+        )
+    
+    # Ensure baseline keys always exist
+    analysis.setdefault("title_text", t)
+    analysis.setdefault("number_text", "")
+    analysis.setdefault("depth_level", 0)
+    analysis.setdefault("numbering_type", "none")
+    analysis.setdefault("number_confidence", 0.0)
+    analysis.setdefault("has_numbering", False)
+    return analysis
 
 
 def derive_section_depth(numbering_analysis: Dict[str, Any]) -> List[int]:
-    """Derive numeric section depth list from numbering analysis."""
-    if not numbering_analysis.get("has_numbering"):
-        return []
-    return numbering_analysis.get("parts", [])
+    """Derive numeric section depth list from numbering analysis.
+    
+    Examples:
+    - number_text='4.1.5.4' -> [4,1,5,4]
+    - number_text='1.' -> [1]
+    - number_text='A.' with alpha_upper -> [1] (A=1, B=2, ...)
+    - number_text='(iv)' with roman -> [4]
+    - number_text='1)' with decimal_paren -> [1]
+    """
+    depth: List[int] = []
+    if not numbering_analysis or not numbering_analysis.get("has_numbering"):
+        return depth
+    
+    ntype = numbering_analysis.get("numbering_type")
+    ntext = (numbering_analysis.get("number_text") or "").strip()
+    if not ntext:
+        return depth
+    
+    try:
+        if ntype == "decimal":
+            ntext = ntext.rstrip(".")
+            parts = [p for p in ntext.split(".") if p]
+            depth = [int(p) for p in parts]
+        elif ntype == "decimal_paren":
+            num = re.sub(r"[^0-9]", "", ntext)
+            if num:
+                depth = [int(num)]
+        elif ntype == "alpha_upper":
+            ch = re.sub(r"[^A-Za-z]", "", ntext).upper()[:1]
+            if ch:
+                depth = [ord(ch) - ord("A") + 1]
+        elif ntype == "alpha_lower":
+            ch = re.sub(r"[^A-Za-z]", "", ntext).lower()[:1]
+            if ch:
+                depth = [ord(ch) - ord("a") + 1]
+        elif ntype == "roman":
+            roman = re.sub(r"[^IVXLCDMivxlcdm]", "", ntext)
+            if roman:
+                depth = [_roman_to_int(roman)]
+    except Exception:
+        depth = []
+    return depth
 
 
 def extract_section_title(text: str) -> str:
@@ -100,76 +171,100 @@ def extract_section_title(text: str) -> str:
     if not text:
         return ""
     
-    # Remove leading numbering patterns
-    for pattern in SECTION_NUMBER_PATTERNS:
-        text = re.sub(f"^{pattern}\\s*", "", text, flags=re.IGNORECASE)
+    na = analyze_section_numbering(text)
+    if na.get("has_numbering"):
+        title = na.get("title_text") or ""
+        return title.strip().lstrip(". ").strip()
     
-    return text.strip()
+    # Fallback: strip single leading number + dot pattern
+    m = re.match(r"^\s*\d+(?:\.\d+)*\.?\s+(.*)$", text)
+    if m:
+        return m.group(1).strip()
+    return text
 
 
 def clean_section_title(text: str) -> str:
     """Remove SECTION_BREADCRUMB comments from title."""
-    text = (text or "").strip()
-    # Remove breadcrumb markers
-    text = re.sub(r"\s*<!--\s*SECTION_BREADCRUMB:.*?-->\s*", "", text)
+    text_lines = text.split("\n")
+    if len(text_lines) > 1 and "<!-- SECTION_BREADCRUMB" in text_lines[-1]:
+        return text_lines[0].strip()
     return text.strip()
 
 
 def detect_header_level(text: str) -> int:
     """Enhanced header level detection with depth analysis."""
-    analysis = analyze_section_numbering(text)
-    if analysis.get("has_numbering"):
-        depth = analysis.get("depth", 1)
-        return min(depth, 6)  # Cap at 6 levels
-    return 1
+    text = text.strip()
+    
+    # Check for markdown-style headers first
+    if text.startswith("# "):
+        return 1
+    elif text.startswith("## "):
+        return 2
+    elif text.startswith("### "):
+        return 3
+    elif text.startswith("#### "):
+        return 4
+    elif text.startswith("##### "):
+        return 5
+    elif text.startswith("###### "):
+        return 6
+    
+    # Use numbering analysis
+    numbering_analysis = analyze_section_numbering(text)
+    if numbering_analysis["has_numbering"]:
+        return numbering_analysis["depth_level"]
+    
+    # Fallback to keyword-based detection
+    lower_text = text.lower()
+    
+    # Level 1 keywords
+    if any(k in lower_text for k in ["introduction", "abstract", "conclusion", "references", "appendix"]):
+        return 1
+    
+    # Level 2 keywords
+    if any(k in lower_text for k in ["methodology", "implementation", "results", "discussion"]):
+        return 2
+    
+    # Level 3 keywords
+    if any(k in lower_text for k in ["interface", "protocol", "algorithm", "structure"]):
+        return 3
+    
+    # Default to level 2
+    return 2
 
 
 def looks_like_header_text(text: str) -> bool:
     """Heuristic: detect if text looks like a header."""
-    text = (text or "").strip()
-    if not text:
+    t = (text or "").strip()
+    if not t:
         return False
     
-    # Accept numbered headings
-    analysis = analyze_section_numbering(text)
-    if analysis.get("has_numbering"):
+    # Accept numbered headings like "4.1.5.4. Title"
+    if re.match(r"^\d+(?:\.\d+){1,}\s+.+", t):
         return True
     
-    # Reject sentences (ending with punctuation)
-    if text.endswith(".") or text.endswith(";") or text.endswith(","):
-        words = text.split()
-        if len(words) > 6:  # Long sentence
-            return False
+    # Accept simulated headings
+    if t.endswith("(Simulated)") or t.endswith("(SIMULATED)"):
+        return True
     
-    # Short, non-sentence text is likely a header
-    return len(text) < 80
-
-
-def normalize_section_number(text: str) -> str:
-    """Normalize a section number string."""
-    analysis = analyze_section_numbering(text)
-    if analysis.get("parts"):
-        return ".".join(str(p) for p in analysis["parts"])
-    return ""
-
-
-def derive_parent_number(section_number: str) -> Optional[str]:
-    """Derive parent section number from a child section number."""
-    parts = section_number.split(".")
-    if len(parts) > 1:
-        return ".".join(parts[:-1])
-    return None
+    # All-caps multi-word titles (common unnumbered headings)
+    alpha = re.sub(r"[^A-Za-z]", "", t)
+    if alpha and t.upper() == t and len(alpha) >= 6 and len(t.split()) >= 2:
+        return True
+    
+    return False
 
 
 __all__ = [
     "SECTION_NUMBER_PATTERNS",
     "roman_to_int",
+    "normalize_section_number",
+    "coerce_depth",
+    "derive_parent_number",
     "analyze_section_numbering",
     "derive_section_depth",
     "extract_section_title",
     "clean_section_title",
     "detect_header_level",
     "looks_like_header_text",
-    "normalize_section_number",
-    "derive_parent_number",
 ]
