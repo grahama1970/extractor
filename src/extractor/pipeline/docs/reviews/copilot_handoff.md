@@ -113,9 +113,22 @@ resp = await router.acompletion(...)
 
 ## File Size Blocker
 
-The large stage files (07=5385 lines, 09=890 lines) still need Phase 2 extraction before Copilot can read them fully. Phase 2 is ready in implementation_plan.md.
+~~The large stage files (07=5385 lines, 09=890 lines) still need Phase 2 extraction before Copilot can read them fully.~~
 
-Options:
+**UPDATE**: Phase 2 started. New `utils/reflow/` package created:
 
-- Have Antigravity do Phase 2 first (extract utils → reduce 07 to ~3500 lines)
-- Have Copilot open a PR with coding agent (can fetch full files directly)
+```
+src/extractor/pipeline/utils/reflow/
+├── __init__.py
+├── tables.py   # 280 lines - merge logic, cell sanitization, confidence
+├── layout.py   # 130 lines - IoU, figure blocks, layout ordering
+├── prompts.py  # TODO - prompt formatting
+├── llm_helpers.py  # TODO - router wrappers
+└── data_loader.py  # TODO - consolidate_data
+```
+
+Copilot can proceed with:
+
+1. Creating remaining modules (prompts.py, llm_helpers.py, data_loader.py)
+2. Updating `07_reflow_section.py` imports to use new package
+3. Removing extracted functions from `07_reflow_section.py`
