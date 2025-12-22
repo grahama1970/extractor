@@ -17,6 +17,7 @@ Example usage
 import hashlib
 import base64
 import mimetypes
+import os
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Union
 
@@ -40,6 +41,7 @@ from extractor.core.schema.unified_document import (
     TableCell,
 )
 from extractor.core.providers.fetcher_bridge import ensure_local_source, attach_fetcher_metadata
+from extractor.core.providers.utils import ensure_hierarchy
 
 
 class SpreadsheetProvider:
@@ -60,7 +62,12 @@ class SpreadsheetProvider:
         suffix = filepath.suffix.lower()
 
         if suffix in {".xlsx", ".xlsm", ".xls"}:
-            blocks, metadata = self._extract_openpyxl(filepath)
+            # Parity note: XLSX is treated as structure-first; we do not force PDF-like block parity.
+            # `XLSX_SIMPLE_MODE` keeps one table per sheet and skips paragraph flattening.
+            if os.environ.get("XLSX_SIMPLE_MODE", "").lower() in {"1", "true", "yes"}:
+                blocks, metadata = self._extract_openpyxl_simple(filepath)
+            else:
+                blocks, metadata = self._extract_openpyxl(filepath)
         elif suffix == ".ods":
             blocks, metadata = self._extract_ods(filepath)
         else:
@@ -83,7 +90,7 @@ class SpreadsheetProvider:
         )
 
         logger.info(f"Extracted {len(blocks)} blocks from spreadsheet")
-        return doc
+        return ensure_hierarchy(doc, default_title=filepath.stem)
 
     # ------------------------------------------------------------------
     # Helpers
@@ -186,6 +193,53 @@ class SpreadsheetProvider:
                 attributes={"sheet": ws.title, "source": "openpyxl"}, confidence=1.0
             ),
         )
+
+    def _extract_openpyxl_simple(self, filepath: Path) -> tuple[List[BaseBlock], DocumentMetadata]:
+        """Structure-first simple extractor: one table per sheet.
+
+        This keeps XLSX parity informational (not enforced) and avoids exploding
+        rows into many paragraph blocks. Suitable for smoke/reporting only.
+        """
+        wb = load_workbook(filepath, data_only=True, keep_links=False)
+        blocks: List[BaseBlock] = []
+
+        for ws in wb.worksheets:
+            max_row = ws.max_row or 0
+            max_col = ws.max_column or 0
+            cells: List[TableCell] = []
+            for r_idx, row in enumerate(ws.iter_rows(values_only=True), start=0):
+                for c_idx, val in enumerate(row, start=0):
+                    cells.append(
+                        TableCell(
+                            row=r_idx,
+                            col=c_idx,
+                            content=str(val) if val not in (None, "") else "",
+                            rowspan=1,
+                            colspan=1,
+                        )
+                    )
+            blocks.append(
+                TableBlock(
+                    id=self._generate_block_id(),
+                    type=BlockType.TABLE,
+                    content="table",
+                    rows=max_row,
+                    cols=max_col,
+                    cells=cells,
+                    headers=[0] if max_row > 0 else [],
+                    metadata=BlockMetadata(attributes={"sheet": ws.title, "source": "openpyxl_simple"}),
+                )
+            )
+
+        metadata = DocumentMetadata(
+            format_metadata={
+                "file_type": "xlsx",
+                "sheet_names": wb.sheetnames,
+                "file_size": filepath.stat().st_size,
+                "simple": True,
+            }
+        )
+        return blocks, metadata
 
     def _cell_value(self, cell: OpxCell) -> str:
         return str(cell.value) if cell.value is not None else ""

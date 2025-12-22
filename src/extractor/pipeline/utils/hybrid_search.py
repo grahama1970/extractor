@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List, Optional, cast
 from loguru import logger
+from extractor.pipeline.utils.reliability import log_stage_error
 
 from .embeddings import ensure_embedder
 
@@ -27,8 +28,9 @@ def hybrid_search_annotations(
 
             env_ann = os.getenv("ARANGO_ANNOTATIONS_COLLECTION", "").strip()
             env_edge = os.getenv("ARANGO_EDGES_COLLECTION", "").strip()
-        except Exception:
-            pass
+        except Exception as exc:
+            log_stage_error('hybrid_search.py', exc, {'context': 'hybrid_search.py'})
+            raise
 
         ann_coll_candidates = ([env_ann] if env_ann else []) + [
             "annotations",
@@ -93,7 +95,9 @@ def hybrid_search_annotations(
                         """
                         dc = DB.aql.execute(aql_docs, bind_vars={"ids": vids})
                         connected_list = list(cast(Any, dc))
-            except Exception as ge:
+            except Exception as exc:
+                log_stage_error('hybrid_search.py', exc, {'context': 'hybrid_search.py'})
+                raise
                 logger.debug(f"Graph-connected annotation fetch failed: {ge}")
 
         combined: Dict[str, Dict[str, Any]] = {}
@@ -138,9 +142,13 @@ def hybrid_search_annotations(
                 results.sort(key=lambda x: x.get("similarity", 0.0), reverse=True)
                 if top_k and len(results) > top_k:
                     results = results[:top_k]
-        except Exception as re:
+        except Exception as exc:
+            log_stage_error('hybrid_search.py', exc, {'context': 'hybrid_search.py'})
+            raise
             logger.debug(f"Annotation re-ranking failed (continuing): {re}")
         return results
-    except Exception as e:
+    except Exception as exc:
+        log_stage_error('hybrid_search.py', exc, {'context': 'hybrid_search.py'})
+        raise
         logger.warning(f"Hybrid search failed; returning empty list: {e}")
         return []

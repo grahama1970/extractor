@@ -4807,7 +4807,6 @@ def run(
         raise
 
     # --- Final Output ---
-    # --- Final Output ---
     # Attach resource samples
     try:
         samples = stop_resource_sampler(sampler) if sampler else []
@@ -4840,6 +4839,7 @@ def run(
         "annotations": str(annotations_json) if annotations_json else None,
     }
 
+    # Build unified_document after tables/merge metadata have been attached
     unified_document_payload = None
     try:
         unified_document = build_unified_document_from_reflow(
@@ -4850,12 +4850,6 @@ def run(
         )
         unified_document_payload = unified_document.model_dump(by_alias=True, mode="json")
     except Exception as exc:
-        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
-        raise
-        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
-        raise
-        log_stage_error('07_reflow_section', exc, {'context': '07'})
-        raise
         diagnostics.append(
             make_event(
                 "07_reflow_section",

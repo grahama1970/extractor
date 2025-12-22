@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 from loguru import logger
+from extractor.pipeline.utils.reliability import log_stage_error
 
 from extractor.pipeline.utils.step_sanity import run_step_sanity
 from extractor.pipeline.utils.section_builder_utils import canonical_block_order_key
@@ -41,7 +42,9 @@ def _read_json(path: Path) -> Dict[str, Any]:
     try:
         if path.exists():
             return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
+    except Exception as exc:
+        log_stage_error('04a_layout_audit', exc, {'context': '04a'})
+        raise
         logger.exception("Failed to read JSON from %s", path)
     return {}
 
@@ -65,7 +68,9 @@ def _add_check(
     checks.append(payload)
     try:
         print(json.dumps({"event": "layout_audit_check", **payload}, ensure_ascii=False))
-    except Exception:
+    except Exception as exc:
+        log_stage_error('04a_layout_audit', exc, {'context': '04a'})
+        raise
         # Best‑effort logging; do not fail audit on print issues.
         pass
 
@@ -149,7 +154,9 @@ def run(results_root: Path | str = Path("data/results/pipeline")) -> Path:
     logger.info("%s: errors=%s", STEP_NAME, errors)
     try:
         print(json.dumps(summary_payload, ensure_ascii=False))
-    except Exception:
+    except Exception as exc:
+        log_stage_error('04a_layout_audit', exc, {'context': '04a'})
+        raise
         pass
 
     if errors > 0:

@@ -6,11 +6,14 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from loguru import logger
+from extractor.pipeline.utils.reliability import log_stage_error
 
 try:  # optional dependency
     from arango import ArangoClient  # type: ignore
     from arango.database import StandardDatabase  # type: ignore
-except Exception:  # pragma: no cover - arango may not be installed
+except Exception as exc:
+    log_stage_error('metrics_logger.py', exc, {'context': 'metrics_logger.py'})
+    raise
     ArangoClient = None  # type: ignore
     StandardDatabase = object  # type: ignore
 
@@ -40,7 +43,9 @@ def _get_arango_db() -> Optional[StandardDatabase]:
             db.create_collection(_COLLECTION_NAME)
         _ARANGO_DB = db
         return db
-    except Exception as e:  # pragma: no cover - connection errors
+    except Exception as exc:
+        log_stage_error('metrics_logger.py', exc, {'context': 'metrics_logger.py'})
+        raise
         logger.warning(f"Metrics logger could not connect to ArangoDB: {e}")
         return None
 
@@ -51,7 +56,9 @@ def _write_local_log(entry: Dict[str, Any]) -> None:
         log_path.parent.mkdir(parents=True, exist_ok=True)
         with log_path.open("a", encoding="utf-8") as f:
             f.write(f"{entry}\n")
-    except Exception:
+    except Exception as exc:
+        log_stage_error('metrics_logger.py', exc, {'context': 'metrics_logger.py'})
+        raise
         logger.debug("Failed to write metrics log locally")
 
 
@@ -68,6 +75,8 @@ def log_metric(stage: str, data: Dict[str, Any]) -> None:
         try:
             db.collection(_COLLECTION_NAME).insert(entry)
             return
-        except Exception as e:  # pragma: no cover - prefer local log fallback
+        except Exception as exc:
+            log_stage_error('metrics_logger.py', exc, {'context': 'metrics_logger.py'})
+            raise
             logger.debug(f"Failed to log metric to ArangoDB: {e}")
     _write_local_log(entry)

@@ -72,6 +72,7 @@ import hashlib
 
 # Third-party
 from loguru import logger
+from extractor.pipeline.utils.reliability import log_stage_error
 from rich.console import Console
 
 # pydantic not used; removed to reduce cold start
@@ -133,7 +134,9 @@ def load_results(pipeline_dir: Path) -> Dict[str, Any]:
                             if isinstance(arr, list):
                                 results[stage_name]["_extras"] = results[stage_name].get("_extras", {})
                                 results[stage_name]["_extras"]["flattened_count"] = len(arr)
-                    except Exception:
+                    except Exception as exc:
+                        log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+                        raise
                         pass
                 if stage_name == "11_arango_create_graph":
                     extras = {}
@@ -146,13 +149,17 @@ def load_results(pipeline_dir: Path) -> Dict[str, Any]:
                             es = json.loads(edges_path.read_text())
                             if isinstance(es, list):
                                 extras["graph_edges_count"] = len(es)
-                    except Exception:
+                    except Exception as exc:
+                        log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+                        raise
                         pass
                     if extras:
                         if isinstance(results[stage_name], dict):
                             results[stage_name]["_extras"] = extras
                 logger.info(f"Loaded results for {stage_name} from {json_file.name}")
-            except Exception as e:
+            except Exception as exc:
+                log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+                raise
                 logger.error(f"Failed to load results for {stage_name}: {e}")
 
     return results
@@ -257,7 +264,9 @@ def calculate_pipeline_statistics(results: Dict[str, Any]) -> Dict[str, Any]:
             t = v.get("timings") or {}
             if isinstance(t, dict) and "stage_duration_ms" in t:
                 durations[k] = int(t.get("stage_duration_ms") or 0)
-        except Exception:
+        except Exception as exc:
+            log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+            raise
             pass
     if durations:
         stats["stage_durations_ms"] = durations
@@ -271,7 +280,9 @@ def calculate_pipeline_statistics(results: Dict[str, Any]) -> Dict[str, Any]:
             "violations_count": int(gsum.get("violations_count", 0) or 0),
             "total_edges_json": int(extras.get("graph_edges_count", 0) or 0),
         }
-    except Exception:
+    except Exception as exc:
+        log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+        raise
         pass
     # RTM counts (v0): use Stage 10 flattened count as a proxy and surface in stats
     try:
@@ -280,7 +291,9 @@ def calculate_pipeline_statistics(results: Dict[str, Any]) -> Dict[str, Any]:
         flat_count = int(extras.get("flattened_count", 0) or 0)
         if flat_count:
             stats["rtm"]["link_count"] = flat_count
-    except Exception:
+    except Exception as exc:
+        log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+        raise
         pass
     return stats
 
@@ -347,7 +360,9 @@ def generate_content_summary(results: Dict[str, Any]) -> Dict[str, Any]:
 def _safe_json(path: Path) -> Dict[str, Any]:
     try:
         return json.loads(path.read_text())
-    except Exception:
+    except Exception as exc:
+        log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+        raise
         return {}
 
 def _optional_metrics(results_dir: Path) -> Dict[str, Any]:
@@ -357,14 +372,18 @@ def _optional_metrics(results_dir: Path) -> Dict[str, Any]:
         secs = r07.get("reflowed_sections") or r07.get("sections") or []
         m["sketch_present_sections"] = sum(1 for s in secs if s.get("sketch_present") or s.get("layout_sketch"))
         m["total_sections"] = len(secs)
-    except Exception:
+    except Exception as exc:
+        log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+        raise
         pass
     try:
         r05 = _safe_json(results_dir / "05_table_extractor" / "json_output" / "05_tables.json")
         tbls = r05.get("tables") or []
         m["tables_with_llm_assist"] = sum(1 for t in tbls if t.get("llm_assist"))
         m["total_tables"] = len(tbls)
-    except Exception:
+    except Exception as exc:
+        log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+        raise
         pass
     return m
 
@@ -570,7 +589,9 @@ async def generate_comprehensive_report(
         simple_metrics = _optional_metrics(output_dir)
         if simple_metrics:
             report.setdefault("optional_metrics", {}).update(simple_metrics)
-    except Exception:
+    except Exception as exc:
+        log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+        raise
         pass
 
     # Save JSON reports
@@ -596,7 +617,9 @@ async def generate_comprehensive_report(
         def _scan_one(pattern: str) -> bool:
             try:
                 return any(output_dir.rglob(pattern))
-            except Exception:
+            except Exception as exc:
+                log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+                raise
                 return False
 
         exporters = {
@@ -618,7 +641,9 @@ async def generate_comprehensive_report(
                         t = (e or {}).get("relationship_type")
                         if t:
                             edges_counts_from_file[t] = edges_counts_from_file.get(t, 0) + 1
-        except Exception:
+        except Exception as exc:
+            log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+            raise
             pass
 
         # Requirements counts
@@ -638,7 +663,9 @@ async def generate_comprehensive_report(
                     by_status[s] = by_status.get(s, 0) + 1
                 if by_status:
                     req_counts["by_status"] = by_status
-        except Exception:
+        except Exception as exc:
+            log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+            raise
             pass
 
         run_summary = {
@@ -652,7 +679,9 @@ async def generate_comprehensive_report(
             "requirements": req_counts,
         }
         (output_dir / "run_summary.json").write_text(json.dumps(run_summary, indent=2, sort_keys=True))
-    except Exception:
+    except Exception as exc:
+        log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+        raise
         pass
 
     # Generate markdown report
@@ -676,7 +705,9 @@ async def generate_comprehensive_report(
                     if key:
                         rtm_map.setdefault(sid, []).append(key)
             (output_dir / "rtm_v0.json").write_text(json.dumps({"rtm": rtm_map}, indent=2, sort_keys=True))
-    except Exception:
+    except Exception as exc:
+        log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+        raise
         pass
 
     logger.info(f"Generated comprehensive report: {json_path}")
@@ -713,7 +744,9 @@ def _cmd_debug():
         console.print(f"✅ Report generated: {output_path}")
         console.print(f"📊 Quality score: {result.get('overall_quality_score', 0):.2%}")
 
-    except Exception as e:
+    except Exception as exc:
+        log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+        raise
         console.print(f"❌ Expected behavior - empty pipeline: {e}")
 
     console.print("\n[cyan]Real usage requires pipeline data from stages 01-07:[/cyan]")
@@ -732,7 +765,9 @@ def debug_bundle(bundle: Path, output_dir: Path = Path("data/results/pipeline"))
             results_map = data
         if not isinstance(results_map, dict) or not results_map:
             raise ValueError("Bundle must be an object mapping stage names to JSON results, or have 'results' key")
-    except Exception as e:
+    except Exception as exc:
+        log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+        raise
         raise ValueError(f"Failed to load bundle: {e}")
 
     canonical = {
@@ -765,7 +800,9 @@ if __name__ == "__main__":
     # Tiny, optional entry for convenience. Keeps module import side-effect free.
     try:
         load_dotenv(find_dotenv())
-    except Exception:
+    except Exception as exc:
+        log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+        raise
         pass
     import sys
     argv = sys.argv[1:]

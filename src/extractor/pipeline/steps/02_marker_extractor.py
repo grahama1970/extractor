@@ -1,6 +1,15 @@
 #!/usr/bin/env python3
 """
 Stage-02: Extract native JSON blocks from a PDF using Marker
+
+Agent instructions (read before running):
+- Purpose: emit native PDF blocks (text + bbox + page_idx) with optional suspicious flags.
+- Expectations: include required top-level keys (timestamp, source_pdf, status, block_count,
+  suspicious_block_count, blocks) and ensure at least one `SectionHeader` candidate so downstream
+  stages (03 suspicious_headers, 04 section_builder) can filter/refine. Misclassified headers are
+  acceptable here; precision happens later.
+- Do NOT prune/merge aggressively; preserve all blocks with basic metadata.
+- Sanity: block_count must equal len(blocks); suspicious_block_count >= 0.
 """
 
 import json
@@ -12,7 +21,9 @@ import time
 
 try:
     import psutil  # type: ignore
-except Exception:
+except Exception as exc:
+    log_stage_error('02_marker_extractor', exc, {'context': '02'})
+    raise
     psutil = None
 import multiprocessing as mp
 from extractor.pipeline.utils.marker_extractor_utils import fallback_simple_extract
@@ -21,6 +32,7 @@ from extractor.pipeline.utils.section_builder_utils import canonical_block_order
 ## Typer removed; plain function signatures for easier debugging
 
 from loguru import logger
+from extractor.pipeline.utils.reliability import log_stage_error
 from rich.console import Console
 import uuid
 
@@ -37,7 +49,9 @@ try:
             pass
 
         _tx.QuantizedCacheConfig = QuantizedCacheConfig  # type: ignore[attr-defined]
-except Exception:
+except Exception as exc:
+    log_stage_error('02_marker_extractor', exc, {'context': '02'})
+    raise
     pass
 from extractor.core.schema import BlockTypes
 from extractor.pipeline.utils.diagnostics import (
@@ -82,6 +96,8 @@ def _worker(pdf_str: str, q: "mp.Queue[Dict[str, Any]]", dump_dir_str: str):
             json.dump({"blocks": blocks_local, "predictors": presence}, f, ensure_ascii=False)
         q.put({"ok": True, "path": str(tmp_path)})
     except Exception as exc:
+        log_stage_error('02_marker_extractor', exc, {'context': '02'})
+        raise
         q.put({"ok": False, "error": str(exc)})
 
 
@@ -97,7 +113,9 @@ def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool
     try:
         from extractor.core.converters.pdf import PdfConverter
         from extractor.core.models import create_model_dict
-    except Exception as e:
+    except Exception as exc:
+        log_stage_error('02_marker_extractor', exc, {'context': '02'})
+        raise
         # If imports fail, attempt simple fallback if allowed
         if os.getenv("STAGE02_ALLOW_SIMPLE", "1").lower() in ("1", "true", "yes", "y"):
             tmp = Path(os.getenv("STAGE02_TMP", "/tmp")) / f"marker_simple_{uuid.uuid4().hex}.json"
@@ -135,7 +153,9 @@ def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool
     # Build the document (this creates and processes all blocks)
     try:
         document = converter.build_document(str(pdf_path))
-    except Exception as e:
+    except Exception as exc:
+        log_stage_error('02_marker_extractor', exc, {'context': '02'})
+        raise
         logger.error(f"Marker document building failed: {e}")
         # If predictor presence is weak and fallback is allowed, try simple extractor
         if os.getenv("STAGE02_ALLOW_SIMPLE", "1").lower() in ("1", "true", "yes", "y"):
@@ -145,7 +165,9 @@ def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool
                 blocks = fallback_simple_extract(pdf_path, tmp)
                 logger.info(f"Simple extraction succeeded, extracted {len(blocks)} blocks")
                 return blocks, predictor_presence
-            except Exception as fallback_error:
+            except Exception as exc:
+                log_stage_error('02_marker_extractor', exc, {'context': '02'})
+                raise
                 logger.error(f"Simple extraction fallback also failed: {fallback_error}")
                 if os.getenv("PIPELINE_FAIL_FAST", "0").lower() in ("1", "true", "yes", "y"):
                     raise RuntimeError(f"Both marker and simple extraction failed: {e}") from e
@@ -186,7 +208,9 @@ def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool
                     if hasattr(block, "raw_text"):
                         try:
                             block_dict["text"] = block.raw_text(document)
-                        except Exception:
+                        except Exception as exc:
+                            log_stage_error('02_marker_extractor', exc, {'context': '02'})
+                            raise
                             block_dict["text"] = getattr(block, "text", "")
                     else:
                         block_dict["text"] = getattr(block, "text", "")
@@ -202,7 +226,9 @@ def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool
                                 font_size = (
                                     float(font_size_val) if font_size_val is not None else None
                                 )
-                            except Exception:
+                            except Exception as exc:
+                                log_stage_error('02_marker_extractor', exc, {'context': '02'})
+                                raise
                                 font_size = None
                             first_span_font = {"name": font_name, "size": font_size}
                             # Also capture basic style flags for heuristics
@@ -214,13 +240,17 @@ def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool
                                 if font_weight is not None:
                                     try:
                                         font_weight = float(font_weight)
-                                    except Exception:
+                                    except Exception as exc:
+                                        log_stage_error('02_marker_extractor', exc, {'context': '02'})
+                                        raise
                                         font_weight = None
                                 first_span_font["bold"] = is_bold
                                 first_span_font["italic"] = is_italic
                                 if font_weight is not None:
                                     first_span_font["weight"] = font_weight
-                            except Exception:
+                            except Exception as exc:
+                                log_stage_error('02_marker_extractor', exc, {'context': '02'})
+                                raise
                                 pass
                             # Try to enrich with color via PyMuPDF if available
                             if (
@@ -311,12 +341,18 @@ def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool
                                                     elif h_deg < 345:
                                                         bucket = "magenta"
                                                 first_span_font["color_bucket"] = bucket
-                                            except Exception:
+                                            except Exception as exc:
+                                                log_stage_error('02_marker_extractor', exc, {'context': '02'})
+                                                raise
                                                 pass
-                                except Exception:
+                                except Exception as exc:
+                                    log_stage_error('02_marker_extractor', exc, {'context': '02'})
+                                    raise
                                     pass
                             block_dict["first_span_font"] = first_span_font
-                    except Exception:
+                    except Exception as exc:
+                        log_stage_error('02_marker_extractor', exc, {'context': '02'})
+                        raise
                         pass
 
                     # Add bbox if available - ensure JSON-safe list of floats
@@ -325,7 +361,9 @@ def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool
                             bx = getattr(block.polygon, "bbox", None)
                             if bx is not None:
                                 block_dict["bbox"] = [float(v) for v in bx]
-                        except Exception:
+                        except Exception as exc:
+                            log_stage_error('02_marker_extractor', exc, {'context': '02'})
+                            raise
                             pass
 
                     # Add Surya/marker confidence and derived quality score
@@ -333,7 +371,9 @@ def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool
                         surya_conf = getattr(block, "confidence", None)
                         if surya_conf is not None:
                             block_dict["surya_confidence"] = float(surya_conf)
-                    except Exception:
+                    except Exception as exc:
+                        log_stage_error('02_marker_extractor', exc, {'context': '02'})
+                        raise
                         pass
                     try:
                         # Derive quick quality score factoring suspicion
@@ -342,13 +382,17 @@ def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool
                         if hasattr(block, "calculate_quality_score"):
                             q = block.calculate_quality_score()
                             block_dict["quality_score"] = float(q)
-                    except Exception:
+                    except Exception as exc:
+                        log_stage_error('02_marker_extractor', exc, {'context': '02'})
+                        raise
                         pass
                     try:
                         req_review = getattr(block, "requires_review", None)
                         if req_review:
                             block_dict["requires_review"] = True
-                    except Exception:
+                    except Exception as exc:
+                        log_stage_error('02_marker_extractor', exc, {'context': '02'})
+                        raise
                         pass
 
                     # Include suspicion fields from base Block class
@@ -362,7 +406,9 @@ def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool
                         susp_conf = getattr(block, "suspicion_confidence", None)
                         if susp_conf is not None:
                             block_dict["suspicion_confidence"] = float(susp_conf)
-                    except Exception:
+                    except Exception as exc:
+                        log_stage_error('02_marker_extractor', exc, {'context': '02'})
+                        raise
                         pass
 
                     # Derive 'suspicious_header' for Stage 03 compatibility; include only when True
@@ -390,7 +436,9 @@ def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool
                         # block.id is a pydantic model; stringify for portability
                         if hasattr(block, "id"):
                             block_dict["id"] = str(block.id)
-                    except Exception:
+                    except Exception as exc:
+                        log_stage_error('02_marker_extractor', exc, {'context': '02'})
+                        raise
                         pass
                     blocks.append(block_dict)
 
@@ -398,7 +446,9 @@ def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool
     try:
         if fitz_doc is not None:
             fitz_doc.close()
-    except Exception:
+    except Exception as exc:
+        log_stage_error('02_marker_extractor', exc, {'context': '02'})
+        raise
         pass
 
     return blocks, predictor_presence
@@ -435,7 +485,9 @@ def run(
                 console.print("[red]Strict mode: missing predictors -> " + ", ".join(miss) + "[/red]")
                 console.print("[yellow]Hint: activate venv and run: `uv sync --extra accurate`[/yellow]")
                 raise RuntimeError("Strict preflight: missing predictors")
-    except Exception as _e:
+    except Exception as exc:
+        log_stage_error('02_marker_extractor', exc, {'context': '02'})
+        raise
         console.print(f"[red]Strict preflight failed: {_e}[/red]")
         console.print("[yellow]Hint: `uv sync --extra accurate`[/yellow]")
         raise RuntimeError(f"Strict preflight failed: {_e}")
@@ -467,7 +519,9 @@ def run(
             rotation="1 week",
             retention="14 days",
         )
-    except Exception:
+    except Exception as exc:
+        log_stage_error('02_marker_extractor', exc, {'context': '02'})
+        raise
         pass
 
     console.print(f"Extracting blocks from: {pdf_path.name} (timeout {timeout}s)")
@@ -491,7 +545,9 @@ def run(
                     {},
                 )
             )
-    except Exception:
+    except Exception as exc:
+        log_stage_error('02_marker_extractor', exc, {'context': '02'})
+        raise
         pass
     try:
         if psutil is not None:
@@ -499,7 +555,9 @@ def run(
             resources["proc_rss_mb_start"] = int((proc.memory_info().rss or 0) / (1024 * 1024))
             vm = psutil.virtual_memory()
             resources["vmem_used_mb_start"] = int(getattr(vm, "used", 0) / (1024 * 1024))
-    except Exception:
+    except Exception as exc:
+        log_stage_error('02_marker_extractor', exc, {'context': '02'})
+        raise
         pass
 
     # Allow env override to force inline (no-spawn) execution — useful on
@@ -513,7 +571,9 @@ def run(
             t_ex0 = time.monotonic()
             blocks, predictor_presence = extract_blocks(pdf_path)
             extract_duration_ms = int((time.monotonic() - t_ex0) * 1000)
-        except Exception as e:
+        except Exception as exc:
+            log_stage_error('02_marker_extractor', exc, {'context': '02'})
+            raise
             logger.exception("Stage 02 failed during inline extraction")
             console.print(f"[red]Stage 02 failed: {e}[/red]")
             if os.getenv("PIPELINE_FAIL_FAST", "0").lower() in ("1", "true", "yes", "y"):
@@ -533,7 +593,9 @@ def run(
         # Read small result first, then join (prevents child blocking on q.put for large payloads)
         try:
             result = q.get(timeout=timeout)
-        except Exception:
+        except Exception as exc:
+            log_stage_error('02_marker_extractor', exc, {'context': '02'})
+            raise
             elapsed = int((time.monotonic() - t_ex0))
             pid = p.pid if p and p.pid else None
             console.print(
@@ -550,14 +612,18 @@ def run(
                     )
                 )
                 errors_count += 1
-            except Exception:
+            except Exception as exc:
+                log_stage_error('02_marker_extractor', exc, {'context': '02'})
+                raise
                 pass
             # Stop sampler explicitly on timeout
             try:
                 samples = stop_resource_sampler(sampler) if sampler else []
                 if samples:
                     resources.setdefault("resource_samples", samples)
-            except Exception:
+            except Exception as exc:
+                log_stage_error('02_marker_extractor', exc, {'context': '02'})
+                raise
                 pass
             if p.is_alive():
                 try:
@@ -586,7 +652,9 @@ def run(
                     )
                 )
                 errors_count += 1
-            except Exception:
+            except Exception as exc:
+                log_stage_error('02_marker_extractor', exc, {'context': '02'})
+                raise
                 pass
             console.print(f"[red]Stage 02 failed: {result.get('error', 'Unknown error')}[/red]")
             if os.getenv("PIPELINE_FAIL_FAST", "0").lower() in ("1", "true", "yes", "y"):
@@ -604,14 +672,18 @@ def run(
             raise FileNotFoundError("Extractor output path missing")
         try:
             tmp_data = json.loads(tmp_path.read_text(encoding="utf-8"))
-        except Exception as e:
+        except Exception as exc:
+            log_stage_error('02_marker_extractor', exc, {'context': '02'})
+            raise
             console.print(f"[red]Stage 02 failed: could not read extractor output: {e}[/red]")
             raise RuntimeError(f"Could not read extractor output: {e}")
         blocks = tmp_data.get("blocks") or []
         predictor_presence = tmp_data.get("predictors", {})
         try:
             tmp_path.unlink()
-        except Exception:
+        except Exception as exc:
+            log_stage_error('02_marker_extractor', exc, {'context': '02'})
+            raise
             pass
 
     # Optional: force-tag all SectionHeader blocks as suspicious_header for Stage 03 testing
@@ -620,7 +692,9 @@ def run(
             for b in blocks:
                 if b.get("block_type") == "SectionHeader":
                     b["suspicious_header"] = True
-        except Exception:
+        except Exception as exc:
+            log_stage_error('02_marker_extractor', exc, {'context': '02'})
+            raise
             pass
 
     # --- Optional: synthesize Figure blocks from embedded images when none exist ---
@@ -633,15 +707,21 @@ def run(
         # Tunables (env)
         try:
             synth_min_w = int(os.getenv("STAGE02_SYNTH_FIG_MIN_WIDTH", "24"))
-        except Exception:
+        except Exception as exc:
+            log_stage_error('02_marker_extractor', exc, {'context': '02'})
+            raise
             synth_min_w = 24
         try:
             synth_min_h = int(os.getenv("STAGE02_SYNTH_FIG_MIN_HEIGHT", "24"))
-        except Exception:
+        except Exception as exc:
+            log_stage_error('02_marker_extractor', exc, {'context': '02'})
+            raise
             synth_min_h = 24
         try:
             synth_max_area_ratio = float(os.getenv("STAGE02_SYNTH_FIG_MAX_AREA_RATIO", "0.9"))
-        except Exception:
+        except Exception as exc:
+            log_stage_error('02_marker_extractor', exc, {'context': '02'})
+            raise
             synth_max_area_ratio = 0.90
 
         has_fig = any((b.get("block_type") in ("Figure", "Image")) for b in blocks)
@@ -662,7 +742,9 @@ def run(
                 for pno in range(len(doc)):
                     try:
                         imgs = doc[pno].get_images(full=True)
-                    except Exception:
+                    except Exception as exc:
+                        log_stage_error('02_marker_extractor', exc, {'context': '02'})
+                        raise
                         imgs = []
                     if not imgs:
                         continue
@@ -675,7 +757,9 @@ def run(
                         try:
                             xref = im[0]
                             rects = doc[pno].get_image_rects(xref)
-                        except Exception:
+                        except Exception as exc:
+                            log_stage_error('02_marker_extractor', exc, {'context': '02'})
+                            raise
                             rects = []
                         if not rects:
                             continue
@@ -753,9 +837,13 @@ def run(
             finally:
                 try:
                     doc.close()
-                except Exception:
+                except Exception as exc:
+                    log_stage_error('02_marker_extractor', exc, {'context': '02'})
+                    raise
                     pass
-    except Exception as _e:
+    except Exception as exc:
+        log_stage_error('02_marker_extractor', exc, {'context': '02'})
+        raise
         try:
             diagnostics.append(
                 make_event(
@@ -766,7 +854,9 @@ def run(
                     {},
                 )
             )
-        except Exception:
+        except Exception as exc:
+            log_stage_error('02_marker_extractor', exc, {'context': '02'})
+            raise
             pass
 
     # Enforce deterministic reading order for all downstream consumers.
@@ -774,7 +864,9 @@ def run(
     # included in the canonical layout.
     try:
         blocks.sort(key=canonical_block_order_key)
-    except Exception:
+    except Exception as exc:
+        log_stage_error('02_marker_extractor', exc, {'context': '02'})
+        raise
         # Best-effort ordering; never fail Stage 02 solely on sort issues.
         pass
 
@@ -795,13 +887,17 @@ def run(
             resources["proc_rss_mb_end"] = int((proc.memory_info().rss or 0) / (1024 * 1024))
             vm = psutil.virtual_memory()
             resources["vmem_used_mb_end"] = int(getattr(vm, "used", 0) / (1024 * 1024))
-    except Exception:
+    except Exception as exc:
+        log_stage_error('02_marker_extractor', exc, {'context': '02'})
+        raise
         pass
     try:
         samples = stop_resource_sampler(sampler) if sampler else []
         if samples:
             resources.setdefault("resource_samples", samples)
-    except Exception:
+    except Exception as exc:
+        log_stage_error('02_marker_extractor', exc, {'context': '02'})
+        raise
         pass
     timings = {
         "stage_start_ts": stage_start_ts,
@@ -868,13 +964,17 @@ def debug_bundle(
         clean_pdf = Path(data.get("clean_pdf") or "")
         if not clean_pdf.exists():
             raise ValueError("Bundle must include existing 'clean_pdf' path")
-    except Exception as e:
+    except Exception as exc:
+        log_stage_error('02_marker_extractor', exc, {'context': '02'})
+        raise
         print(f"Failed to load bundle: {e}")
         raise ValueError(f"Failed to load bundle: {e}")
 
     try:
         blocks, _predictors = extract_blocks(clean_pdf)
-    except Exception as e:
+    except Exception as exc:
+        log_stage_error('02_marker_extractor', exc, {'context': '02'})
+        raise
         print(f"Extraction failed: {e}")
         raise RuntimeError(f"Extraction failed: {e}")
 
@@ -911,7 +1011,9 @@ if __name__ == "__main__":
         from dotenv import find_dotenv, load_dotenv
 
         load_dotenv(find_dotenv())
-    except Exception:
+    except Exception as exc:
+        log_stage_error('02_marker_extractor', exc, {'context': '02'})
+        raise
         pass
     import sys
     argv = sys.argv[1:]
@@ -927,14 +1029,18 @@ if __name__ == "__main__":
     if argv[0] == "run":
         try:
             pdf_path = Path(argv[1])
-        except Exception:
+        except Exception as exc:
+            log_stage_error('02_marker_extractor', exc, {'context': '02'})
+            raise
             print("Missing input PDF", file=sys.stderr)
             sys.exit(2)
         out_dir = Path("data/results/pipeline")
         if "-o" in argv:
             try:
                 out_dir = Path(argv[argv.index("-o") + 1])
-            except Exception:
+            except Exception as exc:
+                log_stage_error('02_marker_extractor', exc, {'context': '02'})
+                raise
                 pass
     else:
         pdf_path = Path(argv[0])

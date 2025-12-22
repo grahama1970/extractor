@@ -12,7 +12,7 @@ def _has_codex() -> bool:
 
 
 def _has_run_codex_exec() -> bool:
-    return imps.find_spec('extractor.pipeline.utils.codex_call') is not None
+    return imps.find_spec('extractor.pipeline.utils.deprecated_codex_call') is not None
 
 
 @pytest.mark.skipif(not os.getenv('RUN_CODEX_SMOKE'), reason='Opt-in: set RUN_CODEX_SMOKE=1 to run Codex exec smoke')

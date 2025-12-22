@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+from extractor.pipeline.utils.reliability import log_stage_error
 import os
 from typing import Tuple
 import urllib.request
@@ -32,7 +33,9 @@ def scillm_quick_check(timeout: float = 3.0) -> Tuple[bool, str]:
             return False, f"HTTP {code} from /models"
     except urllib.error.HTTPError as e:  # pragma: no cover
         return False, f"http error: {e.code}"
-    except Exception as e:  # pragma: no cover
+    except Exception as exc:
+        log_stage_error('preflight.py', exc, {'context': 'preflight.py'})
+        raise
         return False, f"http error: {e}"
 
 
@@ -56,8 +59,9 @@ def require_scillm_env() -> Tuple[bool, str]:
         if os.getenv(var):
             try:
                 os.environ.pop(var, None)
-            except Exception:
-                pass
+            except Exception as exc:
+                log_stage_error('preflight.py', exc, {'context': 'preflight.py'})
+                raise
     return True, "ok"
 
 
@@ -68,8 +72,9 @@ def forbid_input_writes(path_str: str) -> Tuple[bool, str]:
         root = os.path.abspath("data/input")
         if os.path.commonpath([p, root]) == root:
             return False, f"Refusing to write under data/input/: {p}"
-    except Exception:
-        pass
+    except Exception as exc:
+        log_stage_error('preflight.py', exc, {'context': 'preflight.py'})
+        raise
     return True, "ok"
 
 
@@ -79,7 +84,9 @@ def camelot_quick_check() -> Tuple[bool, str]:
 
         _ = camelot.__version__
         return True, "ok"
-    except Exception as e:  # pragma: no cover
+    except Exception as exc:
+        log_stage_error('preflight.py', exc, {'context': 'preflight.py'})
+        raise
         return False, f"camelot import error: {e}"
 
 

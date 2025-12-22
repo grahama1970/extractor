@@ -1,11 +1,14 @@
 from __future__ import annotations
+from extractor.pipeline.utils.reliability import log_stage_error
 from typing import List, Dict, Any, Tuple
 from pathlib import Path
 import json
 
 try:
     import faiss  # type: ignore
-except Exception:
+except Exception as exc:
+    log_stage_error('ann_index.py', exc, {'context': 'ann_index.py'})
+    raise
     faiss = None  # type: ignore
 
 import numpy as np  # type: ignore

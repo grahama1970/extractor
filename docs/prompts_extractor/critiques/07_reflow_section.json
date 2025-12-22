@@ -1,0 +1,17 @@
+{
+  "ok": true,
+  "summary": "prompt is production-ready",
+  "rationale": "Schema, rules, failure stub, and examples are fully specified; no P0/P1 issues.",
+  "citations": [],
+  "issues": [
+    {
+      "id": "info_example_mismatch",
+      "severity": "info",
+      "summary": "Example table rows differ from input",
+      "detail": "Input lacks actual cell data yet example invents rows; could mislead.",
+      "fix": "Replace invented rows with placeholder comment like /* actual Stage-05 cells here */"
+    }
+  ],
+  "highest_severity": "info",
+  "attempts": 1
+}

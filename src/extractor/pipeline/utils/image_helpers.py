@@ -14,6 +14,7 @@ from urlextract import URLExtract
 
 from strip_tags import strip_tags
 from loguru import logger
+from extractor.pipeline.utils.reliability import log_stage_error
 
 # Supported image extensions
 IMAGE_EXT = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tiff", ".webp"}
@@ -27,7 +28,9 @@ def _get_cache_dir(explicit_dir: Optional[str] = None) -> Optional[Path]:
     try:
         p.mkdir(parents=True, exist_ok=True)
         return p
-    except Exception:
+    except Exception as exc:
+        log_stage_error('image_helpers.py', exc, {'context': 'image_helpers.py'})
+        raise
         return None
 
 
@@ -36,7 +39,9 @@ def safe_image(path: Path) -> bool:
         return (
             path.exists() and path.suffix.lower() in IMAGE_EXT and Image.open(path).verify() is None
         )
-    except Exception:
+    except Exception as exc:
+        log_stage_error('image_helpers.py', exc, {'context': 'image_helpers.py'})
+        raise
         return False
 
 
@@ -97,8 +102,9 @@ def compress_image_cached(
         if fp.exists():
             try:
                 return fp.read_text()
-            except Exception:
-                pass
+            except Exception as exc:
+                log_stage_error('image_helpers.py', exc, {'context': 'image_helpers.py'})
+                raise
 
     img_bytes = path.read_bytes()
     max_bytes = max_kb * 1024
@@ -109,8 +115,9 @@ def compress_image_cached(
         if cache_base is not None:
             try:
                 fp.write_text(out)
-            except Exception:
-                pass
+            except Exception as exc:
+                log_stage_error('image_helpers.py', exc, {'context': 'image_helpers.py'})
+                raise
         return out
 
     img = Image.open(io.BytesIO(img_bytes))
@@ -123,8 +130,9 @@ def compress_image_cached(
             if cache_base is not None:
                 try:
                     fp.write_text(out)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    log_stage_error('image_helpers.py', exc, {'context': 'image_helpers.py'})
+                    raise
             return out
         quality -= 10
 
@@ -135,8 +143,9 @@ def compress_image_cached(
     if cache_base is not None:
         try:
             fp.write_text(out)
-        except Exception:
-            pass
+        except Exception as exc:
+            log_stage_error('image_helpers.py', exc, {'context': 'image_helpers.py'})
+            raise
     return out
 
 
@@ -151,8 +160,9 @@ def fetch_remote_image_cached(
         if fp.exists():
             try:
                 return fp.read_text()
-            except Exception:
-                pass
+            except Exception as exc:
+                log_stage_error('image_helpers.py', exc, {'context': 'image_helpers.py'})
+                raise
 
     try:
         r = httpx.get(url, timeout=timeout)
@@ -162,10 +172,13 @@ def fetch_remote_image_cached(
         if cache_base is not None:
             try:
                 fp.write_text(out)
-            except Exception:
-                pass
+            except Exception as exc:
+                log_stage_error('image_helpers.py', exc, {'context': 'image_helpers.py'})
+                raise
         return out
-    except Exception:
+    except Exception as exc:
+        log_stage_error('image_helpers.py', exc, {'context': 'image_helpers.py'})
+        raise
         return None
 
 

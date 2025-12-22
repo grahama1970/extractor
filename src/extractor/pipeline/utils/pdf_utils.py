@@ -8,6 +8,7 @@ import fitz  # PyMuPDF
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from loguru import logger
+from extractor.pipeline.utils.reliability import log_stage_error
 
 
 def clean_pdf(input_path: str, output_path: str, remove_annotations: bool = True) -> Dict[str, Any]:
@@ -50,8 +51,8 @@ def clean_pdf(input_path: str, output_path: str, remove_annotations: bool = True
         }
 
     except Exception as e:
-        logger.error(f"Failed to clean PDF: {e}")
-        return {"success": False, "error": str(e), "annotations_removed": 0}
+        log_stage_error("pdf_utils.clean_pdf", e, {"input": input_path, "output": output_path})
+        raise
 
 
 def extract_image_from_bbox(
@@ -91,8 +92,8 @@ def extract_image_from_bbox(
         return img_data
 
     except Exception as e:
-        logger.error(f"Failed to extract image: {e}")
-        return None
+        log_stage_error("pdf_utils.extract_image_from_bbox", e, {"pdf": str(pdf_path), "page": page_num})
+        raise
 
 
 def replace_text_in_pdf(

@@ -1,0 +1,4 @@
+{
+  "system": "You are a JSON-only assistant. Respond with exactly one JSON object matching {\n  \"summary\": \"concise summary\",\n  \"key_concepts\": [\"concept1\", \"concept2\", \"...\"]\n}. Do not include text outside the JSON object. If input text is empty or insufficient, return an empty string for summary and an empty list for key_concepts (but still valid JSON).",
+  "user": "Summarize the following document section in 2–4 sentences and list 3–7 key concepts.\nKeep the summary consistent with any previous summaries provided.\n\nPrevious summaries:\n{previous_summaries}\n\nSection title: {section_title}\nLevel: {section_level}\nText:\n{section_text}\n\nReturn strictly JSON:\n{{\n  \"summary\": \"concise summary\",\n  \"key_concepts\": [\"concept1\", \"concept2\", \"...\"]\n}}"
+}

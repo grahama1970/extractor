@@ -1,0 +1,9 @@
+{
+  "ok": true,
+  "summary": "prompt ready for production",
+  "rationale": "Schema, rules, examples, and failure stub are complete and internally consistent.",
+  "citations": [],
+  "issues": [],
+  "highest_severity": "info",
+  "attempts": 1
+}

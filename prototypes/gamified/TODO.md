@@ -12,7 +12,6 @@ Done
 
 Next
 - Finalize Smokes + Contracts: enforce instance prompt, agent outputs, scorecard shapes
-- Integrate asyncio runner (codex_call) for children (done) and wire status CLI (done)
+- Integrate asyncio runner (codex_call, deprecated) for children (done) and wire status CLI (done)
 - Harden detach mode I/O and add CI smokes for emit→aggregate
 - Document runbook and protected paths for agent edits
-

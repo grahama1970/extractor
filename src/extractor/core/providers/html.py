@@ -43,6 +43,7 @@ from extractor.core.schema.unified_document import (
     TableCell,
 )
 from extractor.core.providers.fetcher_bridge import ensure_local_source, attach_fetcher_metadata
+from extractor.core.providers.utils import ensure_hierarchy
 
 
 class HTMLProvider:
@@ -106,7 +107,7 @@ class HTMLProvider:
         if fetch_download and fetch_download.windows:
             logger.info("HTML provider ingested {count} rolling windows", count=len(fetch_download.windows))
         logger.info("Extracted {count} blocks from HTML", count=len(blocks))
-        return doc
+        return ensure_hierarchy(doc, default_title=filepath.stem)
 
     def _generate_doc_id(self, filepath: Path) -> str:
         """Generate unique document ID"""

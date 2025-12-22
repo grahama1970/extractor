@@ -308,3 +308,13 @@ whether a VPC_i address hits and shall return the taken/no...</div>
   - REQ-BHT-1: BHTDepth entries indexed by lower bits… (4.1.5.4.1 REQUIREMENTS)
   - Table 4-2 and Table 4-3 are distinct datasets and shall not be merged. (4.1.5. TABLE MERGE SCENARIOS)
   - REQ-BHT-7: instr_scan pre-decode shall indicate VPC hits… (4.1.5.4.1 REQUIREMENTS)
+
+
+## Run note
+- PDF: data/input/pipeline/BHT_CV32A65X_with_requirements_noannots.pdf
+- Mode: accurate
+- Output dir: data/results/parity_runs/pdf
+- Reflow: data/results/parity_runs/pdf/07_reflow_section/json_output/07_reflowed.json
+- Flattened: data/results/parity_runs/pdf/10_arangodb_exporter/json_output/10_flattened_data.json
+- Annotated PDF: n/a
+- Audit: data/results/parity_runs/pdf/09b_audit/json_output/09b_audit.json

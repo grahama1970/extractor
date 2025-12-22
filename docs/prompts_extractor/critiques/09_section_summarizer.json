@@ -1,0 +1,17 @@
+{
+  "ok": true,
+  "summary": "prompt is production-ready",
+  "rationale": "Schema is explicit, JSON-only mode enforced, fallback for empty input provided, and example aligns with expected output.",
+  "citations": [],
+  "issues": [
+    {
+      "id": "info_sentence_count_type",
+      "severity": "info",
+      "summary": "sentence_count type not enforced",
+      "detail": "Prompt says integer but does not constrain to 2-4 range mentioned in user text.",
+      "fix": "Add JSON schema constraint: \"sentence_count\": {\"type\":\"integer\",\"minimum\":2,\"maximum\":4}"
+    }
+  ],
+  "highest_severity": "info",
+  "attempts": 1
+}

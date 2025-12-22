@@ -1303,6 +1303,7 @@ def run(
     output_dir: Path = Path("data/results/pipeline"),
     skip_proving: bool = False,
     requirements_json: Path | None = None,
+    skip_export: bool = False,
 ):
     """
     Extracts and proves formal requirements from reflowed sections using Lean 4.
@@ -1588,7 +1589,8 @@ def debug_bundle(
     }
     output_path = json_output_dir / "08_theorems.json"
     output_path.write_text(json.dumps(final_output, indent=2, ensure_ascii=False))
-    console.print(f"[green]Debug bundle: saved theorem results to {output_path}")
+    console.print(f"[green]Saved theorem results to {output_path}")
+    return True
 
 
 def _cli() -> int:
@@ -1605,12 +1607,17 @@ def _cli() -> int:
     run_p.add_argument(
         "-o", "--output-dir", type=Path, default=Path("data/results/pipeline"), help="Results root"
     )
+    run_p.add_argument(
+        "--skip-export",
+        action="store_true",
+        help="Skip DB export/embeddings after proving (for long-running CLI use)",
+    )
     args = parser.parse_args()
 
     if args.cmd == "sanity":
         return sanity()
     if args.cmd == "run":
-        rc = run(args.reflowed_json, args.output_dir)
+        rc = run(args.reflowed_json, args.output_dir, skip_export=args.skip_export)
         return 0 if rc else 1
     return 1
 

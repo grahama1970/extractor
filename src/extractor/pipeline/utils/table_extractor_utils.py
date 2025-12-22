@@ -2,6 +2,7 @@
 """Pure helpers for Stage 05 (Table Extractor)."""
 from __future__ import annotations
 
+from extractor.pipeline.utils.reliability import log_stage_error
 import json
 import os
 from typing import Any, Dict, List
@@ -144,7 +145,9 @@ def coalesce_repeated_header_rows(df: pd.DataFrame, min_match: float) -> pd.Data
         cols = list(df.columns)
         if cols and not all(isinstance(c, int) for c in cols):
             header_proto = [_normalize_cell(c) for c in cols]
-    except Exception:
+    except Exception as exc:
+        log_stage_error('table_extractor_utils.py', exc, {'context': 'table_extractor_utils.py'})
+        raise
         header_proto = None
     if header_proto is None:
         for _, row in df.iterrows():
@@ -171,5 +174,7 @@ def coalesce_repeated_header_rows(df: pd.DataFrame, min_match: float) -> pd.Data
         df2 = df.loc[df.index[keep_mask]].copy()
         df2.reset_index(drop=True, inplace=True)
         return df2
-    except Exception:
+    except Exception as exc:
+        log_stage_error('table_extractor_utils.py', exc, {'context': 'table_extractor_utils.py'})
+        raise
         return df

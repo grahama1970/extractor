@@ -6,6 +6,7 @@ stage file to avoid accidental coupling.
 """
 from __future__ import annotations
 
+from extractor.pipeline.utils.reliability import log_stage_error
 from pathlib import Path
 from typing import Any, Iterable, Optional, Tuple
 
@@ -56,7 +57,9 @@ def _bbox_area(bbox: Iterable[float]) -> int:
     x0, y0, x1, y1 = map(float, bbox)
     try:
         return int((x1 - x0) * (y1 - y0))
-    except Exception:
+    except Exception as exc:
+        log_stage_error('figure_extractor_utils.py', exc, {'context': 'figure_extractor_utils.py'})
+        raise
         return 0
 
 
@@ -153,8 +156,9 @@ def detect_title_local(
                     continue
                 if _re.match(r"^\s*(Figure|Fig\.)\s*([A-Za-z0-9\-\.]+)?[\.:]?\s*(.*)$", txt, _re.IGNORECASE):
                     return txt, "above"
-    except Exception:
-        pass
+    except Exception as exc:
+        log_stage_error('figure_extractor_utils.py', exc, {'context': 'figure_extractor_utils.py'})
+        raise
     return None, None
 
 
@@ -180,5 +184,7 @@ def intersect_sections(figures: list[dict], sections: list[dict]) -> None:
                     if fitz.Rect(sb).intersects(fb):  # type: ignore[arg-type]
                         figure["section_id"] = s.get("id", "unknown")
                         break
-        except Exception:
+        except Exception as exc:
+            log_stage_error('figure_extractor_utils.py', exc, {'context': 'figure_extractor_utils.py'})
+            raise
             continue

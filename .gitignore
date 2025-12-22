@@ -325,8 +325,3 @@ deprecated/
 # Node/npm lockfiles from auxiliary tools/prototypes
 /package-lock.json
 /prototypes/**/package-lock.json
-
-# Generated artifacts and pipeline outputs
-/scripts/artifacts/
-/local/results/
-/out_fast/

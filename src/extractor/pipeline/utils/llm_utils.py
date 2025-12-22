@@ -12,6 +12,7 @@ from io import BytesIO
 from textwrap import dedent
 
 from loguru import logger
+from extractor.pipeline.utils.reliability import log_stage_error
 from PIL import Image
 
 from scillm import acompletion as scillm_acompletion  # type: ignore
@@ -89,7 +90,9 @@ async def call_llm_with_image(
         else:
             return {"response": content}
 
-    except Exception as e:
+    except Exception as exc:
+        log_stage_error('llm_utils.py', exc, {'context': 'llm_utils.py'})
+        raise
         logger.error(f"LLM call failed: {e}")
         return None
 
@@ -120,7 +123,9 @@ def prepare_image_base64(image: Union[Image.Image, str, Path]) -> Optional[str]:
             image.save(buffer, format="PNG")
             return base64.b64encode(buffer.getvalue()).decode()
 
-    except Exception as e:
+    except Exception as exc:
+        log_stage_error('llm_utils.py', exc, {'context': 'llm_utils.py'})
+        raise
         logger.error(f"Failed to prepare image: {e}")
         return None
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from extractor.pipeline.utils.reliability import log_stage_error
 import textwrap
 from typing import Any, Dict, Optional
 
@@ -27,7 +28,9 @@ def format_block_text(block: Optional[Dict[str, Any]]) -> str:
             if size is not None:
                 try:
                     parts.append(f"{float(size):.1f}pt")
-                except Exception:
+                except Exception as exc:
+                    log_stage_error('prompt_builder.py', exc, {'context': 'prompt_builder.py'})
+                    raise
                     parts.append(str(size))
             if fsf.get("bold"):
                 parts.append("bold")
@@ -74,7 +77,9 @@ def _signals(b: Optional[Dict[str, Any]]) -> str:
     if size is not None:
         try:
             parts.append(f"size={float(size):.1f}pt")
-        except Exception:
+        except Exception as exc:
+            log_stage_error('prompt_builder.py', exc, {'context': 'prompt_builder.py'})
+            raise
             parts.append(f"size={size}")
     if bucket:
         parts.append(f"color={bucket}")

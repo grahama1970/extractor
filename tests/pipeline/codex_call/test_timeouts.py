@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-from extractor.pipeline.utils.codex_call import run_codex_exec
+from extractor.pipeline.utils.deprecated_codex_call import run_codex_exec
 
 
 def test_overall_timeout_terminates_quickly(tmp_path):
@@ -62,4 +62,3 @@ def test_idle_timeout_triggers_without_overall_timeout(tmp_path):
     # Assert: idle timeout engaged, and we saw initial output
     assert res.idle_timed_out is True
     assert any(b"start" in c for c in out_chunks)
-

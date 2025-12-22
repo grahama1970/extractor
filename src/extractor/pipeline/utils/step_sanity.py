@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from .sanity_utils import SanityIssue, emit_sanity, read_json
+from extractor.pipeline.utils.reliability import log_stage_error
 
 
 @dataclass
@@ -55,7 +56,8 @@ def _manifest_flags(root: Path) -> Dict[str, Any]:
         return {}
     try:
         data = json.loads(manifest.read_text(encoding="utf-8"))
-    except Exception:
+    except Exception as exc:
+        log_stage_error("step_sanity._manifest_flags", exc, {"manifest": str(manifest)})
         return {}
     flags = data.get("flags") if isinstance(data, dict) else {}
     return flags if isinstance(flags, dict) else {}

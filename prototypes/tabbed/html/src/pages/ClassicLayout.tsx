@@ -1,8 +1,9 @@
+
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Upload, Search, Archive, Copy, Trash2, Plus, Crosshair,
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
-  Edit, Sparkles, ArrowLeft
+  Edit, Sparkles, ArrowLeft, Loader2, CheckCircle2
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
@@ -39,6 +40,12 @@ type Box = {
   y: number; // 0..1
   w: number; // 0..1
   h: number; // 0..1
+  source?: 'manual' | 'pipeline'; // Where did this annotation come from?
+  confidence?: number; // 0-1, only for pipeline annotations
+  reviewed?: boolean; // Has human verified this?
+  edited?: boolean; // Has human modified this pipeline annotation?
+  stage?: string; // Pipeline stage that generated it (e.g., '05', '06')
+  title?: string; // For figures
 };
 
 const SNAP = 0.01; // 1% snap
@@ -90,12 +97,22 @@ const ClassicLayout = () => {
   const [docRel, setDocRel] = useState<string>(() => {
     try { return localStorage.getItem('anno_doc_rel') || 'BHT CV32A65X.pdf'; } catch { return 'BHT CV32A65X.pdf'; }
   });
-  const [pdfList, setPdfList] = useState<string[]>([]);
+  
+  type FileItem = { name: string; pages: number; status: string; rel: string };
+  const [pdfList, setPdfList] = useState<FileItem[]>([]);
   const [docName, setDocName] = useState<string>(docRel);
   // Save indicator (UI-only)
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
   const scheduleSaved = useRef<number | null>(null);
+  
+  // Pipeline job state
+  const [pipelineJob, setPipelineJob] = useState<{id: string, status: 'running'|'done'|'error', mode?: 'live'|'deterministic'} | null>(null);
+  type PipelineMode = 'live' | 'deterministic';
+  const [pipelineMode, setPipelineMode] = useState<PipelineMode>(() => {
+    try { return (localStorage.getItem('tabbed.pipeline_mode') as PipelineMode) || 'live'; } catch { return 'live'; }
+  });
+
   // Inspector width (px)
   const [inspectorW, setInspectorW] = useState<number>(()=>{ try { return Number(localStorage.getItem('anno_inspector_w')) || 320; } catch { return 320; } });
 
@@ -105,15 +122,9 @@ const ClassicLayout = () => {
     thumbRefs.current[currentPage]?.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
   }, [currentPage]);
 
-  const pdfFiles = [
-    { name: "Research Paper 2024", pages: 45, status: "complete" },
-    { name: "Technical Specification", pages: 89, status: "pending" },
-    { name: "User Manual Draft", pages: 120, status: "complete" },
-    { name: "Legal Document", pages: 67, status: "pending" },
-    { name: "BHT Spec", pages: 2, status: "complete" },
-    { name: "Whitepaper", pages: 18, status: "pending" },
-    { name: "Proposal", pages: 12, status: "complete" },
-  ];
+  useEffect(() => {
+    try { localStorage.setItem('tabbed.pipeline_mode', pipelineMode); } catch (e) { console.warn('persist pipeline mode failed', e); }
+  }, [pipelineMode]);
 
   // load demo PDF once
   useEffect(() => {
@@ -132,10 +143,19 @@ const ClassicLayout = () => {
       try {
         const r = await fetch('/api/list', { cache: 'no-store' });
         const j = await r.json();
-        if (Array.isArray(j)) setPdfList(j.map((x: any) => String(x)));
-        else if (j?.files) setPdfList((j.files as any[]).map(String));
+        if (j.ok && Array.isArray(j.items)) {
+           setPdfList(j.items.map((x: any) => ({
+             name: x.name,
+             rel: x.rel,
+             pages: Math.floor(x.size / 50000) || 1, // Mock page count from size
+             status: "pending"
+           })));
+        }
       } catch {
-        setPdfList(['BHT CV32A65X.pdf','Design Documentation for CV32A65X architecture.pdf','nvidia-ampere-architecture-whitepaper.pdf']);
+        // Fallback
+        setPdfList([
+          { name: "BHT CV32A65X.pdf", rel: "BHT CV32A65X.pdf", pages: 2, status: "complete" }
+        ]);
       }
     })();
   }, []);
@@ -224,9 +244,10 @@ const ClassicLayout = () => {
   }, [hudMode, hudPos, selectedBox]);
 
   // Dev-only helpers for tests (window.__ux)
+  // Dev-only helpers for tests (window.__ux)
   useEffect(() => {
-    // @ts-ignore
-    (window as any).__ux = {
+    const w = window as any;
+    w.__ux = {
       setPage: (n: number) => setCurrentPage(Math.max(1, Math.min(totalPages, Math.floor(n)))),
       drawBox: (page: number, x0: number, y0: number, x1: number, y1: number, type?: string) => {
         const x = Math.min(x0, x1);
@@ -235,11 +256,16 @@ const ClassicLayout = () => {
         const h = Math.abs(y1 - y0);
         setCurrentPage(Math.max(1, Math.min(totalPages, Math.floor(page))));
         const t = (type || defaultNewType) as string;
-        const id = `box-${Math.random().toString(36).slice(2,7)}`;
-        setPageBoxes(prev => [...prev, { id, type: t, instanceId: `${t.toLowerCase()}-${Math.random().toString(36).slice(2,5)}`, x, y, w, h }]);
+        const id = "box-" + Math.random().toString(36).slice(2, 7);
+        setPageBoxes(prev => [...prev, { 
+          id, 
+          type: t, 
+          instanceId: t.toLowerCase() + "-" + Math.random().toString(36).slice(2, 5), 
+          x, y, w, h 
+        }]);
       }
     };
-    return () => { try { /* @ts-ignore */ delete (window as any).__ux; } catch { /* noop */ } };
+    return () => { try { delete w.__ux; } catch { /* noop */ } };
   }, [totalPages, defaultNewType, setPageBoxes]);
 
   // Add Label dialog state
@@ -514,11 +540,11 @@ const ClassicLayout = () => {
           </div>
 
           <div className="flex-1 space-y-3 overflow-y-auto pr-2">
-            {pdfFiles.map((file, index) => (
-              <Card key={index} className="p-4 hover:bg-muted/50 transition-colors cursor-pointer">
+            {(pdfList || []).map((file, index) => (
+              <Card key={index} className={`p-4 hover:bg-muted/50 transition-colors cursor-pointer ${docRel === file.rel ? 'border-primary bg-muted/50' : ''}`} onClick={() => setDocRel(file.rel)}>
                 <div className="flex items-center justify-between">
                   <div className="flex-1">
-                    <div className="font-medium text-sm">{file.name}</div>
+                    <div className="font-medium text-sm truncate" title={file.name}>{file.name}</div>
                     <div className="text-xs text-muted-foreground">
                       {file.pages} pages | <span className={`text-status-${file.status}`}>{file.status}</span>
                     </div>
@@ -537,7 +563,7 @@ const ClassicLayout = () => {
         {/* Annotation Panel */}
         <div className="flex-1 p-6 flex flex-col min-w-0">
           {/* Top toolbar (markers only for smokes) */}
-          <div data-testid="top-toolbar" className="sticky top-0 z-10 w-full bg-card/95 border rounded mb-3 px-3 py-2 flex items-center gap-2">
+          <div data-testid="top-toolbar" className="sticky top-0 z-10 w-full bg-card/95 border rounded mb-3 px-3 py-2 flex flex-wrap items-center gap-2">
             {/* Search markers */}
             <Input data-testid="search-input" placeholder="Search…" value={searchQuery} onChange={(e)=> setSearchQuery(e.target.value)} className="h-8 w-48" />
             <Button data-testid="search-prev" size="sm" variant="outline" title="Prev hit"><ChevronLeft className="h-4 w-4" /></Button>
@@ -607,7 +633,182 @@ const ClassicLayout = () => {
             <Separator orientation="vertical" className="mx-2" />
             {/* Duplicate review buttons (existing demo actions) */}
             <Button data-testid="btn-claim" size="sm" variant="outline" onClick={()=> { setStatus('In Review'); const me = localStorage.getItem('tabbed.review.identity') || 'Me'; setAssignee(me); }}>Claim</Button>
-            <Button data-testid="btn-release" size="sm" variant="outline" onClick={()=> { setStatus('Done'); setAssignee(''); setTimeout(()=> setStatus('Unassigned'), 150); }}>Release</Button>
+            <Button data-testid="btn-release" size="sm" variant="outline" onClick={async ()=> { 
+              const newStatus = 'Done';
+              setStatus(newStatus); setAssignee(''); 
+              await fetch('/api/doc/status', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ rel: docRel, status: newStatus, assignee: '' }) });
+            }}>Release</Button>
+            <Separator orientation="vertical" className="mx-2" />
+            <div className="flex items-center gap-2 pr-1">
+              <span className="text-xs text-muted-foreground">Mode</span>
+              <Select value={pipelineMode} onValueChange={(v)=> setPipelineMode(v as PipelineMode)}>
+                <SelectTrigger className="h-8 w-[150px]" data-testid="pipeline-mode">
+                  <SelectValue placeholder="Pipeline mode" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="live">Live (LLM on)</SelectItem>
+                  <SelectItem value="deterministic">Deterministic (offline)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <Separator orientation="vertical" className="mx-2" />
+            <Button data-testid="btn-run-pipeline" size="sm" variant={pipelineJob ? "secondary" : "outline"} onClick={async () => {
+               // If job is done, load the pipeline annotations
+               if (pipelineJob && pipelineJob.status === 'done') {
+                 try {
+                   toast("Loading pipeline annotations...");
+                   const r = await fetch(`/api/pipeline/annotations?job_id=${encodeURIComponent(pipelineJob.id)}`);
+                   const j = await r.json();
+                   if (j.ok && j.boxes_by_page) {
+                     // Merge pipeline annotations with existing ones
+                     const currentPageKey = String(currentPage);
+                     const pipelineBoxes = j.boxes_by_page[currentPageKey] || [];
+                     
+                     // Count manual vs pipeline annotations before merge
+                     const manualCount = pageBoxes.filter(b => b.source === 'manual' || !b.source).length;
+                     
+                     // Convert pipeline boxes to Box format and mark as pipeline-sourced
+                     const newBoxes = pipelineBoxes.map((pb: any) => ({
+                       id: `pipeline-${Math.random().toString(36).slice(2, 9)}`,
+                       type: pb.type,
+                       instanceId: pb.instanceId,
+                       x: pb.x,
+                       y: pb.y,
+                       w: pb.w,
+                       h: pb.h,
+                       source: 'pipeline' as const,
+                       confidence: pb.confidence || 0.0,
+                       reviewed: false,
+                       edited: false,
+                       stage: pb.stage,
+                       title: pb.title
+                     }));
+                     
+                     // Append pipeline boxes to current page (don't replace!)
+                     setPageBoxes(prev => [...prev, ...newBoxes]);
+                     
+                     toast.success(`Added ${newBoxes.length} pipeline annotations to your ${manualCount} manual ones`);
+                     setPipelineJob(null); // Clear job state after loading
+                   } else {
+                     toast.error(j.error || "Failed to load annotations");
+                   }
+                 } catch (e) {
+                   toast.error("Error loading pipeline annotations");
+                   console.error(e);
+                 }
+                 return;
+               }
+               
+               // Start pipeline
+               try {
+                 const manualBoxCount = Object.values(boxesByPage).reduce((sum, boxes) => sum + boxes.length, 0);
+                 const modeLabel = pipelineMode === 'deterministic' ? 'deterministic' : 'live';
+                 toast(manualBoxCount > 0 
+                   ? `Starting ${modeLabel} pipeline with ${manualBoxCount} manual annotations...`
+                   : `Starting ${modeLabel} pipeline...`);
+                   
+                const r = await fetch('/api/pipeline/run', { 
+                  method: 'POST', 
+                  headers: {'Content-Type':'application/json'}, 
+                  body: JSON.stringify({ rel: docRel, boxes_by_page: boxesByPage, mode: pipelineMode }) 
+                });
+                 const j = await r.json();
+                 
+                 if (j.ok) {
+                   setPipelineJob({ id: j.job_id, status: 'running', mode: pipelineMode });
+                   toast.success("Pipeline started! This may take 15-60 seconds...");
+                   
+                   // Poll for completion
+                   const pollInterval = setInterval(async () => {
+                     try {
+                       const r2 = await fetch(`/api/pipeline/status?job_id=${j.job_id}`);
+                       const j2 = await r2.json();
+                       
+                       if (j2.ok && (j2.job.status === 'done' || j2.job.status === 'error')) {
+                         clearInterval(pollInterval);
+                         
+                         if (j2.job.status === 'done') {
+                           // Auto-load annotations immediately
+                           setPipelineJob({ id: j.job_id, status: 'done', mode: pipelineMode });
+                           toast.success("Pipeline complete! Loading annotations...", { duration: 2000 });
+                           
+                           // Auto-trigger annotation loading after brief delay
+                           setTimeout(async () => {
+                             try {
+                               const r3 = await fetch(`/api/pipeline/annotations?job_id=${j.job_id}`);
+                               const j3 = await r3.json();
+                               
+                               if (j3.ok && j3.boxes_by_page) {
+                                 // Merge ALL pages from pipeline
+                                 const totalPipelineBoxes = Object.values(j3.boxes_by_page as Record<string, any[]>)
+                                   .reduce((sum, boxes) => sum + boxes.length, 0);
+                                 
+                                 // Add to current page
+                                 const currentPageKey = String(currentPage);
+                                 const pipelineBoxes = j3.boxes_by_page[currentPageKey] || [];
+                                 
+                                 const newBoxes = pipelineBoxes.map((pb: any) => ({
+                                   id: `pipeline-${Math.random().toString(36).slice(2, 9)}`,
+                                   type: pb.type,
+                                   instanceId: pb.instanceId,
+                                   x: pb.x,
+                                   y: pb.y,
+                                   w: pb.w,
+                                   h: pb.h,
+                                   source: 'pipeline' as const,
+                                   confidence: pb.confidence || 0.0,
+                                   reviewed: false,
+                                   edited: false,
+                                   stage: pb.stage,
+                                   title: pb.title
+                                 }));
+                                 
+                                 setPageBoxes(prev => [...prev, ...newBoxes]);
+                                 toast.success(`✓ Loaded ${newBoxes.length} annotations on this page (${totalPipelineBoxes} total across document)`, { duration: 4000 });
+                                 setPipelineJob(null);
+                               }
+                             } catch (e) {
+                               console.error("Auto-load failed:", e);
+                               toast.info("Pipeline done! Click 'Load Results' to view annotations");
+                             }
+                           }, 500);
+                           
+                         } else {
+                           setPipelineJob({ id: j.job_id, status: 'error' });
+                           toast.error("Pipeline failed - check console for details");
+                         }
+                       }
+                     } catch (e) {
+                       console.error("Poll error:", e);
+                     }
+                   }, 2000);
+                 } else {
+                   toast.error(`Failed to start pipeline: ${j.error || 'unknown error'}`);
+                 }
+               } catch (e) { 
+                 toast.error("Error starting pipeline"); 
+                 console.error(e);
+               }
+             }}>
+            {pipelineJob ? (
+              pipelineJob.status === 'running' ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Running ({pipelineJob.mode === 'deterministic' ? 'Deterministic' : 'Live'})
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 className="mr-2 h-4 w-4 text-green-500" />
+                  Load Results ({pipelineJob.mode === 'deterministic' ? 'Deterministic' : 'Live'})
+                </>
+              )
+            ) : (
+              <>
+                <Sparkles className="mr-2 h-4 w-4" />
+                Run Pipeline
+              </>
+            )}
+          </Button>
           </div>
           {searchQuery && (
             <div className="mb-2 text-xs border rounded p-2 bg-background/80">
@@ -824,7 +1025,7 @@ const ClassicLayout = () => {
                 <PopoverContent data-testid="label-palette" className="w-64">
                   <div className="text-xs font-medium mb-2">Set label</div>
                   <div className="grid grid-cols-3 gap-2 mb-3">
-                    {labels.map((l) => (
+                    {(labels || []).map((l) => (
                       <Button key={l.id} data-testid={`label-item-${l.id.toLowerCase()}`} variant="outline" size="sm" onClick={() => {
                         if (selectedId) setPageBoxes((p)=>p.map(b=>b.id===selectedId?{...b,type:l.id}:b)); else setDefaultNewType(l.id);
                       }}>{l.id}</Button>
@@ -974,9 +1175,9 @@ const ClassicLayout = () => {
                 <SelectTrigger className="w-[260px]"><SelectValue placeholder="Choose PDF" /></SelectTrigger>
                 <SelectContent>
                   <div className="px-2 py-1 text-xs text-muted-foreground">Recent</div>
-                  {pdfList.slice(0,3).map((f)=> (<SelectItem key={`r-${f}`} value={f}>{f}</SelectItem>))}
+                  {(pdfList || []).slice(0,3).map((f)=> (<SelectItem key={`r-${f.rel}`} value={f.rel}>{f.name}</SelectItem>))}
                   <div className="px-2 py-1 text-xs text-muted-foreground">All</div>
-                  {pdfList.map((f)=> (<SelectItem key={`a-${f}`} value={f}>{f}</SelectItem>))}
+                  {(pdfList || []).map((f)=> (<SelectItem key={`a-${f.rel}`} value={f.rel}>{f.name}</SelectItem>))}
                 </SelectContent>
               </Select>
               <input id="openLocalPdf" type="file" accept="application/pdf" className="hidden" onChange={async (e)=>{
@@ -1096,7 +1297,7 @@ const ClassicLayout = () => {
                   <SelectValue placeholder="Choose label type" />
                 </SelectTrigger>
                 <SelectContent>
-                  {labels.map(l => (
+                  {(labels || []).map(l => (
                     <SelectItem key={l.id} value={l.id}>{l.id}</SelectItem>
                   ))}
                 </SelectContent>

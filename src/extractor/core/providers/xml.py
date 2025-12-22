@@ -57,6 +57,7 @@ from extractor.core.schema.unified_document import (
     TableCell,
 )
 from extractor.core.providers.fetcher_bridge import ensure_local_source, attach_fetcher_metadata
+from extractor.core.providers.utils import ensure_hierarchy
 
 
 class XMLProvider:
@@ -182,7 +183,7 @@ class XMLProvider:
         )
 
         logger.info(f"Extracted {len(blocks)} blocks from XML")
-        return doc
+        return ensure_hierarchy(doc, default_title=filepath.stem)
 
     def _generate_doc_id(self, filepath: Path) -> str:
         """Generate unique document ID"""
@@ -314,7 +315,7 @@ class XMLProvider:
 
         # Table patterns (individual cells)
         if tag_lower in ["td", "th", "cell", "tablecell"]:
-            return BlockType.TABLECELL
+            return BlockType.TABLE
 
         # Default to paragraph
         return BlockType.PARAGRAPH

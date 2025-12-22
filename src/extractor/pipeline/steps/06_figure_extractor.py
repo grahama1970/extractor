@@ -27,6 +27,7 @@ from typing import Any, Optional
 import fitz  # PyMuPDF
 from dotenv import find_dotenv, load_dotenv
 from loguru import logger
+from extractor.pipeline.utils.reliability import log_stage_error
 from rich.console import Console
 from extractor.pipeline.utils.scillm_router import get_vlm_router
 from extractor.pipeline.steps.scillm_preflight_validator import (
@@ -214,7 +215,9 @@ async def _process_one(
             normalized_id=normalized_id,
             extraction_time=datetime.now().isoformat(),
         )
-    except Exception as e:
+    except Exception as exc:
+        log_stage_error('06_figure_extractor', exc, {'context': '06'})
+        raise
         logger.error(f"figure.extract.error id={figure_id} err={e}")
         return None
 
@@ -232,7 +235,9 @@ async def _process_all(
     try:
         from extractor.pipeline.utils.scillm_router import get_vlm_router as _rv
         router = _rv()
-    except Exception:
+    except Exception as exc:
+        log_stage_error('06_figure_extractor', exc, {'context': '06'})
+        raise
         router = None
 
     async def runner(i: int, blk: dict[str, Any]) -> dict[str, Any] | None:
@@ -277,7 +282,9 @@ async def _process_all(
                         indent=2,
                     )
                 )
-        except Exception:
+        except Exception as exc:
+            log_stage_error('06_figure_extractor', exc, {'context': '06'})
+            raise
             pass
         return out
     finally:
@@ -298,7 +305,9 @@ async def _process_all(
                             # no running loop, run synchronously
                             import asyncio as _asyncio
                             _asyncio.run(maybe)  # type: ignore
-            except Exception:
+            except Exception as exc:
+                log_stage_error('06_figure_extractor', exc, {'context': '06'})
+                raise
                 pass
 
 
@@ -367,7 +376,9 @@ def run(
             rotation="1 week",
             retention="14 days",
         )
-    except Exception:
+    except Exception as exc:
+        log_stage_error('06_figure_extractor', exc, {'context': '06'})
+        raise
         pass
 
     figures: list[dict[str, Any]] = []
@@ -396,7 +407,9 @@ def run(
             assert isinstance(f.get("bbox"), (list, tuple)) and len(f.get("bbox")) == 4
             # accept page or page_idx
             _ = f.get("page_idx") if "page_idx" in f else f.get("page")
-    except Exception as _e:
+    except Exception as exc:
+        log_stage_error('06_figure_extractor', exc, {'context': '06'})
+        raise
         console.print(f"[yellow]Stage 06 schema warning: {_e}[/yellow]")
 
     out_path.write_text(json.dumps(result, indent=2))
@@ -415,7 +428,9 @@ if __name__ == "__main__":
         from dotenv import find_dotenv, load_dotenv
 
         load_dotenv(find_dotenv())
-    except Exception:
+    except Exception as exc:
+        log_stage_error('06_figure_extractor', exc, {'context': '06'})
+        raise
         pass
     import sys
     argv = sys.argv[1:]

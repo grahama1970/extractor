@@ -1,515 +1,314 @@
 #!/usr/bin/env python3
-"""
-Main CLI interface for the PDF extraction system.
+"""Single-surface extractor CLI (happy path).
 
-This module provides the command-line interface for extracting content
-from PDFs and other document formats. It supports various output formats,
-concurrent processing, checkpointing, and resume capabilities.
+Usage (per docs/03_guides/HAPPYPATH_GUIDE.md)
+    python -m src.cli extract <input> <out_dir> [--mode fast|accurate] [--prove]
 
-Key capabilities:
-- Extract content from PDF, DOCX, PPTX, and other formats
-- Multiple output formats (JSON, Markdown, RAG-optimized)
-- Concurrent processing with configurable limits
-- Checkpoint/resume for long-running tasks
-- Dry-run mode for execution planning
+Behavior
+  - PDF
+      • fast: PyMuPDF text-only, writes ``<out>/<stem>_fast.json``.
+      • accurate: runs the function-first pipeline (offline-friendly flags),
+        then materializes Stage 10 flattened JSON with deterministic, fast
+        embeddings; proving is opt-in.
+  - Structured formats (HTML/DOCX/PPTX/XLSX/EPUB/RST/MD/XML/IMG):
+      • load via provider, write a UnifiedDocument payload under
+        ``<out>/<stem>/07_reflow_section/json_output/07_reflowed.json`` and
+        a Stage 10 ``10_flattened_data.json``.
 
-AGENT VERIFICATION INSTRUCTIONS:
-- Run this script directly to execute working_usage()
-- The working_usage() function MUST pass all assertions
-- This verifies the CLI produces expected results
-- DO NOT assume the script works without running it
-
-Third-party Documentation:
-- Typer: https://typer.tiangolo.com/
-- Rich: https://rich.readthedocs.io/
-
-Example Usage:
-    # Basic extraction (single CLI surface)
-    python -m src.cli extract input.pdf output/
-
-    # With options
-    python -m src.cli extract input.pdf output/ --formats json,markdown --concurrency 4
-
-Expected Output:
-    {
-        "status": "success",
-        "files_processed": 1,
-        "output_files": ["output/input.json", "output/input.md"],
-        "processing_time": 15.3
-    }
+Notes
+  - We avoid DB export by passing ``skip_export=True`` to Stage 10 but still
+    emit the flattened JSON.
+  - Minimal option surface; errors are reported with actionable messages.
 """
 
-import asyncio
+from __future__ import annotations
+
 import json
 import sys
-import time
-from pathlib import Path
-from typing import Optional, Dict, Any
-from datetime import datetime
+import subprocess
 from enum import Enum
+from pathlib import Path
+from typing import Any, Dict, Type
 
-# Third-party imports
 import typer
 from loguru import logger
-from dotenv import load_dotenv, find_dotenv
-from rich.console import Console
-from rich.table import Table
-import subprocess
-import os
 
-# Configure logging
-logger.remove()
-logger.add(
-    sys.stderr,
-    level="INFO",
-    format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
-)
+from extractor.core.providers.registry import provider_from_filepath
+from extractor.core.providers.pdf import PdfProvider
+from extractor.fast_extract.pymupdf_fast import extract_fast_text
+from extractor.core.schema.unified_document import HierarchyNode
 
-# Load environment variables
-load_dotenv(find_dotenv())
+# Stage 10 flatten helper (imported once; can be monkeypatched in tests)
+from extractor.pipeline.steps import s10_arangodb_exporter as s10
 
-# Initialize Rich console
-console = Console()
+# Typer app --------------------------------------------------------------
 
-# Create Typer app (low surface area; paved road defaults)
+
 app = typer.Typer(
     name="extractor",
-    help="Universal document extractor (fast vs accurate) with normalized outputs",
+    help="Unified document extractor (fast PDF, accurate PDF, structured formats)",
     add_completion=False,
 )
 
 
-# Output format enum
-class OutputFormat(str, Enum):
-    json = "json"
-    markdown = "markdown"
-    rag = "rag"
-    structured = "structured"
-
-
-# ============================================
-# CORE FUNCTIONS (Outside __main__ block)
-# ============================================
-
-
-def validate_input_file(file_path: Path) -> tuple[bool, Optional[str]]:
-    """Validate input file exists and is readable.
-
-    Args:
-        file_path: Path to input file
-
-    Returns:
-        Tuple of (is_valid, error_message)
-    """
-    if not file_path.exists():
-        return False, f"File not found: {file_path}"
-
-    if not file_path.is_file():
-        return False, f"Not a file: {file_path}"
-
-    if not file_path.stat().st_size > 0:
-        return False, f"Empty file: {file_path}"
-
-    # Check file extension
-    valid_extensions = {".pdf", ".docx", ".pptx", ".html", ".xml", ".epub", ".txt", ".xlsx", ".xls", ".xlsm", ".ods", ".rst", ".md"}
-    if file_path.suffix.lower() not in valid_extensions:
-        return False, f"Unsupported file type: {file_path.suffix}"
-
-    return True, None
-
-
-def _structured_extract(input_path: Path, out_dir: Path) -> Dict[str, Any]:
-    """Route non‑PDF formats through the structured pipeline with normalized outputs.
-
-    Produces:
-      out_dir/<stem>/<stage>/json_output/07_reflowed.json and 10_flattened_data.json
-    """
-    from extractor.core.providers.registry import provider_from_filepath
-    from extractor.pipeline.structured_pipeline import (
-        run_structured_pipeline,
-        STRUCTURED_PIPELINES,
-    )
-
-    provider_cls = provider_from_filepath(str(input_path))
-    meta = STRUCTURED_PIPELINES.get(provider_cls)
-    if not meta:
-        raise RuntimeError(f"No structured pipeline registered for provider {provider_cls.__name__}")
-    artifacts = run_structured_pipeline(
-        provider_cls,
-        input_path,
-        out_dir,
-        stage_prefix=meta.stage_prefix,
-        skip_export10=True,
-        skip_embeddings10=True,
-        fast_embeddings10=True,
-    )
-    return {"ok": True, "artifacts": {k: str(v) for k, v in artifacts.items()}}
-
-
-def save_results(results: Dict[str, Any], output_dir: Optional[Path] = None) -> Path:
-    """Save processing results to JSON file.
-
-    Args:
-        results: Results dictionary
-        output_dir: Optional output directory
-
-    Returns:
-        Path to saved file
-    """
-    if output_dir is None:
-        output_dir = Path.cwd() / "tmp" / "responses"
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"extraction_results_{timestamp}.json"
-    output_path = output_dir / filename
-
-    with open(output_path, "w") as f:
-        json.dump(results, f, indent=2, sort_keys=True)
-
-    return output_path
-
-
-# ============================================
-# CLI COMMANDS
-# ============================================
-
-# Fast vs Accurate extraction modes for PDF
 class Mode(str, Enum):
-    fast = "fast"       # PyMuPDF path (bypass pipeline stages)
-    accurate = "accurate"  # Full pipeline stages
+    fast = "fast"
+    accurate = "accurate"
+
+
+# Helpers ----------------------------------------------------------------
+
+
+def _ensure_parent(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+
+def _run_pipeline_accurate(pdf: Path, out_dir: Path, prove: bool) -> None:
+    """Invoke the sequential pipeline with offline-friendly toggles.
+
+    We rely on ``extractor.pipeline.run_pipeline`` (function-first) instead of
+    the deleted ``run_all`` wrapper. Stage 10 is re-run afterwards with
+    deterministic embeddings to guarantee ``10_flattened_data.json`` exists
+    even when the pipeline skipped DB export.
+    """
+
+    from extractor.pipeline import run_pipeline
+
+    args = [
+        "--pdf",
+        str(pdf),
+        "--out",
+        str(out_dir),
+        # Keep deterministic/offline toggles but allow summaries and enrichers to run
+        "--skip-fig-descriptions",  # no VLM calls in Stage 06
+        "--skip-llm03",  # header verifier offline
+        # Note: 09a annotator enabled to satisfy audit/visuals
+        "--skip-export",  # avoid DB I/O; we'll still flatten
+        "--extract-requirements",  # keep 07r deterministic miner on
+        "--skip-scillm-preflight",  # offline-friendly
+    ]
+
+    if prove:
+        args.append("--prove-requirements")
+
+    rc = run_pipeline.main(args)
+    if rc != 0:
+        raise typer.Exit(code=rc)
+
+    # Ensure summaries exist (Stage 09 is skipped when summary-only=True)
+    summaries = out_dir / "09_section_summarizer" / "json_output" / "09_summaries.json"
+    if not summaries.exists():
+        _ensure_parent(summaries)
+        summaries.write_text(json.dumps({"summaries": [], "meta": {"stub": True}}, indent=2))
+
+    # Materialize flattened data deterministically (skip_export=True)
+    reflow = out_dir / "07_reflow_section" / "json_output" / "07_reflowed.json"
+    if not reflow.exists():
+        raise typer.Exit(code=1)
+
+    s10.run(
+        reflowed_json=reflow,
+        summaries_json=summaries,
+        output_dir=out_dir,
+        collection_name="pdf_objects",
+        skip_export=True,
+        skip_embeddings=True,
+        fast_embeddings=True,
+    )
+
+
+def _detect_fast_sections(pages: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
+    """Heuristic section hints for fast mode (cheap regex on headings).
+
+    Returns a list of dicts with: title, page (1-based), line_idx, line_text.
+    Safe to ignore downstream if noisy.
+    """
+
+    import re
+
+    heading_re = re.compile(r"^(?:\d+(?:\.\d+)*\.?\s+.+|[A-Z][A-Z0-9\.]{2,}\s+.+)")
+
+    hints: list[Dict[str, Any]] = []
+    for page in pages:
+        text = page.get("text") or ""
+        lines = text.splitlines()
+        for idx, line in enumerate(lines):
+            line_stripped = line.strip()
+            if not line_stripped:
+                continue
+            if len(line_stripped) > 140:
+                continue
+            upper_ratio = sum(c.isupper() for c in line_stripped) / max(len(line_stripped), 1)
+            if heading_re.match(line_stripped) or upper_ratio > 0.7:
+                hints.append(
+                    {
+                        "title": line_stripped,
+                        "page": page.get("page"),
+                        "line_idx": idx,
+                        "line_text": line_stripped,
+                    }
+                )
+    return hints
+
+
+def _run_pdf_fast(pdf: Path, out_dir: Path, with_sections: bool) -> Path:
+    data = extract_fast_text(str(pdf))
+    if with_sections:
+        data["fast_sections"] = _detect_fast_sections(data.get("pages", []))
+    out_path = out_dir / f"{pdf.stem}_fast.json"
+    _ensure_parent(out_path)
+    out_path.write_text(json.dumps(data, indent=2))
+    return out_path
+
+
+def _append_walkthrough(pdf: Path, out_dir: Path, mode: str, fast_sections: bool) -> None:
+    """Append a short note to walkthrough.md (PDF runs only)."""
+
+    wt = Path("walkthrough.md")
+    if not wt.exists():
+        try:
+            wt.write_text("# Walkthrough\n\n", encoding="utf-8")
+        except Exception:
+            return
+
+    annotated = out_dir / "09a_pdf_annotator" / "annotated.pdf"
+    audit = out_dir / "09b_audit" / "json_output" / "09b_audit.json"
+    reflow = out_dir / "07_reflow_section" / "json_output" / "07_reflowed.json"
+    flat = out_dir / "10_arangodb_exporter" / "json_output" / "10_flattened_data.json"
+    fast = out_dir / f"{pdf.stem}_fast.json"
+
+    lines = [
+        "\n## Run note",
+        f"- PDF: {pdf}",
+        f"- Mode: {mode}"
+        + (" (fast-section heuristics)" if fast_sections and mode == "fast" else ""),
+        f"- Output dir: {out_dir}",
+    ]
+
+    if mode == "fast":
+        lines.append(f"- Fast JSON: {fast if fast.exists() else 'n/a'}")
+    else:
+        lines.append(f"- Reflow: {reflow if reflow.exists() else 'n/a'}")
+        lines.append(f"- Flattened: {flat if flat.exists() else 'n/a'}")
+        lines.append(f"- Annotated PDF: {annotated if annotated.exists() else 'n/a'}")
+        lines.append(f"- Audit: {audit if audit.exists() else 'n/a'}")
+
+    try:
+        wt.write_text(wt.read_text() + "\n" + "\n".join(lines) + "\n")
+    except Exception:
+        # Keep logging best-effort; never fail the run for walkthrough issues
+        pass
+
+
+def _flatten_unified(unified_doc: Dict[str, Any], source: Path, target_root: Path) -> Path:
+    """Flatten a UnifiedDocument payload and write Stage 10 JSON."""
+
+    pipeline_payload = {
+        "unified_document": unified_doc,
+        "source_files": {"sections": str(source)},
+    }
+
+    flattened = s10.flatten_document_to_pdf_objects(
+        pipeline_data=pipeline_payload,
+        summaries_data={"summaries": []},
+        skip_embeddings=True,
+        fast_embeddings=True,
+    )
+
+    flat_path = target_root / "10_arangodb_exporter" / "json_output" / "10_flattened_data.json"
+    _ensure_parent(flat_path)
+    flat_path.write_text(json.dumps(flattened, indent=2))
+    return flat_path
+
+
+def _run_structured(provider_cls: Type, input_file: Path, out_dir: Path) -> Dict[str, Path]:
+    # Most providers accept no positional args; PdfProvider is handled earlier.
+    provider = provider_cls()
+    unified = provider.extract_document(str(input_file))
+
+    # Ensure a hierarchy exists for downstream consumers; synthesize a root if absent.
+    if getattr(unified, "hierarchy", None) is None:
+        root = HierarchyNode(id="root", block_id=None, title=input_file.stem, level=1, children=[])
+        for block in unified.blocks:
+            if getattr(block, "parent_id", None) is None:
+                block.parent_id = root.id
+        unified.hierarchy = root
+
+    unified_payload = unified.model_dump(by_alias=True, mode="json")
+
+    base = out_dir / input_file.stem
+    reflow_path = base / "07_reflow_section" / "json_output" / "07_reflowed.json"
+    _ensure_parent(reflow_path)
+    reflow_path.write_text(json.dumps({"unified_document": unified_payload}, indent=2))
+
+    flat_path = _flatten_unified(unified_payload, input_file, base)
+    return {"reflow": reflow_path, "flattened": flat_path}
+
+
+# Command ----------------------------------------------------------------
 
 
 @app.command()
 def extract(
-    input_file: Path = typer.Argument(..., exists=True, file_okay=True, dir_okay=False, readable=True, help="Input file (PDF or structured formats)"),
+    input_file: Path = typer.Argument(..., exists=True, file_okay=True, dir_okay=False, readable=True, help="Input document"),
     output_dir: Path = typer.Argument(..., help="Output directory for artifacts"),
-    mode: 'Mode' = typer.Option(Mode.accurate, "--mode", help="PDF only: fast (PyMuPDF) or accurate (pipeline)"),
-    prove: bool = typer.Option(False, "--prove", help="Enable Lean4 proving (Stage 08) for PDF accurate runs"),
+    mode: Mode = typer.Option(Mode.accurate, "--mode", help="PDF only: fast or accurate"),
+    prove: bool = typer.Option(False, "--prove", help="Enable Lean4 proving (accurate PDF only)"),
+    fast_sections: bool = typer.Option(
+        False,
+        "--fast-section",
+        "--fast-sections",
+        help="Fast PDF only: add heuristic section hints (light heading regex)",
+    ),
+    log_walkthrough: bool = typer.Option(
+        False,
+        "--log-walkthrough",
+        help="Append a short run note to walkthrough.md (PDF only)",
+    ),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose logging"),
 ):
-    """Unified extraction command (low‑friction, auto‑dispatch).
+    """Unified extraction entrypoint (PDF + structured formats)."""
 
-    Examples:
-      - PDF fast text:     `python -m src.cli extract --mode fast data.pdf out/`
-      - PDF accurate:      `python -m src.cli extract --mode accurate data.pdf out/`
-      - Structured (HTML): `python -m src.cli extract page.html out/`
-      - Structured (DOCX): `python -m src.cli extract doc.docx out/`
-    """
     if verbose:
         logger.remove()
         logger.add(sys.stderr, level="DEBUG")
-    ok, msg = validate_input_file(input_file)
-    if not ok:
-        console.print("[red]Error:[/red] {msg}".format(msg=msg))
-        raise typer.Exit(1)
+
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    if input_file.suffix.lower() == ".pdf":
-        # Handle PDF inline to avoid ordering issues with function definitions
-        output_dir.mkdir(parents=True, exist_ok=True)
+    provider_cls = provider_from_filepath(str(input_file))
+
+    # PDF branch -------------------------------------------------------
+    if provider_cls is PdfProvider:
         if mode == Mode.fast:
-            console.print("[cyan]Running fast extraction via PyMuPDF (no heavy deps)…[/cyan]")
-            try:
-                from extractor.fast_extract.pymupdf_fast import extract_fast_text
-                data = extract_fast_text(str(input_file))
-            except Exception as e:
-                console.print(f"[red]Fast extractor error:[/red] {e}")
-                raise typer.Exit(1)
-            out = output_dir / f"{input_file.stem}_fast.json"
-            out.write_text(json.dumps(data, indent=2))
-            console.print(f"[green]✓ Fast extraction complete:[/green] {out}")
-            return
-        console.print("[cyan]Running accurate extraction via pipeline…[/cyan]")
-        # Build pipeline command directly (run_all)
-        cmd = [
-            sys.executable,
-            "-m",
-            "extractor.pipeline.run_all",
-            "--pdf",
-            str(input_file),
-            "--results",
-            str(output_dir),
-            "--offline",
-            "--skip-llm03",
-            "--skip-descriptions06",
-            "--summary-only07",
-            "--skip-export10",
-            "--fast-embeddings10",
-        ]
-        # Proving toggle
-        if prove:
-            # If Lean4 CLI is missing, warn and keep proving disabled
-            default_lean = Path("/home/graham/workspace/experiments/lean4/src/lean4_prover/cli_mini.py")
-            if default_lean.exists():
-                cmd += ["--prove08"]  # inverse of --skip-proving08
-                cmd += ["--lean4-cli", str(default_lean)]
-            else:
-                console.print("[yellow]Lean4 CLI not found; continuing without proving (install lean4_prover to enable).[/yellow]")
-                cmd += ["--skip-proving08"]
-        else:
-            cmd += ["--skip-proving08"]
-        # Always create graph edges JSON offline (no DB) after Stage 10 via offline mode
-        env = os.environ.copy()
-        proc = subprocess.run(cmd, env=env)
-        if proc.returncode != 0:
-            console.print(f"[red]Pipeline failed with exit code {proc.returncode}[/red]")
-            raise typer.Exit(proc.returncode)
-        console.print(f"[green]✓ Accurate extraction complete:[/green] {output_dir}")
-        return
+            out = _run_pdf_fast(input_file, output_dir, with_sections=fast_sections)
+            if log_walkthrough:
+                _append_walkthrough(pdf=input_file, out_dir=output_dir, mode="fast", fast_sections=fast_sections)
+            typer.echo(f"✓ Fast PDF extraction → {out}")
+            raise typer.Exit(0)
 
-    # Structured formats (HTML/DOCX/PPTX/XLSX/EPUB/RST/XML/MD)
+        if fast_sections:
+            typer.echo("[yellow]--fast-section applies only to --mode fast (ignored).[/yellow]")
+
+        typer.echo("Running accurate PDF pipeline (offline-friendly)…")
+        _run_pipeline_accurate(input_file, output_dir, prove)
+        if log_walkthrough:
+            _append_walkthrough(pdf=input_file, out_dir=output_dir, mode="accurate", fast_sections=False)
+        typer.echo(f"✓ Accurate PDF extraction → {output_dir}")
+        raise typer.Exit(0)
+
+    # Structured branch ------------------------------------------------
     try:
-        result = _structured_extract(input_file, output_dir)
-        arts = result.get("artifacts", {})
-        console.print("[green]✓ Structured extraction complete[/green]")
-        for k, v in arts.items():
-            console.print(f"  • {k}: {v}")
-    except Exception as e:
-        console.print(f"[red]Extraction failed:[/red] {e}")
+        paths = _run_structured(provider_cls, input_file, output_dir)
+        typer.echo("✓ Structured extraction complete")
+        for label, path in paths.items():
+            typer.echo(f"  {label}: {path}")
+    except Exception as e:  # pragma: no cover - surfaced to user
+        typer.echo(f"Extraction failed: {e}", err=True)
         raise typer.Exit(1)
 
 
-@app.command()
-def validate(input_file: Path = typer.Argument(..., help="Input file to validate")):
-    """Validate input file before processing."""
-
-    is_valid, error_msg = validate_input_file(input_file)
-
-    if is_valid:
-        # Get file info
-        file_size = input_file.stat().st_size / (1024 * 1024)  # MB
-
-        console.print("\n[green]✓ File is valid![/green]")
-        console.print(f"  Path: {input_file}")
-        console.print(f"  Type: {input_file.suffix}")
-        console.print(f"  Size: {file_size:.2f} MB")
-    else:
-        console.print("\n[red]✗ Validation failed![/red]")
-        console.print(f"  Error: {error_msg}")
-        raise typer.Exit(1)
-
-
-@app.command("list-tasks")
-def list_tasks():
-    """List available task templates."""
-
-    template_dir = Path(__file__).parent.parent / "configs" / "task_templates"
-
-    if not template_dir.exists():
-        console.print("[yellow]No task templates found[/yellow]")
-        return
-
-    templates = list(template_dir.glob("*.yaml"))
-
-    if not templates:
-        console.print("[yellow]No task templates found[/yellow]")
-        return
-
-    table = Table(title="Available Task Templates")
-    table.add_column("Template", style="cyan")
-    table.add_column("Description", style="white")
-
-    for template in templates:
-        # In real implementation, would parse YAML for description
-        table.add_row(template.stem, "Template for extraction tasks")
-
-    console.print(table)
-
-
-@app.callback()
-def callback():
-    """Universal document extractor with AI enhancements."""
-    pass
-
-
-# ============================================
-# USAGE EXAMPLES (Inside __main__ block)
-# ============================================
-
-
-async def working_usage():
-    """Known working examples that demonstrate CLI functionality.
-
-    CRITICAL FOR AGENTS:
-    - This function MUST verify that the CLI produces expected results
-    - Use assertions to validate outputs match expectations
-    - Return True only if ALL tests pass
-    """
-    logger.info("=== Running Working Usage Examples ===")
-
-    # Create test data
-    test_dir = Path(__file__).parent.parent / "test_data"
-    test_dir.mkdir(exist_ok=True)
-
-    test_pdf = test_dir / "test_document.pdf"
-    test_pdf.write_text("Mock PDF content")  # Create dummy file
-
-    output_dir = test_dir / "output"
-    output_dir.mkdir(exist_ok=True)
-
-    # Test 1: Basic extraction
-    logger.info("\nTest 1: Basic file extraction")
-
-    result = await process_file(test_pdf, output_dir, ["json", "markdown"])
-
-    assert result["status"] == "success", "Extraction should succeed"
-    assert len(result["output_files"]) == 2, "Should create 2 output files"
-    assert result["processing_time"] > 0, "Should have processing time"
-
-    logger.success("✓ Basic extraction passed")
-
-    # Test 2: File validation
-    logger.info("\nTest 2: File validation")
-
-    is_valid, error = validate_input_file(test_pdf)
-    assert is_valid, "Test file should be valid"
-    assert error is None, "Should have no error"
-
-    # Test invalid file
-    invalid_file = test_dir / "nonexistent.pdf"
-    is_valid, error = validate_input_file(invalid_file)
-    assert not is_valid, "Nonexistent file should be invalid"
-    assert "not found" in error.lower(), "Should report file not found"
-
-    logger.success("✓ File validation passed")
-
-    # Test 3: Results saving
-    logger.info("\nTest 3: Results saving")
-
-    results_path = save_results(result, output_dir)
-    assert results_path.exists(), "Results file should be created"
-
-    with open(results_path) as f:
-        saved_results = json.load(f)
-
-    assert saved_results["status"] == "success", "Saved results should match"
-
-    logger.success("✓ Results saving passed")
-
-    # Cleanup
-    import shutil
-
-    shutil.rmtree(test_dir)
-
-    logger.success("✓ All working usage tests passed!")
-    return True
-
-
-async def debug_function():
-    """Debug function for testing CLI features.
-
-    AGENT: Rewrite this freely for experimentation!
-    Current focus: Testing concurrent processing
-    """
-    logger.info("=== Running Debug Function ===")
-
-    # Test concurrent file processing
-    test_files = []
-    test_dir = Path("/tmp/cli_debug")
-    test_dir.mkdir(exist_ok=True)
-
-    # Create multiple test files
-    for i in range(5):
-        test_file = test_dir / f"test_{i}.pdf"
-        test_file.write_text(f"Test content {i}")
-        test_files.append(test_file)
-
-    # Process concurrently
-    output_dir = test_dir / "output"
-    output_dir.mkdir(exist_ok=True)
-
-    start_time = time.time()
-
-    tasks = [process_file(f, output_dir, ["json"]) for f in test_files]
-
-    results = await asyncio.gather(*tasks)
-
-    duration = time.time() - start_time
-
-    logger.info(f"Processed {len(results)} files in {duration:.2f}s")
-    logger.info(f"Rate: {len(results)/duration:.1f} files/sec")
-
-    # Verify all succeeded
-    assert all(r["status"] == "success" for r in results), "All should succeed"
-
-    # Cleanup
-    import shutil
-
-    shutil.rmtree(test_dir)
-
-    return True
-
-
-async def stress_test():
-    """Run stress tests for CLI performance."""
-    logger.info("=== Running Stress Tests ===")
-
-    # Would load stress test configurations
-    # For now, just run a simple test
-
-    test_dir = Path("/tmp/cli_stress")
-    test_dir.mkdir(exist_ok=True)
-
-    # Create large test file
-    large_file = test_dir / "large_test.pdf"
-    large_file.write_bytes(b"x" * (10 * 1024 * 1024))  # 10MB
-
-    output_dir = test_dir / "output"
-    output_dir.mkdir(exist_ok=True)
-
-    # Test processing
-    result = await process_file(large_file, output_dir, ["json"])
-
-    assert result["status"] == "success", "Should handle large files"
-
-    # Cleanup
-    import shutil
-
-    shutil.rmtree(test_dir)
-
-    logger.success("✓ Stress tests passed")
-    return True
+# Entrypoint -------------------------------------------------------------
 
 
 if __name__ == "__main__":
-    """
-    Script entry point with triple-mode execution.
-
-    Usage:
-        python -m src.cli              # Runs working_usage() - stable tests
-        python -m src.cli debug        # Runs debug_function() - experimental
-        python -m src.cli stress       # Runs stress_test() - load tests
-        python -m src.cli [command]    # Run CLI commands
-    """
-
-    if len(sys.argv) > 1:
-        if sys.argv[1] == "debug":
-            logger.info("Running in DEBUG mode...")
-            asyncio.run(debug_function())
-            exit(0)
-        elif sys.argv[1] == "stress":
-            logger.info("Running in STRESS TEST mode...")
-            asyncio.run(stress_test())
-            exit(0)
-        elif sys.argv[1] in ["extract", "validate", "list-tasks", "--help"]:
-            # Run normal CLI
-            app()
-            exit(0)
-
-    # Default: run working usage
-    logger.info("Running in WORKING mode...")
-    success = asyncio.run(working_usage())
-    exit(0 if success else 1)
-@app.command("extract-pdf")
-def extract_pdf_deprecated(*_: str):
-    """Deprecated shim. Use: `python -m src.cli extract`.
-
-    This command intentionally exits non‑zero to steer users to the single CLI surface.
-    """
-    typer.secho(
-        "[deprecated] Use: python -m src.cli extract <input> <out_dir> [--mode fast|accurate]",
-        fg=typer.colors.YELLOW,
-    )
-    raise typer.Exit(2)
+    app()

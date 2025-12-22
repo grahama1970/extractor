@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 from loguru import logger
+from extractor.pipeline.utils.reliability import log_stage_error
 
 _EMBEDDER: Any = None
 
@@ -15,7 +16,9 @@ def ensure_embedder() -> Any:
             logger.info("Loading Sentence Transformer model for text embeddings...")
             _EMBEDDER = SentenceTransformer("all-MiniLM-L6-v2")
             logger.success("Text embedding model loaded.")
-        except Exception as e:
+        except Exception as exc:
+            log_stage_error('embeddings.py', exc, {'context': 'embeddings.py'})
+            raise
             logger.warning(
                 f"Failed to load text embedding model (continuing without embeddings): {e}"
             )

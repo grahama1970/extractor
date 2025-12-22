@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from extractor.pipeline.utils.reliability import log_stage_error
 import json
 from typing import Any, Dict
 
@@ -52,7 +53,9 @@ async def verify_header_with_llm(image_b64: str, context_text: str, model: str) 
     answer = content if isinstance(content, str) else json.dumps(content or {})
     try:
         payload = json.loads(answer) if answer else {}
-    except Exception:
+    except Exception as exc:
+        log_stage_error('verifier.py', exc, {'context': 'verifier.py'})
+        raise
         payload = {"error": {"type": "ParseError", "message": answer[:200]}}
     if isinstance(payload, dict) and payload.get("error"):
         err = payload["error"]

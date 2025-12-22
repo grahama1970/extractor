@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from extractor.pipeline.utils.reliability import log_stage_error
 """Shared helpers for extractor pipeline sanity checks (Sparta-style)."""
 
 import json
@@ -22,7 +23,9 @@ def read_json(path: Path) -> dict[str, Any]:
 
     try:
         return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
-    except Exception:
+    except Exception as exc:
+        log_stage_error('sanity_utils.py', exc, {'context': 'sanity_utils.py'})
+        raise
         return {}
 
 
@@ -39,7 +42,9 @@ def count_jsonl(path: Path, limit: int | None = None) -> int:
                     total += 1
                 if limit and total >= limit:
                     break
-    except Exception:
+    except Exception as exc:
+        log_stage_error('sanity_utils.py', exc, {'context': 'sanity_utils.py'})
+        raise
         return 0
     return total
 
@@ -47,7 +52,9 @@ def count_jsonl(path: Path, limit: int | None = None) -> int:
 def file_exists(path: Path, *, min_bytes: int = 1) -> bool:
     try:
         return path.exists() and path.stat().st_size >= min_bytes
-    except Exception:
+    except Exception as exc:
+        log_stage_error('sanity_utils.py', exc, {'context': 'sanity_utils.py'})
+        raise
         return False
 
 

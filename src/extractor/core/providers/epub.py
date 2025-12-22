@@ -23,6 +23,7 @@ from bs4 import BeautifulSoup, Tag, NavigableString, Comment
 from loguru import logger
 
 from extractor.core.providers.fetcher_bridge import ensure_local_source, attach_fetcher_metadata
+from extractor.core.providers.utils import ensure_hierarchy
 
 from extractor.core.schema.unified_document import (
     UnifiedDocument,
@@ -87,6 +88,8 @@ class EPUBProvider:
             full_text=self._extract_full_text(blocks),
             keywords=self._extract_keywords(book),
         )
+
+        return ensure_hierarchy(doc, default_title=filepath.stem)
 
         logger.info(f"Extracted {len(blocks)} blocks from EPUB")
         return doc

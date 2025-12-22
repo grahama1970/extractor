@@ -99,6 +99,7 @@ def _normalize_model_alias(model: str | None) -> str:
     return m
 from extractor.pipeline.utils.model_params import build_chat_extras  # noqa: E402
 from extractor.pipeline.utils.prompt_builder import build_llm_context  # noqa: E402
+from extractor.pipeline.utils.prompt_loader import load_prompt  # noqa: E402
 # No scillm_client wrappers; Router-only policy for SciLLM
 from extractor.pipeline.utils.section_builder_utils import (
     pdf_analyze_section_numbering as _pdf_analyze_numbering,
@@ -162,30 +163,9 @@ class Config:
 
 
 # ------------------------------------------------------------------
-# PROMPT
+# PROMPT (loaded from centralized library)
 # ------------------------------------------------------------------
-SYSTEM_PROMPT = textwrap.dedent(
-    """
-    You are an expert document analyst. Your task is to determine if a text block, which has been
-    flagged as a "suspicious" section header, is actually a legitimate section header or if it has
-    been misclassified.
-
-    You will be given:
-    1.  An image showing the text block in question, along with the text immediately above and below it for visual context.
-    2.  The structured text content for these three blocks, including font style information.
-
-    Analyze both the visual layout (font size, boldness, spacing) and the text content. A real header typically has a larger font,
-    is often bold, has space around it, and contains topical, non-sentence-like text. A misclassified block might be a figure caption,
-    part of a table, a list item, or just a sentence fragment.
-
-    Provide a strict JSON response with:
-    - "is_header": true|false
-    - "reasoning": short explanation
-
-    """.strip()
-    + "\n\n"
-    + STRICT_JSON_GUARD
-)
+PROMPT = load_prompt("03_suspicious_headers")
 
 # ------------------------------------------------------------------
 # HELPER FUNCTIONS
@@ -243,7 +223,7 @@ async def verify_header_with_llm(image_b64: str, context_text: str, model: str, 
     if not text_only and image_b64:
         user_content.append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_b64}"}})
     messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": PROMPT["system"]},
         {"role": "user", "content": user_content},
     ]
     try:
@@ -336,21 +316,11 @@ async def verify_header_with_llm(image_b64: str, context_text: str, model: str, 
         payload = json.loads(answer) if answer else {}
     except Exception as exc:
         log_stage_error('03_suspicious_headers', exc, {'context': '03'})
-        raise
-        # Soft-fail on parse errors; log and continue
-        log_timing(
-            "03_suspicious_headers",
-            {
-                "attempt": "llm_parse",
-                "outcome": "parse_error",
-                "route_name": "chutes/text",
-                "parse_error_message": str(pe)[:200],
-            },
-        )
-        payload = {"is_header": False, "reasoning": "parse_error"}
+        # Soft-fail on parse errors
+        payload = {"verdict": "reject", "confidence": 0.0, "reasons": ["parse_error"]}
+
     if isinstance(payload, dict) and payload.get("error"):
         err = payload["error"]
-        # Log explicit model error then raise
         log_timing(
             "03_suspicious_headers",
             {
@@ -362,12 +332,29 @@ async def verify_header_with_llm(image_b64: str, context_text: str, model: str, 
             },
         )
         raise RuntimeError(f"LLM error: {err.get('type')}: {err.get('message')}")
+
     if not isinstance(payload, dict):
-        payload = {"content": payload}
-    payload = cast(dict[str, Any], payload)
-    payload["is_header"] = bool(payload.get("is_header", True))
-    payload["reasoning"] = str(payload.get("reasoning", ""))
-    return payload
+        payload = {"verdict": "reject", "confidence": 0.0, "reasons": ["non_dict_payload"]}
+
+    verdict = str(payload.get("verdict", "reject")).lower()
+    is_header = verdict == "accept"
+    reasons = payload.get("reasons")
+    if isinstance(reasons, list):
+        reasons_str = "; ".join(str(r) for r in reasons if r is not None)
+    else:
+        reasons_str = str(payload.get("reasoning", ""))
+    conf = payload.get("confidence")
+    try:
+        confidence = float(conf) if conf is not None else 0.0
+    except Exception:
+        confidence = 0.0
+
+    return {
+        "is_header": is_header,
+        "reasoning": reasons_str,
+        "confidence": confidence,
+        "raw_payload": payload,
+    }
 
 
 # ------------------------------------------------------------------

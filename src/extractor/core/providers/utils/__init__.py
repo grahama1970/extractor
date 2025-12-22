@@ -6,7 +6,13 @@ heavy dependencies. Providers can import from this package path reliably.
 
 from typing import Any, List, Tuple
 
-from extractor.core.schema.unified_document import BaseBlock, BlockMetadata, BlockType
+from extractor.core.schema.unified_document import (
+    BaseBlock,
+    BlockMetadata,
+    BlockType,
+    UnifiedDocument,
+    HierarchyNode,
+)
 
 
 def alphanum_ratio(text: str) -> float:
@@ -66,3 +72,38 @@ def emit_list_blocks(
     except Exception:
         pass
     return list_block, out
+
+
+def ensure_hierarchy(doc: UnifiedDocument, *, default_title: str = "Document") -> UnifiedDocument:
+    """Guarantee the UnifiedDocument has a root hierarchy and parent links.
+
+    - If `doc.hierarchy` already exists, it is returned unchanged.
+    - Otherwise, a root node is synthesized and any blocks missing a parent_id
+      are reparented to the root.
+    """
+
+    root = getattr(doc, "hierarchy", None)
+    if root is None:
+        root = HierarchyNode(
+            id="root",
+            title=default_title or "Document",
+            level=1,
+            block_id="root",
+            breadcrumb=[default_title or "Document"],
+            children=[],
+        )
+    else:
+        if not getattr(root, "block_id", None):
+            root.block_id = root.id
+        if getattr(root, "breadcrumb", None) is None:
+            root.breadcrumb = [root.title or default_title or "Document"]
+
+    for blk in doc.blocks:
+        try:
+            if not getattr(blk, "parent_id", None):
+                blk.parent_id = root.id
+        except Exception:
+            pass
+
+    doc.hierarchy = root
+    return doc

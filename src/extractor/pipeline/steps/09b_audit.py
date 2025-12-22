@@ -4,10 +4,12 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any, Dict, List
 
 from loguru import logger
+from extractor.pipeline.utils.reliability import log_stage_error
 
 from extractor.pipeline.utils.step_sanity import run_step_sanity
 
@@ -15,21 +17,27 @@ STEP_NAME = "09b_audit"
 
 try:
     import fitz  # type: ignore
-except Exception:  # pragma: no cover - optional dependency
+except Exception as exc:
+    log_stage_error(STEP_NAME, exc, {'context': '09b'})
+    raise
     fitz = None  # type: ignore
 
 
 def _read_json(path: Path) -> Dict[str, Any]:
     try:
         return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
-    except Exception:
+    except Exception as exc:
+        log_stage_error(STEP_NAME, exc, {'context': '09b'})
+        raise
         return {}
 
 
 def _exists(path: Path) -> bool:
     try:
         return path.exists() and path.stat().st_size > 0
-    except Exception:
+    except Exception as exc:
+        log_stage_error(STEP_NAME, exc, {'context': '09b'})
+        raise
         return False
 
 
@@ -60,6 +68,8 @@ def _render_preview(pdf_path: Path, out_path: Path) -> tuple[bool, str | None]:
         non_blank = max_val > min_val
         return non_blank, None if non_blank else "preview_detected_blank_frame"
     except Exception as exc:
+        log_stage_error(STEP_NAME, exc, {'context': '09b'})
+        raise
         return False, str(exc)
 
 
@@ -86,7 +96,9 @@ def _add_check(
     checks.append(payload)
     try:
         print(json.dumps({"event": "audit_check", **payload}, ensure_ascii=False))
-    except Exception:
+    except Exception as exc:
+        log_stage_error(STEP_NAME, exc, {'context': '09b'})
+        raise
         pass
 
 
@@ -123,7 +135,7 @@ def run(results_root: Path | str = Path("data/results/pipeline")) -> Path:
 
     checks: List[Dict[str, Any]] = []
 
-    def required_json(step: str, rel: str, key: str | None = None, min_items: int = 1) -> None:
+    def required_json(step: str, rel: str, key: str | None = None, min_items: int = 1, severity: str | None = None) -> None:
         path = root / rel
         data = _read_json(path)
         ok = bool(data) and (min_items <= 0 or (key and _count_list(data, key) >= min_items))
@@ -133,7 +145,7 @@ def run(results_root: Path | str = Path("data/results/pipeline")) -> Path:
             meta[f"{key}_count"] = _count_list(data, key)
         if not ok:
             reason = "file missing" if not path.exists() else f"{key or 'items'} insufficient"
-        _add_check(checks, step=step, path=path, ok=ok, reason=reason, **meta)
+        _add_check(checks, step=step, path=path, ok=ok, reason=reason, severity=severity, **meta)
 
     # Required artifacts
     required_json("01_annotation_processor", "01_annotation_processor/json_output/01_annotations.json", "annotations", 0)
@@ -144,7 +156,14 @@ def run(results_root: Path | str = Path("data/results/pipeline")) -> Path:
     required_json("06_figure_extractor", "06_figure_extractor/json_output/06_figures.json", "figures", 0)
     required_json("06b_layout_sketcher", "06b_layout_sketcher/json_output/06b_layout_sketch.json", "sections", 1)
     required_json("07_reflow_section", "07_reflow_section/json_output/07_reflowed.json", "reflowed_sections", 1)
-    required_json("07_requirements_miner", "07_requirements_miner/json_output/07_requirements.json", "requirements", 1)
+    relax_reqs = os.getenv("PIPELINE_AUDIT_RELAX_REQUIREMENTS", "0").lower() in ("1", "true", "yes")
+    required_json(
+        "07_requirements_miner",
+        "07_requirements_miner/json_output/07_requirements.json",
+        "requirements",
+        1,
+        severity="warning" if relax_reqs else None,
+    )
 
     # Stage 09 is optional when summary_only runs
     summaries_path = root / "09_section_summarizer" / "json_output" / "09_summaries.json"
@@ -255,7 +274,9 @@ def run(results_root: Path | str = Path("data/results/pipeline")) -> Path:
     logger.info("%s: errors=%s warnings=%s", STEP_NAME, errors, warnings)
     try:
         print(json.dumps(summary_payload, ensure_ascii=False))
-    except Exception:
+    except Exception as exc:
+        log_stage_error(STEP_NAME, exc, {'context': '09b'})
+        raise
         pass
     if errors > 0:
         raise RuntimeError(f"{STEP_NAME}: {errors} blocking audit errors (see {audit_path})")

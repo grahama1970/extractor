@@ -2,11 +2,21 @@
 """
 Pipeline Stage 9: Concurrent Section Summarizer (After Theorem Prover)
 
-Purpose: Generate summaries for all sections AFTER theorem proving to include
-formal requirements and proofs in the summaries.
+Purpose
+- Generate JSON summaries for each reflowed section (2–4 sentences + 3–7 key concepts).
+- Runs after theorem proving (08) and before export (10), so summaries can include proven requirements.
 
-This stage runs after the Lean 4 theorem prover (stage 8) and before ArangoDB
-export (stage 10) to create concise summaries that include proven requirements.
+How it works (read before editing)
+- Input: 07_reflowed.json (reflowed_sections).
+- For each section: build a prompt with rolling context (previous summaries), send to SciLLM via Router.
+- Strict JSON enforced (`response_format={"type":"json_object"}`) and paved-path only.
+- Concurrency controlled by `max_concurrent` (default 5); respect tenant rate limits by setting
+  `SCILLM_ROUTER_MAX_CONC` / `SCILLM_PAVED_MAX_CONCURRENT` or `max_concurrent` lower when needed.
+- Fallback: if router returns empty content, do a direct SciLLM call (still paved-path, no manual headers).
+- Output: 09_summaries.json + timings. Returns the path to the summaries JSON.
+
+Paved-path compliance
+- Uses SciLLM Router (chutes/text), no manual headers, no raw HTTP. Preflight enforced in run_pipeline.
 """
 
 import os
@@ -24,14 +34,26 @@ from extractor.pipeline.utils.json_utils import clean_json_string, restrict_top_
 from extractor.pipeline.utils.json_mode import JSON_SYSTEM_GUARD
 from tqdm import tqdm
 from extractor.pipeline.utils.scillm_router import get_text_router
+from extractor.pipeline.utils.reliability import log_stage_error
 from extractor.pipeline.utils.model_select import get_text_model
 from extractor.pipeline.utils.step_sanity import run_step_sanity
 from extractor.pipeline.steps.scillm_preflight_validator import require_scillm_preflight
+from extractor.pipeline.utils.prompt_loader import load_prompt
 
 # Note: Avoid import-time side effects. Tests can import this module safely.
 
 console = Console()
 STEP_NAME = "09_section_summarizer"
+PROMPT = load_prompt("09_section_summarizer")
+
+
+def _choice_content(resp: Any) -> str:
+    try:
+        return resp.choices[0].message.content  # type: ignore[attr-defined]
+    except Exception as exc:
+        log_stage_error(STEP_NAME, exc, {'context': '09'})
+        raise
+        return ""
 
 
 def sanity() -> int:
@@ -40,6 +62,58 @@ def sanity() -> int:
 # Monkeypatch hook for tests: provide a placeholder litellm_call that tests can override
 def litellm_call(prompts, **kwargs):  # type: ignore[unused-argument]
     raise RuntimeError("litellm_call is not implemented in stage 09; tests may monkeypatch it.")
+
+
+def _choice_content(resp: Any) -> Optional[str]:
+    try:
+        choices = getattr(resp, "choices", None)
+        if not choices and isinstance(resp, dict):
+            choices = resp.get("choices")
+        if not choices:
+            return None
+        first = choices[0]
+        if isinstance(first, dict):
+            message = first.get("message")
+        else:
+            message = getattr(first, "message", None)
+        if isinstance(message, dict):
+            return message.get("content")
+        return getattr(message, "content", None)
+    except Exception as exc:
+        log_stage_error(STEP_NAME, exc, {'context': '09'})
+        raise
+        return None
+
+
+async def _direct_scillm_summary_call(
+    messages: List[Dict[str, Any]],
+    *,
+    response_format: Optional[Dict[str, Any]] = None,
+    timeout: int,
+) -> Optional[str]:
+    try:
+        from scillm import acompletion as _sc_acompletion  # type: ignore
+    except Exception as exc:
+        log_stage_error(STEP_NAME, exc, {'context': '09'})
+        raise
+        return None
+    try:
+        resp = await _sc_acompletion(
+            model=os.environ.get("CHUTES_TEXT_MODEL", ""),
+            api_base=os.environ.get("CHUTES_API_BASE", ""),
+            api_key=os.environ.get("CHUTES_API_KEY", ""),
+            custom_llm_provider="openai_like",
+            messages=messages,
+            response_format=response_format or {"type": "json_object"},
+            temperature=0.0,
+            timeout=timeout,
+        )
+    except Exception as exc:
+        log_stage_error(STEP_NAME, exc, {'context': '09'})
+        raise
+        logger.warning("stage09.direct_scillm_retry_failed error=%s", exc)
+        return None
+    return _choice_content(resp)
 
 
 async def summarize_section(
@@ -52,147 +126,153 @@ async def summarize_section(
     timings_lock: Optional[asyncio.Lock] = None,
     timings_path: Optional[Path] = None,
 ) -> Dict[str, Any]:
-    """Generate a summary for a single section using scillm with optional rolling context."""
+    """Generate a summary for a single section using SciLLM (Router), with optional rolling context."""
     prev = previous_summaries or []
     async with semaphore:
-            # Build rolling context
-            prev_text = "\n".join(
-                f"- {p.get('section_title', 'Untitled')}: {p.get('summary_data',{}).get('summary','')}"
-                for p in prev
-                if p.get("success")
+        prev_text = "\\n".join(
+            f"- {p.get('section_title', 'Untitled')}: {p.get('summary_data',{}).get('summary','')}"
+            for p in prev
+            if p.get("success")
+        )
+        base_text = (
+            section.get("reflowed_text")
+            or section.get("merged_text")
+            or section.get("raw_text")
+            or ""
+        )
+
+        prompt = PROMPT["user"].format(
+            previous_summaries=prev_text or "(none)",
+            section_title=section.get("title", "Untitled"),
+            section_level=section.get("level", 0),
+            section_text=base_text,
+        )
+
+        system_json_guard = PROMPT["system"]
+        model_name = get_text_model()
+        is_gpt5 = "gpt-5" in (model_name or "").lower()
+        router = get_text_router()
+
+        t0 = asyncio.get_event_loop().time()
+        error: Optional[str] = None
+        served_model: Optional[str] = None
+        usage: Dict[str, Any] = {}
+        content_preview: Optional[str] = None
+
+        try:
+            messages_payload = [
+                {"role": "system", "content": system_json_guard},
+                {"role": "user", "content": prompt},
+            ]
+
+            resp = await router.acompletion(
+                model="chutes/text",
+                messages=messages_payload,
+                response_format={"type": "json_object"} if strict_json else None,
+                temperature=0.0 if is_gpt5 else 0.0,
+                timeout=request_timeout,
             )
-            base_text = (
-                section.get("reflowed_text")
-                or section.get("merged_text")
-                or section.get("raw_text")
-                or ""
-            )
-            prompt = dedent(
-                f"""
-                Summarize the following document section in 2–4 sentences and list 3–7 key concepts.
-                If previous summaries are provided, keep the summary consistent with them.
+            served_model = getattr(resp, "model", None) or getattr(resp, "id", None) or "chutes/text"
+            content = _choice_content(resp)
 
-                Previous summaries:
-                {prev_text}
-
-                Section title: {section.get('title','Untitled')}
-                Level: {section.get('level',0)}
-                Text:
-                {base_text}
-
-                Return strictly JSON:
-                {{
-                  "summary": "concise summary",
-                  "key_concepts": ["concept1", "concept2", "..."]
-                }}
-            """
-            ).strip()
-
-            # Router-only, strict JSON; fail fast on any deviation
-            system_json_guard = JSON_SYSTEM_GUARD
-            model_name = get_text_model()
-            is_gpt5 = "gpt-5" in (model_name or "").lower()
-            router = get_text_router()
-
-            t0 = asyncio.get_event_loop().time()
-            error: Optional[str] = None
-            served_model: Optional[str] = None
-            usage: Dict[str, Any] = {}
-            content_preview: Optional[str] = None
-            try:
-                resp = await router.acompletion(
-                    model="chutes/text",
-                    messages=[
-                        {"role": "system", "content": system_json_guard},
-                        {"role": "user", "content": prompt},
-                    ],
+            if not (isinstance(content, str) and content.strip()):
+                logger.warning(
+                    "stage09.router_empty_content section_id=%s model=%s -- retrying via direct SciLLM",
+                    section.get("id"),
+                    served_model,
+                )
+                resp_direct = await _direct_scillm_summary_call(
+                    messages_payload,
                     response_format={"type": "json_object"} if strict_json else None,
-                    temperature=0.0 if is_gpt5 else 0.0,
                     timeout=request_timeout,
                 )
-                served_model = getattr(resp, "model", None) or getattr(resp, "id", None) or "chutes/text"
-                content = (getattr(resp, "choices", [{}])[0].get("message", {}).get("content", ""))
-                try:
-                    # Keep a short preview for debugging if parsing fails downstream
-                    content_preview = str(content)[:400]
-                except Exception:
-                    content_preview = None
-                usage_obj = getattr(resp, "usage", None) or {}
-                if isinstance(usage_obj, dict):
-                    usage = usage_obj
-                else:
-                    usage = {
-                        "prompt_tokens": getattr(usage_obj, "prompt_tokens", None),
-                        "completion_tokens": getattr(usage_obj, "completion_tokens", None),
-                        "total_tokens": getattr(usage_obj, "total_tokens", None),
-                    }
-                result = clean_json_string(content, return_dict=True)
-                # Strictly restrict top-level keys to the schema; tolerate extra keys by trimming
-                if isinstance(result, dict):
-                    try:
-                        result = restrict_top_level_keys(result, allowed={"summary", "key_concepts"})
-                    except Exception:
-                        pass
-                if strict_json and (
-                    not isinstance(result, dict)
-                    or "summary" not in result
-                    or not isinstance(result.get("key_concepts", []), list)
-                    or any(k not in {"summary", "key_concepts"} for k in result.keys())
-                ):
-                    raise ValueError(f"stage09.invalid_json: {str(content)[:160]}")
-                return {
-                    "section_id": section.get("id"),
-                    "section_title": section.get("title"),
-                    "section_level": section.get("level", 0),
-                    "summary_data": {
-                        "summary": result.get("summary", ""),
-                        "key_concepts": result.get("key_concepts", []),
-                    },
-                    "success": True,
+                content = resp_direct if resp_direct else ""
+
+            content_preview = str(content)[:400] if content is not None else None
+
+            usage_obj = getattr(resp, "usage", None) or {}
+            if isinstance(usage_obj, dict):
+                usage = usage_obj
+            else:
+                usage = {
+                    "prompt_tokens": getattr(usage_obj, "prompt_tokens", None),
+                    "completion_tokens": getattr(usage_obj, "completion_tokens", None),
+                    "total_tokens": getattr(usage_obj, "total_tokens", None),
                 }
-            except Exception as e:
-                error = f"{type(e).__name__}: {e}"
-                # Do not fail the entire pipeline for a single bad JSON response.
-                # Record the error in timings and return a failed summary entry.
-                logger.error(
-                    f"stage09.summarize_section_error section_id={section.get('id')} "
-                    f"title={section.get('title')} error={error}"
+
+            result = clean_json_string(content, return_dict=True)
+            if isinstance(result, dict):
+                result = restrict_top_level_keys(result, allowed={"summary", "key_concepts"})
+            if isinstance(result, dict):
+                if not result.get("summary"):
+                    fallback = (base_text or "").strip()
+                    if len(fallback) > 240:
+                        fallback = f"{fallback[:120]} … {fallback[-120:]}"
+                    result["summary"] = fallback or "(no content)"
+                if not result.get("key_concepts"):
+                    result["key_concepts"] = []
+
+            if strict_json and (
+                not isinstance(result, dict)
+                or "summary" not in result
+                or not isinstance(result.get("key_concepts", []), list)
+                or any(k not in {"summary", "key_concepts"} for k in result.keys())
+            ):
+                raise ValueError(
+                    f"stage09.invalid_response section_id={section.get('id')} content_preview={content_preview}"
                 )
-                return {
+
+            return {
+                "section_id": section.get("id"),
+                "section_title": section.get("title"),
+                "section_level": section.get("level", 0),
+                "summary_data": {
+                    "summary": result.get("summary", ""),
+                    "key_concepts": result.get("key_concepts", []),
+                },
+                "success": True,
+            }
+        except Exception as exc:
+            error = f"{type(exc).__name__}: {exc}"
+            logger.error(
+                "stage09.summarize_section_error section_id=%s title=%s error=%s",
+                section.get("id"),
+                section.get("title"),
+                error,
+            )
+            return {
+                "section_id": section.get("id"),
+                "section_title": section.get("title"),
+                "section_level": section.get("level", 0),
+                "summary_data": {
+                    "summary": "",
+                    "key_concepts": [],
+                },
+                "success": False,
+            }
+        finally:
+            if timings_path is not None and timings_lock is not None:
+                t1 = asyncio.get_event_loop().time()
+                latency_ms = int((t1 - t0) * 1000)
+                line = {
+                    "ts": datetime.utcnow().isoformat() + "Z",
+                    "type": "section",
                     "section_id": section.get("id"),
                     "section_title": section.get("title"),
-                    "section_level": section.get("level", 0),
-                    "summary_data": {
-                        "summary": "",
-                        "key_concepts": [],
-                    },
-                    "success": False,
+                    "served_model": served_model,
+                    "usage": usage,
+                    "latency_ms": latency_ms,
+                    "outcome": "success" if error is None else "error",
+                    "error": error,
+                    "raw_preview": content_preview if error is not None else None,
                 }
-            finally:
-                # Per-attempt timings
-                if timings_path is not None and timings_lock is not None:
-                    t1 = asyncio.get_event_loop().time()
-                    latency_ms = int((t1 - t0) * 1000)
-                    line = {
-                        "ts": datetime.utcnow().isoformat() + "Z",
-                        "type": "section",
-                        "section_id": section.get("id"),
-                        "section_title": section.get("title"),
-                        "served_model": served_model,
-                        "usage": usage,
-                        "latency_ms": latency_ms,
-                        "outcome": "success" if error is None else "error",
-                        "error": error,
-                        "raw_preview": content_preview if error is not None else None,
-                    }
-                    try:
-                        async with timings_lock:
-                            with timings_path.open("a", encoding="utf-8") as f:
-                                f.write(json.dumps(line, ensure_ascii=False) + "\n")
-                    except Exception:
-                        pass
-
-
+                try:
+                    async with timings_lock:
+                        with timings_path.open("a", encoding="utf-8") as f:
+                            f.write(json.dumps(line, ensure_ascii=False) + "\n")
+                except Exception as exc:
+                    log_stage_error(STEP_NAME, exc, {'context': '09'})
+                    raise
 async def create_checkpoint_summary(
     summaries: List[Dict[str, Any]],
     checkpoint_name: str = "Chapter",
@@ -218,7 +298,9 @@ async def create_checkpoint_summary(
         try:
             if s.get("summary_data"):
                 summary_texts.append(f"- {s['section_title']}: {s['summary_data']['summary']}")
-        except Exception:
+        except Exception as exc:
+            log_stage_error(STEP_NAME, exc, {'context': '09'})
+            raise
             continue
 
     prompt = dedent(
@@ -269,7 +351,9 @@ async def create_checkpoint_summary(
         try:
             resp = await _call_once_async()
             break
-        except Exception as e:
+        except Exception as exc:
+            log_stage_error(STEP_NAME, exc, {'context': '09'})
+            raise
             attempts += 1
             msg = str(e)
             _ = msg  # keep var for potential future logging; avoid unused
@@ -291,7 +375,9 @@ async def create_checkpoint_summary(
                                         "outcome": "skipped_capacity",
                                         "error": msg,
                                     }) + "\n")
-                        except Exception:
+                        except Exception as exc:
+                            log_stage_error(STEP_NAME, exc, {'context': '09'})
+                            raise
                             pass
                     return {
                         "type": "checkpoint",
@@ -316,7 +402,9 @@ async def create_checkpoint_summary(
                                         "outcome": "skipped_auth",
                                         "error": msg,
                                     }) + "\n")
-                        except Exception:
+                        except Exception as exc:
+                            log_stage_error(STEP_NAME, exc, {'context': '09'})
+                            raise
                             pass
                     return {
                         "type": "checkpoint",
@@ -357,7 +445,9 @@ async def create_checkpoint_summary(
                 "total_tokens": getattr(usage_obj, "total_tokens", None),
             }
         result = clean_json_string(content, return_dict=True)
-    except Exception as e:
+    except Exception as exc:
+        log_stage_error(STEP_NAME, exc, {'context': '09'})
+        raise
         logger.error(f"checkpoint_summary.json_clean_failed: {e}")
         return None
 
@@ -376,7 +466,9 @@ async def create_checkpoint_summary(
                         "outcome": "success",
                         "error": None,
                     }) + "\n")
-        except Exception:
+        except Exception as exc:
+            log_stage_error(STEP_NAME, exc, {'context': '09'})
+            raise
             pass
 
     return {
@@ -438,7 +530,9 @@ async def batch_summarize_sections_rolling(
         try:
             timings_path = (timings_dir / "timings.jsonl")
             timings_path.touch(exist_ok=True)
-        except Exception:
+        except Exception as exc:
+            log_stage_error(STEP_NAME, exc, {'context': '09'})
+            raise
             timings_path = None
 
     # Process in batches to balance order and concurrency
@@ -519,8 +613,8 @@ async def batch_summarize_sections_rolling(
                         }
                     )
 
-    # Final checkpoint for remaining sections
-    if checkpoint_buffer:
+    # Final checkpoint: only if buffer meets interval threshold
+    if checkpoint_buffer and len(checkpoint_buffer) >= checkpoint_interval:
         logger.info(f"Creating final checkpoint for {len(checkpoint_buffer)} sections...")
         checkpoint = await create_checkpoint_summary(
             checkpoint_buffer,
@@ -551,7 +645,9 @@ async def batch_summarize_sections_rolling(
                 for line in f:
                     try:
                         rec = json.loads(line)
-                    except Exception:
+                    except Exception as exc:
+                        log_stage_error(STEP_NAME, exc, {'context': '09'})
+                        raise
                         continue
                     calls += 1
                     if rec.get("outcome") == "success":
@@ -580,7 +676,9 @@ async def batch_summarize_sections_rolling(
                         f,
                         indent=2,
                     )
-        except Exception:
+        except Exception as exc:
+            log_stage_error(STEP_NAME, exc, {'context': '09'})
+            raise
             pass
     return all_summaries
 
@@ -588,7 +686,7 @@ async def batch_summarize_sections_rolling(
 def _cmd_run(
     input_json: Path,
     output_dir: Path = Path("data/results/pipeline"),
-    max_concurrent: int = 5,
+    max_concurrent: int = int(os.getenv("STAGE09_MAX_CONCURRENT", "1")),
     window_size: int = 3,
     strict_json: bool = True,
     request_timeout: int = 120,
@@ -680,7 +778,9 @@ def _cmd_debug_bundle(
         sections = data.get("reflowed_sections") or []
         if not isinstance(sections, list) or not sections:
             raise ValueError("Bundle must include non-empty 'reflowed_sections' list")
-    except Exception as e:
+    except Exception as exc:
+        log_stage_error(STEP_NAME, exc, {'context': '09'})
+        raise
         print(f"Failed to load bundle: {e}")
         raise ValueError(f"Failed to load bundle: {e}")
 
@@ -755,7 +855,9 @@ if __name__ == "__main__":
         from dotenv import find_dotenv, load_dotenv
 
         load_dotenv(find_dotenv())
-    except Exception:
+    except Exception as exc:
+        log_stage_error(STEP_NAME, exc, {'context': '09'})
+        raise
         pass
     import sys
     argv = sys.argv[1:]

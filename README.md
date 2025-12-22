@@ -405,7 +405,7 @@ docker run -d -p 8529:8529 arangodb:latest
 
 ## 🚀 Advanced Usage
 
-### LLM Batch Calls (codex_call + SciLLM)
+### LLM Batch Calls (codex_call, deprecated)
 - Canonical input: JSONL (one JSON object per line).
 - Fields per item:
   - "text": user prompt (required)
@@ -413,7 +413,8 @@ docker run -d -p 8529:8529 arangodb:latest
   - "model": optional per-item model override (otherwise environment defaults)
   - Any provider-specific parameters you add are passed through to the API (e.g., temperature, response_format, reasoning), but are only sent if you include them.
 - Reasoning mapping:
-  - codex_call: `--reasoning low` adds only `model_reasoning_effort: "low"` to each JSONL item.
+- Legacy helper kept only for reference tests; prefer SciLLM paved-path calls.
+  - Not used by the extraction pipeline; retained for historical demos only.
   - SciLLM: forwards any user-specified fields; it does not invent reasoning unless you include it in your JSONL.
 
 Example JSONL (data/demos/codex_call_demo_simple.jsonl)
@@ -426,7 +427,7 @@ Also see a more complex set: data/demos/codex_call_demo_medium.jsonl (mix of ima
 {"text": "Explain JSON Lines (JSONL) in one sentence.", "model": "gpt-5"}
 
 Run via Codex (exec path):
-- `cat data/demos/codex_call_demo_simple.jsonl | python src/extractor/pipeline/utils/codex_call.py --stdin --jsonl --codex-bin codex`
+- `cat data/demos/codex_call_demo_simple.jsonl | python src/extractor/pipeline/utils/deprecated_codex_call.py --stdin --jsonl --codex-bin codex`
 - Add minimal reasoning (Codex flag parity): `... --reasoning low` (adds `model_reasoning_effort: "low"` to each item).
 
 Run via SciLLM (helper):

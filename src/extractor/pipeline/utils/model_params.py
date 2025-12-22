@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from extractor.pipeline.utils.reliability import log_stage_error
 import base64
 from pathlib import Path
 import os
@@ -64,6 +65,7 @@ def build_chat_extras(model_name: str) -> Dict[str, Any]:
         _seed = os.getenv("STAGE_SEED")
         if _seed is not None and str(_seed).strip() != "":
             extras["seed"] = int(str(_seed).strip())
-    except Exception:
-        pass
+    except Exception as exc:
+        log_stage_error('model_params.py', exc, {'context': 'model_params.py'})
+        raise
     return extras

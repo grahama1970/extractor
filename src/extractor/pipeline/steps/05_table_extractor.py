@@ -39,6 +39,7 @@ except ImportError:
     raise
 from dotenv import load_dotenv, find_dotenv
 from loguru import logger
+from extractor.pipeline.utils.reliability import log_stage_error
 from extractor.pipeline.utils.table_extractor_utils import (
     _stable_table_hash,
     _should_assist,
@@ -186,7 +187,9 @@ def _attach_llm_assist_headers(result: Dict[str, Any], stage_dir: Path) -> None:
     sidecar = stage_dir / "05_tables_llm_assist.json"
     try:
         side_data = json.loads(sidecar.read_text()) if sidecar.exists() else {}
-    except Exception:
+    except Exception as exc:
+        log_stage_error('05_table_extractor', exc, {'context': '05'})
+        raise
         side_data = {}
 
     # SciLLM-only: resolve model from TABLE_LLM_ASSIST_MODEL or CHUTES_TEXT_MODEL.
@@ -205,7 +208,9 @@ def _attach_llm_assist_headers(result: Dict[str, Any], stage_dir: Path) -> None:
     # Budget gating (tokens/cost)
     try:
         tokens_budget = int(os.getenv("STAGE05_TOKENS_BUDGET", "120000"))
-    except Exception:
+    except Exception as exc:
+        log_stage_error('05_table_extractor', exc, {'context': '05'})
+        raise
         tokens_budget = 0
     cost_budget = float(os.getenv("STAGE05_COST_BUDGET_USD", "0") or 0)
     budget_enforce = os.getenv("STAGE05_BUDGET_ENFORCE", "true").lower() in ("1","true","yes","y")
@@ -248,7 +253,9 @@ def _attach_llm_assist_headers(result: Dict[str, Any], stage_dir: Path) -> None:
                             headers_in = [str(v).strip() for v in row0.values()]
                         elif isinstance(row0, list):
                             headers_in = [str(v).strip() for v in row0]
-            except Exception:
+            except Exception as exc:
+                log_stage_error('05_table_extractor', exc, {'context': '05'})
+                raise
                 pass
             if not headers_in:
                 log_timing(
@@ -343,7 +350,9 @@ def _attach_llm_assist_headers(result: Dict[str, Any], stage_dir: Path) -> None:
                 # Update budgets
                 try:
                     tokens_used += int(usage.get("prompt_tokens") or 0) + int(usage.get("completion_tokens") or 0)
-                except Exception:
+                except Exception as exc:
+                    log_stage_error('05_table_extractor', exc, {'context': '05'})
+                    raise
                     pass
                 # Optional: cost tracking left as placeholder (provider-specific); keep zero unless integrated
                 write_jsonl(token_logs_dir, "token_usage.jsonl", {
@@ -373,7 +382,9 @@ def _attach_llm_assist_headers(result: Dict[str, Any], stage_dir: Path) -> None:
                     },
                     stage_dir=stage_dir,
                 )
-            except Exception as e:
+            except Exception as exc:
+                log_stage_error('05_table_extractor', exc, {'context': '05'})
+                raise
                 _elapsed_ms = int((_time.monotonic() - _t0) * 1000)
                 log_timing(
                     "05_table_extractor",
@@ -391,7 +402,9 @@ def _attach_llm_assist_headers(result: Dict[str, Any], stage_dir: Path) -> None:
                 raise
             try:
                 patch = json.loads(content) if content else None
-            except Exception as pe:
+            except Exception as exc:
+                log_stage_error('05_table_extractor', exc, {'context': '05'})
+                raise
                 log_timing(
                     "05_table_extractor",
                     {
@@ -426,7 +439,9 @@ def _attach_llm_assist_headers(result: Dict[str, Any], stage_dir: Path) -> None:
             t["header_provenance"] = "llm_assist"
             side_data[cache_key] = {"headers": new_headers}
             updated += 1
-        except Exception as e:
+        except Exception as exc:
+            log_stage_error('05_table_extractor', exc, {'context': '05'})
+            raise
             logger.warning(f"LLM assist header patch failed for table: {e}")
             log_timing(
                 "05_table_extractor",
@@ -444,7 +459,9 @@ def _attach_llm_assist_headers(result: Dict[str, Any], stage_dir: Path) -> None:
     try:
         if updated:
             sidecar.write_text(json.dumps(side_data, ensure_ascii=False, indent=2))
-    except Exception as e:
+    except Exception as exc:
+        log_stage_error('05_table_extractor', exc, {'context': '05'})
+        raise
         logger.warning(f"Failed to persist LLM assist sidecar: {e}")
         
 
@@ -464,7 +481,9 @@ def _demote_table_headers_to_text(result: Dict[str, Any]) -> None:
             shape = pm.get("shape") or [0, 0]
             rows = int(shape[0] or 0)
             cols = int(shape[1] or 0)
-        except Exception:
+        except Exception as exc:
+            log_stage_error('05_table_extractor', exc, {'context': '05'})
+            raise
             rows, cols = 0, 0
         if cols and cols > 2:
             continue
@@ -488,7 +507,9 @@ def _demote_table_headers_to_text(result: Dict[str, Any]) -> None:
                 p = int(t.get("page_index"))
             else:
                 p = int(t.get("page_number", 1)) - 1
-        except Exception:
+        except Exception as exc:
+            log_stage_error('05_table_extractor', exc, {'context': '05'})
+            raise
             p = 0
         bbox = t.get("bbox") or []
         demoted.append({"page_idx": p, "bbox": bbox, "text": head})
@@ -523,7 +544,9 @@ def _demote_sentence_like_single_row_tables(result: Dict[str, Any]) -> None:
         if looks_sentence:
             try:
                 p = int(t.get("page_index") if t.get("page_index") is not None else int(t.get("page_number", 1)) - 1)
-            except Exception:
+            except Exception as exc:
+                log_stage_error('05_table_extractor', exc, {'context': '05'})
+                raise
                 p = 0
             demoted.append({"page_idx": p, "bbox": t.get("bbox") or [], "text": txt, "reason": "sentence_like_single_row"})
         else:
@@ -592,7 +615,9 @@ def try_camelot_strategy(
         )
         print(f"DEBUG: Page {page_num+1} Strategy {strategy.get('name')} found {len(tables)} tables")
         return list(tables)  # type: ignore[call-arg, return-value]
-    except Exception as e:
+    except Exception as exc:
+        log_stage_error('05_table_extractor', exc, {'context': '05'})
+        raise
         logger.warning(
             f"Strategy '{strategy.get('name', 'unknown')}' failed on page {page_str}: {e}"
         )
@@ -607,7 +632,9 @@ def try_camelot_strategy(
                         {"page": page_num, "strategy": strategy.get("name")},
                     )
                 )
-        except Exception:
+        except Exception as exc:
+            log_stage_error('05_table_extractor', exc, {'context': '05'})
+            raise
             pass
         return []
 
@@ -654,13 +681,17 @@ def extract_table_image(
         try:
             # Let PyMuPDF determine format from extension (PNG)
             pix.save(str(img_path))
-        except Exception:
+        except Exception as exc:
+            log_stage_error('05_table_extractor', exc, {'context': '05'})
+            raise
             # Fallback to explicit PNG bytes
             with open(img_path, "wb") as f:
                 f.write(pix.tobytes("png"))
 
         return str(img_path)
-    except Exception as e:
+    except Exception as exc:
+        log_stage_error('05_table_extractor', exc, {'context': '05'})
+        raise
         logger.error(f"Failed to extract table image: {e}")
         try:
             if diagnostics is not None:
@@ -673,7 +704,9 @@ def extract_table_image(
                         {"page": page_num, "table_idx": table_idx},
                     )
                 )
-        except Exception:
+        except Exception as exc:
+            log_stage_error('05_table_extractor', exc, {'context': '05'})
+            raise
             pass
         return None
 
@@ -727,7 +760,9 @@ def extract_tables_from_page(
                 xs = [c.x1 for c in table_obj.cells] + [c.x2 for c in table_obj.cells]
                 ys = [c.y1 for c in table_obj.cells] + [c.y2 for c in table_obj.cells]
                 bt = (min(xs), min(ys), max(xs), max(ys))
-            except Exception:
+            except Exception as exc:
+                log_stage_error('05_table_extractor', exc, {'context': '05'})
+                raise
                 bt = None
         return bt
 
@@ -742,7 +777,9 @@ def extract_tables_from_page(
             area_b = max(0.0, (bx1 - bx0)) * max(0.0, (by1 - by0))
             union = area_a + area_b - inter
             return float(inter / union) if union > 0 else 0.0
-        except Exception:
+        except Exception as exc:
+            log_stage_error('05_table_extractor', exc, {'context': '05'})
+            raise
             return 0.0
 
     def _quantize_bbox(bt: tuple) -> tuple:
@@ -905,7 +942,9 @@ def extract_tables_from_page(
                         xs = [c.x1 for c in table_obj.cells] + [c.x2 for c in table_obj.cells]
                         ys = [c.y1 for c in table_obj.cells] + [c.y2 for c in table_obj.cells]
                         bt = (min(xs), min(ys), max(xs), max(ys))
-                    except Exception:
+                    except Exception as exc:
+                        log_stage_error('05_table_extractor', exc, {'context': '05'})
+                        raise
                         bt = None
                 return bt
 
@@ -920,7 +959,9 @@ def extract_tables_from_page(
                     area_b = max(0.0, (bx1 - bx0)) * max(0.0, (by1 - by0))
                     union = area_a + area_b - inter
                     return float(inter / union) if union > 0 else 0.0
-                except Exception:
+                except Exception as exc:
+                    log_stage_error('05_table_extractor', exc, {'context': '05'})
+                    raise
                     return 0.0
 
             def _quantize_bbox(bt: tuple) -> tuple:
@@ -978,7 +1019,9 @@ def extract_tables_from_page(
                     xs = [c.x1 for c in table.cells] + [c.x2 for c in table.cells]
                     ys = [c.y1 for c in table.cells] + [c.y2 for c in table.cells]
                     bbox_tuple = (min(xs), min(ys), max(xs), max(ys))
-                except Exception:
+                except Exception as exc:
+                    log_stage_error('05_table_extractor', exc, {'context': '05'})
+                    raise
                     bbox_tuple = None
             # Optionally extract an image per table
             img_path = (
@@ -991,7 +1034,9 @@ def extract_tables_from_page(
             if TABLE_HEADER_COALESCE_ENABLED:
                 try:
                     df = coalesce_repeated_header_rows(df, TABLE_HEADER_REPEAT_MIN_MATCH)
-                except Exception as e:
+                except Exception as exc:
+                    log_stage_error('05_table_extractor', exc, {'context': '05'})
+                    raise
                     logger.debug("Header coalesce failed; continuing")
                     try:
                         diagnostics.append(
@@ -1003,7 +1048,9 @@ def extract_tables_from_page(
                                 {"page_index": page_num, "table_idx": idx},
                             )
                         )
-                    except Exception:
+                    except Exception as exc:
+                        log_stage_error('05_table_extractor', exc, {'context': '05'})
+                        raise
                         pass
             df_clean = df.map(sanitize_cell)
             fragmentation = fragmentation_score(df_clean)
@@ -1032,7 +1079,9 @@ def extract_tables_from_page(
                     table_data["table_image_path"] = str(
                         Path(img_path).resolve().relative_to(output_dir.parent.parent.resolve())
                     )
-                except Exception:
+                except Exception as exc:
+                    log_stage_error('05_table_extractor', exc, {'context': '05'})
+                    raise
                     table_data["table_image_path"] = img_path
             extracted_tables.append(table_data)
             idx += 1
@@ -1064,7 +1113,9 @@ def extract_all_tables(
     # Open PDF with PyMuPDF for image extraction
     try:
         pdf_doc = fitz.open(str(pdf_path))
-    except Exception as e:
+    except Exception as exc:
+        log_stage_error('05_table_extractor', exc, {'context': '05'})
+        raise
         logger.error(f"Failed to open PDF {pdf_path}: {e}")
         return [], {}, {}
 
@@ -1118,7 +1169,9 @@ def extract_all_tables(
                     # Approximate per_page_ms as average duration per attempt for this page
                     per_attempt = int(dur / max(1, cnt)) if cnt else dur
                     entry["per_page_ms"][str(page_num)] = per_attempt
-            except Exception:
+            except Exception as exc:
+                log_stage_error('05_table_extractor', exc, {'context': '05'})
+                raise
                 # Per-page strategy timing aggregation failed; continue.
                 pass
             # Record last good strategy outside the exception path so it updates on success.
@@ -1142,7 +1195,9 @@ def extract_all_tables(
             area_b = max(0.0, (bx1 - bx0)) * max(0.0, (by1 - by0))
             union = area_a + area_b - inter
             return float(inter / union) if union > 0 else 0.0
-        except Exception:
+        except Exception as exc:
+            log_stage_error('05_table_extractor', exc, {'context': '05'})
+            raise
             return 0.0
 
     deduped: List[Dict[str, Any]] = []
@@ -1201,7 +1256,9 @@ def run(
             rotation="1 week",
             retention="14 days",
         )
-    except Exception:
+    except Exception as exc:
+        log_stage_error('05_table_extractor', exc, {'context': '05'})
+        raise
         pass
     # Fail fast when any SciLLM-powered feature is enabled (split/confirm/assist)
     def _env_true(name: str, default: str = "0") -> bool:
@@ -1243,7 +1300,9 @@ def run(
                     {},
                 )
             )
-    except Exception:
+    except Exception as exc:
+        log_stage_error('05_table_extractor', exc, {'context': '05'})
+        raise
         pass
 
     # --- Input Validation ---
@@ -1326,7 +1385,9 @@ def run(
         if removed > 0:
             try:
                 diagnostics.append(make_event("05_table_extractor", "info", "filtered_section_headers", f"Removed {removed} single-column tables matching section headers", {"count": removed}))
-            except Exception:
+            except Exception as exc:
+                log_stage_error('05_table_extractor', exc, {'context': '05'})
+                raise
                 pass
 
     # --- Repair: reconstruct collapsed single-column header rows (page header-only tables)
@@ -1364,7 +1425,9 @@ def run(
                     if not src_df.empty:
                         raw_txt = str(list(src_df.iloc[0].values)[0])
                     tokens_ws = [t.strip() for t in _re.split(r"\s{2,}|\s\|\s|\t+", raw_txt) if t.strip()]
-                except Exception:
+                except Exception as exc:
+                    log_stage_error('05_table_extractor', exc, {'context': '05'})
+                    raise
                     tokens_ws = []
                 # Columnize by X clusters as fallback/primary
                 words_sorted = sorted(words, key=lambda w: (float(w[0]), float(w[1])))
@@ -1398,7 +1461,9 @@ def run(
                 # Build a 1xN dataframe so metrics reflect proper column count
                 try:
                     df = pd.DataFrame([best], columns=best)
-                except Exception:
+                except Exception as exc:
+                    log_stage_error('05_table_extractor', exc, {'context': '05'})
+                    raise
                     # If duplicate names, uniquify
                     uniq: list[str] = []
                     seen = set()
@@ -1415,7 +1480,9 @@ def run(
                 table["header_inferred"] = best
                 table["header_provenance"] = "spatial"
                 return True
-        except Exception:
+        except Exception as exc:
+            log_stage_error('05_table_extractor', exc, {'context': '05'})
+            raise
             return False
 
     def _llm_split_single_col_header(table: Dict[str, Any]) -> bool:
@@ -1466,14 +1533,18 @@ def run(
             try:
                 data = json.loads(content) if isinstance(content, str) else content
                 cols_out = [sanitize_cell(c) for c in (data.get("columns") or []) if c]
-            except Exception:
+            except Exception as exc:
+                log_stage_error('05_table_extractor', exc, {'context': '05'})
+                raise
                 cols_out = []
             if len(cols_out) < 3:
                 return False
             # Update table with the split columns
             try:
                 df = pd.DataFrame([cols_out], columns=cols_out)
-            except Exception:
+            except Exception as exc:
+                log_stage_error('05_table_extractor', exc, {'context': '05'})
+                raise
                 df = pd.DataFrame([cols_out])
             # Do not mutate Camelot DataFrame; record inferred headers as metadata only
             table["header_inferred"] = cols_out
@@ -1486,7 +1557,9 @@ def run(
                 stage_dir=stage_output_dir,
             )
             return True
-        except Exception as e:
+        except Exception as exc:
+            log_stage_error('05_table_extractor', exc, {'context': '05'})
+            raise
             log_timing(
                 "05_table_extractor",
                 {"attempt": "llm_split_1col", "outcome": "error", "error": str(e)},
@@ -1505,7 +1578,9 @@ def run(
     if repaired:
         try:
             diagnostics.append(make_event("05_table_extractor", "info", "single_col_repairs", f"Repaired {repaired} tables", {"count": repaired}))
-        except Exception:
+        except Exception as exc:
+            log_stage_error('05_table_extractor', exc, {'context': '05'})
+            raise
             pass
 
     # --- Heuristic merge: stitch header-only tables with body tables across pages
@@ -1535,7 +1610,9 @@ def run(
             total = sum(len(v) for v in values) or 1
             digit_ratio = digits / total
             return (avg_len <= 32) and (digit_ratio < 0.5)
-        except Exception:
+        except Exception as exc:
+            log_stage_error('05_table_extractor', exc, {'context': '05'})
+            raise
             return False
 
     def horizontal_iou(a: List[float], b: List[float]) -> float:
@@ -1545,7 +1622,9 @@ def run(
             inter = max(0.0, min(ax1, bx1) - max(ax0, bx0))
             uni = max(ax1, bx1) - min(ax0, bx0)
             return float(inter / uni) if uni > 0 else 0.0
-        except Exception:
+        except Exception as exc:
+            log_stage_error('05_table_extractor', exc, {'context': '05'})
+            raise
             return 0.0
 
     def stitch_headers(tables: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -1610,7 +1689,9 @@ def run(
                             best["pandas_df"] = body_df.to_dict("records")
                             best["pandas_metrics"] = generate_pandas_metrics(body_df)
                             used_headers.add(header_idx)
-                    except Exception:
+                    except Exception as exc:
+                        log_stage_error('05_table_extractor', exc, {'context': '05'})
+                        raise
                         pass
                 # Don't append header-only table; it will be dropped by filters anyway
                 continue
@@ -1660,7 +1741,9 @@ def run(
                 if re.match(r"^\s*Table\s+\d+(?:[-–]\d+)?[.:]", txt, re.IGNORECASE):
                     return txt
             return None
-        except Exception:
+        except Exception as exc:
+            log_stage_error('05_table_extractor', exc, {'context': '05'})
+            raise
             return None
 
     if TABLE_HEADER_STITCHING_ENABLED:
@@ -1684,7 +1767,9 @@ def run(
         for idx, s in enumerate(sections):
             try:
                 y0 = float((s.get("bbox") or [0, 0, 0, 0])[1])
-            except Exception:
+            except Exception as exc:
+                log_stage_error('05_table_extractor', exc, {'context': '05'})
+                raise
                 y0 = 0.0
             anchors.append({
                 "idx": idx,
@@ -1697,7 +1782,9 @@ def run(
             p = int(t.get("page_index", 0))
             try:
                 ty = float((t.get("bbox") or [0, 0, 0, 0])[1])
-            except Exception:
+            except Exception as exc:
+                log_stage_error('05_table_extractor', exc, {'context': '05'})
+                raise
                 ty = 0.0
             # same-page candidates with header above the table
             same = [a for a in anchors if a["page"] == p and a["y0"] <= ty]
@@ -1765,7 +1852,9 @@ def run(
             data = _json.loads(content) if isinstance(content, str) else content
             val = data.get("is_table")
             return bool(val) if isinstance(val, bool) else None
-        except Exception:
+        except Exception as exc:
+            log_stage_error('05_table_extractor', exc, {'context': '05'})
+            raise
             return None
 
     demoted_llm: list[dict[str, Any]] = []
@@ -1778,7 +1867,9 @@ def run(
         density = float(metrics.get("data_density", 0.0) or 0.0)
         try:
             acc = float((t.get("camelot_metrics") or {}).get("accuracy") or 0.0)
-        except Exception:
+        except Exception as exc:
+            log_stage_error('05_table_extractor', exc, {'context': '05'})
+            raise
             acc = 0.0
 
         # If Camelot couldn't form a DF or confidence is low, confirm via LLM (live only)
@@ -1795,7 +1886,9 @@ def run(
                         "text": _extract_table_text_for_heuristics(t),
                         "reason": "llm_not_table",
                     })
-                except Exception:
+                except Exception as exc:
+                    log_stage_error('05_table_extractor', exc, {'context': '05'})
+                    raise
                     pass
                 try:
                     diagnostics.append(
@@ -1803,7 +1896,9 @@ def run(
                             "rows": rows, "cols": cols, "density": density, "acc": acc
                         })
                     )
-                except Exception:
+                except Exception as exc:
+                    log_stage_error('05_table_extractor', exc, {'context': '05'})
+                    raise
                     pass
                 continue
         # Reject tables with suspiciously large bboxes (stream strategy false positives)
@@ -1820,10 +1915,14 @@ def run(
                                    f"Rejected table with suspiciously large bbox (area={bbox_area:.0f})",
                                    {"bbox": t.get("bbox"), "page": t.get("page_index")})
                     )
-                except Exception:
+                except Exception as exc:
+                    log_stage_error('05_table_extractor', exc, {'context': '05'})
+                    raise
                     pass
                 continue
-        except Exception:
+        except Exception as exc:
+            log_stage_error('05_table_extractor', exc, {'context': '05'})
+            raise
             pass
 
         # Accept dense multi-row tables with at least 2 columns (single-column = prose/headers, not tabular data).
@@ -1847,7 +1946,9 @@ def run(
                         },
                     )
                 )
-            except Exception:
+            except Exception as exc:
+                log_stage_error('05_table_extractor', exc, {'context': '05'})
+                raise
                 pass
 
     # Selection behavior:
@@ -1874,7 +1975,9 @@ def run(
                 best_list = strong if strong else candidates
                 best = max(best_list, key=lambda t: float(t.get("score", 0.0)))
                 selected.append(best)
-            except Exception:
+            except Exception as exc:
+                log_stage_error('05_table_extractor', exc, {'context': '05'})
+                raise
                 continue
         filtered_tables = selected
 
@@ -1928,7 +2031,9 @@ def run(
                 return content.strip('"') if content else ""
             title = _asyncio.run(_call())
             return title or None
-        except Exception as e:
+        except Exception as exc:
+            log_stage_error('05_table_extractor', exc, {'context': '05'})
+            raise
             logger.debug(f"Title infer via SciLLM failed: {e}")
             return None
 
@@ -1953,7 +2058,9 @@ def run(
                     band = _fitz.Rect(r.x0, max(0, r.y0-120), r.x1, r.y0)
                     blks = _page.get_text('blocks', clip=band)
                     near = '\n'.join((b[4] or '').strip() for b in blks if (b[4] or '').strip())
-            except Exception:
+            except Exception as exc:
+                log_stage_error('05_table_extractor', exc, {'context': '05'})
+                raise
                 near = ''
             import pandas as _pd  # for header synthesis
             header = ''
@@ -1971,9 +2078,13 @@ def run(
                         try:
                             first_row = df.iloc[0].astype(str).tolist()
                             header = ' | '.join(str(cell) for cell in first_row if str(cell).strip())[:100]
-                        except Exception:
+                        except Exception as exc:
+                            log_stage_error('05_table_extractor', exc, {'context': '05'})
+                            raise
                             header = ''
-            except Exception:
+            except Exception as exc:
+                log_stage_error('05_table_extractor', exc, {'context': '05'})
+                raise
                 pass
             ctx = f"Header: {header}\nNearby: {near}".strip()
             inferred = _infer_title_with_scillm(ctx) or (header if header else (near.split('\n',1)[0] if near else ''))
@@ -1999,7 +2110,9 @@ def run(
     # --- De-duplicate header rows accidentally included in body ---
     try:
         import pandas as pd
-    except Exception:
+    except Exception as exc:
+        log_stage_error('05_table_extractor', exc, {'context': '05'})
+        raise
         pd = None  # type: ignore
     if pd is not None and TABLE_HEADER_DEDUP_ENABLED:
         for t in filtered_tables:
@@ -2020,7 +2133,9 @@ def run(
                     df = df.drop(index=to_drop).reset_index(drop=True)
                     t["pandas_df"] = df.to_dict("records")
                     t["pandas_metrics"] = generate_pandas_metrics(df)
-            except Exception:
+            except Exception as exc:
+                log_stage_error('05_table_extractor', exc, {'context': '05'})
+                raise
                 continue
 
     # --- Final Payload and Output ---
@@ -2028,7 +2143,9 @@ def run(
         samples = stop_resource_sampler(sampler) if sampler else []
         if samples:
             resources.setdefault("resource_samples", samples)
-    except Exception:
+    except Exception as exc:
+        log_stage_error('05_table_extractor', exc, {'context': '05'})
+        raise
         pass
     timings = build_stage_timings(stage_start_ts, t0)
     try:
@@ -2037,13 +2154,17 @@ def run(
             if att > 0:
                 _v["avg_duration_ms"] = int(_v.get("total_duration_ms", 0) / att)
         timings["strategy_durations"] = strategy_summary
-    except Exception:
+    except Exception as exc:
+        log_stage_error('05_table_extractor', exc, {'context': '05'})
+        raise
         pass
     try:
         samples = stop_resource_sampler(sampler) if sampler else []
         if samples:
             resources.setdefault("resource_samples", samples)
-    except Exception:
+    except Exception as exc:
+        log_stage_error('05_table_extractor', exc, {'context': '05'})
+        raise
         pass
     timings = build_stage_timings(stage_start_ts, t0)
     try:
@@ -2052,7 +2173,9 @@ def run(
             if att > 0:
                 _v["avg_duration_ms"] = int(_v.get("total_duration_ms", 0) / att)
         timings["strategy_durations"] = strategy_summary
-    except Exception:
+    except Exception as exc:
+        log_stage_error('05_table_extractor', exc, {'context': '05'})
+        raise
         pass
     metrics_payload = {
         "quality_fallback": {
@@ -2081,7 +2204,9 @@ def run(
     try:
         if os.getenv("TABLE_LLM_ASSIST", "0").lower() in ("1","true","yes","y"):
             _attach_llm_assist_headers(result, stage_output_dir)
-    except Exception as _assist_e:
+    except Exception as exc:
+        log_stage_error('05_table_extractor', exc, {'context': '05'})
+        raise
         diagnostics.append(
             make_event(
                 "05_table_extractor",
@@ -2106,7 +2231,9 @@ def run(
             pm = t.get("pandas_metrics", {}) or {}
             if pm:
                 _ = pm.get("shape"), pm.get("columns")
-    except Exception as _e:
+    except Exception as exc:
+        log_stage_error('05_table_extractor', exc, {'context': '05'})
+        raise
         console.print(f"[yellow]Stage 05 schema warning: {_e}[/yellow]")
 
     output_path = json_output_dir / "05_tables.json"
@@ -2157,7 +2284,9 @@ def debug_bundle(
                     {},
                 )
             )
-    except Exception:
+    except Exception as exc:
+        log_stage_error('05_table_extractor', exc, {'context': '05'})
+        raise
         pass
 
     data = json.loads(bundle.read_text())
@@ -2187,7 +2316,9 @@ def debug_bundle(
                 ] and section_bbox.intersects(table_bbox):
                     table["section_id"] = section.get("id", "unknown")
                     break
-        except Exception:
+        except Exception as exc:
+            log_stage_error('05_table_extractor', exc, {'context': '05'})
+            raise
             continue
     # Basic filter (reuse criteria)
     filtered_tables = []
@@ -2206,7 +2337,9 @@ def debug_bundle(
             try:
                 best = max(all_tables, key=lambda t: float(t.get("score", 0.0)))
                 filtered_tables = [best]
-            except Exception:
+            except Exception as exc:
+                log_stage_error('05_table_extractor', exc, {'context': '05'})
+                raise
                 filtered_tables = all_tables[:1]
         else:
             filtered_tables = all_tables
@@ -2219,7 +2352,9 @@ def debug_bundle(
         samples = stop_resource_sampler(sampler) if sampler else []
         if samples:
             resources.setdefault("resource_samples", samples)
-    except Exception:
+    except Exception as exc:
+        log_stage_error('05_table_extractor', exc, {'context': '05'})
+        raise
         pass
     timings = build_stage_timings(stage_start_ts, t0)
     try:
@@ -2228,13 +2363,17 @@ def debug_bundle(
             if att > 0:
                 _v["avg_duration_ms"] = int(_v.get("total_duration_ms", 0) / att)
         timings["strategy_durations"] = strategy_summary
-    except Exception:
+    except Exception as exc:
+        log_stage_error('05_table_extractor', exc, {'context': '05'})
+        raise
         pass
     try:
         samples = stop_resource_sampler(sampler) if sampler else []
         if samples:
             resources.setdefault("resource_samples", samples)
-    except Exception:
+    except Exception as exc:
+        log_stage_error('05_table_extractor', exc, {'context': '05'})
+        raise
         pass
     timings = build_stage_timings(stage_start_ts, t0)
     try:
@@ -2243,7 +2382,9 @@ def debug_bundle(
             if att > 0:
                 _v["avg_duration_ms"] = int(_v.get("total_duration_ms", 0) / att)
         timings["strategy_durations"] = strategy_summary
-    except Exception:
+    except Exception as exc:
+        log_stage_error('05_table_extractor', exc, {'context': '05'})
+        raise
         pass
     metrics_payload = {
         "quality_fallback": {
@@ -2271,7 +2412,9 @@ def debug_bundle(
     try:
         if os.getenv("TABLE_LLM_ASSIST", "0").lower() in ("1", "true", "yes", "y"):
             _attach_llm_assist_headers(result, stage_output_dir)
-    except Exception as _assist_e:
+    except Exception as exc:
+        log_stage_error('05_table_extractor', exc, {'context': '05'})
+        raise
         diagnostics.append(
             make_event(
                 "05_table_extractor",

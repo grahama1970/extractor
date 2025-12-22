@@ -70,6 +70,8 @@ dependencies = [
  "pyflakes>=3.4.0",
  # Shared web-ingestion toolkit (local path per AGENT guidance)
  "fetcher @ file:///home/graham/workspace/experiments/fetcher",
+ "pynvml>=13.0.1",
+ "faiss-cpu>=1.12.0",
 ]
 [[project.authors]]
 name = "Graham Anderson"
@@ -209,6 +211,7 @@ include = [
   "src/extractor",
   "src/extractor/core/scripts/*.sh",
   "src/extractor/core/scripts/*.html",
+  "src/extractor/pipeline/prompts/**/*.json",
   "memory",
 ]
 
@@ -217,6 +220,7 @@ packages = [ "src/extractor", "memory",]
 include = [
   "src/extractor/core/scripts/*.sh",
   "src/extractor/core/scripts/*.html",
+  "src/extractor/pipeline/prompts/**/*.json",
 ]
 
 [tool.black]

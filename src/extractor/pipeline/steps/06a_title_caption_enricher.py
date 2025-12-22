@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+/home/graham/workspace/experiments/extractor/src/extractor/pipeline/steps#!/usr/bin/env python3
 """
 Stage 06a: Title/Caption Enricher (text-only)
 

@@ -24,6 +24,7 @@ from typing import Any, Dict, List
 
 import pandas as pd
 from loguru import logger
+from extractor.pipeline.utils.reliability import log_stage_error
 
 
 def calculate_accuracy_score(table: Any) -> float:
@@ -225,7 +226,9 @@ def calculate_table_confidence(table: Any) -> Dict[str, float]:
         completeness = calculate_completeness_score(table.df)
         consistency = calculate_consistency_score(table.df)
         whitespace = calculate_whitespace_score(table)
-    except Exception as e:
+    except Exception as exc:
+        log_stage_error('table_quality_metrics.py', exc, {'context': 'table_quality_metrics.py'})
+        raise
         logger.error(f"Error calculating quality metrics: {str(e)}")
         return {
             "confidence": 0.0,
@@ -342,7 +345,9 @@ if __name__ == "__main__":
             print(f"  - Whitespace: {whitespace:.4f}")
             print(f"  - Overall confidence: {confidence['confidence']:.4f}")
 
-    except Exception as e:
+    except Exception as exc:
+        log_stage_error('table_quality_metrics.py', exc, {'context': 'table_quality_metrics.py'})
+        raise
         all_validation_failures.append(f"Error in test 1: {str(e)}")
 
     # Test 2: Edge case - empty DataFrame
@@ -362,7 +367,9 @@ if __name__ == "__main__":
             all_validation_failures.append(
                 f"Consistency for empty DataFrame should be 0, got {consistency}"
             )
-    except Exception as e:
+    except Exception as exc:
+        log_stage_error('table_quality_metrics.py', exc, {'context': 'table_quality_metrics.py'})
+        raise
         all_validation_failures.append(f"Error in test 2: {str(e)}")
 
     # Final validation result

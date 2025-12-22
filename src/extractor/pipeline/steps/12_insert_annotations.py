@@ -30,6 +30,7 @@ from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 # (dotenv to be loaded by caller/debug harness)
 from loguru import logger
+from extractor.pipeline.utils.reliability import log_stage_error
 from rich.console import Console
 
 try:
@@ -91,7 +92,9 @@ def ensure_graph(
                         ],
                     )
                     logger.info(f"Recreated graph {graph_name} with updated vertices {list(fv)}")
-        except Exception as e:
+        except Exception as exc:
+            log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+            raise
             logger.warning(f"Graph inspection failed (continuing): {e}")
 
 
@@ -214,7 +217,9 @@ def run(
                     for r in rows
                     if r.get("_key") is not None
                 ]
-            except Exception as e:
+            except Exception as exc:
+                log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+                raise
                 logger.warning(f"Failed to fetch annotations for bridging: {e}")
                 docs_for_bridge = []
 
@@ -231,7 +236,9 @@ def run(
                 """
             try:
                 ids = list(db.aql.execute(aql, bind_vars={"p": int(page), "src": source_pdf}))
-            except Exception:
+            except Exception as exc:
+                log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+                raise
                 ids = []
             aid = f"{ann_col}/{d['_key']}"
             for oid in ids:
@@ -288,7 +295,9 @@ def debug_bundle(
             raise ValueError("Bundle must include non-empty 'annotations' list")
         if not isinstance(pdf_objects, list):
             pdf_objects = []
-    except Exception as e:
+    except Exception as exc:
+        log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+        raise
         print(f"Failed to load bundle: {e}")
         raise ValueError(f"Failed to load bundle: {e}")
 

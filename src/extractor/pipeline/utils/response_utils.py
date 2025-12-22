@@ -19,6 +19,7 @@ from typing import Any, Dict
 
 from extractor.pipeline.utils.json_utils import clean_json_string
 from extractor.pipeline.utils.image_helpers import extract_images
+from extractor.pipeline.utils.reliability import log_stage_error
 from typing import Any as _Any, Dict as _Dict, List as _List, Optional as _Optional, Tuple as _Tuple
 import json as _json
 
@@ -63,8 +64,8 @@ def extract_content(resp: Any) -> str:
             ot = resp.get("output_text")
             if isinstance(ot, str) and ot.strip():
                 return ot
-        except Exception:
-            pass
+        except Exception as exc:
+            log_stage_error("response_utils.extract_content", exc, {"context": "openai_dict"})
 
     # ModelResponse-like object
     ch_obj = getattr(resp, "choices", None)
@@ -95,8 +96,8 @@ def extract_content(resp: Any) -> str:
             ot = getattr(resp, "output_text", None)
             if isinstance(ot, str) and ot.strip():
                 return ot
-        except Exception:
-            pass
+        except Exception as exc:
+            log_stage_error("response_utils.extract_content", exc, {"context": "model_response"})
 
     # Top-level fallbacks for dict/objects that put text elsewhere
     if isinstance(resp, dict):
@@ -126,8 +127,8 @@ def normalize_json_content(resp: Any) -> _Tuple[str, _Optional[_Dict[str, _Any]]
                 parsed = _json.loads(raw_text)
                 if isinstance(parsed, dict):
                     json_obj = parsed
-            except Exception:
-                # Attempt repair via cleaner
+            except Exception as exc:
+                log_stage_error("response_utils.normalize_json_content", exc, {"context": "loads_raw_text"})
                 repaired = clean_json_string(raw_text, return_dict=True)
                 if isinstance(repaired, dict):
                     json_obj = repaired
@@ -148,11 +149,13 @@ def normalize_json_content(resp: Any) -> _Tuple[str, _Optional[_Dict[str, _Any]]
                             parsed = _json.loads(raw_text)
                             if isinstance(parsed, dict):
                                 json_obj = parsed
-                        except Exception:
+                        except Exception as exc:
+                            log_stage_error("response_utils.normalize_json_content", exc, {"context": "loads_content_str"})
                             repaired = clean_json_string(raw_text, return_dict=True)
                             if isinstance(repaired, dict):
                                 json_obj = repaired
-    except Exception:
+    except Exception as exc:
+        log_stage_error("response_utils.normalize_json_content", exc, {"context": "normalize"})
         json_obj = None
     return raw_text, json_obj
 

@@ -76,12 +76,9 @@ async def probe_chat_completions_endpoint(base_url: str, api_key: str) -> Tuple[
 async def validate_scillm_preflight() -> Tuple[bool, str]:
     """
     Full SciLLM preflight validation per AGENTS.md requirements.
-    
-    Returns:
-        Tuple[bool, str]: (success, reason)
+    Uses paved timeouts; no external wait_for wrapping required.
+    Returns (success, reason).
     """
-    # Hard cap to prevent hangs
-    timeout_s = float(os.getenv("SCILLM_PREFLIGHT_TIMEOUT", "15"))
     base_url = os.getenv("CHUTES_API_BASE", "").rstrip("/")
     api_key = os.getenv("CHUTES_API_KEY", "")
 
@@ -94,14 +91,16 @@ async def validate_scillm_preflight() -> Tuple[bool, str]:
     try:
         from scillm.paved import chutes_healthcheck  # type: ignore
 
-        hc = await chutes_healthcheck()
-        ok = bool(hc.get("ok"))
+        hc = chutes_healthcheck(timeout=15.0)
+        if asyncio.iscoroutine(hc):
+            hc = await hc
+        ok = bool(hc.get("ok")) if isinstance(hc, dict) else False
         if ok:
             logger.info("SciLLM preflight (paved): ok — served_model=%s", hc.get("served_model"))
             return True, "Healthcheck passed"
         # fall through to explicit probes if paved check reports not ok
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"SciLLM paved healthcheck failed: {e}")
 
     # Fallback explicit probes (rarely needed)
     models_ok, models_reason = await probe_models_endpoint(base_url, api_key)
@@ -117,28 +116,19 @@ async def validate_scillm_preflight() -> Tuple[bool, str]:
 
 
 def validate_scillm_env_sync() -> Tuple[bool, str]:
-    """Synchronous wrapper for validate_scillm_preflight() with a timeout."""
-    timeout_s = float(os.getenv("SCILLM_PREFLIGHT_TIMEOUT", "15"))
+    """Synchronous wrapper for validate_scillm_preflight(). Relies on paved timeouts."""
     try:
-        # Handle existing event loop gracefully
         try:
-            loop = asyncio.get_running_loop()
-            # If we're already in an event loop, create a task and run it
-            if loop.is_running():
-                # Use nest_asyncio if available, otherwise return a safe default
-                try:
-                    import nest_asyncio
-                    nest_asyncio.apply()
-                    return asyncio.run(asyncio.wait_for(validate_scillm_preflight(), timeout=timeout_s))
-                except ImportError:
-                    # Fallback: assume environment is valid if basic vars are set
-                    if quick_scillm_check():
-                        return True, "Basic environment check passed (nest_asyncio not available for full validation)"
-                    else:
-                        return False, "Basic environment check failed"
+            loop = asyncio.get_event_loop()
         except RuntimeError:
-            # No event loop running, safe to use asyncio.run
-            return asyncio.run(asyncio.wait_for(validate_scillm_preflight(), timeout=timeout_s))
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        if loop.is_running():
+            # Already running loop: schedule task and wait
+            fut = asyncio.run_coroutine_threadsafe(validate_scillm_preflight(), loop)
+            return fut.result()
+        else:
+            return asyncio.run(validate_scillm_preflight())
     except Exception as e:
         return False, f"Preflight validation error: {e}"
 

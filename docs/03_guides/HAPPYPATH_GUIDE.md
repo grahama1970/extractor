@@ -23,6 +23,13 @@ Principles
     data/results/fast_pdf \
     --mode fast
   ```
+- PDF (fast with lightweight heading hints):
+  ```bash
+  python -m src.cli extract \
+    data/input/pipeline/BHT_CV32A65X_marked.pdf \
+    data/results/fast_pdf \
+    --mode fast --fast-section
+  ```
 - PDF (accurate, normalized outputs):
   ```bash
   python -m src.cli extract \

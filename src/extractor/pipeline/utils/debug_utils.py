@@ -7,6 +7,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional
+from extractor.pipeline.utils.reliability import log_stage_error
 
 
 def _iso_now() -> str:
@@ -25,12 +26,13 @@ def ensure_logs_dir(base_results_dir: Path, stage_name: str) -> Path:
 
 
 def write_jsonl(logs_dir: Path, name: str, payload: Dict[str, Any]) -> None:
+    path = logs_dir / name
     try:
-        path = logs_dir / name
         with path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(payload, ensure_ascii=False, default=str) + "\n")
-    except Exception:
-        pass
+    except Exception as exc:
+        log_stage_error("debug_utils.write_jsonl", exc, {"path": str(path)})
+        raise
 
 
 def log_timing(stage_key: str, record: Dict[str, Any], *, stage_dir: Optional[Path] = None) -> None:
@@ -40,23 +42,16 @@ def log_timing(stage_key: str, record: Dict[str, Any], *, stage_dir: Optional[Pa
     - Optionally mirrors to `stage_dir/timings.jsonl` when provided (for stage-local artifacts).
     - Adds an ISO timestamp and the `stage` key automatically; keeps fields flat and JSONL-safe.
     """
-    try:
-        rec: Dict[str, Any] = {"ts": _iso_now(), "stage": stage_key}
-        rec.update(record)
-        rd = os.getenv("RUN_RESULTS_DIR")
-        if rd:
-            logs_dir = ensure_logs_dir(Path(rd), stage_key)
-            write_jsonl(logs_dir, "timings.jsonl", rec)
-        if stage_dir is not None:
-            try:
-                path = Path(stage_dir) / "timings.jsonl"
-                with path.open("a", encoding="utf-8") as f:
-                    f.write(json.dumps(rec, ensure_ascii=False, default=str) + "\n")
-            except Exception:
-                pass
-    except Exception:
-        # Never raise from observability helper
-        pass
+    rec: Dict[str, Any] = {"ts": _iso_now(), "stage": stage_key}
+    rec.update(record)
+    rd = os.getenv("RUN_RESULTS_DIR")
+    if rd:
+        logs_dir = ensure_logs_dir(Path(rd), stage_key)
+        write_jsonl(logs_dir, "timings.jsonl", rec)
+    if stage_dir is not None:
+        path = Path(stage_dir) / "timings.jsonl"
+        with path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False, default=str) + "\n")
 
 
 @dataclass

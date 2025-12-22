@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from extractor.pipeline.utils.reliability import log_stage_error
 import json
 from pathlib import Path
 from typing import Any, Dict, List, Tuple, cast
@@ -15,7 +16,9 @@ def rect_overlap_ratio(block_bbox: List[float], annot_rect: List[float]) -> floa
         inter = iw * ih
         barea = max(0.0, (bx1 - bx0) * (by1 - by0))
         return (inter / barea) if barea > 0 else 0.0
-    except Exception:
+    except Exception as exc:
+        log_stage_error('annotations.py', exc, {'context': 'annotations.py'})
+        raise
         return 0.0
 
 
@@ -32,7 +35,9 @@ def cue_from_annotation(a: Dict[str, Any]) -> Tuple[int, float, str]:
     try:
         if isinstance(interp.get("labels"), list):
             labels = [str(x).lower() for x in interp.get("labels")]
-    except Exception:
+    except Exception as exc:
+        log_stage_error('annotations.py', exc, {'context': 'annotations.py'})
+        raise
         labels = []
 
     positive_keywords = ["section header", "sectionheader", "header"]
@@ -131,8 +136,9 @@ def load_relevant_rules() -> Dict[str, Any]:
         if here.exists():
             with open(here, "r") as f:
                 return cast(Dict[str, Any], json.load(f))
-    except Exception:
-        pass
+    except Exception as exc:
+        log_stage_error('annotations.py', exc, {'context': 'annotations.py'})
+        raise
     return {
         "boost_relevant_weight_for_stage": {"03": 1.25},
         "auto_reject_thresholds": {"default": 0.85, "relevant_03": 0.75},

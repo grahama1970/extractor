@@ -3,6 +3,7 @@ import fitz
 import json
 import sys
 import html
+import argparse
 from pathlib import Path
 from datetime import date
 
@@ -47,23 +48,23 @@ def _find_label_targets(page, labels):
 
 
 
-def generate_enhanced_walkthrough(pdf_path, output_dir):
+def generate_enhanced_walkthrough(pdf_path: Path, output_dir: Path, run_dir: Path):
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    
+
     doc = fitz.open(pdf_path)
-    
-    # Load Artifacts
-    tables_path = Path("data/results/pipeline/05_table_extractor/json_output/05_tables.json")
-    figures_path = Path("data/results/pipeline/06_figure_extractor/json_output/06_figures.json")
-    sections_path = Path("data/results/pipeline/04_section_builder/json_output/04_sections.json")
-    reflowed_path = Path("data/results/pipeline/07_reflow_section/json_output/07_reflowed.json")
-    requirements_path = Path("data/results/pipeline/07_requirements_miner/json_output/07_requirements.json")
-    
+
+    # Load Artifacts (relative to run_dir)
+    tables_path = run_dir / "05_table_extractor/json_output/05_tables.json"
+    figures_path = run_dir / "06_figure_extractor/json_output/06_figures.json"
+    sections_path = run_dir / "04_section_builder/json_output/04_sections.json"
+    reflowed_path = run_dir / "07_reflow_section/json_output/07_reflowed.json"
+    requirements_path = run_dir / "07_requirements_miner/json_output/07_requirements.json"
+
     # Enriched paths (preferred if available)
-    tables_enriched = Path("data/results/pipeline/06a_title_caption_enricher/json_output/05_tables.enriched.json")
-    figures_enriched = Path("data/results/pipeline/06a_title_caption_enricher/json_output/06_figures.enriched.json")
-    layout06b_path = Path("data/results/pipeline/06b_layout_sketcher/json_output/06b_layout_sketch.json")
+    tables_enriched = run_dir / "06a_title_caption_enricher/json_output/05_tables.enriched.json"
+    figures_enriched = run_dir / "06a_title_caption_enricher/json_output/06_figures.enriched.json"
+    layout06b_path = run_dir / "06b_layout_sketcher/json_output/06b_layout_sketch.json"
     
     if tables_enriched.exists():
         tables = json.loads(tables_enriched.read_text()).get("tables", [])
@@ -157,6 +158,8 @@ def generate_enhanced_walkthrough(pdf_path, output_dir):
         "# Enhanced Pipeline Walkthrough",
         "",
         f"**Date:** {date.today()}",
+        f"**Run dir:** {run_dir}",
+        f"**PDF:** {pdf_path}",
         "**Format:** Side-by-side visualization of extracted artifacts.",
         "",
     ]
@@ -579,6 +582,15 @@ def generate_enhanced_walkthrough(pdf_path, output_dir):
     print(f"Self-contained walkthrough (relative assets): {local_md}")
 
 if __name__ == "__main__":
-    pdf = "data/input/pipeline/BHT_CV32A65X_with_requirements_noannots.pdf"
-    out = "scripts/artifacts/visuals_pipeline"
-    generate_enhanced_walkthrough(pdf, out)
+    parser = argparse.ArgumentParser(description="Generate enhanced walkthrough markdown from pipeline artifacts.")
+    parser.add_argument("pdf", type=Path, help="Source PDF to visualize")
+    parser.add_argument("output", type=Path, help="Output directory for walkthrough files")
+    parser.add_argument(
+        "--run-dir",
+        type=Path,
+        default=Path("data/results/pipeline"),
+        help="Pipeline run directory containing step outputs (04..07..09 etc.)",
+    )
+    args = parser.parse_args()
+
+    generate_enhanced_walkthrough(args.pdf, args.output, args.run_dir)

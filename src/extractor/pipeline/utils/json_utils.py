@@ -18,13 +18,13 @@ Example Usage:
 
 import json
 import os
-import json
 from pathlib import Path
 import re
 from typing import Union, Any
 
 from json_repair import repair_json
 from loguru import logger
+from extractor.pipeline.utils.reliability import log_stage_error
 
 
 class PathEncoder(json.JSONEncoder):
@@ -80,7 +80,7 @@ def load_json_file(file_path):
             logger.error("JSON decoding error persists with utf-8-sig encoding")
             raise
     except IOError as e:
-        logger.error(f"I/O error: {e}")
+        log_stage_error("json_utils.load_json_file", e, {"file": file_path})
         raise
 
 
@@ -106,7 +106,7 @@ def save_json_to_file(data, file_path):
             json.dump(data, f, indent=4)
             logger.info(f"Saved extracted tables to JSON cache at: {file_path}")
     except Exception as e:
-        logger.error(f"Failed to save cache to {file_path}: {e}")
+        log_stage_error("json_utils.save_json_to_file", e, {"file": file_path})
         raise
 
 
@@ -147,9 +147,11 @@ def parse_json(content: str, logger=None) -> Union[dict, list, str]:
     except json.JSONDecodeError as e:
         if _log:
             _log.error(f"JSON decode error after repair attempt: {e}")
+        raise
     except Exception as e:
         if _log:
             _log.error(f"Failed to parse JSON response: {e}")
+        raise
     if _log:
         _log.debug(f"Returning original content as string: {content}")
     return content

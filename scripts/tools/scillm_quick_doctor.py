@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import os
+import warnings
 from dataclasses import asdict, dataclass
 from typing import Any, Dict, Optional
 
@@ -109,9 +110,17 @@ def main(
 
     had_openai_env = _unset_openai_envs()
 
+    warnings.filterwarnings(
+        "ignore",
+        message="Pydantic serializer warnings:"
+    )
+
     # Direct path only
     try:
-        raw = _call_direct(env_base, env_key, env_model)
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", "Task was destroyed but it is pending")
+            warnings.filterwarnings("ignore", "Pydantic serializer warnings")
+            raw = _call_direct(env_base, env_key, env_model)
         content = raw["choices"][0]["message"]["content"]
         ok = False
         if isinstance(content, dict):
@@ -132,8 +141,8 @@ def main(
                 raw=None if ok else {"snippet": str(content)[:80]},
             ).to_json()
         )
-        raise typer.Exit(code=0 if ok else 3)
     except Exception as e:
+        err = f"{type(e).__name__}: {e!r}"
         print(
             DoctorResult(
                 ok=False,
@@ -141,11 +150,13 @@ def main(
                 base=env_base,
                 model=env_model,
                 had_openai_env=had_openai_env,
-                error=str(e),
+                error=err,
                 raw=None,
             ).to_json()
         )
         raise typer.Exit(code=2)
+    else:
+        raise typer.Exit(code=0 if ok else 3)
 
 
 if __name__ == "__main__":  # pragma: no cover

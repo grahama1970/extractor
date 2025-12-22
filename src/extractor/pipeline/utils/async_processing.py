@@ -12,6 +12,7 @@ import asyncio
 import os
 from typing import List, Any, Callable
 from loguru import logger
+from extractor.pipeline.utils.reliability import log_stage_error
 from tqdm.asyncio import tqdm
 from tenacity import (
     retry,
@@ -21,7 +22,9 @@ from tenacity import (
 )
 try:
     import litellm  # type: ignore
-except Exception:  # pragma: no cover
+except Exception as exc:
+    log_stage_error('async_processing.py', exc, {'context': 'async_processing.py'})
+    raise
     class _DummyLitellm:
         class exceptions:  # type: ignore
             Timeout = Exception

@@ -27,7 +27,7 @@ from docx2python import docx2python
 from docx2python.iterators import iter_at_depth, iter_tables
 from docx import Document as PythonDocxDocument
 from loguru import logger
-from extractor.core.providers.utils import emit_list_blocks, normalize_heading_level
+from extractor.core.providers.utils import emit_list_blocks, normalize_heading_level, ensure_hierarchy
 from extractor.core.providers.fetcher_bridge import ensure_local_source, attach_fetcher_metadata
 
 from extractor.core.schema.unified_document import (
@@ -61,11 +61,95 @@ class DOCXProvider:
             "Subtitle": 1,
         }
 
+    # ------------------------------------------------------------------
+    def _extract_simple(self, filepath: Path) -> UnifiedDocument:
+        """Simple docx path for parity/gold fixtures.
+
+        - Uses python-docx (not docx2python)
+        - One block per paragraph, one block per table
+        - No styling/metadata; deterministic and lightweight
+        """
+
+        doc = PythonDocxDocument(filepath)
+        blocks: List[BaseBlock] = []
+
+        doc_id = filepath.stem
+
+        def iter_block_items(parent):
+            from docx.oxml.ns import qn
+            from docx.table import _Cell, Table
+            from docx.text.paragraph import Paragraph
+
+            for child in parent.iterchildren():
+                if child.tag == qn("w:p"):
+                    yield Paragraph(child, parent)
+                elif child.tag == qn("w:tbl"):
+                    yield Table(child, parent)
+                elif child.tag == qn("w:sdt"):
+                    # content controls can wrap paragraphs/tables
+                    for sub in child.iterchildren():
+                        for item in iter_block_items(sub):
+                            yield item
+
+        for item in iter_block_items(doc.element.body):
+            if hasattr(item, "rows"):
+                # table
+                rows: List[List[str]] = []
+                for row in item.rows:
+                    rows.append([cell.text for cell in row.cells])
+                cells = []
+                for r_idx, r in enumerate(rows):
+                    for c_idx, cell in enumerate(r):
+                        cells.append(TableCell(row=r_idx, col=c_idx, content=cell or ""))
+                blocks.append(
+                    TableBlock(
+                        id=str(len(blocks)),
+                        type=BlockType.TABLE,
+                        content="table",
+                        metadata=BlockMetadata(page_number=1),
+                        rows=len(rows),
+                        cols=len(rows[0]) if rows else 0,
+                        cells=cells,
+                    )
+                )
+            else:
+                txt = getattr(item, "text", "").strip()
+                if not txt:
+                    continue
+                blocks.append(
+                    BaseBlock(
+                        id=str(len(blocks)),
+                        type=BlockType.PARAGRAPH,
+                        content=txt,
+                        metadata=BlockMetadata(page_number=1),
+                    )
+                )
+
+        unified = UnifiedDocument(
+            id=doc_id,
+            source_type=SourceType.DOCX,
+            blocks=blocks,
+            metadata=DocumentMetadata(
+                title=filepath.stem,
+                author=None,
+                created=None,
+                modified=None,
+                extra={},
+            ),
+        )
+
+        return ensure_hierarchy(unified)
+
     def extract_document(self, filepath: Union[str, Path]) -> UnifiedDocument:
         """Extract DOCX content to unified document format"""
         resolved_path, fetch_download = ensure_local_source(filepath)
         filepath = Path(resolved_path)
         logger.info(f"Extracting DOCX document: {filepath}")
+
+        # Default: simple, parity-friendly path (one paragraph/table per block).
+        # Opt out with DOCX_SIMPLE_MODE=0 to use the rich docx2python path.
+        if os.environ.get("DOCX_SIMPLE_MODE", "1").lower() in {"1", "true", "yes"}:
+            return self._extract_simple(filepath)
 
         # Optional: build numbering depth map (v2 opt-in)
         if os.environ.get("DOCX_USE_NUMBERING_DEPTH", "").lower() in {"1", "true"}:
@@ -128,7 +212,7 @@ class DOCXProvider:
             )
 
             logger.info(f"Extracted {len(blocks)} blocks from DOCX")
-            return doc
+            return ensure_hierarchy(doc, default_title=filepath.stem)
 
     def _generate_doc_id(self, filepath: Path) -> str:
         """Generate unique document ID"""

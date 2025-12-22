@@ -1,0 +1,9 @@
+{
+  "ok": true,
+  "summary": "Prompt is complete and aligned with schema",
+  "rationale": "All required keys are specified, examples match the schema, failure stub is provided, and rules enforce grounding in visual evidence.",
+  "citations": [],
+  "issues": [],
+  "highest_severity": "info",
+  "attempts": 1
+}

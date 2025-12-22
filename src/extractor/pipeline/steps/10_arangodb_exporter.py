@@ -23,17 +23,21 @@ from datetime import datetime
 import hashlib
 import struct
 import re
+from pydantic import BaseModel, Field, ValidationError
 
 # Direct, non-abstracted, top-level imports for core functionality
 from dotenv import find_dotenv, load_dotenv
 from loguru import logger
+from extractor.pipeline.utils.reliability import log_stage_error
 from rich.console import Console
 
 try:
     from arango import ArangoClient
     from arango.exceptions import ArangoError
     from arango.database import StandardDatabase
-except Exception:  # allow import without python-arango
+except Exception as exc:
+    log_stage_error('10_arangodb_exporter', exc, {'context': '10'})
+    raise
     ArangoClient = None  # type: ignore
 
     class ArangoError(Exception): ...  # type: ignore
@@ -57,6 +61,46 @@ from extractor.pipeline.utils.step_sanity import run_step_sanity
 console = Console()
 STEP_NAME = "10_arangodb_exporter"
 
+class PDFObject(BaseModel):
+    doc_id: str
+    doc_set_id: str
+    revision_id: str
+    trace_id: str
+    _key: str
+    object_index_in_doc: int
+    page_num: int
+    bbox: Any
+    object_type: str
+    text_content: str
+    embedding: Optional[list] = None
+    section_id: str
+    section_title: str
+    section_level: int
+    section_breadcrumbs: list
+    section_summary: Optional[Any] = None
+    data: dict
+    units: dict
+    rtm: dict
+    table_typing: Optional[dict] = None
+
+class SectionRecord(BaseModel):
+    section_id: str
+    title: str
+    level: int
+    parent_id: Optional[str] = None
+    breadcrumb: list = Field(default_factory=list)
+    section_hash: str
+    breadcrumb_hashes: list = Field(default_factory=list)
+    page_start: Optional[int] = None
+    page_end: Optional[int] = None
+    heading_block_id: Optional[str] = None
+    heading_bbox: Optional[Any] = None
+    doc_id: str
+    doc_set_id: str
+    revision_id: str
+
+
+
 
 def sanity() -> int:
     return run_step_sanity(STEP_NAME)
@@ -66,7 +110,9 @@ try:
     from pint import UnitRegistry  # type: ignore
     _HAVE_PINT = True
     _UREG = UnitRegistry()
-except Exception:
+except Exception as exc:
+    log_stage_error('10_arangodb_exporter', exc, {'context': '10'})
+    raise
     _HAVE_PINT = False
     _UREG = None  # type: ignore
 
@@ -88,7 +134,9 @@ def _ensure_embedder():
 
             EMBEDDING_MODEL = SentenceTransformer(EMBEDDING_MODEL_NAME)
             logger.success("Embedding model loaded")
-        except Exception as e:
+        except Exception as exc:
+            log_stage_error('10_arangodb_exporter', exc, {'context': '10'})
+            raise
             logger.warning(f"Embedding model unavailable; continuing without embeddings: {e}")
     return EMBEDDING_MODEL
 
@@ -145,6 +193,11 @@ def _fast_embedding(text: str, dim: int = 8) -> List[float]:
     return vals
 
 
+def _hash_path(parts: list[str]) -> str:
+    joined = "|".join(parts)
+    return hashlib.md5(joined.encode("utf-8")).hexdigest()
+
+
 @dataclass
 class SectionContext:
     section_id: str
@@ -152,6 +205,8 @@ class SectionContext:
     title: str
     level: int
     breadcrumb: List[str]
+    section_hash: str
+    breadcrumb_hashes: List[str]
 
 
 def _table_to_text(table: TableBlock) -> str:
@@ -242,23 +297,27 @@ def _collect_section_contexts(
     if hierarchy is None:
         return contexts_by_block, contexts_by_section
 
-    def _walk(node: HierarchyNode, breadcrumb: List[str]) -> None:
+    def _walk(node: HierarchyNode, breadcrumb: List[str], breadcrumb_hashes: List[str]) -> None:
         title = node.title or ""
         new_breadcrumb = breadcrumb + ([title] if title else [])
+        new_bh = breadcrumb_hashes + ([_hash_path(new_breadcrumb)] if title else breadcrumb_hashes)
         if node.level > 0:
+            section_hash = _hash_path(new_breadcrumb) if new_breadcrumb else _hash_path([node.id])
             context = SectionContext(
                 section_id=node.id,
                 heading_block_id=node.block_id,
                 title=title,
                 level=node.level,
                 breadcrumb=new_breadcrumb,
+                section_hash=section_hash,
+                breadcrumb_hashes=new_bh,
             )
             contexts_by_block[node.block_id] = context
             contexts_by_section[node.id] = context
         for child in node.children or []:
-            _walk(child, new_breadcrumb)
+            _walk(child, new_breadcrumb, new_bh)
 
-    _walk(hierarchy, [])
+    _walk(hierarchy, [], [])
     return contexts_by_block, contexts_by_section
 
 
@@ -312,7 +371,9 @@ def setup_arango_collection(db: StandardDatabase, collection_name: str):
         collection.add_persistent_index(fields=["section_id"], unique=False)
         try:
             collection.add_persistent_index(fields=["doc_id"], unique=False)
-        except Exception:
+        except Exception as exc:
+            log_stage_error('10_arangodb_exporter', exc, {'context': '10'})
+            raise
             pass
         # *** CRITICAL: Add an index on the ordering field for fast document reconstruction ***
         collection.add_persistent_index(fields=["object_index_in_doc"], unique=False)
@@ -341,8 +402,8 @@ def flatten_document_to_pdf_objects(
     *,
     skip_embeddings: bool = False,
     fast_embeddings: bool = False,
-) -> List[Dict[str, Any]]:
-    """Flatten a :class:`UnifiedDocument` into ordered Arango-ready objects."""
+) -> Tuple[List[Dict[str, Any]], List[SectionRecord]]:
+    """Flatten a :class:`UnifiedDocument` into ordered Arango-ready objects and section records."""
 
     unified_document = _coerce_unified_document(pipeline_data)
     summaries = {
@@ -366,12 +427,16 @@ def flatten_document_to_pdf_objects(
         if unified_document.hierarchy
         else (unified_document.blocks[0].id if unified_document.blocks else "document-root")
     )
+    root_breadcrumb = [root_title] if root_title else []
+    root_breadcrumb_hashes = [_hash_path(root_breadcrumb)] if root_breadcrumb else []
     root_context = SectionContext(
         section_id="document-root",
         heading_block_id=root_block_id,
         title=root_title or "Document",
         level=0,
-        breadcrumb=[root_title] if root_title else [],
+        breadcrumb=root_breadcrumb,
+        section_hash=_hash_path(root_breadcrumb or ["document-root"]),
+        breadcrumb_hashes=root_breadcrumb_hashes,
     )
 
     source_pdf = (
@@ -386,6 +451,45 @@ def flatten_document_to_pdf_objects(
     doc_set_id, revision_id = _derive_doc_set_and_revision(source_pdf or unified_document.id)
 
     ordered_objects: List[Dict[str, Any]] = []
+    sections_flat: List[SectionRecord] = []
+    block_index = {b.id: b for b in unified_document.blocks}
+
+    # Build section records (flatten hierarchy)
+    def _walk(node: HierarchyNode, parent_id: Optional[str], breadcrumb: List[str], breadcrumb_hashes: List[str]):
+        title = node.title or "Untitled"
+        sec_id = node.block_id or title
+        bc = breadcrumb + [title]
+        bh = breadcrumb_hashes + [_hash_path(bc)]
+        page_numbers = []
+        heading_block = block_index.get(node.block_id)
+        if heading_block and getattr(heading_block.metadata, 'page_number', None) is not None:
+            page_numbers.append(heading_block.metadata.page_number)
+        page_start = min(page_numbers) if page_numbers else None
+        page_end = max(page_numbers) if page_numbers else None
+        section_hash = _hash_path(bc)
+        sections_flat.append(
+            SectionRecord(
+                section_id=sec_id,
+                title=title,
+                level=node.level or 0,
+                parent_id=parent_id,
+                breadcrumb=bc,
+                section_hash=section_hash,
+                breadcrumb_hashes=bh,
+                page_start=page_start,
+                page_end=page_end,
+                heading_block_id=node.block_id,
+                heading_bbox=getattr(heading_block.metadata, 'bbox', None) if heading_block else None,
+                doc_id=doc_id,
+                doc_set_id=doc_set_id,
+                revision_id=revision_id,
+            )
+        )
+        for child in node.children or []:
+            _walk(child, sec_id, bc, bh)
+
+    if unified_document.hierarchy:
+        _walk(unified_document.hierarchy, None, [], [])
 
     for block in unified_document.blocks:
         if block.type == BlockType.HEADING:
@@ -415,7 +519,9 @@ def flatten_document_to_pdf_objects(
                 if embedder is not None:
                     try:
                         embedding = embedder.encode(text_content).tolist()  # type: ignore[attr-defined]
-                    except Exception as e:  # pragma: no cover - defensive
+                    except Exception as exc:
+                        log_stage_error('10_arangodb_exporter', exc, {'context': '10'})
+                        raise
                         logger.warning(f"Failed to generate embedding: {e}")
 
         units_norm = _normalize_units_in_text(text_content)
@@ -434,8 +540,7 @@ def flatten_document_to_pdf_objects(
                     cols.append({"name": name, "unit": unit, "type": "number" if unit else "unknown"})
                 table_typing = {"columns": cols}
 
-        ordered_objects.append(
-            {
+        obj_entry = {
                 "_key": key,
                 "doc_id": doc_id,
                 "doc_set_id": doc_set_id,
@@ -452,6 +557,8 @@ def flatten_document_to_pdf_objects(
                 "section_title": context.title,
                 "section_level": context.level,
                 "section_breadcrumbs": context.breadcrumb,
+                "section_hash": context.section_hash,
+                "breadcrumb_hashes": context.breadcrumb_hashes,
                 "section_summary": section_summary,
                 "data": block.model_dump(mode="json"),
                 "units": units_norm,
@@ -468,9 +575,21 @@ def flatten_document_to_pdf_objects(
                     "lean4_status": None,
                 },
             }
-        )
+        # Carry table merge metadata if present on the block content
+        if object_type == "Table":
+            content_dict = block.content if isinstance(block.content, dict) else {}
+            logical_table_key = content_dict.get("logical_table_key") or content_dict.get("logical_table_id")
+            merged_table = bool(content_dict.get("merged_table"))
+            merged_pages = content_dict.get("merged_pages")
+            if logical_table_key:
+                obj_entry["data"]["logical_table_key"] = logical_table_key
+            if merged_table:
+                obj_entry["data"]["merged_table"] = True
+            if merged_pages:
+                obj_entry["data"]["merged_pages"] = merged_pages
+        ordered_objects.append(obj_entry)
 
-    return ordered_objects
+    return ordered_objects, sections_flat
 
 
 # --- Main Orchestration and CLI ---
@@ -488,7 +607,7 @@ def run(
     """
     console.print("[bold green]Starting ArangoDB Export (Stage 10)[/bold green]")
 
-    stage_output_dir = output_dir / "10_arangodb_exporter"
+    stage_output_dir = Path(output_dir).resolve() / "10_arangodb_exporter"
     json_output_dir = stage_output_dir / "json_output"
     stage_output_dir.mkdir(parents=True, exist_ok=True)
     json_output_dir.mkdir(exist_ok=True)
@@ -498,7 +617,7 @@ def run(
     with open(summaries_json, "r") as f:
         summaries_data = json.load(f)
 
-    pdf_objects_to_load = flatten_document_to_pdf_objects(
+    pdf_objects_to_load, sections_flat = flatten_document_to_pdf_objects(
         reflowed_data,
         summaries_data,
         skip_embeddings=skip_embeddings,
@@ -552,7 +671,9 @@ def run(
                 ana = sec_analysis.get(sec_id)
                 if ana:
                     rtm.update(ana)
-    except Exception as e:
+    except Exception as exc:
+        log_stage_error('10_arangodb_exporter', exc, {'context': '10'})
+        raise
         logger.warning(f"RTM lean4_status enrichment failed: {e}")
 
     # Always materialize flattened JSON for downstream stages (Stage 11 and tooling)
@@ -561,14 +682,30 @@ def run(
         with open(flat_path, "w") as f:
             json.dump(pdf_objects_to_load, f, indent=2)
         logger.info(f"Wrote flattened data for Stage 11 to: {flat_path}")
-    except Exception as e:
+    except Exception as exc:
+        log_stage_error('10_arangodb_exporter', exc, {'context': '10'})
+        raise
         logger.warning(f"Failed to write flattened JSON (continuing): {e}")
+
+    # Sections export (flattened hierarchy)
+    try:
+        sections_path = json_output_dir / "10_sections.json"
+        validated_sections = [SectionRecord.model_validate(s) if not isinstance(s, SectionRecord) else s for s in sections_flat]
+        with open(sections_path, "w") as f:
+            json.dump([s.model_dump(mode="json") for s in validated_sections], f, indent=2)
+        logger.info(f"Wrote flattened sections to: {sections_path}")
+    except ValidationError as exc:
+        log_stage_error('10_arangodb_exporter', exc, {'context': '10_sections_validation'})
+        raise
+    except Exception as exc:
+        log_stage_error('10_arangodb_exporter', exc, {'context': '10_sections'})
+        raise
 
     if skip_export:
         console.print(
             "[yellow]--skip-export flag is set. Skipping ArangoDB export (flattened JSON already saved).[/yellow]"
         )
-        return None
+        return flat_path
 
     try:
         host = os.getenv("ARANGO_HOST", "localhost")
@@ -579,7 +716,7 @@ def run(
 
         if not password or ArangoClient is None:
             console.print("[yellow]Arango not configured/available → export skipped; flattened JSON already saved.[/yellow]")
-            return
+            return flat_path
 
         client = ArangoClient(hosts=f"http://{host}:{port}")
         db = client.db(db_name, username=user, password=password)
@@ -587,7 +724,7 @@ def run(
         logger.success(f"Connected to ArangoDB database '{db_name}'.")
     except (ArangoError, ValueError) as e:
         console.print(f"[yellow]Arango connection failed → export skipped ({e}); flattened JSON already saved.[/yellow]")
-        return None
+        return flat_path
 
     setup_arango_collection(db, collection_name)
 
@@ -608,10 +745,11 @@ def run(
 
         console.print("\n[bold green]✅ ArangoDB export complete.[/bold green]")
         console.print(f"   - Confirmation saved to: [cyan]{output_path}[/cyan]")
+        return output_path
 
     except ArangoError as e:
         console.print(f"[yellow]Bulk import failed → export skipped ({e}); flattened JSON present.[/yellow]")
-        return
+        return flat_path
 
 
 def debug_bundle(
@@ -635,6 +773,8 @@ def debug_bundle(
     stage_output_dir.mkdir(parents=True, exist_ok=True)
     json_output_dir.mkdir(exist_ok=True)
 
+    output_path: Path | None = None
+
     try:
         data = json.loads(bundle.read_text())
         if not isinstance(data, dict):
@@ -647,7 +787,9 @@ def debug_bundle(
             raise ValueError(
                 "Bundle must include 'unified_document' or non-empty 'reflowed_sections'"
             )
-    except Exception as e:
+    except Exception as exc:
+        log_stage_error('10_arangodb_exporter', exc, {'context': '10'})
+        raise
         raise ValueError(f"Failed to load bundle: {e}")
 
     reflowed_data = data  # treat the bundle itself as the reflowed payload
@@ -669,7 +811,7 @@ def debug_bundle(
         console.print(
             f"[green]Debug bundle: saved {len(pdf_objects_to_load)} flattened objects to {output_path}"
         )
-        return
+        return output_path
 
     # Optional export path (rare for debug-bundle)
     try:
@@ -683,7 +825,7 @@ def debug_bundle(
             console.print("[yellow]Arango not configured/available → export skipped; flattened JSON written.[/yellow]")
             output_path = json_output_dir / "10_flattened_data.json"
             output_path.write_text(json.dumps(pdf_objects_to_load, indent=2))
-            return None
+            return output_path
 
         client = ArangoClient(hosts=f"http://{host}:{port}")
         db = client.db(db_name, username=user, password=password)
@@ -693,7 +835,7 @@ def debug_bundle(
         console.print(f"[yellow]Arango connection failed → export skipped ({e}); flattened JSON written.[/yellow]")
         output_path = json_output_dir / "10_flattened_data.json"
         output_path.write_text(json.dumps(pdf_objects_to_load, indent=2))
-        return None
+        return output_path
 
     setup_arango_collection(db, collection_name)
     try:
@@ -710,9 +852,22 @@ def debug_bundle(
         output_path = json_output_dir / "10_export_confirmation.json"
         output_path.write_text(json.dumps(confirmation, indent=2))
         console.print(f"[green]Debug bundle: export complete. Confirmation saved to {output_path}")
+        return output_path
     except ArangoError as e:
         console.print(f"[yellow]Bulk import failed → export skipped ({e}); flattened JSON available.[/yellow]")
-        return
+        output_path = json_output_dir / "10_flattened_data.json"
+        output_path.write_text(json.dumps(pdf_objects_to_load, indent=2))
+        return output_path
+
+    # Fallback: if no explicit return occurred, provide the confirmation path if present.
+    if output_path is None:
+        confirmation = json_output_dir / "10_export_confirmation.json"
+        flattened = json_output_dir / "10_flattened_data.json"
+        if confirmation.exists():
+            return confirmation
+        if flattened.exists():
+            return flattened
+    return output_path
 
 
 # Minimal __main__ for convenience: import-safe, tiny, and optional.
@@ -720,7 +875,9 @@ if __name__ == "__main__":
     # Load .env only for direct invocation
     try:
         load_dotenv(find_dotenv(), override=True)
-    except Exception:
+    except Exception as exc:
+        log_stage_error('10_arangodb_exporter', exc, {'context': '10'})
+        raise
         pass
     import sys
 
@@ -754,6 +911,8 @@ if __name__ == "__main__":
             skip_embeddings=False,
             fast_embeddings=False,
         )
-    except Exception as e:
+    except Exception as exc:
+        log_stage_error('10_arangodb_exporter', exc, {'context': '10'})
+        raise
         logger.error(f"Stage 10 failed: {e}")
         sys.exit(1)

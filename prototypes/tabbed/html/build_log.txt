@@ -1,0 +1,43 @@
+
+> extractor-tabbed-ui@0.1.1 prebuild
+> node ../../../scripts/write_build_info.mjs
+
+Wrote /home/graham/workspace/experiments/extractor/prototypes/tabbed/html/public/build.json { git: '0b40ea26', built_at: '2025-11-30T17:15:54.428Z' }
+
+> extractor-tabbed-ui@0.1.1 build
+> vite build
+
+vite v5.4.20 building for production...
+transforming...
+✓ 22 modules transformed.
+x Build failed in 875ms
+error during build:
+[vite:esbuild] Transform failed with 1 error:
+/home/graham/workspace/experiments/extractor/prototypes/tabbed/html/src/pages/ClassicLayout.tsx:250:20: ERROR: Expected ";" but found "box"
+file: /home/graham/workspace/experiments/extractor/prototypes/tabbed/html/src/pages/ClassicLayout.tsx:250:20
+
+Expected ";" but found "box"
+248|          setCurrentPage(Math.max(1, Math.min(totalPages, Math.floor(page))));
+249|          const t = (type || defaultNewType) as string;
+250|          const id = `box-${Math.random().toString(36).slice(2,7)}`;
+   |                      ^
+251|          setPageBoxes(prev => [...prev, { id, type: t, instanceId: `${t.toLowerCase()}-${Math.random().toString(36).slice(2,5)}`, x, y, w, h }]);
+252|        }
+
+    at failureErrorWithLog (/home/graham/workspace/experiments/extractor/prototypes/tabbed/node_modules/vite/node_modules/esbuild/lib/main.js:1472:15)
+    at /home/graham/workspace/experiments/extractor/prototypes/tabbed/node_modules/vite/node_modules/esbuild/lib/main.js:755:50
+    at responseCallbacks.<computed> (/home/graham/workspace/experiments/extractor/prototypes/tabbed/node_modules/vite/node_modules/esbuild/lib/main.js:622:9)
+    at handleIncomingPacket (/home/graham/workspace/experiments/extractor/prototypes/tabbed/node_modules/vite/node_modules/esbuild/lib/main.js:677:12)
+    at Socket.readFromStdout (/home/graham/workspace/experiments/extractor/prototypes/tabbed/node_modules/vite/node_modules/esbuild/lib/main.js:600:7)
+    at Socket.emit (node:events:518:28)
+    at addChunk (node:internal/streams/readable:561:12)
+    at readableAddChunkPushByteMode (node:internal/streams/readable:512:3)
+    at Readable.push (node:internal/streams/readable:392:5)
+    at Pipe.onStreamRead (node:internal/stream_base_commons:189:23)
+npm error Lifecycle script `build` failed with error:
+npm error code 1
+npm error path /home/graham/workspace/experiments/extractor/prototypes/tabbed/html
+npm error workspace extractor-tabbed-ui@0.1.1
+npm error location /home/graham/workspace/experiments/extractor/prototypes/tabbed/html
+npm error command failed
+npm error command sh -c vite build

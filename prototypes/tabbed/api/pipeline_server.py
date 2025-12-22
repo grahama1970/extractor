@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import json
 import shutil
 import subprocess
@@ -44,6 +45,7 @@ class RunExternalRequest(BaseModel):
     boxes_by_page: Dict[int, List[Box]] = Field(default_factory=dict)
     results_dir: Optional[str] = None
     session: Optional[str] = None
+    mode: Optional[str] = "live"  # "live" default; deterministic only when explicitly requested
 
 
 app = FastAPI(title="Tabbed → Pipeline Bridge")
@@ -54,6 +56,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 def _resolve_pdf(req: RunExternalRequest) -> Path:
@@ -152,7 +156,8 @@ def run_external(req: RunExternalRequest):
 
     # Invoke run_all with external annotations
     env = os.environ.copy()
-    env.setdefault("PYTHONPATH", str(Path.cwd() / "src"))
+    env["PYTHONPATH"] = str(REPO_ROOT / "src")
+    env["PYTHON"] = sys.executable
     cmd = [
         env.get("PYTHON", "python"),
         "-m",
@@ -166,13 +171,18 @@ def run_external(req: RunExternalRequest):
         "--clean-pdf",
         str(clean_path),
         # Omit --validate here; UI path prioritizes finishing the run.
-        # Deterministic toggles (optional):
-        "--skip-llm03",
-        "--skip-descriptions06",
-        "--summary-only07",
-        "--skip-proving08",
-        "--fast-embeddings10",
     ]
+
+    mode = (req.mode or "live").lower().strip()
+    deterministic = mode in {"deterministic", "offline", "heuristic", "skip"}
+    if deterministic:
+        cmd.extend([
+            "--skip-llm03",
+            "--skip-descriptions06",
+            "--summary-only07",
+            "--skip-proving08",
+            "--fast-embeddings10",
+        ])
     proc = subprocess.run(cmd, env=env)
     ok = proc.returncode == 0
 
@@ -181,6 +191,7 @@ def run_external(req: RunExternalRequest):
     final_md = results / "final_report.md"
     return {
         "ok": ok,
+        "mode": mode,
         "results_dir": str(results),
         "summary_path": str(summary) if summary.exists() else None,
         "final_report_json": str(final_json) if final_json.exists() else None,

@@ -18,6 +18,7 @@ stages.
 
 from __future__ import annotations
 
+from extractor.pipeline.utils.reliability import log_stage_error
 import hashlib
 import re
 from collections import defaultdict
@@ -66,8 +67,9 @@ def _default_document_title(source_path: Optional[str], sections: Sequence[Dict[
     if source_path:
         try:
             return Path(source_path).stem
-        except Exception:
-            pass
+        except Exception as exc:
+            log_stage_error('unified_conversion.py', exc, {'context': 'unified_conversion.py'})
+            raise
     return "Document"
 
 
@@ -168,6 +170,9 @@ def _table_from_section(
         "title": table.get("title"),
         "pandas_metrics": metrics,
         "image_path": table.get("table_image_path"),
+        "logical_table_key": table.get("logical_table_key"),
+        "merged_table": table.get("merged_table"),
+        "merged_pages": table.get("merged_pages"),
     }
 
     return TableBlock(

@@ -34,8 +34,28 @@ pipeline-smoke:
 
 
 .PHONY: coco-export smoke-tabbed-api help setup setup-smokes smokes-python dev stop lint fmt type test api-smokes ux-health smokes ci scaffold smoke-issue \
-			gamified-e2e gamified-all gamified-all-fast gamified-codex gamified-cli \
-			smoke-07-reflow-min bundle-tabbed state-of-project
+		gamified-e2e gamified-all gamified-all-fast gamified-codex gamified-cli \
+		smoke-07-reflow-min bundle-tabbed state-of-project
+
+.PHONY: smoke-parity-gold
+smoke-parity-gold:
+	PYTHONPATH=src python scripts/smokes/pipeline/smoke_parity_canonical.py \
+	  --flat data/results/parity_smoke/pdf/10_arangodb_exporter/json_output/10_flattened_data.json
+	python scripts/smokes/pipeline/smoke_parity_clean.py \
+	  --pdf-flat data/results/parity_smoke/pdf/10_arangodb_exporter/json_output/10_flattened_data.json \
+	  --clean-flat data/input/parity_hand/reflat.json data/input/parity_hand/reflat_docx.json data/input/parity_hand/reflat_md.json data/input/parity_hand/reflat_rst.json data/input/parity_hand/reflat_epub.json \
+	  --ignore-ext pptx,xlsx
+	@echo "Info report (non-blocking):" && \
+	python scripts/smokes/pipeline/smoke_parity_report.py \
+	  --refs data/results/parity_smoke/pdf/10_arangodb_exporter/json_output/10_flattened_data.json \
+	  --candidates data/input/parity_hand/reflat_pptx.json data/input/parity_hand/reflat_xlsx.json
+
+.PHONY: smoke-parity-xml
+smoke-parity-xml:
+	PYTHONPATH=src python scripts/smokes/pipeline/smoke_parity_xml.py
+
+.PHONY: smoke-parity-all
+smoke-parity-all: smoke-parity-gold smoke-parity-xml
 
 help:
 	@echo "Common targets:"
@@ -84,16 +104,17 @@ help:
 	@echo "  make smokes-pipeline-db      # run DB-backed Stage 10→12 smokes (Arango required)"
 	@echo "  make arango-clean-db         # drop test DB (ARANGO_DATABASE)"
 	@echo "  make smokes-pipeline-happy   # single-command happy-path run + gold validation"
-		@echo "  make steps-happy             # run happy path on BHT and print report/summary paths"
+	@echo "  make steps-happy             # run happy path on BHT and print report/summary paths"
 	@echo "  make smokes-pipeline-skip01  # happy-path with external annotations (skip Stage 01)"
-		@echo "  make smokes-pipeline-api-upsert  # run extract + upsert API smoke (Arango required)"
-		@echo "  make smokes-pipeline-api-chat    # run chat smoke (after upsert)"
-		@echo "  make smoke-ui-extract-load       # UI smoke (server must be running)"
-		@echo "  make smoke-ui-extract-load-cdp   # UI CDP smoke (Chrome --remote-debugging-port=9222)"
-		@echo "  make ux-autofix                   # Detect Vite overlay via CDP/Puppeteer and auto-fix JSX"
-		@echo "  make lint-ruff-extractor         # Run Ruff only on extractor src/ (focused)"
-		@echo "  make smokes-api-external     # API bridge: run-external with UI boxes"
-		@echo "  make extract-fast PDF=... OUT=... # quick text-only PDF dump (PyMuPDF)"
+	@echo "  make smokes-pipeline-api-upsert  # run extract + upsert API smoke (Arango required)"
+	@echo "  make smokes-pipeline-api-chat    # run chat smoke (after upsert)"
+	@echo "  make smoke-ui-extract-load       # UI smoke (server must be running)"
+	@echo "  make smoke-ui-extract-load-cdp   # UI CDP smoke (Chrome --remote-debugging-port=9222)"
+	@echo "  make ux-autofix                   # Detect Vite overlay via CDP/Puppeteer and auto-fix JSX"
+	@echo "  make lint-ruff-extractor         # Run Ruff only on extractor src/ (focused)"
+	@echo "  make smoke-parity-gold           # deterministic parity (canonical flat vs clean artifacts)"
+	@echo "  make smokes-api-external     # API bridge: run-external with UI boxes"
+	@echo "  make extract-fast PDF=... OUT=... # quick text-only PDF dump (PyMuPDF)"
 	@echo "  make bootstrap-smokes # Install minimal deps to run smokes (venv + PYTHONPATH)"
 	@echo "  make prompt-opt PROMPT=path.md        # Optimize a raw prompt"
 	@echo "  make prompt-compile RESEARCH=path.md  # Compile research to a prompt (LLM)"

@@ -22,7 +22,7 @@ from typing import Optional
 
 import typer
 
-from extractor.pipeline.utils.codex_call import run_codex_exec
+from extractor.pipeline.utils.deprecated_codex_call import run_codex_exec
 
 app = typer.Typer(help="Smoke: launch one codex instance with a prompt file and wait.")
 
@@ -77,4 +77,3 @@ def run(
 
 if __name__ == "__main__":
     app()
-

@@ -28,7 +28,7 @@ from typing import List, Optional
 
 import typer
 
-from extractor.pipeline.utils.codex_call import run_codex_exec
+from extractor.pipeline.utils.deprecated_codex_call import run_codex_exec
 
 app = typer.Typer(help="Codex exec smoke: launch one child and wait for completion.")
 
@@ -83,4 +83,3 @@ def run(
 
 if __name__ == "__main__":
     app()
-

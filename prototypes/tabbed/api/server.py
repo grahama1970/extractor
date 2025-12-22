@@ -795,67 +795,6 @@ async def api_save_annotations(payload: AnnotationPayload):
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
-@app.post("/api/pipeline/run")
-async def api_pipeline_run(payload: Dict[str, Any], tasks: BackgroundTasks):
-    """
-    Trigger the extractor pipeline for a given PDF.
-    Payload: { rel: "file.pdf", options: { ... } }
-    """
-    try:
-        rel = payload.get("rel")
-        if not rel:
-             return JSONResponse({"ok": False, "error": "missing_rel"}, status_code=400)
-             
-        fp = _abs_pdf_path(rel)
-        
-        # Output directory: data/results/pipeline/{stem}_{timestamp}
-        # For the prototype, we might want a stable output dir or per-run.
-        # Let's use a stable dir for now to make "latest" easy to find, 
-        # or rely on the pipeline's default behavior.
-        # Let's use: data/results/pipeline/{stem}
-        stem = Path(fp).stem
-        out_dir = Path(REPO_ROOT) / "data" / "results" / "pipeline" / stem
-        
-        # Construct command
-        # python -m extractor.pipeline --pdf ... --out ...
-        cmd = [
-            sys.executable,
-            "-m", "extractor.pipeline",
-            "--pdf", str(fp),
-            "--out", str(out_dir),
-            "--stop-on-fail" # Fail fast for UI feedback
-        ]
-        
-        # Add optional flags
-        opts = payload.get("options") or {}
-        if opts.get("summary_only"):
-            cmd.append("--summary-only")
-        if opts.get("skip_scillm"):
-            cmd.append("--skip-scillm-preflight")
-            
-        logger_cmd = " ".join(cmd)
-        print(f"Queueing pipeline run: {logger_cmd}")
-        
-        def _run_pipeline_task(command):
-            try:
-                # Run synchronously in the background thread
-                subprocess.run(command, check=True, cwd=str(REPO_ROOT))
-                # Update a "latest_run.json" sidecar or similar if needed
-                # For now, the pipeline updates its own manifest
-            except subprocess.CalledProcessError as e:
-                print(f"Pipeline failed: {e}")
-            except Exception as e:
-                print(f"Pipeline error: {e}")
-
-        tasks.add_task(_run_pipeline_task, cmd)
-        
-        return {
-            "ok": True, 
-            "status": "queued", 
-            "out_dir": str(out_dir),
-            "command": logger_cmd
-        }
-        
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
@@ -958,6 +897,16 @@ async def api_set_status(payload: StatusPayload):
 class RunPipelineRequest(BaseModel):
     rel: str
     boxes_by_page: Optional[Dict[str, List[Dict[str, Any]]]] = None
+    mode: Optional[str] = "live"  # "live" (LLM-on) or "deterministic" (offline-ish)
+
+
+DETERMINISTIC_FLAGS = [
+    "--skip-llm03",
+    "--skip-descriptions06",
+    "--summary-only07",
+    "--skip-proving08",
+    "--fast-embeddings10",
+]
 
 def _to_pipeline_annotations(pdf: Path, boxes_by_page: Dict[str, List[Dict[str, Any]]]) -> Dict:
     # Re-implement or import logic. For simplicity, we'll implement a basic version here
@@ -1016,49 +965,66 @@ async def api_run_pipeline(payload: RunPipelineRequest, tasks: BackgroundTasks):
     """Run the pipeline on a document, optionally with annotations."""
     try:
         pdf_path = Path(_abs_pdf_path(payload.rel))
-        
-        # If annotations provided, save them first (or use them for this run)
-        # We'll use a temp run directory
+
+        # 1. Update sidecar if annotations provided (ensure pipeline sees latest state)
+        if payload.boxes_by_page:
+            sidecar = pdf_path.parent / f".{pdf_path.name}.annotations.json"
+            data = {
+                "rel": payload.rel,
+                "boxes_by_page": payload.boxes_by_page,
+                "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                "updated_by": "pipeline_trigger"
+            }
+            sidecar.write_text(json.dumps(data, indent=2))
+
+        # 2. Setup run directory
         run_id = f"run_{int(time.time())}_{os.getpid()}"
         results_dir = Path(ARTIFACTS_ROOT) / "pipeline_runs" / run_id
         results_dir.mkdir(parents=True, exist_ok=True)
 
-        cmd = [sys.executable, "-m", "extractor.pipeline.run_all", "--pdf", str(pdf_path), "--results", str(results_dir)]
-        
-        # Handle annotations
-        if payload.boxes_by_page:
-            # Generate 01_annotations.json
-            stage01 = results_dir / "01_annotation_processor" / "json_output"
-            stage01.mkdir(parents=True, exist_ok=True)
-            
-            annos = _to_pipeline_annotations(pdf_path, payload.boxes_by_page)
-            anno_path = stage01 / "01_annotations.json"
-            anno_path.write_text(json.dumps(annos, indent=2))
-            
-            # Copy clean PDF
-            clean_path = results_dir / "01_annotation_processor" / f"{pdf_path.stem}_clean.pdf"
-            shutil.copy(pdf_path, clean_path)
-            
-            cmd.extend(["--annotations-json", str(anno_path), "--clean-pdf", str(clean_path)])
-            
-            # Add some speed flags for interactive use
-            cmd.extend(["--skip-llm03", "--skip-descriptions06", "--summary-only07", "--skip-proving08", "--fast-embeddings10"])
+        # 3. Construct command
+        mode = (payload.mode or "live").lower().strip()
+        deterministic = mode in {"deterministic", "offline", "heuristic", "skip"}
 
-        # Run in background (or blocking for now to return status? UI expects async job usually)
-        # For this prototype, we'll run blocking to ensure it works, or use subprocess.Popen
-        # Let's use blocking for simplicity of feedback in this step, or Popen if we want to return job ID.
-        # The frontend expects a job ID.
-        
-        # We'll write a marker file
+        cmd = [
+            sys.executable, "-m", "extractor.pipeline",
+            "--pdf", str(pdf_path),
+            "--out", str(results_dir),
+            "--stop-on-fail"
+        ]
+        if deterministic:
+            cmd.extend(DETERMINISTIC_FLAGS)
+
+        # 4. Run (async/background)
         job_file = results_dir / "job.json"
-        job_file.write_text(json.dumps({"id": run_id, "status": "running", "start_time": time.time(), "source_pdf": str(pdf_path)}))
+        job_file.write_text(json.dumps({
+            "id": run_id, 
+            "status": "running", 
+            "start_time": time.time(), 
+            "source_pdf": str(pdf_path),
+            "mode": mode,
+        }))
 
         def run_proc():
             try:
-                subprocess.run(cmd, check=True)
-                job_file.write_text(json.dumps({"id": run_id, "status": "done", "end_time": time.time(), "out_dir": str(results_dir), "source_pdf": str(pdf_path)}))
+                logger_cmd = " ".join(cmd)
+                print(f"Starting pipeline job {run_id}: {logger_cmd}")
+                subprocess.run(cmd, check=True, cwd=str(REPO_ROOT))
+                job_file.write_text(json.dumps({
+                    "id": run_id, 
+                    "status": "done", 
+                    "end_time": time.time(), 
+                    "out_dir": str(results_dir), 
+                    "source_pdf": str(pdf_path),
+                    "mode": mode,
+                }))
             except Exception as e:
-                job_file.write_text(json.dumps({"id": run_id, "status": "error", "error": str(e)}))
+                print(f"Pipeline job {run_id} failed: {e}")
+                job_file.write_text(json.dumps({
+                    "id": run_id, 
+                    "status": "error", 
+                    "error": str(e)
+                }))
 
         tasks.add_task(run_proc)
         
@@ -1092,129 +1058,169 @@ async def api_pipeline_annotations(job_id: str):
     """
     try:
         run_dir = Path(ARTIFACTS_ROOT) / "pipeline_runs" / job_id
-        
+
         # Check job completed
         job_file = run_dir / "job.json"
         if not job_file.exists():
             return {"ok": False, "error": "Job not found"}
-        
+
         job_data = json.loads(job_file.read_text())
         if job_data.get("status") != "done":
             return {"ok": False, "error": f"Job not complete (status: {job_data.get('status')})"}
-        
+
         # Find PDF path from the run (was passed as --pdf argument)
-        # Check for source_pdf in job.json or reconstruct from artifacts
         pdf_path = None
         if "source_pdf" in job_data:
             pdf_path = Path(job_data["source_pdf"])
         else:
-            # Try to find PDF in 01_annotation_processor directory
             clean_pdf_candidates = list((run_dir / "01_annotation_processor").glob("*_clean.pdf"))
             if clean_pdf_candidates:
                 pdf_path = clean_pdf_candidates[0]
-        
+
         if not pdf_path or not pdf_path.exists():
             return {"ok": False, "error": "Source PDF not found"}
-        
-        # Open PDF to get page dimensions for coordinate conversion
+
         import fitz
         doc = fitz.open(str(pdf_path))
-        
+
         boxes_by_page: Dict[str, List[Dict[str, Any]]] = {}
-        
+
+        def _add_box(page_idx: int, box: Dict[str, Any]):
+            try:
+                page_idx = int(page_idx)
+            except Exception:
+                return
+            if page_idx < 0 or page_idx >= len(doc):
+                return
+            page_num = page_idx + 1
+            page = doc[page_idx]
+            pw, ph = page.rect.width, page.rect.height
+            x0, y0, x1, y1 = box.get("bbox", [0, 0, 0, 0])
+            x = x0 / pw
+            y = y0 / ph
+            w = (x1 - x0) / pw
+            h = (y1 - y0) / ph
+            x = max(0.0, min(1.0, x))
+            y = max(0.0, min(1.0, y))
+            w = max(0.0, min(1.0, w))
+            h = max(0.0, min(1.0, h))
+            page_key = str(page_num)
+            boxes_by_page.setdefault(page_key, []).append({
+                "type": box.get("type", "Region"),
+                "instanceId": box.get("instanceId") or box.get("id") or f"pipeline-{len(boxes_by_page[page_key])}",
+                "x": max(0, min(1, x)),
+                "y": max(0, min(1, y)),
+                "w": max(0, min(1, w)),
+                "h": max(0, min(1, h)),
+                "confidence": box.get("confidence", 0.0),
+                "source": "pipeline",
+                "stage": box.get("stage"),
+                "title": box.get("title", ""),
+            })
+
+        # Prefer 09a overlays if present (final reconciled view)
+        annotations_path = run_dir / "09a_pdf_annotator" / "json_output" / "annotations.json"
+        if annotations_path.exists():
+            try:
+                data09a = json.loads(annotations_path.read_text())
+                overlays = data09a.get("overlays", [])
+                for ov in overlays:
+                    page_idx = int(ov.get("page", 0))
+                    bbox = ov.get("render_bbox") or ov.get("bbox") or ov.get("pdf_bbox")
+                    if not bbox or len(bbox) != 4:
+                        continue
+                    kind = str(ov.get("kind", "")).lower()
+                    if "table" in kind:
+                        typ = "Table"
+                    elif "figure" in kind:
+                        typ = "Figure"
+                    elif "section" in kind:
+                        typ = "Section"
+                    elif "requirement" in kind:
+                        typ = "Requirement"
+                    else:
+                        typ = kind.title() if kind else "Region"
+                    title = ov.get("title") or ov.get("_label") or ov.get("label") or ov.get("logical_table_key") or ""
+                    conf = ov.get("probability") or ov.get("score") or ov.get("confidence") or 0.0
+                    _add_box(page_idx, {
+                        "bbox": bbox,
+                        "type": typ,
+                        "instanceId": ov.get("stable_id") or ov.get("overlay_id"),
+                        "confidence": conf,
+                        "stage": "09a",
+                        "title": title,
+                    })
+                if boxes_by_page:
+                    doc.close()
+                    return {"ok": True, "boxes_by_page": boxes_by_page, "job_id": job_id}
+            except Exception:
+                # Fall back to raw stages if parsing 09a fails
+                pass
+
         # Extract tables from Stage 05
         tables_file = run_dir / "05_table_extractor" / "json_output" / "05_tables.json"
         if tables_file.exists():
-            tables_data =json.loads(tables_file.read_text())
+            tables_data = json.loads(tables_file.read_text())
             for table in tables_data.get("tables", []):
-                # Get page number (pipeline uses 0-based page_index)
                 page_idx = table.get("page_index", table.get("page", 0))
-                page_num = page_idx + 1  # Convert to 1-based for UI
-                
-                # Get bbox in PDF coordinates [x0, y0, x1, y1]
                 bbox = table.get("bbox")
                 if not bbox or len(bbox) != 4:
                     continue
-                
-                # Get page dimensions
-                page = doc[page_idx]
-                pw, ph = page.rect.width, page.rect.height
-                
-                # Convert PDF coords to normalized 0-1
-                x0, y0, x1, y1 = bbox
-                x = x0 / pw
-                y = y0 / ph
-                w = (x1 - x0) / pw
-                h = (y1 - y0) / ph
-                
-               # Ensure page entry exists
-                page_key = str(page_num)
-                if page_key not in boxes_by_page:
-                    boxes_by_page[page_key] = []
-                
-                # Create annotation box
-                table_id = f"pipeline-table-{len(boxes_by_page[page_key])}"
-                boxes_by_page[page_key].append({
+                conf = 0.0
+                if table.get("camelot_metrics"):
+                    conf = table.get("camelot_metrics", {}).get("accuracy", 0.0)
+                _add_box(page_idx, {
+                    "bbox": bbox,
                     "type": "Table",
-                    "instanceId": table_id,
-                    "x": max(0, min(1, x)),
-                    "y": max(0, min(1, y)),
-                    "w": max(0, min(1, w)),
-                    "h": max(0, min(1, h)),
-                    "confidence": table.get("camelot_metrics", {}).get("accuracy", 0.0) if table.get("camelot_metrics") else 0.0,
-                    "source": "pipeline",
-                    "stage": "05"
+                    "instanceId": f"pipeline-table-{page_idx}-{len(boxes_by_page.get(str(page_idx+1), []))}",
+                    "confidence": conf,
+                    "stage": "05",
                 })
-        
+
         # Extract figures from Stage 06
         figures_file = run_dir / "06_figure_extractor" / "json_output" / "06_figures.json"
         if figures_file.exists():
             figures_data = json.loads(figures_file.read_text())
             for figure in figures_data.get("figures", []):
-                # Get page number
                 page_idx = figure.get("page_idx", figure.get("page", 0))
-                page_num = page_idx + 1
-                
-                # Get bbox
                 bbox = figure.get("bbox", figure.get("bbox0"))
                 if not bbox or len(bbox) != 4:
                     continue
-                
-                # Get page dimensions
-                page = doc[page_idx]
-                pw, ph = page.rect.width, page.rect.height
-                
-                # Convert to normalized
-                x0, y0, x1, y1 = bbox
-                x = x0 / pw
-                y = y0 / ph
-                w = (x1 - x0) / pw
-                h = (y1 - y0) / ph
-                
-                page_key = str(page_num)
-                if page_key not in boxes_by_page:
-                    boxes_by_page[page_key] = []
-                
-                figure_id = f"pipeline-figure-{len(boxes_by_page[page_key])}"
-                boxes_by_page[page_key].append({
+                _add_box(page_idx, {
+                    "bbox": bbox,
                     "type": "Figure",
-                    "instanceId": figure_id,
-                    "x": max(0, min(1, x)),
-                    "y": max(0, min(1, y)),
-                    "w": max(0, min(1, w)),
-                    "h": max(0, min(1, h)),
+                    "instanceId": f"pipeline-figure-{page_idx}-{len(boxes_by_page.get(str(page_idx+1), []))}",
+                    "stage": "06",
                     "title": figure.get("title", ""),
-                    "source": "pipeline",
-                    "stage": "06"
                 })
-        
-        # Note: Stage 07 sections may not always have bbox data
-        # Skipping for now, can add if needed
-        
+
+        # Sections (Stage 04) – allow structural verification when 09a overlays are unavailable
+        sections_file = run_dir / "04_section_builder" / "json_output" / "04_sections.json"
+        if sections_file.exists():
+            try:
+                sections_data = json.loads(sections_file.read_text())
+                for section in sections_data.get("sections", []):
+                    page_idx = section.get("page_start") or section.get("page") or 0
+                    bbox = section.get("bbox")
+                    if not bbox or len(bbox) != 4:
+                        continue
+                    title = section.get("title") or ""
+                    conf = section.get("quality_score") or section.get("surya_confidence") or 0.0
+                    _add_box(int(page_idx), {
+                        "bbox": bbox,
+                        "type": "Section",
+                        "instanceId": section.get("id"),
+                        "confidence": conf,
+                        "stage": "04",
+                        "title": title,
+                    })
+            except Exception:
+                pass
+
         doc.close()
-        
+
         return {"ok": True, "boxes_by_page": boxes_by_page, "job_id": job_id}
-        
+
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -1974,6 +1980,7 @@ class _RunExternalReq(BaseModel):
     boxes_by_page: Dict[int, List[_Box]] = Field(default_factory=dict)
     results_dir: Optional[str] = None
     session: Optional[str] = None
+    mode: Optional[str] = "live"  # "live" (LLM on) or "deterministic" (debug only)
 
 
 class _SaveAnnotationsReq(BaseModel):
@@ -2196,8 +2203,11 @@ def api_pipeline_run_external(req: _RunExternalReq):
     cmd = [ sys.executable, "-m", "extractor.pipeline.run_all",
         "--pdf", str(pdf), "--results", str(results),
         "--annotations-json", str(anno_ext), "--clean-pdf", str(clean_path),
-        "--skip-llm03", "--skip-descriptions06", "--summary-only07", "--skip-proving08", "--fast-embeddings10",
     ]
+    mode = (req.mode or "live").lower().strip()
+    deterministic = mode in {"deterministic", "offline", "heuristic", "skip"}
+    if deterministic:
+        cmd.extend(DETERMINISTIC_FLAGS)
     proc = subprocess.run(cmd, env=env)
     ok = proc.returncode == 0
     summary = Path("scripts/artifacts/run_summary_happy.json")
@@ -2208,7 +2218,7 @@ def api_pipeline_run_external(req: _RunExternalReq):
         pointer.write_text(json.dumps({"results_dir": str(results)}, indent=2))
     except Exception:
         pass
-    return { 'ok': ok, 'results_dir': str(results),
+    return { 'ok': ok, 'mode': mode, 'results_dir': str(results),
              'summary_path': str(summary) if summary.exists() else None,
              'final_report_json': str(final_json) if final_json.exists() else None,
              'final_report_md': str(final_md) if final_md.exists() else None }

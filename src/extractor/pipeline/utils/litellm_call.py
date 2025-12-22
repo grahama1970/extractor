@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from extractor.pipeline.utils.reliability import log_stage_error
 """
 Thin, test-oriented CLI and helpers compatible with prior `litellm_call` usage.
 
@@ -43,7 +44,9 @@ async def litellm_call(prompts: List[Any], **kwargs) -> List[str]:
     # Lazy import to avoid hard dependency in test collection
     try:
         from .scillm_router import get_text_router
-    except Exception:
+    except Exception as exc:
+        log_stage_error('litellm_call.py', exc, {'context': 'litellm_call.py'})
+        raise
         get_text_router = None  # type: ignore
 
     if not get_text_router:
@@ -87,7 +90,9 @@ async def litellm_call(prompts: List[Any], **kwargs) -> List[str]:
                 out.append(json.dumps({"content": text}))
             else:
                 out.append(text)
-        except Exception as e:
+        except Exception as exc:
+            log_stage_error('litellm_call.py', exc, {'context': 'litellm_call.py'})
+            raise
             out.append(json.dumps({"error": {"type": type(e).__name__, "message": str(e)[:200]}}) if wrap_json else "")
     return out
 
@@ -100,7 +105,9 @@ def _looks_like_json(s: str) -> bool:
         try:
             json.loads(s2)
             return True
-        except Exception:
+        except Exception as exc:
+            log_stage_error('litellm_call.py', exc, {'context': 'litellm_call.py'})
+            raise
             return False
     return False
 

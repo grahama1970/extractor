@@ -69,7 +69,7 @@ def resolve_codex_binary():
 ## 2. Environment Inheritance & PYTHONPATH
 
 ### Problem you saw
-`RuntimeError: codex_call.run_codex_exec unavailable; set PYTHONPATH=./src` indicates the module import path (e.g. `extractor.pipeline.utils.codex_call`) wasn’t on `sys.path`.
+`RuntimeError: deprecated_codex_call.run_codex_exec unavailable; set PYTHONPATH=./src` indicates the module import path (e.g. `extractor.pipeline.utils.deprecated_codex_call`) wasn’t on `sys.path`.
 
 ### How to determine required PYTHONPATH
 From repo root (where `src/` exists):
@@ -79,7 +79,7 @@ import sys, os
 print("CWD:", os.getcwd())
 print("sys.path:", sys.path)
 try:
-    import extractor.pipeline.utils.codex_call
+    import extractor.pipeline.utils.deprecated_codex_call
     print("IMPORT_OK")
 except Exception as e:
     print("IMPORT_FAIL:", e)
@@ -247,8 +247,8 @@ python - <<'EOF'
 import sys, os
 print("sys.path=", sys.path)
 try:
-    import extractor.pipeline.utils.codex_call as m
-    print("IMPORT extractor.pipeline.utils.codex_call OK:", getattr(m, "__file__", None))
+    import extractor.pipeline.utils.deprecated_codex_call as m
+    print("IMPORT extractor.pipeline.utils.deprecated_codex_call OK:", getattr(m, "__file__", None))
 except Exception as e:
     print("IMPORT FAILED:", e)
 EOF
@@ -442,7 +442,7 @@ Key features:
 
 | Failure | Likely Root Cause | Fix |
 |---------|------------------|-----|
-| `codex_call.run_codex_exec unavailable` | Missing PYTHONPATH/src not added | Export `PYTHONPATH=<repo_root>/src` before import or set in env for the agent |
+| `deprecated_codex_call.run_codex_exec unavailable` | Missing PYTHONPATH/src not added | Export `PYTHONPATH=<repo_root>/src` before import or set in env for the agent |
 | `codex CLI not found on PATH` | Non-login shell lacks PATH additions | Resolve absolute binary once; configure `CODEX_BINARY_PATH` |
 | Child blocked / killed | Missing stdout consumption OR idle limit / supervisor kill | Ensure continuous read; implement idle + wall timeout; confirm no external watchdog |
 | Backend autostart fails | Not needed; missing heavy deps or blocked port | Skip uvicorn for smoke tests; run Codex directly |
@@ -540,7 +540,7 @@ Here’s a **practical unblocker**: direct answers (what to assume/do), a **copy
 * **Do not assume** `PYTHONPATH=./src`. Set it explicitly for the subprocess:
 
   * `PYTHONPATH="<repo_root>/src:${PYTHONPATH:-}"`.
-* If you need to import `extractor.pipeline.utils.codex_call`, require:
+* If you need to import `extractor.pipeline.utils.deprecated_codex_call`, require:
 
   * `PYTHONPATH` includes repo `src`
   * Minimal runtime deps installed (not the full dev stack)
@@ -603,10 +603,10 @@ print("sys.executable:", sys.executable)
 print("sys.version:", sys.version.split()[0])
 sys.path.insert(0, os.path.abspath("src"))
 try:
-  import extractor.pipeline.utils.codex_call as m
-  print("codex_call import: OK; module:", m.__name__)
+  import extractor.pipeline.utils.deprecated_codex_call as m
+  print("deprecated_codex_call import: OK; module:", m.__name__)
 except Exception as e:
-  print("codex_call import: FAIL:", repr(e))
+  print("deprecated_codex_call import: FAIL:", repr(e))
 PY
 echo
 echo "[repo-root codex exec sanity]"

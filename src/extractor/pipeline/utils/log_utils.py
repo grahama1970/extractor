@@ -1,3 +1,4 @@
+from extractor.pipeline.utils.reliability import log_stage_error
 """
 Module: log_utils.py
 Description: Utility functions and helpers for log utils
@@ -220,7 +221,9 @@ def sanitize_data_url(value: Any, mode: str = "redact", max_str_len: int = 48) -
             sha = hashlib.sha256(data.encode("utf-8", "ignore")).hexdigest()
             approx = int(len(data) * 3 / 4)
             return f"<data-url sha256={sha} bytes≈{approx}>"
-        except Exception:
+        except Exception as exc:
+            log_stage_error('log_utils.py', exc, {'context': 'log_utils.py'})
+            raise
             return "<data-url sha256=error>"
     if mode_l == "truncate":
         return truncate_large_value(value, max_str_len=max_str_len)
@@ -318,7 +321,9 @@ if __name__ == "__main__":
         log_safe_results(invalid_input_1)
     except TypeError as e:
         print(f" Successfully caught expected error: {e}")
-    except Exception as e:
+    except Exception as exc:
+        log_stage_error('log_utils.py', exc, {'context': 'log_utils.py'})
+        raise
         print(f" Caught unexpected error: {e}")
 
     # Test Case 2: Input is a list, but contains non-dict elements
@@ -328,7 +333,9 @@ if __name__ == "__main__":
         log_safe_results(invalid_input_2)
     except TypeError as e:
         print(f" Successfully caught expected error: {e}")
-    except Exception as e:
+    except Exception as exc:
+        log_stage_error('log_utils.py', exc, {'context': 'log_utils.py'})
+        raise
         print(f" Caught unexpected error: {e}")
 
     # Test Case 3: Input is a list of simple types
@@ -338,7 +345,9 @@ if __name__ == "__main__":
         log_safe_results(invalid_input_3)
     except TypeError as e:
         print(f" Successfully caught expected error: {e}")
-    except Exception as e:
+    except Exception as exc:
+        log_stage_error('log_utils.py', exc, {'context': 'log_utils.py'})
+        raise
         print(f" Caught unexpected error: {e}")
 
     # Test Case 4: Input is None
@@ -348,7 +357,9 @@ if __name__ == "__main__":
         log_safe_results(invalid_input_4)
     except TypeError as e:
         print(f" Successfully caught expected error: {e}")
-    except Exception as e:
+    except Exception as exc:
+        log_stage_error('log_utils.py', exc, {'context': 'log_utils.py'})
+        raise
         print(f" Caught unexpected error: {e}")
 
     # Test Case 5: Empty list (should be valid)
@@ -360,7 +371,9 @@ if __name__ == "__main__":
             print(" Successfully processed empty list.")
         else:
             print(f" Processing empty list resulted in unexpected output: {result}")
-    except Exception as e:
+    except Exception as exc:
+        log_stage_error('log_utils.py', exc, {'context': 'log_utils.py'})
+        raise
         print(f" Caught unexpected error processing empty list: {e}")
 
     # Test API logging functions
@@ -370,5 +383,7 @@ if __name__ == "__main__":
         log_api_response("TestService", {"result": "This is a test result", "status": "success"})
         log_api_error("TestService", Exception("Test error"), {"model": "test-model"})
         print(" API logging functions executed successfully.")
-    except Exception as e:
+    except Exception as exc:
+        log_stage_error('log_utils.py', exc, {'context': 'log_utils.py'})
+        raise
         print(f" Error testing API logging functions: {e}")

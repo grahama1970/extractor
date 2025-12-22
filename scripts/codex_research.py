@@ -8,7 +8,7 @@ from typing import Optional
 import typer
 from loguru import logger
 
-from extractor.pipeline.utils.codex_call import run_codex_exec
+from extractor.pipeline.utils.deprecated_codex_call import run_codex_exec
 import aiohttp
 import asyncio
 

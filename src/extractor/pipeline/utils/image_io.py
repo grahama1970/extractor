@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 from pathlib import Path
 from typing import Dict, Optional
+from extractor.pipeline.utils.reliability import log_stage_error
 
 
 def _safe_read_image_b64(path_str: str, base_dir: Path) -> Optional[str]:
@@ -39,7 +40,8 @@ def _safe_read_image_b64(path_str: str, base_dir: Path) -> Optional[str]:
 
         try:
             from PIL import Image  # type: ignore
-        except Exception:
+        except Exception as exc:
+            log_stage_error("image_io", exc, {"context": "import_PIL"})
             Image = None  # type: ignore
 
         for cand in _candidates():
@@ -54,12 +56,13 @@ def _safe_read_image_b64(path_str: str, base_dir: Path) -> Optional[str]:
                         img.save(buf, format="PNG")
                         norm = buf.getvalue()
                         return base64.b64encode(norm).decode("utf-8")
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        log_stage_error("image_io", exc, {"context": "PIL_normalize", "candidate": str(cand)})
                 # Fallback: return original bytes (may still work if valid)
                 return base64.b64encode(raw).decode("utf-8")
         return None
-    except Exception:
+    except Exception as exc:
+        log_stage_error("image_io", exc, {"context": "safe_read_image_b64", "path": path_str})
         return None
 
 

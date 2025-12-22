@@ -7,6 +7,7 @@ deterministic helpers without pulling in Stage code.
 """
 from __future__ import annotations
 
+from extractor.pipeline.utils.reliability import log_stage_error
 from typing import Tuple, Dict, Any, Optional, Iterable, List
 import os
 import re as _re
@@ -25,7 +26,9 @@ def get_pdf_large_font_threshold() -> float:
         if v is None:
             return PDF_LARGE_FONT_THRESHOLD
         return float(v)
-    except Exception:
+    except Exception as exc:
+        log_stage_error('section_builder_utils.py', exc, {'context': 'section_builder_utils.py'})
+        raise
         return PDF_LARGE_FONT_THRESHOLD
 
 
@@ -46,7 +49,9 @@ def canonical_block_order_key(block: Dict[str, Any]) -> Tuple[int, float, float,
         if raw_page is None:
             raw_page = block.get("page_idx", block.get("page_index", 0))
         page = int(raw_page)
-    except Exception:
+    except Exception as exc:
+        log_stage_error('section_builder_utils.py', exc, {'context': 'section_builder_utils.py'})
+        raise
         page = 0
 
     bbox = block.get("bbox") or []
@@ -54,7 +59,9 @@ def canonical_block_order_key(block: Dict[str, Any]) -> Tuple[int, float, float,
         try:
             x0 = float(bbox[0])
             y0 = float(bbox[1])
-        except Exception:
+        except Exception as exc:
+            log_stage_error('section_builder_utils.py', exc, {'context': 'section_builder_utils.py'})
+            raise
             x0 = 0.0
             y0 = 0.0
     else:
@@ -64,7 +71,9 @@ def canonical_block_order_key(block: Dict[str, Any]) -> Tuple[int, float, float,
 
     try:
         bid = int(block.get("block_id", 0))
-    except Exception:
+    except Exception as exc:
+        log_stage_error('section_builder_utils.py', exc, {'context': 'section_builder_utils.py'})
+        raise
         bid = 0
 
     return (page, y0, x0, bid)
@@ -77,7 +86,9 @@ def _rgb_to_hex(rgb: Tuple[float, float, float]) -> str:
         g = int(max(0, min(255, round(g * (255 if g <= 1 else 1)))))
         b = int(max(0, min(255, round(b * (255 if b <= 1 else 1)))))
         return f"#{r:02x}{g:02x}{b:02x}"
-    except Exception:
+    except Exception as exc:
+        log_stage_error('section_builder_utils.py', exc, {'context': 'section_builder_utils.py'})
+        raise
         return "#000000"
 
 
@@ -98,7 +109,9 @@ def _bucket_color(hex_str: str) -> str:
         if b > r and b > g:
             return "blue"
         return "gray"
-    except Exception:
+    except Exception as exc:
+        log_stage_error('section_builder_utils.py', exc, {'context': 'section_builder_utils.py'})
+        raise
         return "unknown"
 
 
@@ -211,7 +224,9 @@ def pdf_analyze_section_numbering(text: str) -> Dict[str, Any]:
         # Spans
         try:
             ns, ne = m.span("num")
-        except Exception:
+        except Exception as exc:
+            log_stage_error('section_builder_utils.py', exc, {'context': 'section_builder_utils.py'})
+            raise
             ns, ne = (0, 0)
         if "title" in m.groupdict() and (m.group("title") or ""):
             ts, te = m.span("title")
@@ -288,7 +303,9 @@ def is_probable_pdf_section_header(
     fs = first_span_font or {}
     try:
         size = float(fs.get("size")) if fs.get("size") is not None else None
-    except Exception:
+    except Exception as exc:
+        log_stage_error('section_builder_utils.py', exc, {'context': 'section_builder_utils.py'})
+        raise
         size = None
     is_bold = bool(fs.get("bold"))
 
@@ -483,7 +500,9 @@ def html_heading_info(
 try:  # optional, fast path if installed
     from rapidfuzz import fuzz as _rf_fuzz  # type: ignore
     _HAVE_RAPIDFUZZ = True
-except Exception:  # pragma: no cover
+except Exception as exc:
+    log_stage_error('section_builder_utils.py', exc, {'context': 'section_builder_utils.py'})
+    raise
     _HAVE_RAPIDFUZZ = False
 import difflib as _difflib  # fallback
 

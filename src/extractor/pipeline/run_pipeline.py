@@ -214,6 +214,11 @@ def main(argv: Optional[list[str]] = None) -> int:
         action="store_true",
         help="Run 09a_pdf_annotator to generate an annotated PDF with overlays",
     )
+    p.add_argument(
+        "--generate-walkthrough",
+        action="store_true",
+        help="Generate Markdown walkthrough with page images/overlays after other stages (step 15)",
+    )
     p.add_argument("--stop-on-fail", action="store_true", default=True)
     p.add_argument("--continue-on-error", action="store_true", help="Allow stages to continue after failure")
     args = p.parse_args(argv)
@@ -271,7 +276,8 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     if not _probe_dependencies(
         required=["camelot", "fitz"],
-        optional={"python-arango": "python_arango"},
+        # python-arango installs the importable module name "arango"
+        optional={"python-arango": "arango"},
     ):
         return 1
 
@@ -351,6 +357,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         s09_section_summarizer as s09,
         s06a_title_caption_enricher as s06a,
         s14_report_generator as s14,
+        s15_walkthrough_generator as s15,
     )
     # Lazy import for optional DB steps to avoid hard dependency on python-arango if not needed
     s11 = None
@@ -861,6 +868,35 @@ def main(argv: Optional[list[str]] = None) -> int:
             "Completed",
             {"json": str(audit_json.relative_to(out)), "latency_ms": stage_latencies.get("09b_audit")},
         )
+
+    # 15 walkthrough (optional)
+    if args.generate_walkthrough:
+        try:
+            pdf_for_walk = out / "01_annotation_processor" / "json_output" / "01_annotations.json"
+            # Fallback: original PDF path
+            pdf_path = pdf if not pdf_for_walk.exists() else pdf
+            a15 = _step(
+                "15_walkthrough_generator",
+                s15.run,
+                pdf_path,
+                out,
+                out,
+                stop_on_fail=False,
+                timeout_sec=args.stage_timeout,
+                log_dir_base=out,
+                on_timing=lambda n, dt: stage_latencies.update({n: dt}),
+            )
+            if a15:
+                _write_artifacts_index((out / "15_walkthrough_generator"))
+                manifest.record_stage(
+                    "15_walkthrough_generator",
+                    "Completed",
+                    {"path": str(Path(a15).relative_to(out)), "latency_ms": stage_latencies.get("15_walkthrough_generator")},
+                )
+        except Exception as e:
+            logger.error(f"15_walkthrough_generator failed: {e}")
+            if args.stop_on_fail:
+                return 1
 
     # 10 (optional DB export)
     if args.skip_export or s10 is None:

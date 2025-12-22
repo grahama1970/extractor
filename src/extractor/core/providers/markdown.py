@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional, Union
 
 from loguru import logger
-from extractor.core.providers.utils import emit_list_blocks, normalize_heading_level
+from extractor.core.providers.utils import emit_list_blocks, normalize_heading_level, ensure_hierarchy
 from extractor.core.providers.fetcher_bridge import ensure_local_source, attach_fetcher_metadata
 
 from extractor.core.schema.unified_document import (
@@ -116,7 +116,7 @@ class MarkdownProvider:
         hierarchy = self._build_hierarchy(blocks)
         meta = DocumentMetadata(title=filepath.stem, format_metadata={"file_type": "markdown"})
         attach_fetcher_metadata(meta, fetch_download)
-        return UnifiedDocument(
+        doc = UnifiedDocument(
             id=self._doc_id(filepath),
             source_type=SourceType.MD,
             source_path=str(filepath),
@@ -126,6 +126,7 @@ class MarkdownProvider:
             full_text="\n".join(b.content for b in blocks if isinstance(b.content, str)),
             keywords=[],
         )
+        return ensure_hierarchy(doc, default_title=filepath.stem)
 
     def _doc_id(self, path: Path) -> str:
         return hashlib.md5(str(path).encode()).hexdigest()

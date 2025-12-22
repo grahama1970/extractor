@@ -46,6 +46,7 @@ from extractor.pipeline.utils.diagnostics import (
     make_event,
     classify_llm_error,
 )
+from extractor.pipeline.utils.prompt_loader import load_prompt
 
 # Use pipeline-local JSON utilities to avoid heavy core service deps during this stage
 from extractor.pipeline.utils.json_utils import clean_json_string
@@ -219,47 +220,7 @@ class Config:
 # ------------------------------------------------------------------
 # PROMPT
 # ------------------------------------------------------------------
-SYSTEM_PROMPT = textwrap.dedent(
-    """
-You are a PDF annotation interpreter. Given (a) a cropped image of the annotated region and
-(b) nearby text blocks (inside/above/below), infer what the human likely intended to label and explain why.
-Do not assume a specific category in advance; infer from visual and textual evidence. If a human note
-(e.g., "Section Header") is provided in the context, evaluate alignment with that note.
-
-Return ONLY a JSON object with keys:
-{
-  "title": string|null,                   // short title/name if applicable
-  "summary": string,                      // 1–2 sentence gist of the region
-  "entities": [string],                   // salient terms
-  "labels": [string],                     // free-form tags from content
-  "human_note_echo": string|null,         // echo of human note if present
-  "inferred_object": {                    // your best guess of the object type
-    "type": "section_header"|"paragraph"|"table"|"table_header"|"figure"|"caption"|"list_item"|"equation"|"code_block"|"footnote"|"header_footer"|"annotation_note"|"other",
-    "confidence": number,                 // 0.0–1.0
-    "rationale": string                   // concise why: visual/text cues supporting the choice
-  },
-  "alternate_objects": [                 // optional alternates with brief rationale
-    {"type": string, "confidence": number, "rationale": string}
-  ],
-  "matches_human_label": boolean|null,    // if human note given, whether this region fits it
-  "visual_features": {                    // cues you used; nulls allowed when unknown
-    "bold_detected": boolean|null,
-    "font_sizes": [number]|null,
-    "has_numbering": boolean|null,
-    "list_bullet": boolean|null,
-    "spacing_above": number|null,
-    "spacing_below": number|null,
-    "alignment": "left"|"center"|"right"|null,
-    "gridlines_or_cells": boolean|null    // evidence suggestive of a table
-  }
-}
-
-Rules:
-- Be neutral; infer the object type from the image + text context. Do not hallucinate.
-- Ground rationale in observable cues (e.g., larger font, bold, numbering, extra spacing, centered alignment, gridlines).
-- If any field is unknown, use null (or [] for lists). Keep output compact.
-"""
-)
+PROMPT = load_prompt("01_annotation_processor")
 
 
 # ------------------------------------------------------------------
@@ -642,7 +603,30 @@ def extract_annotations_data(pdf_path: Path, config: Config) -> List[Dict[str, A
                 inside_plain = _extract_plain_text(inside_blocks) or ""
                 numbering = _detect_numbering(inside_plain)
                 grid = _gridline_features(str(img_path))
+
+                annots_out.append(
+                    {
+                        "id": f"p{pno}_a{idx}",
+                        "page": pno,
+                        "type": "FreeText",
+                        "original_rect": [original_rect.x0, original_rect.y0, original_rect.x1, original_rect.y1],
+                        "expanded_rect": [expanded_rect.x0, expanded_rect.y0, expanded_rect.x1, expanded_rect.y1],
+                        "inside_blocks": inside_blocks,
+                        "above_blocks": above_blocks,
+                        "below_blocks": below_blocks,
+                        "image_path": str(img_path),
+                        "human_note": nearest_note,
+                        "machine_note": machine_note,
+                        "computed_features": {
+                            "avg_font_size_inside": avg_size_inside,
+                            "avg_font_size_above": avg_size_above,
+                            "avg_font_size_below": avg_size_below,
+                            "bold_detected_inside": bold_inside,
+                            "alignment": align,
+                            **numbering,
+                            "gridlines_detected": grid.get("detected", False) if isinstance(grid, dict) else False,
                         },
+                        "provenance": "freetext",
                     }
                 )
     
@@ -838,18 +822,6 @@ async def process_pdf_pipeline(config: Config):
     warnings_count = 0
     resources: Dict[str, Any] = {}
     
-    # AGENTS.md compliance: Validate SciLLM environment before processing
-    if config.llm_model or os.getenv("CHUTES_TEXT_MODEL"):
-        try:
-            require_scillm_preflight()
-        except RuntimeError as e:
-            logger.error(f"SciLLM preflight validation failed: {e}")
-            if os.getenv("PIPELINE_FAIL_FAST", "0").lower() in ("1", "true", "yes", "y"):
-                raise
-            # Continue without LLM if not in fail-fast mode
-            logger.warning("Continuing without LLM inference due to preflight failure")
-            config.llm_model = ""
-    
     sampler = (
         start_resource_sampler(float(os.getenv("SAMPLE_INTERVAL_SEC", "2")))
         if os.getenv("ENABLE_RESOURCE_SAMPLING", "0").lower() in ("1", "true", "yes", "y")
@@ -877,12 +849,13 @@ async def process_pdf_pipeline(config: Config):
     json_output_dir.mkdir(exist_ok=True)
     image_output_dir.mkdir(exist_ok=True)
 
+    logger.info("01: extracting annotations…")
     data = extract_annotations_data(config.input_pdf, config)
     if config.limit_annotations and config.limit_annotations > 0:
         logger.info(f"Limiting annotations to first {config.limit_annotations} (for debugging)")
         data = data[: config.limit_annotations]
     if not data:
-        logger.info("No annotations found.")
+        logger.info("01: no annotations found; skipping LLM and writing empty payload.")
         clean_pdf_path = create_clean_pdf(config.input_pdf, stage_output_dir)
         payload = {
             "timestamp": datetime.now().isoformat(),
@@ -899,8 +872,22 @@ async def process_pdf_pipeline(config: Config):
         out_json = json_output_dir / "01_annotations.json"
         with open(out_json, "w") as f:
             json.dump(payload, f, indent=2)
-        logger.info(f"Saved empty result to: {out_json}")
+        logger.info(f"01: saved empty result to: {out_json}")
         return
+
+    # AGENTS.md compliance: Validate SciLLM environment only when we have annotations to interpret
+    if config.llm_model or os.getenv("CHUTES_TEXT_MODEL"):
+        try:
+            logger.info("01: running SciLLM preflight…")
+            require_scillm_preflight()
+            logger.info("01: SciLLM preflight OK")
+        except RuntimeError as e:
+            logger.error(f"SciLLM preflight validation failed: {e}")
+            if os.getenv("PIPELINE_FAIL_FAST", "0").lower() in ("1", "true", "yes", "y"):
+                raise
+            # Continue without LLM if not in fail-fast mode
+            logger.warning("Continuing without LLM inference due to preflight failure")
+            config.llm_model = ""
 
     # images are already saved during extraction
 
@@ -925,7 +912,7 @@ async def process_pdf_pipeline(config: Config):
             params = {
                 "model": config.llm_model,
                 "messages": [
-                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "system", "content": PROMPT["system"]},
                     {"role": "user", "content": user_content},
                 ],
                 "response_format": {"type": "json_object"},
@@ -1098,12 +1085,16 @@ async def process_pdf_pipeline(config: Config):
             try:
                 try:
                     from loguru import logger as _logger
-                    _logger.info(
-                        f"stage01_interpret: model={getattr(getattr(r,'request',object()),'model',None)} ok={r.exception is None}"
-                    )
+                    # r can be a dict when using paved/scillm adapters; guard attribute access
+                    model = getattr(getattr(r, 'request', object()), 'model', None)
+                    ok = False
+                    if isinstance(r, dict):
+                        ok = bool(r.get("exception") is None)
+                    else:
+                        ok = bool(getattr(r, "exception", None) is None)
+                    _logger.info(f"stage01_interpret: model={model} ok={ok}")
                 except Exception as exc:
                     log_stage_error('01_annotation_processor', exc, {'context': '01'})
-                    raise
                     pass
                 if not isinstance(content_str, str) or not content_str.strip():
                     d["interpretation"] = {"error": "Empty content from LLM"}
@@ -1334,6 +1325,13 @@ def run(
             rotation="1 week",
             retention="14 days",
         )
+        _lg.add(
+            sys.stderr,
+            level="INFO",
+            enqueue=True,
+            backtrace=False,
+            diagnose=False,
+        )
     except Exception as exc:
         log_stage_error('01_annotation_processor', exc, {'context': '01'})
         raise
@@ -1356,10 +1354,12 @@ def run(
         max_runtime_seconds=timeout,
         cache=cache,
     )
+    print(f"[01] Processing {input_pdf}")
     if debug:
-        print(f"DEBUG: include_freetext = {cfg.include_freetext}")
+        print(f"[01] DEBUG: include_freetext = {cfg.include_freetext}")
     try:
         asyncio.run(process_pdf_pipeline(cfg))
+        print(f"[01] Saved annotations (may be empty) to {stage_output_dir / 'json_output' / '01_annotations.json'}")
     except Exception as exc:
         log_stage_error('01_annotation_processor', exc, {'context': '01'})
         raise

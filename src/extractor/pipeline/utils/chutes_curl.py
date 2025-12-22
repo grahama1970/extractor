@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+from extractor.pipeline.utils.reliability import log_stage_error
 import json
 import os
 import subprocess
@@ -76,7 +77,9 @@ def chutes_curl_chat_json(
     ]
     try:
         r = subprocess.run(cmd, check=False, capture_output=True, text=True)
-    except Exception as e:
+    except Exception as exc:
+        log_stage_error('chutes_curl.py', exc, {'context': 'chutes_curl.py'})
+        raise
         return None, {"error": "subprocess", "exc": str(e)}
 
     meta = {
@@ -89,7 +92,9 @@ def chutes_curl_chat_json(
     }
     try:
         data = json.loads(resp_path.read_text(encoding="utf-8"))
-    except Exception:
+    except Exception as exc:
+        log_stage_error('chutes_curl.py', exc, {'context': 'chutes_curl.py'})
+        raise
         return None, {**meta, "error": "json_load_failed"}
     return data, meta
 

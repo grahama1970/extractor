@@ -301,7 +301,7 @@ def run(
     if research_topic:
         logger.info(f"Running research via Codex MCP: {research_topic}")
         if use_codex:
-            from extractor.pipeline.utils.codex_call import run_codex_exec
+            from extractor.pipeline.utils.deprecated_codex_call import run_codex_exec
             asyncio.run(run_codex_exec(
                 script_or_path="python",
                 codex_bin=codex_bin,
@@ -323,7 +323,7 @@ def run(
         logger.info(f"Running code review via Codex persona on {len(review_files)} files")
         file_args = [str(p) for p in review_files]
         if use_codex:
-            from extractor.pipeline.utils.codex_call import run_codex_exec
+            from extractor.pipeline.utils.deprecated_codex_call import run_codex_exec
             asyncio.run(run_codex_exec(
                 script_or_path="python",
                 codex_bin=codex_bin,
@@ -427,7 +427,7 @@ def run(
                             logger.warning(str(err))
         else:
             # Run each variant under codex exec (validator or generic episode_cmd)
-            from extractor.pipeline.utils.codex_call import run_codex_exec
+            from extractor.pipeline.utils.deprecated_codex_call import run_codex_exec
 
             async def _run_one(vname: str, target: str, ep_id: str, out_path: Path):
                 # Build command
@@ -577,7 +577,7 @@ def run(
                     try:
                         topic = f"Variant {vname} plateaued with recent scores {hist[-window:]}. Recommend UI mutations and heuristics grounded in pdf.js/shadcn docs."
                         if use_codex:
-                            from extractor.pipeline.utils.codex_call import run_codex_exec
+                            from extractor.pipeline.utils.deprecated_codex_call import run_codex_exec
                             ts = int(time.time())
                             save_to = Path("data/research") / f"research_{run_id}_{vname}_{ts}.json"
                             docs_dir = Path("data/docs_summaries") / f"{run_id}_{vname}_{ts}"
@@ -608,7 +608,7 @@ def run(
             key = " ".join(msgs[:3])[:400]
             topic = f"Investigate errors observed in {vname}: {key}. Provide fixes using pdf.js and related docs; suggest robust patterns."
             try:
-                from extractor.pipeline.utils.codex_call import run_codex_exec
+                from extractor.pipeline.utils.deprecated_codex_call import run_codex_exec
                 ts = int(time.time())
                 save_to = Path("data/research") / f"research_{run_id}_{vname}_errors_{ts}.json"
                 docs_dir = Path("data/docs_summaries") / f"{run_id}_{vname}_errors_{ts}"

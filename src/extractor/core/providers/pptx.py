@@ -42,6 +42,7 @@ from extractor.core.schema.unified_document import (
     TableCell,
 )
 from extractor.core.providers.fetcher_bridge import ensure_local_source, attach_fetcher_metadata
+from extractor.core.providers.utils import ensure_hierarchy
 
 # Default configuration constants
 DEFAULT_MAX_IMAGE_SIZE_MB = 10
@@ -112,7 +113,7 @@ class PPTXProvider:
         )
 
         logger.info(f"Extracted {len(blocks)} blocks from {len(prs.slides)} slides")
-        return doc
+        return ensure_hierarchy(doc, default_title=filepath.stem)
 
     def _generate_doc_id(self, filepath: Path) -> str:
         """Generate unique document ID using SHA256"""

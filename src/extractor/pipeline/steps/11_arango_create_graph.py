@@ -25,6 +25,7 @@ from numpy.typing import NDArray  # noqa: E402
 
 # Third-party
 from loguru import logger  # noqa: E402
+from extractor.pipeline.utils.reliability import log_stage_error
 from rich.console import Console  # noqa: E402
 from rich.progress import Progress, SpinnerColumn, TextColumn  # noqa: E402
 from extractor.pipeline.utils.diagnostics import get_run_id  # noqa: E402,F401
@@ -37,7 +38,9 @@ try:
     from arango import ArangoClient
     from arango.exceptions import ArangoError
     from arango.database import StandardDatabase
-except Exception:  # allow import without python-arango for non-DB debug paths
+except Exception as exc:
+    log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+    raise
     ArangoClient = None  # type: ignore
 
     class ArangoError(Exception): ...  # type: ignore
@@ -64,7 +67,9 @@ try:
     import faiss  # type: ignore
 
     _HAVE_FAISS = True
-except Exception:
+except Exception as exc:
+    log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+    raise
     faiss = None  # type: ignore
     _HAVE_FAISS = False
 
@@ -128,7 +133,9 @@ def _validate_edges(edges: list[dict]) -> dict:
                 s = float(e.get("semantic_score", 0.0))
                 if not (0.0 <= s <= 1.0):
                     violations.append({"edge": e, "reason": "score_out_of_range"})
-        except Exception:
+        except Exception as exc:
+            log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+            raise
             violations.append({"edge": e, "reason": "exception_validating"})
     return {
         "schema_version": EDGE_SCHEMA_VERSION,
@@ -142,7 +149,9 @@ def _save_summary(json_output_dir: Path, summary: dict) -> None:
     try:
         out = json_output_dir / "11_graph_summary.json"
         out.write_text(json.dumps(summary, indent=2))
-    except Exception:
+    except Exception as exc:
+        log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+        raise
         pass
 
 def _proves_edges_from_docs(documents: list[dict], proved_section_ids: set[str]) -> list[dict]:
@@ -164,7 +173,9 @@ def _proves_edges_from_docs(documents: list[dict], proved_section_ids: set[str])
                     "neighbor_index": 0,
                     "created_at": datetime.now(timezone.utc).isoformat(),
                 })
-            except Exception:
+            except Exception as exc:
+                log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+                raise
                 continue
     return edges
 
@@ -284,7 +295,9 @@ def _contradicts_edges_from_docs(documents: list[dict]) -> list[dict]:
                 "normalized_prop": norm,
                 "created_at": datetime.now(timezone.utc).isoformat(),
             })
-        except Exception:
+        except Exception as exc:
+            log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+            raise
             continue
     return edges
 
@@ -527,7 +540,9 @@ async def _rationale_for_pair(text_a: str, text_b: str, model: str, max_tokens: 
                     or os.getenv("LITELLM_MODEL")
                     or "gemini/gemini-2.5-flash"
                 )
-        except Exception:
+        except Exception as exc:
+            log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+            raise
             pass
 
         params: Dict[str, Any] = {
@@ -581,7 +596,9 @@ async def _rationale_for_pair(text_a: str, text_b: str, model: str, max_tokens: 
                 },
             )
             return (content or "").strip()[:600]
-        except Exception as e:
+        except Exception as exc:
+            log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+            raise
             _elapsed_ms = int((_t.monotonic() - _t0) * 1000)
             log_timing(
                 "11_arango_create_graph",
@@ -595,7 +612,9 @@ async def _rationale_for_pair(text_a: str, text_b: str, model: str, max_tokens: 
                 },
             )
             raise
-    except Exception:
+    except Exception as exc:
+        log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+        raise
         return ""
 
 
@@ -623,7 +642,9 @@ async def enrich_edges_with_rationales(
                 )
                 edge["rationale"] = rationale
                 edge["rationale_model"] = GRAPH_RATIONALE_MODEL
-        except Exception:
+        except Exception as exc:
+            log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+            raise
             edge["rationale"] = ""
             edge["rationale_model"] = GRAPH_RATIONALE_MODEL
 
@@ -676,7 +697,9 @@ async def find_and_create_relationships(
                             "created_at": datetime.now(timezone.utc).isoformat(),
                         }
                         edge_buffer.append(edge_doc)
-                except Exception:
+                except Exception as exc:
+                    log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+                    raise
                     # Keep graph building resilient; skip malformed docs
                     continue
 
@@ -725,7 +748,9 @@ async def find_and_create_relationships(
                         created = 0
                         try:
                             created = int(result.get("created", 0))  # type: ignore[attr-defined]
-                        except Exception:
+                        except Exception as exc:
+                            log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+                            raise
                             created = 0
                         total_edges += created
                         edge_buffer.clear()
@@ -744,7 +769,9 @@ async def find_and_create_relationships(
             created = 0
             try:
                 created = int(result.get("created", 0))  # type: ignore[attr-defined]
-            except Exception:
+            except Exception as exc:
+                log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+                raise
                 created = 0
             total_edges += created
         except ArangoError as e:
@@ -833,7 +860,9 @@ def run(
                                 proved.add(sid)
                         if proved:
                             proved_sec_ids = proved
-        except Exception as e:
+        except Exception as exc:
+            log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+            raise
             logger.warning(f"Stage 11: proves-only detection failed: {e}")
 
         if skip_graph_creation:
@@ -841,22 +870,30 @@ def run(
             # Conflicts (units) first
             try:
                 edges.extend(_conflict_edges_from_docs(documents))
-            except Exception:
+            except Exception as exc:
+                log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+                raise
                 pass
             # Duplicates
             try:
                 edges.extend(_duplicates_edges_from_docs(documents))
-            except Exception:
+            except Exception as exc:
+                log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+                raise
                 pass
             # Contradicts
             try:
                 edges.extend(_contradicts_edges_from_docs(documents))
-            except Exception:
+            except Exception as exc:
+                log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+                raise
                 pass
             # Duplicates
             try:
                 edges.extend(_duplicates_edges_from_docs(documents))
-            except Exception:
+            except Exception as exc:
+                log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+                raise
                 pass
             # Proves
             if proved_sec_ids:
@@ -864,12 +901,16 @@ def run(
             # Supersedes
             try:
                 edges.extend(_supersedes_edges_from_docs(documents))
-            except Exception:
+            except Exception as exc:
+                log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+                raise
                 pass
             # Refers-to
             try:
                 edges.extend(_refers_to_edges_from_docs(documents))
-            except Exception:
+            except Exception as exc:
+                log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+                raise
                 pass
             output_path = json_output_dir / "11_graph_edges.json"
             with open(output_path, "w") as f:
@@ -946,11 +987,15 @@ def run(
                             status = (pr or {}).get("status")
                             if sid and (status is None or str(status).lower() in {"ok", "proved", "success", "true"}):
                                 proved.add(sid)
-                        except Exception:
+                        except Exception as exc:
+                            log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+                            raise
                             continue
                     if proved:
                         proved_sec_ids = proved
-    except Exception as e:
+    except Exception as exc:
+        log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+        raise
         logger.warning(f"Stage 11: failed to read Stage 08 theorems for 'proves' edges: {e}")
 
     edges = asyncio.run(
@@ -977,9 +1022,13 @@ def run(
             try:
                 edge_col = db.collection(edge_collection)
                 edge_col.import_bulk(contr, on_duplicate="ignore")
-            except Exception:
+            except Exception as exc:
+                log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+                raise
                 pass
-    except Exception:
+    except Exception as exc:
+        log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+        raise
         pass
     # Also append conflicts edges when embeddings path ran
     try:
@@ -996,9 +1045,13 @@ def run(
                 try:
                     edge_col = db.collection(edge_collection)
                     edge_col.import_bulk(ins, on_duplicate="ignore")
-                except Exception:
+                except Exception as exc:
+                    log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+                    raise
                     pass
-    except Exception:
+    except Exception as exc:
+        log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+        raise
         pass
 
     # --- Final Output ---
@@ -1045,7 +1098,9 @@ def debug_bundle(
         documents = data.get("documents")
         if not isinstance(documents, list) or not documents:
             raise ValueError("Bundle must include non-empty 'documents' list")
-    except Exception as e:
+    except Exception as exc:
+        log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+        raise
         print(f"Failed to load bundle: {e}")
         raise ValueError(f"Failed to load bundle: {e}")
 
@@ -1069,7 +1124,9 @@ def debug_bundle(
                                 proved.add(sid)
                         if proved:
                             proved_sec_ids = proved
-        except Exception as e:
+        except Exception as exc:
+            log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+            raise
             logger.warning(f"Stage 11 debug-bundle: proves-only detection failed: {e}")
 
         edges: list[dict] = []
@@ -1104,11 +1161,15 @@ def debug_bundle(
                             status = (pr or {}).get("status")
                             if sid and (status is None or str(status).lower() in {"ok", "proved", "success", "true"}):
                                 proved.add(sid)
-                        except Exception:
+                        except Exception as exc:
+                            log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+                            raise
                             continue
                     if proved:
                         proved_sec_ids = proved
-    except Exception as e:
+    except Exception as exc:
+        log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+        raise
         logger.warning(f"Stage 11 debug-bundle: failed to read Stage 08 theorems: {e}")
 
     edges = asyncio.run(
@@ -1131,7 +1192,9 @@ def debug_bundle(
     try:
         summary = _validate_edges(edges)
         _save_summary(json_output_dir, summary)
-    except Exception:
+    except Exception as exc:
+        log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+        raise
         pass
     console.print(f"[green]Debug bundle: saved {len(edges)} graph edges to {output_path}")
 

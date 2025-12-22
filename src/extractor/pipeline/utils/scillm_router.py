@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+from extractor.pipeline.utils.reliability import log_stage_error
 import os
 from typing import Any, Dict, List
 
 import asyncio
+import logging
+import types
+
+logger = logging.getLogger(__name__)
 
 _TEXT_ROUTER: Router | None = None
 _VLM_ROUTER: Router | None = None
@@ -41,10 +46,11 @@ def _import_router_cls():
         from scillm import Router as _Router  # type: ignore
 
         return _Router
-    except Exception as e:  # pragma: no cover - only used in constrained CI envs
+    except Exception as exc:
+        log_stage_error('scillm_router.py', exc, {'context': 'scillm_router.py'})
         raise ImportError(
             "SciLLM Router unavailable; ensure sibling 'litellm/scillm' is present or install scillm."
-        ) from e
+        ) from exc
 
 
 def get_text_router():
@@ -73,9 +79,10 @@ def get_text_router():
     # Router now handles transient retries natively; avoid layering retries here
     # to prevent duplicate backoffs. Use Router defaults.
     Router = _import_router_cls()
-    _TEXT_ROUTER = Router(
+    router = Router(
         model_list=model_list or [{}],
     )
+    _TEXT_ROUTER = _wrap_router_with_fallback(router, fallback_model=primary)
     return _TEXT_ROUTER
 
 
@@ -101,9 +108,10 @@ def get_vlm_router():
     if not model_list and not auto:
         raise RuntimeError("No CHUTES_VLM_MODEL pins provided and SCILLM_AUTO_ROUTER is disabled. Set CHUTES_VLM_MODEL or enable SCILLM_AUTO_ROUTER=1 for dev triage.")
     Router = _import_router_cls()
-    _VLM_ROUTER = Router(
+    router = Router(
         model_list=model_list or [{}],
     )
+    _VLM_ROUTER = _wrap_router_with_fallback(router, fallback_model=primary)
     return _VLM_ROUTER
 
 
@@ -121,10 +129,12 @@ def _safe_async_close(obj) -> None:
                     try:
                         loop = asyncio.get_event_loop()
                         loop.create_task(res)  # fire and forget
-                    except Exception:
-                        pass
-    except Exception:
-        pass
+                    except Exception as exc:
+                        log_stage_error('scillm_router.py', exc, {'context': 'scillm_router.py'})
+                        raise
+    except Exception as exc:
+        log_stage_error('scillm_router.py', exc, {'context': 'scillm_router.py'})
+        raise
 
 
 def close_text_router() -> None:
@@ -135,8 +145,9 @@ def close_text_router() -> None:
             _safe_async_close(_TEXT_ROUTER)
             try:
                 _TEXT_ROUTER.close()
-            except Exception:
-                pass
+            except Exception as exc:
+                log_stage_error('scillm_router.py', exc, {'context': 'scillm_router.py'})
+                raise
     finally:
         _TEXT_ROUTER = None
 
@@ -148,8 +159,9 @@ def close_vlm_router() -> None:
             _safe_async_close(_VLM_ROUTER)
             try:
                 _VLM_ROUTER.close()
-            except Exception:
-                pass
+            except Exception as exc:
+                log_stage_error('scillm_router.py', exc, {'context': 'scillm_router.py'})
+                raise
     finally:
         _VLM_ROUTER = None
 
@@ -157,3 +169,86 @@ def close_vlm_router() -> None:
 def close_all_routers() -> None:
     close_text_router()
     close_vlm_router()
+
+
+def _extract_choice_content(resp: Any) -> Any:
+    try:
+        choices = getattr(resp, "choices", None)
+        if choices is None and isinstance(resp, dict):
+            choices = resp.get("choices")
+    except Exception as exc:
+        log_stage_error('scillm_router.py', exc, {'context': 'scillm_router.py'})
+        raise
+        choices = None
+    if not choices:
+        return None
+    first = choices[0]
+    if isinstance(first, dict):
+        message = first.get("message")
+    else:
+        message = getattr(first, "message", None)
+    if message is None:
+        return None
+    if isinstance(message, dict):
+        return message.get("content")
+    content = getattr(message, "content", None)
+    if content is None and hasattr(message, "get"):
+        try:
+            return message.get("content")
+        except Exception as exc:
+            log_stage_error('scillm_router.py', exc, {'context': 'scillm_router.py'})
+            raise
+            return None
+    return content
+
+
+def _response_content_empty(resp: Any) -> bool:
+    content = _extract_choice_content(resp)
+    if content is None:
+        return True
+    if isinstance(content, str):
+        return not content.strip()
+    return False
+
+
+def _wrap_router_with_fallback(router: Any, *, fallback_model: str) -> Any:
+    if not fallback_model:
+        return router
+    if getattr(router, "_scillm_fallback_wrapped", False):
+        return router
+
+    orig_acompletion = router.acompletion
+
+    async def _acompletion_with_fallback(self, *args, **kwargs):
+        resp = await orig_acompletion(*args, **kwargs)
+        if not _response_content_empty(resp):
+            return resp
+        fallback_kwargs = dict(kwargs)
+        fallback_kwargs.setdefault("custom_llm_provider", kwargs.get("custom_llm_provider", "openai_like"))
+        fallback_kwargs["model"] = fallback_model
+        fallback_kwargs.update(_auth_params())
+        try:
+            from scillm import acompletion as _acompletion  # type: ignore
+        except Exception as exc:
+            log_stage_error('scillm_router.py', exc, {'context': 'scillm_router.py'})
+            raise
+            return resp
+        try:
+            logger.warning(
+                "SciLLM router returned empty content; retrying direct completion for model '%s'",
+                fallback_model,
+            )
+            return await _acompletion(**fallback_kwargs)
+        except Exception as exc:
+            log_stage_error('scillm_router.py', exc, {'context': 'scillm_router.py'})
+            raise
+            logger.warning(
+                "Direct SciLLM fallback for model '%s' failed: %s",
+                fallback_model,
+                fallback_error,
+            )
+            return resp
+
+    router.acompletion = types.MethodType(_acompletion_with_fallback, router)
+    router._scillm_fallback_wrapped = True
+    return router

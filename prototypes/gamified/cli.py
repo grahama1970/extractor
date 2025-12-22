@@ -22,8 +22,8 @@ from typing import Optional, List, Dict, Any
 import typer
 
 try:
-    # Prefer robust asyncio-based runner for Codex exec
-    from extractor.pipeline.utils.codex_call import run_codex_exec  # type: ignore
+    # Prefer robust asyncio-based runner for Codex exec (deprecated helper)
+    from extractor.pipeline.utils.deprecated_codex_call import run_codex_exec  # type: ignore
 except Exception:  # pragma: no cover - optional import for environments without src on PYTHONPATH
     run_codex_exec = None  # type: ignore
 
@@ -749,7 +749,7 @@ def run(
         # Try to (re)import run_codex_exec if optional import failed at module import time
         if globals().get('run_codex_exec') is None:
             try:
-                from extractor.pipeline.utils.codex_call import run_codex_exec as _rc  # type: ignore
+                from extractor.pipeline.utils.deprecated_codex_call import run_codex_exec as _rc  # type: ignore
                 globals()['run_codex_exec'] = _rc
             except Exception:
                 pass
@@ -1485,7 +1485,7 @@ def run(
                     try:
                         if run_codex_exec is None:
                             try:
-                                from extractor.pipeline.utils.codex_call import run_codex_exec as _rc  # type: ignore
+                                from extractor.pipeline.utils.deprecated_codex_call import run_codex_exec as _rc  # type: ignore
                                 globals()['run_codex_exec'] = _rc
                             except Exception:
                                 pass

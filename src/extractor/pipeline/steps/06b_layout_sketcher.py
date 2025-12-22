@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from loguru import logger
 from extractor.pipeline.utils.step_sanity import run_step_sanity
 from extractor.pipeline.steps.scillm_preflight_validator import require_scillm_preflight
+from extractor.pipeline.utils.reliability import log_stage_error
 
 
 GRID = 12  # default grid granularity (rows = cols = GRID)
@@ -190,10 +191,9 @@ def _iou(a: list[float], b: list[float]) -> float:
         area_b = max(0.0, (bx1 - bx0) * (by1 - by0))
         union = max(1e-9, area_a + area_b - inter)
         return inter / union
-    except Exception:
-        return 0.0
-
-
+    except Exception as exc:
+        log_stage_error(STEP_NAME, exc, {'context': '06b'})
+        raise
 def _build_flow_stream(
     elements: list[dict[str, Any]],
     columns_grid: list[dict[str, int]],
@@ -296,8 +296,9 @@ def _pymupdf_fill_missing_pages(page_index: Dict[int, Dict[str, Any]], source_pd
         return
     try:
         import fitz  # PyMuPDF
-    except Exception:
-        return
+    except Exception as exc:
+        log_stage_error(STEP_NAME, exc, {'context': '06b'})
+        raise
     try:
         doc = fitz.open(str(source_pdf))
         for pno in range(len(doc)):
@@ -320,10 +321,9 @@ def _pymupdf_fill_missing_pages(page_index: Dict[int, Dict[str, Any]], source_pd
                 r = doc[pno].rect
                 rec["page_bbox"] = [0.0, 0.0, float(r.width), float(r.height)]
         doc.close()
-    except Exception:
-        pass
-
-
+    except Exception as exc:
+        log_stage_error(STEP_NAME, exc, {'context': '06b'})
+        raise
 def _build_page_layout(
     page_index: Dict[int, Dict[str, Any]],
     *,
@@ -429,8 +429,9 @@ def _build_section_sketch(
                     # Accept candidate header if it has 3+ short tokens (typical of column names)
                     if len([c for c in cand if c]) >= 3:
                         hdr = cand
-        except Exception:
-            pass
+        except Exception as exc:
+            log_stage_error(STEP_NAME, exc, {'context': '06b'})
+            raise
         hdr_text = " | ".join([str(h) for h in hdr])
         # Normalize header string for logical grouping
         def _norm_hdr(h: str) -> str:
@@ -441,20 +442,24 @@ def _build_section_sketch(
         try:
             rows = int(shp[0] or 0)
             cols = int(shp[1] or 0)
-        except Exception:
-            rows, cols = 0, 0
+        except Exception as exc:
+            log_stage_error(STEP_NAME, exc, {'context': '06b'})
+            raise
         try:
             density = float(pm.get("data_density") or 0.0)
-        except Exception:
-            density = 0.0
+        except Exception as exc:
+            log_stage_error(STEP_NAME, exc, {'context': '06b'})
+            raise
         try:
             camel_acc = float(camel.get("accuracy") or 0.0)
-        except Exception:
-            camel_acc = 0.0
+        except Exception as exc:
+            log_stage_error(STEP_NAME, exc, {'context': '06b'})
+            raise
         try:
             camel_ws = float(camel.get("whitespace") or 0.0)
-        except Exception:
-            camel_ws = 0.0
+        except Exception as exc:
+            log_stage_error(STEP_NAME, exc, {'context': '06b'})
+            raise
         frag = float(t.get("fragmentation_score") or 0.0)
         total_cells = int(pm.get("total_cells") or 0)
         non_empty_cells = int(pm.get("non_empty_cells") or 0)
@@ -536,8 +541,9 @@ def _build_section_sketch(
             y0 = float(b[1])
             y1 = float(b[3])
             e["header_footer_candidate"] = bool(y1 <= top_band or y0 >= bot_band)
-        except Exception:
-            e["header_footer_candidate"] = False
+        except Exception as exc:
+            log_stage_error(STEP_NAME, exc, {'context': '06b'})
+            raise
         enriched.append(e)
     enriched.sort(key=lambda x: (
         int(x.get("column_id", 0)),
@@ -556,9 +562,9 @@ def _build_section_sketch(
             sid = str(sec.get("id") or "sec")
             prefix = {"text": "txt", "table": "tbl", "figure": "fig"}.get(e.get("kind"), "blk")
             e["sketch_id"] = f"{sid}-{prefix}-{i:03d}"
-        except Exception:
-            e["sketch_id"] = e.get("id") or f"elem_{i:03d}"
-
+        except Exception as exc:
+            log_stage_error(STEP_NAME, exc, {'context': '06b'})
+            raise
     # Overlap flag via pairwise IoU
     try:
         for i, a in enumerate(enriched):
@@ -571,9 +577,9 @@ def _build_section_sketch(
                     overlapped = True
                     break
             a["overlapped"] = overlapped
-    except Exception:
-        pass
-
+    except Exception as exc:
+        log_stage_error(STEP_NAME, exc, {'context': '06b'})
+        raise
     # Anchor floats (figures/tables) to nearest text
     texts = [e for e in enriched if e.get("kind") == "text"]
     for f in enriched:
@@ -615,9 +621,9 @@ def _build_section_sketch(
     try:
         conf_vals = [float((page_layout.get(p, {}).get("conf") or {}).get("columns", 0.0)) for p in pages_present]
         ordering_conf = float(sum(conf_vals) / max(1, len(conf_vals))) if conf_vals else 0.6
-    except Exception:
-        ordering_conf = 0.6
-
+    except Exception as exc:
+        log_stage_error(STEP_NAME, exc, {'context': '06b'})
+        raise
     # Optional: table merge hints (non-binding)
     table_merge_hints: List[Dict[str, Any]] = []
     # Always compute merge hints for local propagation; emission to JSON remains gated by emit_merge_hints.
@@ -627,8 +633,9 @@ def _build_section_sketch(
             shp = m.get("shape") or [0, 0]
             try:
                 return int(shp[0] or 0), int(shp[1] or 0)
-            except Exception:
-                return 0, 0
+            except Exception as exc:
+                log_stage_error(STEP_NAME, exc, {'context': '06b'})
+                raise
         def _h_iou(a: List[float], b: List[float]) -> float:
             try:
                 ax0, _, ax1, _ = a
@@ -636,8 +643,9 @@ def _build_section_sketch(
                 inter = max(0.0, min(float(ax1), float(bx1)) - max(float(ax0), float(bx0)))
                 uni = max(float(ax1), float(bx1)) - min(float(ax0), float(bx0))
                 return float(inter / uni) if uni > 0 else 0.0
-            except Exception:
-                return 0.0
+            except Exception as exc:
+                log_stage_error(STEP_NAME, exc, {'context': '06b'})
+                raise
         tabs = sorted(list(tables_for_section), key=lambda t: (int(t.get("page_index", 0) or 0), int(t.get("table_index", 0) or 0)))
         for i in range(len(tabs)):
             for j in range(i + 1, len(tabs)):
@@ -693,8 +701,9 @@ def _build_section_sketch(
                 lines.append(
                     f"Columns: {len(cols)} bands " + ", ".join(bands)
                 )
-        except Exception:
-            pass
+        except Exception as exc:
+            log_stage_error(STEP_NAME, exc, {'context': '06b'})
+            raise
         # Flow lines (reading order already assigned)
         for i, e in enumerate(elements_sorted, start=1):
             k = e.get("kind")
@@ -722,8 +731,9 @@ def _build_section_sketch(
                 # paragraph/list hints; mark too-short and coalesce group when applicable
                 try:
                     too_short = bool(int(e.get("char_count", 0)) < 40 and (float(bb[3])-float(bb[1])) <= 20)
-                except Exception:
-                    too_short = False
+                except Exception as exc:
+                    log_stage_error(STEP_NAME, exc, {'context': '06b'})
+                    raise
                 cg = e.get("coalesce_group")
                 cg_part = f" coalesce_group={cg}" if cg else ""
                 ts_part = " too_short=1" if too_short else ""
@@ -773,9 +783,9 @@ def _build_section_sketch(
             gutter = max(0, int(min(gaps)))
         else:
             gutter = 0
-    except Exception:
-        gutter = 0
-
+    except Exception as exc:
+        log_stage_error(STEP_NAME, exc, {'context': '06b'})
+        raise
     def _obj_to_v2(e: dict[str, Any]) -> dict[str, Any]:
         sid = e.get("sketch_id") or e.get("id")
         out: dict[str, Any] = {
@@ -792,8 +802,9 @@ def _build_section_sketch(
             try:
                 bb = out["bbox"]
                 too_short = bool(int(e.get("char_count", 0)) < 40 and (float(bb[3]) - float(bb[1])) <= 20)
-            except Exception:
-                too_short = False
+            except Exception as exc:
+                log_stage_error(STEP_NAME, exc, {'context': '06b'})
+                raise
             out.update({
                 "reflow_hint": True,
                 "too_short": bool(too_short),
@@ -829,8 +840,9 @@ def _build_section_sketch(
             try:
                 if out.get("page") is not None and out.get("page_index") is None:
                     out["page_index"] = int(out.get("page"))
-            except Exception:
-                pass
+            except Exception as exc:
+                log_stage_error(STEP_NAME, exc, {'context': '06b'})
+                raise
         elif e.get("kind") == "figure":
             out.update({
                 "caption_hint": _summ(e.get("summary") or "", 160),
@@ -842,9 +854,9 @@ def _build_section_sketch(
         try:
             x0, y0, x1, y1 = [float(x) for x in b]
             return [round(x0, 2), round(y0, 2), round(x1, 2), round(y1, 2)]
-        except Exception:
-            return b
-
+        except Exception as exc:
+            log_stage_error(STEP_NAME, exc, {'context': '06b'})
+            raise
     # Round bbox and trim noisy metrics for token efficiency
     objects_v2 = []
     seen_ids = set()
@@ -877,8 +889,9 @@ def _build_section_sketch(
                 try:
                     oid = str(o.get('id'))
                     by_id[oid] = o
-                except Exception:
-                    continue
+                except Exception as exc:
+                    log_stage_error(STEP_NAME, exc, {'context': '06b'})
+                    raise
             import re as _re
             for hint in (table_merge_hints or []):
                 try:
@@ -900,8 +913,9 @@ def _build_section_sketch(
                     scores = hint.get('scores') or {}
                     try:
                         hiou = float(scores.get('h_iou') or 0.0)
-                    except Exception:
-                        hiou = 0.0
+                    except Exception as exc:
+                        log_stage_error(STEP_NAME, exc, {'context': '06b'})
+                        raise
                     same_cols = ('same_columns' in reason)
                     adjacent = any('adjacent' in str(r) for r in reason)
                     should_propagate = bool(hint.get('header_body') or is_generic or (same_cols and adjacent and hiou >= 0.2))
@@ -913,10 +927,12 @@ def _build_section_sketch(
                     lid = f"lt_{_hl.sha1(hnorm.encode('utf-8')).hexdigest()[:10]}"
                     h['logical_table_id'] = lid
                     b['logical_table_id'] = lid
-                except Exception:
-                    continue
-    except Exception:
-        pass
+                except Exception as exc:
+                    log_stage_error(STEP_NAME, exc, {'context': '06b'})
+                    raise
+    except Exception as exc:
+        log_stage_error(STEP_NAME, exc, {'context': '06b'})
+        raise
     # Secondary deterministic propagation: header (rows==1, non-generic header_norm) → body on next page
     # when columns match and horizontal IoU is reasonable. This does not depend on merge_hints.
     try:
@@ -930,15 +946,17 @@ def _build_section_sketch(
                 inter = max(0.0, min(float(ax1), float(bx1)) - max(float(ax0), float(bx0)))
                 uni = max(float(ax1), float(bx1)) - min(float(ax0), float(bx0))
                 return float(inter / uni) if uni > 0 else 0.0
-            except Exception:
-                return 0.0
+            except Exception as exc:
+                log_stage_error(STEP_NAME, exc, {'context': '06b'})
+                raise
         tables_v2 = [o for o in objects_v2 if o.get('type') == 'table']
         by_page: Dict[int, List[dict]] = {}
         for o in tables_v2:
             try:
                 by_page.setdefault(int(o.get('page', section_page_idx)), []).append(o)
-            except Exception:
-                continue
+            except Exception as exc:
+                log_stage_error(STEP_NAME, exc, {'context': '06b'})
+                raise
         for p, hdrs in by_page.items():
             nxt = by_page.get(p + 1) or []
             for h in hdrs:
@@ -960,10 +978,12 @@ def _build_section_sketch(
                         lid = f"lt_{_hl.sha1(hn.encode('utf-8')).hexdigest()[:10]}"
                         h['logical_table_id'] = lid
                         b['logical_table_id'] = lid
-                except Exception:
-                    continue
-    except Exception:
-        pass
+                except Exception as exc:
+                    log_stage_error(STEP_NAME, exc, {'context': '06b'})
+                    raise
+    except Exception as exc:
+        log_stage_error(STEP_NAME, exc, {'context': '06b'})
+        raise
     # Mark table continuity/merge by logical_table_id
     try:
         by_lt: Dict[str, List[dict]] = {}
@@ -977,9 +997,9 @@ def _build_section_sketch(
                 for j, t in enumerate(items):
                     t["merge"] = True
                     t["continued"] = (j < len(items)-1)
-    except Exception:
-        pass
-
+    except Exception as exc:
+        log_stage_error(STEP_NAME, exc, {'context': '06b'})
+        raise
     sketch_v2 = {
         "sketch_format": "SKETCH_V2",
         "version": 1,
@@ -1025,8 +1045,9 @@ def _build_section_sketch(
     try:
         if table_merge_hints:
             sketch_v2["merge_hints"] = table_merge_hints
-    except Exception:
-        pass
+    except Exception as exc:
+        log_stage_error(STEP_NAME, exc, {'context': '06b'})
+        raise
     if include_flow:
         result["flow_stream"] = _build_flow_stream(
             result["elements"], grid_cols, exclude_header_footer=True, place_floats=place_floats
@@ -1053,13 +1074,15 @@ def _build_section_sketch(
                     result["sketch_v2"]["visual_path"] = vrel
                 # Do not generate a duplicate crop when a canonical image exists.
                 return result
-        except Exception:
-            pass
+        except Exception as exc:
+            log_stage_error(STEP_NAME, exc, {'context': '06b'})
+            raise
         if base_results_dir is not None and source_pdf is not None and source_pdf.exists():
             try:
                 import fitz  # PyMuPDF
-            except Exception:
-                fitz = None
+            except Exception as exc:
+                log_stage_error(STEP_NAME, exc, {'context': '06b'})
+                raise
             if fitz is not None:
                 pages_present = sorted({int(e.get("page", section_page_idx)) for e in enriched})
                 pno = pages_present[0] if pages_present else section_page_idx
@@ -1097,15 +1120,17 @@ def _build_section_sketch(
                     pix.save(str(out_path))
                     try:
                         rel = out_path.relative_to(base_results_dir)
-                    except Exception:
-                        rel = out_path
+                    except Exception as exc:
+                        log_stage_error(STEP_NAME, exc, {'context': '06b'})
+                        raise
                     result["visual_path"] = str(rel)
                     if isinstance(result.get("sketch_v2"), dict):
                         result["sketch_v2"]["visual_path"] = str(rel)
                 finally:
                     doc.close()
-    except Exception:
-        pass
+    except Exception as exc:
+        log_stage_error(STEP_NAME, exc, {'context': '06b'})
+        raise
     # Router lifecycle is managed at run() end for efficiency
     return result
 
@@ -1192,10 +1217,9 @@ def _build_section_sketch_llm(
             obj.setdefault("grid_contract", {"cell": "half-open", "rounding": "floor/ceil", "eps": 1e-6})
             return obj
         return None
-    except Exception:
-        return None
-
-
+    except Exception as exc:
+        log_stage_error(STEP_NAME, exc, {'context': '06b'})
+        raise
 def run(input_path: str, output_path: str, **kwargs) -> dict[str, Any]:
     """
     Build 06b_layout_sketch.json under 06b_layout_sketcher/json_output/.
@@ -1210,8 +1234,9 @@ def run(input_path: str, output_path: str, **kwargs) -> dict[str, Any]:
     sink_id = None
     try:
         sink_id = logger.add(stage_dir / "stage.log", level="DEBUG", enqueue=True, rotation="5 MB", retention=3)
-    except Exception:
-        sink_id = None
+    except Exception as exc:
+        log_stage_error(STEP_NAME, exc, {'context': '06b'})
+        raise
     if ALLOW_VLM:
         try:
             require_scillm_preflight()
@@ -1230,10 +1255,7 @@ def run(input_path: str, output_path: str, **kwargs) -> dict[str, Any]:
         else:
             strict = bool(kwargs.get("strict") or (os.getenv("STAGE06B_STRICT","0").lower() in ("1","true","yes","y")))
             msg = "06b_layout_sketcher: missing Stage 04 sections (04_sections.json)"
-            try:
-                logger.error(msg)
-            except Exception:
-                pass
+            logger.error(msg)
             if strict:
                 # Fail-fast contract when requested
                 raise FileNotFoundError(msg)
@@ -1242,18 +1264,12 @@ def run(input_path: str, output_path: str, **kwargs) -> dict[str, Any]:
             json_dir.mkdir(parents=True, exist_ok=True)
             (json_dir / "06b_layout_sketch.json").write_text(json.dumps(out, indent=2))
             # Emit minimal timings
-            try:
-                t_ms = int((_t.monotonic() - _t0) * 1000)
-                with (stage_dir / "timings.jsonl").open("a", encoding="utf-8") as fp:
-                    fp.write(json.dumps({"stage":"06b_layout_sketcher","latency_ms":t_ms,"outcome":"empty"})+"\n")
-                (stage_dir / "timings_summary.json").write_text(json.dumps({"total_ms":t_ms}, indent=2))
-            except Exception:
-                pass
+            t_ms = int((_t.monotonic() - _t0) * 1000)
+            with (stage_dir / "timings.jsonl").open("a", encoding="utf-8") as fp:
+                fp.write(json.dumps({"stage":"06b_layout_sketcher","latency_ms":t_ms,"outcome":"empty"})+"\n")
+            (stage_dir / "timings_summary.json").write_text(json.dumps({"total_ms":t_ms}, indent=2))
             if sink_id is not None:
-                try:
-                    logger.remove(sink_id)
-                except Exception:
-                    pass
+                logger.remove(sink_id)
             return out
 
     data = json.loads(sec_json.read_text(encoding="utf-8"))
@@ -1263,11 +1279,8 @@ def run(input_path: str, output_path: str, **kwargs) -> dict[str, Any]:
     try:
         from extractor.pipeline.utils.page_geometry_cache import build_or_load as _pg_build
         src_pdf = None
-        try:
-            sp = data.get("source_pdf")
-            src_pdf = Path(sp) if isinstance(sp, str) else None
-        except Exception:
-            src_pdf = None
+        sp = data.get("source_pdf")
+        src_pdf = Path(sp) if isinstance(sp, str) else None
         cache = _pg_build(base, sections, src_pdf)
         for pno, pg in cache.pages.items():
             page_bbox = [0.0, 0.0, float(pg.width or 1.0), float(pg.height or 1.0)]
@@ -1283,8 +1296,9 @@ def run(input_path: str, output_path: str, **kwargs) -> dict[str, Any]:
                 "grid_columns": grid_cols,
                 "conf": {"columns": conf, "source": "pg_cache"},
             }
-    except Exception:
-        page_layout = {}
+    except Exception as exc:
+        log_stage_error(STEP_NAME, exc, {'context': '06b'})
+        raise
     # Optionally load Stage 05/06 to attach tables/figures by section
     tabs_by_sec: Dict[str, List[dict]] = {}
     figs_by_sec: Dict[str, List[dict]] = {}
@@ -1296,8 +1310,9 @@ def run(input_path: str, output_path: str, **kwargs) -> dict[str, Any]:
                 sid = str(t.get("section_id") or "")
                 if sid:
                     tabs_by_sec.setdefault(sid, []).append(t)
-    except Exception:
-        pass
+    except Exception as exc:
+        log_stage_error(STEP_NAME, exc, {'context': '06b'})
+        raise
     try:
         fpath = base / "06_figure_extractor" / "json_output" / "06_figures.json"
         if fpath.exists():
@@ -1306,20 +1321,18 @@ def run(input_path: str, output_path: str, **kwargs) -> dict[str, Any]:
                 sid = str(f.get("section_id") or "")
                 if sid:
                     figs_by_sec.setdefault(sid, []).append(f)
-    except Exception:
-        pass
+    except Exception as exc:
+        log_stage_error(STEP_NAME, exc, {'context': '06b'})
+        raise
     if not page_layout:
         # Per-page layout cache from section blocks (+ optional PyMuPDF for missing)
         page_index = _collect_page_index_from_sections(sections)
         # Try to resolve a source PDF for fallback
         source_pdf: Optional[Path] = None
-        try:
-            top_source = data.get("source_pdf") or None
-            if top_source and isinstance(top_source, str):
-                p = Path(top_source)
-                source_pdf = p if p.exists() else None
-        except Exception:
-            source_pdf = None
+        top_source = data.get("source_pdf") or None
+        if top_source and isinstance(top_source, str):
+            p = Path(top_source)
+            source_pdf = p if p.exists() else None
         if SOURCE_PDF_ENV and not source_pdf:
             p = Path(SOURCE_PDF_ENV)
             source_pdf = p if p.exists() else None
@@ -1336,16 +1349,16 @@ def run(input_path: str, output_path: str, **kwargs) -> dict[str, Any]:
         tpath2 = base / "05_table_extractor" / "json_output" / "05_tables.json"
         if tpath2.exists():
             all_tables = json.loads(tpath2.read_text(encoding="utf-8")).get("tables") or []
-    except Exception:
-        all_tables = []
-
+    except Exception as exc:
+        log_stage_error(STEP_NAME, exc, {'context': '06b'})
+        raise
     def _rect_intersects(a: list[float], b: list[float]) -> bool:
         try:
             ax0, ay0, ax1, ay1 = map(float, a); bx0, by0, bx1, by1 = map(float, b)
             return not (ax1 <= bx0 or bx1 <= ax0 or ay1 <= by0 or by1 <= ay0)
-        except Exception:
-            return False
-
+        except Exception as exc:
+            log_stage_error(STEP_NAME, exc, {'context': '06b'})
+            raise
     sketches: dict[str, Any] = {"sections": {}}
     for sec in sections:
         sid = str(sec.get("id"))
@@ -1360,14 +1373,16 @@ def run(input_path: str, output_path: str, **kwargs) -> dict[str, Any]:
             if not _tables_for_sec and all_tables:
                 try:
                     ps = int(sec.get("page_start", 0)); pe = int(sec.get("page_end", ps))
-                except Exception:
-                    ps, pe = 0, 0
+                except Exception as exc:
+                    log_stage_error(STEP_NAME, exc, {'context': '06b'})
+                    raise
                 sb = sec.get("bbox") or []
                 for t in all_tables:
                     try:
                         tp = int(t.get("page_index", 0) or 0)
-                    except Exception:
-                        tp = 0
+                    except Exception as exc:
+                        log_stage_error(STEP_NAME, exc, {'context': '06b'})
+                        raise
                     if tp < ps or tp > pe:
                         continue
                     tb = t.get("bbox") or []
@@ -1393,81 +1408,59 @@ def run(input_path: str, output_path: str, **kwargs) -> dict[str, Any]:
         sketches["sections"][sid] = sketch
 
     # Optional: render column/order overlays per section (visual proof)
-    try:
-        if VISUAL_PROOF:
-            from extractor.pipeline.visual.overlay import Box, draw_overlays
-            # Resolve source PDF
-            src_pdf = None
-            try:
-                tp = data.get("source_pdf")
-                src_pdf = Path(tp) if isinstance(tp, str) and Path(tp).exists() else None
-            except Exception:
-                src_pdf = None
-            if not src_pdf and SOURCE_PDF_ENV:
-                p = Path(SOURCE_PDF_ENV)
-                src_pdf = p if p.exists() else None
-            if src_pdf:
-                for sid, sk in sketches.get("sections", {}).items():
-                    try:
-                        elems = sk.get("elements") or []
-                        orig = {e.get("id"): (e.get("bbox") or None) for e in sk.get("elements_original_bbox", [])}
-                        boxes = []
-                        for e in elems:
-                            bid = e.get("id")
-                            bb = orig.get(bid)
-                            if not bb or len(bb) != 4:
-                                continue
-                            pg = int(e.get("page", 0) or 0)
-                            kind = e.get("kind") or "elem"
-                            ro = e.get("reading_order")
-                            col = int(e.get("column_id", 0))
-                            label = f"{kind}:{ro}@c{col}"
-                            color = (0, 170, 255) if kind == "text" else ((0, 200, 0) if kind == "table" else (255, 128, 0))
-                            boxes.append(Box(page=pg, x0=float(bb[0]), y0=float(bb[1]), x1=float(bb[2]), y1=float(bb[3]), label=label, color=color, width=3))
-                        if boxes:
-                            vout = base / "06b_layout_sketcher" / "visual_output" / sid
-                            draw_overlays(src_pdf, boxes, vout)
-                            # attach a relative path list for convenience
-                            try:
-                                imgs = [str(p.relative_to(base)) for p in vout.glob("*.png")]
-                                if imgs:
-                                    sk.setdefault("visual_overlays", imgs)
-                            except Exception:
-                                pass
-                    except Exception:
+    if VISUAL_PROOF:
+        from extractor.pipeline.visual.overlay import Box, draw_overlays
+        tp = data.get("source_pdf")
+        src_pdf = Path(tp) if isinstance(tp, str) and Path(tp).exists() else None
+        if not src_pdf and SOURCE_PDF_ENV:
+            p = Path(SOURCE_PDF_ENV)
+            src_pdf = p if p.exists() else None
+        if not src_pdf:
+            logger.warning("06b_layout_sketcher: VISUAL_PROOF requested but source PDF missing; skipping overlays")
+        else:
+            overlays_root = base / "06b_layout_sketcher" / "visual_output"
+            overlays_root.mkdir(parents=True, exist_ok=True)
+            for sid, sk in sketches.get("sections", {}).items():
+                elems = sk.get("elements") or []
+                orig = {e.get("id"): (e.get("bbox") or None) for e in sk.get("elements_original_bbox", [])}
+                boxes = []
+                for e in elems:
+                    bid = e.get("id")
+                    bb = orig.get(bid)
+                    if not bb or len(bb) != 4:
                         continue
-    except Exception:
-        pass
+                    pg = int(e.get("page", 0) or 0)
+                    kind = e.get("kind") or "elem"
+                    ro = e.get("reading_order")
+                    col = int(e.get("column_id", 0))
+                    label = f"{kind}:{ro}@c{col}"
+                    color = (0, 170, 255) if kind == "text" else ((0, 200, 0) if kind == "table" else (255, 128, 0))
+                    boxes.append(Box(page=pg, x0=float(bb[0]), y0=float(bb[1]), x1=float(bb[2]), y1=float(bb[3]), label=label, color=color, width=3))
+                if boxes:
+                    vout = overlays_root / sid
+                    draw_overlays(src_pdf, boxes, vout)
+                    imgs = [str(p.relative_to(base)) for p in vout.glob("*.png")]
+                    if imgs:
+                        sk.setdefault("visual_overlays", imgs)
 
     out_dir = base / "06b_layout_sketcher" / "json_output"
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "06b_layout_sketch.json").write_text(json.dumps(sketches, ensure_ascii=False, indent=2))
     # Also emit a SKETCH_V2 consolidated view for convenience
-    try:
-        v2 = {"sections": {}}
-        # Map section_id -> visual_path from Stage 04 (if present)
-        _vis_by_sid = {}
-        try:
-            for _s in sections:
-                _sid = str(_s.get("id"))
-                _v = _s.get("visual_path")
-                if _sid and isinstance(_v, str) and _v.strip():
-                    _vis_by_sid[_sid] = _v.strip()
-        except Exception:
-            _vis_by_sid = {}
-        for sid, sk in sketches.get("sections", {}).items():
-            if isinstance(sk, dict) and sk.get("sketch_v2"):
-                v2["sections"][sid] = sk["sketch_v2"]
-                # Ensure visual_path is carried through into sketch_v2
-                try:
-                    vp = sk.get("visual_path") or _vis_by_sid.get(sid)
-                    if vp and isinstance(vp, str):
-                        v2["sections"][sid]["visual_path"] = vp
-                except Exception:
-                    pass
-        (out_dir / "06b_layout_sketch_v2.json").write_text(json.dumps(v2, ensure_ascii=False, indent=2))
-    except Exception:
-        pass
+    v2 = {"sections": {}}
+    _vis_by_sid = {}
+    for _s in sections:
+        _sid = str(_s.get("id"))
+        _v = _s.get("visual_path")
+        if _sid and isinstance(_v, str) and _v.strip():
+            _vis_by_sid[_sid] = _v.strip()
+    for sid, sk in sketches.get("sections", {}).items():
+        if isinstance(sk, dict) and sk.get("sketch_v2"):
+            v2["sections"][sid] = sk["sketch_v2"]
+            vp = sk.get("visual_path") or _vis_by_sid.get(sid)
+            if vp and isinstance(vp, str):
+                v2["sections"][sid]["visual_path"] = vp
+    (out_dir / "06b_layout_sketch_v2.json").write_text(json.dumps(v2, ensure_ascii=False, indent=2))
     return sketches
 
 
@@ -1499,8 +1492,9 @@ def main(
                 if top_source and isinstance(top_source, str):
                     p = Path(top_source)
                     source_pdf = p if p.exists() else None
-            except Exception:
-                source_pdf = None
+            except Exception as exc:
+                log_stage_error(STEP_NAME, exc, {'context': '06b'})
+                raise
             if SOURCE_PDF_ENV and not source_pdf:
                 p = Path(SOURCE_PDF_ENV)
                 source_pdf = p if p.exists() else None
@@ -1517,8 +1511,9 @@ def main(
                         sid = str(t.get("section_id") or "")
                         if sid:
                             tabs_by_sec.setdefault(sid, []).append(t)
-            except Exception:
-                pass
+            except Exception as exc:
+                log_stage_error(STEP_NAME, exc, {'context': '06b'})
+                raise
             try:
                 fpath = base / "06_figure_extractor" / "json_output" / "06_figures.json"
                 if fpath.exists():
@@ -1527,8 +1522,9 @@ def main(
                         sid = str(f.get("section_id") or "")
                         if sid:
                             figs_by_sec.setdefault(sid, []).append(f)
-            except Exception:
-                pass
+            except Exception as exc:
+                log_stage_error(STEP_NAME, exc, {'context': '06b'})
+                raise
             rebuilt: dict[str, Any] = {"sections": {}}
             for sec in sections:
                 sid = str(sec.get("id"))
@@ -1558,36 +1554,18 @@ def main(
                 json.dumps(rebuilt, ensure_ascii=False, indent=2)
             )
     # Schema validation + timings + router close + sink teardown
-    try:
-        # Compute latency with real start time
-        t_ms = int((_t.monotonic() - _t0) * 1000)
-        # Validate top-level schema of latest file if present
-        try:
-            latest = json.loads(((base / "06b_layout_sketcher" / "json_output" / "06b_layout_sketch.json")).read_text(encoding="utf-8"))
-            if not isinstance(latest, dict) or not isinstance(latest.get("sections"), dict):
-                raise ValueError("invalid 06b_layout_sketch.json schema: expected {sections:{...}}")
-            try:
-                logger.info(f"06b_layout_sketcher: sections={len(latest.get('sections',{}))}")
-            except Exception:
-                pass
-        except Exception as _ve:
-            try:
-                logger.error(f"06b_layout_sketcher: schema validation failed: {_ve}")
-            except Exception:
-                pass
-        with ((base / "06b_layout_sketcher") / "timings.jsonl").open("a", encoding="utf-8") as fp:
-            fp.write(json.dumps({"stage":"06b_layout_sketcher","latency_ms":t_ms,"outcome":"ok"})+"\n")
-        ((base / "06b_layout_sketcher") / "timings_summary.json").write_text(json.dumps({"total_ms":t_ms}, indent=2))
-    except Exception:
-        pass
+    t_ms = int((_t.monotonic() - _t0) * 1000)
+    latest_path = base / "06b_layout_sketcher" / "json_output" / "06b_layout_sketch.json"
+    latest = json.loads(latest_path.read_text(encoding="utf-8"))
+    if not isinstance(latest, dict) or not isinstance(latest.get("sections"), dict):
+        raise ValueError("invalid 06b_layout_sketch.json schema: expected {sections:{...}}")
+    logger.info(f"06b_layout_sketcher: sections={len(latest.get('sections',{}))}")
+    with ((base / "06b_layout_sketcher") / "timings.jsonl").open("a", encoding="utf-8") as fp:
+        fp.write(json.dumps({"stage":"06b_layout_sketcher","latency_ms":t_ms,"outcome":"ok"}) + "\n")
+    ((base / "06b_layout_sketcher") / "timings_summary.json").write_text(json.dumps({"total_ms":t_ms}, indent=2))
     # Remove sink
     if locals().get("sink_id") is not None:
-        try:
-            logger.remove(locals().get("sink_id"))
-        except Exception:
-            pass
-
-
+        logger.remove(locals().get("sink_id"))
 if __name__ == "__main__":
     import sys
     argv = sys.argv[1:]

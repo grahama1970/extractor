@@ -35,7 +35,7 @@ from extractor.core.schema.unified_document import (
     HierarchyNode,
     TableCell,
 )
-from extractor.core.providers.utils import emit_list_blocks, normalize_heading_level
+from extractor.core.providers.utils import emit_list_blocks, normalize_heading_level, ensure_hierarchy
 from extractor.core.providers.fetcher_bridge import ensure_local_source, attach_fetcher_metadata
 
 
@@ -113,7 +113,7 @@ class RSTProvider:
         )
 
         logger.info(f"Extracted {len(blocks)} blocks from RST")
-        return doc
+        return ensure_hierarchy(doc, default_title=filepath.stem)
 
     # ------------------------------------------------------------------
     # Internal helpers
