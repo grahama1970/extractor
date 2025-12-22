@@ -14,6 +14,7 @@ from extractor.pipeline.schemas.reflow import (
     FigureBlock,
 )
 from extractor.pipeline.schemas.summarizer import SummaryOutput
+from extractor.pipeline.schemas.llm_call import LLMCallRecord
 
 __all__ = [
     "ReflowOutput",
@@ -23,4 +24,6 @@ __all__ = [
     "TableBlock",
     "FigureBlock",
     "SummaryOutput",
+    "LLMCallRecord",
 ]
+

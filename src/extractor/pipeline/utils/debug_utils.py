@@ -123,3 +123,66 @@ def summarize_messages(messages: Any) -> Dict[str, Any]:
         return {"parts": count, "chars": chars, "images": images}
     except Exception:
         return {}
+
+
+def log_llm_call(
+    stage_key: str,
+    task_kind: str,
+    route: str,
+    model: str,
+    success: bool,
+    *,
+    section_id: Optional[str] = None,
+    error_class: Optional[str] = None,
+    latency_ms: Optional[int] = None,
+    tokens_in: Optional[int] = None,
+    tokens_out: Optional[int] = None,
+    raw_preview: Optional[str] = None,
+    stage_dir: Optional[Path] = None,
+) -> None:
+    """Stamp an LLM call into per-stage timings.jsonl.
+
+    Validates the record with LLMCallRecord Pydantic schema, then delegates
+    to log_timing() for writing. Uses lazy import to avoid circular deps.
+
+    Args:
+        stage_key: Stage name, e.g. "07_reflow_section"
+        task_kind: Type of task (reflow, summarize, verify_header, etc.)
+        route: Logical route ("chutes/text" or "chutes/vlm")
+        model: Underlying model ID from environment
+        success: Whether the call succeeded
+        section_id: Optional section or unit-of-work ID
+        error_class: Error classification if failed (timeout, parse_fail, etc.)
+        latency_ms: Call latency in milliseconds
+        tokens_in: Input token count if available
+        tokens_out: Output token count if available
+        raw_preview: First 400 chars of response on error paths only
+        stage_dir: Optional stage directory for additional output
+    """
+    # Lazy import to avoid circular dependency with schemas
+    from extractor.pipeline.schemas.llm_call import LLMCallRecord
+
+    # Truncate raw_preview to 400 chars
+    preview = raw_preview[:400] if raw_preview else None
+
+    try:
+        record = LLMCallRecord(
+            ts=_iso_now(),
+            stage=stage_key,
+            task_kind=task_kind,
+            route=route,
+            model=model,
+            section_id=section_id,
+            success=success,
+            error_class=error_class,
+            latency_ms=latency_ms,
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
+            raw_preview=preview,
+        )
+        # exclude_none keeps the JSONL compact
+        log_timing(stage_key, record.model_dump(exclude_none=True), stage_dir=stage_dir)
+    except Exception as exc:
+        # Log validation errors but don't crash the pipeline
+        log_stage_error("debug_utils.log_llm_call", exc, {"stage": stage_key})
+
