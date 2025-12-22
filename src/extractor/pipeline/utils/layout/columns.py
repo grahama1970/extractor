@@ -62,34 +62,30 @@ def assign_cols_and_span(
     bbox: List[float],
     columns: List[List[float]],
 ) -> Tuple[List[int], bool]:
-    """Return ([col_ids], spans_columns) based on overlap with column bands."""
+    """Return ([col_ids], spans_columns) based on overlap with column bands.
+    
+    Uses 50% overlap threshold to assign to column.
+    """
+    x0, _, x1, _ = [float(v) for v in (bbox or [0, 0, 0, 0])]
+    col_ids: List[int] = []
+    spans = False
     if not columns:
         return [0], False
-    
-    x0, _, x1, _ = bbox
-    matched = []
-    
+    w = max(1e-6, x1 - x0)
     for i, (cx0, cx1) in enumerate(columns):
-        # Calculate overlap
-        inter = max(0.0, min(x1, cx1) - max(x0, cx0))
-        if inter > 0:
-            matched.append(i)
-    
-    if not matched:
-        # Find closest column
-        xc = (x0 + x1) / 2.0
-        closest = 0
-        min_dist = float("inf")
-        for i, (cx0, cx1) in enumerate(columns):
-            col_center = (cx0 + cx1) / 2.0
-            dist = abs(xc - col_center)
-            if dist < min_dist:
-                min_dist = dist
-                closest = i
-        matched = [closest]
-    
-    spans = len(matched) > 1
-    return matched, spans
+        ov = max(0.0, min(x1, float(cx1)) - max(x0, float(cx0)))
+        if ov / w >= 0.5:
+            col_ids.append(i)
+    if len(col_ids) >= 2:
+        spans = True
+    if not col_ids:
+        # fallback to single best overlap
+        best = max(
+            range(len(columns)),
+            key=lambda i: max(0.0, min(x1, float(columns[i][1])) - max(x0, float(columns[i][0]))),
+        )
+        col_ids = [best]
+    return col_ids, spans
 
 
 def col_id_for(xc: float, columns: List[List[float]]) -> int:

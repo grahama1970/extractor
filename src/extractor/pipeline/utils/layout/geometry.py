@@ -95,19 +95,21 @@ def horizontal_iou(a: List[float], b: List[float]) -> float:
 
 def summ(text: str, limit: int = 80) -> str:
     """Summarize text to a limit."""
-    s = " ".join((text or "").split())
-    return s[:limit] + "…" if len(s) > limit else s
+    if not text:
+        return ""
+    s = " ".join(str(text).split())
+    return s if len(s) <= limit else s[: limit - 1] + "…"
 
 
 def norm_text(s: str) -> str:
-    """Normalize text (lowercase, collapsed whitespace)."""
-    return " ".join((s or "").lower().split())
+    """Normalize text (collapsed whitespace, preserves case)."""
+    return " ".join((s or "").split())
 
 
 def text_sha1(s: str) -> str:
     """Compute SHA1 hash of normalized text."""
     normed = norm_text(s)
-    return hashlib.sha1(normed.encode("utf-8")).hexdigest()[:12]
+    return hashlib.sha1(normed.encode("utf-8")).hexdigest()
 
 
 def union_bbox(elements: List[Dict[str, Any]]) -> List[float]:
