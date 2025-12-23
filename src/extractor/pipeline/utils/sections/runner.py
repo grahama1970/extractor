@@ -1,10 +1,58 @@
 """Stage 04 section builder runner."""
-import json, os
+import json, os, asyncio
 from pathlib import Path
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
 from loguru import logger
+from rich.console import Console
 from extractor.pipeline.utils.reliability import log_stage_error
+from extractor.pipeline.utils.diagnostics import (
+    start_resource_sampler,
+    stop_resource_sampler,
+    make_event,
+    snapshot_resources,
+    build_stage_timings,
+    get_run_id,
+    gpu_metrics_available,
+)
+
+# Import from new utils/sections package (primary section parsing functions)
+from extractor.pipeline.utils.sections import (
+    SECTION_NUMBER_PATTERNS,
+    normalize_section_number as _normalize_section_number,
+    coerce_depth as _coerce_depth,
+    derive_parent_number,
+    analyze_section_numbering,
+    derive_section_depth,
+    extract_section_title,
+    clean_section_title,
+    detect_header_level,
+    looks_like_header_text as _looks_like_header_text,
+)
+from extractor.pipeline.utils.section_builder_utils import (
+    pdf_analyze_section_numbering as _pdf_analyze_numbering,
+)
+try:
+    from extractor.pipeline.utils.section_builder_utils_local import (
+        normalize_breadcrumbs as _normalize_breadcrumbs,
+        breadcrumb_label,
+        enrich_header_colors as _enrich_header_colors,
+        prepare_section_hierarchy as _prepare_section_hierarchy,
+    )
+except ImportError:
+    # If local utils are not found, define stubs or fail
+    # Assuming they exist based on step file
+    import extractor.pipeline.utils.section_builder_utils_local as sbul
+    _normalize_breadcrumbs = sbul.normalize_breadcrumbs
+    _prepare_section_hierarchy = sbul.prepare_section_hierarchy
+    _enrich_header_colors = sbul.enrich_header_colors
+
+LARGE_FONT_THRESHOLD = 11.0 # Approximate default
+
+console = Console(stderr=True)
+MAX_VISUAL_PAGES_DEFAULT = 5
+STAGE04_COLOR_ENRICH = os.getenv("STAGE04_COLOR_ENRICH", "1").lower() in ("1", "true", "yes", "y")
+
 def run(
     input_json: Path,
     pdf_dir: Path,

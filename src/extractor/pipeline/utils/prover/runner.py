@@ -1,10 +1,72 @@
 """Stage 08 Lean4 theorem prover runner."""
-import asyncio, json, os, sys
+import asyncio, json, os, sys, time
+from dataclasses import dataclass
 from pathlib import Path
 from datetime import datetime
 from typing import Any, Dict, List
 from loguru import logger
+from rich.console import Console
 from extractor.pipeline.utils.reliability import log_stage_error
+from extractor.pipeline.steps.scillm_preflight_validator import require_scillm_preflight
+from extractor.pipeline.utils.diagnostics import (
+    iso_now,
+    snapshot_resources,
+    start_resource_sampler,
+    stop_resource_sampler,
+    make_event,
+    gpu_metrics_available,
+    get_run_id,
+)
+import shlex
+import textwrap
+from tqdm.asyncio import tqdm
+from extractor.pipeline.utils.json_utils import clean_json_string
+from extractor.pipeline.utils.json_mode import JSON_SYSTEM_GUARD
+from extractor.pipeline.utils.scillm_router import get_text_router
+from extractor.pipeline.utils.debug_utils import log_llm_call
+from extractor.pipeline.utils.prover.execution import (
+    ProofResult as _ProofResult,
+    prove_via_cli as _prove_via_cli,
+    prove_batch_via_cli as _prove_batch_via_cli,
+    execute_lean_code_docker as _execute_lean_code_docker,
+    get_cli_cmd,
+)
+
+try:
+    from scillm.extras.providers import certainly_prove  # type: ignore
+except Exception:
+    def certainly_prove(*args, **kwargs):
+        raise RuntimeError("SciLLM extras/providers unavailable in this environment")
+
+try:
+    from lean4_prover.core.prove_requirement import ProofResult, generate_lean_code
+except Exception:
+    @dataclass
+    class ProofResult:
+        success: bool
+        lean_code: str
+        stdout: str
+        stderr: str
+        return_code: int
+        test_filename: str
+        error_messages: List[str] | None = None
+        proof_output: str | None = None
+
+    async def generate_lean_code(requirement: str, strategy):
+        return (
+            f"-- requirement: {requirement}\n"
+            f"-- strategy: {getattr(strategy, 'validation_approach', 'unknown')}\n"
+        )
+
+# LLM Configuration
+LEAN4_MODEL = os.getenv("LEAN4_MODEL", "chutes/text")
+LEAN4_PROVER_MODEL = os.getenv("LEAN4_PROVER_MODEL", os.getenv("LEAN4_MODEL", "certainly/lean4"))
+MAX_CONCURRENT_LLM = int(os.getenv("MAX_CONCURRENT_LLM_CALLS", 1))
+MAX_CONCURRENT_LEAN4 = int(os.getenv("MAX_CONCURRENT_LEAN4_CALLS", 1))
+LEAN4_CLI_CMD = os.getenv("LEAN4_CLI_CMD", "").strip()
+
+console = Console(stderr=True)
+
 def run(
     input_json: Path,
     output_dir: Path = Path("data/results/pipeline"),

@@ -20,8 +20,202 @@ from extractor.pipeline.utils.diagnostics import (
     start_resource_sampler,
     stop_resource_sampler,
 )
+from extractor.pipeline.steps.scillm_preflight_validator import require_scillm_preflight
+
 EMIT_MERGE_HINTS = os.getenv("STAGE06B_EMIT_MERGE_HINTS", "0").lower() in ("1", "true", "yes", "y")
 GRID = 12
+ALLOW_VLM = os.getenv("ALLOW_VLM", "0").lower() in ("1", "true", "yes", "y")
+SCHEMA_VERSION = "0.0.1"
+SOURCE_PDF_ENV = os.getenv("SOURCE_PDF")
+VISUAL_PROOF = os.getenv("VISUAL_PROOF", "0").lower() in ("1", "true", "yes", "y")
+HEADER_PROPAGATION = True
+STEP_NAME = "06b_layout_sketcher"
+
+def _norm(v: float, a: float, b: float) -> float:
+    if b <= a:
+        return 0.0
+    x = (v - a) / (b - a)
+    return 0.0 if x < 0 else (1.0 if x > 1 else x)
+
+def _grid_bbox(bbox: list[float], page: list[float], grid: int) -> dict[str, int]:
+    """Map page bbox → grid cells using half-open contract [x0,x1), [y0,y1)."""
+    import math
+    x0, y0, x1, y1 = bbox or [0.0, 0.0, 0.0, 0.0]
+    px0, py0, px1, py1 = page or [0.0, 0.0, 1.0, 1.0]
+    nx0 = _norm(float(x0), float(px0), float(px1))
+    ny0 = _norm(float(y0), float(py0), float(py1))
+    nx1 = _norm(float(x1), float(px0), float(px1))
+    ny1 = _norm(float(y1), float(py0), float(py1))
+    gx0 = max(0, min(grid, int(math.floor(nx0 * grid))))
+    gy0 = max(0, min(grid, int(math.floor(ny0 * grid))))
+    gx1 = max(0, min(grid, int(math.ceil(nx1 * grid))))
+    gy1 = max(0, min(grid, int(math.ceil(ny1 * grid))))
+    if gx1 <= gx0: gx1 = min(grid, gx0 + 1)
+    if gy1 <= gy0: gy1 = min(grid, gy0 + 1)
+    return {"x0": gx0, "y0": gy0, "x1": gx1, "y1": gy1}
+
+def _summ(text: str, limit: int = 80) -> str:
+    if not text:
+        return ""
+    s = " ".join(str(text).split())
+    return s if len(s) <= limit else s[: limit - 1] + "…"
+
+def _norm_text(s: str) -> str:
+    return " ".join((s or "").split())
+
+def _text_sha1(s: str) -> str:
+    import hashlib
+    return hashlib.sha1(_norm_text(s).encode("utf-8")).hexdigest()
+
+def _area(b: list[float]) -> float:
+    if not b or len(b) != 4:
+        return 0.0
+    return max(0.0, (b[2] - b[0])) * max(0.0, (b[3] - b[1]))
+
+def _aspect(b: list[float]) -> float:
+    w = max(1e-6, (b[2] - b[0]))
+    h = max(1e-6, (b[3] - b[1]))
+    return w / h
+
+def _detect_columns(elements: list[dict[str, Any]], page_bbox: list[float], min_gap_ratio: float = 0.04) -> list[list[float]]:
+    """Detect 1–3 columns deterministically using x-center gaps."""
+    pts: list[float] = []
+    for e in elements:
+        b = e.get("bbox")
+        if not b or len(b) != 4:
+            continue
+        pts.append((float(b[0]) + float(b[2])) / 2.0)
+    pts.sort()
+    if len(pts) < 3:
+        return [[page_bbox[0], page_bbox[2]]]
+    gaps: list[tuple[float, int]] = []
+    for i in range(len(pts) - 1):
+        gaps.append((pts[i + 1] - pts[i], i))
+    page_w = max(1e-6, (page_bbox[2] - page_bbox[0]))
+    cuts = [i for g, i in gaps if g / page_w >= min_gap_ratio]
+    if not cuts:
+        return [[page_bbox[0], page_bbox[2]]]
+    bounds: list[float] = [page_bbox[0]] + [(pts[i] + pts[i + 1]) / 2.0 for i in cuts] + [page_bbox[2]]
+    cols = [[bounds[j], bounds[j + 1]] for j in range(len(bounds) - 1)]
+    return cols[:3]
+
+def _assign_cols_and_span(bbox: List[float], columns: List[List[float]]) -> Tuple[List[int], bool]:
+    x0, _, x1, _ = [float(v) for v in (bbox or [0, 0, 0, 0])]
+    col_ids: List[int] = []
+    spans = False
+    if not columns:
+        return [0], False
+    w = max(1e-6, x1 - x0)
+    for i, (cx0, cx1) in enumerate(columns):
+        ov = max(0.0, min(x1, float(cx1)) - max(x0, float(cx0)))
+        if ov / w >= 0.5:
+            col_ids.append(i)
+    if len(col_ids) >= 2:
+        spans = True
+    if not col_ids:
+        best = max(range(len(columns)), key=lambda i: max(0.0, min(x1, float(columns[i][1])) - max(x0, float(columns[i][0]))))
+        col_ids = [best]
+    return col_ids, spans
+
+def _col_id_for(xc: float, columns: list[list[float]]) -> int:
+    for i, (a, b) in enumerate(columns):
+        if a <= xc <= b:
+            return i
+    return 0
+
+def _iou(a: list[float], b: list[float]) -> float:
+    try:
+        ax0, ay0, ax1, ay1 = map(float, a); bx0, by0, bx1, by1 = map(float, b)
+        ix0, iy0, ix1, iy1 = max(ax0, bx0), max(ay0, by0), min(ax1, bx1), min(ay1, by1)
+        inter = max(0.0, ix1 - ix0) * max(0.0, iy1 - iy0)
+        if inter <= 0: return 0.0
+        union = max(1e-9, max(0.0, (ax1 - ax0) * (ay1 - ay0)) + max(0.0, (bx1 - bx0) * (by1 - by0)) - inter)
+        return inter / union
+    except Exception as exc:
+        log_stage_error(STEP_NAME, exc, {'context': '06b'})
+        raise
+
+def _build_flow_stream(elements: list[dict[str, Any]], columns_grid: list[dict[str, int]], *, exclude_header_footer: bool, place_floats: str = "inline") -> str:
+    lines: list[str] = ["[SECTION START]"]
+    col_count = len(columns_grid) if columns_grid else 1
+    lines.append(f"[COLUMNS {col_count}]")
+    by_col: dict[int, list[dict[str, Any]]] = {}
+    for e in elements:
+        if exclude_header_footer and e.get("header_footer_candidate"): continue
+        by_col.setdefault(int(e.get("column_id", 0)), []).append(e)
+    def _emit_elem(e):
+        gid = e.get("id") or "?"
+        if e.get("kind") == "text": return f"[PARA id={gid}] {e.get('summary','')}"
+        if e.get("kind") == "table": return f"[TABLE id={gid} header=\"{e.get('summary', '').replace(chr(10), ' ')}\"]"
+        if e.get("kind") == "figure": return f"[FIGURE id={gid} cap=\"{e.get('summary', '').replace(chr(10), ' ')}\"]" + (f" [ANCHOR={e.get('anchor_element_id')} dist={e.get('anchor_distance')}]" if e.get('anchor_element_id') else "")
+        return f"[ELEM id={gid} kind={e.get('kind')}]"
+    if place_floats not in {"inline", "sidebar", "append"}: place_floats = "inline"
+    for cidx in sorted(by_col):
+        lines.append(f"[COL {cidx} START]")
+        col_elems = by_col[cidx]
+        if place_floats == "inline":
+            for e in col_elems: lines.append(_emit_elem(e))
+        elif place_floats == "sidebar":
+            for e in col_elems:
+                if e.get("kind") == "text": lines.append(_emit_elem(e))
+            for e in col_elems:
+                if e.get("kind") in ("table", "figure"): lines.append(_emit_elem(e))
+        else:
+            for e in col_elems:
+                if e.get("kind") not in ("table", "figure"): lines.append(_emit_elem(e))
+            for e in col_elems:
+                if e.get("kind") in ("table", "figure"): lines.append(_emit_elem(e))
+        lines.append(f"[COL {cidx} END]")
+    lines.append("[SECTION END]")
+    return "\n".join(lines)
+
+def _collect_page_index_from_sections(sections: List[dict]) -> Dict[int, Dict[str, Any]]:
+    page_index: Dict[int, Dict[str, Any]] = {}
+    for sec in sections or []:
+        for b in sec.get("blocks") or []:
+            page = int(b.get("page") or b.get("page_idx") or b.get("page_index") or -1)
+            bbox = b.get("bbox") or []
+            if page < 0 or len(bbox) != 4: continue
+            rec = page_index.setdefault(page, {"text_bboxes": [], "page_bbox": [None, None, None, None]})
+            rec["text_bboxes"].append([float(x) for x in bbox])
+            pb = rec["page_bbox"]
+            x0, y0, x1, y1 = [float(x) for x in bbox]
+            pb[0] = x0 if pb[0] is None else min(pb[0], x0)
+            pb[1] = y0 if pb[1] is None else min(pb[1], y0)
+            pb[2] = x1 if pb[2] is None else max(pb[2], x1)
+            pb[3] = y1 if pb[3] is None else max(pb[3], y1)
+    for _, rec in page_index.items():
+        if any(v is None for v in rec["page_bbox"]): rec["page_bbox"] = [0.0, 0.0, 1.0, 1.0]
+    return page_index
+
+def _pymupdf_fill_missing_pages(page_index: Dict[int, Dict[str, Any]], source_pdf: Optional[Path]) -> None:
+    if not os.getenv("STAGE06B_PYMUPDF_FALLBACK", "").lower() in ("1", "true", "yes", "y") or not source_pdf or not source_pdf.exists(): return
+    try:
+        import fitz
+        doc = fitz.open(str(source_pdf))
+        for pno in range(len(doc)):
+            rec = page_index.setdefault(pno, {"text_bboxes": [], "page_bbox": [0.0, 0.0, doc[pno].rect.width, doc[pno].rect.height]})
+            if rec.get("text_bboxes"): continue
+            for blk in doc[pno].get_text("blocks"):
+                if len(blk) >= 5 and blk[4].strip():
+                    rec["text_bboxes"].append([float(blk[0]), float(blk[1]), float(blk[2]), float(blk[3])])
+            if not rec.get("page_bbox"): rec["page_bbox"] = [0.0, 0.0, float(doc[pno].rect.width), float(doc[pno].rect.height)]
+        doc.close()
+    except Exception as exc: log_stage_error(STEP_NAME, exc, {'context': '06b'}); raise
+
+def _build_page_layout(page_index: Dict[int, Dict[str, Any]], *, min_gap_ratio: float, grid: int) -> Dict[int, Dict[str, Any]]:
+    layout: Dict[int, Dict[str, Any]] = {}
+    for pno, rec in page_index.items():
+        page_bbox: List[float] = rec.get("page_bbox") or [0.0, 0.0, 1.0, 1.0]
+        elements = [{"bbox": b} for b in rec.get("text_bboxes") or []]
+        cols = _detect_columns(elements, page_bbox, min_gap_ratio=min_gap_ratio)
+        grid_cols = []
+        for idx, (cx0, cx1) in enumerate(cols):
+            gb = _grid_bbox([cx0, page_bbox[1], cx1, page_bbox[3]], page_bbox, grid)
+            grid_cols.append({"id": idx, "x0": gb["x0"], "x1": gb["x1"]})
+        conf = 0.6 if len(cols) <= 1 else 0.85
+        layout[pno] = {"page_bbox": page_bbox, "columns": cols, "grid_columns": grid_cols, "conf": {"columns": conf, "source": "marker"}}
+    return layout
 
 def _build_section_sketch(
     sec: dict[str, Any],

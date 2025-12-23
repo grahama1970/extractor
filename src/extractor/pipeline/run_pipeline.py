@@ -869,6 +869,25 @@ def main(argv: Optional[list[str]] = None) -> int:
             {"json": str(audit_json.relative_to(out)), "latency_ms": stage_latencies.get("09b_audit")},
         )
 
+    # 14 Report Generator
+    a14 = _step(
+        "14_report_generator",
+        s14.run,
+        out,
+        out,
+        stop_on_fail=args.stop_on_fail,
+        timeout_sec=args.stage_timeout,
+        log_dir_base=out,
+        on_timing=lambda n, dt: stage_latencies.update({n: dt}),
+    )
+    if a14:
+        _write_artifacts_index((out / "14_report_generator"))
+        manifest.record_stage(
+            "14_report_generator",
+            "Completed",
+            {"json": str(Path(a14).relative_to(out)), "latency_ms": stage_latencies.get("14_report_generator")},
+        )
+
     # 15 walkthrough (optional)
     if args.generate_walkthrough:
         try:

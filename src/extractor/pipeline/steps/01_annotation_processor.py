@@ -38,6 +38,7 @@ from extractor.pipeline.steps.scillm_preflight_validator import (
     quick_scillm_check
 )
 from extractor.pipeline.utils.step_sanity import run_step_sanity
+from extractor.pipeline.utils.annots.runner import run
 
 from extractor.pipeline.utils.diagnostics import (
     start_resource_sampler,

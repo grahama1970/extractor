@@ -1,99 +1,60 @@
-# Pipeline Refactoring Walkthrough for Copilot Review
+# Critical Pipeline Assessment for Copilot
 
-## Status: ✅ Complete
+**Date:** 2025-12-23
+**Status:** ⚠️ REFRACTORING PARTIALLY BROKEN (Runtime Errors)
 
-**Commit: `4aa8d8ca` on `feature/merge-metadata-prop`**
+## Honest Assessment: Aspirational vs. Functional
 
----
+The recent refactor ("Thin Wrapper" + "Utility Runner") was architecturally sound but **execution was flawed**. The extracted runner files contain "aspirational code" — code that looks correct but fails at runtime due to missing dependencies.
 
-## Line Count Results (All Under 800)
+### 1. Structural Flaws (The "Cut & Paste" Problem)
 
-| Step File                  | Lines |
-| -------------------------- | ----- |
-| 07_reflow_section.py       | 795   |
-| 11_arango_create_graph.py  | 788   |
-| 14_report_generator.py     | 724   |
-| 05_table_extractor.py      | 682   |
-| 10_arangodb_exporter.py    | 595   |
-| 06b_layout_sketcher.py     | 470   |
-| 03_suspicious_headers.py   | 463   |
-| 02_marker_extractor.py     | 456   |
-| 01_annotation_processor.py | 264   |
-| 08_lean4_theorem_prover.py | 154   |
-| 09a_pdf_annotator.py       | 133   |
-| 09_section_summarizer.py   | 126   |
+The refactoring involved moving logic from Step Executables -> Utility Runners.
+**The Flaw:** Imports and helper classes were NOT moved with the logic.
 
-**Total: 9,180 lines** (reduced from ~24,000)
+| Step    | Status    | Broken Dependency                                     | Fix Applied?      |
+| ------- | --------- | ----------------------------------------------------- | ----------------- |
+| **01**  | ✅ FIXED  | `sys`, `fitz`, `Config` (missing class), `textwrap`   | Yes (01 now runs) |
+| **02**  | ❌ BROKEN | `uuid` (missing import)                               | In Progress       |
+| **03**  | ⚠️ RISKY  | Imports from `utils/annotations` (which was shadowed) | Pending           |
+| **09a** | ✅ FIXED  | `sys` (removed), dead code                            | Yes               |
 
----
+### 2. Specific "Aspirational" Patterns Detected
 
-## Verification Evidence
+#### A. The "Ghost Import"
 
-### Import Check: 15/15 Pass
-
-```bash
-python3 -c "import importlib; ..."
-# All 15 step modules import successfully
-```
-
-### Sanity Check: 14/15 Pass
-
-```bash
-python3 -c "... mod.sanity() ..."
-# 14/15 pass - only 11_arango fails due to empty test data
-```
-
----
-
-## Fixes Applied
-
-| Issue                                 | Fix                                      |
-| ------------------------------------- | ---------------------------------------- |
-| 09a missing sys import                | Removed - `__main__` moved to runner     |
-| 01/02 `log_stage_error` before import | Moved import before `try: import psutil` |
-| Dead code after raise                 | Removed from 09a helpers                 |
-| 07 missing STEP_NAME                  | Added constant                           |
-| 14 missing sanity()                   | Added function and spec                  |
-| step_sanity list.keys() bug           | Fixed for JSON list roots                |
-
----
-
-## New Utility Packages
-
-| Package                       | Contains                     | Source                  |
-| ----------------------------- | ---------------------------- | ----------------------- |
-| `utils/reflow/runner.py`      | Stage 07 `run()`             | 07_reflow_section       |
-| `utils/tables/runner.py`      | Table extraction pipeline    | 05_table_extractor      |
-| `utils/headers/runner.py`     | Header verification pipeline | 03_suspicious_headers   |
-| `utils/visuals/runner.py`     | PDF annotation pipeline      | 09a_pdf_annotator       |
-| `utils/layout/sketcher.py`    | Layout sketch generation     | 06b_layout_sketcher     |
-| `utils/prover/runner.py`      | Lean4 theorem proving        | 08_lean4_theorem_prover |
-| `utils/sections/runner.py`    | Section building             | 04_section_builder      |
-| `utils/annotations/runner.py` | Annotation processing        | 01_annotation_processor |
-| `utils/arango/`               | ArangoDB export/graph        | 10, 11                  |
-
----
-
-## Wrapper Structure
-
-Each step file now follows this pattern:
+Runner files use libraries that arent imported.
+_Example (02 Marker Runner):_
 
 ```python
-# Imports
-from extractor.pipeline.utils.<package>.runner import run
-from extractor.pipeline.utils.step_sanity import run_step_sanity
-
-STEP_NAME = "<step_name>"
-
-def sanity() -> int:
-    return run_step_sanity(STEP_NAME)
-
-# Optional helper functions used by runner or pipeline
+# utils/marker_runner.py
+def run(...):
+    run_id = uuid.uuid4().hex  # NameError: name 'uuid' is not defined
 ```
 
-**Key points:**
+#### B. The "Orphaned Config"
 
-- ✅ All wrappers export `run` (re-exported from runner)
-- ✅ All wrappers export `sanity()`
-- ✅ No `__main__` blocks in wrappers
-- ✅ Pipeline calls `s*.run(...)` correctly
+Runners rely on a `Config` dataclass that was left behind in the step file.
+_Example (01 Runner):_
+
+```python
+def extract_annotations_data(..., config: Config): # NameError
+```
+
+#### C. Package Shadowing
+
+Creating `utils/annotations/` (directory) shadowed the existing `utils/annotations.py` (file), breaking imports in Stage 03.
+_Status:_ Fixed by renaming to `utils/annotation_runner.py`.
+
+### 3. Conclusion for Copilot
+
+**Is the pipeline "aspirational"?**
+
+- **Partially, YES.** The _logic_ is real, but the _files_ are currently broken artifacts of a sloppy refactor.
+- **Does it need human rewrite?** No, but it needs a **rigorous linting/fix pass** to re-add missing imports and move helper classes. It does not need a logical rewrite, just a dependency repair.
+
+### 4. Next Steps
+
+1. **Lint all runners**: Identify every missing import in `src/extractor/pipeline/utils/*.py`.
+2. **Move Configs**: Extract `Config` dataclasses to `utils/configs.py` or keep in runners to avoid circular deps.
+3. **Verify Runtime**: Do not claim "works" until `offline-smoke` passes.

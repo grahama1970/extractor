@@ -80,6 +80,7 @@ from extractor.pipeline.utils.diagnostics import (
     gpu_metrics_available,
 )
 from extractor.pipeline.utils.step_sanity import run_step_sanity
+from extractor.pipeline.utils.sections.runner import run
 
 # (removed unused report utils import)
 

@@ -118,3 +118,46 @@ src/extractor/pipeline/docs/step_refactors/
 2. **Delete duplicates** from that stage
 3. **Add `log_llm_call()` stamps** to that stage
 4. **Test** → repeat for other stages
+
+## 🛑 Phase 4: Emergency Repairs & Assessment (Dec 2025)
+
+**Status**: The pipeline compilation and wiring has been repaired. The "refactoring" in Phase 2 left many runner files in a broken state (missing imports, undefined variables, missing helper functions). These have been mechanically fixed to pass `offline-smoke` tests.
+
+### "Brutal" Assessment
+
+**Is it AI Slop?**
+
+- **Borderline.** The Phase 2 refactor exhibited "hallucination-like" traits: creating runner files that _looked_ correct structurally but failed to import critical dependencies or define local helpers.
+- **Example**: `utils/layout/sketcher.py` was missing ~15 internal helper functions (`_norm`, `_grid_bbox`) that were left behind in the original step file.
+- **Example**: `utils/report_runner.py` crashed on `list` vs `int` comparison for `section_depth`, indicating a lack of type discipline/validation across stages.
+
+**Can it be saved?**
+
+- **YES.** The underlying architecture (Sequential Steps → Runners → Shared Utils) is sound and much better than the original monolith.
+- **It works now.** The pipeline passed a full end-to-end `offline-smoke` test on Dec 23, 2025.
+- **Do NOT rewrite from scratch.** Use the current working state as a baseline and harden it.
+
+### Revised Request for Next Agent
+
+**Goal**: Transform the "working but fragile" pipeline into a robust, type-safe system.
+
+1.  **Strict Data Contracts**:
+
+    - Implement Pydantic models for _all_ inter-stage JSON artifacts (`04_sections.json`, `07_reflowed.json`, etc.).
+    - Eliminate "mixed types" (e.g. ensure `section_depth` is always `int` or `List[int]`, not both).
+    - Validate inputs at the start of every `runner.run()` function.
+
+2.  **Logic Hardening (Cleanup)**:
+
+    - The "Injection" logic in `utils/layout/sketcher.py` (helpers copied from step) is technical debt. Move these to a proper utility module (e.g. `extractor.pipeline.utils.geometry`).
+    - Audit all `utils/*.py` files for "aspirational" code (unused imports, stubs).
+
+3.  **Online Verification**:
+
+    - `offline-smoke` passes, but Stages 08 (Prover) and 09 (Summarizer) were skipped.
+    - **CRITICAL**: Run a _live_ test (or high-fidelity mock) to verify that `log_llm_call` and the LLM logic in `utils/reflow/section_reflow.py` actually work.
+
+4.  **Logging**:
+    - Complete "Task B" (Stamp LLM Call Sites) if it hasn't been done. Ensure telemetry is capturing costs/latency.
+
+**Conclusion**: The patient is stable but needs intensive care (types, tests) before discharge.

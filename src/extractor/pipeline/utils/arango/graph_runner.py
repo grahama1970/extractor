@@ -4,7 +4,11 @@ from pathlib import Path
 from datetime import datetime
 from typing import Any, Dict, List
 from loguru import logger
+from rich.console import Console
 from extractor.pipeline.utils.reliability import log_stage_error
+
+console = Console(stderr=True)
+
 def run(
     input_json: Path,
     output_dir: Path = Path("data/results/pipeline"),

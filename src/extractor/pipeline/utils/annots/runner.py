@@ -1,10 +1,86 @@
 """Stage 01 annotation processor runner."""
-import json, os, asyncio
+import json
+import os
+import sys
+import asyncio
+import time
+import textwrap
 from pathlib import Path
 from datetime import datetime
 from typing import Any, Dict, List, Optional
+from dataclasses import dataclass, field
 from loguru import logger
+import fitz  # PyMuPDF
 from extractor.pipeline.utils.reliability import log_stage_error
+from extractor.pipeline.utils.diagnostics import (
+    start_resource_sampler,
+    stop_resource_sampler,
+    get_run_id,
+    make_event,
+)
+
+try:
+    import psutil  # type: ignore
+except ImportError:
+    psutil = None
+
+# Global constants
+ANNOT_FREETEXT = "FreeText"
+
+
+@dataclass
+class Config:
+    input_pdf: Path
+    output_dir: Path
+    vertical_expansion_ratio: float = 0.5
+    full_page_width: bool = True
+    include_freetext: bool = field(default=False)
+    use_images: bool = False
+    render_dpi: int = 150
+    llm_model: str = field(
+        default_factory=lambda: os.getenv("", "")
+    )
+    llm_concurrency: int = 5
+    context_blocks: int = 2
+    limit_annotations: int = 0
+    max_runtime_seconds: int = 0
+    debug: bool = False
+    cache: bool = True
+
+
+def _get_expanded_rect(
+    annot: fitz.Annot,
+    page: fitz.Page,
+    config: Config,
+    freetext_rects: List[fitz.Rect],
+    other_annots: List[fitz.Rect],
+) -> fitz.Rect:
+    """Get expanded rectangle around annotation."""
+    MAX_RADIUS = 200
+    current = annot.rect
+    cx, cy = (current.x0 + current.x1) / 2, (current.y0 + current.y1) / 2
+
+    best, best_d = None, float("inf")
+    for ft in freetext_rects:
+        fx, fy = (ft.x0 + ft.x1) / 2, (ft.y0 + ft.y1) / 2
+        d = ((cx - fx) ** 2 + (cy - fy) ** 2) ** 0.5
+        if d < best_d and d <= MAX_RADIUS:
+            best_d, best = d, ft
+    expanded = current if best is None else current | best
+
+    walls = other_annots
+    top = max([r.y1 for r in walls if r.y1 <= expanded.y0], default=0)
+    bot = min([r.y0 for r in walls if r.y0 >= expanded.y1], default=page.rect.height)
+
+    h = current.y1 - current.y0
+    extra = max(h * config.vertical_expansion_ratio, 40.0) / 2.0
+    y0 = max(top, expanded.y0 - extra)
+    y1 = min(bot, expanded.y1 + extra)
+
+    x0, x1 = (0, page.rect.width) if config.full_page_width else (expanded.x0, expanded.x1)
+    return fitz.Rect(x0, y0, x1, y1)
+
+
 def run(
     input_pdf: Path,
     output_dir: Path = Path("data/results/pipeline"),

@@ -32,6 +32,24 @@ from extractor.pipeline.steps.scillm_preflight_validator import require_scillm_p
 
 from extractor.pipeline.utils.reflow import consolidate_data
 from extractor.pipeline.utils.reflow.section_reflow import reflow_section_with_llm
+from extractor.pipeline.utils.reflow import (
+    compute_table_merges as _compute_table_merges,
+    apply_layout_ordering as _apply_layout_ordering,
+)
+from extractor.pipeline.utils.ann_index import (
+    load_ann_index,
+    build_ann_index,
+    query_ann_index,
+)
+from extractor.pipeline.utils.diagnostics import gpu_metrics_available, make_event
+from extractor.core.schema.unified_document import SourceType
+
+USE_LAYOUT_SKETCH = os.getenv("STAGE07_USE_LAYOUT_SKETCH", "true").lower() in ("1", "true", "yes", "y")
+OMIT_IMAGES_IF_CONFIDENT = os.getenv("STAGE07_OMIT_IMAGES_IF_CONFIDENT", "true").lower() in ("1", "true", "yes", "y")
+LAYOUT_CONF_THRESH = float(os.getenv("STAGE07_LAYOUT_CONF_THRESH", "0.75"))
+STAGE07_DEBUG = os.getenv("STAGE07_DEBUG", "0").lower() in ("1", "true", "yes", "y")
+STAGE07_VISUAL_PROOF = os.getenv("STAGE07_VISUAL_PROOF", "").lower() in ("1", "true", "yes", "y")
+STAGE07_SOURCE_PDF = os.getenv("STAGE07_SOURCE_PDF", "").strip() or None
 
 console = Console()
 
