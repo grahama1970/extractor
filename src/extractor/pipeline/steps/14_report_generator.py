@@ -85,6 +85,12 @@ console = None  # type: ignore[assignment]
 # CORE FUNCTIONS
 # ============================================
 
+from extractor.pipeline.utils.step_sanity import run_step_sanity
+STEP_NAME = "14_report_generator"
+
+def sanity() -> int:
+    return run_step_sanity(STEP_NAME)
+
 
 def load_results(pipeline_dir: Path) -> Dict[str, Any]:
     """Load all stage results from the structured pipeline results directory."""

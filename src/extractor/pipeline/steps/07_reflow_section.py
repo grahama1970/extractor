@@ -159,6 +159,7 @@ async def _direct_compact_fallback(
             raise
             pass
     return content
+STEP_NAME = "07_reflow_section"
 # Shared helper: table confidence heuristic (0.0–1.0)
 def sanity() -> int:
     return run_step_sanity(STEP_NAME)
