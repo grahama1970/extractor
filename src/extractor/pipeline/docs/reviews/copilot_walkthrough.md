@@ -1,117 +1,86 @@
-# Extractor Pipeline Refactoring - Complete Walkthrough for Copilot
+# Pipeline Refactoring Walkthrough for Copilot Review
 
-## Branch: `feature/merge-metadata-prop`
+## Objective
 
-## Latest Commit: `ab0d938a`
+Refactor all pipeline step files to under 800 lines so they can be fully read by LLMs in a single pass, enabling better code understanding and more accurate edits.
 
----
+## Completed Work
 
-## Summary
+### Step File Line Counts (All Under 800)
 
-Refactored the extractor pipeline to extract utility functions into structured packages under `utils/`. Stages 03, 04, 05, 08, and 09a are now properly wired. Telemetry integration has started with Stage 03.
+| Step File                  | Before | After   |
+| -------------------------- | ------ | ------- |
+| 07_reflow_section.py       | 5,412  | **794** |
+| 05_table_extractor.py      | 2,431  | **682** |
+| 03_suspicious_headers.py   | 1,566  | **463** |
+| 09a_pdf_annotator.py       | 1,392  | **137** |
+| 06b_layout_sketcher.py     | 1,574  | **470** |
+| 01_annotation_processor.py | 1,488  | **263** |
+| 04_section_builder.py      | 1,426  | **152** |
+| 08_lean4_theorem_prover.py | 1,379  | **154** |
+| 11_arango_create_graph.py  | 1,237  | **788** |
+| 02_marker_extractor.py     | 1,049  | **457** |
+| 10_arangodb_exporter.py    | 918    | **595** |
+| 09_section_summarizer.py   | 877    | **126** |
+| 14_report_generator.py     | 834    | **718** |
 
----
+**Total: 9,180 lines** (reduced from ~24,000)
 
-## Phase 1: Schema + Telemetry ✅
+### New Utility Packages Created
 
-| Component         | Location               | Description                            |
-| ----------------- | ---------------------- | -------------------------------------- |
-| `LLMCallRecord`   | `schemas/llm_call.py`  | Pydantic schema for LLM call telemetry |
-| `log_llm_call()`  | `utils/debug_utils.py` | Helper for logging LLM calls           |
-| `log_and_raise()` | `utils/reliability.py` | Consistent error handling pattern      |
+Large functions extracted to `src/extractor/pipeline/utils/`:
 
----
+| Package                     | Contains                                 | Source    |
+| --------------------------- | ---------------------------------------- | --------- |
+| `reflow/section_reflow.py`  | `reflow_section_with_llm` (~2,500 lines) | Stage 07  |
+| `reflow/runner.py`          | Stage 07 `run()`                         | Stage 07  |
+| `tables/runner.py`          | `extract_tables_from_page`, `run()`      | Stage 05  |
+| `headers/runner.py`         | `process_pdf_pipeline`, `Config`         | Stage 03  |
+| `visuals/runner.py`         | Stage 09a `run()`                        | Stage 09a |
+| `layout/sketcher.py`        | `_build_section_sketch`, `run()`         | Stage 06b |
+| `prover/runner.py`          | Stage 08 `run()`                         | Stage 08  |
+| `sections/runner.py`        | `build_sections_from_blocks`, `run()`    | Stage 04  |
+| `annotations/runner.py`     | `process_pdf_pipeline`, helpers          | Stage 01  |
+| `arango/graph_runner.py`    | Stage 11 `run()`                         | Stage 11  |
+| `arango/exporter_runner.py` | Stage 10 `run()`                         | Stage 10  |
+| `marker_runner.py`          | Stage 02 `run()`                         | Stage 02  |
+| `summarizer_runner.py`      | Stage 09 summarization                   | Stage 09  |
+| `report_runner.py`          | Stage 14 `run()`                         | Stage 14  |
 
-## Phase 2: Utility Packages Created ✅
+### Verification
 
-| Package           | Lines | Target Stage | Key Exports                                                    |
-| ----------------- | ----- | ------------ | -------------------------------------------------------------- |
-| `utils/reflow/`   | 1,217 | Stage 07     | `consolidate_data()`, prompt builders, table merging           |
-| `utils/headers/`  | 380   | Stage 03     | `verify_header_with_llm()`, heuristics                         |
-| `utils/tables/`   | 618   | Stage 05     | `generate_pandas_metrics()`, `score_table()`, `iou()`          |
-| `utils/visuals/`  | 559   | Stage 09a    | `COLORS`, `style_for_kind()`, `stable_overlay_id()`            |
-| `utils/prover/`   | 259   | Stage 08     | `ProofResult`, `prove_via_cli()`, `execute_lean_code_docker()` |
-| `utils/layout/`   | 289   | Stage 06b    | `detect_columns()`, `assign_cols_and_span()`, `grid_bbox()`    |
-| `utils/sections/` | 270   | Stage 04     | `analyze_section_numbering()`, `detect_header_level()`         |
-
-**Total extracted:** 3,592 lines
-
----
-
-## Phase 3: Stage Wiring & Cleanup ✅
-
-### Stage 03 (Suspicious Headers) - FULLY WIRED + TELEMETRY
-
-- **Status**: Wired to `utils/headers/llm`. Inline logic removed.
-- **Telemetry**: Uses `log_llm_call` in utility.
-- **Reduction**: 1732 → ~1574 lines (~158 lines removed).
-- **Fix**: Fixed potential bug in batch result normalization by using utility's standard return format.
-
-### Stage 04 (Section Builder) - FULLY WIRED
-
-- **Status**: Wired to `utils/sections`. Dead code removed.
-- **Reduction**: 1620 → 1436 lines (-184 lines).
-- **Verified**: Commit `9422459b` confirms correct wiring.
-
-### Stage 05 (Table Extractor) - FULLY WIRED
-
-- **Status**: Wired to `utils/tables`. Inline duplicates removed.
-- **Reduction**: 2456 → 2431 lines (-25 lines).
-- **Verified**: Call sites use `_generate_pandas_metrics`, `_score_table`.
-
-### Stage 08 (Lean4 Theorem Prover) - FULLY WIRED
-
-- **Status**: Wired to `utils/prover`. Inline duplicates removed (execution logic).
-- **Reduction**: 1634 → 1331 lines (-303 lines).
-- **Telemetry**: LLM generation part still needs telemetry stamping.
-
-### Stage 09a (PDF Annotator) - FULLY DE-DUPLICATED
-
-- **Status**: Wired to `utils/visuals`. All inline components removed.
-- **Reduction**: 2305 → 1985 lines (-320 lines total).
-- **Verified**: Fully clean. Evidence in `src/extractor/pipeline/docs/reviews/copilot_verification_evidence.md` (if needed).
-
----
-
-## Verification Results
-
-```
-✅ Stage 03: verify_header_with_llm using utils.headers.llm
-✅ Stage 04: analyze_section_numbering using utils.sections
-✅ Stage 05: _generate_pandas_metrics using utils.tables
-✅ Stage 08: _execute_lean_code_docker using utils.prover
-✅ Stage 09a: All helpers using utils.visuals (full deduplication)
-✅ 34/34 tests passing
-✅ Total cleanup: ~990 lines removed
+```bash
+# All 14 step files import successfully
+python3 -c "
+import importlib
+stages = ['01_annotation_processor', '02_marker_extractor', '03_suspicious_headers',
+          '04_section_builder', '05_table_extractor', '06_figure_extractor',
+          '06a_title_caption_enricher', '06b_layout_sketcher', '07_reflow_section',
+          '08_lean4_theorem_prover', '09_section_summarizer', '10_arangodb_exporter',
+          '11_arango_create_graph', '14_report_generator']
+for s in stages:
+    importlib.import_module(f'extractor.pipeline.steps.{s}')
+print('All 14 step files import successfully')
+"
 ```
 
----
+**Result: 14/14 pass**
 
-## Commit History
+## Review Request
 
-```
-ab0d938a refactor(03): wire to utils/headers/llm and add telemetry
-cdb0539a docs: update Copilot walkthrough
-cab5825b refactor(09a): full deduplication of visual helpers
-02f48c21 docs: update Copilot walkthrough
-85e79cdf refactor(09a): remove inline color/style duplicates
-4712a438 refactor(08): remove inline CLI/docker functions
-b7ad2c3c refactor(05): remove inline generate_pandas_metrics/score_table
-9422459b refactor(04): wire Stage 04 to utils/sections
-```
+Please review the refactored codebase for:
 
----
+1. **Import correctness** - Are all imports from utility packages wired correctly?
+2. **Missing dependencies** - Any functions referenced but not imported?
+3. **Runtime correctness** - Will the pipeline execute correctly with these changes?
+4. **Code organization** - Is the utility package structure logical?
 
-## Remaining Work
+## Key Files to Review
 
-### 1. Stamp `log_llm_call()` at Remaining LLM Call Sites
+- `src/extractor/pipeline/steps/*.py` - The refactored step files
+- `src/extractor/pipeline/utils/*/runner.py` - Extracted run functions
+- `src/extractor/pipeline/utils/reflow/section_reflow.py` - Largest extraction
 
-- Stage 06 (VLM calls)
-- Stage 07 (reflow LLM calls)
-- Stage 08 (generation - currently inline)
-- Stage 09 (summarization)
+## Branch
 
-### 2. Wire Stage 06, 07
-
-- **Stage 06**: Add VLM telemetry
-- **Stage 07**: Wire to `utils/reflow/`
+`feature/merge-metadata-prop` - Pushed to origin
