@@ -18,12 +18,11 @@ from pathlib import Path
 from typing import List, Dict, Any
 import os
 import time
+from extractor.pipeline.utils.reliability import log_stage_error
 
 try:
     import psutil  # type: ignore
-except Exception as exc:
-    log_stage_error('02_marker_extractor', exc, {'context': '02'})
-    raise
+except ImportError:
     psutil = None
 import multiprocessing as mp
 from extractor.pipeline.utils.marker_extractor_utils import fallback_simple_extract
@@ -32,7 +31,6 @@ from extractor.pipeline.utils.section_builder_utils import canonical_block_order
 ## Typer removed; plain function signatures for easier debugging
 
 from loguru import logger
-from extractor.pipeline.utils.reliability import log_stage_error
 from rich.console import Console
 import uuid
 

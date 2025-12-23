@@ -16,11 +16,12 @@ from typing import List, Dict, Any, Optional, cast
 from datetime import datetime
 import time
 
+# Import log_stage_error early so it can be used in import-time exception handling
+from extractor.pipeline.utils.reliability import log_stage_error
+
 try:
     import psutil  # type: ignore
-except Exception as exc:
-    log_stage_error('01_annotation_processor', exc, {'context': '01'})
-    raise
+except ImportError:
     psutil = None  # type: ignore
 
 try:
@@ -29,7 +30,6 @@ except ImportError:
     print("PyMuPDF (fitz) not installed. Stage 01 requires it.", file=sys.stderr)
     raise
 from loguru import logger
-from extractor.pipeline.utils.reliability import log_stage_error
 from extractor.pipeline.utils.scillm_router import get_text_router
 from extractor.pipeline.utils.debug_utils import log_timing
 from extractor.pipeline.steps.scillm_preflight_validator import (
