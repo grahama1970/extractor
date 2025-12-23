@@ -20,6 +20,7 @@ import asyncio
 import base64
 import json
 import os
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -34,7 +35,7 @@ from extractor.pipeline.steps.scillm_preflight_validator import (
     quick_scillm_check,
 )
 from extractor.pipeline.utils.response_utils import normalize_json_content
-from extractor.pipeline.utils.debug_utils import ensure_logs_dir, time_block
+from extractor.pipeline.utils.debug_utils import ensure_logs_dir, log_llm_call, time_block
 
 from extractor.pipeline.utils.figure_extractor_utils import (
     _estimate_bbox,
@@ -122,10 +123,24 @@ async def _describe_and_title_multimodal(
     # Router-only (SciLLM). No SDK/curl fallback inside steps.
     router = get_vlm_router()
     # Optional per-call timing: set RUN_RESULTS_DIR to base results dir
-    _rd = os.getenv("RUN_RESULTS_DIR")
-    if _rd:
-        logs_dir = ensure_logs_dir(Path(_rd), "06_figure_extractor")
-        with time_block(logs_dir, "figure_vlm", parts=len(user_parts), image=1 if any(isinstance(p, dict) and p.get("type")=="image_url" for p in user_parts) else 0):
+    t0 = time.perf_counter()
+    success = False
+    err_ex = None
+    try:
+        # Optional per-call timing: set RUN_RESULTS_DIR to base results dir
+        _rd = os.getenv("RUN_RESULTS_DIR")
+        if _rd:
+            logs_dir = ensure_logs_dir(Path(_rd), "06_figure_extractor")
+            with time_block(logs_dir, "figure_vlm", parts=len(user_parts), image=1 if any(isinstance(p, dict) and p.get("type")=="image_url" for p in user_parts) else 0):
+                resp = await router.acompletion(
+                    model="chutes/vlm",
+                    messages=[{"role": "system", "content": system}, {"role": "user", "content": user_parts}],
+                    response_format={"type": "json_object"},
+                    temperature=0.2,
+                    max_tokens=220,
+                    timeout=VLM_TIMEOUT_SEC,
+                )
+        else:
             resp = await router.acompletion(
                 model="chutes/vlm",
                 messages=[{"role": "system", "content": system}, {"role": "user", "content": user_parts}],
@@ -134,14 +149,20 @@ async def _describe_and_title_multimodal(
                 max_tokens=220,
                 timeout=VLM_TIMEOUT_SEC,
             )
-    else:
-        resp = await router.acompletion(
-            model="chutes/vlm",
-            messages=[{"role": "system", "content": system}, {"role": "user", "content": user_parts}],
-            response_format={"type": "json_object"},
-            temperature=0.2,
-            max_tokens=220,
-            timeout=VLM_TIMEOUT_SEC,
+        success = True
+    except Exception as exc:
+        err_ex = exc
+        raise
+    finally:
+        log_llm_call(
+            stage_key="06_figure_extractor",
+            task_kind="figure_description",
+            route="chutes/vlm",
+            model=model,
+            success=success,
+            latency_ms=int((time.perf_counter() - t0) * 1000),
+            error_class=type(err_ex).__name__ if err_ex else None,
+            raw_preview=str(err_ex) if err_ex else None,
         )
     _, obj = normalize_json_content(resp)
     if isinstance(obj, dict):

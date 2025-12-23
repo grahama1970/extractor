@@ -7,7 +7,9 @@ Handles router response parsing, direct SciLLM calls, and JSON content normaliza
 from __future__ import annotations
 
 import os
+import time
 from typing import Any, Dict, List, Optional
+from extractor.pipeline.utils.debug_utils import log_llm_call
 
 from extractor.pipeline.utils.json_utils import clean_json_string, parse_json_strict
 
@@ -88,18 +90,37 @@ async def direct_scillm_json(
         return None
     
     try:
-        resp = await _sc_acompletion(
-            model=os.environ.get("CHUTES_TEXT_MODEL", ""),
-            api_base=os.environ.get("CHUTES_API_BASE", ""),
-            api_key=os.environ.get("CHUTES_API_KEY", ""),
-            custom_llm_provider="openai_like",
-            messages=messages,
-            response_format=response_format or {"type": "json_object"},
-            temperature=0,
-            max_tokens=max_tokens,
-            timeout=timeout,
-        )
-        return extract_router_content(resp)
+        t0 = time.monotonic()
+        success = False
+        err = None
+        try:
+            resp = await _sc_acompletion(
+                model=os.environ.get("CHUTES_TEXT_MODEL", ""),
+                api_base=os.environ.get("CHUTES_API_BASE", ""),
+                api_key=os.environ.get("CHUTES_API_KEY", ""),
+                custom_llm_provider="openai_like",
+                messages=messages,
+                response_format=response_format or {"type": "json_object"},
+                temperature=0,
+                max_tokens=max_tokens,
+                timeout=timeout,
+            )
+            success = True
+            return extract_router_content(resp)
+        except Exception as exc:
+            err = exc
+            return None
+        finally:
+            log_llm_call(
+                stage_key="07_reflow_section",
+                task_kind="direct_scillm_fallback",
+                route="chutes/text",
+                model=os.environ.get("CHUTES_TEXT_MODEL", ""),
+                success=success,
+                latency_ms=int((time.monotonic() - t0) * 1000),
+                error_class=type(err).__name__ if err else None,
+                raw_preview=str(err) if err else None,
+            )
     except Exception:
         return None
 

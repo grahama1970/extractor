@@ -29,6 +29,7 @@ from extractor.pipeline.utils.reflow.llm_helpers import (
     direct_scillm_json,
     get_usage_field,
 )
+from extractor.pipeline.utils.reflow.llm import call_reflow_llm
 
 # Prompts
 from extractor.pipeline.utils.reflow.prompts import (
@@ -64,6 +65,7 @@ __all__ = [
     "content_to_json_dict",
     "direct_scillm_json",
     "get_usage_field",
+    "call_reflow_llm",
     # Prompts
     "build_reflow_prompt",
     "build_compact_prompt",

@@ -1,9 +1,4 @@
-"""Prover utilities package for Stage 08.
-
-Extracts theorem proving functions from 08_lean4_theorem_prover.py.
-"""
-
-# Execution
+"""Prover utilities for Stage 08."""
 from extractor.pipeline.utils.prover.execution import (
     ProofResult,
     get_cli_cmd,
@@ -11,11 +6,4 @@ from extractor.pipeline.utils.prover.execution import (
     prove_batch_via_cli,
     execute_lean_code_docker,
 )
-
-__all__ = [
-    "ProofResult",
-    "get_cli_cmd",
-    "prove_via_cli",
-    "prove_batch_via_cli",
-    "execute_lean_code_docker",
-]
+from extractor.pipeline.utils.prover.runner import run
