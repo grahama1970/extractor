@@ -100,7 +100,6 @@ def _append_timing(logs_dir: Path, record: Dict[str, Any]) -> None:
     except Exception as exc:
         log_stage_error('09a_pdf_annotator', exc, {'context': '09a'})
         raise
-        pass
 
 
 def _summarize_timings(logs_dir: Path) -> None:
@@ -118,8 +117,7 @@ def _summarize_timings(logs_dir: Path) -> None:
                 count += 1
             except Exception as exc:
                 log_stage_error('09a_pdf_annotator', exc, {'context': '09a'})
-                raise
-                continue
+                continue  # Skip malformed line, don't crash
         lat.sort()
         def _pct(p: float) -> float:
             if not lat:
@@ -131,6 +129,5 @@ def _summarize_timings(logs_dir: Path) -> None:
     except Exception as exc:
         log_stage_error('09a_pdf_annotator', exc, {'context': '09a'})
         raise
-        pass
 
 
