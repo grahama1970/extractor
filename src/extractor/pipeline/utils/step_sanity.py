@@ -130,9 +130,9 @@ def run_step_sanity(step: str, *, results_root: Path | None = None) -> int:
         if requirement.kind == "json":
             data = read_json(abs_path)
             outputs_data[rel] = data
-            entry["keys"] = sorted(list(data.keys()))[:8]
+            entry["keys"] = sorted(list(data.keys()))[:8] if isinstance(data, dict) else []
             if requirement.key:
-                items = data.get(requirement.key) or []
+                items = data.get(requirement.key, []) if isinstance(data, dict) else data
                 count = _count_items(items)
                 entry[f"{requirement.key}_count"] = count
                 if requirement.min_items is not None and count < requirement.min_items:
@@ -558,6 +558,18 @@ def _register_default_specs() -> None:
                 )
             ],
             extra=_extra_graph_edges,
+        )
+    )
+    register_step_sanity(
+        StepSanitySpec(
+            step="14_report_generator",
+            description="Final report generated",
+            outputs=[
+                OutputCheck(
+                    "14_report_generator/json_output/14_report.json",
+                    kind="json",
+                )
+            ],
         )
     )
 
