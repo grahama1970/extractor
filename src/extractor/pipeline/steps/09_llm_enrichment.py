@@ -10,18 +10,19 @@ Purpose:
 Uses scillm.parallel_acompletions_iter for efficient batch processing.
 """
 
-import sys
 import os
-import json
 import asyncio
 from pathlib import Path
-from typing import List, Dict, Any, Optional
-import duckdb
+from typing import Dict, Any
+
+# Set SCILLM_JSON_STRICT before any SciLLM imports to ensure it takes effect
+os.environ["SCILLM_JSON_STRICT"] = "1"
 
 from dotenv import load_dotenv, find_dotenv
 load_dotenv(find_dotenv(usecwd=True), override=False)
 
 from loguru import logger
+from extractor.pipeline.utils.db.connection import get_connection
 
 # Default model and API settings
 DEFAULT_MODEL = os.getenv("SCILLM_MODEL", "deepseek-ai/DeepSeek-V3")
@@ -35,9 +36,30 @@ DEFAULT_SYSTEM_PROMPT = os.getenv(
     "If a specific title/caption is not found in the text, infer a descriptive one and prepend it with 'INFERRED: '."
 )
 
+def extract_message_content(resp_item: Dict[str, Any]) -> str:
+    """Decouple from provider-specific response shapes (OpenAI vs others)."""
+    resp = resp_item.get("response")
+    if not resp:
+        return ""
+    
+    # Check for direct content (some SciLLM versions/providers)
+    if "content" in resp:
+        return resp["content"]
+        
+    # Check for OpenAI-like choice structure
+    try:
+        choices = resp.get("choices", [])
+        if choices:
+            msg = choices[0].get("message", {})
+            return msg.get("content", "")
+    except Exception as e:
+        logger.debug(f"Failed to extract content from unknown shape: {e}")
+        logger.trace(f"Full payload: {resp}")
+    
+    return ""
 
 async def enrich_assets(
-    con: duckdb.DuckDBPyConnection,
+    con: Any, # duckdb.DuckDBPyConnection
     model: str = DEFAULT_MODEL,
     api_base: str = DEFAULT_API_BASE,
     concurrency: int = DEFAULT_CONCURRENCY,
@@ -48,58 +70,98 @@ async def enrich_assets(
     import json_repair
     
     api_key = os.getenv("CHUTES_API_KEY")
-    os.environ["SCILLM_JSON_STRICT"] = "1"  # Opt-in to strict JSON via env
     
-    # 2. Fetch assets with context
-    tables = con.execute("""
-        WITH asset_pos AS (
-            SELECT section_id, asset_id, sort_order FROM merged_content WHERE type = 'table'
-        )
+    # 2. Fetch assets with context using Window Functions (Single Pass)
+    # We capture up to 2 context blocks (text or section) on each side.
+    asset_query = """
+    WITH context_candidates AS (
         SELECT 
-            t.id, t.csv_data, s.title as section_title,
-            (SELECT content FROM merged_content m2 
-             WHERE m2.section_id = ap.section_id AND m2.sort_order < ap.sort_order AND m2.type = 'text'
-             ORDER BY m2.sort_order DESC LIMIT 1) as context_before,
-            (SELECT content FROM merged_content m3 
-             WHERE m3.section_id = ap.section_id AND m3.sort_order > ap.sort_order AND m3.type = 'text'
-             ORDER BY m3.sort_order ASC LIMIT 1) as context_after
-        FROM tables t
-        JOIN asset_pos ap ON t.id = ap.asset_id
-        LEFT JOIN sections s ON t.section_id = s.id
-    """).fetchall()
+            section_id, 
+            sort_order, 
+            type, 
+            content,
+            asset_id
+        FROM merged_content
+        WHERE type IN ('text', 'section', 'table', 'figure')
+    ),
+    timeline AS (
+        SELECT
+            *,
+            -- 1st context before
+            LAG(content, 1) OVER (PARTITION BY section_id ORDER BY sort_order) as ctx_b1,
+            LAG(type, 1) OVER (PARTITION BY section_id ORDER BY sort_order) as ctx_b1_type,
+            -- 2nd context before
+            LAG(content, 2) OVER (PARTITION BY section_id ORDER BY sort_order) as ctx_b2,
+            LAG(type, 2) OVER (PARTITION BY section_id ORDER BY sort_order) as ctx_b2_type,
+            -- 1st context after
+            LEAD(content, 1) OVER (PARTITION BY section_id ORDER BY sort_order) as ctx_a1,
+            LEAD(type, 1) OVER (PARTITION BY section_id ORDER BY sort_order) as ctx_a1_type,
+            -- 2nd context after
+            LEAD(content, 2) OVER (PARTITION BY section_id ORDER BY sort_order) as ctx_a2,
+            LEAD(type, 2) OVER (PARTITION BY section_id ORDER BY sort_order) as ctx_a2_type
+        FROM context_candidates
+    )
+    SELECT 
+        tl.type as asset_type,
+        tl.asset_id,
+        s.title as section_title,
+        CASE WHEN tl.type = 'table' THEN t.csv_data ELSE NULL END as csv_data,
+        CASE WHEN tl.type = 'figure' THEN f.page ELSE NULL END as page,
+        -- Context Before (Section Headers or Text)
+        COALESCE(
+            CASE WHEN tl.ctx_b2_type IN ('text', 'section') THEN tl.ctx_b2 || '\n\n' ELSE '' END ||
+            CASE WHEN tl.ctx_b1_type IN ('text', 'section') THEN tl.ctx_b1 ELSE '' END,
+            '(none)'
+        ) as context_before,
+        -- Context After
+        COALESCE(
+            CASE WHEN tl.ctx_a1_type IN ('text', 'section') THEN tl.ctx_a1 || '\n\n' ELSE '' END ||
+            CASE WHEN tl.ctx_a2_type IN ('text', 'section') THEN tl.ctx_a2 ELSE '' END,
+            '(none)'
+        ) as context_after
+    FROM timeline tl
+    LEFT JOIN sections s ON tl.section_id = s.id
+    LEFT JOIN tables t ON tl.asset_id = t.id AND tl.type = 'table'
+    LEFT JOIN figures f ON tl.asset_id = f.id AND tl.type = 'figure'
+    WHERE tl.type IN ('table', 'figure')
+    """
     
-    figures = con.execute("""
-        WITH asset_pos AS (
-            SELECT section_id, asset_id, sort_order FROM merged_content WHERE type = 'figure'
+    assets = con.execute(asset_query).fetchall()
+    
+    # Asset count sanity check
+    db_tables = con.execute("SELECT COUNT(*) FROM tables").fetchone()[0]
+    db_figures = con.execute("SELECT COUNT(*) FROM figures").fetchone()[0]
+    joined_tables = sum(1 for a in assets if a[0] == 'table')
+    joined_figures = sum(1 for a in assets if a[0] == 'figure')
+    
+    if joined_tables != db_tables or joined_figures != db_figures:
+        logger.warning(
+            f"Asset count mismatch! DB: {db_tables}T/{db_figures}F, Joined: {joined_tables}T/{joined_figures}F. "
+            "Some assets may be missing from merged_content."
         )
-        SELECT 
-            f.id, f.page, s.title as section_title,
-            (SELECT content FROM merged_content m2 
-             WHERE m2.section_id = ap.section_id AND m2.sort_order < ap.sort_order AND m2.type = 'text'
-             ORDER BY m2.sort_order DESC LIMIT 1) as context_before,
-            (SELECT content FROM merged_content m3 
-             WHERE m3.section_id = ap.section_id AND m3.sort_order > ap.sort_order AND m3.type = 'text'
-             ORDER BY m3.sort_order ASC LIMIT 1) as context_after
-        FROM figures f
-        JOIN asset_pos ap ON f.id = ap.asset_id
-        LEFT JOIN sections s ON f.section_id = s.id
-    """).fetchall()
-    
-    if not tables and not figures:
+
+    if not assets:
         logger.info("No assets to enrich")
         return {"tables": 0, "figures": 0}
 
     # 3. Build Batch Requests
     requests = []
-    asset_map = {}  # index -> (type, id)
+    asset_map = {}  # index -> (type, id, context_strings)
     
-    for idx, (t_id, csv_data, section_title, before, after) in enumerate(tables):
-        user_prompt = f"""Analyze this table.
+    for idx, (a_type, a_id, section_title, csv_data, page, before, after) in enumerate(assets):
+        if a_type == 'table':
+            user_prompt = f"""Analyze this table.
 Section: {section_title}
-Context Before: {before or "(none)"}
+Context Before: {before}
 Table CSV (first 2000 chars):
-{csv_data[:2000]}
-Context After: {after or "(none)"}"""
+{csv_data[:2000] if csv_data else ""}
+Context After: {after}"""
+        else:
+            user_prompt = f"""Suggest metadata for this figure.
+Section: {section_title} | Page: {(page + 1) if page is not None else "Unknown"}
+Context Before: {before}
+[FIGURE]
+Context After: {after}"""
         
         requests.append({
             "model": model,
@@ -107,29 +169,10 @@ Context After: {after or "(none)"}"""
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ],
-            # Note: response_format is handled inside acompletion in the iterator
             "response_format": {"type": "json_object"},
             "temperature": 0.1
         })
-        asset_map[len(requests) - 1] = ("table", t_id)
-
-    for idx, (f_id, page, section_title, before, after) in enumerate(figures):
-        user_prompt = f"""Suggest metadata for this figure.
-Section: {section_title} | Page: {page + 1}
-Context Before: {before or "(none)"}
-[FIGURE]
-Context After: {after or "(none)"}"""
-
-        requests.append({
-            "model": model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            "response_format": {"type": "json_object"},
-            "temperature": 0.1
-        })
-        asset_map[len(requests) - 1] = ("figure", f_id)
+        asset_map[len(requests) - 1] = (a_type, a_id, before + "\n" + after)
 
     # 4. Execute Batch with Progress (parallel_acompletions_iter)
     logger.info(f"Enriching {len(requests)} assets via parallel_acompletions_iter...")
@@ -156,27 +199,68 @@ Context After: {after or "(none)"}"""
     ):
         completed += 1
         idx = r["index"]
-        asset_type, asset_id = asset_map[idx]
+        asset_type, asset_id, combined_ctx = asset_map[idx]
         
         if not r["ok"] or r.get("error"):
-            logger.warning(f"[{completed}/{total}] Error enriching {asset_type} {asset_id}: {r.get('error') or r.get('status')}")
+            # Improved error logging with payload visibility
+            err_msg = r.get("error") or r.get("status")
+            logger.warning(f"[{completed}/{total}] Error enriching {asset_type} {asset_id}: {err_msg}")
+            if "response" in r:
+                logger.debug(f"Truncated payload for {asset_id}: {str(r['response'])[:500]}")
             continue
         
-        # In parallel_acompletions_iter, response is the direct object
-        # We need to extract the content. Given strict_json=True (env),
-        # scillm might already provide a parsed dict or we parse response.content
-        raw_msg = r["response"]["choices"][0]["message"]["content"]
+        # Use decoupled normalization helper
+        raw_msg = extract_message_content(r)
+        
+        # Strip potential markdown fences before repair/parse
+        if raw_msg.startswith("```"):
+            raw_msg = raw_msg.strip("`").strip("json").strip()
+
         try:
             data = json_repair.loads(raw_msg)
         except Exception as e:
             logger.warning(f"Failed to parse JSON for {asset_id}: {e}")
             data = {"title": raw_msg[:80], "description": raw_msg}
 
+        # Basic type validation and missing key coercion
         if not isinstance(data, dict):
             data = {"title": str(data)[:80], "description": str(data)}
-            
-        title = data.get("title", "")[:80]
-        desc = data.get("description", "")[:500]
+        
+        title = str(data.get("title", "")).strip()
+        desc = str(data.get("description", "")).strip()
+        
+        # Robustness: Fallback if title/desc empty
+        if not title:
+            title = desc[:50] if desc else f"Untitled {asset_type}"
+        if not desc:
+            desc = "(No description provided by LLM)"
+
+        # --- Deterministic INFERRED Enforcement (Business Rule) ---
+        # 1. Clean previous prefix if LLM provided it
+        clean_title = title.replace("INFERRED:", "").strip()
+        
+        # 2. Heuristic: Is a caption present in context?
+        # Captions usually contain 'Table X' or 'Figure Y' or 'Fig. Z'
+        found_verbatim = False
+        import re
+        patterns = [r"Table\s+\d+", r"Figure\s+\d+", r"Fig\.\s+\d+"]
+        for p in patterns:
+            # We check if the clean title (verbatim extraction) exists in the context
+            # or if the context contains a typical caption pattern that matches the title
+            if re.search(p, combined_ctx, re.IGNORECASE) and clean_title.lower() in combined_ctx.lower():
+                found_verbatim = True
+                break
+        
+        # 3. Enforce prefix
+        if not found_verbatim and not title.startswith("INFERRED:"):
+            title = f"INFERRED: {clean_title}"
+        elif found_verbatim and title.startswith("INFERRED:"):
+            # If it found it verbatim but still prefixed it, remove prefix to respect verbatim rule
+            title = clean_title
+
+        # Truncate for storage
+        title = title[:120]
+        desc = desc[:1000]
         
         table_name = "tables" if asset_type == "table" else "figures"
         con.execute(
@@ -207,7 +291,8 @@ def run_enrich_assets(
         logger.error(f"Database not found: {db_path}")
         return {"tables": 0, "figures": 0}
     
-    con = duckdb.connect(str(db_path))
+    # Standardized connection via utility
+    con = get_connection(db_path)
     
     # 1. Paved Path: Preflight (Discovery)
     from scillm.paved import list_models_openai_like
@@ -232,7 +317,8 @@ if __name__ == "__main__":
     import argparse
     
     parser = argparse.ArgumentParser(description="Stage 09: LLM Enrichment")
-    parser.add_argument("--pipeline-dir", type=str, required=True)
+    # Default to data/results/pipeline_test_final if not specified
+    parser.add_argument("--pipeline-dir", type=str, default="data/results/pipeline_test_final")
     parser.add_argument("--model", type=str, default=DEFAULT_MODEL)
     parser.add_argument("--api-base", type=str, default=DEFAULT_API_BASE)
     parser.add_argument("--concurrency", type=int, default=DEFAULT_CONCURRENCY)
