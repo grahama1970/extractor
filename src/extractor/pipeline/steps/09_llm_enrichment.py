@@ -67,7 +67,6 @@ async def enrich_assets(
 ) -> Dict[str, int]:
     """Enrich tables and figures with LLM-generated metadata."""
     from scillm import parallel_acompletions_iter
-    import json_repair
     
     api_key = os.getenv("CHUTES_API_KEY")
     
@@ -189,19 +188,33 @@ Context After: {after}"""
     total = len(requests)
     completed = 0
 
+    # Define schema for enforcement
+    asset_schema = {
+        "type": "object",
+        "properties": {
+            "title": {"type": "string", "minLength": 5},
+            "description": {"type": "string", "minLength": 10}
+        },
+        "required": ["title", "description"]
+    }
+
     async for r in parallel_acompletions_iter(
         requests,
         api_base=api_base,
         api_key=api_key,
         concurrency=concurrency,
         tenacious=True,
-        timeout=60
+        timeout=60,
+        response_format={"type": "json_object"},
+        repair_invalid_json=True,
+        retry_invalid_json=2,
+        schema=asset_schema
     ):
         completed += 1
         idx = r["index"]
         asset_type, asset_id, combined_ctx = asset_map[idx]
         
-        if not r["ok"] or r.get("error"):
+        if not r["ok"] or r.get("error") == "invalid_json":
             # Improved error logging with payload visibility
             err_msg = r.get("error") or r.get("status")
             logger.warning(f"[{completed}/{total}] Error enriching {asset_type} {asset_id}: {err_msg}")
@@ -209,23 +222,26 @@ Context After: {after}"""
                 logger.debug(f"Truncated payload for {asset_id}: {str(r['response'])[:500]}")
             continue
         
-        # Use decoupled normalization helper
-        raw_msg = extract_message_content(r)
+        # v1.78.0 features: 'parsed' contains the dict if schema/JSON was successful
+        # 'content' contains the raw string if repair failed but it's still "ok"
+        # In current scillm v1.78.1, 'content' might already be the parsed dict.
+        data = r.get("parsed") or {}
         
-        # Strip potential markdown fences before repair/parse
-        if raw_msg.startswith("```"):
-            raw_msg = raw_msg.strip("`").strip("json").strip()
+        if not data and r.get("content"):
+            content = r.get("content")
+            if isinstance(content, dict):
+                data = content
+            else:
+                import json_repair
+                try:
+                    data = json_repair.loads(content)
+                except Exception as e:
+                    logger.debug(f"Fallback parse failed for {asset_id}: {e}")
+                    data = {}
 
-        try:
-            data = json_repair.loads(raw_msg)
-        except Exception as e:
-            logger.warning(f"Failed to parse JSON for {asset_id}: {e}")
-            data = {"title": raw_msg[:80], "description": raw_msg}
+        if r.get("repaired"):
+            logger.debug(f"SciLLM auto-repaired JSON for {asset_id}")
 
-        # Basic type validation and missing key coercion
-        if not isinstance(data, dict):
-            data = {"title": str(data)[:80], "description": str(data)}
-        
         title = str(data.get("title", "")).strip()
         desc = str(data.get("description", "")).strip()
         
