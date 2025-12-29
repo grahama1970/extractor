@@ -25,7 +25,7 @@ from loguru import logger
 from extractor.pipeline.utils.db.connection import get_connection
 
 # Default model and API settings
-DEFAULT_MODEL = os.getenv("SCILLM_MODEL", "deepseek-ai/DeepSeek-V3")
+DEFAULT_MODEL = os.getenv("CHUTES_TEXT_MODEL", "moonshotai/Kimi-K2-Instruct-0905")
 DEFAULT_API_BASE = os.getenv("SCILLM_API_BASE", "https://llm.chutes.ai/v1")
 DEFAULT_CONCURRENCY = int(os.getenv("SCILLM_CONCURRENCY", "4"))
 
