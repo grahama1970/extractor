@@ -43,10 +43,21 @@ class HTMLProvider:
         
     def parse(self) -> UnifiedDocument:
         """Main entry point to parse the HTML file."""
+        encoding_used = "utf-8"
         try:
             content = self.file_path.read_text(encoding="utf-8")
         except UnicodeDecodeError:
-            content = self.file_path.read_text(encoding="latin-1") # Fallback
+            encoding_used = "latin-1"
+            try:
+                content = self.file_path.read_text(encoding="latin-1")
+            except UnicodeDecodeError:
+                # Final fallback: utf-8 with replacement characters for undecodable bytes
+                encoding_used = "utf-8 (with replacement)"
+                content = self.file_path.read_bytes().decode("utf-8", errors="replace")
+                logger.warning(f"HTML file required lossy decoding: {self.file_path}")
+        
+        if encoding_used != "utf-8":
+            logger.info(f"HTML file decoded with {encoding_used}: {self.file_path.name}")
             
         self.soup = BeautifulSoup(content, "html.parser")
         

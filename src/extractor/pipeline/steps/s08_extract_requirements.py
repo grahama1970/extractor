@@ -16,6 +16,7 @@ import json
 import logging
 import re
 import uuid
+import hashlib
 from pathlib import Path
 from typing import List, Dict, Any, Tuple
 import duckdb
@@ -168,8 +169,16 @@ def run_extract_requirements(pipeline_dir: Path, db_path: Path):
     logger.info("Starting Stage 08: Focused Extraction")
     con = get_connection(db_path)
     
-    # 0. Check Resume State
-    # TODO: Implement resume logic (check IDs in requirements table)
+    # 0. Idempotency Check - count existing requirements per section
+    existing_req_counts = {}
+    try:
+        existing = con.execute("SELECT section_id, COUNT(*) FROM requirements GROUP BY section_id").fetchall()
+        existing_req_counts = {row[0]: row[1] for row in existing}
+        if existing_req_counts:
+            total_existing = sum(existing_req_counts.values())
+            logger.info(f"Found {total_existing} existing requirements across {len(existing_req_counts)} sections")
+    except duckdb.CatalogException:
+        logger.debug("requirements table may not exist yet")
     
     # 1. Fetch Sections with page info for sort_order
     sections = con.sql("""
@@ -182,6 +191,7 @@ def run_extract_requirements(pipeline_dir: Path, db_path: Path):
     router = get_text_router()
     
     processed_count = 0
+    skipped_count = 0
     requirements_batch = []
     merged_content_batch = []
     
@@ -200,6 +210,12 @@ def run_extract_requirements(pipeline_dir: Path, db_path: Path):
         
         # Heuristic Filter
         if not heuristic_is_relevant(text, tables):
+            continue
+        
+        # Idempotency: Skip sections that already have requirements
+        if s_id in existing_req_counts:
+            logger.info(f"Skipping section {s_id}: already has {existing_req_counts[s_id]} requirements")
+            skipped_count += 1
             continue
             
         logger.info(f"Processing Section {s_id} ('{title}')...")
@@ -246,14 +262,15 @@ def run_extract_requirements(pipeline_dir: Path, db_path: Path):
             global_req_idx += 1
             section_req_idx += 1
             
-            # UUID-based internal ID (uuid imported at top of file)
-            r_id = f"req_{uuid.uuid4().hex[:8]}"
-            
             # Human-readable req_id: REQ-4.1.5-001
             if section_number:
                 req_id = f"REQ-{section_number}-{section_req_idx:03d}"
             else:
                 req_id = f"REQ-{global_req_idx:04d}"
+            
+            # Deterministic internal ID based on section_id + req_id (for idempotency)
+            id_hash = hashlib.sha1(f"{s_id}:{req_id}".encode()).hexdigest()[:12]
+            r_id = f"req_{id_hash}"
             
             # Calculate sort_order (position in reading order)
             sort_order = section_sort_base + section_req_idx * SORT_ORDER_BLOCK_INCREMENT
@@ -268,7 +285,8 @@ def run_extract_requirements(pipeline_dir: Path, db_path: Path):
             ))
             
             # Also insert into merged_content for reading order context
-            mc_id = f"mc_req_{uuid.uuid4().hex[:6]}"
+            # Deterministic mc_id based on requirement id
+            mc_id = f"mc_{r_id}"
             # Format: REQ: REQ-4.1.5-001 [COND] Requirement text...
             prefix = "REQ: " + req_id
             if is_conditional:

@@ -27,7 +27,11 @@ def create_schema(con: duckdb.DuckDBPyConnection):
             title VARCHAR,
             page_start INTEGER,
             page_end INTEGER,
-            parent_id VARCHAR
+            parent_id VARCHAR,
+            -- LLM enrichment columns (added to schema to prevent runtime ALTER TABLE drift)
+            llm_summary VARCHAR,
+            llm_key_concepts VARCHAR,  -- JSON array of key concepts
+            llm_metadata VARCHAR       -- JSON object with token usage, model, latency
         );
         
         CREATE TABLE IF NOT EXISTS blocks (
