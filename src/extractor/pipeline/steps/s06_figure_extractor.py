@@ -194,8 +194,8 @@ async def _process_all(
                 )
             )
     except Exception as exc:
-        log_stage_error('06_figure_extractor', exc, {'context': '06', 'step': 'log_summaries'})
-        raise
+        # Non-critical: don't fail pipeline on log write errors
+        logger.warning(f"Failed to write figure summaries: {exc}")
     return out
 
 

@@ -128,12 +128,8 @@ async def run_summarizer(
     system_prompt = prompts["system"]
     user_prompt_tmpl = prompts["user"]
 
-    # Ensure columns exist
-    for col in ["llm_summary", "llm_key_concepts", "llm_metadata"]:
-        try:
-            con.execute(f"ALTER TABLE sections ADD COLUMN {col} VARCHAR")
-        except:
-            pass
+    # Columns llm_summary, llm_key_concepts, llm_metadata are now defined in schema.py
+    # No runtime ALTER TABLE needed - schema handles this at DB creation time
 
     # Schema for validation
     summary_schema = {

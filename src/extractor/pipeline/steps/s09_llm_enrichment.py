@@ -176,13 +176,8 @@ Context After: {after}"""
     # 4. Execute Batch with Progress (parallel_acompletions_iter)
     logger.info(f"Enriching {len(requests)} assets via parallel_acompletions_iter...")
     
-    # Ensure columns exist before processing
-    for tbl in ["tables", "figures"]:
-        try:
-            con.execute(f"ALTER TABLE {tbl} ADD COLUMN IF NOT EXISTS llm_title VARCHAR")
-            con.execute(f"ALTER TABLE {tbl} ADD COLUMN IF NOT EXISTS llm_description VARCHAR")
-        except Exception as e:
-            logger.warning(f"Schema update failed for {tbl}: {e}")
+    # Columns llm_title and llm_description are now defined in schema.py
+    # No runtime ALTER TABLE needed - schema handles this at DB creation time
 
     table_count = 0
     figure_count = 0
