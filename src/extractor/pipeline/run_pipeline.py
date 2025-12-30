@@ -496,9 +496,11 @@ def _run_pdf_strategy(pdf: Path, out: Path, args: argparse.Namespace) -> int:
 
             s08 = _s08
     if not args.skip_export and not (bool(args.summary_only) and bool(args.skip_fig_descriptions)):
-        from extractor.pipeline.steps import s10_arangodb_exporter as _s10
-
-        s10 = _s10
+        try:
+            from extractor.pipeline.steps import s10_arangodb_exporter as _s10
+            s10 = _s10
+        except ImportError:
+            logger.debug("s10_arangodb_exporter not available (arango export disabled)")
 
     # Enforce implications: proving implies requirements miner
     if args.prove_requirements and not args.extract_requirements:
