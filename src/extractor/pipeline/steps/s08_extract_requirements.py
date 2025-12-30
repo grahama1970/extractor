@@ -14,6 +14,8 @@ This replaces the legacy Lean4 prover step for the initial extraction.
 import sys
 import json
 import logging
+import re
+import uuid
 from pathlib import Path
 from typing import List, Dict, Any, Tuple
 import duckdb
@@ -30,46 +32,41 @@ from loguru import logger
 
 # Configuration
 THRESHOLD_CONFIDENCE = 0.5
-THRESHOLD_CITATION_MATCH = 80.0  # Fuzzy match score check
+THRESHOLD_CITATION_MATCH = 80.0  # Fuzzy match score for citation verification
+SORT_ORDER_PAGE_MULTIPLIER = 10000  # page * 10000 for sort_order base
+SORT_ORDER_BLOCK_INCREMENT = 10  # Increment per requirement within section
 
 def get_section_content(con: duckdb.DuckDBPyConnection, section_id: str) -> Tuple[str, List[str], List[str]]:
     """
     Fetches text, tables, and figures for a section.
     Returns: (concatenated_text, list_of_table_csvs, list_of_figure_paths)
     """
-    # 1. Text from Clean Blocks (using v_clean_blocks via section_id)
-    # Note: We rely on the section_id FK we populated in Stage 07 (or 04).
-    # We sort by page, y0, x0 to ensure reading order.
-    blocks = con.sql(f"""
+    # 1. Text from Clean Blocks - parameterized to prevent SQL injection
+    blocks = con.execute("""
         SELECT text 
-        FROM blocks -- Use blocks directly as we trust Stage 07 assignment. 
-                    -- Ideally check v_clean_blocks but filtering is subtle if section_id is used.
-                    -- Let's use v_clean_blocks if possible, but v_clean_blocks might need section_id join.
-                    -- Actually, Stage 07 populated blocks.section_id.
-                    -- So we can query blocks. But we want 'clean' blocks.
-                    -- Let's query blocks intersecting v_clean_blocks.
-        WHERE section_id = '{section_id}'
+        FROM blocks 
+        WHERE section_id = ?
         AND id IN (SELECT id FROM v_clean_blocks)
         ORDER BY page, round(y0/10)*10, x0
-    """).fetchall()
+    """, [section_id]).fetchall()
     
-    text_content = "\n".join([b[0] for b in blocks])
+    text_content = "\n".join([b[0] for b in blocks if b[0]])
     
-    # 2. Tables
-    tables = con.sql(f"""
+    # 2. Tables - parameterized
+    tables = con.execute("""
         SELECT csv_data 
         FROM tables 
-        WHERE section_id = '{section_id}'
-    """).fetchall()
-    table_content = [t[0] for t in tables]
+        WHERE section_id = ?
+    """, [section_id]).fetchall()
+    table_content = [t[0] for t in tables if t[0]]
     
-    # 3. Figures (path only for now, maybe caption later)
-    figures = con.sql(f"""
+    # 3. Figures - parameterized
+    figures = con.execute("""
         SELECT image_path 
         FROM figures 
-        WHERE section_id = '{section_id}'
-    """).fetchall()
-    figure_content = [f[0] for f in figures]
+        WHERE section_id = ?
+    """, [section_id]).fetchall()
+    figure_content = [f[0] for f in figures if f[0]]
     
     return text_content, table_content, figure_content
 
@@ -209,7 +206,6 @@ def run_extract_requirements(pipeline_dir: Path, db_path: Path):
         
         # Extract section number from title (e.g., "4.1.5" from "4.1.5. BHT Submodule")
         section_number = ""
-        import re
         num_match = re.match(r'^(\d+(?:\.\d+)*)', str(title or "").strip())
         if num_match:
             section_number = num_match.group(1)
@@ -217,13 +213,15 @@ def run_extract_requirements(pipeline_dir: Path, db_path: Path):
         # Extract
         extracted = extract_requirements_llm(router, str(title), text, tables, section_number)
         
-        # Get base sort_order for this section's content
+        # Get base sort_order for this section's content - parameterized query
         try:
-            section_sort_base = con.sql(f"""
-                SELECT MIN(sort_order) FROM merged_content WHERE section_id = '{s_id}'
-            """).fetchone()[0] or (page_start * 10000)
-        except Exception:
-            section_sort_base = page_start * 10000 if page_start else max_sort
+            result = con.execute(
+                "SELECT MIN(sort_order) FROM merged_content WHERE section_id = ?", [s_id]
+            ).fetchone()
+            section_sort_base = (result[0] if result and result[0] else None) or (page_start * SORT_ORDER_PAGE_MULTIPLIER)
+        except duckdb.CatalogException as e:
+            logger.debug(f"merged_content table may not exist yet: {e}")
+            section_sort_base = page_start * SORT_ORDER_PAGE_MULTIPLIER if page_start else max_sort
         
         # Track position within section
         section_req_idx = 0
@@ -248,8 +246,7 @@ def run_extract_requirements(pipeline_dir: Path, db_path: Path):
             global_req_idx += 1
             section_req_idx += 1
             
-            # UUID-based internal ID
-            import uuid
+            # UUID-based internal ID (uuid imported at top of file)
             r_id = f"req_{uuid.uuid4().hex[:8]}"
             
             # Human-readable req_id: REQ-4.1.5-001
@@ -259,7 +256,7 @@ def run_extract_requirements(pipeline_dir: Path, db_path: Path):
                 req_id = f"REQ-{global_req_idx:04d}"
             
             # Calculate sort_order (position in reading order)
-            sort_order = section_sort_base + section_req_idx * 10
+            sort_order = section_sort_base + section_req_idx * SORT_ORDER_BLOCK_INCREMENT
             page = page_start or 0
             
             # Append to requirements batch (id, req_id, section_id, text, type, confidence, 

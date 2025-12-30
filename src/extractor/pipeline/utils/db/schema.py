@@ -97,6 +97,17 @@ def create_schema(con: duckdb.DuckDBPyConnection):
              proof_result VARCHAR,    -- proven, counterexample, timeout
              created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
+        
+        -- merged_content: Unified reading order for all content types
+        CREATE TABLE IF NOT EXISTS merged_content (
+             id VARCHAR PRIMARY KEY,
+             section_id VARCHAR,
+             page INTEGER,
+             type VARCHAR,           -- 'text', 'section', 'figure', 'table', 'requirement'
+             content VARCHAR,
+             asset_id VARCHAR,       -- FK to requirements.id, figures.id, etc.
+             sort_order INTEGER      -- Reading order position
+        );
 
         -- VIEWS
         
