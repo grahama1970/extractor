@@ -65,19 +65,13 @@ def run(input_dir: Path, output_dir: Path) -> Path:
     # However, for flat list:
     blocks = data.get("blocks", [])
     
-    candidates = []
-    # Identify blocks needing verification (suspicious_header=True OR marked for review)
-    # We rely on Stage 03 to have set "requires_verification": True or similar.
-    # Or determining from 'suspicious_header' flag.
-    
-    candidate_indices = []
+    candidates = []  # list[tuple[int, dict]] - carry index with block to prevent mismatch
     
     for i, b in enumerate(blocks):
         if b.get("suspicious_header") or b.get("requires_verification"):
              # Must have context_image_path for VLM
              if b.get("context_image_path"):
-                 candidates.append(b)
-                 candidate_indices.append(i)
+                 candidates.append((i, b))  # Tuple: (original_index, block)
     
     if not candidates:
         logger.info("No suspicious headers to verify.")
@@ -104,7 +98,7 @@ def run(input_dir: Path, output_dir: Path) -> Path:
         "}"
     )
     
-    for i, b in enumerate(candidates):
+    for idx, b in candidates:
         # Image must be absolute path? 
         # Stage 03 writes absolute path to 'context_image_path'.
         img_path = Path(b["context_image_path"])
@@ -120,10 +114,9 @@ def run(input_dir: Path, output_dir: Path) -> Path:
             continue
 
         prompt_text = (
-            "Analyze the image and text.\n"
-            f"Text: {b.get('text', '')}\n"
-            "Text: {b.get('text', '')}\n"
-            "Is this a true section header? Or is it a list item, table row, or caption?\n"
+            "Analyze the image and the extracted text.\n"
+            f"Extracted text: {b.get('text', '')}\n"
+            "Is this a true section header, or is it a list item, table row, caption, or body text?\n"
             "Return strict JSON."
         )
         # Add context from prompt builder? 
@@ -146,7 +139,7 @@ def run(input_dir: Path, output_dir: Path) -> Path:
             "response_format": {"type": "json_object"},
             "temperature": 0.0,
             "metadata": {"task_kind": "header_verify", "stage": "03b"},
-            "index": candidate_indices[i] # Track back to original block index
+            "index": idx  # Track back to original block index (from tuple)
         }
         requests.append(req)
 

@@ -63,14 +63,17 @@ def run(input_path: Path, output_dir: Path = None):
     """
     pipeline_dir = input_path.parent.parent if input_path.is_file() else input_path
     
-    # Locate DuckDB
-    db_path = pipeline_dir / "corpus.duckdb"
+    # Locate DuckDB - prefer canonical name used by enrichment stages
+    db_path = pipeline_dir / "pipeline.duckdb"
     if not db_path.exists():
-        # Fallback for previous steps output pattern
+        # Legacy fallback
+        db_path = pipeline_dir / "corpus.duckdb"
+    if not db_path.exists():
+        # Fallback for Stage 07 output pattern
         db_path = pipeline_dir / "07_assemble_corpus" / "corpus.duckdb"
     
     if not db_path.exists():
-        logger.error(f"DuckDB not found at {db_path}")
+        logger.error(f"DuckDB not found. Tried: pipeline.duckdb, corpus.duckdb, 07_assemble_corpus/corpus.duckdb in {pipeline_dir}")
         return
 
     # Output setup

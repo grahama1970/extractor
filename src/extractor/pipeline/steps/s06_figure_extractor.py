@@ -135,10 +135,8 @@ async def _process_one(
         res["context_nearby"] = nearby_text
         return res
     except Exception as exc:
-        log_stage_error('06_figure_extractor', exc, {'context': '06'})
+        log_stage_error('06_figure_extractor', exc, {'context': '06', 'figure_id': figure_id})
         raise
-        logger.error(f"figure.extract.error id={figure_id} err={e}")
-        return None
 
 
 async def _process_all(
@@ -196,9 +194,8 @@ async def _process_all(
                 )
             )
     except Exception as exc:
-        log_stage_error('06_figure_extractor', exc, {'context': '06'})
+        log_stage_error('06_figure_extractor', exc, {'context': '06', 'step': 'log_summaries'})
         raise
-        pass
     return out
 
 
@@ -264,9 +261,8 @@ def run(
             retention="14 days",
         )
     except Exception as exc:
-        log_stage_error('06_figure_extractor', exc, {'context': '06'})
+        log_stage_error('06_figure_extractor', exc, {'context': '06', 'step': 'logger_setup'})
         raise
-        pass
 
     figures: list[dict[str, Any]] = []
     if blocks:
@@ -295,9 +291,8 @@ def run(
             # accept page or page_idx
             _ = f.get("page_idx") if "page_idx" in f else f.get("page")
     except Exception as exc:
-        log_stage_error('06_figure_extractor', exc, {'context': '06'})
+        log_stage_error('06_figure_extractor', exc, {'context': '06', 'step': 'schema_validation'})
         raise
-        console.print(f"[yellow]Stage 06 schema warning: {_e}[/yellow]")
 
     out_path.write_text(json.dumps(result, indent=2))
 
@@ -316,9 +311,8 @@ if __name__ == "__main__":
 
         load_dotenv(find_dotenv())
     except Exception as exc:
-        log_stage_error('06_figure_extractor', exc, {'context': '06'})
+        log_stage_error('06_figure_extractor', exc, {'context': '06', 'step': 'dotenv_load'})
         raise
-        pass
     import sys
     argv = sys.argv[1:]
     if argv and argv[0] == "sanity":
