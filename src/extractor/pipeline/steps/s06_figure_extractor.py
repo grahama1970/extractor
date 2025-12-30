@@ -66,10 +66,7 @@ VERTICAL_PADDING_RATIO = float(os.getenv("FIGURE_VERTICAL_PADDING", "0.2"))
 CONCURRENCY = int(os.getenv("STAGE06_CONCURRENCY", "6"))
 BAND_ABOVE_PX = int(os.getenv("STAGE06_BAND_ABOVE_PX", "120"))
 BAND_BELOW_PX = int(os.getenv("STAGE06_BAND_BELOW_PX", "140"))
-VLM_TIMEOUT_SEC = float(os.getenv("STAGE06_VLM_TIMEOUT_SEC", "25"))
-USE_JSON_CHAT = os.getenv("SCILLM_USE_JSON_CHAT", "").lower() in {"1","true","yes","y"}
 FIGURE_MIN_AREA = int(os.getenv("FIGURE_MIN_AREA_PX", "5000"))
-FIGURE_DESC_ENABLED = os.getenv("FIGURE_DESC", "1").lower() in {"1", "true", "yes"}
 
 
 def _band_texts(page: fitz.Page, bbox: list[float]) -> tuple[str, str]:
@@ -82,97 +79,6 @@ def _band_texts(page: fitz.Page, bbox: list[float]) -> tuple[str, str]:
         return " ".join((b[4] or "").strip() for b in blks if (b[4] or "").strip())
 
     return collect(band_above), collect(band_below)
-
-
-async def _describe_and_title_multimodal(
-    *,
-    image_data: bytes,
-    text_above: str,
-    text_below: str,
-    nearby_text: str,
-    router: Any | None = None,
-) -> dict[str, Optional[str]]:
-    # AGENTS.md compliance: SciLLM must be configured for multimodal analysis
-    if not quick_scillm_check():
-        raise RuntimeError("SciLLM environment not configured; figure analysis requires Chutes.")
-    
-    base = os.getenv("CHUTES_API_BASE", "").strip()
-    key = os.getenv("CHUTES_API_KEY", "").strip()
-    model = (os.getenv("CHUTES_VLM_MODEL") or "").strip()
-    if not (base and key and model):
-        raise RuntimeError("VLM environment incomplete; set CHUTES_API_BASE/CHUTES_API_KEY/CHUTES_VLM_MODEL.")
-
-    b64 = base64.b64encode(image_data).decode("utf-8")
-    system = (
-        "You assist PDF figure extraction. Return strict JSON only with keys: "
-        "description (2–3 sentences), title (<=10 words, no 'Figure' prefix), "
-        "source ('above'|'below'|'context'|'unknown'), number (optional)."
-    )
-    user_parts: list[Any] = [
-        {
-            "type": "text",
-            "text": (
-                "Text above (may contain caption):\n" + (text_above or "")[:600]
-                + "\n\nText below (may contain caption):\n" + (text_below or "")[:600]
-                + "\n\nNearby text on page:\n" + (nearby_text or "")[:800]
-            ),
-        },
-        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
-    ]
-
-    # Router-only (SciLLM). No SDK/curl fallback inside steps.
-    router = get_vlm_router()
-    # Optional per-call timing: set RUN_RESULTS_DIR to base results dir
-    t0 = time.perf_counter()
-    success = False
-    err_ex = None
-    try:
-        # Optional per-call timing: set RUN_RESULTS_DIR to base results dir
-        _rd = os.getenv("RUN_RESULTS_DIR")
-        if _rd:
-            logs_dir = ensure_logs_dir(Path(_rd), "06_figure_extractor")
-            with time_block(logs_dir, "figure_vlm", parts=len(user_parts), image=1 if any(isinstance(p, dict) and p.get("type")=="image_url" for p in user_parts) else 0):
-                resp = await router.acompletion(
-                    model="chutes/vlm",
-                    messages=[{"role": "system", "content": system}, {"role": "user", "content": user_parts}],
-                    response_format={"type": "json_object"},
-                    temperature=0.2,
-                    max_tokens=220,
-                    timeout=VLM_TIMEOUT_SEC,
-                )
-        else:
-            resp = await router.acompletion(
-                model="chutes/vlm",
-                messages=[{"role": "system", "content": system}, {"role": "user", "content": user_parts}],
-                response_format={"type": "json_object"},
-                temperature=0.2,
-                max_tokens=220,
-                timeout=VLM_TIMEOUT_SEC,
-            )
-        success = True
-    except Exception as exc:
-        err_ex = exc
-        raise
-    finally:
-        log_llm_call(
-            stage_key="06_figure_extractor",
-            task_kind="figure_description",
-            route="chutes/vlm",
-            model=model,
-            success=success,
-            latency_ms=int((time.perf_counter() - t0) * 1000),
-            error_class=type(err_ex).__name__ if err_ex else None,
-            raw_preview=str(err_ex) if err_ex else None,
-        )
-    _, obj = normalize_json_content(resp)
-    if isinstance(obj, dict):
-        return {
-            "description": obj.get("description"),
-            "title": obj.get("title"),
-            "source": obj.get("source"),
-            "number": obj.get("number"),
-        }
-    return {}
 
 
 async def _process_one(
@@ -194,38 +100,25 @@ async def _process_one(
         image_data = _render_region(page, expanded_bbox)
         img_path = _save_image_bytes(image_output_dir, figure_id, image_data)
 
+        # Context gathering (for 06b)
         above_text, below_text = _band_texts(page, bbox0)
         nearby_text = _nearby_text(page, expanded_bbox)
-
-        description = "Description skipped (offline)"
+        
+        # NOTE: Stage 06 is now purely deterministic. 
+        # Description/Title will provide nulls/empties, populated by 06b_figure_describer (VLM).
+        description: Optional[str] = None
         figure_title: Optional[str] = None
         title_source: Optional[str] = None
         number_hint: Optional[str] = None
 
-        if not skip_descriptions and _bbox_area(expanded_bbox) >= FIGURE_MIN_AREA:
-            meta = await _describe_and_title_multimodal(
-                image_data=image_data,
-                text_above=above_text,
-                text_below=below_text,
-                nearby_text=nearby_text,
-                router=router,
-            )
-            if meta:
-                if isinstance(meta.get("description"), str):
-                    description = meta["description"].strip() or description
-                if isinstance(meta.get("title"), str):
-                    figure_title = meta["title"].strip() or None
-                if isinstance(meta.get("source"), str):
-                    title_source = meta["source"].strip() or None
-                if isinstance(meta.get("number"), str):
-                    number_hint = meta["number"].strip() or None
-
         number, base_title, normalized_id = _normalize_title(figure_title or number_hint)
 
-        return _assemble_result(
+        # Attach context strings to the result object so 06b can reuse them
+        # (Must be added to _assemble_result or piggybacked - simpler to piggyback on the record)
+        res = _assemble_result(
             figure_id=figure_id,
             page_num=page_num,
-            output_dir=image_output_dir.parent,  # stage dir; utils computes relative path from parent.parent
+            output_dir=image_output_dir.parent,
             img_path=img_path,
             expanded_bbox=expanded_bbox,
             description=description,
@@ -236,6 +129,11 @@ async def _process_one(
             normalized_id=normalized_id,
             extraction_time=datetime.now().isoformat(),
         )
+        # Piggyback context for Stage 06b
+        res["context_above"] = above_text
+        res["context_below"] = below_text
+        res["context_nearby"] = nearby_text
+        return res
     except Exception as exc:
         log_stage_error('06_figure_extractor', exc, {'context': '06'})
         raise
@@ -248,19 +146,10 @@ async def _process_all(
     pdf_path: Path,
     figure_blocks: list[dict[str, Any]],
     image_output_dir: Path,
-    skip_descriptions: bool,
 ) -> list[dict[str, Any]]:
     sem = asyncio.Semaphore(max(1, CONCURRENCY))
-    # Router is constructed on demand inside calls (get_vlm_router)
-    router = None
-    try:
-        from extractor.pipeline.utils.scillm_router import get_vlm_router as _rv
-        router = _rv()
-    except Exception as exc:
-        log_stage_error('06_figure_extractor', exc, {'context': '06'})
-        raise
-        router = None
-
+    # Note: No router needed here anymore; purely deterministic.
+    
     async def runner(i: int, blk: dict[str, Any]) -> dict[str, Any] | None:
         async with sem:
             return await _process_one(
@@ -268,68 +157,49 @@ async def _process_all(
                 block=blk,
                 figure_id=f"figure_{i+1:03d}",
                 image_output_dir=image_output_dir,
-                skip_descriptions=skip_descriptions,
-                router=router,
+                skip_descriptions=True, # no-op, but kept for signature if needed
+                router=None,
             )
 
     tasks = []
     doc = fitz.open(str(pdf_path))
+    out: list[dict[str, Any]] = []
     try:
         for i, blk in enumerate(figure_blocks):
             tasks.append(asyncio.create_task(runner(i, blk)))
         results = await asyncio.gather(*tasks, return_exceptions=True)
-        out: list[dict[str, Any]] = []
         for i, res in enumerate(results):
             if isinstance(res, Exception):
                 logger.error(f"figure.task.error idx={i} err={res}")
                 continue
             if res:
                 out.append(res)
-        # Write per-figure summaries for diagnostics
-        try:
-            logs_dir = image_output_dir.parent / "logs"
-            logs_dir.mkdir(parents=True, exist_ok=True)
-            for i, r in enumerate(out):
-                if not isinstance(r, dict):
-                    continue
-                (logs_dir / f"figure_{i+1:03d}.summary.json").write_text(
-                    json.dumps(
-                        {
-                            "id": r.get("figure_id"),
-                            "has_title": bool(r.get("title")),
-                            "has_description": bool(r.get("ai_description")),
-                            "title_source": r.get("title_source"),
-                        },
-                        indent=2,
-                    )
-                )
-        except Exception as exc:
-            log_stage_error('06_figure_extractor', exc, {'context': '06'})
-            raise
-            pass
-        return out
     finally:
         doc.close()
-        # Ensure router is closed cleanly to avoid aiohttp warnings
-        if router is not None:
-            try:
-                close = getattr(router, "aclose", None) or getattr(router, "close", None)
-                if close is not None:
-                    maybe = close()
-                    if hasattr(maybe, "__await__"):
-                        try:
-                            import asyncio as _asyncio
-                            loop = _asyncio.get_running_loop()
-                            # schedule without blocking
-                            loop.create_task(maybe)  # type: ignore
-                        except RuntimeError:
-                            # no running loop, run synchronously
-                            import asyncio as _asyncio
-                            _asyncio.run(maybe)  # type: ignore
-            except Exception as exc:
-                log_stage_error('06_figure_extractor', exc, {'context': '06'})
-                raise
-                pass
+
+    # Write per-figure summaries for diagnostics (metadata only)
+    try:
+        logs_dir = image_output_dir.parent / "logs"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        for i, r in enumerate(out):
+            if not isinstance(r, dict):
+                continue
+            (logs_dir / f"figure_{i+1:03d}.summary.json").write_text(
+                json.dumps(
+                    {
+                        "id": r.get("figure_id"),
+                        "has_title": bool(r.get("title")),
+                        "has_description": bool(r.get("ai_description")),
+                        "title_source": r.get("title_source"),
+                    },
+                    indent=2,
+                )
+            )
+    except Exception as exc:
+        log_stage_error('06_figure_extractor', exc, {'context': '06'})
+        raise
+        pass
+    return out
 
 
 ## section intersection moved to utils.intersect_sections
@@ -341,18 +211,14 @@ def run(
     pdf_dir: Optional[Path] = None,
     output_dir: Path = Path("data/results/pipeline"),
     bundle: Optional[Path] = None,
-    skip_descriptions: bool = False,
+    skip_descriptions: bool = False, # Ignored, kept for compat
 ) -> Path:
-    """Extract figures, call SciLLM once per figure (image + band texts), write JSON."""
+    """Extract figures, deterministically (image + band texts), write JSON."""
     import time
 
     t0 = time.monotonic()
-
-    # Enforce preflight if descriptions are enabled (no soft skip)
-    if not skip_descriptions:
-        from extractor.pipeline.steps.scillm_preflight_validator import require_scillm_preflight
-        require_scillm_preflight()
-
+    # Note: No SciLLM preflight needed here.
+    
     # Load inputs
     if bundle is not None:
         data = json.loads(Path(bundle).read_text())
@@ -405,7 +271,7 @@ def run(
     figures: list[dict[str, Any]] = []
     if blocks:
         figures = asyncio.run(
-            _process_all(pdf_path=pdf_path, figure_blocks=blocks, image_output_dir=img_dir, skip_descriptions=skip_descriptions)
+            _process_all(pdf_path=pdf_path, figure_blocks=blocks, image_output_dir=img_dir)
         )
 
     # Map to sections

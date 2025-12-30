@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
+import os
 import pandas as pd
 
 
@@ -71,4 +72,75 @@ __all__ = [
     "score_table",
     "iou",
     "horizontal_iou",
+    "sanitize_cell",
+    "fragmentation_score",
+    "should_retry_fragmentation",
+    "has_fragmentation_improvement",
+    "should_replace_table",
 ]
+
+
+def sanitize_cell(val: Any) -> str:
+    """Sanitize cell text to standardize whitespace and fix OCR typos."""
+    if val is None:
+        return ""
+    text = str(val).replace("\u00a0", " ").replace("\n", " ")
+    text = " ".join(text.split()).strip()
+    replacements = {
+        "Subsyste m": "Subsystem",
+        "Asynchro nous": "Asynchronous",
+        "SUBSY STEM": "SUBSYSTEM",
+        "EXECU TE": "EXECUTE",
+        "bht_updat e_i": "bht_update_i",
+        "bht_predi ction_o": "bht_prediction_o",
+        "connexi on": "Connection",
+        "Descripti on": "Description",
+    }
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+    tokens = text.split()
+    if tokens and all(tok.lower() in {"in", "out", "ou", "t"} for tok in tokens):
+        merged: List[str] = []
+        i = 0
+        while i < len(tokens):
+            tok = tokens[i].lower()
+            if tok == "in":
+                merged.append("in")
+            elif tok == "out":
+                merged.append("out")
+            elif tok == "ou" and i + 1 < len(tokens) and tokens[i + 1].lower() == "t":
+                merged.append("out")
+                i += 1
+            else:
+                merged.append(tok)
+            i += 1
+        text = "/".join(merged)
+    return text
+
+
+def fragmentation_score(df: pd.DataFrame) -> int:
+    """Calculate a score indicating how fragmented the table text is (OCR issues)."""
+    count = 0
+    for cell in df.astype(str).values.flatten():
+        if sanitize_cell(cell) != str(cell):
+            count += 1
+    return count
+
+
+def should_retry_fragmentation(score: int) -> bool:
+    """Check if fragmentation score exceeds retry threshold."""
+    return score > max(0, int(os.getenv("TABLE_FRAGMENTATION_RETRY_THRESHOLD", "0")))
+
+
+def has_fragmentation_improvement(existing: int, new: int) -> bool:
+    """Check if new fragmentation score is significantly better than existing."""
+    return (existing - new) >= max(1, int(os.getenv("TABLE_FRAGMENTATION_MIN_IMPROVEMENT", "1")))
+
+
+def should_replace_table(existing_frag: int, new_frag: int, existing_score: float, new_score: float) -> bool:
+    """Decide if a new table extraction is better than an existing one."""
+    if has_fragmentation_improvement(existing_frag, new_frag):
+        return True
+    if new_frag == existing_frag and new_score > existing_score:
+        return True
+    return False

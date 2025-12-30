@@ -355,10 +355,23 @@ def _register_default_specs() -> None:
     register_step_sanity(
         StepSanitySpec(
             step="03_suspicious_headers",
+            description="Candidate header blocks emitted",
+            outputs=[
+                OutputCheck(
+                    "03_suspicious_headers/json_output/03_markup.json",
+                    key="blocks",
+                    min_items=1,
+                )
+            ],
+        )
+    )
+    register_step_sanity(
+        StepSanitySpec(
+            step="03b_header_verifier",
             description="Verified header blocks emitted",
             outputs=[
                 OutputCheck(
-                    "03_suspicious_headers/json_output/03_verified_blocks.json",
+                    "03b_header_verifier/json_output/03_verified_blocks.json",
                     key="blocks",
                     min_items=1,
                 )
@@ -560,6 +573,19 @@ def _register_default_specs() -> None:
             extra=_extra_graph_edges,
         )
     )
+    register_step_sanity(
+        StepSanitySpec(
+            step="10_markdown_exporter",
+            description="Markdown output exists",
+            outputs=[
+                OutputCheck(
+                    "10_markdown_exporter/markdown_output/full_document.md",
+                    kind="file",
+                )
+            ],
+        )
+    )
+
     register_step_sanity(
         StepSanitySpec(
             step="14_report_generator",

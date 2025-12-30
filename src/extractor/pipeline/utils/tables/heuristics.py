@@ -304,4 +304,53 @@ __all__ = [
     "detect_table_caption",
     "demote_table_headers_to_text",
     "demote_sentence_like_single_row_tables",
+    "coalesce_repeated_header_rows",
 ]
+
+
+def _normalize_cell(val: Any) -> str:
+    """Normalize cell text for header comparison."""
+    s = str(val or "").strip()
+    s = s.replace("\u00a0", " ")
+    s = " ".join(s.split())
+    return s.lower()
+
+
+def coalesce_repeated_header_rows(df: pd.DataFrame, min_match: float) -> pd.DataFrame:
+    """Remove rows that look like repeated headers."""
+    if df is None or df.empty:
+        return df
+    header_proto = None
+    try:
+        cols = list(df.columns)
+        if cols and not all(isinstance(c, int) for c in cols):
+            header_proto = [_normalize_cell(c) for c in cols]
+    except Exception:
+        header_proto = None
+    if header_proto is None:
+        for _, row in df.iterrows():
+            vals = [_normalize_cell(v) for v in row.tolist()]
+            if any(vals):
+                header_proto = vals
+                break
+    if not header_proto:
+        return df
+    keep_mask = []
+    for i, row in df.iterrows():
+        vals = [_normalize_cell(v) for v in row.tolist()]
+        if not any(vals):
+            keep_mask.append(True)
+            continue
+        n = max(1, min(len(vals), len(header_proto)))
+        matches = sum(1 for a, b in zip(vals[:n], header_proto[:n]) if a == b and a != "")
+        ratio = matches / float(n)
+        if ratio >= min_match and i != df.index[0]:
+            keep_mask.append(False)
+        else:
+            keep_mask.append(True)
+    try:
+        df2 = df.loc[df.index[keep_mask]].copy()
+        df2.reset_index(drop=True, inplace=True)
+        return df2
+    except Exception:
+        return df

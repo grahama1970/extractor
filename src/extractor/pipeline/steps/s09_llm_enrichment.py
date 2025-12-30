@@ -179,9 +179,10 @@ Context After: {after}"""
     # Ensure columns exist before processing
     for tbl in ["tables", "figures"]:
         try:
-            con.execute(f"ALTER TABLE {tbl} ADD COLUMN llm_title VARCHAR")
-            con.execute(f"ALTER TABLE {tbl} ADD COLUMN llm_description VARCHAR")
-        except Exception: pass
+            con.execute(f"ALTER TABLE {tbl} ADD COLUMN IF NOT EXISTS llm_title VARCHAR")
+            con.execute(f"ALTER TABLE {tbl} ADD COLUMN IF NOT EXISTS llm_description VARCHAR")
+        except Exception as e:
+            logger.warning(f"Schema update failed for {tbl}: {e}")
 
     table_count = 0
     figure_count = 0

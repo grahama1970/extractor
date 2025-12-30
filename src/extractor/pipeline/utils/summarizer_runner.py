@@ -615,6 +615,17 @@ def _cmd_run(
         "summaries": summaries,
     }
 
+    # Validate output before writing
+    from extractor.pipeline.schemas.summarizer_actual import validate_summarizer09_output
+    validated_output, error = validate_summarizer09_output(final_output)
+    if error:
+        logger.error(f"Stage 09 output validation failed: {error}")
+        # Log validation errors but don't fail - this is the second stage to get validation
+        final_output["validation_errors"] = [error]
+    else:
+        # Validation passed - you can optionally replace with validated version
+        pass
+
     output_path = json_output_dir / "09_summaries.json"
     with open(output_path, "w") as f:
         json.dump(final_output, f, indent=2)

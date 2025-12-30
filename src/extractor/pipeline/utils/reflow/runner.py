@@ -668,6 +668,17 @@ def run(
         "resources": resources,
     }
 
+    # Validate output before writing
+    from extractor.pipeline.schemas.reflow_actual import validate_reflow07_output
+    validated_output, error = validate_reflow07_output(final_output)
+    if error:
+        logger.error(f"Stage 07 output validation failed: {error}")
+        # Log validation errors but don't fail - this is the first stage to get validation
+        final_output["validation_errors"] = [error]
+    else:
+        # Validation passed - you can optionally replace with validated version
+        pass
+
     if unified_document_payload:
         final_output["unified_document"] = unified_document_payload
 

@@ -234,20 +234,69 @@ def detect_header_level(text: str) -> int:
 
 
 def looks_like_header_text(text: str) -> bool:
-    """Heuristic: detect if text looks like a header."""
+    """Heuristic: detect if text looks like a header.
+    
+    Strategy: Cast wide regex net, then filter false positives with Python.
+    Uses both exact and fuzzy matching against known header keywords.
+    """
     t = (text or "").strip()
     if not t:
         return False
     
-    # Accept numbered headings like "4.1.5.4. Title"
-    if re.match(r"^\d+(?:\.\d+){1,}\s+.+", t):
-        return True
+    # Known valid header titles (exact/fuzzy match)
+    _VALID_HEADERS = {
+        "Acronyms", "Definitions", "Glossary", "References", "Notes", "Abbreviations",
+        "Terms", "Symbols", "Conventions", "Notation", "Bibliography", "Appendix",
+        "Index", "Abstract", "Summary", "Introduction", "Conclusion", "Methods",
+        "Results", "Discussion", "Acknowledgments", "Acknowledgements", "Preface",
+        "Foreword", "Contents", "Overview", "Background", "Requirements",
+        "Specification", "Interface", "Architecture", "Design", "Implementation",
+        "Analysis", "Validation", "Verification", "Testing", "Scope", "Purpose",
+    }
     
-    # Accept simulated headings
-    if t.endswith("(Simulated)") or t.endswith("(SIMULATED)"):
+    # === CHECK 1: Exact/fuzzy match against known headers ===
+    tl = t.strip().lower()
+    # Exact match
+    if any(tl == h.lower() for h in _VALID_HEADERS):
         return True
+    # Fuzzy match (92% threshold)
+    try:
+        from rapidfuzz import fuzz
+        for h in _VALID_HEADERS:
+            if fuzz.ratio(tl, h.lower()) >= 92:
+                return True
+    except ImportError:
+        pass
     
-    # All-caps multi-word titles (common unnumbered headings)
+    # === CHECK 2: Wide regex net for numbered/formatted patterns ===
+    numbered_patterns = [
+        r"^\d+(?:\.\d+)*\.?\s+.+",      # 1., 1.2, 1.2.3, 1.2.3.4. with title
+        r"^[A-Z]\.\s+.+",                # A. Title
+        r"^[a-z]\)\s+.+",                # a) Title
+        r"^\([ivxlcdmIVXLCDM]+\)\s+.+",  # (i), (ii), (IV) Title
+        r"^\d+\)\s+.+",                  # 1) Title
+    ]
+    
+    format_patterns = [
+        r"^#+\s+.+",                     # Markdown headers
+        r".+\(Simulated\)$",             # Test markers
+    ]
+    
+    all_patterns = numbered_patterns + format_patterns
+    
+    for pattern in all_patterns:
+        if re.match(pattern, t):
+            # === FILTER FALSE POSITIVES ===
+            if len(t) < 3:
+                continue
+            title_part = re.sub(r"^[\d\.\)\(\s]+", "", t).strip()
+            if len(title_part) < 2:
+                continue
+            if t[0].islower() and not re.match(r"^[a-z]\)", t):
+                continue
+            return True
+    
+    # === CHECK 3: ALL CAPS multi-word (common for unnumbered headers) ===
     alpha = re.sub(r"[^A-Za-z]", "", t)
     if alpha and t.upper() == t and len(alpha) >= 6 and len(t.split()) >= 2:
         return True

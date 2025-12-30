@@ -52,7 +52,9 @@ def create_schema(con: duckdb.DuckDBPyConnection):
             csv_data VARCHAR,
             html_data VARCHAR,
             section_id VARCHAR,
-            sort_order INTEGER  -- page * 10000 + y0 for reading order
+            sort_order INTEGER,  -- page * 10000 + y0 for reading order
+            llm_title VARCHAR,
+            llm_description VARCHAR
         );
         
         CREATE TABLE IF NOT EXISTS figures (
@@ -64,17 +66,36 @@ def create_schema(con: duckdb.DuckDBPyConnection):
             y1 DOUBLE,
             image_path VARCHAR,
             section_id VARCHAR,
-            sort_order INTEGER  -- page * 10000 + y0 for reading order
+            sort_order INTEGER,  -- page * 10000 + y0 for reading order
+            llm_title VARCHAR,
+            llm_description VARCHAR
         );
         
         CREATE TABLE IF NOT EXISTS requirements (
              id VARCHAR PRIMARY KEY,
+             req_id VARCHAR,          -- Human-readable ID like REQ-4.1.5-001
              section_id VARCHAR,
              text VARCHAR,
-             type VARCHAR,
+             type VARCHAR,            -- Function, Interface, Physical, etc.
              confidence DOUBLE,
              citation_snippet VARCHAR,
-             is_table_row BOOLEAN DEFAULT FALSE
+             is_table_row BOOLEAN DEFAULT FALSE,
+             is_conditional BOOLEAN DEFAULT FALSE,  -- When X, shall Y
+             condition_text VARCHAR,  -- The condition clause if is_conditional
+             sort_order INTEGER,      -- Reading order within document
+             page INTEGER,
+             y0 DOUBLE                -- For positioning context
+        );
+        
+        CREATE TABLE IF NOT EXISTS lean4_proofs (
+             id VARCHAR PRIMARY KEY,
+             requirement_id VARCHAR,  -- FK to requirements.id
+             theorem_strategy VARCHAR,  -- LLM-generated proof strategy
+             lean4_code VARCHAR,      -- Generated Lean4 theorem code
+             compilation_status VARCHAR,  -- pending, success, error
+             compilation_error VARCHAR,
+             proof_result VARCHAR,    -- proven, counterexample, timeout
+             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
 
         -- VIEWS

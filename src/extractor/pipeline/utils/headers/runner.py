@@ -17,6 +17,8 @@ from typing import Any, Dict, List, Optional, cast
 import fitz
 from loguru import logger
 
+STAGE03_COLOR_ENRICH = os.getenv("STAGE03_COLOR_ENRICH", "1").lower() in {"1", "true", "yes", "y"}
+
 try:
     import psutil
 except ImportError:
@@ -38,6 +40,19 @@ from extractor.pipeline.utils.headers import (
     verify_header_with_llm as _verify_header_with_llm,
     retrieve_prior_decisions as _retrieve_prior_decisions,
 )
+from extractor.pipeline.utils.suspicious_headers_utils import (
+    ensure_first_span_color,
+    norm_text,
+    text_sha1,
+)
+from extractor.pipeline.utils.debug_utils import log_timing
+from extractor.pipeline.utils.section_builder_utils import (
+    pdf_analyze_section_numbering as _pdf_analyze_numbering,
+    pdf_extract_section_title as _pdf_extract_title,
+    is_probable_pdf_section_header as _is_probable_pdf_header,
+)
+from extractor.pipeline.utils.prompt_builder import build_llm_context
+
 from extractor.pipeline.utils.scillm_router import get_text_router, get_vlm_router
 from extractor.pipeline.steps.scillm_preflight_validator import quick_scillm_check
 from extractor.pipeline.utils.model_params import build_chat_extras
@@ -73,6 +88,189 @@ class Config:
     source_pdf: str | None = None
     verify_all_headers: bool = False
     write_suspicion_fields: bool = True
+
+@dataclass
+class VerificationTask:
+    """Holds all necessary info for a single verification task."""
+
+    page_idx: int
+    block_idx: int
+    page_blocks: list[dict[str, Any]]
+    page_obj: fitz.Page
+    config: Config
+    image_output_dir: Path
+
+    def get_context_blocks(
+        self,
+    ) -> tuple[dict[str, Any], dict[str, Any] | None, dict[str, Any] | None]:
+        """Return (target, above, below) where above/below skip empty blocks.
+
+        Empty means:
+        - No text content (after strip) AND
+        - No usable bbox (missing or zero area)
+
+        Preference: textual neighbors; fallback to any block with a non-zero bbox
+        within a small window.
+        """
+
+        def _has_text(b: dict[str, Any] | None) -> bool:
+            if not b:
+                return False
+            t = (b.get("text") or b.get("content") or "").strip()
+            if t:
+                return True
+            # legacy shape
+            for ln in b.get("lines") or []:
+                for sp in ln.get("spans") or []:
+                    if (sp.get("text") or "").strip():
+                        return True
+            return False
+
+        def _has_bbox(b: dict[str, Any] | None) -> bool:
+            if not b:
+                return False
+            bb = b.get("bbox")
+            if not isinstance(bb, (list, tuple)) or len(bb) != 4:
+                return False
+            x0, y0, x1, y1 = bb
+            try:
+                return (float(x1) - float(x0)) > 0 and (float(y1) - float(y0)) > 0
+            except Exception as exc:
+                log_stage_error('03_suspicious_headers', exc, {'context': '03'})
+                raise
+                return False
+
+        def _non_empty(b: dict[str, Any] | None) -> bool:
+            return _has_text(b) or _has_bbox(b)
+
+        target = self.page_blocks[self.block_idx]
+
+        # immediate neighbors
+        above = self.page_blocks[self.block_idx - 1] if self.block_idx > 0 else None
+        below = (
+            self.page_blocks[self.block_idx + 1]
+            if self.block_idx < len(self.page_blocks) - 1
+            else None
+        )
+
+        # If neighbor is empty, scan up to ±5 blocks to find a non-empty one
+        MAX_SCAN = 5
+        if not _non_empty(above):
+            for i in range(self.block_idx - 2, max(-1, self.block_idx - 2 - MAX_SCAN), -1):
+                if i < 0:
+                    break
+                cand = self.page_blocks[i]
+                if _non_empty(cand):
+                    above = cand
+                    break
+
+        if not _non_empty(below):
+            for i in range(
+                self.block_idx + 2, min(len(self.page_blocks), self.block_idx + 2 + MAX_SCAN)
+            ):
+                cand = self.page_blocks[i]
+                if _non_empty(cand):
+                    below = cand
+                    break
+
+        return target, above, below
+
+    def render_context_image_b64(self) -> str:
+        """Renders an image of the block and its neighbors, saves it, and returns base64.
+
+        Also logs render timing and metadata to RUN_RESULTS_DIR/03_suspicious_headers/logs/timings.jsonl
+        using attempt=context_render.
+        """
+        t_start = time.monotonic()
+        target, above, below = self.get_context_blocks()
+
+        expanded_rect = fitz.Rect(target["bbox"])
+
+        if above and "bbox" in above:
+            expanded_rect.include_rect(fitz.Rect(above["bbox"]))
+        if below and "bbox" in below:
+            expanded_rect.include_rect(fitz.Rect(below["bbox"]))
+
+        expanded_rect.x0 -= 10
+        expanded_rect.y0 -= 10
+        expanded_rect.x1 += 10
+        expanded_rect.y1 += 10
+
+        # ensure expanded rect stays within page bounds across PyMuPDF versions
+        expanded_rect = expanded_rect & self.page_obj.rect
+
+        matrix = fitz.Matrix(self.config.render_dpi / 72, self.config.render_dpi / 72)
+        pix = self.page_obj.get_pixmap(matrix=matrix, clip=expanded_rect)  # type: ignore[attr-defined]
+
+        # Save the image for inspection
+        image_path = self.image_output_dir / f"suspicious_p{self.page_idx}_b{self.block_idx}.png"
+        pix.save(str(image_path))
+
+        # Also update the block with the path to its context image
+        self.page_blocks[self.block_idx]["context_image_path"] = str(image_path)
+
+        # IMPORTANT: Encode as PNG to match data URL type
+        b = pix.tobytes("png")
+        b64 = base64.b64encode(b).decode("utf-8")
+        try:
+            log_timing(
+                "03_suspicious_headers",
+                {
+                    "attempt": "context_render",
+                    "outcome": "ok",
+                    "render_ms": int((time.monotonic() - t_start) * 1000),
+                    "page_idx": int(self.page_idx),
+                    "block_idx": int(self.block_idx),
+                    "blocks_in_context": int(1 + (1 if above else 0) + (1 if below else 0)),
+                    "w": getattr(pix, "width", None),
+                    "h": getattr(pix, "height", None),
+                    "image_pixels": (getattr(pix, "width", 0) or 0) * (getattr(pix, "height", 0) or 0),
+                    "b64_bytes": len(b64),
+                    "render_cache": "miss",
+                },
+            )
+        except Exception as exc:
+            log_stage_error('03_suspicious_headers', exc, {'context': '03'})
+            raise
+            pass
+        return b64
+
+    def build_dataset_record(
+        self,
+        *,
+        context_text: str,
+        final_label: bool,
+        label_source: str,
+        reasoning: str = "",
+    ) -> dict[str, Any]:
+        target, above, below = self.get_context_blocks()
+        t_text = (target.get("text") or target.get("content") or "").strip()
+        fs = target.get("first_span_font") or {}
+        font_sig = f"{fs.get('name') or '?'}|{fs.get('size') or '?'}|{'b' if fs.get('bold') else 'n'}{'i' if fs.get('italic') else 'n'}|{fs.get('color_bucket') or '?'}"
+        rec = {
+            "doc_path": str(self.config.input_pdf),
+            "json_path": str(self.config.input_json),
+            "page_idx": int(self.page_idx),
+            "block_idx": int(self.block_idx),
+            "header_text": t_text,
+            "header_text_norm": norm_text(t_text),
+            "text_sha1": text_sha1(t_text + "|" + font_sig),
+            "font_signature": font_sig,
+            "context_text": context_text,
+            "label_is_header": bool(final_label),
+            "label_source": label_source,
+            "reasoning": reasoning or "",
+            "timestamp": datetime.now().isoformat(),
+            "text_only": os.getenv("STAGE03_TEXT_ONLY", "1").lower() in ("1", "true", "yes", "y"),
+        }
+        # Include saved context image path if present
+        try:
+            rec["context_image_path"] = target.get("context_image_path")
+        except Exception as exc:
+            log_stage_error('03_suspicious_headers', exc, {'context': '03'})
+            raise
+            pass
+        return rec
 
 async def process_pdf_pipeline(config: Config):
     """
@@ -593,336 +791,86 @@ async def process_pdf_pipeline(config: Config):
             )
             auto_results[idx] = {"is_header": True, "reasoning": f"Preparation error: {e}"}
 
-    # 6) LLM batch — verify and collect JSON payloads (scillm + Chutes x-api-key)
-    llm_payloads: list[dict[str, Any]] = []
-    if prepared:
-        try:
-            t_llm0 = time.monotonic()
-            try:
-                _verify_cap = int(os.getenv("STAGE03_VERIFY_MAX_TOKENS", "256"))
-            except Exception as exc:
-                log_stage_error('03_suspicious_headers', exc, {'context': '03'})
-                raise
-                _verify_cap = 256
+    # 6) Hand-off to Stage 03b: Mark candidates for verification
+    # We have 'prepared' items (LLM ready) and 'auto_results' (heuristic decisions).
+    
+    # helper to find metadata
+    task_map = {id(t): t for t in tasks}
 
-
-            async def _process_item(item: dict) -> dict:
-                return await _verify_header_with_llm(
-                    item["image_b64"],
-                    item["context_text"],
-                    item["model"],
-                    item_timeout=config.item_timeout_seconds,
-                )
-
-            results = await process_items_concurrently(
-                prepared,
-                _process_item,
-                description="Verifying Headers",
-            )
-            llm_batch_duration_ms = int((time.monotonic() - t_llm0) * 1000)
-        except TimeoutError as e:
-            logger.error(f"Stage 03 model calls timed out after {config.max_runtime_seconds}s")
-            info = classify_llm_error(e)
-            try:
-                diagnostics.append(
-                    make_event(
-                        "03_suspicious_headers",
-                        "error",
-                        info["code"],
-                        info["message"],
-                        {"prepared": len(prepared)},
-                    )
-                )
-                errors_count += 1
-            except Exception as exc:
-                log_stage_error('03_suspicious_headers', exc, {'context': '03'})
-                raise
-                pass
-            results = [
-                json.dumps({"error": {"type": "Timeout", "message": info.get("message")}})
-            ] * len(prepared)
-        except Exception as exc:
-            log_stage_error('03_suspicious_headers', exc, {'context': '03'})
-            raise
-            logger.error(f"Stage 03 model calls failed: {e}")
-            info = classify_llm_error(e)
-            try:
-                diagnostics.append(
-                    make_event(
-                        "03_suspicious_headers",
-                        "error",
-                        info["code"],
-                        info["message"],
-                        {"prepared": len(prepared)},
-                    )
-                )
-                errors_count += 1
-            except Exception as exc:
-                log_stage_error('03_suspicious_headers', exc, {'context': '03'})
-                raise
-                pass
-            results = [
-                json.dumps({"error": {"type": type(e).__name__, "message": info.get("message")}})
-            ] * len(prepared)
-
-        for ans in results:
-            try:
-                # ans is already a dict from _verify_header_with_llm (or empty dict on error fallback)
-                llm_payloads.append(ans if isinstance(ans, dict) else {})
-            except Exception as exc:
-                log_stage_error('03_suspicious_headers', exc, {'context': '03'})
-                raise
-                llm_payloads.append({})
-
-    # 7) Apply results back to blocks — update types, suspicion fields, persist
-    parse_error_count = 0
-    prep_idx = 0
-    for idx, task in enumerate(tasks):
-        # Determine result (auto or from batch)
-        if idx in auto_results:
-            llm_result = auto_results[idx]
-        else:
-            payload = llm_payloads[prep_idx] if prep_idx < len(llm_payloads) else {}
-            prep_idx += 1
-            if payload.get("error"):
-                # Keep header on model error but record reasoning
-                err = payload["error"]
-                llm_result = {
-                    "is_header": True,
-                    "reasoning": f"LLM error: {err.get('type')}: {err.get('message')}",
-                }
-            else:
-                payload = cast(dict[str, Any], payload)
-                if payload.get("is_header") is None:
-                    payload["is_header"] = True
-                if payload.get("reasoning") is None:
-                    payload["reasoning"] = ""
-                llm_result = payload
-
-        # Count parse_error soft-fails for observability/thresholds
-        try:
-            if str(llm_result.get("reasoning", "")).strip() == "parse_error":
-                parse_error_count += 1
-        except Exception as exc:
-            log_stage_error('03_suspicious_headers', exc, {'context': '03'})
-            raise
-            pass
-
-        # Update JSON in place
-        block_to_update = marker_data["pages"][task.page_idx]["blocks"][task.block_idx]
-        is_header = bool(llm_result.get("is_header", True))
-        if not is_header:
-            block_to_update["block_type"] = "Text"
-
-        block_to_update["suspicious_header"] = False
-        block_to_update["llm_verification"] = {
+    # Apply Auto-Results immediately
+    for idx, res in auto_results.items():
+        task = tasks[idx]
+        block = marker_data["pages"][task.page_idx]["blocks"][task.block_idx]
+        
+        is_header = res.get("is_header", False)
+        reason = res.get("reasoning", "")
+        
+        block["suspicious_header"] = False # Decision made
+        block["requires_verification"] = False
+        block["llm_verification"] = {
             "verified_at": datetime.now().isoformat(),
-            "model": config.llm_model,
-            "result": llm_result,
+            "model": "heuristic_v1",
+            "result": res,
             "original_block_type": "SectionHeader",
-            "final_block_type": block_to_update["block_type"],
+            "final_block_type": "SectionHeader" if is_header else "Text"
         }
+        if not is_header:
+            block["block_type"] = "Text"
+            block["is_suspicious"] = True
+            block["suspicious_reasons"] = [reason]
+        else:
+            block["is_suspicious"] = False
+            
+    # Mark LLM Candidates
+    for idx, prep in enumerate(prepared):
+        # We need to map back to the block. 
+        # We tracked 'task_refs' parallel to 'prepared'.
+        task = task_refs[idx]
+        block = marker_data["pages"][task.page_idx]["blocks"][task.block_idx]
+        
+        block["requires_verification"] = True
+        # prompt_context contains the text we built for the LLM
+        block["prompt_context"] = prep["context_text"]
+        
+        # Ensure image path is persisted (it was set in task_blocks during render, so it should be there)
+        # But let's double check task.page_blocks IS the source of truth ref? 
+        # Yes, task.page_blocks = page_blocks = page_data["blocks"]. It is a ref.
 
-        # Use a dedicated flag to control writing suspicion fields
-        if config.write_suspicion_fields:
-            if is_header:
-                block_to_update["is_suspicious"] = False
-                block_to_update["suspicious_reasons"] = []
-                block_to_update["suspicion_confidence"] = 0.0
-                block_to_update["requires_review"] = False
-            else:
-                block_to_update["is_suspicious"] = True
-                reasons = block_to_update.get("suspicious_reasons") or []
-                if "llm_verification_reject" not in [str(r) for r in reasons]:
-                    reasons.append("llm_verification_reject")
-                block_to_update["suspicious_reasons"] = reasons
-                # If model returned a confidence field, prefer it; else set a default high suspicion
-                try:
-                    conf = llm_result.get("confidence")
-                    block_to_update["suspicion_confidence"] = (
-                        float(conf) if isinstance(conf, (int, float)) else 0.9
-                    )
-                except Exception as exc:
-                    log_stage_error('03_suspicious_headers', exc, {'context': '03'})
-                    raise
-                    block_to_update["suspicion_confidence"] = 0.9
-                block_to_update["requires_review"] = True
-
-        # Dataset dump (for future finetuning)
-        try:
-            ds_enabled = os.getenv("STAGE03_DUMP_DATASET", "1").lower() in ("1", "true", "yes", "y")
-            if ds_enabled:
-                # Use aligned prepared context text when not auto; otherwise rebuild minimal
-                try:
-                    if idx in auto_results:
-                        tgt, abv, bel = task.get_context_blocks()
-                        ctx = build_llm_context(tgt, abv, bel)
-                    else:
-                        ctx = prepared_ctx[prep_idx - 1] if (prep_idx - 1) < len(prepared_ctx) else ""
-                except Exception as exc:
-                    log_stage_error('03_suspicious_headers', exc, {'context': '03'})
-                    raise
-                    ctx = ""
-                rec = task.build_dataset_record(
-                    context_text=ctx,
-                    final_label=bool(is_header),
-                    label_source=("heuristic_auto" if idx in auto_results else "llm"),
-                    reasoning=str((llm_result or {}).get("reasoning") or ""),
-                )
-                ds_dir = Path(os.getenv("STAGE03_DATASET_DIR", str(config.output_dir / "datasets" / "suspicious_headers")))
-                ds_dir.mkdir(parents=True, exist_ok=True)
-                run_file = ds_dir / f"{run_id}.jsonl"
-                with open(run_file, "a", encoding="utf-8") as fp:
-                    fp.write(json.dumps(rec, ensure_ascii=False) + "\n")
-        except Exception as exc:
-            log_stage_error('03_suspicious_headers', exc, {'context': '03'})
-            raise
-            logger.warning(f"dataset_dump_failed: {_e}")
-    pdf_doc.close()
-
-    # 8) Save the updated JSON — flatten pages to top-level blocks
-    output_json_path = json_output_dir / "03_verified_blocks.json"
-
+    # 7) Save Markup
     # Flatten the pages structure back to a simple list of blocks
     final_blocks = [block for page in marker_data["pages"] for block in page["blocks"]]
-    # Policy guardrail: demote any remaining SectionHeader whose text ends with ':' or ';'
-    # and any title containing '(continued)' or '- Continued'.
-    try:
-        import re as _re
-        for b in final_blocks:
-            bt = b.get("type") or b.get("block_type")
-            if bt != "SectionHeader":
-                continue
-            txt = (b.get("text") or b.get("content") or "").strip()
-            low = txt.lower()
-            if txt.endswith(":") or txt.endswith(";") or "(continued" in low or "- continued" in low:
-                # Demote to Text
-                b["block_type"] = "Text"
-                b["type"] = "Text"
-                # Clear any prior header flags
-                if b.get("suspicious_header"):
-                    b["suspicious_header"] = False
-                b.setdefault("llm_verification", {})
-                b["llm_verification"]["result"] = {"is_header": False, "reasoning": "policy_auto_reject_colon_semicolon_or_continued"}
-    except Exception as exc:
-        log_stage_error('03_suspicious_headers', exc, {'context': '03'})
-        raise
-        pass
+    
     marker_data["blocks"] = final_blocks
     del marker_data["pages"]
 
     marker_data["run_id"] = run_id
+    # Clear old counts or set to 0
     marker_data["errors_count"] = errors_count
     marker_data["warnings_count"] = warnings_count
     marker_data["diagnostics"] = diagnostics
+    
     stage_end_ts = datetime.now().isoformat()
-    try:
-        if psutil is not None:
-            proc = psutil.Process()
-            resources["proc_rss_mb_end"] = int((proc.memory_info().rss or 0) / (1024 * 1024))
-            vm = psutil.virtual_memory()
-            resources["vmem_used_mb_end"] = int(getattr(vm, "used", 0) / (1024 * 1024))
-    except Exception as exc:
-        log_stage_error('03_suspicious_headers', exc, {'context': '03'})
-        raise
-        pass
+    
+    # Simple timings
     timings = {
         "stage_start_ts": stage_start_ts,
         "stage_end_ts": stage_end_ts,
         "stage_duration_ms": int((time.monotonic() - t_stage0) * 1000),
-        "preflight_duration_ms": int(locals().get("preflight_duration_ms", 0)),
-        "llm_batch_duration_ms": int(locals().get("llm_batch_duration_ms", 0)),
+        "candidates_found": len(prepared),
+        "auto_resolved": len(auto_results),
     }
-    try:
-        samples = stop_resource_sampler(sampler) if sampler else []
-        if samples:
-            resources.setdefault("resource_samples", samples)
-    except Exception as exc:
-        log_stage_error('03_suspicious_headers', exc, {'context': '03'})
-        raise
-        pass
     marker_data["timings"] = timings
     marker_data["resources"] = resources
-    # Threshold policy for parse errors
-    try:
-        warn_frac = float(os.getenv("PARSE_WARN_FRAC", "0.05"))
-    except Exception as exc:
-        log_stage_error('03_suspicious_headers', exc, {'context': '03'})
-        raise
-        warn_frac = 0.05
-    try:
-        fail_frac = float(os.getenv("PARSE_FAIL_FRAC", "0.20"))
-    except Exception as exc:
-        log_stage_error('03_suspicious_headers', exc, {'context': '03'})
-        raise
-        fail_frac = 0.20
-    total_verified = max(1, len(tasks) - len(auto_results))
-    parse_rate = parse_error_count / float(total_verified)
 
     # Write output unless DRY_RUN=1
+    output_json_path = json_output_dir / "03_markup.json"
     if os.getenv("DRY_RUN", "0").lower() not in {"1","true","yes","y"}:
         with open(output_json_path, "w") as f:
             json.dump(marker_data, f, indent=2)
-        print(f"\nVerification complete. Updated JSON saved to: {output_json_path}")
+        print(f"\nCandidate generation complete. Markup saved to: {output_json_path}")
     else:
-        print("[03] DRY_RUN=1 → skipped writing json_output (logs/timings still recorded)")
+        print("[03] DRY_RUN=1 → skipped writing json_output")
 
-    # Summarize timings.jsonl → timings_summary.json (best-effort)
-    try:
-        from pathlib import Path as _P
-        rd = os.getenv("RUN_RESULTS_DIR")
-        if rd:
-            logs_dir = _P(rd) / "03_suspicious_headers" / "logs"
-            tfile = logs_dir / "timings.jsonl"
-            if tfile.exists():
-                lat = []
-                attempts = 0
-                ok = 0
-                exc = 0
-                for line in tfile.read_text(encoding="utf-8").splitlines():
-                    try:
-                        rec = json.loads(line)
-                        attempts += 1
-                        if str(rec.get("outcome")) == "ok":
-                            ok += 1
-                        if str(rec.get("outcome")) == "exception":
-                            exc += 1
-                        if rec.get("latency_ms") is not None:
-                            lat.append(float(rec["latency_ms"]))
-                    except Exception as exc:
-                        log_stage_error('03_suspicious_headers', exc, {'context': '03'})
-                        raise
-                        continue
-                lat_sorted = sorted(lat)
-                def _pct(p: float) -> float:
-                    if not lat_sorted:
-                        return 0.0
-                    idx = int(max(0, min(len(lat_sorted)-1, round(p * (len(lat_sorted)-1)))))
-                    return float(lat_sorted[idx])
-                summary = {
-                    "attempts": attempts,
-                    "ok": ok,
-                    "exceptions": exc,
-                    "parse_error_count": parse_error_count,
-                    "parse_error_rate": round(parse_rate, 4),
-                    "p50_ms": _pct(0.50),
-                    "p95_ms": _pct(0.95),
-                }
-                (logs_dir / "timings_summary.json").write_text(json.dumps(summary, indent=2))
-    except Exception as exc:
-        log_stage_error('03_suspicious_headers', exc, {'context': '03'})
-        raise
-        pass
-
-    # Enforce thresholds: warn vs fail
-    if parse_rate >= fail_frac:
-        raise RuntimeError(
-            f"Stage 03 parse_error rate {parse_rate:.2%} exceeded fail threshold {fail_frac:.0%}"
-        )
-    if parse_rate >= warn_frac:
-        print(
-            f"[03] Warning: parse_error rate {parse_rate:.2%} exceeded warn threshold {warn_frac:.0%}"
-        )
 
 
 # ------------------------------------------------------------------

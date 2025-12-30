@@ -20,6 +20,11 @@ from extractor.pipeline.utils.tables.metrics import (
     score_table,
     iou,
     horizontal_iou,
+    sanitize_cell,
+    fragmentation_score,
+    should_retry_fragmentation,
+    has_fragmentation_improvement,
+    should_replace_table,
 )
 
 # Heuristics
@@ -29,6 +34,7 @@ from extractor.pipeline.utils.tables.heuristics import (
     detect_table_caption,
     demote_table_headers_to_text,
     demote_sentence_like_single_row_tables,
+    coalesce_repeated_header_rows,
 )
 
 __all__ = [
@@ -45,10 +51,16 @@ __all__ = [
     "score_table",
     "iou",
     "horizontal_iou",
+    "sanitize_cell",
+    "fragmentation_score",
+    "should_retry_fragmentation",
+    "has_fragmentation_improvement",
+    "should_replace_table",
     # Heuristics
     "is_header_row_table",
     "stitch_headers",
     "detect_table_caption",
     "demote_table_headers_to_text",
     "demote_sentence_like_single_row_tables",
+    "coalesce_repeated_header_rows",
 ]

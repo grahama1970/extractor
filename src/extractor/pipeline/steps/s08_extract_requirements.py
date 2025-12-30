@@ -80,7 +80,7 @@ def heuristic_is_relevant(text: str, tables: List[str]) -> bool:
     if tables:
         return True # Tables often contain specs
     
-    keywords = ["shall", "must", "require", "constraint", "comply", "will"]
+    keywords = ["shall", "must", "require", "constraint", "comply", "will", "should", "tied to"]
     text_lower = text.lower()
     for kw in keywords:
         if kw in text_lower:
@@ -109,7 +109,7 @@ def verify_citation(snippet: str, full_text: str, table_texts: List[str]) -> flo
             
     return score_text
 
-def extract_requirements_llm(router, title: str, text: str, tables: List[str]) -> List[Dict[str, Any]]:
+def extract_requirements_llm(router, title: str, text: str, tables: List[str], section_number: str = "") -> List[Dict[str, Any]]:
     """
     Calls LLM to extract requirements.
     """
@@ -129,6 +129,8 @@ Target Section: "{title}"
 3. For each extracted item, you MUST provide a "citation_snippet" that is a VERBATIM copy of the source text or table row that validates the requirement.
 4. Assign a "type" (Function, Interface, Physical, Environmental, Design) and "confidence" (0.0-1.0).
 5. If the requirement comes from a table, set "is_table_row": true.
+6. If the requirement is CONDITIONAL (e.g., "When X is true, Y shall..."), set "is_conditional": true and extract the condition into "condition_text".
+7. IMPORTANT: Maintain the ORDER in which requirements appear in the source text.
 
 Output strictly a JSON list of objects:
 [
@@ -137,7 +139,9 @@ Output strictly a JSON list of objects:
     "type": "Function",
     "confidence": 0.95,
     "citation_snippet": "verbatim text...",
-    "is_table_row": false
+    "is_table_row": false,
+    "is_conditional": false,
+    "condition_text": null
   }}
 ]
 """
@@ -170,28 +174,59 @@ def run_extract_requirements(pipeline_dir: Path, db_path: Path):
     # 0. Check Resume State
     # TODO: Implement resume logic (check IDs in requirements table)
     
-    # 1. Fetch Sections
-    sections = con.sql("SELECT id, title FROM sections ORDER BY page_start, id").fetchall()
+    # 1. Fetch Sections with page info for sort_order
+    sections = con.sql("""
+        SELECT id, title, page_start 
+        FROM sections 
+        ORDER BY page_start, id
+    """).fetchall()
     logger.info(f"Found {len(sections)} sections in corpus.")
     
     router = get_text_router()
     
     processed_count = 0
     requirements_batch = []
+    merged_content_batch = []
     
-    for s_id, title in sections:
+    # Global counter for req_id within document
+    global_req_idx = 0
+    
+    # Get max sort_order from merged_content to append after existing content
+    try:
+        max_sort = con.sql("SELECT COALESCE(MAX(sort_order), 0) FROM merged_content").fetchone()[0]
+    except Exception:
+        max_sort = 0
+    
+    for s_id, title, page_start in sections:
         # Get Content
         text, tables, figures = get_section_content(con, s_id)
         
         # Heuristic Filter
         if not heuristic_is_relevant(text, tables):
-            # logger.debug(f"Skipping section {s_id}: No keywords/tables")
             continue
             
         logger.info(f"Processing Section {s_id} ('{title}')...")
         
+        # Extract section number from title (e.g., "4.1.5" from "4.1.5. BHT Submodule")
+        section_number = ""
+        import re
+        num_match = re.match(r'^(\d+(?:\.\d+)*)', str(title or "").strip())
+        if num_match:
+            section_number = num_match.group(1)
+        
         # Extract
-        extracted = extract_requirements_llm(router, str(title), text, tables)
+        extracted = extract_requirements_llm(router, str(title), text, tables, section_number)
+        
+        # Get base sort_order for this section's content
+        try:
+            section_sort_base = con.sql(f"""
+                SELECT MIN(sort_order) FROM merged_content WHERE section_id = '{s_id}'
+            """).fetchone()[0] or (page_start * 10000)
+        except Exception:
+            section_sort_base = page_start * 10000 if page_start else max_sort
+        
+        # Track position within section
+        section_req_idx = 0
         
         # Verify & Collect
         for item in extracted:
@@ -200,36 +235,89 @@ def run_extract_requirements(pipeline_dir: Path, db_path: Path):
             conf = float(item.get("confidence", 0.5))
             citation = item.get("citation_snippet", "")
             is_tbl = bool(item.get("is_table_row", False))
+            is_conditional = bool(item.get("is_conditional", False))
+            condition_text = item.get("condition_text") or None
             
             # Verification
             match_score = verify_citation(citation, text, tables)
             if match_score < THRESHOLD_CITATION_MATCH:
                 logger.warning(f"Low citation match ({match_score:.1f}%) for: {req_text[:50]}...")
-                # We still store it, but maybe penalize confidence?
                 conf = conf * 0.8
             
-            # ID generation using hash or UUID
+            # Generate IDs
+            global_req_idx += 1
+            section_req_idx += 1
+            
+            # UUID-based internal ID
             import uuid
             r_id = f"req_{uuid.uuid4().hex[:8]}"
             
+            # Human-readable req_id: REQ-4.1.5-001
+            if section_number:
+                req_id = f"REQ-{section_number}-{section_req_idx:03d}"
+            else:
+                req_id = f"REQ-{global_req_idx:04d}"
+            
+            # Calculate sort_order (position in reading order)
+            sort_order = section_sort_base + section_req_idx * 10
+            page = page_start or 0
+            
+            # Append to requirements batch (id, req_id, section_id, text, type, confidence, 
+            #                               citation, is_table_row, is_conditional, condition_text,
+            #                               sort_order, page, y0)
             requirements_batch.append((
-                r_id, s_id, req_text, req_type, conf, citation, is_tbl
+                r_id, req_id, s_id, req_text, req_type, conf, citation, 
+                is_tbl, is_conditional, condition_text, sort_order, page, 0.0
+            ))
+            
+            # Also insert into merged_content for reading order context
+            mc_id = f"mc_req_{uuid.uuid4().hex[:6]}"
+            # Format: REQ: REQ-4.1.5-001 [COND] Requirement text...
+            prefix = "REQ: " + req_id
+            if is_conditional:
+                prefix += " [COND]"
+            content_str = f"{prefix} {req_text}"
+            
+            merged_content_batch.append((
+                mc_id, s_id, page, "requirement", content_str, r_id, sort_order
             ))
             
         processed_count += 1
         
         # Batch Insert
         if len(requirements_batch) >= 10:
-             con.executemany("INSERT OR REPLACE INTO requirements VALUES (?, ?, ?, ?, ?, ?, ?)", requirements_batch)
-             requirements_batch = []
+            con.executemany("""
+                INSERT OR REPLACE INTO requirements 
+                (id, req_id, section_id, text, type, confidence, citation_snippet, 
+                 is_table_row, is_conditional, condition_text, sort_order, page, y0) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, requirements_batch)
+            con.executemany("""
+                INSERT OR REPLACE INTO merged_content 
+                (id, section_id, page, type, content, asset_id, sort_order) 
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, merged_content_batch)
+            requirements_batch = []
+            merged_content_batch = []
              
     # Flush remaining
     if requirements_batch:
-        con.executemany("INSERT OR REPLACE INTO requirements VALUES (?, ?, ?, ?, ?, ?, ?)", requirements_batch)
+        con.executemany("""
+            INSERT OR REPLACE INTO requirements 
+            (id, req_id, section_id, text, type, confidence, citation_snippet, 
+             is_table_row, is_conditional, condition_text, sort_order, page, y0) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, requirements_batch)
+        con.executemany("""
+            INSERT OR REPLACE INTO merged_content 
+            (id, section_id, page, type, content, asset_id, sort_order) 
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, merged_content_batch)
         
     final_count = con.sql("SELECT count(*) FROM requirements").fetchone()[0]
+    cond_count = con.sql("SELECT count(*) FROM requirements WHERE is_conditional = true").fetchone()[0]
     logger.info(f"Extraction Complete. Processed {processed_count} relevant sections.")
-    logger.info(f"Total Requirements Extracted: {final_count}")
+    logger.info(f"Total Requirements Extracted: {final_count} ({cond_count} conditional)")
 
 if __name__ == "__main__":
     import argparse

@@ -7,6 +7,8 @@ Scope
 
 General Rules
 
+- **Strict Coordinate System**: All spatial coordinates (bounding boxes, points) **MUST** use the Top-Left Origin system (PyMuPDF standard). Legacy formats (e.g., PDF Bottom-Left) **MUST** be normalized before leaving their respective stage.
+
 - Steps are pure Python modules with a callable `run(...)`. No CLI frameworks (Typer/click/argparse) inside steps.
 - Steps must not have import-time side effects. Loading `.env` happens in the driver or under `if __name__ == "__main__"` only.
 - Each step writes to `data/results/<run>/<step>/{json_output,image_output,visual_output,logs}`.

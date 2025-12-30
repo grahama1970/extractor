@@ -20,11 +20,13 @@ from extractor.pipeline.utils.diagnostics import (
 
 console = Console(stderr=True)
 
+import duckdb
+
 def load_results(pipeline_dir: Path) -> Dict[str, Any]:
-    """Load results from all pipeline stages."""
+    """Load results from all pipeline stages (JSON artifacts + DuckDB)."""
     results = {}
 
-    # Map stage output files
+    # Map stage output files (Upstream stages that still produce JSONs)
     stage_files = {
         "02_marker": "02_marker_extractor/json_output/02_marker_blocks.json",
         "03_verification": "03_suspicious_headers/json_output/03_verified_blocks.json",
@@ -32,12 +34,6 @@ def load_results(pipeline_dir: Path) -> Dict[str, Any]:
         "04a_audit": "04a_layout_audit/json_output/04a_layout_audit.json",
         "05_tables": "05_table_extractor/json_output/05_tables.json",
         "06_figures": "06_figure_extractor/json_output/06_figures.json",
-        "07_reflow": "07_reflow_section/json_output/07_reflowed.json",
-        "07_requirements": "07_requirements_miner/json_output/07_requirements.json",
-        "08_theorems": "08_lean4_theorem_prover/json_output/08_theorems.json",
-        "09_summaries": "09_section_summarizer/json_output/09_summaries.json",
-        "09a_annotator": "09a_pdf_annotator/json_output/annotations.json",
-        "09b_audit": "09b_audit/json_output/09b_audit.json",
     }
 
     for key, rel_path in stage_files.items():
@@ -47,11 +43,43 @@ def load_results(pipeline_dir: Path) -> Dict[str, Any]:
                 text = path.read_text(encoding="utf-8")
                 results[key] = json.loads(text)
             else:
-                logger.warning(f"Results not found for {key}: {path}")
                 results[key] = None
         except Exception as e:
             logger.error(f"Failed to load {key}: {e}")
             results[key] = None
+
+    # Load from DuckDB (The new Source of Truth for Assembler/Extractor)
+    db_path = pipeline_dir / "pipeline.duckdb"
+    if db_path.exists():
+        try:
+            con = duckdb.connect(str(db_path), read_only=True)
+            
+            # Stats for Stage 07 (Assembler)
+            b_count = con.execute("SELECT count(*) FROM blocks").fetchone()[0]
+            t_count = con.execute("SELECT count(*) FROM tables").fetchone()[0]
+            f_count = con.execute("SELECT count(*) FROM figures").fetchone()[0]
+            s_count = con.execute("SELECT count(*) FROM sections").fetchone()[0]
+            
+            # Stats for Stage 08 (Extractor)
+            r_count = 0
+            # Check if requirements table exists (it should)
+            has_reqs = con.execute("SELECT count(*) FROM information_schema.tables WHERE table_name='requirements'").fetchone()[0]
+            if has_reqs:
+                r_count = con.execute("SELECT count(*) FROM requirements").fetchone()[0]
+                
+            results["db_stats"] = {
+                "blocks": b_count,
+                "tables": t_count, 
+                "figures": f_count,
+                "sections": s_count,
+                "requirements": r_count
+            }
+            con.close()
+        except Exception as e:
+            logger.error(f"Failed to load stats from DuckDB: {e}")
+            results["db_stats"] = None
+    else:
+        results["db_stats"] = None
 
     return results
 
@@ -91,14 +119,23 @@ def calculate_pipeline_statistics(results: Dict[str, Any]) -> Dict[str, Any]:
                 safe_depths.append(d)
         stats["metrics"]["max_depth"] = max(safe_depths) if safe_depths else 0
 
-    # 4. Content Metrics (05 Tables, 06 Figures)
-    if results.get("05_tables"):
-        tables = results["05_tables"].get("tables", [])
-        stats["metrics"]["total_tables"] = len(tables)
+    # 4. Content Metrics (DuckDB Primary)
+    db = results.get("db_stats")
+    if db:
+        stats["metrics"]["total_blocks"] = db.get("blocks", 0) # Update total blocks specifically
+        stats["metrics"]["total_tables"] = db.get("tables", 0)
+        stats["metrics"]["total_figures"] = db.get("figures", 0)
+        stats["metrics"]["total_sections"] = db.get("sections", 0)
+        stats["metrics"]["requirements_extracted"] = db.get("requirements", 0)
+    else:
+        # Fallback
+        if results.get("05_tables"):
+            tables = results["05_tables"].get("tables", [])
+            stats["metrics"]["total_tables"] = len(tables)
 
-    if results.get("06_figures"):
-        figures = results["06_figures"].get("figures", [])
-        stats["metrics"]["total_figures"] = len(figures)
+        if results.get("06_figures"):
+            figures = results["06_figures"].get("figures", [])
+            stats["metrics"]["total_figures"] = len(figures)
 
     return stats
 
@@ -149,20 +186,22 @@ def _safe_json(data: Any) -> str:
 
 def _optional_metrics(results: Dict[str, Any]) -> str:
     lines = []
-    # 05 tables
-    if results.get("05_tables"):
-        tabs = results["05_tables"].get("tables", [])
-        lines.append(f"- **Tables Extracted**: {len(tabs)}")
-        # breakdown by strategy if available
-    # 06 figures
-    if results.get("06_figures"):
-        figs = results["06_figures"].get("figures", [])
-        lines.append(f"- **Figures Extracted**: {len(figs)}")
-    # 08 theorems
-    if results.get("08_theorems"):
-        thms = results["08_theorems"].get("all_theorems", [])
-        proven = sum(1 for t in thms if t.get("status") == "proved")
-        lines.append(f"- **Formal Theorems**: {len(thms)} (Proven: {proven})")
+    db = results.get("db_stats")
+    if db:
+        lines.append(f"- **Tables**: {db.get('tables', 0)}")
+        lines.append(f"- **Figures**: {db.get('figures', 0)}")
+        lines.append(f"- **Sections**: {db.get('sections', 0)}")
+        lines.append(f"- **Requirements Extracted**: {db.get('requirements', 0)}")
+    else:
+        # 05 tables
+        if results.get("05_tables"):
+            tabs = results["05_tables"].get("tables", [])
+            lines.append(f"- **Tables Extracted**: {len(tabs)}")
+        # 06 figures
+        if results.get("06_figures"):
+            figs = results["06_figures"].get("figures", [])
+            lines.append(f"- **Figures Extracted**: {len(figs)}")
+            
     return "\n".join(lines)
 
 def generate_markdown_report(

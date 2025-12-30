@@ -49,7 +49,6 @@ try:
         _tx.QuantizedCacheConfig = QuantizedCacheConfig  # type: ignore[attr-defined]
 except Exception as exc:
     log_stage_error('02_marker_extractor', exc, {'context': '02'})
-    raise
     pass
 from extractor.core.schema import BlockTypes
 from extractor.pipeline.utils.diagnostics import (
@@ -114,7 +113,6 @@ def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool
         from extractor.core.models import create_model_dict
     except Exception as exc:
         log_stage_error('02_marker_extractor', exc, {'context': '02'})
-        raise
         # If imports fail, attempt simple fallback if allowed
         if os.getenv("STAGE02_ALLOW_SIMPLE", "1").lower() in ("1", "true", "yes", "y"):
             tmp = Path(os.getenv("STAGE02_TMP", "/tmp")) / f"marker_simple_{uuid.uuid4().hex}.json"
@@ -154,8 +152,7 @@ def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool
         document = converter.build_document(str(pdf_path))
     except Exception as exc:
         log_stage_error('02_marker_extractor', exc, {'context': '02'})
-        raise
-        logger.error(f"Marker document building failed: {e}")
+        logger.error(f"Marker document building failed: {exc}")
         # If predictor presence is weak and fallback is allowed, try simple extractor
         if os.getenv("STAGE02_ALLOW_SIMPLE", "1").lower() in ("1", "true", "yes", "y"):
             logger.warning("Falling back to simple extraction mode")
@@ -166,8 +163,7 @@ def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool
                 return blocks, predictor_presence
             except Exception as exc:
                 log_stage_error('02_marker_extractor', exc, {'context': '02'})
-                raise
-                logger.error(f"Simple extraction fallback also failed: {fallback_error}")
+                logger.error(f"Simple extraction fallback also failed: {exc}")
                 if os.getenv("PIPELINE_FAIL_FAST", "0").lower() in ("1", "true", "yes", "y"):
                     raise RuntimeError(f"Both marker and simple extraction failed: {e}") from e
                 # Return empty blocks to allow pipeline to continue
@@ -209,7 +205,6 @@ def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool
                             block_dict["text"] = block.raw_text(document)
                         except Exception as exc:
                             log_stage_error('02_marker_extractor', exc, {'context': '02'})
-                            raise
                             block_dict["text"] = getattr(block, "text", "")
                     else:
                         block_dict["text"] = getattr(block, "text", "")
@@ -227,7 +222,6 @@ def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool
                                 )
                             except Exception as exc:
                                 log_stage_error('02_marker_extractor', exc, {'context': '02'})
-                                raise
                                 font_size = None
                             first_span_font = {"name": font_name, "size": font_size}
                             # Also capture basic style flags for heuristics
@@ -241,7 +235,6 @@ def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool
                                         font_weight = float(font_weight)
                                     except Exception as exc:
                                         log_stage_error('02_marker_extractor', exc, {'context': '02'})
-                                        raise
                                         font_weight = None
                                 first_span_font["bold"] = is_bold
                                 first_span_font["italic"] = is_italic
@@ -249,7 +242,6 @@ def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool
                                     first_span_font["weight"] = font_weight
                             except Exception as exc:
                                 log_stage_error('02_marker_extractor', exc, {'context': '02'})
-                                raise
                                 pass
                             # Try to enrich with color via PyMuPDF if available
                             if (
@@ -342,16 +334,12 @@ def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool
                                                 first_span_font["color_bucket"] = bucket
                                             except Exception as exc:
                                                 log_stage_error('02_marker_extractor', exc, {'context': '02'})
-                                                raise
                                                 pass
                                 except Exception as exc:
                                     log_stage_error('02_marker_extractor', exc, {'context': '02'})
-                                    raise
                                     pass
-                            block_dict["first_span_font"] = first_span_font
                     except Exception as exc:
                         log_stage_error('02_marker_extractor', exc, {'context': '02'})
-                        raise
                         pass
 
                     # Add bbox if available - ensure JSON-safe list of floats
@@ -362,7 +350,6 @@ def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool
                                 block_dict["bbox"] = [float(v) for v in bx]
                         except Exception as exc:
                             log_stage_error('02_marker_extractor', exc, {'context': '02'})
-                            raise
                             pass
 
                     # Add Surya/marker confidence and derived quality score
@@ -372,7 +359,6 @@ def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool
                             block_dict["surya_confidence"] = float(surya_conf)
                     except Exception as exc:
                         log_stage_error('02_marker_extractor', exc, {'context': '02'})
-                        raise
                         pass
                     try:
                         # Derive quick quality score factoring suspicion
@@ -383,7 +369,6 @@ def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool
                             block_dict["quality_score"] = float(q)
                     except Exception as exc:
                         log_stage_error('02_marker_extractor', exc, {'context': '02'})
-                        raise
                         pass
                     try:
                         req_review = getattr(block, "requires_review", None)
@@ -391,7 +376,6 @@ def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool
                             block_dict["requires_review"] = True
                     except Exception as exc:
                         log_stage_error('02_marker_extractor', exc, {'context': '02'})
-                        raise
                         pass
 
                     # Include suspicion fields from base Block class
@@ -407,7 +391,6 @@ def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool
                             block_dict["suspicion_confidence"] = float(susp_conf)
                     except Exception as exc:
                         log_stage_error('02_marker_extractor', exc, {'context': '02'})
-                        raise
                         pass
 
                     # Derive 'suspicious_header' for Stage 03 compatibility; include only when True
@@ -437,7 +420,6 @@ def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool
                             block_dict["id"] = str(block.id)
                     except Exception as exc:
                         log_stage_error('02_marker_extractor', exc, {'context': '02'})
-                        raise
                         pass
                     blocks.append(block_dict)
 
@@ -447,7 +429,6 @@ def extract_blocks(pdf_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, bool
             fitz_doc.close()
     except Exception as exc:
         log_stage_error('02_marker_extractor', exc, {'context': '02'})
-        raise
         pass
 
     return blocks, predictor_presence

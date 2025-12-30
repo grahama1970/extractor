@@ -206,7 +206,6 @@ def _attach_llm_assist_headers(result: Dict[str, Any], stage_dir: Path) -> None:
         side_data = json.loads(sidecar.read_text()) if sidecar.exists() else {}
     except Exception as exc:
         log_stage_error('05_table_extractor', exc, {'context': '05'})
-        raise
         side_data = {}
 
     # SciLLM-only: resolve model from TABLE_LLM_ASSIST_MODEL or CHUTES_TEXT_MODEL.
@@ -227,8 +226,7 @@ def _attach_llm_assist_headers(result: Dict[str, Any], stage_dir: Path) -> None:
         tokens_budget = int(os.getenv("STAGE05_TOKENS_BUDGET", "120000"))
     except Exception as exc:
         log_stage_error('05_table_extractor', exc, {'context': '05'})
-        raise
-        tokens_budget = 0
+        tokens_budget = 120000
     cost_budget = float(os.getenv("STAGE05_COST_BUDGET_USD", "0") or 0)
     budget_enforce = os.getenv("STAGE05_BUDGET_ENFORCE", "true").lower() in ("1","true","yes","y")
     tokens_used = 0
@@ -272,8 +270,6 @@ def _attach_llm_assist_headers(result: Dict[str, Any], stage_dir: Path) -> None:
                             headers_in = [str(v).strip() for v in row0]
             except Exception as exc:
                 log_stage_error('05_table_extractor', exc, {'context': '05'})
-                raise
-                pass
             if not headers_in:
                 log_timing(
                     "05_table_extractor",
@@ -369,8 +365,6 @@ def _attach_llm_assist_headers(result: Dict[str, Any], stage_dir: Path) -> None:
                     tokens_used += int(usage.get("prompt_tokens") or 0) + int(usage.get("completion_tokens") or 0)
                 except Exception as exc:
                     log_stage_error('05_table_extractor', exc, {'context': '05'})
-                    raise
-                    pass
                 # Optional: cost tracking left as placeholder (provider-specific); keep zero unless integrated
                 write_jsonl(token_logs_dir, "token_usage.jsonl", {
                     "ts": datetime.utcnow().isoformat()+"Z",
@@ -478,8 +472,7 @@ def _attach_llm_assist_headers(result: Dict[str, Any], stage_dir: Path) -> None:
             sidecar.write_text(json.dumps(side_data, ensure_ascii=False, indent=2))
     except Exception as exc:
         log_stage_error('05_table_extractor', exc, {'context': '05'})
-        raise
-        logger.warning(f"Failed to persist LLM assist sidecar: {e}")
+        # Non-critical sidecar failure
         
 
 def debug_bundle(
@@ -521,8 +514,6 @@ def debug_bundle(
             )
     except Exception as exc:
         log_stage_error('05_table_extractor', exc, {'context': '05'})
-        raise
-        pass
 
     data = json.loads(bundle.read_text())
     sections_obj = data.get("sections")
@@ -553,7 +544,6 @@ def debug_bundle(
                     break
         except Exception as exc:
             log_stage_error('05_table_extractor', exc, {'context': '05'})
-            raise
             continue
     # Basic filter (reuse criteria)
     filtered_tables = []
@@ -574,7 +564,6 @@ def debug_bundle(
                 filtered_tables = [best]
             except Exception as exc:
                 log_stage_error('05_table_extractor', exc, {'context': '05'})
-                raise
                 filtered_tables = all_tables[:1]
         else:
             filtered_tables = all_tables
@@ -589,8 +578,8 @@ def debug_bundle(
             resources.setdefault("resource_samples", samples)
     except Exception as exc:
         log_stage_error('05_table_extractor', exc, {'context': '05'})
-        raise
-        pass
+        # fallback: no samples
+        
     timings = build_stage_timings(stage_start_ts, t0)
     try:
         for _k, _v in strategy_summary.items():
@@ -600,27 +589,6 @@ def debug_bundle(
         timings["strategy_durations"] = strategy_summary
     except Exception as exc:
         log_stage_error('05_table_extractor', exc, {'context': '05'})
-        raise
-        pass
-    try:
-        samples = stop_resource_sampler(sampler) if sampler else []
-        if samples:
-            resources.setdefault("resource_samples", samples)
-    except Exception as exc:
-        log_stage_error('05_table_extractor', exc, {'context': '05'})
-        raise
-        pass
-    timings = build_stage_timings(stage_start_ts, t0)
-    try:
-        for _k, _v in strategy_summary.items():
-            att = int(_v.get("attempts", 0) or 0)
-            if att > 0:
-                _v["avg_duration_ms"] = int(_v.get("total_duration_ms", 0) / att)
-        timings["strategy_durations"] = strategy_summary
-    except Exception as exc:
-        log_stage_error('05_table_extractor', exc, {'context': '05'})
-        raise
-        pass
     metrics_payload = {
         "quality_fallback": {
             **quality_summary,
@@ -649,16 +617,8 @@ def debug_bundle(
             _attach_llm_assist_headers(result, stage_output_dir)
     except Exception as exc:
         log_stage_error('05_table_extractor', exc, {'context': '05'})
-        raise
-        diagnostics.append(
-            make_event(
-                "05_table_extractor",
-                "warning",
-                "llm_assist_failed",
-                str(_assist_e),
-                {},
-            )
-        )
+        # Logged above; continue without LLM assist
+        pass
 
     output_path = json_output_dir / "05_tables.json"
     with open(output_path, "w") as f:
@@ -670,13 +630,20 @@ def debug_bundle(
 
 
 if __name__ == "__main__":
-    import sys
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("cmd", nargs="?", choices=["sanity", "run"], default="run")
+    parser.add_argument("--input", type=Path)
+    parser.add_argument("--output", type=Path)
+    args = parser.parse_args()
 
-    argv = sys.argv[1:]
-    if argv and argv[0] == "sanity":
-        sys.exit(sanity())
-    print(
-        "Usage: python -m extractor.pipeline.steps.05_table_extractor sanity",
-        file=sys.stderr,
-    )
-    sys.exit(2)
+    if args.cmd == "sanity":
+        from extractor.pipeline.utils.step_sanity import run_step_sanity
+        run_step_sanity("extractor.pipeline.steps.05_table_extractor", sanity)
+    else:
+        # Default run mode
+        if not args.input:
+            print("Error: --input required for run mode", file=sys.stderr)
+            sys.exit(1)
+        out = args.output or args.input.parent.parent
+        run(args.input, output_dir=out)

@@ -98,6 +98,10 @@ from extractor.pipeline.utils.diagnostics import (
 )
 from extractor.pipeline.utils.prompt_loader import load_prompt
 from extractor.pipeline.utils.step_sanity import run_step_sanity
+
+def _env_vlm_model() -> str:
+    return os.getenv("CHUTES_VLM_MODEL", "")
+
 from extractor.pipeline.utils.json_utils import STRICT_JSON_GUARD
 def sanity() -> int:
     return run_step_sanity(STEP_NAME)
@@ -237,7 +241,9 @@ def run(
                     b["suspicion_confidence"] = float(b.get("suspicion_confidence") or 0.9)
         data["suspicious_block_count"] = 0
         data["status"] = "Completed"
-        out = json_output_dir / "03_verified_blocks.json"
+        data["suspicious_block_count"] = 0
+        data["status"] = "Completed"
+        out = json_output_dir / "03_markup.json"
         out.write_text(json.dumps(data, indent=2))
         print(f"[offline] Heuristic demotion applied; wrote {out}")
         # Router lifecycle is handled by the pipeline driver via scillm.shutdown().
@@ -247,7 +253,7 @@ def run(
     try:
         from loguru import logger as _lg
 
-        _lg.remove()
+        # _lg.remove()  # DO NOT REMOVE global handlers
         _lg.add(
             str(stage_output_dir / "stage_03_suspicious_headers.log"),
             level="DEBUG" if debug else "INFO",

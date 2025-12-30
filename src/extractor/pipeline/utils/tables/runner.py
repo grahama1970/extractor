@@ -11,6 +11,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+import fitz  # PyMuPDF
 from loguru import logger
 from rich.console import Console
 from tqdm.asyncio import tqdm_asyncio
@@ -30,6 +31,7 @@ from extractor.pipeline.utils.debug_utils import ensure_logs_dir, log_timing, wr
 from extractor.pipeline.utils.step_sanity import run_step_sanity
 from extractor.pipeline.steps.scillm_preflight_validator import quick_scillm_check
 from extractor.pipeline.utils.tables import (
+    CAMELOT_STRATEGIES,
     generate_pandas_metrics,
     score_table,
     iou,
@@ -38,9 +40,39 @@ from extractor.pipeline.utils.tables import (
     extract_table_image,
     demote_table_headers_to_text,
     demote_sentence_like_single_row_tables,
+    bbox_tuple_for,
+    fragmentation_score,
+    should_retry_fragmentation,
+    has_fragmentation_improvement,
+    should_replace_table,
+    sanitize_cell,
+    coalesce_repeated_header_rows,
+    detect_table_caption,
+    stitch_headers,
 )
 
 console = Console()
+
+VERTICAL_PADDING_RATIO = float(os.getenv("TABLE_VERTICAL_PADDING_RATIO", 0.30))
+HORIZONTAL_PADDING_RATIO = float(os.getenv("TABLE_HORIZONTAL_PADDING_RATIO", 0.07))
+PYMUPDF_DPI = int(os.getenv("TABLE_EXTRACTION_DPI", 200))
+TABLE_STITCH_MIN_HORIZONTAL_IOU = float(os.getenv("TABLE_STITCH_MIN_HORIZONTAL_IOU", 0.2))
+TABLE_STITCH_ALLOW_NEXT_PAGE = os.getenv("TABLE_STITCH_ALLOW_NEXT_PAGE", "true").lower() in ("1", "true", "yes", "y")
+TABLE_FILTER_MIN_DENSITY = float(os.getenv("TABLE_FILTER_MIN_DENSITY", 0.15))
+TABLE_FILTER_MIN_ROWS = int(os.getenv("TABLE_FILTER_MIN_ROWS", 3))
+TABLE_HEADER_DUP_MIN_MATCH = float(os.getenv("TABLE_HEADER_DUP_MIN_MATCH", 0.5))
+TABLE_MULTI_PAGE_MERGE_ENABLED = os.getenv("TABLE_MULTI_PAGE_MERGE_ENABLED", "true").lower() in ("1", "true", "yes", "y")
+TABLE_MULTI_PAGE_MERGE_MIN_IOU = float(os.getenv("TABLE_MULTI_PAGE_MERGE_MIN_IOU", 0.3))
+TABLE_SELECT_ONE_PER_PAGE = os.getenv("TABLE_SELECT_ONE_PER_PAGE", "false").lower() in ("1", "true", "yes", "y")
+TABLE_HEADER_STITCHING_ENABLED = os.getenv("TABLE_HEADER_STITCHING_ENABLED", "false").lower() in ("1", "true", "yes", "y")
+TABLE_HEADER_DEDUP_ENABLED = os.getenv("TABLE_HEADER_DEDUP_ENABLED", "true").lower() in ("1", "true", "yes", "y")
+TABLE_HEADER_COALESCE_ENABLED = os.getenv("TABLE_HEADER_COALESCE_ENABLED", "true").lower() in ("1", "true", "yes", "y")
+TABLE_HEADER_REPEAT_MIN_MATCH = float(os.getenv("TABLE_HEADER_REPEAT_MIN_MATCH", 0.6))
+# Fragmentation
+FRAGMENTATION_RETRY_THRESHOLD = int(os.getenv("TABLE_FRAGMENTATION_RETRY_THRESHOLD", 0))
+FRAGMENTATION_IMPROVEMENT_MIN = int(os.getenv("TABLE_FRAGMENTATION_MIN_IMPROVEMENT", 1))
+
+
 
 def extract_tables_from_page(
     pdf_path: Path,
@@ -84,34 +116,7 @@ def extract_tables_from_page(
     strategy_durations = {}
     fallback_applied_for_page = False
 
-    def _bbox_tuple_for(table_obj: Any) -> Optional[tuple]:
-        bt = getattr(table_obj, "_bbox", None)
-        if not bt and hasattr(table_obj, "cells") and getattr(table_obj, "cells"):
-            try:
-                xs = [c.x1 for c in table_obj.cells] + [c.x2 for c in table_obj.cells]
-                ys = [c.y1 for c in table_obj.cells] + [c.y2 for c in table_obj.cells]
-                bt = (min(xs), min(ys), max(xs), max(ys))
-            except Exception as exc:
-                log_stage_error('05_table_extractor', exc, {'context': '05'})
-                raise
-                bt = None
-        return bt
 
-    def _iou(a: tuple, b: tuple) -> float:
-        try:
-            ax0, ay0, ax1, ay1 = a
-            bx0, by0, bx1, by1 = b
-            inter_w = max(0.0, min(ax1, bx1) - max(ax0, bx0))
-            inter_h = max(0.0, min(ay1, by1) - max(ay0, by0))
-            inter = inter_w * inter_h
-            area_a = max(0.0, (ax1 - ax0)) * max(0.0, (ay1 - ay0))
-            area_b = max(0.0, (bx1 - bx0)) * max(0.0, (by1 - by0))
-            union = area_a + area_b - inter
-            return float(inter / union) if union > 0 else 0.0
-        except Exception as exc:
-            log_stage_error('05_table_extractor', exc, {'context': '05'})
-            raise
-            return 0.0
 
     def _quantize_bbox(bt: tuple) -> tuple:
         return tuple(round(float(x), 2) for x in bt)
@@ -196,8 +201,8 @@ def extract_tables_from_page(
         found_count = 0
 
         for table in tables:
-            bbox_tuple = _bbox_tuple_for(table)
-            score = _score_table(table.df)
+            bbox_tuple = bbox_tuple_for(table)
+            score = score_table(table.df)
             if score == 0:
                 continue
             if not bbox_tuple:
@@ -207,12 +212,12 @@ def extract_tables_from_page(
 
             replaced_existing_high_iou = False  # ensure flag is defined per table
             for existing_key in list(page_tables.keys()):
-                iou = _iou(bbox_q, existing_key)
+                iou_val = iou(bbox_q, existing_key)
                 print(
-                    f"DEBUG: Comparing bbox_q={bbox_q} with existing_key={existing_key}. IOU={iou:.4f}",
+                    f"DEBUG: Comparing bbox_q={bbox_q} with existing_key={existing_key}. IOU={iou_val:.4f}",
                     file=sys.stderr,
                 )
-                if iou >= 0.70:
+                if iou_val >= 0.70:
                     replaced_existing_high_iou = True
                     action, quality_flag = _register_table(
                         strategy["name"], table, existing_key, score
@@ -266,49 +271,22 @@ def extract_tables_from_page(
 
             found_count = 0
 
-            def _bbox_tuple_for(table_obj: Any) -> Optional[tuple]:
-                bt = getattr(table_obj, "_bbox", None)
-                if not bt and hasattr(table_obj, "cells") and getattr(table_obj, "cells"):
-                    try:
-                        xs = [c.x1 for c in table_obj.cells] + [c.x2 for c in table_obj.cells]
-                        ys = [c.y1 for c in table_obj.cells] + [c.y2 for c in table_obj.cells]
-                        bt = (min(xs), min(ys), max(xs), max(ys))
-                    except Exception as exc:
-                        log_stage_error('05_table_extractor', exc, {'context': '05'})
-                        raise
-                        bt = None
-                return bt
 
-            def _iou(a: tuple, b: tuple) -> float:
-                try:
-                    ax0, ay0, ax1, ay1 = a
-                    bx0, by0, bx1, by1 = b
-                    inter_w = max(0.0, min(ax1, bx1) - max(ax0, bx0))
-                    inter_h = max(0.0, min(ay1, by1) - max(ay0, by0))
-                    inter = inter_w * inter_h
-                    area_a = max(0.0, (ax1 - ax0)) * max(0.0, (ay1 - ay0))
-                    area_b = max(0.0, (bx1 - bx0)) * max(0.0, (by1 - by0))
-                    union = area_a + area_b - inter
-                    return float(inter / union) if union > 0 else 0.0
-                except Exception as exc:
-                    log_stage_error('05_table_extractor', exc, {'context': '05'})
-                    raise
-                    return 0.0
 
             def _quantize_bbox(bt: tuple) -> tuple:
                 return tuple(round(float(x), 2) for x in bt)
 
             for table in tables:
-                bbox_tuple = _bbox_tuple_for(table)
-                score = _score_table(table.df)
+                bbox_tuple = bbox_tuple_for(table)
+                score = score_table(table.df)
                 if score == 0 or not bbox_tuple:
                     continue
                 bbox_q = _quantize_bbox(bbox_tuple)
                 
                 replaced_existing_high_iou = False # Initialize here
                 for existing_key in list(page_tables.keys()):
-                    iou = _iou(bbox_q, existing_key)
-                    if iou >= 0.70:
+                    iou_score = iou(bbox_q, existing_key)
+                    if iou_score >= 0.70:
                         replaced_existing_high_iou = True
                         action, quality_flag = _register_table(
                             strategy["name"], table, existing_key, score
@@ -354,6 +332,25 @@ def extract_tables_from_page(
                     log_stage_error('05_table_extractor', exc, {'context': '05'})
                     raise
                     bbox_tuple = None
+
+            # NORMALIZE COORDINATES (CONTRACT VIOLATION FIX)
+            # Camelot returns Bottom-Left origin (PDF). We MUST normalize to Top-Left (PyMuPDF).
+            # y_top_new = H - y_top_old (Camelot's y1)
+            # y_bot_new = H - y_bot_old (Camelot's y0)
+            final_bbox = []
+            if bbox_tuple:
+                try:
+                    page_obj = pdf_doc[page_num]
+                    H = page_obj.rect.height
+                    c_x0, c_y0, c_x1, c_y1 = bbox_tuple
+                    # Invert Y axis
+                    new_y0 = H - c_y1
+                    new_y1 = H - c_y0
+                    final_bbox = [c_x0, new_y0, c_x1, new_y1]
+                except Exception as e:
+                    logger.error(f"Failed to normalize table bbox: {e}")
+                    final_bbox = list(bbox_tuple)
+
             # Optionally extract an image per table
             img_path = (
                 extract_table_image(pdf_doc, page_num, bbox_tuple, output_dir, idx, diagnostics)
@@ -389,13 +386,13 @@ def extract_tables_from_page(
                 "page_number": page_num + 1,
                 "page_index": page_num,
                 "table_index": idx + 1,
-                "bbox": list(bbox_tuple) if bbox_tuple else [],
+                "bbox": final_bbox,
                 "extraction_method": "camelot",
                 "strategy": table_info["strategy"],
                 "fragmentation_score": fragmentation,
                 "pandas_df_raw": df.to_dict("records"),
                 "pandas_df": df_clean.to_dict("records"),
-                "pandas_metrics": _generate_pandas_metrics(df_clean),
+                "pandas_metrics": generate_pandas_metrics(df_clean),
                 "camelot_metrics": {
                     "accuracy": getattr(table, "accuracy", None),
                     "whitespace": getattr(table, "whitespace", None),
@@ -515,21 +512,7 @@ def extract_all_tables(
         pdf_doc.close()
 
     # Final regression guard: de-dupe high-IOU overlaps per page (safety net)
-    def _iou(a: List[float], b: List[float]) -> float:
-        try:
-            ax0, ay0, ax1, ay1 = a
-            bx0, by0, bx1, by1 = b
-            inter_w = max(0.0, min(ax1, bx1) - max(ax0, bx0))
-            inter_h = max(0.0, min(ay1, by1) - max(ay0, by0))
-            inter = inter_w * inter_h
-            area_a = max(0.0, (ax1 - ax0)) * max(0.0, (ay1 - ay0))
-            area_b = max(0.0, (bx1 - bx0)) * max(0.0, (by1 - by0))
-            union = area_a + area_b - inter
-            return float(inter / union) if union > 0 else 0.0
-        except Exception as exc:
-            log_stage_error('05_table_extractor', exc, {'context': '05'})
-            raise
-            return 0.0
+
 
     deduped: List[Dict[str, Any]] = []
     by_page: Dict[int, List[Dict[str, Any]]] = {}
@@ -548,7 +531,7 @@ def extract_all_tables(
                 kbbox = k.get("bbox") or []
                 if len(kbbox) != 4:
                     continue
-                if _iou(bbox, kbbox) >= 0.70:
+                if iou(bbox, kbbox) >= 0.70:
                     overlap = True
                     # Keep higher-score table
                     if float(t.get("score", 0) or 0.0) > float(k.get("score", 0) or 0.0):
@@ -955,127 +938,7 @@ def run(
             return float(inter / uni) if uni > 0 else 0.0
         except Exception as exc:
             log_stage_error('05_table_extractor', exc, {'context': '05'})
-            raise
-            return 0.0
-
-    def stitch_headers(tables: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        if not tables:
-            return tables
-        # Index candidates by page
-        by_page: Dict[int, List[Dict[str, Any]]] = {}
-        for t in tables:
-            by_page.setdefault(int(t.get("page_index", 0)), []).append(t)
-
-        used_headers: set[int] = set()
-        stitched: List[Dict[str, Any]] = []
-        for t in tables:
-            # Skip header-only tables that will be stitched
-            if is_header_row_table(t):
-                page = int(t.get("page_index", 0))
-                bbox = t.get("bbox", [])
-                cols = int((t.get("pandas_metrics", {}) or {}).get("shape", [0, 0])[1] or 0)
-                header_idx = id(t)
-                # Search body on same or next page
-                candidate_pages = [page]
-                if TABLE_STITCH_ALLOW_NEXT_PAGE:
-                    candidate_pages.append(page + 1)
-                candidates = []
-                for p in candidate_pages:
-                    candidates.extend(by_page.get(p, []) or [])
-                best = None
-                best_score = -1.0
-                for c in candidates:
-                    if c is t:
-                        continue
-                    m = c.get("pandas_metrics", {}) or {}
-                    shape = m.get("shape", [0, 0])
-                    rows_c = int(shape[0]) if isinstance(shape, (list, tuple)) and shape else 0
-                    cols_c = int(shape[1]) if isinstance(shape, (list, tuple)) and shape else 0
-                    if rows_c < 2 or cols_c != cols:
-                        continue
-                    iou = horizontal_iou(bbox, c.get("bbox", []))
-                    if iou < TABLE_STITCH_MIN_HORIZONTAL_IOU:
-                        continue
-                    score = float(c.get("score", 0.0)) + iou
-                    if score > best_score:
-                        best_score = score
-                        best = c
-                if best is not None:
-                    # Apply header row as column names for 'best'
-                    try:
-                        import pandas as pd
-
-                        header_row = (t.get("pandas_df") or [{}])[0]
-                        keys = sorted(
-                            header_row.keys(),
-                            key=lambda k: int(str(k)) if str(k).isdigit() else 9999,
-                        )
-                        new_cols = [
-                            str(header_row[k]).strip() or str(i) for i, k in enumerate(keys)
-                        ]
-                        body_df = pd.DataFrame(best.get("pandas_df") or [])
-                        if len(body_df.columns) == len(new_cols):
-                            body_df.columns = new_cols
-                            # Update best table payload and metrics
-                            best["pandas_df"] = body_df.to_dict("records")
-                            best["pandas_metrics"] = _generate_pandas_metrics(body_df)
-                            used_headers.add(header_idx)
-                    except Exception as exc:
-                        log_stage_error('05_table_extractor', exc, {'context': '05'})
-                        raise
-                        pass
-                # Don't append header-only table; it will be dropped by filters anyway
-                continue
-            stitched.append(t)
-        return stitched
-
     
-    # --- Caption detection: scan PDF text just above the table for captions like "Table 4-1. ..."
-    def detect_table_caption(pdf_path: Path, page_index: int, bbox: List[float]) -> str | None:
-        """Find a nearby caption/title for a table.
-
-        Strategy:
-        1) Scan a narrow band just above the table.
-        2) If not found, scan a wider band.
-        3) As a last resort, scan all text blocks above y0 on the page.
-        """
-        try:
-            doc = fitz.open(str(pdf_path))
-            page = doc[page_index]
-            rect = fitz.Rect(*bbox)
-            def _scan_band(top: float) -> str | None:
-                band = fitz.Rect(rect.x0, max(0, top), rect.x1, rect.y0)
-                blocks = page.get_text('blocks', clip=band)
-                blocks = sorted(blocks, key=lambda b: -b[1])  # y desc
-                for b in blocks:
-                    txt = (b[4] or '').strip()
-                    if not txt:
-                        continue
-                    if re.match(r"^\s*Table\s+\d+(?:[-–]\d+)?[.:]", txt, re.IGNORECASE):
-                        return txt
-                return None
-            # narrow (80pt) then wider (200pt)
-            cap = _scan_band(max(0, rect.y0 - 80))
-            if cap:
-                return cap
-            cap = _scan_band(max(0, rect.y0 - 200))
-            if cap:
-                return cap
-            # Fallback: any block above y0 on the page
-            blocks = page.get_text('blocks')
-            above = [b for b in blocks if b[3] <= rect.y0]  # block bottom is b[3]
-            above = sorted(above, key=lambda b: -b[1])
-            for b in above:
-                txt = (b[4] or '').strip()
-                if not txt:
-                    continue
-                if re.match(r"^\s*Table\s+\d+(?:[-–]\d+)?[.:]", txt, re.IGNORECASE):
-                    return txt
-            return None
-        except Exception as exc:
-            log_stage_error('05_table_extractor', exc, {'context': '05'})
-            raise
-            return None
 
     if TABLE_HEADER_STITCHING_ENABLED:
         all_tables = stitch_headers(all_tables)
@@ -1550,8 +1413,8 @@ def run(
     # Emit demoted text blocks so Stage 04 can merge heuristics
     if demoted_llm:
         result.setdefault("demoted_text_blocks", []).extend(demoted_llm)
-    _demote_table_headers_to_text(result)
-    _demote_sentence_like_single_row_tables(result)
+    demote_table_headers_to_text(result)
+    demote_sentence_like_single_row_tables(result)
 
     # Minimal schema validation
     try:

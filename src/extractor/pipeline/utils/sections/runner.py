@@ -230,7 +230,9 @@ def build_sections_from_blocks(
         # Heuristic uplift: if not labeled as header but it looks like one, promote it.
         if fallback_heuristics and block_type != "SectionHeader":
             txt = block.get("text") or block.get("content") or ""
-            if _looks_like_header_text(txt):
+            # Check both header text patterns AND section numbering
+            na = analyze_section_numbering(txt)
+            if _looks_like_header_text(txt) or na.get("has_numbering"):
                 block_type = "SectionHeader"
                 block["block_type"] = "SectionHeader"
         if block_type == "SectionHeader":

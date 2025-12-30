@@ -72,6 +72,8 @@ dependencies = [
  "fetcher @ file:///home/graham/workspace/experiments/fetcher",
  "pynvml>=13.0.1",
  "faiss-cpu>=1.12.0",
+ "duckdb>=1.1.0",
+ "nltk>=3.9.2",
 ]
 [[project.authors]]
 name = "Graham Anderson"
@@ -80,11 +82,11 @@ email = "graham@grahama.co"
 [dependency-groups]
 dev = [
  "jupyter>=1.0.0,<2",
- "datasets>=2.21.0,<3",
+ "datasets>=4.4.1,<5",
  "streamlit>=1.37.1,<2",
  "fastapi>=0.115.4,<0.116",
  "uvicorn>=0.33.0",
- "python-multipart>=0.0.16,<0.0.17",
+ "python-multipart>=0.0.16,<0.0.20",
  "pytest>=8.3.3,<9",
  "pytest-mock>=3.14.0,<4",
  "pytest-json-report>=1.5.0,<2",

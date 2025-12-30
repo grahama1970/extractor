@@ -93,16 +93,42 @@ def ingest_sections_and_blocks(con: duckdb.DuckDBPyConnection, pipeline_dir: Pat
 
     if section_rows:
         logger.info(f"Inserting {len(section_rows)} sections...")
-        con.executemany("INSERT OR REPLACE INTO sections VALUES (?, ?, ?, ?, ?)", section_rows)
+        con.executemany("INSERT OR REPLACE INTO sections (id, title, page_start, page_end, parent_id) VALUES (?, ?, ?, ?, ?)", section_rows)
         
     if block_rows:
         logger.info(f"Inserting {len(block_rows)} blocks...")
-        con.executemany("INSERT OR REPLACE INTO blocks VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", block_rows)
+        con.executemany("INSERT OR REPLACE INTO blocks (id, page, x0, y0, x1, y1, text, type, section_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", block_rows)
 
+
+def get_page_heights(pipeline_dir: Path) -> Dict[int, float]:
+    """
+    Extracts page heights from the source PDF (found in 01_annotation_processor).
+    Necessary to invert partial PDF coordinates (Camelot) to PyMuPDF (Top-Left).
+    """
+    try:
+        import fitz
+        pdf_dir = pipeline_dir / "01_annotation_processor"
+        try:
+            pdf_path = next(pdf_dir.glob("*_clean.pdf"))
+        except StopIteration:
+            logger.warning("No clean PDF found for height extraction. Assuming 842.0 (A4/Letter approx).")
+            return {}
+            
+        doc = fitz.open(pdf_path)
+        heights = {i: page.rect.height for i, page in enumerate(doc)}
+        doc.close()
+        return heights
+    except ImportError:
+        logger.error("PyMuPDF (fitz) not installed. Cannot determine page heights.")
+        return {}
+    except Exception as e:
+        logger.error(f"Failed to extract page heights: {e}")
+        return {}
 
 def ingest_tables(con: duckdb.DuckDBPyConnection, pipeline_dir: Path):
     """
     Ingests Tables from Stage 05.
+    Coordinates are now normalized to Top-Left in Stage 05 (per CONTRACT.md).
     """
     path = pipeline_dir / "05_table_extractor" / "json_output" / "05_tables.json"
     data = load_json(path)
@@ -113,44 +139,52 @@ def ingest_tables(con: duckdb.DuckDBPyConnection, pipeline_dir: Path):
     logger.info(f"Ingesting {len(tables_list)} tables from {path.name}")
     
     rows = []
+    
     for idx, table in enumerate(tables_list):
-        # Table might not have 'id' in consistent output, check.
-        # Stage 05 outputs 'normalized_id', so check that too.
         t_id = table.get("id") or table.get("table_id") or table.get("normalized_id")
         if not t_id:
-             # Fallback: generate ID from page and index
              page_num = table.get("page_number") or table.get("page_index", 0)
              table_idx = table.get("table_index", idx)
              t_id = f"table_p{page_num}_t{table_idx}"
-             logger.warning(f"No ID found for table, generated: {t_id}")
              
         # Stage 05 outputs page_number (1-indexed) and page_index (0-indexed)
-        # Blocks use 0-indexed pages, so use page_index
         page = table.get("page_index")
         if page is None:
-            # Fallback: convert 1-indexed page_number to 0-indexed
             pn = table.get("page_number")
             page = (pn - 1) if pn else 0
             
         bbox = table.get("bbox", [0,0,0,0])
         x0, y0, x1, y1 = bbox if bbox and len(bbox)==4 else [0,0,0,0]
+        
         csv_data = clean_text(table.get("csv", ""))
         html_data = clean_text(table.get("html", ""))
-        section_id = None # Initially NULL, resolved via Spatial View
-        sort_order = int(page * 10000 + y0)  # Reading order: page first, then y position
+        section_id = None
+        sort_order = int(page * 10000 + y0)
         
-        rows.append((t_id, page, x0, y0, x1, y1, csv_data, html_data, section_id, sort_order))
+        # Capture metadata for summarizer context
+        llm_title = table.get("llm_title") or table.get("title")
+        llm_desc = table.get("llm_description") or table.get("description")
+        
+        rows.append((t_id, page, x0, y0, x1, y1, csv_data, html_data, section_id, sort_order, llm_title, llm_desc))
         
     if rows:
-        # Sort by reading order (page, then y position) before inserting
-        rows.sort(key=lambda r: r[9])  # sort_order is at index 9
-        con.executemany("INSERT OR REPLACE INTO tables VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
+        rows.sort(key=lambda r: r[9])
+        con.executemany("INSERT OR REPLACE INTO tables (id, page, x0, y0, x1, y1, csv_data, html_data, section_id, sort_order, llm_title, llm_description) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
 
 def ingest_figures(con: duckdb.DuckDBPyConnection, pipeline_dir: Path):
     """
     Ingests Figures from Stage 06.
     """
-    path = pipeline_dir / "06_figure_extractor" / "json_output" / "06_figures.json"
+    p6b = pipeline_dir / "06b_figure_describer" / "json_output" / "06b_figures.json"
+    p06 = pipeline_dir / "06_figure_extractor" / "json_output" / "06_figures.json"
+    
+    if p6b.exists():
+        path = p6b
+        logger.info(f"Using Enriched Figures from Stage 06b: {path}")
+    else:
+        path = p06
+        logger.info(f"Using Raw Figures from Stage 06 (06b not found): {path}")
+        
     data = load_json(path)
     if not data:
         return
@@ -173,26 +207,28 @@ def ingest_figures(con: duckdb.DuckDBPyConnection, pipeline_dir: Path):
         section_id = None # Initially NULL
         sort_order = int(page * 10000 + y0)  # Reading order
         
-        rows.append((f_id, page, x0, y0, x1, y1, image_path, section_id, sort_order))
+        # Capture metadata for summarizer context
+        llm_title = fig.get("llm_title") or fig.get("title")
+        llm_desc = fig.get("llm_description") or fig.get("ai_description") or fig.get("description")
+        
+        rows.append((f_id, page, x0, y0, x1, y1, image_path, section_id, sort_order, llm_title, llm_desc))
         
     if rows:
         # Sort by reading order before inserting
         rows.sort(key=lambda r: r[8])  # sort_order is at index 8
-        con.executemany("INSERT OR REPLACE INTO figures VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
+        con.executemany("INSERT OR REPLACE INTO figures (id, page, x0, y0, x1, y1, image_path, section_id, sort_order, llm_title, llm_description) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
 
 def assign_assets_to_sections(con: duckdb.DuckDBPyConnection):
     """
-    Post-processing step to assign Tables and Figures to Sections using Spatial Logic.
+    Post-processing step to assign Tables and Figures to Sections using Spatial and Page Logic.
     
-    Logic:
-    Since `blocks` are already assigned to `section_id` (via Stage 04),
-    we find the `section_id` of the Block that is spatially closest to the asset.
+    Strategies:
+    1. Spatial Proximity: Closest text block on the same page (same section_id).
+    2. Page Range Fallback: Smallest section containing the asset's page.
     """
     logger.info("Assigning Tables and Figures to Sections...")
     
-    # Update Tables
-    # We find the closest block on the same page.
-    # Dist metric: vertical distance primarily.
+    # 1. Spatial Proximity (Update Tables)
     con.execute("""
         UPDATE tables
         SET section_id = (
@@ -205,7 +241,20 @@ def assign_assets_to_sections(con: duckdb.DuckDBPyConnection):
         WHERE section_id IS NULL;
     """)
     
-    # Update Figures
+    # 2. Page Range Fallback (Update Tables)
+    con.execute("""
+        UPDATE tables
+        SET section_id = (
+            SELECT s.id
+            FROM sections s
+            WHERE s.page_start <= tables.page AND s.page_end >= tables.page
+            ORDER BY (s.page_end - s.page_start) ASC, s.page_start DESC
+            LIMIT 1
+        )
+        WHERE section_id IS NULL;
+    """)
+
+    # 3. Spatial Proximity (Update Figures)
     con.execute("""
         UPDATE figures
         SET section_id = (
@@ -217,11 +266,26 @@ def assign_assets_to_sections(con: duckdb.DuckDBPyConnection):
         )
         WHERE section_id IS NULL;
     """)
+
+    # 4. Page Range Fallback (Update Figures)
+    con.execute("""
+        UPDATE figures
+        SET section_id = (
+            SELECT s.id
+            FROM sections s
+            WHERE s.page_start <= figures.page AND s.page_end >= figures.page
+            ORDER BY (s.page_end - s.page_start) ASC, s.page_start DESC
+            LIMIT 1
+        )
+        WHERE section_id IS NULL;
+    """)
     
     # Log counts
     t_assigned = con.sql("SELECT count(*) FROM tables WHERE section_id IS NOT NULL").fetchone()[0]
     f_assigned = con.sql("SELECT count(*) FROM figures WHERE section_id IS NOT NULL").fetchone()[0]
-    logger.info(f"Assigned {t_assigned} tables and {f_assigned} figures to sections.")
+    t_total = con.sql("SELECT count(*) FROM tables").fetchone()[0]
+    f_total = con.sql("SELECT count(*) FROM figures").fetchone()[0]
+    logger.info(f"Assigned {t_assigned}/{t_total} tables and {f_assigned}/{f_total} figures to sections.")
 
 
 def merge_page_break_tables(con: duckdb.DuckDBPyConnection, pipeline_dir: Path):
