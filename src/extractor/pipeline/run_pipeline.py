@@ -500,7 +500,7 @@ def _run_pdf_strategy(pdf: Path, out: Path, args: argparse.Namespace) -> int:
             from extractor.pipeline.steps import s10_arangodb_exporter as _s10
             s10 = _s10
         except ImportError:
-            logger.debug("s10_arangodb_exporter not available (arango export disabled)")
+            logger.info("Stage 10 [Arango Export] skipped: s10_arangodb_exporter module not found.")
 
     # Enforce implications: proving implies requirements miner
     if args.prove_requirements and not args.extract_requirements:

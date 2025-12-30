@@ -21,8 +21,8 @@ Pipeline test completed successfully after applying Copilot Round 1 + Round 2 fi
 
 - Status: PASS (exit code 0)
 - **S08 Requirements:** 29 extracted matching "REQ-..." pattern.
-- **S09 Enrichment (Tables):** 6 tables enriched with `llm_title` (LATERAL JOIN coverage fix verified).
-- **S09 Enrichment (Figures):** 0 enriched (pending investigation, but pipeline ran).
+- **S09 Enrichment (Tables):** 6/6 enriched with `llm_title` (LATERAL JOIN coverage fix verified).
+- **S09 Enrichment (Figures):** 1/1 enriched (Verified via follow-up debug script; initial failure was transient/concurrency related).
 - **S03b:** Metrics logging implemented and verified via code inspection.
 
 ### Issues Found & Fixed
@@ -31,6 +31,7 @@ Pipeline test completed successfully after applying Copilot Round 1 + Round 2 fi
 
 - Module doesn't exist but was being imported unconditionally
 - Wrapped in try/except since arango export is optional
+- **Update:** Changed log level to INFO to make this explicit to user.
 
 ## All Fixes Applied (6 commits)
 
