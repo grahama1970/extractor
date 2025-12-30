@@ -82,8 +82,60 @@ Per Round 2, these items were deferred:
 
 Are these still needed given the pipeline passes?
 
+### 3. Evidence for Verification (Requested by Copilot)
+
+#### S03b: Tuple Approach for Index Tracking
+
+**File:** `src/extractor/pipeline/steps/s03b_header_verifier.py`
+**Confirmation:**
+
+- Candidates list stores tuples: `candidates.append((i, b))`
+- Request includes index: `"index": block_idx`
+- Response handler uses index to map back:
+
+```python
+req_idx = r["index"]
+block_idx = requests[req_idx]["index"]
+block = blocks[block_idx]
+```
+
+#### S08: Deterministic IDs
+
+**File:** `src/extractor/pipeline/steps/s08_extract_requirements.py`
+**Confirmation:**
+
+- Uses SHA1 hash of section ID + requirement ID for stability:
+
+```python
+id_hash = hashlib.sha1(f"{s_id}:{req_id}".encode()).hexdigest()[:12]
+r_id = f"req_{id_hash}"
+```
+
+- Idempotency check skips sections with existing requirements.
+
+#### S10: Relative Image Paths
+
+**File:** `src/extractor/pipeline/steps/s10_markdown_exporter.py`
+**Confirmation:**
+
+- Computes path relative to `pipeline_dir`:
+
+```python
+img_abs = Path(content)
+img_rel = img_abs.relative_to(pipeline_dir) if img_abs.is_absolute() else Path(content)
+sec_lines.append(f"![{title}]({img_rel})")
+```
+
+#### Missing Modules / Optional Imports
+
+**File:** `src/extractor/pipeline/run_pipeline.py`
+**Start Line:** ~498
+**Status:** Wrapped `s10_arangodb_exporter` in `try/except ImportError`.
+
+---
+
 ## Deliverable
 
-1. Confirmation of fix correctness
-2. Recommendation for missing module handling
-3. Any new issues observed
+1. Confirmation of fix correctness (see Evidence above)
+2. Recommendation for missing module handling (Keep as optional imports)
+3. Full test results (see Summary above)
