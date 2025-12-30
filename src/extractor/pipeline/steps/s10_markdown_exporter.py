@@ -150,11 +150,19 @@ def run(input_path: Path, output_dir: Path = None):
             elif itype == 'figure':
                 title = meta.get('title') or "Figure"
                 desc = meta.get('desc') or ""
-                path_rel = Path(content).name if content else "unknown.png"
-                # We assume images are in ../06_figure_extractor/image_output relative to the final MD?
-                # Actually, absolute paths in DB. We'll just put the filename for simplicity or a relative link if known.
+                # Compute relative path for portability
+                if content:
+                    try:
+                        img_abs = Path(content)
+                        # Make path relative to pipeline_dir for portability
+                        img_rel = img_abs.relative_to(pipeline_dir) if img_abs.is_absolute() else Path(content)
+                    except ValueError:
+                        # If not under pipeline_dir, use filename only
+                        img_rel = Path(content).name
+                else:
+                    img_rel = "unknown.png"
                 sec_lines.append(f"### {title}")
-                sec_lines.append(f"![{title}]({content})")
+                sec_lines.append(f"![{title}]({img_rel})")
                 if desc:
                     sec_lines.append(f"> *{desc}*")
                 sec_lines.append("")

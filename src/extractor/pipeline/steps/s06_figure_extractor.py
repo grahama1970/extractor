@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """
-Stage 06 — Figure Extractor (lean)
+Stage 06 — Figure Extractor (Deterministic)
 
-Contract (simple, debugger‑friendly):
+Contract:
 - Inputs: Stage 02 blocks (Figure/Image), Stage 04 sections, cleaned PDF path, output dir.
 - For each figure block:
   - Crop region (small vertical padding), save image to image_output/.
-  - Collect text bands immediately above/below + nearby text.
-  - Single SciLLM multimodal call (image + texts) → JSON {description, title, source, number}.
-  - Normalize title/number; map to section if bbox intersects; append record.
+  - Collect text bands immediately above/below + nearby text for context.
+  - Map to section if bbox intersects.
 - Output: writes 06_figure_extractor/json_output/06_figures.json.
 
-SciLLM-only. No httpx/litellm fallbacks. Minimal logs.
+NOTE: This stage is purely deterministic (no LLM/VLM calls).
+VLM description/title inference is performed by Stage 06b (figure_describer).
 """
 
 from __future__ import annotations
