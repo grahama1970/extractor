@@ -87,6 +87,7 @@ def run(input_dir: Path, output_dir: Path) -> Path:
 
     # Prepare requests
     requests = []
+    skipped_count = 0
     system_prompt = (
         "You are an expert at analyzing PDF section headers. "
         "Reply with strict JSON matching this schema:\n"
@@ -104,6 +105,7 @@ def run(input_dir: Path, output_dir: Path) -> Path:
         img_path = Path(b["context_image_path"])
         if not img_path.exists():
             logger.warning(f"Missing context image: {img_path}")
+            skipped_count += 1
             continue
             
         try:
@@ -111,6 +113,7 @@ def run(input_dir: Path, output_dir: Path) -> Path:
             b64 = base64.b64encode(img_path.read_bytes()).decode("utf-8")
         except Exception as e:
             logger.error(f"Failed to read image {img_path}: {e}")
+            skipped_count += 1
             continue
 
         prompt_text = (
@@ -143,60 +146,73 @@ def run(input_dir: Path, output_dir: Path) -> Path:
         }
         requests.append(req)
 
+    logger.info(f"Generated {len(requests)} verification requests (Skipped: {skipped_count} missing images).")
+
     # Batch Process
     api_key = os.getenv("CHUTES_API_KEY")
     api_base = os.getenv("CHUTES_API_BASE", "https://llm.chutes.ai/v1")
     
-    async def _process():
-        async for r in parallel_acompletions_iter(
-            requests,
-            api_base=api_base,
-            api_key=api_key,
-            concurrency=CONCURRENCY,
-            timeout=VLM_TIMEOUT_SEC,
-            response_format={"type": "json_object"}
-        ):
-            idx = r.get("index")
-            if idx is None: continue
-            
-            block = blocks[idx]
-            
-            if not r.get("ok"):
-                logger.warning(f"Failed verify block {idx}: {r.get('error')}")
-                # Default to keeping it as header? Or demoting?
-                # Fail open (keep header) is safer for containment, fail closed (demote) safer for reading flow.
-                # Let's keep strict: if error, keep original state but note it.
-                continue
+    verified_count = 0
+    error_count = 0
 
-            content = r.get("parsed") or {}
-            is_header = content.get("is_header")
-            
-            # Apply decision
-            block["suspicious_header"] = False # Decision made
-            block["llm_verification"] = {
-                "verified_at": time.time(),
-                "model": MODEL,
-                "confidence": content.get("confidence", 1.0),
-                "reason": content.get("reason"),
-                "result": content
-            }
-            
-            if is_header is False:
-                # DEMOTE
-                block["block_type"] = "Text"
-                # If they gave an alternate type like "Caption", maybe use it?
-                # For now, just demote to Text to be safe.
-                if content.get("alternate_type") == "caption":
-                    block["block_type"] = "Caption"
+    if requests:
+        async def _run_batch():
+            nonlocal verified_count, error_count
+            async for r in parallel_acompletions_iter(
+                requests,
+                api_base=api_base,
+                api_key=api_key,
+                concurrency=CONCURRENCY,
+                timeout=VLM_TIMEOUT_SEC,
+                response_format={"type": "json_object"}
+            ):
+                idx = r.get("index")
+                if idx is None: continue # Should not happen if index is passed in request
+
+                block = blocks[idx]
                 
-                block["is_suspicious"] = True
-                block["suspicious_reasons"] = ["llm_verification_reject"]
-            else:
-                 # CONFIRM
-                 block["is_suspicious"] = False
-                 block["suspicious_confidence"] = 0.0
+                if not r.get("ok"):
+                    logger.warning(f"Failed verify block {idx}: {r.get('error')}")
+                    error_count += 1
+                    # Default to keeping it as header? Or demoting?
+                    # Fail open (keep header) is safer for containment, fail closed (demote) safer for reading flow.
+                    # Let's keep strict: if error, keep original state but note it.
+                    continue
 
-    asyncio.run(_process())
+                content = r.get("parsed") or {}
+                is_header = content.get("is_header")
+                
+                # Apply decision
+                block["suspicious_header"] = False # Decision made
+                block["llm_verification"] = {
+                    "verified_at": time.time(),
+                    "model": MODEL,
+                    "confidence": content.get("confidence", 1.0),
+                    "reason": content.get("reason"),
+                    "result": content
+                }
+                
+                if is_header is False:
+                    # DEMOTE
+                    block["block_type"] = "Text"
+                    # If they gave an alternate type like "Caption", maybe use it?
+                    # For now, just demote to Text to be safe.
+                    if content.get("alternate_type") == "caption":
+                        block["block_type"] = "Caption"
+                    
+                    block["is_suspicious"] = True
+                    block["suspicious_reasons"] = ["llm_verification_reject"]
+                else:
+                    # CONFIRM
+                    block["is_suspicious"] = False
+                    block["suspicious_confidence"] = 0.0
+                
+                verified_count += 1
+
+        try:
+            asyncio.run(_run_batch())
+        except Exception as e:
+            logger.error(f"Async loop failed: {e}")
 
     # Write Output
     out_dir = output_dir / STEP_NAME
@@ -206,7 +222,7 @@ def run(input_dir: Path, output_dir: Path) -> Path:
     out_file = out_dir / "json_output" / "03_verified_blocks.json"
     write_json_strict(out_file, data)
     
-    logger.info(f"Verified {len(requests)} headers.")
+    logger.info(f"Stage 03b Complete. Total candidates: {len(candidates)}, Verified: {verified_count}, Skipped: {skipped_count}, Errors: {error_count}")
     return out_file
 
 if __name__ == "__main__":

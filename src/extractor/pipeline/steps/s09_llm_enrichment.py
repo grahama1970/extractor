@@ -70,59 +70,59 @@ async def enrich_assets(
     
     api_key = os.getenv("CHUTES_API_KEY")
     
-    # 2. Fetch assets with context using Window Functions (Single Pass)
-    # We capture up to 2 context blocks (text or section) on each side.
+    # 2. Fetch assets with context using LATERAL JOINs (Robust Coverage)
+    # We drive from primary tables/figures to ensure 100% coverage even if assembler missed them in merged_content.
+    # We look up "text" or "section" context from merged_content nearby in sort_order.
+    
     asset_query = """
-    WITH context_candidates AS (
-        SELECT 
-            section_id, 
-            sort_order, 
-            type, 
-            content,
-            asset_id
-        FROM merged_content
-        WHERE type IN ('text', 'section', 'table', 'figure')
-    ),
-    timeline AS (
-        SELECT
-            *,
-            -- 1st context before
-            LAG(content, 1) OVER (PARTITION BY section_id ORDER BY sort_order) as ctx_b1,
-            LAG(type, 1) OVER (PARTITION BY section_id ORDER BY sort_order) as ctx_b1_type,
-            -- 2nd context before
-            LAG(content, 2) OVER (PARTITION BY section_id ORDER BY sort_order) as ctx_b2,
-            LAG(type, 2) OVER (PARTITION BY section_id ORDER BY sort_order) as ctx_b2_type,
-            -- 1st context after
-            LEAD(content, 1) OVER (PARTITION BY section_id ORDER BY sort_order) as ctx_a1,
-            LEAD(type, 1) OVER (PARTITION BY section_id ORDER BY sort_order) as ctx_a1_type,
-            -- 2nd context after
-            LEAD(content, 2) OVER (PARTITION BY section_id ORDER BY sort_order) as ctx_a2,
-            LEAD(type, 2) OVER (PARTITION BY section_id ORDER BY sort_order) as ctx_a2_type
-        FROM context_candidates
+    WITH combined_assets AS (
+        SELECT 'table' as asset_type, id as asset_id, section_id, sort_order, csv_data as content, NULL as page FROM tables
+        UNION ALL
+        SELECT 'figure' as asset_type, id as asset_id, section_id, sort_order, NULL as content, page FROM figures
     )
     SELECT 
-        tl.type as asset_type,
-        tl.asset_id,
+        a.asset_type,
+        a.asset_id,
         s.title as section_title,
-        CASE WHEN tl.type = 'table' THEN t.csv_data ELSE NULL END as csv_data,
-        CASE WHEN tl.type = 'figure' THEN f.page ELSE NULL END as page,
-        -- Context Before (Section Headers or Text)
-        COALESCE(
-            CASE WHEN tl.ctx_b2_type IN ('text', 'section') THEN tl.ctx_b2 || '\n\n' ELSE '' END ||
-            CASE WHEN tl.ctx_b1_type IN ('text', 'section') THEN tl.ctx_b1 ELSE '' END,
-            '(none)'
-        ) as context_before,
-        -- Context After
-        COALESCE(
-            CASE WHEN tl.ctx_a1_type IN ('text', 'section') THEN tl.ctx_a1 || '\n\n' ELSE '' END ||
-            CASE WHEN tl.ctx_a2_type IN ('text', 'section') THEN tl.ctx_a2 ELSE '' END,
-            '(none)'
-        ) as context_after
-    FROM timeline tl
-    LEFT JOIN sections s ON tl.section_id = s.id
-    LEFT JOIN tables t ON tl.asset_id = t.id AND tl.type = 'table'
-    LEFT JOIN figures f ON tl.asset_id = f.id AND tl.type = 'figure'
-    WHERE tl.type IN ('table', 'figure')
+        CASE WHEN a.asset_type = 'table' THEN a.content ELSE NULL END as csv_data,
+        CASE WHEN a.asset_type = 'figure' THEN a.page ELSE NULL END as page,
+        
+        -- Context Before (Nearest 2 text/section blocks)
+        COALESCE(cb.ctx, '(none)') as context_before,
+        
+        -- Context After (Nearest 2 text/section blocks)
+        COALESCE(ca.ctx, '(none)') as context_after
+        
+    FROM combined_assets a
+    LEFT JOIN sections s ON a.section_id = s.id
+    
+    -- LATERAL JOIN for Context Before
+    LEFT JOIN LATERAL (
+        SELECT string_agg(content, '\n\n') as ctx
+        FROM (
+            SELECT content 
+            FROM merged_content 
+            WHERE section_id = a.section_id 
+              AND sort_order < a.sort_order 
+              AND type IN ('text', 'section')
+            ORDER BY sort_order DESC 
+            LIMIT 2
+        ) sub_b
+    ) cb ON true
+    
+    -- LATERAL JOIN for Context After
+    LEFT JOIN LATERAL (
+        SELECT string_agg(content, '\n\n') as ctx
+        FROM (
+            SELECT content 
+            FROM merged_content 
+            WHERE section_id = a.section_id 
+              AND sort_order > a.sort_order 
+              AND type IN ('text', 'section')
+            ORDER BY sort_order ASC 
+            LIMIT 2
+        ) sub_a
+    ) ca ON true
     """
     
     assets = con.execute(asset_query).fetchall()
@@ -135,8 +135,7 @@ async def enrich_assets(
     
     if joined_tables != db_tables or joined_figures != db_figures:
         logger.warning(
-            f"Asset count mismatch! DB: {db_tables}T/{db_figures}F, Joined: {joined_tables}T/{joined_figures}F. "
-            "Some assets may be missing from merged_content."
+            f"Asset count mismatch even with primary query! DB: {db_tables}T/{db_figures}F, Joined: {joined_tables}T/{joined_figures}F."
         )
 
     if not assets:

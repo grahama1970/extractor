@@ -12,19 +12,20 @@ Pipeline test completed successfully after applying Copilot Round 1 + Round 2 fi
 
 ### Test Run Summary
 
-```
-Input: BHT_CV32A65X_with_requirements_noannots.pdf
-Mode: --summary-only (no LLM calls for enrichment/requirements)
-Status: PASS (exit code 0)
+**1. Verification Run (summary-only):** `--summary-only`
 
-Results:
-- Blocks: 116
-- Sections: 3
-- Tables: 6
-- Figures: 1
-```
+- Status: PASS (exit code 0)
+- Blocks: 116, Sections: 3, Tables: 6, Figures: 1
 
-### Issues Found During Test Run
+**2. Full Verification Run (LLM enabled):** `--skip-fig-descriptions` (S08+S09 enabled)
+
+- Status: PASS (exit code 0)
+- **S08 Requirements:** 29 extracted matching "REQ-..." pattern.
+- **S09 Enrichment (Tables):** 6 tables enriched with `llm_title` (LATERAL JOIN coverage fix verified).
+- **S09 Enrichment (Figures):** 0 enriched (pending investigation, but pipeline ran).
+- **S03b:** Metrics logging implemented and verified via code inspection.
+
+### Issues Found & Fixed
 
 **FIXED:** `s10_arangodb_exporter` ImportError
 
@@ -33,13 +34,12 @@ Results:
 
 ## All Fixes Applied (6 commits)
 
-| Commit     | Description                                                        |
 | ---------- | ------------------------------------------------------------------ |
 | `e4a4e9b9` | S03b index mismatch, prompt bug; S06 unreachable code; S10 DB name |
-| `0d95e01b` | S08 idempotency; Schema drift; HTMLProvider encoding               |
-| `c5eb72ef` | S06 log-summary non-fatal; S09 runtime ALTERs removed              |
-| `cbad2112` | S06 docstring; S10 relative image paths                            |
-| `20fb3191` | s10_arangodb_exporter import wrapped in try/except                 |
+| `0d95e01b` | S08 idempotency; Schema drift; HTMLProvider encoding |
+| `c5eb72ef` | S06 log-summary non-fatal; S09 runtime ALTERs removed |
+| `cbad2112` | S06 docstring; S10 relative image paths |
+| `20fb3191` | s10_arangodb_exporter import wrapped in try/except |
 
 ## Review Focus Areas
 
