@@ -2,7 +2,7 @@ Pipeline Steps Contract (Deterministic + Live)
 
 Scope
 
-- Documents minimal, testable invariants for core steps and the 09a PDF Annotator.
+- Documents minimal, testable invariants for the stages executed by `src/extractor/pipeline/run_pipeline.py`.
 - Complements data/expected/pipeline/\* golden artifacts and pytest gates.
 
 General Rules
@@ -15,7 +15,25 @@ General Rules
 - `stage.log` present per step when the driver provides a log sink.
 - Each step exposes `sanity()` + `python -m <step> sanity` which emits a Sparta-style JSON summary via `run_step_sanity`.
 
-Required Artifacts (deterministic mode)
+Active Stages (run_pipeline.py order)
+
+- 01_annotation_processor
+- 02_marker_extractor
+- 03_suspicious_headers
+- 04_section_builder
+- 04a_layout_audit
+- 05_table_extractor
+- 05b_table_describer (LLM; optional / skipped in summary-only)
+- 05c_table_merger
+- 06_figure_extractor
+- 06b_figure_describer (LLM; optional / skipped in summary-only)
+- 07_assemble_corpus (DuckDB ingest)
+- 08_extract_requirements (LLM; optional / skipped in summary-only)
+- 09_section_summarizer (LLM; optional / skipped in summary-only)
+- 10_markdown_exporter (always)
+- 14_report_generator (always, best‑effort)
+
+Required Artifacts (deterministic base)
 
 - 01_annotation_processor/json_output/01_annotations.json
   - Keys: { timestamp, source_pdf, clean_pdf_path, pages, annotations }
@@ -25,76 +43,75 @@ Required Artifacts (deterministic mode)
   - Keys: { blocks } with `verdict` on suspicious headers
 - 04_section_builder/json_output/04_sections.json
   - Keys: { sections } with section bbox and page indices
+- 04a_layout_audit/json_output/04a_layout_audit.json
+  - Keys: { ok, errors, checks } with `ok == true` and `errors == 0`
 - 05_table_extractor/json_output/05_tables.json
   - Keys: { tables } with per-table bbox, page, metrics (pandas_metrics, camelot_metrics)
-  - Optional metadata (live):
-    - header_inferred: [string,...] (do not mutate Camelot DF; metadata-only)
-    - header_provenance: "llm_assist" | "spatial"
-    - demoted_text_blocks: [{ page_idx:int, bbox:[...], text:str, reason:str }] for table candidates rejected (prose-like or LLM-confirmed not table)
+- 05c_table_merger/json_output/05c_tables.json
+  - Keys: { tables } with merged/normalized tables (must fall back to 05 if 05b absent)
 - 06_figure_extractor/json_output/06_figures.json
   - Keys: { figures } (page or page_idx, bbox, image_path). In deterministic mode, ai_description may be stubbed.
-- 07_reflow_section/json_output/07_reflowed.json (summary-only allowed for deterministic CI)
-  - Keys: { reflowed_sections|sections } minimal presence
-- 09_section_summarizer/json_output/09_summaries.json
-  - Keys: { summaries }
+- 07_assemble_corpus
+  - Output: pipeline.duckdb
+  - Required tables: sections, blocks, tables, figures, merged_content
+  - merged_content row count must be > 0
+- 10_markdown_exporter/markdown_output/full_document.md
+  - Non-empty; sections/ directory should exist (section markdown files)
+- 14_report_generator/json_output/final_report.json
+  - Required keys: { status, issues, checks } (from report generator)
+- 14_report_generator/text_output/report.md
+  - Non-empty
 
-09a PDF Annotator Contract
-Inputs
+Optional / LLM-augmented Artifacts (full mode)
 
-- sections_json (04), tables_json (05), figures_json (06), optional reflowed_json (07), blocks02_json (02)
+- 05b_table_describer/json_output/05b_tables.json
+  - Keys: { tables } with llm_description/llm_title metadata
+- 06b_figure_describer/json_output/06b_figures.json
+  - Keys: { figures } with llm_description/llm_title metadata
+- 08_extract_requirements
+  - pipeline.duckdb table `requirements` exists (min row count configurable by verifier)
+- 09_section_summarizer
+  - `sections.llm_summary` populated for at least one section
+- 08_lean4_theorem_prover
+  - Verification is currently skipped (upstream certainly/lean4 updates in progress).
 
-Outputs
+Verifier (fail-fast + retry)
 
-- annotated.pdf
-- json_output/annotations.json
-  - Keys:
-    - summary.total_overlays: int
-    - summary.by*kind: dict[str,int] (section, table, figure, header_candidate, table_rejected, reflow*\* …)
-    - summary.pages_touched: [int]
-    - overlays: [ { overlay_id:int, page:int, bbox:[x0,y0,x1,y1], kind:str, … } ]
-- json_output/legend.json (color legend)
-- logs/timings.jsonl (+ timings_summary.json) best-effort
+- Use `scripts/verify_pipeline_contract.py` to run each step, verify artifacts, and retry per-step up to `--max-tries`.
+- Deterministic mode skips LLM steps; full mode runs all steps:
+  - `python scripts/verify_pipeline_contract.py --pdf <PDF> --mode deterministic`
+  - `python scripts/verify_pipeline_contract.py --pdf <PDF> --mode full --min-requirements 1`
+- Fixture-specific expectations are stored under `contracts/fixtures/` and can be enforced with:
+  - `python scripts/verify_pipeline_contract.py --pdf <PDF> --fixture contracts/fixtures/<fixture>.json --mode deterministic`
+- Optional LLM reasonableness judging (Codex exec) can be enabled with:
+  - `python scripts/verify_pipeline_contract.py --pdf <PDF> --fixture contracts/fixtures/<fixture>.json --mode full --llm-judge`
+- Lean4 verification can be skipped explicitly (default behavior until upstream fixes land):
+  - `python scripts/verify_pipeline_contract.py --pdf <PDF> --mode full --skip-lean4`
 
-Invariants (deterministic CI)
+Legacy / Out-of-Scope (for this contract)
 
-- bbox containment: every overlay bbox lies within its page rect.
-- coverage parity (tolerant):
-  - by_kind.section ∈ [1, len(sections)] when sections exist
-  - by_kind.table ∈ [1, len(tables)] when tables exist
-  - by_kind.figure ∈ [0, len(figures)] when figures exist
-- total_overlays = sum(by_kind.values).
-- pages_touched is non-empty and numbers are 1-based page indices.
-- table_rejected count may be 0 (offline demoters can be absent depending on input).
-
-Invariants (live CI additions)
-
-- 07_reflowed.json has ≥ 1 reflowed section.
-- timings_summary.json exists and total_ms > 0.
-- Optional: stage latency caps and p95 acceptance can be enforced by policy.
-- 07 table blocks include header_norm and logical_table_id (used for merged overlays in 09a when available).
-- 09a may include table_rejected overlays sourced from 05.demoted_text_blocks.
+- 09a PDF Annotator is not executed by `run_pipeline.py` and is excluded from this contract.
 
 Golden Artifacts
 
 - Expected files live under data/expected/pipeline/<slug>. Use the tools:
-  - Bless: `uv run scripts/tools/expected_bless.py --pdf <PDF> --out <OUT> --expected-root data/expected/pipeline --steps 01,02,04,05,06,07,09`
+  - Bless: `uv run scripts/tools/expected_bless.py --pdf <PDF> --out <OUT> --expected-root data/expected/pipeline --steps 01,02,03,04,04a,05,05c,06,07,10,14`
   - Verify: `uv run scripts/tools/expected_verify.py --pdf <PDF> --out <OUT> --expected-root data/expected/pipeline --steps …`
   - Visuals: `uv run scripts/tools/expected_render.py …` + `expected_imgdiff.py` for pixel diffs.
 
 CI Mapping
 
 - Deterministic CI (offline):
-  - Pytest: tests/test_pipeline_annotator_offline.py validates 01→06(+06b)→09a and 09a contract above.
+  - Preferred: `python scripts/verify_pipeline_contract.py --pdf <PDF> --mode deterministic`
   - No network or SciLLM calls.
 - Live CI (self-hosted):
-  - make ci-live → runs LLM-inclusive pipeline + scripts/ci/verify_live_pipeline.py checks.
+  - Run LLM-inclusive pipeline + `python scripts/verify_pipeline_contract.py --pdf <PDF> --mode full --min-requirements 1`.
   - Requires CHUTES\_\* env and a resolvable scillm dependency on the runner.
 
 Notes
 
-- If any upstream object lacks bbox/page, 09a may skip that overlay; CI tolerance allows ≤ expected counts while we improve resilience/logging.
-- Prefer adding WARN lines in 09a when an overlay is skipped for missing/invalid bbox/page to aid debugging and improve future parity.
-- Stage 14 report generator is optional; the primary human-facing journal is `walkthrough.md` produced alongside 09a.
+- Stage 14 report generator is best-effort; if it fails, downstream consumers should tolerate a stub report.
+- Prefer logging WARN lines when blocks are skipped for missing/invalid bbox/page to aid debugging and improve future parity.
 
 Reference Fixture: BHT_CV32A65X_with_requirements_noannots.pdf
 
@@ -107,35 +124,27 @@ Deterministic expectations (no LLM)
 
 - Stage 05 (raw fragments): exactly 9 tables in 05_tables.json.
 - Stage 06 (figures): exactly 1 figure in 06_figures.json.
-- Stage 09a (annotator):
-  - bboxes contained within page bounds
-  - total_overlays = sum(by_kind)
-  - by_kind.section ∈ [1, len(sections04)]
-  - by_kind.table ∈ [1, len(tables05)]
-  - by_kind.figure ∈ [0, len(figures06)]
+- Stage 07 (DuckDB): merged_content row count > 0.
+- Stage 10: full_document.md exists and is non-empty.
 
 Live expectations (LLM-enabled)
 
-- Stage 07 reflowed_json:
-  - Sections: exactly 3 reflowed sections
-  - Tables (merged): exactly 5 logical tables total, with ≥ 1 merged across pages {0,1} and 4 unmerged (single-page) tables
-- Stage 07r requirements: ≥ 12 total, with ≥ 2 conditional requirements
-- Stage 06 figures: exactly 1 figure, and 09a by_kind.figure ≥ 1
-- 09a: merged_table_groups ≥ 1 (when logical_table_id propagation is present); table_rejected ≥ 0 (tolerant).
+- Stage 05c (merged tables): exactly 5 logical tables for the fixture (1 merged across pages, 4 single-page).
+- Stage 08 requirements: ≥ 12 total, with ≥ 2 conditional requirements for the fixture.
+- Stage 09 summaries: at least 1 section has llm_summary.
 
 Verification mapping
 
 - 05_tables.json → counts raw tables (pre-merge)
   - Also the presence of demoted_text_blocks for rejected candidates (live).
-- 07_reflowed.json → counts merged logical tables and sections
-- 07_requirements.json → counts total and conditional requirements
-- 06_figures.json and 09a annotations.json → figure presence (source + overlay)
+- pipeline.duckdb → merged_content count + requirements count
+- 10_markdown_exporter/markdown_output/full_document.md → final Markdown output presence
 
 Provider/Extractor Principles
 
 - Camelot is the source of truth for table extraction; Pandas is used for metrics only.
 - Header normalization/splitting is metadata-only (header_inferred/provenance); Camelot DataFrames are not rewritten.
-- Low-confidence or empty Camelot results may be LLM-confirmed (live) before acceptance; rejected candidates are recorded under demoted_text_blocks and visualized by 09a as table_rejected overlays.
+- Low-confidence or empty Camelot results may be LLM-confirmed (live) before acceptance; rejected candidates are recorded under demoted_text_blocks.
 - SciLLM updates: `pyproject.toml` pins `scillm @ file:///home/graham/workspace/experiments/litellm`. To pick up upstream scillm changes, pull that repo and reinstall editable (`uv pip install -e ../litellm`). PyPI installs won’t apply until the dependency is moved off the file:// pin.
   - Convenience: use `scripts/update_scillm.sh` (pulls ../litellm then reinstalls editable).
   - Known benign warning: SciLLM shutdown warning is suppressed locally (pending upstream fix in paved path). Keep suppression until upstream resolves.
@@ -170,5 +179,5 @@ Interactive Workflow (Human-in-the-Loop)
 - UI/Pipeline Bridge:
   - The UI (Tabbed Prototype) writes the sidecar file.
   - The UI triggers the pipeline (via API).
-  - The Pipeline reads the sidecar, processes the document, and generates standard artifacts.
-  - The UI reloads the results (e.g., `09a` output) for final verification.
+- The Pipeline reads the sidecar, processes the document, and generates standard artifacts.
+- The UI reloads the results (e.g., report/markdown output) for final verification.

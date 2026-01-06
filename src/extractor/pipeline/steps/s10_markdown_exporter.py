@@ -61,16 +61,23 @@ def run(input_path: Path, output_dir: Path = None):
                     Stage 09 (Summarizer) modifies the DB in place.
                     Usage conventions imply pointing to the pipeline root or DuckDB file.
     """
-    pipeline_dir = input_path.parent.parent if input_path.is_file() else input_path
-    
-    # Locate DuckDB - prefer canonical name used by enrichment stages
-    db_path = pipeline_dir / "pipeline.duckdb"
-    if not db_path.exists():
-        # Legacy fallback
-        db_path = pipeline_dir / "corpus.duckdb"
-    if not db_path.exists():
-        # Fallback for Stage 07 output pattern
-        db_path = pipeline_dir / "07_assemble_corpus" / "corpus.duckdb"
+    db_path = None
+    pipeline_dir = input_path
+
+    if input_path.suffix == ".duckdb" and input_path.exists():
+        db_path = input_path
+        pipeline_dir = input_path.parent
+    else:
+        pipeline_dir = input_path.parent.parent if input_path.is_file() else input_path
+        
+        # Locate DuckDB - prefer canonical name used by enrichment stages
+        db_path = pipeline_dir / "pipeline.duckdb"
+        if not db_path.exists():
+            # Legacy fallback
+            db_path = pipeline_dir / "corpus.duckdb"
+        if not db_path.exists():
+            # Fallback for Stage 07 output pattern
+            db_path = pipeline_dir / "07_assemble_corpus" / "corpus.duckdb"
     
     if not db_path.exists():
         logger.error(f"DuckDB not found. Tried: pipeline.duckdb, corpus.duckdb, 07_assemble_corpus/corpus.duckdb in {pipeline_dir}")
@@ -90,46 +97,128 @@ def run(input_path: Path, output_dir: Path = None):
     # Actually, we want hierarchical headers. "Sections" table has parent_id.
     # For linear export, we can sort by `page_start`, `page_end`.
     
+    # 1. Pre-fetch Lean4 Proofs (if available)
+    proofs_map = {}
+    try:
+        # Check if table exists
+        has_proofs = con.execute("SELECT 1 FROM information_schema.tables WHERE table_name = 'lean4_proofs'").fetchone()
+        if has_proofs:
+            # Map by ID (hash)
+            p_rows = con.execute("""
+                SELECT id, theorem_strategy, lean4_code, compilation_status, proof_result 
+                FROM lean4_proofs
+            """).fetchall()
+            for r in p_rows:
+                proofs_map[r[0]] = {
+                    "strategy": r[1],
+                    "code": r[2],
+                    "status": r[3],
+                    "result": r[4]
+                }
+            logger.info(f"Loaded {len(proofs_map)} proofs for export.")
+    except Exception as e:
+        logger.warning(f"Could not load proofs: {e}")
+
+    # 2. Fetch Sections (with S09 Summaries)
     sections = con.execute("""
-        SELECT id, title, page_start 
+        SELECT id, title, page_start, llm_summary 
         FROM sections 
         ORDER BY page_start, id
     """).fetchall()
 
     full_doc_lines = ["# Full Document Export", ""]
     
-    for sec_id, sec_title, p_start in sections:
+    for sec_id, sec_title, p_start, sec_summary in sections:
         sec_header = f"## {sec_title} (ID: {sec_id})"
         sec_lines = [sec_header, ""]
+        
+        # Display S09 Summary if available
+        if sec_summary:
+            sec_lines.append(f"> **Summary:** {sec_summary}")
+            sec_lines.append("")
         
         # Query Content for this Section
         # We UNION blocks, tables, and figures, sorting by `sort_order`.
         # Note: sort_order was calc'd as page * 10000 + y0.
         
+        # Query Content for this Section from MERGED_CONTENT
+        # This includes valid text, tables, figures, AND REQUIREMENTS (Stage 08)
+        # properly interleaved by sort_order.
+        
         query = """
-            SELECT type, text_content as content, sort_order, meta
-            FROM (
-                SELECT 'text' as type, text as text_content, (page * 10000 + y0) as sort_order, NULL as meta
-                FROM blocks WHERE section_id = ?
-                
-                UNION ALL
-                
-                SELECT 'table' as type, csv_data as text_content, sort_order, 
-                       json_object('title', llm_title, 'desc', llm_description) as meta
-                FROM tables WHERE section_id = ?
-                
-                UNION ALL
-                
-                SELECT 'figure' as type, image_path as text_content, sort_order, 
-                       json_object('title', llm_title, 'desc', llm_description) as meta
-                FROM figures WHERE section_id = ?
-            )
-            ORDER BY sort_order
+            SELECT 
+                mc.type,
+                CASE 
+                    WHEN mc.type = 'requirement' THEN (SELECT text FROM requirements WHERE id = mc.asset_id)
+                    WHEN mc.type = 'table' THEN (SELECT csv_data FROM tables WHERE id = mc.asset_id)
+                    WHEN mc.type = 'figure' THEN (SELECT image_path FROM figures WHERE id = mc.asset_id)
+                    ELSE mc.content 
+                END as content,
+                mc.sort_order,
+                CASE 
+                    WHEN mc.type = 'requirement' THEN (SELECT json_object('req_id', req_id, 'citation', citation_snippet, 'type', type, 'is_conditional', is_conditional) FROM requirements WHERE id = mc.asset_id)
+                    WHEN mc.type = 'table' THEN (SELECT json_object('title', llm_title, 'desc', llm_description) FROM tables WHERE id = mc.asset_id)
+                    WHEN mc.type = 'figure' THEN (SELECT json_object('title', llm_title, 'desc', llm_description) FROM figures WHERE id = mc.asset_id)
+                    ELSE NULL
+                END as meta_json,
+                mc.asset_id
+            FROM merged_content mc
+            WHERE mc.section_id = ?
+            ORDER BY mc.sort_order
         """
         
-        items = con.execute(query, [sec_id, sec_id, sec_id]).fetchall()
         
-        for itype, content, sort_order, meta_json in items:
+        items = con.execute(query, [sec_id]).fetchall()
+
+        # [NEW] Pre-scan for Requirements to build Summary Table
+        req_items = [it for it in items if it[0] == 'requirement']
+        if req_items:
+            sec_lines.append("")
+            sec_lines.append("### Requirement Proof Summary")
+            sec_lines.append("")
+            sec_lines.append("| ID | Type | Status | Theorem |")
+            sec_lines.append("| :--- | :--- | :--- | :--- |")
+            
+            for _, content, _, meta_json, asset_id in req_items:
+                meta = json.loads(meta_json) if meta_json else {}
+                req_id = meta.get('req_id') or "REQ-UNKNOWN"
+                req_type = (meta.get('type') or "FUNCTION").upper()
+                if meta.get('is_conditional'): req_type = "CONDITIONAL"
+                
+                # Proof Lookup
+                status_icon = "❓"
+                status_text = "Pending"
+                theorem_name = "`coverage_missing`"
+                
+                if asset_id in proofs_map:
+                    p = proofs_map[asset_id]
+                    if p['status'] == 'verified':
+                        status_icon = "✅"
+                        status_text = "Verified"
+                    elif p['status'] == 'failed':
+                        status_icon = "❌"
+                        status_text = "Failed"
+                    else:
+                        status_icon = "⚠️"
+                        status_text = p['status']
+                    
+                    # Extract theorem name from code if possible
+                    code = p['code']
+                    if "theorem" in code:
+                        parts = code.split("theorem", 1)[1].strip().split()
+                        if parts:
+                            theorem_name = f"`{parts[0]}`"
+                    else:
+                        # Fallback to snippet
+                        snippet = code.replace("\n", " ")[:20]
+                        theorem_name = f"`{snippet}...`"
+
+                sec_lines.append(f"| **{req_id}** | {req_type} | {status_icon} {status_text} | {theorem_name} |")
+            
+            sec_lines.append("")
+            sec_lines.append("")
+        
+        for itype, content, sort_order, meta_json, asset_id in items:
             meta = json.loads(meta_json) if meta_json else {}
             
             if itype == 'text':
@@ -144,7 +233,13 @@ def run(input_path: Path, output_dir: Path = None):
                 if desc:
                     sec_lines.append(f"> *{desc}*")
                 sec_lines.append("")
-                sec_lines.append(format_markdown_table(content))
+                
+                # Expose failures instead of hiding them
+                table_md = format_markdown_table(content)
+                if not table_md:
+                     sec_lines.append("> ⚠️ **Warning: Table data could not be extracted or is empty.**")
+                else:
+                    sec_lines.append(table_md)
                 sec_lines.append("")
                 
             elif itype == 'figure':
@@ -166,6 +261,49 @@ def run(input_path: Path, output_dir: Path = None):
                 if desc:
                     sec_lines.append(f"> *{desc}*")
                 sec_lines.append("")
+                
+            elif itype == 'requirement':
+                req_id = meta.get('req_id') or "REQ-UNKNOWN"
+                citation = meta.get('citation') or ""
+                req_type = meta.get('type') or "requirement"
+                is_cond = bool(meta.get('is_conditional', False))
+                
+                type_tag = ""
+                if is_cond:
+                    type_tag = " [CONDITIONAL]"
+                elif req_type and req_type.lower() != "requirement":
+                     type_tag = f" [{req_type.upper()}]"
+
+                sec_lines.append(f"> **[{req_id}]{type_tag}** {content}")
+                if citation:
+                     sec_lines.append(f"> *Source: \"{citation}\"*")
+                
+                # Append Proof Status if available
+                if asset_id in proofs_map:
+                    p = proofs_map[asset_id]
+                    status_icon = "✅" if p['status'] == 'verified' else "❌"
+                    status_text = "Verified" if p['status'] == 'verified' else "Failed"
+                    strategy = p['strategy'] or "unknown"
+                    
+                    # Create a mini table for the proof
+                    # "theorem" | "tactic/strategy" | "result/code"
+                    # User asked for: section_id, requirement_id, requirement, theorem, tactic, tactics_tried
+                    # We are INSIDE the section and requirement block, so we just show the proof details.
+                    
+                    # Clean up code for display (single line or block?)
+                    # Block is better for code.
+                    code_snippet = (p['code'] or "").replace("\n", " ")
+                    if len(code_snippet) > 100: code_snippet = code_snippet[:100] + "..."
+                    
+                    result_msg = (p['result'] or "").replace("\n", " ")
+                    if len(result_msg) > 100: result_msg = result_msg[:100] + "..."
+
+                    sec_lines.append(f">")
+                    sec_lines.append(f"> | Proof Status | Strategy | Details |")
+                    sec_lines.append(f"> | :--- | :--- | :--- |")
+                    sec_lines.append(f"> | {status_icon} {status_text} | {strategy} | `Theorem: {code_snippet}` <br> `Msg: {result_msg}` |")
+                
+                sec_lines.append("")
 
         # Add to full doc
         full_doc_lines.extend(sec_lines)
@@ -183,13 +321,54 @@ def run(input_path: Path, output_dir: Path = None):
 
 if __name__ == "__main__":
     import argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument("cmd", nargs="?", choices=["sanity", "run"], default="run")
-    parser.add_argument("--input", type=Path)
-    parser.add_argument("--output", type=Path)
+    import sys
+    from extractor.pipeline.utils import ralph
+    
+    parser = argparse.ArgumentParser(description="Stage 10: Markdown Exporter (Ralph Enabled)")
+    parser.add_argument("--pipeline-dir", type=Path, required=True, help="Path to pipeline results root")
+    parser.add_argument("--verify-only", action="store_true", help="Only verify existing results without running")
     args = parser.parse_args()
     
-    if args.cmd == "sanity":
-        sanity()
-    else:
-        run(args.input or Path("data/results/pipeline"), args.output)
+    # Run Generation
+    if not args.verify_only:
+        try:
+            logger.info("Ralph: Running Stage 10...")
+            db_path = args.pipeline_dir / "pipeline.duckdb"
+            if not db_path.exists():
+                logger.error(f"Database missing: {db_path}")
+                sys.exit(1)
+            
+            run(db_path, args.pipeline_dir)
+        except Exception as e:
+            logger.error(f"Ralph: Execution failed: {e}")
+            sys.exit(1)
+
+    # Verification
+    try:
+        md_dir = args.pipeline_dir / "10_markdown_exporter" / "markdown_output"
+        full_doc = md_dir / "full_document.md"
+        
+        ralph.assert_helping(full_doc.exists(), "full_document.md exists")
+        ralph.assert_helping(full_doc.stat().st_size > 1024, f"full_document.md size {full_doc.stat().st_size} > 1KB")
+        
+        # Content Check
+        content = full_doc.read_text(encoding="utf-8")
+        if "Requirement Proof Summary" not in content:
+            logger.warning("Ralph: 'Requirement Proof Summary' missing (expected if running in deterministic mode)")
+        if "REQ-" not in content:
+            logger.warning("Ralph: No requirement IDs found (expected if running in deterministic mode)")
+        
+        # Check for meaningful content (not just headers)
+        lines = content.splitlines()
+        row_count = len([l for l in lines if l.strip()])
+        logger.info(f"Ralph: Document has {row_count} non-empty lines.")
+        
+        print("✅ Ralph is happy! Stage 10 is outputting a valid document.")
+        sys.exit(0)
+        
+    except ralph.RalphError as e:
+        logger.error(f"Ralph is sad: {e}")
+        sys.exit(1)
+    except Exception as e:
+        logger.error(f"Verification crashed: {e}")
+        sys.exit(1)
