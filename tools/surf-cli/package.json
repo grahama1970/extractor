@@ -1,0 +1,31 @@
+{
+  "name": "surf-cli",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "surf": "./native/cli.cjs"
+  },
+  "scripts": {
+    "dev": "vite build --watch --mode development",
+    "build": "vite build",
+    "check": "tsc --noEmit",
+    "install:native": "node scripts/install-native-host.cjs",
+    "uninstall:native": "node scripts/uninstall-native-host.cjs"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.21.0",
+    "@modelcontextprotocol/sdk": "^1.7.0",
+    "zod": "^3.24.0",
+    "buffer": "^6.0.3",
+    "crypto-browserify": "^3.12.1",
+    "events": "^3.3.0",
+    "stream-browserify": "^3.0.0",
+    "vite-plugin-node-polyfills": "^0.24.0"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.287",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.0"
+  }
+}
