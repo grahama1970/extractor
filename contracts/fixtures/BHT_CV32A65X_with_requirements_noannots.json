@@ -1,0 +1,106 @@
+{
+  "fixture": {
+    "name": "BHT_CV32A65X_with_requirements_noannots",
+    "pdf": "data/input/pipeline/BHT_CV32A65X_with_requirements_noannots.pdf"
+  },
+  "steps": {
+    "01_annotation_processor": {
+      "json": "01_annotation_processor/json_output/01_annotations.json",
+      "keys": [
+        "annotations",
+        "clean_pdf_path"
+      ],
+      "min_annotations": 0
+    },
+    "02_marker_extractor": {
+      "json": "02_marker_extractor/json_output/02_marker_blocks.json",
+      "keys": [
+        "blocks",
+        "block_count"
+      ],
+      "min_blocks": 1
+    },
+    "03_suspicious_headers": {
+      "json": "03_suspicious_headers/json_output/03_verified_blocks.json",
+      "keys": [
+        "blocks"
+      ],
+      "min_verified_blocks": 0
+    },
+    "04_section_builder": {
+      "json": "04_section_builder/json_output/04_sections.json",
+      "keys": [
+        "sections"
+      ],
+      "min_sections": 1
+    },
+    "05b_table_describer": {
+      "json": "05b_table_describer/json_output/05b_tables.json",
+      "keys": [
+        "tables"
+      ],
+      "judge": {
+        "enabled": true,
+        "sample_size": 3,
+        "min_samples": 1,
+        "min_chars": 40,
+        "disallow": [
+          "lorem ipsum",
+          "not found",
+          "unknown",
+          "n/a"
+        ],
+        "prompt": "Evaluate whether the table descriptions are coherent, specific to the table content, and not placeholder text. Mark ok=false if they are generic or irrelevant."
+      }
+    },
+    "06b_figure_describer": {
+      "json": "06b_figure_describer/json_output/06b_figures.json",
+      "keys": [
+        "figures"
+      ],
+      "judge": {
+        "enabled": true,
+        "sample_size": 2,
+        "min_samples": 1,
+        "min_chars": 40,
+        "disallow": [
+          "lorem ipsum",
+          "not found",
+          "unknown",
+          "n/a"
+        ],
+        "prompt": "Evaluate whether the figure descriptions are coherent and match a technical diagram/figure. Mark ok=false if vague or placeholder."
+      }
+    },
+    "08_extract_requirements": {
+      "judge": {
+        "enabled": true,
+        "sample_size": 5,
+        "min_samples": 2,
+        "min_chars": 40,
+        "disallow": [
+          "lorem ipsum",
+          "not found",
+          "unknown",
+          "n/a"
+        ],
+        "prompt": "Evaluate whether the requirement statements are well-formed, specific, and plausibly derived from technical text. Mark ok=false if generic or incoherent."
+      }
+    },
+    "09_section_summarizer": {
+      "judge": {
+        "enabled": true,
+        "sample_size": 3,
+        "min_samples": 1,
+        "min_chars": 60,
+        "disallow": [
+          "lorem ipsum",
+          "not found",
+          "unknown",
+          "n/a"
+        ],
+        "prompt": "Evaluate whether the summaries are coherent and accurately summarize technical content. Mark ok=false if generic or placeholder."
+      }
+    }
+  }
+}
