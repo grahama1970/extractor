@@ -1,0 +1,3 @@
+[submodule ".skills"]
+	path = .skills
+	url = git@github.com:grahama1970/agent-skills.git
