@@ -1022,6 +1022,7 @@ def _run_common_stages(
         s14.run,
         out,
         stage_14_out,
+        pdf,  # Pass source PDF for Visual Report
         stop_on_fail=False,
         timeout_sec=args.stage_timeout,
         log_dir_base=out,

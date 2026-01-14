@@ -306,16 +306,29 @@ async def generate_comprehensive_report(
     out_dir = output_dir or (pipeline_dir / "14_report_generator")
     json_dir = out_dir / "json_output"
     text_dir = out_dir / "text_output"
+    html_dir = out_dir / "visual_output"
+    
     json_dir.mkdir(parents=True, exist_ok=True)
     text_dir.mkdir(parents=True, exist_ok=True)
+    html_dir.mkdir(parents=True, exist_ok=True)
 
     json_path = json_dir / "final_report.json"
     md_path = text_dir / "report.md"
+    html_path = html_dir / "visual_report.html"
 
     json_path.write_text(_safe_json(final_report), encoding="utf-8")
     md_path.write_text(markdown_report, encoding="utf-8")
+    
+    # 8. Visual Report (if source PDF available)
+    source_pdf = results.get("meta", {}).get("source_pdf")
+    if source_pdf and Path(source_pdf).exists():
+        try:
+            generate_visual_html_report(Path(source_pdf), results, html_path)
+            console.print(f"  • Visual: {html_path}")
+        except Exception as e:
+            logger.error(f"Visual report generation failed: {e}")
 
-    # 8. Log Summary
+    # 9. Log Summary
     console.print("[bold green]Pipeline Report Generated[/bold green]")
     console.print(f"  • JSON: {json_path}")
     console.print(f"  • Markdown: {md_path}")
@@ -325,19 +338,192 @@ async def generate_comprehensive_report(
     return json_path, final_report
 
 
-def run(results_dir: Path, output_dir: Path) -> Optional[Path]:
+def generate_visual_html_report(pdf_path: Path, results: Dict[str, Any], output_path: Path):
+    """Generate side-by-side HTML report."""
+    import fitz
+    import base64
+    
+    doc = fitz.open(pdf_path)
+    
+    # Pre-index content by page
+    sections_by_page = {}
+    if results.get("04_sections"):
+        for s in results["04_sections"].get("sections", []):
+            p = s.get("page_start", 0)
+            if p not in sections_by_page: sections_by_page[p] = []
+            sections_by_page[p].append(s)
+            
+    html_parts = ["""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Visual Extraction Report</title>
+        <style>
+            body { font-family: sans-serif; margin: 0; padding: 0; background: #f0f0f0; }
+            .container { display: flex; flex-direction: column; gap: 20px; padding: 20px; }
+            .page-row { display: flex; background: white; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+            .pdf-pane { flex: 1; padding: 10px; border-right: 1px solid #ddd; text-align: center; }
+            .pdf-pane img { max-width: 100%; border: 1px solid #999; }
+            .content-pane { flex: 1; padding: 20px; overflow-y: auto; max-height: 100vh; }
+            .feedback-pane { background: #eef; padding: 15px; border-top: 1px solid #ccd; }
+            .section { border-left: 4px solid #007bff; padding-left: 10px; margin-bottom: 20px; }
+            .meta { color: #666; font-size: 0.9em; }
+            .form-question { margin-bottom: 10px; }
+            h1 { text-align: center; color: #333; }
+        </style>
+    </head>
+    <body>
+        <h1>Visual Extraction Report: """ + pdf_path.name + """</h1>
+        <div class="container">
+    """]
+    
+    for page_idx in range(len(doc)):
+        page = doc[page_idx]
+        
+        # Render page
+        pix = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5))
+        img_data = pix.tobytes("png")
+        b64_img = base64.b64encode(img_data).decode("utf-8")
+        
+        # Get content
+        page_sections = sections_by_page.get(page_idx, [])
+        content_html = ""
+        for s in page_sections:
+            title = s.get("title", "Untitled")
+            depth = len(s.get("metadata", {}).get("section_id", "").split("."))
+            margin = (depth - 1) * 20
+            content_html += f"""
+            <div class="section" style="margin-left: {margin}px">
+                <h3>{title}</h3>
+                <div class="meta">ID: {s.get("metadata", {}).get("section_id")}</div>
+                <p><i>(Content extracted from this section...)</i></p>
+            </div>
+            """
+            
+        if not page_sections:
+            content_html = "<p><i>No sections started on this page.</i></p>"
+            
+        html_parts.append(f"""
+        <div class="page-row">
+            <div class="pdf-pane">
+                <h3>Page {page_idx + 1}</h3>
+                <img src="data:image/png;base64,{b64_img}" />
+            </div>
+            <div class="content-pane">
+                {content_html}
+                <div class="feedback-pane">
+                    <h4>👮 Agent Questions (Collaboration)</h4>
+                    <form>
+                        <div class="form-question">
+                            <label>Does the extraction match the image?</label><br/>
+                            <input type="radio" name="p{page_idx}_q1" value="yes"> Yes
+                            <input type="radio" name="p{page_idx}_q1" value="no"> No
+                        </div>
+                        <div class="form-question">
+                            <label>Are there missed tables?</label><br/>
+                            <input type="checkbox" name="p{page_idx}_q2"> Missed Table
+                        </div>
+                        <textarea placeholder="Notes on page {page_idx + 1}..." rows="2" style="width:100%"></textarea>
+                    </form>
+                </div>
+            </div>
+        </div>
+        """)
+        
+    html_parts.append("</div></body></html>")
+    output_path.write_text("\n".join(html_parts), encoding="utf-8")
+
+
+def run(results_dir: Path, output_dir: Path, source_pdf: Optional[Path] = None) -> Optional[Path]:
     try:
-        json_path, _ = asyncio.run(generate_comprehensive_report(results_dir, output_dir or results_dir / "14_report_generator"))
+        # Inject source_pdf into results for reporting
+        # Note: We can't easily modify the full comprehensive report signature without changing calls everywhere,
+        # but we can rely on passing it inside 'results' or just handling it in wrapper.
+        # Let's handle it by modifying how we call generate_comprehensive_report or overloading it.
+        # Actually, simpler: just pass it via a side-channel or update the load_results logic?
+        # Better: Update generate_comprehensive_report to accept source_pdf.
+        
+        json_path, _ = asyncio.run(
+            generate_comprehensive_report(results_dir, output_dir or results_dir / "14_report_generator", source_pdf)
+        )
         return json_path
     except Exception as e:
         logger.error(f"Report generation failed: {e}")
         return None
 
+# Updated signature to accept source_pdf
+async def generate_comprehensive_report(
+    pipeline_dir: Path, output_dir: Optional[Path] = None, source_pdf: Optional[Path] = None
+) -> Tuple[Path, Dict[str, Any]]:
+    """Generate comprehensive pipeline report."""
+
+    # 1. Load all results
+    results = load_results(pipeline_dir)
+    if source_pdf:
+        results["meta"] = results.get("meta", {})
+        results["meta"]["source_pdf"] = str(source_pdf)
+
+    # 2. Calculate Statistics
+    stats = calculate_pipeline_statistics(results)
+
+    # 3. Generate Content Summary
+    content_summary = generate_content_summary(results)
+
+    # 4. Generate Verification Report
+    verification = generate_verification_report(results)
+
+    # 5. Compile Final Report
+    final_report = {
+        "meta": {
+            "version": "1.0",
+            "pipeline_id": pipeline_dir.name,
+            "generated_at": datetime.now().isoformat(),
+            "source_pdf": str(source_pdf) if source_pdf else None,
+        },
+        "statistics": stats,
+        "content_summary": content_summary,
+        "verification": verification,
+    }
+
+    # 6. Generate Markdown Representation
+    markdown_report = generate_markdown_report(stats, content_summary, results)
+
+    # 7. Save Outputs (Logic continues above...)
+    out_dir = output_dir or (pipeline_dir / "14_report_generator")
+    json_dir = out_dir / "json_output"
+    text_dir = out_dir / "text_output"
+    html_dir = out_dir / "visual_output"
+    
+    json_dir.mkdir(parents=True, exist_ok=True)
+    text_dir.mkdir(parents=True, exist_ok=True)
+    html_dir.mkdir(parents=True, exist_ok=True)
+
+    json_path = json_dir / "final_report.json"
+    md_path = text_dir / "report.md"
+    html_path = html_dir / "visual_report.html"
+
+    json_path.write_text(_safe_json(final_report), encoding="utf-8")
+    md_path.write_text(markdown_report, encoding="utf-8")
+    
+    # 8. Visual Report
+    if source_pdf and Path(source_pdf).exists():
+        try:
+            generate_visual_html_report(Path(source_pdf), results, html_path)
+            console.print(f"  • Visual: {html_path}")
+        except Exception as e:
+            logger.error(f"Visual report generation failed: {e}")
+
+    # 9. Log Summary
+    console.print("[bold green]Pipeline Report Generated[/bold green]")
+    console.print(f"  • JSON: {json_path}")
+    console.print(f"  • Markdown: {md_path}")
+    console.print(f"  • Sections: {stats['metrics'].get('total_sections', 0)}")
+    console.print(f"  • Status: {verification['status']}")
+
+    return json_path, final_report
 
 def debug_bundle(bundle_path: Path, output_dir: Path):
     """Run report generator on a debug bundle."""
-    # For report generator, a bundle is essentially just the pipeline results directory
-    # If bundle_path is a directory, use it.
     if bundle_path.is_dir():
         run(bundle_path, output_dir)
     else:
@@ -350,11 +536,12 @@ if __name__ == "__main__":
     
     parser = argparse.ArgumentParser(description="Stage 14: Report Generator")
     parser.add_argument("--pipeline-dir", type=Path, required=True)
+    parser.add_argument("--pdf", type=Path, required=False, help="Source PDF for visual report")
     args = parser.parse_args()
     
     try:
         logger.info(f"Generating report for {args.pipeline_dir}...")
-        out_path = run(args.pipeline_dir, args.pipeline_dir / "14_report_generator")
+        out_path = run(args.pipeline_dir, args.pipeline_dir / "14_report_generator", args.pdf)
         if out_path and out_path.exists():
             logger.info(f"Report generated: {out_path}")
         else:

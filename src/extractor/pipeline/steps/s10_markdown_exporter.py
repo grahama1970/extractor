@@ -127,6 +127,53 @@ def run(input_path: Path, output_dir: Path = None):
     full_path.write_text("\n".join(full_doc_lines), encoding="utf-8")
     
     logger.info(f"Exported {len(sections)} sections to {md_out_dir}")
+    
+    # 3. Export RAG Chunks (JSONL)
+    chunks_path = md_out_dir / "chunks.jsonl"
+    logger.info(f"Generating RAG chunks: {chunks_path}")
+    
+    # Use pipeline dir name as crude source ID if not available
+    source_id = pipeline_dir.name.replace("pipeline_", "")
+    
+    chunks = []
+    
+    # Re-iterate sections to build chunks (using cached full_doc_lines would be messy)
+    # We already have the logic above, let's just use the markdown we generated per section.
+    
+    for sec_id in [s[0] for s in sections]:
+        sec_md_path = sec_out_dir / f"{sec_id}.md"
+        if not sec_md_path.exists():
+            continue
+            
+        text_content = sec_md_path.read_text(encoding="utf-8")
+        
+        # Find metadata
+        # (sec_id, sec_title, p_start, sec_summary)
+        sec_meta = next((s for s in sections if s[0] == sec_id), None)
+        if not sec_meta:
+            continue
+            
+        _, sec_title, p_start, sec_summary = sec_meta
+        
+        chunk = {
+            "text": text_content,
+            "metadata": {
+                "source": source_id,
+                "section_id": sec_id,
+                "title": sec_title,
+                "page": p_start,
+                "summary": sec_summary or "",
+                "level": len(sec_id.split(".")) if sec_id else 0
+            }
+        }
+        chunks.append(chunk)
+        
+    with open(chunks_path, "w", encoding="utf-8") as f:
+        for chunk in chunks:
+            f.write(json.dumps(chunk) + "\n")
+            
+    logger.info(f"Exported {len(chunks)} chunks to JSONL")
+
     return full_path
 
 if __name__ == "__main__":

@@ -207,7 +207,31 @@ def twin(
             typer.echo("\n❌ Twin creation failed")
             raise typer.Exit(code=1)
             
-    asyncio.run(_run())
-
+@app.command()
+def analyze(
+    pdf: Path = typer.Argument(..., help="Path to the PDF to analyze"),
+    pages: int = typer.Option(10, "--pages", "-p", help="Number of pages to scan"),
+):
+    """
+    Analyze PDF layout and suggest SPEC.md settings.
+    
+    Scans header/footer constraints and column layouts.
+    """
+    pdf = Path(pdf).resolve()
+    
+    if not pdf.exists():
+        typer.echo(f"❌ File not found: {pdf}")
+        raise typer.Exit(code=1)
+        
+    typer.echo(f"\n🔍 Analyzing layout for: {pdf.name}")
+    
+    # Run the analysis script directly (it has no heavyweight dependencies)
+    from tools.tasks_loop.utils.analyze_layout import analyze_layout
+    
+    results = analyze_layout(pdf, max_pages=pages)
+    
+    # The script prints the report to stdout, so we just exit cleanly
+    typer.echo("")
+    
 if __name__ == "__main__":
     app()
