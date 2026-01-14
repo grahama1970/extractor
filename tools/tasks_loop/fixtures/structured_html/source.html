@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Structured HTML Test Fixture</title>
+    <meta name="author" content="Extractor Test" />
+    <meta name="keywords" content="test, fixture, structured" />
+  </head>
+  <body>
+    <h1>1. Introduction</h1>
+    <p>
+      This is a test HTML document for validating the structured format
+      pipeline.
+    </p>
+    <p>
+      Unlike PDF extraction, HTML is already semantic and does not require a
+      Twin.
+    </p>
+
+    <h2>1.1 Purpose</h2>
+    <p>
+      Validate that the Provider → UnifiedAdapter → S07+ pipeline works
+      correctly.
+    </p>
+
+    <h2>1.2 Scope</h2>
+    <ul>
+      <li>HTML parsing with BeautifulSoup/Trafilatura</li>
+      <li>Block extraction (headings, paragraphs, tables)</li>
+      <li>DuckDB ingest</li>
+      <li>Markdown export</li>
+    </ul>
+
+    <h1>2. Data Tables</h1>
+
+    <h2>2.1 System Parameters</h2>
+    <table border="1">
+      <thead>
+        <tr>
+          <th>Parameter</th>
+          <th>Value</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>CLOCK_FREQ</td>
+          <td>100 MHz</td>
+          <td>System clock frequency</td>
+        </tr>
+        <tr>
+          <td>RESET_DELAY</td>
+          <td>10 cycles</td>
+          <td>Reset assertion delay</td>
+        </tr>
+        <tr>
+          <td>BUS_WIDTH</td>
+          <td>32 bits</td>
+          <td>Data bus width</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h1>3. Conclusion</h1>
+    <p>
+      This fixture demonstrates that structured formats can be extracted
+      directly without Twin calibration.
+    </p>
+  </body>
+</html>

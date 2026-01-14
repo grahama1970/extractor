@@ -173,6 +173,44 @@ class ExtractorLogic:
         
         return (await self._run_command(cmd)) == 0
 
+    @staticmethod
+    def is_structured_format(path: Path) -> bool:
+        """Check if file is a structured format (doesn't need Twin)."""
+        structured_extensions = {
+            ".html", ".htm", ".md", ".markdown", ".rst",
+            ".docx", ".pptx", ".xml", ".epub",
+            ".csv", ".xlsx", ".xls"
+        }
+        return path.suffix.lower() in structured_extensions
+
+    @staticmethod
+    def is_pdf(path: Path) -> bool:
+        """Check if file is a PDF."""
+        return path.suffix.lower() == ".pdf"
+
+    async def extract_structured(self, source_path: Path, output_dir: Path = None) -> bool:
+        """Extract structured format directly (no Twin needed)."""
+        source_path = Path(source_path).resolve()
+        output_dir = output_dir or Path("data/results/structured")
+        
+        if not source_path.exists():
+            logger.error(f"File not found: {source_path}")
+            return False
+            
+        logger.info(f"Extracting structured format: {source_path.name}")
+        logger.info("No Twin required for structured formats.")
+        
+        # Use run_structured.py
+        script = WORKSPACE_ROOT / "src" / "extractor" / "pipeline" / "run_structured.py"
+        
+        cmd = [
+            "python3", str(script),
+            str(source_path),
+            "-o", str(output_dir)
+        ]
+        
+        return (await self._run_command(cmd)) == 0
+
     async def create_twin(
         self,
         source_pdf: Path,

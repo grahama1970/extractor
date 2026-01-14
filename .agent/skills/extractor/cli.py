@@ -34,29 +34,44 @@ CHAOS_OPTIONS = [
 
 @app.command()
 def extract(
-    pdf: Path = typer.Argument(..., help="Path to the PDF file"),
-    strict: bool = typer.Option(True, help="Enforce Twin-First calibration"),
-    fast: bool = typer.Option(False, "--fast", help="Skip calibration (quick PyMuPDF only)"),
+    file: Path = typer.Argument(..., help="Path to the file (PDF, HTML, MD, DOCX, etc.)"),
+    strict: bool = typer.Option(True, help="Enforce Twin-First calibration (PDF only)"),
+    fast: bool = typer.Option(False, "--fast", help="Skip calibration (quick mode)"),
 ):
     """
-    Extract content from a PDF.
+    Extract content from a file.
     
-    By default, requires a calibrated Twin (--strict).
-    Use --fast for quick extraction without calibration (risky).
+    - PDF: Requires calibrated Twin (--strict) unless --fast is used.
+    - HTML/MD/DOCX/XML: Direct extraction (no Twin needed).
     """
-    pdf = Path(pdf).resolve()
+    file = Path(file).resolve()
     
-    if not pdf.exists():
-        typer.echo(f"❌ File not found: {pdf}")
+    if not file.exists():
+        typer.echo(f"❌ File not found: {file}")
         raise typer.Exit(code=1)
     
+    # Check if structured format (no Twin needed)
+    if logic.is_structured_format(file):
+        typer.echo(f"\n📄 Detected structured format: {file.suffix}")
+        typer.echo("No Twin required - extracting directly...\n")
+        
+        async def _run_structured():
+            success = await logic.extract_structured(file)
+            if not success:
+                raise typer.Exit(code=1)
+            typer.echo("\n✅ Extraction complete")
+                
+        asyncio.run(_run_structured())
+        return
+    
+    # PDF path (existing logic)
     if fast:
         typer.echo("\n⚡ FAST MODE: Skipping Twin calibration (risky)")
         typer.echo("Using PyMuPDF direct extraction...\n")
         strict = False
         
     async def _run():
-        success = await logic.extract_real(pdf, strict=strict)
+        success = await logic.extract_real(file, strict=strict)
         if not success and strict:
             # Offer interactive options
             typer.echo("\n" + "="*60)
@@ -73,11 +88,11 @@ def extract(
             
             if choice == "1":
                 pages = typer.prompt("How many pages for the Twin?", default="5", type=int)
-                fixture_name = pdf.stem.lower().replace(" ", "_") + "_twin"
+                fixture_name = file.stem.lower().replace(" ", "_") + "_twin"
                 
                 typer.echo(f"\n🔧 Creating {pages}-page Twin: {fixture_name}")
                 typer.echo("Run this command to create the Twin:\n")
-                typer.echo(f"  python3 .agent/skills/extractor/cli.py twin {pdf} --pages {pages} --name {fixture_name}")
+                typer.echo(f"  python3 .agent/skills/extractor/cli.py twin {file} --pages {pages} --name {fixture_name}")
                 typer.echo("")
                 return
             elif choice == "2":
@@ -86,12 +101,12 @@ def extract(
                 typer.echo("First, verify the Twin passes:\n")
                 typer.echo(f"  python3 .agent/skills/extractor/cli.py verify {existing_fixture}")
                 typer.echo("\nThen extract with:")
-                typer.echo(f"  python3 .agent/skills/extractor/cli.py extract {pdf} --fast")
+                typer.echo(f"  python3 .agent/skills/extractor/cli.py extract {file} --fast")
                 return
             else:
                 typer.echo("\n⚠️  WARNING: Quick extraction has LOW accuracy.")
                 typer.echo("   Results may be incomplete or incorrect.\n")
-                await logic.extract_real(pdf, strict=False)
+                await logic.extract_real(file, strict=False)
                 
     asyncio.run(_run())
 
