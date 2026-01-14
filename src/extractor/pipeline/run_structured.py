@@ -34,11 +34,11 @@ def get_provider(filepath: Path):
         from extractor.core.providers.markdown import MarkdownProvider
         return MarkdownProvider()
     elif suffix == ".docx":
-        from extractor.core.providers.docx import DocxProvider
-        return DocxProvider()
+        from extractor.core.providers.docx import DOCXProvider
+        return DOCXProvider()
     elif suffix == ".pptx":
-        from extractor.core.providers.pptx import PptxProvider
-        return PptxProvider()
+        from extractor.core.providers.pptx import PPTXProvider
+        return PPTXProvider()
     elif suffix == ".xml":
         from extractor.core.providers.xml import XMLProvider
         return XMLProvider()
@@ -46,13 +46,14 @@ def get_provider(filepath: Path):
         from extractor.core.providers.rst import RSTProvider
         return RSTProvider()
     elif suffix == ".epub":
-        from extractor.core.providers.epub import EpubProvider
-        return EpubProvider()
+        from extractor.core.providers.epub import EPUBProvider
+        return EPUBProvider()
     elif suffix in [".csv", ".xlsx", ".xls"]:
         from extractor.core.providers.spreadsheet import SpreadsheetProvider
         return SpreadsheetProvider()
     else:
         raise ValueError(f"Unsupported format: {suffix}")
+
 
 
 def run_structured_pipeline(
