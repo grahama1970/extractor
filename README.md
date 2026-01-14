@@ -97,6 +97,57 @@ python -m extractor --enhance document.pdf
 python -m extractor --pipeline full document.pdf
 ```
 
+## 🎯 Twin-First Collaborative Extraction (NEW)
+
+> **Every engineering/scientific PDF needs a Digital Synthetic Twin.**
+> PDF extraction will NOT be accurate WITHOUT human-agent collaboration.
+
+The extractor enforces a **Twin-First** methodology where you calibrate the pipeline on a synthetic PDF before running on real data.
+
+### Quick Start with the Skill CLI
+
+```bash
+# 1. Try to extract a PDF (will prompt for options)
+python3 .agent/skills/extractor/cli.py extract /path/to/doc.pdf
+
+# CLI presents options:
+#   1. Create a NEW Twin (recommended)
+#   2. Use an EXISTING Twin
+#   3. Quick extract (low accuracy)
+
+# 2. Create a 10-page Twin with common errors
+python3 .agent/skills/extractor/cli.py twin /path/to/doc.pdf --pages 10 --show-expected
+
+# 3. Verify the Twin (calibrate pipeline)
+python3 .agent/skills/extractor/cli.py verify my_twin --auto-tune
+
+# 4. Once Twin passes, extract real PDF
+python3 .agent/skills/extractor/cli.py extract /path/to/doc.pdf --fast
+```
+
+### How It Works
+
+```
+┌──────────────────────────────────────────────────────────┐
+│  Human: Domain knowledge (requirements look like X)     │
+│  Agent: Technical execution (regex tuning, validation)  │
+│  Twin:  Synthetic PDF with known content = calibration  │
+└──────────────────────────────────────────────────────────┘
+```
+
+### Chaos Catalog (Injectable Errors)
+
+| Error             | Description                                 |
+| ----------------- | ------------------------------------------- | ------ |
+| `hyphenation`     | Words split across lines (`require-\nment`) |
+| `ligatures`       | Unicode substitution (`fi` → `ﬁ`)           |
+| `split_tables`    | Tables spanning multiple pages              |
+| `trapped_headers` | Data rows mimicking section headers         |
+| `mojibake`        | Encoding corruption                         |
+| `ocr_artifacts`   | Character confusion (`                      | `→`I`) |
+
+See [tools/tasks_loop/README.md](tools/tasks_loop/README.md) for full documentation.
+
 ### Python API
 
 ```python
