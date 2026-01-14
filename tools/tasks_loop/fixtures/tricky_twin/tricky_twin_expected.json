@@ -1,0 +1,120 @@
+{
+  "metrics": {
+    "requirement_count": 4,
+    "table_count": 1,
+    "total_items": 5
+  },
+  "content": [
+    {
+      "id": "TBL-001",
+      "type": "Table",
+      "title": "Table 1: System Data (Configured)",
+      "content": [
+        {
+          "ID": "R0",
+          "Value": "VAL_0",
+          "Description": "Data row 0"
+        },
+        {
+          "ID": "R1",
+          "Value": "VAL_1",
+          "Description": "Data row 1"
+        },
+        {
+          "ID": "R2",
+          "Value": "VAL_2",
+          "Description": "Data row 2"
+        },
+        {
+          "ID": "R3",
+          "Value": "VAL_3",
+          "Description": "Data row 3"
+        },
+        {
+          "ID": "R4",
+          "Value": "VAL_4",
+          "Description": "Data row 4"
+        },
+        {
+          "ID": "R5",
+          "Value": "VAL_5",
+          "Description": "SECTION 5 START"
+        },
+        {
+          "ID": "R6",
+          "Value": "VAL_6",
+          "Description": "Data row 6"
+        },
+        {
+          "ID": "R7",
+          "Value": "VAL_7",
+          "Description": "Data row 7"
+        },
+        {
+          "ID": "R8",
+          "Value": "VAL_8",
+          "Description": "Data row 8"
+        },
+        {
+          "ID": "R9",
+          "Value": "VAL_9",
+          "Description": "Data row 9"
+        },
+        {
+          "ID": "R10",
+          "Value": "VAL_10",
+          "Description": "Data row 10"
+        },
+        {
+          "ID": "R11",
+          "Value": "VAL_11",
+          "Description": "Data row 11"
+        },
+        {
+          "ID": "R12",
+          "Value": "VAL_12",
+          "Description": "Data row 12"
+        },
+        {
+          "ID": "R13",
+          "Value": "VAL_13",
+          "Description": "Data row 13"
+        },
+        {
+          "ID": "R14",
+          "Value": "VAL_14",
+          "Description": "Data row 14"
+        },
+        {
+          "ID": "R15",
+          "Value": "VAL_15",
+          "Description": "Data row 15"
+        }
+      ],
+      "text": "ID,Value,Description\r\nR0,VAL_0,Data row 0\r\nR1,VAL_1,Data row 1\r\nR2,VAL_2,Data row 2\r\nR3,VAL_3,Data row 3\r\nR4,VAL_4,Data row 4\r\nR5,VAL_5,SECTION 5 START\r\nR6,VAL_6,Data row 6\r\nR7,VAL_7,Data row 7\r\nR8,VAL_8,Data row 8\r\nR9,VAL_9,Data row 9\r\nR10,VAL_10,Data row 10\r\nR11,VAL_11,Data row 11\r\nR12,VAL_12,Data row 12\r\nR13,VAL_13,Data row 13\r\nR14,VAL_14,Data row 14\r\nR15,VAL_15,Data row 15\r\n",
+      "strict_verification": false
+    },
+    {
+      "id": "REQ-SYN-001",
+      "type": "Requirement",
+      "text": "REQ-SYN-001: The system shall handle synthetic data."
+    },
+    {
+      "id": "REQ-SYN-002",
+      "type": "Requirement",
+      "text": "REQ-SYN-002: The system must ignore false headers."
+    },
+    {
+      "id": "REQ-CRIT-001",
+      "type": "Requirement",
+      "text": "The system MUST operate within 50ms latency.",
+      "strict_verification": true
+    },
+    {
+      "id": "REQ-CRIT-002",
+      "type": "Requirement",
+      "text": "All data shall be encrypted at rest using AES-256.",
+      "strict_verification": true
+    }
+  ]
+}

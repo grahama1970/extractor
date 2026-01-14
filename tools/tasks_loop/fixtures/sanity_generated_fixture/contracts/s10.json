@@ -1,0 +1,13 @@
+{
+  "step": "s10",
+  "fixture": "sanity_generated_fixture",
+  "name": "Markdown Exporter",
+  "output": "",
+  "format": [],
+  "expected": {
+    "section_headers": 2,
+    "requirements": 1,
+    "equations_min": 1
+  },
+  "sanity": []
+}

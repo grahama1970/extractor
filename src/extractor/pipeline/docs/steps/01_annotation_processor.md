@@ -9,7 +9,7 @@ Inputs
 
 Outputs
 - `01_annotation_processor/json_output/01_annotations.json`
-- `01_annotation_processor/image_output/*.png` (cropped annotation regions)
+- `01_annotation_processor/visual_output/*.png` (cropped annotation regions)
 - `01_annotation_processor/*_clean.pdf`
 
 Key Behavior

@@ -1,0 +1,32 @@
+{
+  "task_id": "task_01_contract_index",
+  "title": "Smoke: contract index lists task_00",
+  "prompt": "No code changes required. Return JSON with ok=true, summary, and artifacts=[] per schema.",
+  "max_iters": 2,
+  "deterministic_checks": {
+    "commands": [
+      {
+        "name": "echo_index_ok",
+        "cmd": "python -c \"print('index ok')\""
+      }
+    ],
+    "files_exist": [
+      "contracts/contract_loop/CONTRACT.md"
+    ],
+    "files_contain": [
+      {
+        "path": "contracts/contract_loop/CONTRACT.md",
+        "contains": [
+          "Contract file: `task_00.json`"
+        ]
+      }
+    ]
+  },
+  "agent": {
+    "output_schema": "tools/contract_loop/judges/agent_task.schema.json"
+  },
+  "llm_gate": {
+    "schema": "tools/contract_loop/judges/contract_gate.schema.json",
+    "prompt": "If deterministic.ok is true, return ok=true with notes and next_actions=[]. Otherwise ok=false and include next_actions."
+  }
+}

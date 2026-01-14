@@ -1,0 +1,11 @@
+{
+  "step": "s08",
+  "fixture": "source_mimic",
+  "name": "Requirement Extractor",
+  "output": "",
+  "format": [],
+  "expected": {
+    "requirement_count": 2
+  },
+  "sanity": []
+}

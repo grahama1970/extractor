@@ -1,0 +1,33 @@
+{
+  "task_id": "task_02_contract_docs",
+  "title": "Smoke: module sanity matrix exists",
+  "prompt": "No code changes required. Return JSON with ok=true, summary, and artifacts=[] per schema.",
+  "max_iters": 2,
+  "deterministic_checks": {
+    "commands": [
+      {
+        "name": "echo_docs_ok",
+        "cmd": "python -c \"print('docs ok')\""
+      }
+    ],
+    "files_exist": [
+      "tools/contract_loop/docs/SANITY_MATRIX_CONTRACT.md"
+    ],
+    "files_contain": [
+      {
+        "path": "tools/contract_loop/docs/SANITY_MATRIX_CONTRACT.md",
+        "contains": [
+          "sanity_contract_exec.py",
+          "sanity_contract_clarify.py"
+        ]
+      }
+    ]
+  },
+  "agent": {
+    "output_schema": "tools/contract_loop/judges/agent_task.schema.json"
+  },
+  "llm_gate": {
+    "schema": "tools/contract_loop/judges/contract_gate.schema.json",
+    "prompt": "If deterministic.ok is true, return ok=true with notes and next_actions=[]. Otherwise ok=false and include next_actions."
+  }
+}

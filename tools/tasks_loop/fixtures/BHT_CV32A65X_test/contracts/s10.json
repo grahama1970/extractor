@@ -1,0 +1,12 @@
+{
+  "step": "s10",
+  "fixture": "BHT_CV32A65X_test",
+  "name": "Auto-Generated S10",
+  "output": "",
+  "format": [],
+  "expected": {
+    "output_dir": "10_markdown_exporter",
+    "status": "PASS"
+  },
+  "sanity": []
+}

@@ -1,0 +1,11 @@
+{
+  "step": "s10",
+  "fixture": "Text_Cleaning",
+  "name": "Markdown Exporter",
+  "output": "",
+  "format": [],
+  "expected": {
+    "section_headers": 1
+  },
+  "sanity": []
+}

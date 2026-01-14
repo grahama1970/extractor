@@ -48,7 +48,7 @@ def section_json_for_prompt(sec: dict) -> dict:
 
 
 def find_section_image(sec: dict) -> Path | None:
-    out_dir = ROOT / "data/results/pipeline/04_section_builder/image_output"
+    out_dir = ROOT / "data/results/pipeline/04_section_builder/visual_output"
     candidates: list[Path] = []
     sid = sec.get("id")
     if isinstance(sid, str) and sid:
@@ -66,7 +66,7 @@ def find_section_image(sec: dict) -> Path | None:
     for c in candidates:
         if c.exists():
             return c
-    # Fallback: choose first PNG in image_output
+    # Fallback: choose first PNG in visual_output
     try:
         for p in sorted(out_dir.glob("*.png")):
             return p

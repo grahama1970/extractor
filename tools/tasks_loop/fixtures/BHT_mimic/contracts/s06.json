@@ -1,0 +1,11 @@
+{
+  "step": "s06",
+  "fixture": "BHT_mimic",
+  "name": "Figure Extractor",
+  "output": "",
+  "format": [],
+  "expected": {
+    "figure_count": 1
+  },
+  "sanity": []
+}

@@ -26,7 +26,7 @@ from extractor.pipeline.utils import ralph
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUT = ROOT / "data" / "results" / "pipeline_contract"
-JUDGE_SCHEMA = ROOT / "contracts" / "judges" / "llm_judge.schema.json"
+JUDGE_SCHEMA = ROOT / "tools" / "contract_loop" / "judges" / "llm_judge.schema.json"
 
 
 

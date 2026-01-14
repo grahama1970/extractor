@@ -1,0 +1,11 @@
+{
+  "step": "s05",
+  "fixture": "BHT_Mutant_Eq",
+  "name": "Table Extractor",
+  "output": "",
+  "format": [],
+  "expected": {
+    "table_count_min": 1
+  },
+  "sanity": []
+}

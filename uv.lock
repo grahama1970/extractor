@@ -911,7 +911,7 @@ wheels = [
 
 [[package]]
 name = "certainly"
-version = "0.1.0"
+version = "0.1.1"
 source = { directory = "../lean4" }
 dependencies = [
     { name = "aiodocker" },
@@ -997,7 +997,7 @@ requires-dist = [
     { name = "rich", specifier = ">=13.0.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.1.0" },
     { name = "scikit-learn", specifier = ">=1.3.0" },
-    { name = "scillm", specifier = ">=1.77.2" },
+    { name = "scillm", directory = "../litellm" },
     { name = "seaborn", specifier = ">=0.13.0" },
     { name = "sentence-transformers", specifier = ">=2.2.0" },
     { name = "strip-tags", specifier = ">=0.6" },
@@ -2182,6 +2182,7 @@ dependencies = [
     { name = "faiss-cpu" },
     { name = "fetcher" },
     { name = "filetype" },
+    { name = "flask" },
     { name = "ftfy" },
     { name = "ijson" },
     { name = "json-repair" },
@@ -2217,7 +2218,7 @@ dependencies = [
     { name = "regex" },
     { name = "rich" },
     { name = "ruff" },
-    { name = "scillm" },
+    { name = "scillm", extra = ["certainly"] },
     { name = "sentence-transformers" },
     { name = "strip-tags" },
     { name = "structlog" },
@@ -2340,6 +2341,7 @@ requires-dist = [
     { name = "fastapi", marker = "extra == 'server'", specifier = ">=0.115.12" },
     { name = "fetcher", directory = "../fetcher" },
     { name = "filetype", specifier = ">=1.2.0,<2" },
+    { name = "flask", specifier = ">=3.1.1,<4" },
     { name = "flask", marker = "extra == 'server'", specifier = ">=3.1.1" },
     { name = "flask-cors", marker = "extra == 'server'", specifier = ">=6.0.1" },
     { name = "ftfy", specifier = ">=6.1.1,<7" },
@@ -2396,7 +2398,7 @@ requires-dist = [
     { name = "regex", specifier = ">=2024.4.28,<2025" },
     { name = "rich", specifier = ">=13.0.0" },
     { name = "ruff", specifier = ">=0.13.0" },
-    { name = "scillm", directory = "../litellm" },
+    { name = "scillm", extras = ["certainly"], directory = "../litellm" },
     { name = "sentence-transformers", specifier = ">=5.0.0" },
     { name = "sentence-transformers", marker = "extra == 'accurate'", specifier = ">=5.0.0" },
     { name = "spacy", marker = "extra == 'accurate'", specifier = ">=3.8.7" },
@@ -2798,7 +2800,7 @@ wheels = [
 
 [[package]]
 name = "fetcher"
-version = "0.1.12"
+version = "0.1.13"
 source = { directory = "../fetcher" }
 dependencies = [
     { name = "aiohttp" },
@@ -2815,6 +2817,7 @@ dependencies = [
     { name = "readability-lxml" },
     { name = "requests" },
     { name = "trafilatura" },
+    { name = "typer" },
 ]
 
 [package.metadata]
@@ -2837,9 +2840,10 @@ requires-dist = [
     { name = "readability-lxml", specifier = ">=0.8.1" },
     { name = "requests", specifier = ">=2.32" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6" },
-    { name = "scillm", marker = "extra == 'alternates'", directory = "../litellm" },
+    { name = "scillm", marker = "extra == 'alternates'", git = "https://github.com/grahama1970/scillm.git?rev=fe0d21112b491822bb620d047d8a3df868d07fad" },
     { name = "spacy", marker = "extra == 'rolling'", specifier = ">=3.7,<4" },
     { name = "trafilatura", specifier = ">=2.0.0" },
+    { name = "typer", specifier = ">=0.12" },
 ]
 provides-extras = ["rolling", "alternates", "dev", "pdfcrack"]
 
@@ -2913,30 +2917,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/14/22/886e6664c204669c39fca99efc93e6c208f4ed4f897f9fa0c0494f8fc248/flatten_any_dict_iterable_or_whatsoever-0.33.tar.gz", hash = "sha256:f15696b3fca1004321edb86cca66d0c1d9b4da9985220b66756bd2d90b5c90a1", size = 36792, upload-time = "2022-10-04T01:36:21.429Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/bd/e1/fd763b386f598ac3e90b6c6fe294461a946ec3a9c3b12685ea4e22bbdeff/flatten_any_dict_iterable_or_whatsoever-0.33-py3-none-any.whl", hash = "sha256:4347316b8d79c449ca75c9a3989f88b81476600187d24688bd6cb7ffe6b18c8a", size = 23723, upload-time = "2022-10-04T01:36:17.613Z" },
-]
-
-[[package]]
-name = "flexcache"
-version = "0.3"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "typing-extensions" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/55/b0/8a21e330561c65653d010ef112bf38f60890051d244ede197ddaa08e50c1/flexcache-0.3.tar.gz", hash = "sha256:18743bd5a0621bfe2cf8d519e4c3bfdf57a269c15d1ced3fb4b64e0ff4600656", size = 15816, upload-time = "2024-03-09T03:21:07.555Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/27/cd/c883e1a7c447479d6e13985565080e3fea88ab5a107c21684c813dba1875/flexcache-0.3-py3-none-any.whl", hash = "sha256:d43c9fea82336af6e0115e308d9d33a185390b8346a017564611f1466dcd2e32", size = 13263, upload-time = "2024-03-09T03:21:05.635Z" },
-]
-
-[[package]]
-name = "flexparser"
-version = "0.4"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "typing-extensions" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/82/99/b4de7e39e8eaf8207ba1a8fa2241dd98b2ba72ae6e16960d8351736d8702/flexparser-0.4.tar.gz", hash = "sha256:266d98905595be2ccc5da964fe0a2c3526fbbffdc45b65b3146d75db992ef6b2", size = 31799, upload-time = "2024-11-07T02:00:56.249Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/fe/5e/3be305568fe5f34448807976dc82fc151d76c3e0e03958f34770286278c1/flexparser-0.4-py3-none-any.whl", hash = "sha256:3738b456192dcb3e15620f324c447721023c0293f6af9955b481e91d00179846", size = 27625, upload-time = "2024-11-07T02:00:54.523Z" },
 ]
 
 [[package]]
@@ -3269,14 +3249,17 @@ dependencies = [
     { name = "tenacity" },
     { name = "transformers" },
     { name = "typer" },
+    { name = "youtube-transcript-api" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "datasets", specifier = ">=4.4.1" },
+    { name = "extractor", marker = "extra == 'curate'", directory = "." },
     { name = "faiss-cpu", marker = "extra == 'faiss'", specifier = ">=1.7.2" },
     { name = "faiss-gpu-cu11", marker = "sys_platform == 'linux' and extra == 'faiss-gpu'", specifier = ">=1.11.0" },
     { name = "faiss-gpu-cu12", marker = "sys_platform == 'linux' and extra == 'faiss-gpu'", specifier = ">=1.11.0" },
+    { name = "fetcher", marker = "extra == 'curate'", directory = "../fetcher" },
     { name = "httpx", marker = "extra == 'service'", specifier = ">=0.28.0" },
     { name = "huggingface-hub", specifier = ">=0.34.5" },
     { name = "litellm", marker = "extra == 'llm'", specifier = ">=1.77.2" },
@@ -3289,6 +3272,7 @@ requires-dist = [
     { name = "runpod", specifier = ">=1.8.1" },
     { name = "runpod", marker = "extra == 'runpod'", specifier = ">=1.8.1" },
     { name = "runpod-ops", marker = "extra == 'runpod'", directory = "../runpod_ops" },
+    { name = "scillm", marker = "extra == 'curate'", directory = "../litellm" },
     { name = "scillm", marker = "extra == 'scillm'", directory = "../litellm" },
     { name = "sentence-transformers", marker = "extra == 'faiss'", specifier = ">=5.1.0" },
     { name = "sentence-transformers", marker = "extra == 'faiss-gpu'", specifier = ">=5.1.0" },
@@ -3297,10 +3281,12 @@ requires-dist = [
     { name = "transformers", specifier = ">=4.56.1" },
     { name = "tree-sitter", marker = "extra == 'code'", specifier = "==0.25.2" },
     { name = "tree-sitter-language-pack", marker = "extra == 'code'", specifier = "==0.13.0" },
+    { name = "treesitter-tools", marker = "extra == 'curate'", directory = "../treesitter-tools" },
     { name = "treesitter-tools", marker = "extra == 'treesitter-tools'", directory = "../treesitter-tools" },
     { name = "typer", specifier = ">=0.12" },
+    { name = "youtube-transcript-api", specifier = ">=1.2.3" },
 ]
-provides-extras = ["faiss", "faiss-gpu", "service", "code", "treesitter-tools", "llm", "runpod", "scillm"]
+provides-extras = ["faiss", "faiss-gpu", "service", "code", "treesitter-tools", "llm", "runpod", "scillm", "curate"]
 
 [[package]]
 name = "graval"
@@ -6101,58 +6087,6 @@ wheels = [
 ]
 
 [[package]]
-name = "pint"
-version = "0.24.4"
-source = { registry = "https://pypi.org/simple" }
-resolution-markers = [
-    "python_full_version < '3.11' and sys_platform == 'darwin'",
-    "python_full_version < '3.11' and platform_machine == 'aarch64' and sys_platform == 'linux'",
-    "(python_full_version < '3.11' and platform_machine != 'aarch64' and sys_platform == 'linux') or (python_full_version < '3.11' and sys_platform != 'darwin' and sys_platform != 'linux')",
-]
-dependencies = [
-    { name = "flexcache", marker = "python_full_version < '3.11'" },
-    { name = "flexparser", marker = "python_full_version < '3.11'" },
-    { name = "platformdirs", marker = "python_full_version < '3.11'" },
-    { name = "typing-extensions", marker = "python_full_version < '3.11'" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/20/bb/52b15ddf7b7706ed591134a895dbf6e41c8348171fb635e655e0a4bbb0ea/pint-0.24.4.tar.gz", hash = "sha256:35275439b574837a6cd3020a5a4a73645eb125ce4152a73a2f126bf164b91b80", size = 342225, upload-time = "2024-11-07T16:29:46.061Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/b7/16/bd2f5904557265882108dc2e04f18abc05ab0c2b7082ae9430091daf1d5c/Pint-0.24.4-py3-none-any.whl", hash = "sha256:aa54926c8772159fcf65f82cc0d34de6768c151b32ad1deb0331291c38fe7659", size = 302029, upload-time = "2024-11-07T16:29:43.976Z" },
-]
-
-[[package]]
-name = "pint"
-version = "0.25.2"
-source = { registry = "https://pypi.org/simple" }
-resolution-markers = [
-    "python_full_version >= '3.14' and platform_python_implementation != 'PyPy' and sys_platform == 'darwin'",
-    "python_full_version >= '3.12' and python_full_version < '3.14' and platform_python_implementation != 'PyPy' and sys_platform == 'darwin'",
-    "python_full_version >= '3.14' and platform_python_implementation == 'PyPy' and sys_platform == 'darwin'",
-    "python_full_version >= '3.12' and python_full_version < '3.14' and platform_python_implementation == 'PyPy' and sys_platform == 'darwin'",
-    "python_full_version >= '3.14' and platform_machine == 'aarch64' and platform_python_implementation != 'PyPy' and sys_platform == 'linux'",
-    "python_full_version >= '3.12' and python_full_version < '3.14' and platform_machine == 'aarch64' and platform_python_implementation != 'PyPy' and sys_platform == 'linux'",
-    "python_full_version >= '3.14' and platform_machine == 'aarch64' and platform_python_implementation == 'PyPy' and sys_platform == 'linux'",
-    "python_full_version >= '3.12' and python_full_version < '3.14' and platform_machine == 'aarch64' and platform_python_implementation == 'PyPy' and sys_platform == 'linux'",
-    "(python_full_version >= '3.14' and platform_machine != 'aarch64' and platform_python_implementation != 'PyPy' and sys_platform == 'linux') or (python_full_version >= '3.14' and platform_python_implementation != 'PyPy' and sys_platform != 'darwin' and sys_platform != 'linux')",
-    "(python_full_version >= '3.12' and python_full_version < '3.14' and platform_machine != 'aarch64' and platform_python_implementation != 'PyPy' and sys_platform == 'linux') or (python_full_version >= '3.12' and python_full_version < '3.14' and platform_python_implementation != 'PyPy' and sys_platform != 'darwin' and sys_platform != 'linux')",
-    "(python_full_version >= '3.14' and platform_machine != 'aarch64' and platform_python_implementation == 'PyPy' and sys_platform == 'linux') or (python_full_version >= '3.14' and platform_python_implementation == 'PyPy' and sys_platform != 'darwin' and sys_platform != 'linux')",
-    "(python_full_version >= '3.12' and python_full_version < '3.14' and platform_machine != 'aarch64' and platform_python_implementation == 'PyPy' and sys_platform == 'linux') or (python_full_version >= '3.12' and python_full_version < '3.14' and platform_python_implementation == 'PyPy' and sys_platform != 'darwin' and sys_platform != 'linux')",
-    "python_full_version == '3.11.*' and sys_platform == 'darwin'",
-    "python_full_version == '3.11.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
-    "(python_full_version == '3.11.*' and platform_machine != 'aarch64' and sys_platform == 'linux') or (python_full_version == '3.11.*' and sys_platform != 'darwin' and sys_platform != 'linux')",
-]
-dependencies = [
-    { name = "flexcache", marker = "python_full_version >= '3.11'" },
-    { name = "flexparser", marker = "python_full_version >= '3.11'" },
-    { name = "platformdirs", marker = "python_full_version >= '3.11'" },
-    { name = "typing-extensions", marker = "python_full_version >= '3.11'" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/5f/74/bc3f671997158aef171194c3c4041e549946f4784b8690baa0626a0a164b/pint-0.25.2.tar.gz", hash = "sha256:85a45d1da8fe9c9f7477fed8aef59ad2b939af3d6611507e1a9cbdacdcd3450a", size = 254467, upload-time = "2025-11-06T22:08:09.184Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/ab/88/550d41e81e6d43335603a960cd9c75c1d88f9cf01bc9d4ee8e86290aba7d/pint-0.25.2-py3-none-any.whl", hash = "sha256:ca35ab1d8eeeb6f7d9942b3cb5f34ca42b61cdd5fb3eae79531553dcca04dda7", size = 306762, upload-time = "2025-11-06T22:08:07.745Z" },
-]
-
-[[package]]
 name = "platformdirs"
 version = "4.5.0"
 source = { registry = "https://pypi.org/simple" }
@@ -6163,21 +6097,21 @@ wheels = [
 
 [[package]]
 name = "playwright"
-version = "1.55.0"
+version = "1.57.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "greenlet" },
     { name = "pyee" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/80/3a/c81ff76df266c62e24f19718df9c168f49af93cabdbc4608ae29656a9986/playwright-1.55.0-py3-none-macosx_10_13_x86_64.whl", hash = "sha256:d7da108a95001e412effca4f7610de79da1637ccdf670b1ae3fdc08b9694c034", size = 40428109, upload-time = "2025-08-28T15:46:20.357Z" },
-    { url = "https://files.pythonhosted.org/packages/cf/f5/bdb61553b20e907196a38d864602a9b4a461660c3a111c67a35179b636fa/playwright-1.55.0-py3-none-macosx_11_0_arm64.whl", hash = "sha256:8290cf27a5d542e2682ac274da423941f879d07b001f6575a5a3a257b1d4ba1c", size = 38687254, upload-time = "2025-08-28T15:46:23.925Z" },
-    { url = "https://files.pythonhosted.org/packages/4a/64/48b2837ef396487807e5ab53c76465747e34c7143fac4a084ef349c293a8/playwright-1.55.0-py3-none-macosx_11_0_universal2.whl", hash = "sha256:25b0d6b3fd991c315cca33c802cf617d52980108ab8431e3e1d37b5de755c10e", size = 40428108, upload-time = "2025-08-28T15:46:27.119Z" },
-    { url = "https://files.pythonhosted.org/packages/08/33/858312628aa16a6de97839adc2ca28031ebc5391f96b6fb8fdf1fcb15d6c/playwright-1.55.0-py3-none-manylinux1_x86_64.whl", hash = "sha256:c6d4d8f6f8c66c483b0835569c7f0caa03230820af8e500c181c93509c92d831", size = 45905643, upload-time = "2025-08-28T15:46:30.312Z" },
-    { url = "https://files.pythonhosted.org/packages/83/83/b8d06a5b5721931aa6d5916b83168e28bd891f38ff56fe92af7bdee9860f/playwright-1.55.0-py3-none-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:29a0777c4ce1273acf90c87e4ae2fe0130182100d99bcd2ae5bf486093044838", size = 45296647, upload-time = "2025-08-28T15:46:33.221Z" },
-    { url = "https://files.pythonhosted.org/packages/06/2e/9db64518aebcb3d6ef6cd6d4d01da741aff912c3f0314dadb61226c6a96a/playwright-1.55.0-py3-none-win32.whl", hash = "sha256:29e6d1558ad9d5b5c19cbec0a72f6a2e35e6353cd9f262e22148685b86759f90", size = 35476046, upload-time = "2025-08-28T15:46:36.184Z" },
-    { url = "https://files.pythonhosted.org/packages/46/4f/9ba607fa94bb9cee3d4beb1c7b32c16efbfc9d69d5037fa85d10cafc618b/playwright-1.55.0-py3-none-win_amd64.whl", hash = "sha256:7eb5956473ca1951abb51537e6a0da55257bb2e25fc37c2b75af094a5c93736c", size = 35476048, upload-time = "2025-08-28T15:46:38.867Z" },
-    { url = "https://files.pythonhosted.org/packages/21/98/5ca173c8ec906abde26c28e1ecb34887343fd71cc4136261b90036841323/playwright-1.55.0-py3-none-win_arm64.whl", hash = "sha256:012dc89ccdcbd774cdde8aeee14c08e0dd52ddb9135bf10e9db040527386bd76", size = 31225543, upload-time = "2025-08-28T15:46:41.613Z" },
+    { url = "https://files.pythonhosted.org/packages/ed/b6/e17543cea8290ae4dced10be21d5a43c360096aa2cce0aa7039e60c50df3/playwright-1.57.0-py3-none-macosx_10_13_x86_64.whl", hash = "sha256:9351c1ac3dfd9b3820fe7fc4340d96c0d3736bb68097b9b7a69bd45d25e9370c", size = 41985039, upload-time = "2025-12-09T08:06:18.408Z" },
+    { url = "https://files.pythonhosted.org/packages/8b/04/ef95b67e1ff59c080b2effd1a9a96984d6953f667c91dfe9d77c838fc956/playwright-1.57.0-py3-none-macosx_11_0_arm64.whl", hash = "sha256:a4a9d65027bce48eeba842408bcc1421502dfd7e41e28d207e94260fa93ca67e", size = 40775575, upload-time = "2025-12-09T08:06:22.105Z" },
+    { url = "https://files.pythonhosted.org/packages/60/bd/5563850322a663956c927eefcf1457d12917e8f118c214410e815f2147d1/playwright-1.57.0-py3-none-macosx_11_0_universal2.whl", hash = "sha256:99104771abc4eafee48f47dac2369e0015516dc1ce8c409807d2dd440828b9a4", size = 41985042, upload-time = "2025-12-09T08:06:25.357Z" },
+    { url = "https://files.pythonhosted.org/packages/56/61/3a803cb5ae0321715bfd5247ea871d25b32c8f372aeb70550a90c5f586df/playwright-1.57.0-py3-none-manylinux1_x86_64.whl", hash = "sha256:284ed5a706b7c389a06caa431b2f0ba9ac4130113c3a779767dda758c2497bb1", size = 45975252, upload-time = "2025-12-09T08:06:29.186Z" },
+    { url = "https://files.pythonhosted.org/packages/83/d7/b72eb59dfbea0013a7f9731878df8c670f5f35318cedb010c8a30292c118/playwright-1.57.0-py3-none-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:38a1bae6c0a07839cdeaddbc0756b3b2b85e476c07945f64ece08f1f956a86f1", size = 45706917, upload-time = "2025-12-09T08:06:32.549Z" },
+    { url = "https://files.pythonhosted.org/packages/e4/09/3fc9ebd7c95ee54ba6a68d5c0bc23e449f7235f4603fc60534a364934c16/playwright-1.57.0-py3-none-win32.whl", hash = "sha256:1dd93b265688da46e91ecb0606d36f777f8eadcf7fbef12f6426b20bf0c9137c", size = 36553860, upload-time = "2025-12-09T08:06:35.864Z" },
+    { url = "https://files.pythonhosted.org/packages/58/d4/dcdfd2a33096aeda6ca0d15584800443dd2be64becca8f315634044b135b/playwright-1.57.0-py3-none-win_amd64.whl", hash = "sha256:6caefb08ed2c6f29d33b8088d05d09376946e49a73be19271c8cd5384b82b14c", size = 36553864, upload-time = "2025-12-09T08:06:38.915Z" },
+    { url = "https://files.pythonhosted.org/packages/6a/60/fe31d7e6b8907789dcb0584f88be741ba388413e4fbce35f1eba4e3073de/playwright-1.57.0-py3-none-win_arm64.whl", hash = "sha256:5f065f5a133dbc15e6e7c71e7bc04f258195755b1c32a432b792e28338c8335e", size = 32837940, upload-time = "2025-12-09T08:06:42.268Z" },
 ]
 
 [[package]]
@@ -8410,7 +8344,7 @@ wheels = [
 
 [[package]]
 name = "scillm"
-version = "1.78.1"
+version = "1.78.9"
 source = { directory = "../litellm" }
 dependencies = [
     { name = "aiohttp" },
@@ -8422,15 +8356,15 @@ dependencies = [
     { name = "fastuuid" },
     { name = "httpx" },
     { name = "importlib-metadata" },
+    { name = "jinja2" },
     { name = "json-repair" },
     { name = "jsonschema" },
-    { name = "nbformat" },
     { name = "openai" },
-    { name = "pint", version = "0.24.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "pint", version = "0.25.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "playwright" },
     { name = "pondpond" },
     { name = "prometheus-client" },
     { name = "pydantic" },
+    { name = "pytest-html" },
     { name = "python-dotenv" },
     { name = "rapidfuzz" },
     { name = "tiktoken" },
@@ -8438,6 +8372,11 @@ dependencies = [
     { name = "uvicorn" },
     { name = "uvloop" },
     { name = "websockets" },
+]
+
+[package.optional-dependencies]
+certainly = [
+    { name = "certainly" },
 ]
 
 [package.metadata]
@@ -8451,6 +8390,7 @@ requires-dist = [
     { name = "azure-storage-blob", marker = "extra == 'proxy'", specifier = ">=12.25.1" },
     { name = "backoff", marker = "extra == 'proxy'" },
     { name = "boto3", marker = "extra == 'proxy'", specifier = "==1.36.0" },
+    { name = "certainly", marker = "extra == 'certainly'", directory = "../lean4" },
     { name = "chutes", specifier = ">=0.0.26" },
     { name = "click" },
     { name = "cryptography", marker = "extra == 'proxy'" },
@@ -8465,19 +8405,17 @@ requires-dist = [
     { name = "gunicorn", marker = "extra == 'proxy'", specifier = ">=23.0.0" },
     { name = "httpx", specifier = ">=0.23.0" },
     { name = "importlib-metadata", specifier = ">=6.8.0" },
-    { name = "jinja2", marker = "extra == 'dotprompt'", specifier = ">=3.1" },
-    { name = "json-repair", specifier = ">=0.53.0" },
+    { name = "jinja2", specifier = ">=3.1.2" },
     { name = "json-repair", marker = "python_full_version >= '3.10'", specifier = ">=0.51.0" },
     { name = "jsonschema", specifier = ">=4.22.0" },
     { name = "litellm-enterprise", marker = "extra == 'proxy'", specifier = "==0.1.20" },
     { name = "litellm-proxy-extras", marker = "extra == 'proxy'", specifier = "==0.2.18" },
     { name = "mcp", marker = "python_full_version >= '3.10' and extra == 'proxy'", specifier = ">=1.10.0" },
     { name = "mlflow", marker = "python_full_version >= '3.10' and extra == 'mlflow'", specifier = ">3.1.4" },
-    { name = "nbformat", specifier = ">=5.10.4" },
     { name = "numpydoc", marker = "extra == 'utils'" },
     { name = "openai", specifier = ">=1.99.5" },
     { name = "orjson", marker = "extra == 'proxy'", specifier = ">=3.9.7" },
-    { name = "pint", specifier = ">=0.23" },
+    { name = "playwright", specifier = ">=1.57.0" },
     { name = "polars", marker = "python_full_version >= '3.10' and extra == 'proxy'", specifier = ">=1.31.0" },
     { name = "pondpond", specifier = ">=1.4.1" },
     { name = "prisma", marker = "extra == 'extra-proxy'", specifier = "==0.11.0" },
@@ -8485,6 +8423,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.5.0" },
     { name = "pyjwt", marker = "extra == 'proxy'", specifier = ">=2.8.0" },
     { name = "pynacl", marker = "extra == 'proxy'", specifier = ">=1.5.0" },
+    { name = "pytest-html", specifier = ">=4.1.1" },
     { name = "python-dotenv", specifier = ">=0.2.0" },
     { name = "python-multipart", marker = "extra == 'proxy'", specifier = ">=0.0.18" },
     { name = "pyyaml", marker = "extra == 'proxy'", specifier = ">=6.0.1" },
@@ -8502,7 +8441,7 @@ requires-dist = [
     { name = "websockets", specifier = ">=13.1" },
     { name = "websockets", marker = "extra == 'proxy'", specifier = ">=13.1.0" },
 ]
-provides-extras = ["dotprompt", "proxy", "extra-proxy", "utils", "caching", "mlflow"]
+provides-extras = ["proxy", "extra-proxy", "utils", "caching", "mlflow", "certainly"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -8510,7 +8449,6 @@ dev = [
     { name = "fastapi", specifier = ">=0.115.5" },
     { name = "fastapi-offline", specifier = ">=1.7.3" },
     { name = "flake8", specifier = ">=6.1.0" },
-    { name = "jinja2", specifier = ">=3.1,<4" },
     { name = "langfuse", specifier = ">=2.45.0" },
     { name = "mypy", specifier = ">=1.0" },
     { name = "opentelemetry-api", specifier = "==1.25.0" },
@@ -8518,7 +8456,6 @@ dev = [
     { name = "opentelemetry-sdk", specifier = "==1.25.0" },
     { name = "pytest", specifier = ">=7.4.3" },
     { name = "pytest-asyncio", specifier = ">=0.21.1" },
-    { name = "pytest-html", specifier = ">=4.1.1" },
     { name = "pytest-mock", specifier = ">=3.12.0" },
     { name = "requests-mock", specifier = ">=1.12.1" },
     { name = "responses", specifier = ">=0.25.7" },
@@ -10705,6 +10642,19 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/f9/86/0f0dccb6e59a9e7f122c5afd43568b1d31b8ab7dda5f1b01fb5c7025c9a9/yarl-1.22.0-cp314-cp314t-win_amd64.whl", hash = "sha256:9fb17ea16e972c63d25d4a97f016d235c78dd2344820eb35bc034bc32012ee27", size = 96292, upload-time = "2025-10-06T14:12:15.398Z" },
     { url = "https://files.pythonhosted.org/packages/48/b7/503c98092fb3b344a179579f55814b613c1fbb1c23b3ec14a7b008a66a6e/yarl-1.22.0-cp314-cp314t-win_arm64.whl", hash = "sha256:9f6d73c1436b934e3f01df1e1b21ff765cd1d28c77dfb9ace207f746d4610ee1", size = 85171, upload-time = "2025-10-06T14:12:16.935Z" },
     { url = "https://files.pythonhosted.org/packages/73/ae/b48f95715333080afb75a4504487cbe142cae1268afc482d06692d605ae6/yarl-1.22.0-py3-none-any.whl", hash = "sha256:1380560bdba02b6b6c90de54133c81c9f2a453dee9912fe58c1dcced1edb7cff", size = 46814, upload-time = "2025-10-06T14:12:53.872Z" },
+]
+
+[[package]]
+name = "youtube-transcript-api"
+version = "1.2.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "defusedxml" },
+    { name = "requests" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/87/03/68c69b2d3e282d45cb3c07e5836a9146ff9574cde720570ffc7eb124e56b/youtube_transcript_api-1.2.3.tar.gz", hash = "sha256:76016b71b410b124892c74df24b07b052702cf3c53afb300d0a2c547c0b71b68", size = 469757, upload-time = "2025-10-13T15:57:17.532Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ef/75/a861661b73d862e323c12af96ecfb237fb4d1433e551183d4172d39d5275/youtube_transcript_api-1.2.3-py3-none-any.whl", hash = "sha256:0c1b32ea5e739f9efde8c42e3d43e67df475185af6f820109607577b83768375", size = 485140, upload-time = "2025-10-13T15:57:16.034Z" },
 ]
 
 [[package]]

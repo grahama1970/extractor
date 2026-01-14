@@ -1,0 +1,33 @@
+{
+  "task_id": "s14_report_generator",
+  "title": "Stage 14 report generator contract",
+  "prompt": "Ensure Stage 14 (s14_report_generator) meets the pipeline contract. Run uv run scripts/smokes/smoke_stage14_report.py and fix any failures. Do not change unrelated stages. Return JSON with keys ok, summary, artifacts.",
+  "max_iters": 3,
+  "deterministic_checks": {
+    "commands": [
+      {
+        "name": "s14_smoke",
+        "cmd": "uv run scripts/smokes/smoke_stage14_report.py"
+      }
+    ],
+    "files_exist": [
+      "src/extractor/pipeline/steps/s14_report_generator.py",
+      "tools/contract_loop/adapters/extractor/docs/SANITY_MATRIX.md"
+    ],
+    "files_contain": [
+      {
+        "path": "tools/contract_loop/adapters/extractor/docs/SANITY_MATRIX.md",
+        "contains": [
+          "s14_report_generator.py"
+        ]
+      }
+    ]
+  },
+  "agent": {
+    "output_schema": "tools/contract_loop/judges/agent_task.schema.json"
+  },
+  "llm_gate": {
+    "schema": "tools/contract_loop/judges/contract_gate.schema.json",
+    "prompt": "You are the contract auditor for Stage 14. Approve only if the smoke script passed and report outputs meet the contract. If anything is missing, return ok=false with next_actions."
+  }
+}

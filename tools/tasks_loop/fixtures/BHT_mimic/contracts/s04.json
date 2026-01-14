@@ -1,0 +1,11 @@
+{
+  "step": "s04",
+  "fixture": "BHT_mimic",
+  "name": "Section Builder",
+  "output": "",
+  "format": [],
+  "expected": {
+    "section_count": 4
+  },
+  "sanity": []
+}

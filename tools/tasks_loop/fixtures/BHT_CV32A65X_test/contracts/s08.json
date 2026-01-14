@@ -1,0 +1,11 @@
+{
+  "step": "s08",
+  "fixture": "BHT_CV32A65X_test",
+  "name": "Auto-Generated S08",
+  "output": "",
+  "format": [],
+  "expected": {
+    "requirement_count_min": 3
+  },
+  "sanity": []
+}

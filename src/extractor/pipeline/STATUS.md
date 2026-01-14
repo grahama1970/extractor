@@ -128,7 +128,7 @@ Debugging Aids
 - Shared: diagnostics arrays and logs per stage under data/results/pipeline/<stage>/
 - Resource sampling: ENABLE_RESOURCE_SAMPLING=1 and SAMPLE_INTERVAL_SEC=2
 - Session scoping: LITELLM_SESSION_ID for reproducible caching; LITELLM_ATTACH_SESSION=true
-- Stage 03/06/07 write context images to their image_output directories for inspection.
+- Stage 03/06/07 write context images to their visual_output directories for inspection.
 
 Readiness Assessment
 - Steps implemented: 01–07, 08, 09, 10–12, 14 (all present with CLIs and outputs). Most stages have gold invariants.

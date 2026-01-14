@@ -298,12 +298,96 @@ def demote_sentence_like_single_row_tables(result: Dict[str, Any]) -> None:
         result["demoted_text_blocks"] = demoted
 
 
+def demote_text_heavy_lattice_tables(result: Dict[str, Any]) -> None:
+    """
+    Demote tables that appear to be purely text layout artifacts (Lattice False Positives).
+    
+    Target:
+    - Single column (or effectively single column)
+    - High average word count per row > 3
+    - Low numeric density
+    """
+    if os.getenv("STAGE05_DEMOTE_TEXT_TABLES", "1").lower() not in {"1", "true", "yes", "y"}:
+        return
+
+    tables = list(result.get("tables") or [])
+    keep: List[Dict[str, Any]] = []
+    demoted: List[Dict[str, Any]] = result.get("demoted_text_blocks", []) or []
+    
+    for t in tables:
+        pm = t.get("pandas_metrics") or {}
+        shape = pm.get("shape", [0, 0])
+        rows = int(shape[0]) if len(shape) > 0 and str(shape[0]).isdigit() else 0
+        cols = int(shape[1]) if len(shape) > 1 and str(shape[1]).isdigit() else 0
+        
+        # Heuristic 1: Text Blob Detection (Single or Multi-column phantom)
+        # Often stream mode splits text into 2-3 columns based on spaces.
+        is_text_blob = False
+        
+        if cols <= 3:
+            # Check content
+            src = t.get("pandas_df_raw") or t.get("pandas_df") or []
+            total_words = 0
+            total_digits = 0
+            total_chars = 0
+            row_count = 0
+            
+            # Flatten to analyze content
+            all_text = []
+            if isinstance(src, list):
+                for r in src:
+                    vals = r.values() if isinstance(r, dict) else r
+                    # Join cols with space to reconstruct sentence
+                    line_parts = [str(v).strip() for v in vals if str(v).strip()]
+                    line = " ".join(line_parts)
+                    if line:
+                        all_text.append(line)
+                        words = line.split()
+                        total_words += len(words)
+                        total_digits += sum(c.isdigit() for c in line)
+                        total_chars += len(line)
+                        row_count += 1
+            
+            avg_words = total_words / max(1, row_count)
+            digit_ratio = total_digits / max(1, total_chars)
+            
+            # Relaxed Criteria:
+            # - Avg words > 5.0 (keeps verbose data tables like Description cols)
+            # - Digit ratio < 0.2 (rejects data tables)
+            # - Row count > 1 (single rows handled by other heuristic, but fine here too)
+            if avg_words > 5.0 and digit_ratio < 0.2:
+                is_text_blob = True
+                
+        if is_text_blob:
+            logger.info(f"Demoting text-heavy table idx={t.get('table_index')} page={t.get('page_number')} (cols={cols}, avg_words={avg_words:.1f})")
+            try:
+                p = int(t.get("page_index") if t.get("page_index") is not None else int(t.get("page_number", 1)) - 1)
+            except Exception:
+                p = 0
+            
+            # Join with spaces or newlines?
+            # Camelot row-splitting usually implies newlines.
+            full_text = "\n".join(all_text)
+            
+            demoted.append({
+                "page_idx": p,
+                "bbox": t.get("bbox") or [],
+                "text": full_text,
+                "reason": "text_heavy_lattice_table"
+            })
+        else:
+            keep.append(t)
+            
+    result["tables"] = keep
+    result["demoted_text_blocks"] = demoted
+
 __all__ = [
     "is_header_row_table",
     "stitch_headers",
     "detect_table_caption",
     "demote_table_headers_to_text",
     "demote_sentence_like_single_row_tables",
+    "demote_text_heavy_lattice_tables",
     "coalesce_repeated_header_rows",
 ]
 

@@ -1,0 +1,211 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Mimic Report: source_mimic</title>
+    <style>
+        body { font-family: sans-serif; margin: 0; padding: 0; display: flex; height: 100vh; overflow: hidden; }
+        .sidebar { width: 250px; background: #f4f4f4; border-right: 1px solid #ddd; padding: 20px; overflow-y: auto; }
+        .main { flex: 1; display: flex; flex-direction: column; }
+        .header { padding: 10px 20px; background: #333; color: white; display: flex; justify-content: space-between; align-items: center; }
+        .toolbar { padding: 10px; background: #eee; border-bottom: 1px solid #ddd; }
+        .content { flex: 1; display: flex; overflow: hidden; }
+        .panel { flex: 1; padding: 20px; overflow-y: auto; border-right: 1px solid #ddd; }
+        .panel:last-child { border-right: none; }
+        h2 { margin-top: 0; font-size: 16px; border-bottom: 2px solid #333; padding-bottom: 5px; }
+        pre { white-space: pre-wrap; font-family: monospace; background: #f9f9f9; padding: 10px; border: 1px solid #e0e0e0; }
+        .diff-add { background-color: #e6ffec; }
+        .diff-del { background-color: #ffebe9; }
+        .meta-item { margin-bottom: 10px; font-size: 14px; }
+        .meta-label { font-weight: bold; color: #555; }
+        iframe { width: 100%; height: 100%; border: none; }
+        button { padding: 5px 10px; cursor: pointer; }
+        .tab-btn { background: #ddd; border: none; padding: 8px 16px; margin-right: 2px; }
+        .tab-btn.active { background: white; font-weight: bold; }
+    </style>
+    <script>
+        function showTab(tabId) {
+            document.querySelectorAll('.tab-view').forEach(el => el.style.display = 'none');
+            document.getElementById(tabId).style.display = 'flex';
+            document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+            document.getElementById('btn-' + tabId).classList.add('active');
+        }
+    </script>
+</head>
+<body>
+    <div class="sidebar">
+        <h3>Fixture Stats</h3>
+        <div class="meta-item"><span class="meta-label">Name:</span> source_mimic</div>
+        <div class="meta-item"><span class="meta-label">PDF Size:</span> 12982 bytes</div>
+        <div class="meta-item"><span class="meta-label">MD Lines:</span> 22</div>
+        <hr>
+        <h4>Actions</h4>
+        <p><em>(Mock buttons)</em></p>
+        <button onclick="alert('Configuration editing not implemented in prototype')">Edit Config</button>
+        <button onclick="alert('Regenerating fixture...')">Regenerate</button>
+    </div>
+    
+    <div class="main">
+        <div class="header">
+            <span>Collaborative Mimic Review</span>
+            <span>Now</span>
+        </div>
+        
+        <div class="toolbar">
+            <button id="btn-view-compare" class="tab-btn active" onclick="showTab('view-compare')">Compare (Side-by-Side)</button>
+            <button id="btn-view-diff" class="tab-btn" onclick="showTab('view-diff')">Diff Report</button>
+            <button id="btn-view-spec" class="tab-btn" onclick="showTab('view-spec')">Spec & Config</button>
+        </div>
+        
+        <div id="view-compare" class="content tab-view">
+            <div class="panel">
+                <h2>Extracted Markdown (Actual)</h2>
+                <pre># Full Document Export
+
+## 1. Introduction (ID: section_0)
+
+&gt; **Summary:** The section is the cover page of the NVIDIA A100 Tensor Core GPU Architecture document, displaying the NVIDIA logo, the product title in green, and the tagline “UNPRECEDENTED ACCELERATION AT EVERY SCALE” with version V1.0.
+
+## 2. Requirements (ID: section_1)
+
+&gt; **Summary:** The system must process synthetic data (REQ-SYN-001) and disregard any false headers (REQ-SYN-002).
+
+
+### Requirement Proof Summary
+
+| ID | Type | Status | Theorem |
+| :--- | :--- | :--- | :--- |
+| **REQ-SYN-001** | FUNCTION | ❓ Pending | `coverage_missing` |
+| **REQ-SYN-002** | FUNCTION | ❓ Pending | `coverage_missing` |
+
+
+&gt; **[REQ-SYN-001] [FUNCTION]** The system shall handle synthetic data.
+
+&gt; **[REQ-SYN-002] [FUNCTION]** The system must ignore false headers.
+</pre>
+            </div>
+            <div class="panel">
+                <h2>Expected Markdown (Ground Truth)</h2>
+                <pre># 1. Introduction
+This document is a synthetic test fixture.
+
+E = mc^2 is a famous equation.
+
+### Table 1: System Data (Configured)
+| ID | Value | Description |
+|---|---|---|
+| R0 | VAL_0 | Data row 0 |
+| R1 | VAL_1 | Data row 1 |
+| R2 | VAL_2 | Data row 2 |
+| R3 | VAL_3 | Data row 3 |
+| R4 | VAL_4 | Data row 4 |
+| R5 | VAL_5 | SECTION 5 START |
+| R6 | VAL_6 | Data row 6 |
+| R7 | VAL_7 | Data row 7 |
+| R8 | VAL_8 | Data row 8 |
+| R9 | VAL_9 | Data row 9 |
+*(Table continues on next page...)*
+
+| R10 | VAL_10 | Data row 10 |
+| R11 | VAL_11 | Data row 11 |
+| R12 | VAL_12 | Data row 12 |
+| R13 | VAL_13 | Data row 13 |
+| R14 | VAL_14 | Data row 14 |
+| R15 | VAL_15 | Data row 15 |
+
+# 2. Requirements
+- **REQ-SYN-001**: The system shall handle synthetic data.
+- **REQ-SYN-002**: The system must ignore false headers.</pre>
+            </div>
+        </div>
+        
+        <div id="view-diff" class="content tab-view" style="display:none;">
+             <div class="panel">
+                <h2>Diff Output</h2>
+                <pre>--- /home/graham/workspace/experiments/extractor/tools/tasks_loop/fixtures/source_mimic/source_expected.md	2026-01-14 11:54:50.529454331 -0500
++++ /home/graham/workspace/experiments/extractor/data/results/pipeline/10_markdown_exporter/markdown_output/full_document.md	2026-01-14 11:57:51.974616406 -0500
+@@ -1,30 +1,22 @@
+-# 1. Introduction
+-This document is a synthetic test fixture.
++# Full Document Export
+ 
+-E = mc^2 is a famous equation.
++## 1. Introduction (ID: section_0)
+ 
+-### Table 1: System Data (Configured)
+-| ID | Value | Description |
+-|---|---|---|
+-| R0 | VAL_0 | Data row 0 |
+-| R1 | VAL_1 | Data row 1 |
+-| R2 | VAL_2 | Data row 2 |
+-| R3 | VAL_3 | Data row 3 |
+-| R4 | VAL_4 | Data row 4 |
+-| R5 | VAL_5 | SECTION 5 START |
+-| R6 | VAL_6 | Data row 6 |
+-| R7 | VAL_7 | Data row 7 |
+-| R8 | VAL_8 | Data row 8 |
+-| R9 | VAL_9 | Data row 9 |
+-*(Table continues on next page...)*
+-
+-| R10 | VAL_10 | Data row 10 |
+-| R11 | VAL_11 | Data row 11 |
+-| R12 | VAL_12 | Data row 12 |
+-| R13 | VAL_13 | Data row 13 |
+-| R14 | VAL_14 | Data row 14 |
+-| R15 | VAL_15 | Data row 15 |
+-
+-# 2. Requirements
+-- **REQ-SYN-001**: The system shall handle synthetic data.
+-- **REQ-SYN-002**: The system must ignore false headers.
+\ No newline at end of file
++&gt; **Summary:** The section is the cover page of the NVIDIA A100 Tensor Core GPU Architecture document, displaying the NVIDIA logo, the product title in green, and the tagline “UNPRECEDENTED ACCELERATION AT EVERY SCALE” with version V1.0.
++
++## 2. Requirements (ID: section_1)
++
++&gt; **Summary:** The system must process synthetic data (REQ-SYN-001) and disregard any false headers (REQ-SYN-002).
++
++
++### Requirement Proof Summary
++
++| ID | Type | Status | Theorem |
++| :--- | :--- | :--- | :--- |
++| **REQ-SYN-001** | FUNCTION | ❓ Pending | `coverage_missing` |
++| **REQ-SYN-002** | FUNCTION | ❓ Pending | `coverage_missing` |
++
++
++&gt; **[REQ-SYN-001] [FUNCTION]** The system shall handle synthetic data.
++
++&gt; **[REQ-SYN-002] [FUNCTION]** The system must ignore false headers.
+</pre>
+            </div>
+        </div>
+
+        <div id="view-spec" class="content tab-view" style="display:none;">
+             <div class="panel">
+                <h2>SPEC.md</h2>
+                <pre>---
+fixture: source_mimic
+pdf: tools/tasks_loop/fixtures/source_mimic/source.pdf
+steps:
+  s10:
+    name: Markdown Exporter
+    expected:
+      not_contains:
+      - SECTION 5 START
+  s05:
+    name: Table Extractor
+    expected:
+      table_count: 1
+  s08:
+    name: Requirement Extractor
+    expected:
+      requirement_count: 2
+---
+# Auto-generated Spec from Source Mimic Ground Truth
+# This ensures the Contract matches the Twin Intent.
+</pre>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

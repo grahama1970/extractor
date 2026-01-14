@@ -4,7 +4,8 @@
 This script gathers the current git snapshot, auto-selects the Codex session
 associated with the repo (by scanning ~/.codex/sessions for transcripts that
 mention the repo root), and writes CONTEXT.md in the repo root using a single
-Codex CLI call.
+Codex CLI call. The session id is used for metadata only; newer Codex CLIs no
+longer accept a --session flag.
 
 Usage:
     scripts/context.py [--session SESSION_ID]
@@ -12,7 +13,10 @@ Usage:
 Environment variables:
     CODEX_CLI        CLI executable to invoke (default: "codex").
     CODEX_HOME       Base directory for Codex data (default: "$HOME/.codex").
-    CODEX_SESSION_ID Overrides auto-discovered session ID.
+    CODEX_SESSION_ID Overrides auto-discovered session ID (metadata only).
+    CODEX_CONTEXT_TIMEOUT_SECONDS  Timeout for codex exec (default: 300; 0 disables).
+    CODEX_CONTEXT_LOG_DIR          Directory for codex exec logs (default: "<repo>/logs").
+    CODEX_CONTEXT_DISABLE          Skip context generation when set (1/true/yes).
 """
 
 from __future__ import annotations
@@ -20,6 +24,7 @@ from __future__ import annotations
 import argparse
 import os
 import subprocess
+from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -136,21 +141,74 @@ _Last updated: {timestamp} · Branch: {snapshot['branch']} · Session: {session_
 """
 
 
+def tail_file(path: Path, max_lines: int = 80) -> str:
+    try:
+        with path.open("r", encoding="utf-8", errors="ignore") as handle:
+            tail = deque(handle, maxlen=max_lines)
+        return "".join(tail).rstrip()
+    except OSError:
+        return ""
+
+
 def call_codex(prompt: str, session_id: str, output_path: Path) -> None:
     codex_cli = os.environ.get("CODEX_CLI", "codex")
-    result = subprocess.run(
-        [codex_cli, "--session", session_id, "-p", prompt, "--output-format", "markdown"],
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(
-            f"Codex CLI failed (exit {result.returncode}):\n{result.stderr.strip()}"
+    out_dir = output_path.parent
+    out_dir.mkdir(parents=True, exist_ok=True)
+    logs_dir = Path(os.environ.get("CODEX_CONTEXT_LOG_DIR", out_dir / "logs"))
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    tmp_path = out_dir / f".context_{session_id}.md"
+    log_stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    log_path = logs_dir / f"context_codex_{session_id}_{log_stamp}.log"
+    timeout_s = int(os.environ.get("CODEX_CONTEXT_TIMEOUT_SECONDS", "300"))
+    cmd = [
+        codex_cli,
+        "exec",
+        "--sandbox",
+        "read-only",
+        "--output-last-message",
+        str(tmp_path),
+    ]
+    with log_path.open("w", encoding="utf-8") as log_file:
+        log_file.write(f"started_at={datetime.now(timezone.utc).isoformat()}\n")
+        log_file.write(f"cmd={' '.join(cmd)}\n")
+        log_file.write(f"timeout_seconds={timeout_s}\n")
+        log_file.flush()
+        proc = subprocess.Popen(
+            cmd,
+            stdin=subprocess.PIPE,
+            stdout=log_file,
+            stderr=log_file,
+            text=True,
         )
-    output_path.write_text(result.stdout)
+        try:
+            proc.communicate(input=prompt, timeout=timeout_s if timeout_s > 0 else None)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.communicate()
+            raise RuntimeError(
+                f"Codex CLI timed out after {timeout_s}s. Log: {log_path}"
+            )
+    if proc.returncode != 0:
+        tail = tail_file(log_path)
+        msg = f"Codex CLI failed (exit {proc.returncode}). Log: {log_path}"
+        if tail:
+            msg = f"{msg}\n--- log tail ---\n{tail}"
+        raise RuntimeError(msg)
+    if not tmp_path.exists():
+        raise RuntimeError(
+            f"Codex CLI did not produce output (missing output file). Log: {log_path}"
+        )
+    output_path.write_text(tmp_path.read_text(encoding="utf-8"), encoding="utf-8")
+    try:
+        tmp_path.unlink()
+    except OSError:
+        pass
 
 
 def main() -> None:
+    if os.environ.get("CODEX_CONTEXT_DISABLE", "").lower() in {"1", "true", "yes", "y"}:
+        print("Skipping CONTEXT.md generation (CODEX_CONTEXT_DISABLE=1).")
+        return
     parser = argparse.ArgumentParser(description="Generate CONTEXT.md via Codex CLI")
     parser.add_argument("--session", dest="session", help="Override session id", default=None)
     args = parser.parse_args()

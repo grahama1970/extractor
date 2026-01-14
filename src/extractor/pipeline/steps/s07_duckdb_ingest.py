@@ -43,6 +43,33 @@ def load_json(path: Path) -> Dict[str, Any]:
         logger.error(f"Failed to load JSON {path}: {e}")
         return {}
 
+def calculate_sort_order(page: int, x0: float, y0: float, page_width: float = 612.0) -> int:
+    """
+    Calculate sort order with column detection.
+    
+    For multi-column PDFs, this detects columns using x-coordinate bucketing
+    and sorts column-by-column (not strictly top-to-bottom).
+    
+    Args:
+        page: Page number (0-indexed)
+        x0: Left x-coordinate of bbox
+        y0: Top y-coordinate of bbox (PyMuPDF coords: y=0 at bottom)
+        page_width: PDF page width in points (default 612 = US Letter)
+    
+    Returns:
+        Integer sort order for reading sequence
+    """
+    # Simple heuristic: if x0 is in the right half, it's column 2
+    # This works for standard 2-column layouts where each column is ~50% width
+    # For more complex layouts, we'd need to analyze the full page's x0 distribution
+    mid_page = page_width / 2
+    column = 0 if x0 < mid_page else 1
+    
+    # Sort by: page → column → y-coordinate
+    # Page gets 1M range, column gets 100k range, y0 gets remaining precision
+    return int(page * 1000000 + column * 100000 + y0)
+
+
 def ingest_sections_and_blocks(con: duckdb.DuckDBPyConnection, sections_json: Path):
     """
     Ingests Sections and their nested Blocks from Stage 04 output.
@@ -182,7 +209,7 @@ def ingest_tables(con: duckdb.DuckDBPyConnection, tables_json: Path):
 
         html_data = clean_text(table.get("html", ""))
         section_id = None
-        sort_order = int(page * 10000 + y0)
+        sort_order = calculate_sort_order(page, x0, y0)
         
         # Capture metadata for summarizer context
         llm_title = table.get("llm_title") or table.get("ai_title") or table.get("title")
@@ -224,7 +251,7 @@ def ingest_figures(con: duckdb.DuckDBPyConnection, figures_json: Path):
         x0, y0, x1, y1 = bbox if bbox and len(bbox)==4 else [0,0,0,0]
         image_path = fig.get("image_path", "")
         section_id = None # Initially NULL
-        sort_order = int(page * 10000 + y0)  # Reading order
+        sort_order = calculate_sort_order(page, x0, y0)
         
         # Capture metadata for summarizer context
         llm_title = fig.get("llm_title") or fig.get("title")
@@ -236,6 +263,33 @@ def ingest_figures(con: duckdb.DuckDBPyConnection, figures_json: Path):
         # Sort by reading order before inserting
         rows.sort(key=lambda r: r[8])  # sort_order is at index 8
         con.executemany("INSERT OR REPLACE INTO figures (id, page, x0, y0, x1, y1, image_path, section_id, sort_order, llm_title, llm_description) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
+
+def ingest_annotations(con: duckdb.DuckDBPyConnection, annotations_json: Path):
+    path = annotations_json
+    data = load_json(path)
+    if not data:
+        return
+        
+    annots_list = data.get("annotations", [])
+    logger.info(f"Ingesting {len(annots_list)} annotations from {path.name}")
+    
+    rows = []
+    for a in annots_list:
+        a_id = a.get("id")
+        page = a.get("page", 0)
+        a_type = a.get("type", "FreeText")
+        # Ensure rect is valid
+        rect = a.get("original_rect") or [0,0,0,0]
+        x0, y0, x1, y1 = rect if isinstance(rect, list) and len(rect) == 4 else [0,0,0,0]
+        
+        human_note = a.get("human_note", "")
+        image_path = a.get("image_path", "")
+        provenance = a.get("provenance", "")
+        
+        rows.append((a_id, page, a_type, x0, y0, x1, y1, human_note, image_path, provenance))
+        
+    if rows:
+        con.executemany("INSERT OR REPLACE INTO annotations (id, page, type, x0, y0, x1, y1, human_note, image_path, provenance) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
 
 def assign_assets_to_sections(con: duckdb.DuckDBPyConnection):
     """
@@ -429,145 +483,6 @@ def merge_page_break_tables(con: duckdb.DuckDBPyConnection, pipeline_dir: Path):
         logger.info(f"Merged {merge_count} page-break split table(s)")
 
 
-def merge_contiguous_blocks(con: duckdb.DuckDBPyConnection):
-    """
-    Post-processing: Merge contiguous text blocks per section, stopping at figures/tables.
-    
-    Creates a 'merged_content' table with entries in reading order:
-    - type: 'text', 'table', 'figure'
-    - content: merged text (for blocks) or ID reference (for assets)
-    - sort_order: for reading sequence
-    """
-    import nltk
-    try:
-        nltk.data.find('tokenizers/punkt')
-    except LookupError:
-        nltk.download('punkt', quiet=True)
-    from nltk.tokenize import sent_tokenize
-    
-    logger.info("Merging contiguous text blocks...")
-    
-    # Create merged_content table
-    con.execute("""
-        CREATE TABLE IF NOT EXISTS merged_content (
-            id VARCHAR PRIMARY KEY,
-            section_id VARCHAR,
-            page INTEGER,
-            type VARCHAR,  -- 'text', 'table', 'figure'
-            content VARCHAR,
-            asset_id VARCHAR,  -- Reference to tables/figures.id (NULL for text)
-            sort_order INTEGER
-        )
-    """)
-    con.execute("DELETE FROM merged_content")  # Clear for re-run
-    
-    # Get all sections
-    sections = con.execute("SELECT id FROM sections").fetchall()
-    
-    merged_rows = []
-    content_id = 0
-    
-    for (section_id,) in sections:
-        # Get all objects for section, union'd and sorted
-        # Include block type to detect section headers
-        query = """
-        SELECT 'block' as obj_type, id, page, y0, text as content, type as block_type, page * 10000 + y0 as sort_order
-        FROM v_clean_blocks 
-        WHERE section_id = ? AND text IS NOT NULL AND TRIM(text) != ''
-        UNION ALL
-        SELECT 'table' as obj_type, id, page, y0, csv_data as content, 'table' as block_type, sort_order
-        FROM tables WHERE section_id = ?
-        UNION ALL
-        SELECT 'figure' as obj_type, id, page, y0, llm_description as content, 'figure' as block_type, sort_order
-        FROM figures WHERE section_id = ?
-        ORDER BY sort_order
-        """
-        objects = con.execute(query, [section_id, section_id, section_id]).fetchall()
-        
-        current_text_buffer = []
-        current_page = None
-        current_sort_base = 0
-        
-        def flush_text_buffer():
-            nonlocal content_id, current_text_buffer, current_page, current_sort_base
-            if current_text_buffer:
-                merged_text = " ".join(current_text_buffer)
-                # Ensure we don't cut sentences - validate with sent_tokenize
-                sentences = sent_tokenize(merged_text)
-                if sentences:
-                    merged_text = " ".join(sentences)  # Clean up
-                content_id += 1
-                merged_rows.append((
-                    f"mc_{content_id}",
-                    section_id,
-                    current_page,
-                    "text",
-                    merged_text.strip(),
-                    None,
-                    current_sort_base
-                ))
-                current_text_buffer = []
-        
-        for obj in objects:
-            obj_type, obj_id, page, y0, content, block_type, sort_order = obj
-            
-            if obj_type == 'block':
-                # Check if this is a section header
-                if block_type == 'SectionHeader':
-                    # Flush any pending text, then add section header as its own entry
-                    flush_text_buffer()
-                    content_id += 1
-                    merged_rows.append((
-                        f"mc_{content_id}",
-                        section_id,
-                        page,
-                        "section",  # Type for section headers
-                        content.strip(),
-                        None,
-                        sort_order
-                    ))
-                    current_page = page
-                    current_sort_base = sort_order + 1
-                else:
-                    # Regular text block
-                    if current_page is None:
-                        current_page = page
-                        current_sort_base = sort_order
-                    elif page != current_page:
-                        # Page changed - flush
-                        flush_text_buffer()
-                        current_page = page
-                        current_sort_base = sort_order
-                    
-                    current_text_buffer.append(content.strip())
-            else:
-                # Asset (table/figure) - flush text buffer first
-                flush_text_buffer()
-                content_id += 1
-                merged_rows.append((
-                    f"mc_{content_id}",
-                    section_id,
-                    page,
-                    obj_type,
-                    content,
-                    obj_id,
-                    sort_order
-                ))
-                current_page = page
-                current_sort_base = sort_order + 1  # Next text starts after asset
-        
-        # Flush any remaining text
-        flush_text_buffer()
-    
-    if merged_rows:
-        con.executemany(
-            "INSERT INTO merged_content VALUES (?, ?, ?, ?, ?, ?, ?)",
-            merged_rows
-        )
-    
-    count = con.execute("SELECT count(*) FROM merged_content").fetchone()[0]
-    text_count = con.execute("SELECT count(*) FROM merged_content WHERE type='text'").fetchone()[0]
-    logger.info(f"Created {count} merged content entries ({text_count} text blocks)")
 
 
 def run_assemble_corpus(
@@ -608,6 +523,8 @@ def run_assemble_corpus(
             ingest_tables(con, tables_json)
         if figures_json:
             ingest_figures(con, figures_json)
+        if annotations_json:
+            ingest_annotations(con, annotations_json)
         
         assign_assets_to_sections(con)
         con.commit()
@@ -626,7 +543,8 @@ def run_assemble_corpus(
         suppress_overlapping_blocks(con, tables_json)
     
     # 4. Post-processing: Merge contiguous text blocks
-    merge_contiguous_blocks(con)
+    # MOVED TO S07b (Process Text Cleaner)
+    # merge_contiguous_blocks(con)
         
     # 5. Validation / Stats
     try:
@@ -714,19 +632,10 @@ if __name__ == "__main__":
     
     parser = argparse.ArgumentParser(description="Stage 07: DuckDB Ingest")
     parser.add_argument("--pipeline-dir", type=Path, required=True)
-    parser.add_argument("--verify-only", action="store_true", help="Only verify existing results without running")
     args = parser.parse_args()
     
     pipeline_dir = args.pipeline_dir
     db_path = pipeline_dir / "pipeline.duckdb"
-    
-    if args.verify_only:
-        if not db_path.exists():
-             print("❌ Pipeline DB missing")
-             sys.exit(1)
-        # TODO: Add deeper verification (schema check)
-        print("✅ Ralph verify-only passed.")
-        sys.exit(0)
     
     # Inputs
     sections_json = pipeline_dir / "04_section_builder/json_output/04_sections.json"

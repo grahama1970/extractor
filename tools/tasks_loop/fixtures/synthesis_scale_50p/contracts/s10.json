@@ -1,0 +1,14 @@
+{
+  "step": "s10",
+  "fixture": "synthesis_scale_50p",
+  "name": "Markdown Exporter (Stability)",
+  "output": "10_markdown_exporter/markdown_output/full_document.md",
+  "format": [],
+  "expected": {
+    "file_exists": true,
+    "contains": [
+      "Page 50"
+    ]
+  },
+  "sanity": []
+}

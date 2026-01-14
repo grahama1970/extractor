@@ -21,11 +21,17 @@ except ImportError:
 
 STEP_NAME = "05_table_extractor"
 
+# Padding ratios for table image extraction
+VERTICAL_PADDING_RATIO = float(os.getenv("TABLE_VERTICAL_PADDING_RATIO", 0.30))
+HORIZONTAL_PADDING_RATIO = float(os.getenv("TABLE_HORIZONTAL_PADDING_RATIO", 0.07))
+PYMUPDF_DPI = int(os.getenv("TABLE_EXTRACTION_DPI", 200))
+CAMELOT_LINE_SCALE_DEFAULT = int(os.getenv("CAMELOT_LINE_SCALE_DEFAULT", 15))
+
 # Camelot extraction strategies
 CAMELOT_STRATEGIES = {
     "lattice_default": {
         "flavor": "lattice",
-        "params": {"process_background": False, "line_scale": 15},
+        "params": {"process_background": False, "line_scale": CAMELOT_LINE_SCALE_DEFAULT},
     },
     "lattice_strong": {
         "flavor": "lattice",
@@ -40,11 +46,6 @@ CAMELOT_STRATEGIES = {
         "params": {"edge_tol": 50},
     },
 }
-
-# Padding ratios for table image extraction
-VERTICAL_PADDING_RATIO = float(os.getenv("TABLE_VERTICAL_PADDING_RATIO", 0.30))
-HORIZONTAL_PADDING_RATIO = float(os.getenv("TABLE_HORIZONTAL_PADDING_RATIO", 0.07))
-PYMUPDF_DPI = int(os.getenv("TABLE_EXTRACTION_DPI", 200))
 
 
 def try_camelot_strategy(

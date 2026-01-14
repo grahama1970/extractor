@@ -1,0 +1,11 @@
+{
+  "step": "s09",
+  "fixture": "BHT_CV32A65X_test",
+  "name": "Auto-Generated S09",
+  "output": "",
+  "format": [],
+  "expected": {
+    "pass_through": true
+  },
+  "sanity": []
+}

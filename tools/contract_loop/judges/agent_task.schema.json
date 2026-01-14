@@ -1,0 +1,10 @@
+{
+  "type": "object",
+  "properties": {
+    "ok": { "type": "boolean" },
+    "summary": { "type": "string" },
+    "artifacts": { "type": "array", "items": { "type": "string" } }
+  },
+  "required": ["ok", "summary", "artifacts"],
+  "additionalProperties": false
+}

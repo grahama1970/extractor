@@ -83,6 +83,70 @@ def _filter_simulated_sections(src: Path, results_root: Path) -> Path:
         return src
 
 
+
+def clean_step_artifacts(step_name: str, results_root: Path) -> None:
+    """Enforce pipeline hygiene by nuking downstream artifacts before a step runs.
+    
+    This ensures that if a step fails or is skipped, we don't accidentally
+    use stale data from a previous run.
+    """
+    import shutil
+    
+    # Map of Step -> Artifacts to Delete
+    # Note: We delete artifacts that THIS step produces (to ensure fresh write)
+    # AND artifacts of IMMEDIATE downstream steps (to break the chain).
+    
+    # Paths
+    s04_out = results_root / "04_section_builder/json_output/04_sections.json"
+    s05_out = results_root / "05_table_extractor/json_output/05_tables.json"
+    s05b_out = results_root / "05_table_extractor/json_output/05b_table_descriptions.json"
+    s05c_out = results_root / "05_table_extractor/json_output/05c_tables.json"
+    s06_out = results_root / "06_figure_extractor/json_output/06_figures.json"
+    s08_out = results_root / "08_extract_requirements/json_output/08_requirements.json"
+    s08b_out = results_root / "08_lean4_theorem_prover"
+    s09_out = results_root / "09_llm_enrichment/json_output/09_enriched.json"
+    
+    to_delete = []
+    
+    if "04_section_builder" in step_name:
+        to_delete.extend([s04_out, s05_out, s05b_out, s05c_out, s06_out, s08_out, s08b_out, s09_out])
+        
+    elif "05_table_extractor" in step_name:
+        # Standard S05 runs before S05b/S05c, so nuke them
+        to_delete.extend([s05_out, s05b_out, s05c_out])
+        
+    elif "05b_table_describer" in step_name:
+        to_delete.extend([s05b_out, s05c_out])
+        
+    elif "05c_table_merger" in step_name:
+        to_delete.extend([s05c_out])
+        
+    elif "06_figure_extractor" in step_name:
+        to_delete.extend([s06_out])
+        
+    elif "08_extract_requirements" in step_name:
+        to_delete.extend([s08_out, s08b_out, s09_out])
+    
+    elif "08b_lean4_theorem_prover" in step_name:
+        to_delete.extend([s08b_out])
+        
+    elif "09_llm_enrichment" in step_name:
+        to_delete.extend([s09_out])
+
+    # S07 and S10 handle their own DB/File cleaning internally/explicitly
+        
+    for p in to_delete:
+        if p.exists():
+            try:
+                if p.is_dir():
+                    shutil.rmtree(p)
+                else:
+                    p.unlink()
+                logger.info(f"Hygiene: Deleted stale artifact {p.name}")
+            except Exception as e:
+                logger.warning(f"Hygiene: Failed to delete {p.name}: {e}")
+
+
 def _step(
     name: str,
     fn,
@@ -94,7 +158,24 @@ def _step(
     **fkw,
 ) -> Optional[Path]:
     logger.info(f"{name}: start")
+    
+    # 1. Enforce Hygiene (Nuke Artifacts)
+    # We infer results_root from fkw if available (usually 'output_dir')
+    # pipeline/steps usually take 'output_dir' as 2nd arg or kwarg.
+    # Here run_pipeline passes `results_dir` (Path) as one of *fargs.
+    # Typically fargs[1] is output_dir based on main() calls below.
+    # Let's try to find a Path argument that looks like results dir.
+    results_dir = None
+    for arg in fargs:
+        if isinstance(arg, Path) and "results" in str(arg):
+             results_dir = arg
+             break
+    
+    if results_dir:
+        clean_step_artifacts(name, results_dir)
+        
     sink_id = None
+
     stage_dir: Optional[Path] = None
     if log_dir_base:
         try:
@@ -211,9 +292,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     p.add_argument("--extract-requirements", action="store_true", help="Run 07_requirements_miner after reflow")
     p.add_argument("--stage-timeout", type=int, default=int(__import__('os').getenv('PIPELINE_STAGE_TIMEOUT','600')), help="Per-stage wall timeout in seconds (fail-fast)")
     p.add_argument(
-        "--prove-requirements",
+        "--skip-proving",
         action="store_true",
-        help="Run 08_lean4_theorem_prover (may be slow); implies --extract-requirements",
+        help="Skip 08_lean4_theorem_prover (enabled by default)",
     )
     p.add_argument(
         "--annotate-pdf",
@@ -256,6 +337,10 @@ def main(argv: Optional[list[str]] = None) -> int:
             return 1
         files_to_process = [input_path]
 
+    # Pre-flight logic: Derive 'prove_requirements' from flags
+    # Default is TRUE, unless skipped or in offline smoke mode
+    args.prove_requirements = not args.skip_proving
+
     # Pre-flight checks (dependency/env)
     if args.continue_on_error:
         args.stop_on_fail = False
@@ -279,7 +364,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         args.skip_fig_descriptions = True
         args.skip_export = True
         args.extract_requirements = False
-        args.prove_requirements = False
+        args.prove_requirements = False # Force disable in smoke tests
+        args.skip_proving = True        # Consistency
         args.skip_llm03 = True
         args.skip_tables05 = True
         args.skip_reqs07 = True
@@ -370,13 +456,28 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     # Run processing
     # Sequential for now to ensure stability before threading
-    for i, pdf_file in enumerate(files_to_process):
-         logger.info(f"[{i+1}/{len(files_to_process)}] Starting: {pdf_file.name}")
-         if not process_file_safe(pdf_file):
-             failed_files.append(str(pdf_file))
-             if args.stop_on_fail and not args.continue_on_error:
-                 logger.error("Stopping due to failure (use --continue-on-error to ignore).")
-                 return 1
+    from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn, TimeRemainingColumn
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TaskProgressColumn(),
+        TimeRemainingColumn(),
+        transient=True,
+    ) as progress:
+        task = progress.add_task("[green]Processing files...", total=len(files_to_process))
+        
+        for i, pdf_file in enumerate(files_to_process):
+             progress.update(task, description=f"[green]Processing {pdf_file.name} ({i+1}/{len(files_to_process)})")
+             logger.info(f"[{i+1}/{len(files_to_process)}] Starting: {pdf_file.name}")
+             
+             if not process_file_safe(pdf_file):
+                 failed_files.append(str(pdf_file))
+                 if args.stop_on_fail and not args.continue_on_error:
+                     logger.error("Stopping due to failure (use --continue-on-error to ignore).")
+                     return 1
+             progress.advance(task)
 
     if failed_files:
         logger.error(f"Run completed with {len(failed_files)} failures: {failed_files}")
@@ -390,13 +491,14 @@ def _write_artifacts_index(out: Path, stage_dir: Path) -> None:
     """Helper to write artifact index for a stage directory."""
     try:
         json_dir = stage_dir / "json_output"
-        img_dir = stage_dir / "image_output"
+        img_dir = stage_dir / "visual_output"
+        legacy_img_dir = stage_dir / "image_output"
         vis_dir = stage_dir / "visual_output"
         txt_dir = stage_dir / "text_output"
         idx = {
             "images": [
                 *([str(p.relative_to(out)) for p in (img_dir.rglob("*"))] if img_dir.exists() else []),
-                *([str(p.relative_to(out)) for p in (vis_dir.rglob("*.png"))] if vis_dir.exists() else []),
+                *([str(p.relative_to(out)) for p in (legacy_img_dir.rglob("*"))] if legacy_img_dir.exists() else []),
             ],
             "json": [str(p.relative_to(out)) for p in (json_dir.glob("*.json"))] if json_dir.exists() else [],
             "text": [str(p.relative_to(out)) for p in (txt_dir.rglob("*.txt"))] if txt_dir.exists() else [],
@@ -462,16 +564,17 @@ def _run_pdf_strategy(pdf: Path, out: Path, args: argparse.Namespace) -> int:
         s01_annotation_processor as s01,
         s02_marker_extractor as s02,
         s03_suspicious_headers as s03,
-        s03b_header_verifier as s03b,
         s04_section_builder as s04,
         s04a_layout_audit as s04a,
         s05_table_extractor as s05,
+        s05b_table_describer as s05b,
+        s05c_table_merger as s05c,
         s06_figure_extractor as s06,
         s06b_figure_describer as s06b,
-        s07_assemble_corpus as s07,
+        s07_duckdb_ingest as s07,
         s08_extract_requirements as s08,
-        s09_llm_enrichment as s09_enrich,
         s09_section_summarizer as s09_summ,
+        s10_markdown_exporter as s10_export,
         s14_report_generator as s14,
     )
     # Lazy import for optional DB steps to avoid hard dependency on python-arango if not needed
@@ -579,33 +682,6 @@ def _run_pdf_strategy(pdf: Path, out: Path, args: argparse.Namespace) -> int:
         counts={"candidates": vcount} if isinstance(vcount, int) else None,
     )
 
-    # 03b (Header Verifier - Batch LLM)
-    if not args.skip_llm03:
-        a03b = _step(
-            "03b_header_verifier",
-            s03b.run,
-            out / "03_suspicious_headers", # Input: contains 03_markup.json
-            out, # Output root
-            stop_on_fail=args.stop_on_fail,
-            timeout_sec=args.stage_timeout,
-            log_dir_base=out,
-            on_timing=lambda n, dt: stage_latencies.update({n: dt}),
-        )
-        if a03b:
-            results["03b"] = a03b
-            # Update a03 pointer for downstream consumption (04 etc.)
-            a03 = a03b
-            _write_artifacts_index(out, (out / "03b_header_verifier"))
-            manifest.record_stage(
-                "03b_header_verifier",
-                "Completed",
-                {"json": str(a03b.relative_to(out)), "latency_ms": stage_latencies.get("03b_header_verifier")}
-            )
-        elif args.stop_on_fail:
-             return 1
-    else:
-        logger.info("03b_header_verifier: skipped via --skip-llm03")
-
     # 04 (hard-require Stage 03 outputs)
     try:
         _a03_obj = json.loads(a03.read_text())
@@ -696,7 +772,36 @@ def _run_pdf_strategy(pdf: Path, out: Path, args: argparse.Namespace) -> int:
         counts={"tables": tcount} if isinstance(tcount, int) else None,
     )
 
-    # (Removed duplicate Stage 05 invocation)
+    # 05b (VLM Descriptions)
+    a05b = _step(
+        "05b_table_describer",
+        s05b.run,
+        out / "05_table_extractor", # Input dir
+        out, # Output dir
+        skip_descriptions=bool(args.summary_only) or bool(args.skip_tables05),
+        stop_on_fail=args.stop_on_fail,
+        timeout_sec=args.stage_timeout,
+        log_dir_base=out,
+        on_timing=lambda n, dt: stage_latencies.update({n: dt}),
+    )
+    if not a05b and args.stop_on_fail and not args.skip_tables05:
+        return 1
+    results["05b"] = a05b
+
+    # 05c (Table Merger)
+    a05c = _step(
+        "05c_table_merger",
+        s05c.run,
+        out, # Input dir (searches for 05b or 05)
+        out, # Output dir
+        stop_on_fail=args.stop_on_fail,
+        timeout_sec=args.stage_timeout,
+        log_dir_base=out,
+        on_timing=lambda n, dt: stage_latencies.update({n: dt})
+    )
+    if not a05c and args.stop_on_fail and not args.skip_tables05:
+        return 1
+    results["05c"] = a05c
 
     # 06
     a06 = _step(
@@ -749,9 +854,6 @@ def _run_pdf_strategy(pdf: Path, out: Path, args: argparse.Namespace) -> int:
             "Completed",
             {"json": str(a06b.relative_to(out)), "latency_ms": stage_latencies.get("06b_figure_describer")},
          )
-         # NOTE: We do NOT overwrite a06 pointer here because s07 is hardcoded to read 06.
-         # Instead, we rely on s06b updating 07 via side-channel or s07 updating to read 06b.
-         # Given s06b writes to 06b_figures.json, we should likely update s07 to check for it.
 
     # Common Downstream Stages (S07-S14)
     return _run_common_stages(out, args, manifest, results, stage_latencies, served_model)
@@ -769,18 +871,23 @@ def _run_common_stages(
     
     # Lazy imports for shared stages
     from extractor.pipeline.steps import (
-        s07_assemble_corpus as s07,
+        s07_duckdb_ingest as s07,
         s08_extract_requirements as s08,
-        s09_llm_enrichment as s09_enrich,
         s09_section_summarizer as s09_summ,
         s14_report_generator as s14,
+        s10_markdown_exporter as s10_export,
     )
 
     # 07 (Assembler)
-    # 07 (Assembler)
     db_path = out / "pipeline.duckdb"
     def _run_07(ip: Path, op: Path) -> str:
-        s07.run_assemble_corpus(op, db_path)
+        s07.run_assemble_corpus(
+            results_db_path=db_path,
+            sections_json=results.get("04"),
+            tables_json=results.get("05c") or results.get("05b") or results.get("05"), # Prefer processed tables
+            figures_json=results.get("06b") or results.get("06"), # Prefer described figures
+            annotations_json=results.get("01")
+        )
         return str(db_path)
 
     a07 = _step(
@@ -834,26 +941,34 @@ def _run_common_stages(
             counts={"requirements": int(str(a08)) if a08 and str(a08).isdigit() else 0}
         )
 
-    # 09a (LLM Enrichment) - Backfill metadata for tables/figures
-    if args.summary_only:
-        logger.info("09_llm_enrichment: skipped via --summary-only")
-    else:
-        def _run_09_enrich(ip: Path, op: Path) -> Path:
-            s09_enrich.run_stage_09_enrichment(op)
-            return op / "pipeline.duckdb"
-            
-        a09_enrich = _step(
-            "09_llm_enrichment",
-            _run_09_enrich,
-            out,
-            out,
-            stop_on_fail=args.stop_on_fail,
-            timeout_sec=args.stage_timeout,
-            log_dir_base=out,
-            on_timing=lambda n, dt: stage_latencies.update({n: dt}),
-        )
-        if a09_enrich:
-             manifest.record_stage("09_llm_enrichment", "Completed")
+        # 08b (Lean4 Theorem Prover) - DISABLED (Aspirational/Experimental)
+        # def _run_08b(ip: Path, op: Path) -> str:
+        #     from extractor.pipeline.steps.s08_lean4_theorem_prover import prove_requirements
+        #     asyncio.run(prove_requirements(db_path, op / "08_lean4_theorem_prover"))
+        #     # Fetch proof count for manifest
+        #     import duckdb
+        #     con = duckdb.connect(str(db_path), read_only=True)
+        #     res = con.execute("SELECT count(*) FROM lean4_proofs").fetchone()
+        #     con.close()
+        #     return str(res[0]) if res else "0"
+
+        # a08b = _step(
+        #     "08b_lean4_theorem_prover",
+        #     _run_08b,
+        #     out,
+        #     out,
+        #     stop_on_fail=False,  # Don't block pipeline if proving fails
+        #     timeout_sec=args.stage_timeout * 3,  # Proofs take longer
+        #     log_dir_base=out,
+        #     on_timing=lambda n, dt: stage_latencies.update({n: dt}),
+        # )
+        # if a08b:
+        #     manifest.record_stage(
+        #         "08b_lean4_theorem_prover",
+        #         "Completed",
+        #         {"latency_ms": stage_latencies.get("08b_lean4_theorem_prover")},
+        #         counts={"proofs": int(str(a08b)) if a08b and str(a08b).isdigit() else 0}
+        #     )
 
     # 09b (Section Summarizer)
     if args.summary_only:
@@ -874,15 +989,16 @@ def _run_common_stages(
             on_timing=lambda n, dt: stage_latencies.update({n: dt}),
         )
         if a09_summ:
-             manifest.record_stage("09_section_summarizer", "Completed")
+             manifest.record_stage(
+        "09_section_summarizer",
+        "Completed",
+        {"output": None, "latency_ms": stage_latencies.get("09_section_summarizer")}
+    )
 
-    # 10 (Markdown Exporter)
-    if args.summary_only:
-        logger.info("10_markdown_exporter: skipped via --summary-only")
-    else:
-        from extractor.pipeline.steps import s10_markdown_exporter as s10_export
+    # 10 (Markdown Exporter) -- Always run (deterministic, high value)
+    if True:
         # run(input_path, output_dir=None) 
-        # We pass 'out' as input_path (pipeline root)
+        # We pass 'out' as input_path (pipeline root) -> s10 finds DB there
         a10 = _step(
             "10_markdown_exporter",
             s10_export.run,
@@ -899,12 +1015,13 @@ def _run_common_stages(
                 {"file": str(a10.relative_to(out)), "latency_ms": stage_latencies.get("10_markdown_exporter")}
              )
 
-    # Legacy stages (07r-12) disabled for DuckDB Pivot.
     # 14 (Report Generator) - always run at end
+    stage_14_out = out / "14_report_generator"
     a14 = _step(
         "14_report_generator",
-        s14.run_report,
+        s14.run,
         out,
+        stage_14_out,
         stop_on_fail=False,
         timeout_sec=args.stage_timeout,
         log_dir_base=out,
@@ -928,9 +1045,6 @@ def _run_common_stages(
     
     # Close resources if needed
     try:
-         # Local import if meaningful, otherwise use global shutdown logic
-         # that was passed/available. Here we rely on global/module imports from top-level.
-         # But to be safe in a function, we re-verify.
          pass
     except Exception:
         pass

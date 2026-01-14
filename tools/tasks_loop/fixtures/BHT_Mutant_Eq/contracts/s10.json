@@ -1,0 +1,13 @@
+{
+  "step": "s10",
+  "fixture": "BHT_Mutant_Eq",
+  "name": "Markdown Exporter",
+  "output": "",
+  "format": [],
+  "expected": {
+    "section_headers_min": 1,
+    "requirements_min": 1,
+    "equations_min": 0
+  },
+  "sanity": []
+}

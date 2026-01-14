@@ -1,0 +1,22 @@
+# Mimic Profile: NVIDIA Ampere
+# Based on analysis of nvidia-ampere-architecture-whitepaper.pdf
+
+style:
+  page_width: 612.0
+  page_height: 792.0
+  body_font_size: 11.2
+  header_font_size: 30.4
+  font_name: "Helvetica"
+
+chaos:
+  hyphenation_probability: 0.15
+  ligature_map:
+    "fi": "ﬁ"
+    "fl": "ﬂ"
+  mojibake_probability: 0.01
+
+critical_content:
+  - id: "REQ-001"
+    text: "The NVIDIA A100 Tensor Core GPU delivers unprecedented acceleration."
+    type: "Requirement"
+    strict_verification: true

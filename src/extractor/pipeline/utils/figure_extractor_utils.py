@@ -105,7 +105,7 @@ def _assemble_result(
     out = {
         "figure_id": figure_id,
         "page": page_num,
-        "image_path": str(img_path.relative_to(output_dir.parent.parent)),
+        "image_path": str(img_path),
         "bbox": bbox_list,
         "ai_description": description,
         "title": title,

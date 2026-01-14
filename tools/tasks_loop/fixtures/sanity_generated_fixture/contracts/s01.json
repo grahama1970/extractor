@@ -1,0 +1,9 @@
+{
+  "step": "s01",
+  "fixture": "sanity_generated_fixture",
+  "name": "Auto-Generated S01",
+  "output": "",
+  "format": [],
+  "expected": {},
+  "sanity": []
+}

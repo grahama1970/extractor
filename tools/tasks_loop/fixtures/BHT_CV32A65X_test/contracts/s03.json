@@ -1,0 +1,12 @@
+{
+  "step": "s03",
+  "fixture": "BHT_CV32A65X_test",
+  "name": "Auto-Generated S03",
+  "output": "",
+  "format": [],
+  "expected": {
+    "output_type": "json",
+    "header_count_min": 1
+  },
+  "sanity": []
+}

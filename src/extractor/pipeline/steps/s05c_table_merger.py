@@ -25,6 +25,7 @@ import logging
 import pandas as pd
 import io
 import time
+import shutil
 from pathlib import Path
 from typing import List, Dict, Any
 
@@ -253,12 +254,33 @@ def run(
     step_dir.mkdir(exist_ok=True)
     json_out = step_dir / "json_output"
     json_out.mkdir(exist_ok=True)
+    visual_out = step_dir / "visual_output"
+    visual_out.mkdir(exist_ok=True)
     
-    out_file = json_out / "05c_tables.json"
+    out_file = json_out / "05c_merged_tables.json"
     
     data["tables"] = merged_tables
     data["merge_timestamp"] = getattr(time, "time")()
-    
+
+    # Copy table visuals for merged tables (debug enforcement expects visuals)
+    for idx, table in enumerate(merged_tables):
+        img_rel = table.get("table_image_path") or table.get("image_path")
+        if not img_rel:
+            continue
+        src_path = Path(str(img_rel))
+        if not src_path.is_absolute():
+            src_path = output_dir / src_path
+        if not src_path.exists():
+            continue
+        dst_name = f"table_{idx:04d}.png"
+        dst_path = visual_out / dst_name
+        if not dst_path.exists():
+            shutil.copy2(src_path, dst_path)
+        try:
+            table["visual_path"] = str(dst_path.relative_to(output_dir))
+        except Exception:
+            table["visual_path"] = str(dst_path)
+
     write_json_strict(out_file, data)
     
     logger.info(f"Stage 05c complete. {len(tables)} -> {len(merged_tables)} tables in {int(time.monotonic()-t0)}s.")
@@ -267,59 +289,22 @@ def run(
 if __name__ == "__main__":
     import argparse
     import sys
-    from extractor.pipeline.utils import ralph
     
-    parser = argparse.ArgumentParser(description="Stage 05c: Table Merger (Ralph Enabled)")
+    parser = argparse.ArgumentParser(description="Stage 05c: Table Merger")
     parser.add_argument("--pipeline-dir", type=Path, required=True, help="Path to pipeline results root")
-    parser.add_argument("--verify-only", action="store_true", help="Only verify existing results without running")
     args = parser.parse_args()
     
     pipeline_dir = args.pipeline_dir
     
-    # Run Generation
-    if not args.verify_only:
-        try:
-            logger.info("Ralph: Running Stage 05c...")
-            # S05c inputs are technically output_dir (it finds S05b or S05 in it)
-            if not (pipeline_dir / "05_table_extractor").exists():
-                logger.error("Missing input dependencies (Stage 05)")
-                sys.exit(1)
-            
-            run(input_dir=pipeline_dir, output_dir=pipeline_dir)
-            
-        except Exception as e:
-            logger.error(f"Ralph: Execution failed: {e}")
-            sys.exit(1)
-
-    # Verification
     try:
-        out_file = pipeline_dir / "05c_table_merger/json_output/05c_tables.json"
+        logger.info("Running Stage 05c...")
+        # S05c inputs are technically output_dir (it finds S05b or S05 in it)
+        if not (pipeline_dir / "05_table_extractor").exists():
+            logger.error("Missing input dependencies (Stage 05)")
+            sys.exit(1)
         
-        ralph.assert_helping(out_file.exists(), "05c_tables.json output exists")
-        data = ralph.check_json_file_valid(out_file, key_check=["tables"])
-        tables = data.get("tables", [])
+        run(input_dir=pipeline_dir, output_dir=pipeline_dir)
         
-        # If no tables extracted in S05, S05c is trivially successful (0 in, 0 out)
-        if len(tables) == 0:
-             logger.info("Ralph: No tables to merge. Trivial success.")
-             print("✅ Ralph is happy! Stage 05c is active (but no input data).")
-             sys.exit(0)
-        
-        ralph.assert_helping(len(tables) > 0, f"Found {len(tables)} tables after merge")
-        
-        # Check merges (heuristic: see if any merged_with keys exist, optional)
-        merged_count = len([t for t in tables if t.get("merged_with")])
-        if merged_count > 0:
-            logger.info(f"Ralph: {merged_count} tables were results of a merge.")
-        else:
-            logger.info("Ralph: No merges occurred (clean inputs or single pages).")
-        
-        print("✅ Ralph is happy! Stage 05c is helping.")
-        sys.exit(0)
-        
-    except ralph.RalphError as e:
-        logger.error(f"Ralph is sad: {e}")
-        sys.exit(1)
     except Exception as e:
-        logger.error(f"Verification crashed: {e}")
+        logger.error(f"Execution failed: {e}")
         sys.exit(1)

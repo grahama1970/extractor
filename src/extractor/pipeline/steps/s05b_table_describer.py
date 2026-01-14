@@ -217,82 +217,22 @@ def run(
 if __name__ == "__main__":
     import argparse
     import sys
-    from extractor.pipeline.utils import ralph
     
-    parser = argparse.ArgumentParser(description="Stage 05b: Table Describer (Ralph Enabled)")
+    parser = argparse.ArgumentParser(description="Stage 05b: Table Describer")
     parser.add_argument("--pipeline-dir", type=Path, required=True, help="Path to pipeline results root")
-    parser.add_argument("--verify-only", action="store_true", help="Only verify existing results without running")
     args = parser.parse_args()
     
     pipeline_dir = args.pipeline_dir
     stage_dir = pipeline_dir / "05_table_extractor"
     
-    # Run Generation
-    if not args.verify_only:
-        try:
-            logger.info("Ralph: Running Stage 05b...")
-            if not stage_dir.exists():
-                logger.error("Missing input dependencies (Stage 05)")
-                sys.exit(1)
-            
-            run(stage_05_dir=stage_dir, output_dir=pipeline_dir)
-            
-        except Exception as e:
-            logger.error(f"Ralph: Execution failed: {e}")
-            sys.exit(1)
-
-    # Verification
     try:
-        out_file = pipeline_dir / "05b_table_describer/json_output/05b_tables.json"
+        logger.info("Running Stage 05b...")
+        if not stage_dir.exists():
+            logger.error("Missing input dependencies (Stage 05)")
+            sys.exit(1)
         
-        ralph.assert_helping(out_file.exists(), "05b_tables.json output exists")
-        data = ralph.check_json_file_valid(out_file, key_check=["tables"])
-        tables = data.get("tables", [])
+        run(stage_05_dir=stage_dir, output_dir=pipeline_dir)
         
-        # If no tables extracted in S05, S05b is trivially successful (0 in, 0 out)
-        if len(tables) == 0:
-             logger.info("Ralph: No tables to describe. Trivial success.")
-             print("✅ Ralph is happy! Stage 05b is active (but no input data).")
-             sys.exit(0)
-        
-        ralph.assert_helping(len(tables) > 0, f"Found {len(tables)} tables")
-        
-        # Check Enrichment
-        # We check if `ai_description` is populated for substantial tables
-        described_count = 0
-        substantial_count = 0
-        for t in tables:
-             # Heuristic for substantial table: has image path
-             if t.get("table_image_path"):
-                 substantial_count += 1
-                 if t.get("ai_description"):
-                     described_count += 1
-                     
-        if substantial_count == 0:
-             logger.warning("Ralph: Tables present but no images? Might be text-only tables.")
-        else:
-             logger.info(f"Ralph: Found {described_count} described tables out of {substantial_count} substantial tables.")
-             # We expect at least some to be described if substantial
-             if described_count == 0:
-                  logger.warning("Ralph: No tables were described. VLM might be failing or config disabled?")
-                  # This should probably fail if budget/config allows
-                  # For now, if we have substantial tables, we expect VLM
-                  if os.getenv("TABLE_LLM_ASSIST", "0") == "1": # Or check logic
-                       pass # Logic is always enabled unless skip_descriptions=True
-                  
-                  # Let's enforce it if we found images
-                  ralph.assert_helping(described_count > 0, "VLM Description generated for at least one table")
-        
-        if described_count > 0:
-             sample = next(t for t in tables if t.get("ai_description"))
-             logger.info(f"Ralph: Sample description: {sample['ai_description'][:50]}...")
-        
-        print("✅ Ralph is happy! Stage 05b is helping.")
-        sys.exit(0)
-        
-    except ralph.RalphError as e:
-        logger.error(f"Ralph is sad: {e}")
-        sys.exit(1)
     except Exception as e:
-        logger.error(f"Verification crashed: {e}")
+        logger.error(f"Execution failed: {e}")
         sys.exit(1)

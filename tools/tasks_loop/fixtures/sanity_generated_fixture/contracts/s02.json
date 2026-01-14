@@ -1,0 +1,11 @@
+{
+  "step": "s02",
+  "fixture": "sanity_generated_fixture",
+  "name": "Marker Blocks",
+  "output": "",
+  "format": [],
+  "expected": {
+    "block_count_min": 12
+  },
+  "sanity": []
+}

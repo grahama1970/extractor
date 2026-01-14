@@ -1,0 +1,11 @@
+{
+  "step": "s08",
+  "fixture": "synthesis_messy_BHT",
+  "name": "Requirements (LLM)",
+  "output": "requirements table in DuckDB",
+  "format": [],
+  "expected": {
+    "requirement_count": 2
+  },
+  "sanity": []
+}

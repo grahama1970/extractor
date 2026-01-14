@@ -1,0 +1,33 @@
+{
+  "task_id": "s04_section_builder",
+  "title": "Stage 04 section builder contract",
+  "prompt": "Ensure Stage 04 (s04_section_builder) meets the pipeline contract. Run uv run scripts/smokes/smoke_stage04_sections.py and fix any failures. Do not change unrelated stages. Return JSON with keys ok, summary, artifacts.",
+  "max_iters": 3,
+  "deterministic_checks": {
+    "commands": [
+      {
+        "name": "s04_smoke",
+        "cmd": "uv run scripts/smokes/smoke_stage04_sections.py"
+      }
+    ],
+    "files_exist": [
+      "src/extractor/pipeline/steps/s04_section_builder.py",
+      "tools/contract_loop/adapters/extractor/docs/SANITY_MATRIX.md"
+    ],
+    "files_contain": [
+      {
+        "path": "tools/contract_loop/adapters/extractor/docs/SANITY_MATRIX.md",
+        "contains": [
+          "s04_section_builder.py"
+        ]
+      }
+    ]
+  },
+  "agent": {
+    "output_schema": "tools/contract_loop/judges/agent_task.schema.json"
+  },
+  "llm_gate": {
+    "schema": "tools/contract_loop/judges/contract_gate.schema.json",
+    "prompt": "You are the contract auditor for Stage 04. Approve only if the smoke script passed and artifacts match the contract. If anything is missing, return ok=false with next_actions."
+  }
+}

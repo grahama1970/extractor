@@ -13,7 +13,7 @@ def collect(results_root: Path, dest_root: Path) -> None:
         if not stage_dir.name[:2].isdigit():
             continue
         target = dest_root / stage_dir.name
-        img = stage_dir / "image_output"
+        img = stage_dir / "visual_output"
         txt = stage_dir / "text_output"
         json_dir = stage_dir / "json_output"
         if img.exists():

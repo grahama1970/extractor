@@ -58,6 +58,11 @@ def main():
             print("Converting PDF…")
             result, images, metadata = converter(str(pdf_path))
             blocks = getattr(result, "blocks", []) if result is not None else []
+            
+            # FIX: If Marker returns 0 blocks, force fallback to PyMuPDF
+            if not blocks:
+                raise RuntimeError("Marker returned 0 blocks; forcing PyMuPDF fallback")
+
             output_data = {"blocks": blocks, "metadata": metadata}
             with open(output_json, "w") as f:
                 json.dump(output_data, f, indent=2)

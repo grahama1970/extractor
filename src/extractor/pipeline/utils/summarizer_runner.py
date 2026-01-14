@@ -2,7 +2,7 @@
 import json, os, asyncio
 from pathlib import Path
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from loguru import logger
 from extractor.pipeline.utils.reliability import log_stage_error
 async def summarize_section(
@@ -49,18 +49,36 @@ async def summarize_section(
         content_preview: Optional[str] = None
 
         try:
-            messages_payload = [
-                {"role": "system", "content": system_json_guard},
-                {"role": "user", "content": prompt},
-            ]
+            from scillm.batch import parallel_acompletions_iter
+            import os
+            
+            reqs = [{
+                "model": "chutes/text",
+                "messages": messages_payload,
+                "response_format": {"type": "json_object"} if strict_json else None,
+                "temperature": 0.0 if is_gpt5 else 0.0,
+                "timeout": request_timeout,
+                "index": 0
+            }]
+            
+            api_key = os.getenv("CHUTES_API_KEY")
+            api_base = os.getenv("CHUTES_API_BASE", "https://llm.chutes.ai/v1")
+            
+            resp = None
+            async for r in parallel_acompletions_iter(
+                reqs, api_base=api_base, api_key=api_key, concurrency=1, timeout=request_timeout, 
+                response_format={"type": "json_object"} if strict_json else None
+            ):
+                if r.get("ok"):
+                    resp = {
+                        "model": r.get("model", "chutes/text"),
+                        "usage": r.get("usage"),
+                        "choices": [{"message": {"content": r.get("content")}}],
+                        "id": r.get("id")
+                    }
+                else:
+                    raise RuntimeError(f"SciLLM Summarizer Error: {r.get('error')}")
 
-            resp = await router.acompletion(
-                model="chutes/text",
-                messages=messages_payload,
-                response_format={"type": "json_object"} if strict_json else None,
-                temperature=0.0 if is_gpt5 else 0.0,
-                timeout=request_timeout,
-            )
             log_llm_call(
                 stage_key="09_summarizer",
                 task_kind="summarize_section",
@@ -73,7 +91,7 @@ async def summarize_section(
             served_model = getattr(resp, "model", None) or getattr(resp, "id", None) or "chutes/text"
             content = _choice_content(resp)
 
-            if not (isinstance(content, str) and content.strip()):
+            if content is None or (isinstance(content, str) and not content.strip()):
                 logger.warning(
                     "stage09.router_empty_content section_id=%s model=%s -- retrying via direct SciLLM",
                     section.get("id"),
@@ -214,19 +232,37 @@ async def create_checkpoint_summary(
     system_guard = JSON_SYSTEM_GUARD
 
     async def _call_once_async():
-        router = get_text_router()
         t0 = time.time()
         try:
-            resp = await router.acompletion(
-                model="chutes/text",
-                messages=[
+            reqs = [{
+                "model": "chutes/text",
+                "messages": [
                     {"role": "system", "content": system_guard},
                     {"role": "user", "content": prompt},
                 ],
-                response_format={"type":"json_object"},
-                temperature=0.0,
-                timeout=request_timeout,
-            )
+                "response_format": {"type":"json_object"},
+                "temperature": 0.0,
+                "timeout": request_timeout,
+                "index": 0
+            }]
+            
+            api_key = os.getenv("CHUTES_API_KEY")
+            api_base = os.getenv("CHUTES_API_BASE", "https://llm.chutes.ai/v1")
+            
+            resp = None
+            async for r in parallel_acompletions_iter(
+                reqs, api_base=api_base, api_key=api_key, concurrency=1, timeout=request_timeout, response_format={"type": "json_object"}
+            ):
+                if r.get("ok"):
+                    resp = {
+                        "model": r.get("model", "chutes/text"),
+                        "usage": r.get("usage"),
+                        "choices": [{"message": {"content": r.get("content")}}],
+                        "id": r.get("id")
+                    }
+                else:
+                    raise RuntimeError(f"SciLLM Checkpoint Error: {r.get('error')}")
+
             log_llm_call(
                 stage_key="09_summarizer",
                 task_kind="checkpoint_summary",

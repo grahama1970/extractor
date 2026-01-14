@@ -1,0 +1,12 @@
+{
+  "step": "s05c",
+  "fixture": "synthesis_messy_BHT",
+  "name": "Table Merger",
+  "output": "05c_table_merger/json_output/05c_merged_tables.json",
+  "format": [],
+  "expected": {
+    "merged_table_count": 1,
+    "merged_pairs": 0
+  },
+  "sanity": []
+}

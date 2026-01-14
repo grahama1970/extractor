@@ -1,0 +1,10 @@
+{
+  "type": "object",
+  "properties": {
+    "ok": { "type": "boolean" },
+    "notes": { "type": "string" },
+    "next_actions": { "type": "array", "items": { "type": "string" } }
+  },
+  "required": ["ok", "notes", "next_actions"],
+  "additionalProperties": false
+}

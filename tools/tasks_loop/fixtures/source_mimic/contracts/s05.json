@@ -1,0 +1,11 @@
+{
+  "step": "s05",
+  "fixture": "source_mimic",
+  "name": "Table Extractor",
+  "output": "",
+  "format": [],
+  "expected": {
+    "table_count": 1
+  },
+  "sanity": []
+}

@@ -486,19 +486,40 @@ async def identify_requirements_in_section(
                         "tables": len(tables or []),
                     }
                 )
-                router = get_text_router()
+                
+                from scillm import parallel_acompletions_iter
+                import os
+                
                 _t0 = time.time()
                 try:
-                    resp = await router.acompletion(
-                        model="chutes/text",
-                        messages=[
+                    reqs = [{
+                        "model": "chutes/text",
+                        "messages": [
                             {"role": "system", "content": JSON_SYSTEM_GUARD},
                             {"role": "user", "content": prompt},
                         ],
-                        response_format={"type": "json_object"},
-                        timeout=120,
-                        temperature=0,
-                    )
+                        "response_format": {"type": "json_object"},
+                        "timeout": 120,
+                        "temperature": 0,
+                        "index": 0
+                    }]
+                    
+                    api_key = os.getenv("CHUTES_API_KEY")
+                    api_base = os.getenv("CHUTES_API_BASE", "https://llm.chutes.ai/v1")
+                    
+                    async for r in parallel_acompletions_iter(
+                        reqs, api_base=api_base, api_key=api_key, concurrency=1, timeout=120, response_format={"type": "json_object"}
+                    ):
+                        if r.get("ok"):
+                            resp = {
+                                "model": r.get("model", "chutes/text"),
+                                "usage": r.get("usage"),
+                                "choices": [{"message": {"content": r.get("content")}}],
+                                "id": r.get("id")
+                            }
+                        else:
+                            raise RuntimeError(f"SciLLM Error: {r.get('error')}")
+
                     log_llm_call(
                         stage_key="08_lean4",
                         task_kind="identify_requirements",
@@ -676,12 +697,12 @@ async def prove_requirement(requirement: str, strategy: Any):
             ch_base = os.getenv("CHUTES_API_BASE", "").strip()
             ch_key = os.getenv("CHUTES_API_KEY", "").strip()
             async def _do_scillm_prover():
-                router = get_text_router()
+                from scillm import parallel_acompletions_iter
                 _t0 = time.time()
                 try:
-                    resp = await router.acompletion(
-                        model="chutes/text",
-                        messages=[
+                    reqs = [{
+                        "model": "chutes/text",
+                        "messages": [
                             {"role": "system", "content": "You are a Lean 4 theorem prover service. Return STRICT JSON with keys: success(bool), lean_code(string), stdout(string), stderr(string), proof_output(string|null)."},
                             {"role": "user", "content": textwrap.dedent(f"""
                                 Prove the following requirement. Return STRICT JSON only.
@@ -693,10 +714,25 @@ async def prove_requirement(requirement: str, strategy: Any):
                                 {getattr(strategy, '__dict__', strategy)}
                             """)},
                         ],
-                        response_format={"type": "json_object"},
-                        timeout=300,
-                        temperature=0,
-                    )
+                        "response_format": {"type": "json_object"},
+                        "timeout": 300,
+                        "temperature": 0,
+                        "index": 0
+                    }]
+                    
+                    async for r in parallel_acompletions_iter(
+                        reqs, api_base=ch_base, api_key=ch_key, concurrency=1, timeout=300, response_format={"type": "json_object"}
+                    ):
+                        if r.get("ok"):
+                            resp = {
+                                "model": r.get("model", "chutes/text"),
+                                "usage": r.get("usage"),
+                                "choices": [{"message": {"content": r.get("content")}}],
+                                "id": r.get("id")
+                            }
+                        else:
+                            raise RuntimeError(f"SciLLM Prover Error: {r.get('error')}")
+
                     log_llm_call(
                         stage_key="08_lean4",
                         task_kind="prove_requirement",

@@ -31,7 +31,7 @@ The verification checks were too shallow:
 
 We are discarding "Ralph" (ad-hoc checks) for **Contracts** (Schema Enforcement).
 
-**The Specs (`src/extractor/pipeline/steps/CONTRACT.md`):**
+**The Specs (`tools/contract_loop/adapters/extractor/docs/CONTRACT.md`):**
 We already possess a rigorous specification for every step. We just aren't enforcing it.
 
 | Step             | Contract (simplified)                                    |

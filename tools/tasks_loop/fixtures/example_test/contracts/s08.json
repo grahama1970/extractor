@@ -1,0 +1,11 @@
+{
+  "step": "s08",
+  "fixture": "example_test",
+  "name": "Requirements (LLM)",
+  "output": "",
+  "format": [],
+  "expected": {
+    "requirement_count": 2
+  },
+  "sanity": []
+}

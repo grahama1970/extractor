@@ -26,7 +26,7 @@ from typing import Any, Dict, List
 
 from dotenv import find_dotenv, load_dotenv
 from loguru import logger
-from scillm import parallel_acompletions_iter
+from scillm.batch import parallel_acompletions_iter
 
 from extractor.pipeline.utils.reliability import log_stage_error, write_json_strict
 from extractor.pipeline.utils.step_sanity import run_step_sanity
@@ -74,7 +74,8 @@ async def process_figures(figures: List[Dict[str, Any]], output_dir: Path) -> Li
         if fig.get("start_description"): # Example check, or just overwrite?
             pass
             
-        img_rel = fig.get("img_path")
+        # Fix: Step 06 produces "image_path", but code was using "img_path". Support both.
+        img_rel = fig.get("image_path") or fig.get("img_path")
         if not img_rel:
             continue
             
@@ -82,7 +83,7 @@ async def process_figures(figures: List[Dict[str, Any]], output_dir: Path) -> Li
         # fig["img_path"] is usually relative to results root.
         # We need absolute path. output_dir passed to run() is usually valid.
         # If output_dir is ".../06_figure_extractor", we need to look there.
-        # Actually, fig["img_path"] is like "06_figure_extractor/image_output/fig_001.png"
+        # Actually, fig["img_path"] is like "06_figure_extractor/visual_output/fig_001.png"
         # and output_dir is ".../pipeline".
         
         full_img_path = output_dir / img_rel
@@ -163,13 +164,14 @@ async def process_figures(figures: List[Dict[str, Any]], output_dir: Path) -> Li
             continue
 
         # Parse JSON
-        content = result.get("parsed") or {}
-        if not content and result.get("content"):
+        content = result.get("parsed") or result.get("content") or {}
+        if isinstance(content, str) and content:
              # lazy parse
              try:
                  import json_repair
-                 content = json_repair.loads(result["content"])
-             except: pass
+                 content = json_repair.loads(content)
+             except:
+                 content = {}
 
         if content:
              fig["ai_description"] = content.get("description")
@@ -235,14 +237,23 @@ def run(
 
 if __name__ == "__main__":
     import argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--input-dir", type=Path, required=True, help="Path to 06_figure_extractor dir or pipeline root")
-    parser.add_argument("--output-dir", type=Path, default=Path("data/results/pipeline"))
+    import sys
+    
+    parser = argparse.ArgumentParser(description="Stage 06b: Figure Describer")
+    parser.add_argument("--pipeline-dir", type=Path, required=True, help="Path to pipeline results root")
     args = parser.parse_args()
     
-    # Heuristic to find 06 dir if pipeline root passed
-    s06 = args.input_dir
-    if (s06 / "06_figure_extractor").exists():
-        s06 = s06 / "06_figure_extractor"
+    pipeline_dir = args.pipeline_dir
+    stage_dir = pipeline_dir / "06_figure_extractor"
+    
+    try:
+        logger.info("Running Stage 06b...")
+        if not stage_dir.exists():
+            logger.error("Missing input dependencies (Stage 06)")
+            sys.exit(1)
         
-    run(s06, args.output_dir)
+        run(stage_06_dir=stage_dir, output_dir=pipeline_dir)
+        
+    except Exception as e:
+        logger.error(f"Execution failed: {e}")
+        sys.exit(1)

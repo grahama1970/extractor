@@ -1,0 +1,32 @@
+{
+  "task_id": "task_example",
+  "title": "Example: verify a README contains a Usage section",
+  "prompt": "Update README.md to include a Usage section. Return JSON with ok, summary, and artifacts list.",
+  "max_iters": 3,
+  "deterministic_checks": {
+    "commands": [
+      {
+        "name": "list_repo",
+        "cmd": "ls"
+      }
+    ],
+    "files_exist": [
+      "README.md"
+    ],
+    "files_contain": [
+      {
+        "path": "README.md",
+        "contains": [
+          "## Usage"
+        ]
+      }
+    ]
+  },
+  "agent": {
+    "output_schema": "tools/contract_loop/judges/agent_task.schema.json"
+  },
+  "llm_gate": {
+    "schema": "tools/contract_loop/judges/contract_gate.schema.json",
+    "prompt": "You are the contract auditor. Approve only if the Usage section exists and matches the task. Include next_actions when failing."
+  }
+}

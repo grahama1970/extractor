@@ -1,0 +1,11 @@
+{
+  "step": "s04",
+  "fixture": "Text_Cleaning",
+  "name": "Section Builder",
+  "output": "",
+  "format": [],
+  "expected": {
+    "section_count": 1
+  },
+  "sanity": []
+}

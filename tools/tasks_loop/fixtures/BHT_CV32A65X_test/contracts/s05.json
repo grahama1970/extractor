@@ -1,0 +1,11 @@
+{
+  "step": "s05",
+  "fixture": "BHT_CV32A65X_test",
+  "name": "Auto-Generated S05",
+  "output": "",
+  "format": [],
+  "expected": {
+    "table_count_min": 1
+  },
+  "sanity": []
+}

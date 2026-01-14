@@ -34,6 +34,7 @@ from extractor.pipeline.utils.tables.heuristics import (
     detect_table_caption,
     demote_table_headers_to_text,
     demote_sentence_like_single_row_tables,
+    demote_text_heavy_lattice_tables,
     coalesce_repeated_header_rows,
 )
 
@@ -62,5 +63,6 @@ __all__ = [
     "detect_table_caption",
     "demote_table_headers_to_text",
     "demote_sentence_like_single_row_tables",
+    "demote_text_heavy_lattice_tables",
     "coalesce_repeated_header_rows",
 ]

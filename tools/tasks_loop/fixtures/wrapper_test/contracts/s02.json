@@ -1,0 +1,11 @@
+{
+  "step": "s02",
+  "fixture": "wrapper_test",
+  "name": "Marker Blocks",
+  "output": "",
+  "format": [],
+  "expected": {
+    "block_count_min": 17
+  },
+  "sanity": []
+}

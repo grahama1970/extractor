@@ -3,7 +3,9 @@
 # requires-python = ">=3.10"
 # dependencies = [
 #   "python-dotenv",
+#   "loguru>=0.7.0",
 #   "typer>=0.12",
+#   "pymupdf>=1.23.0",
 # ]
 # ///
 import sys
@@ -17,7 +19,7 @@ app = typer.Typer(add_completion=False, help="Smoke: Stage 01 artifacts exist (i
 
 
 def _load_stage01():
-    p = Path("src/extractor/pipeline/steps/01_annotation_processor.py").resolve()
+    p = Path("src/extractor/pipeline/steps/s01_annotation_processor.py").resolve()
     spec = importlib.util.spec_from_file_location("stage01", str(p))
     if not spec or not spec.loader:
         raise RuntimeError("Failed to load Stage 01 module")
@@ -63,7 +65,7 @@ def main(
         if not annots:
             typer.echo("No annotations found", err=True)
             raise SystemExit(2)
-        image_dir = stage_dir / "image_output"
+        image_dir = stage_dir / "visual_output"
         if not image_dir.exists() or not any(image_dir.iterdir()):
             typer.echo("No images saved", err=True)
             raise SystemExit(3)

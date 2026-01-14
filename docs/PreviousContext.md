@@ -6,7 +6,7 @@ This document captures the working context so a restarted agent (or teammate) ca
 
 - 01_annotation_processor → 02_marker_extractor → 03_suspicious_headers → 04_section_builder → 05_table_extractor → 06_figure_extractor → 07_reflow_section → 08–14
 - Key pre‑07 artifacts used by Stage 07:
-  - Sections (Stage 04): `data/results/pipeline/04_section_builder/json_output/04_sections.json` + visuals under `image_output/section_{id}.png`
+  - Sections (Stage 04): `data/results/pipeline/04_section_builder/json_output/04_sections.json` + visuals under `visual_output/section_{id}.png`
   - Tables (Stage 05): `data/results/pipeline/05_table_extractor/json_output/05_tables.json` with `pandas_df`, `pandas_metrics{columns, shape, data_density}`, and `table_image_path`.
   - Figures (Stage 06): `data/results/pipeline/06_figure_extractor/json_output/06_figures.json` with `image_path`, `ai_description`, `section_id`.
 
@@ -53,8 +53,8 @@ This document captures the working context so a restarted agent (or teammate) ca
 
 ## Key Paths / Artifacts
 
-- Section visuals: `data/results/pipeline/04_section_builder/image_output/section_{id}.png` (prompt shows the path explicitly for human attachment)
-- Stage 06 figures: `06_figure_extractor/image_output/figure_*.png`
+- Section visuals: `data/results/pipeline/04_section_builder/visual_output/section_{id}.png` (prompt shows the path explicitly for human attachment)
+- Stage 06 figures: `06_figure_extractor/visual_output/figure_*.png`
 - Stage 07 outputs: `data/results/pipeline/07_reflow_section/json_output/07_reflowed.json`
 - Web prompt artifacts:
   - `scripts/artifacts/stage07_web_prompt.txt` (copy/paste user prompt with Section/Tables/Figures JSON + Image Path)

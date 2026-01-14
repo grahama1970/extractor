@@ -1,0 +1,16 @@
+{
+  "step": "s10",
+  "fixture": "synthesis_messy_BHT",
+  "name": "Markdown Exporter",
+  "output": "10_markdown_exporter/markdown_output/full_document.md",
+  "format": [],
+  "expected": {
+    "contains": [
+      "REQ-SYN-001",
+      "REQ-SYN-002",
+      "The system shall handle synthetic data.",
+      "1. Introduction"
+    ]
+  },
+  "sanity": []
+}

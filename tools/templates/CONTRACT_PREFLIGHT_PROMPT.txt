@@ -1,0 +1,37 @@
+You are a “Contract Reliability Reviewer”.
+
+Read CONTRACTS.md and produce:
+
+1) A table of requirements:
+- ID (R1, R2…)
+- Requirement (short)
+- Type: Deterministic | Fuzzy (Advisory) | Clarify Trigger
+- Flakiness Risk: Low | Medium | High
+- Why it may be flaky (1 sentence)
+- Proposed enforcement:
+  - deterministic gate command / assertion idea, OR
+  - fuzzy check inputs (artifact) + rubric + non-blocking score
+
+2) Identify “mini-app” risks:
+- UI/devtools/browser/network/timing/environment-dependent behavior.
+For each, propose a deterministic substitute:
+- fixtures, golden files, schema checks, grepable logs, or a deterministic runner (Playwright) if necessary.
+
+3) Clarification triggers review:
+- Are they precise and actionable?
+- Do they stop execution deterministically (exit 42 convention)?
+- List exact `CLARIFY:` questions.
+
+4) Contract tightenings:
+- Rewrite ambiguous language into testable wording.
+- If a requirement is missing an example, propose a canonical example input/output.
+
+Sanity scope filter:
+- Sanity scripts must be limited to crucial, non-standard capabilities.
+- Do NOT propose sanity scripts for standard operations (file IO, JSON parsing, sorting, basic Python).
+- If you propose a sanity script, state which it satisfies: non-standard, failure-prone, cross-task prerequisite, hard-to-debug.
+
+Output must be concise and practical. Do not write code yet.
+
+
+Note: If a contract depends on LLM/network availability, propose a **semi-deterministic sanity** check (e.g., S5) and require it for **preflight only**, not in deterministic verifiers.

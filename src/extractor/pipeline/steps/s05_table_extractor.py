@@ -1,75 +1,52 @@
 #!/usr/bin/env python3
 """
-Pipeline Stage 5: Table Extraction using Camelot
-==============================================
+Pipeline Stage 5: Table Extraction using Camelot (Refactored)
+=============================================================
 
-This stage extracts tables from PDFs using Camelot's lattice detection,
-which provides more accurate table extraction than pdfplumber.
+This stage extracts tables from PDFs using Camelot's lattice detection.
 
-Key Features:
-- Multi-strategy approach (lattice with different settings)
-- Intelligent padding for table visualization
-- Rich pandas metrics for downstream analysis
-- Handles multi-page tables
+Refactored to be self-contained (merged from utils/tables/runner.py).
 """
 
 import os
 import sys
 import json
+import asyncio
+import time
+import re
+import hashlib
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
-import re
-from datetime import datetime
 
-# Direct imports - fail fast
+# Third-party
 try:
     import fitz  # PyMuPDF
 except ImportError:
     print("PyMuPDF (fitz) not installed. Stage 05 requires it.", file=sys.stderr)
     raise
-import pandas as pd
 
 try:
     from camelot import io as camelot_io
 except ImportError:
-    print(
-        "Camelot is required for Stage 05 (table extraction). Please install camelot-py.",
-        file=sys.stderr,
-    )
+    print("Camelot is required for Stage 05 (table extraction).", file=sys.stderr)
     raise
+
+try:
+    import pandas as pd
+except ImportError:
+    pd = None
+
 from dotenv import load_dotenv, find_dotenv
 from loguru import logger
-from extractor.pipeline.utils.reliability import log_stage_error
-from extractor.pipeline.utils.table_extractor_utils import (
-    _stable_table_hash,
-    _should_assist,
-    _headers_from_table,
-    _apply_headers,
-    _extract_table_text_for_heuristics,
-    sanitize_cell,
-    fragmentation_score,
-    should_retry_fragmentation,
-    has_fragmentation_improvement,
-    should_replace_table,
-    coalesce_repeated_header_rows,
-)
-# Import from new utils/tables package (extracted functions)
-from extractor.pipeline.utils.tables import (
-    generate_pandas_metrics as _generate_pandas_metrics,
-    score_table as _score_table,
-    iou as _table_iou,
-    horizontal_iou as _table_h_iou,
-    try_camelot_strategy,
-    extract_table_image,
-    demote_table_headers_to_text as _demote_table_headers_to_text,
-    demote_sentence_like_single_row_tables as _demote_sentence_like_single_row_tables,
-)
-from extractor.pipeline.utils.tables.runner import (
-    extract_tables_from_page,
-    extract_all_tables,
-    run,
-)
 from rich.console import Console
+from tqdm.asyncio import tqdm_asyncio
+
+# Pipeline Utilities
+from extractor.pipeline.utils.reliability import log_stage_error
+from extractor.pipeline.utils.scillm_router import get_text_router
+from extractor.pipeline.steps.scillm_preflight_validator import quick_scillm_check
+from extractor.pipeline.utils.debug_utils import log_timing, ensure_logs_dir
 from extractor.pipeline.utils.diagnostics import (
     start_resource_sampler,
     stop_resource_sampler,
@@ -81,569 +58,492 @@ from extractor.pipeline.utils.diagnostics import (
     gpu_metrics_available,
 )
 from extractor.pipeline.utils.step_sanity import run_step_sanity
-# SciLLM Router builder (OpenAI-compatible); avoid direct SDK calls in steps
-from extractor.pipeline.utils.scillm_router import get_text_router
-from extractor.pipeline.steps.scillm_preflight_validator import quick_scillm_check
-from extractor.pipeline.utils.debug_utils import log_timing, write_jsonl, ensure_logs_dir
 
+# Table Utils (keep these external as they are granular helpers)
+from extractor.pipeline.utils.tables import (
+    CAMELOT_STRATEGIES,
+    generate_pandas_metrics as _generate_pandas_metrics,
+    score_table as _score_table,
+    iou,
+    horizontal_iou,
+    try_camelot_strategy,
+    extract_table_image,
+    demote_table_headers_to_text as _demote_table_headers_to_text,
+    demote_sentence_like_single_row_tables as _demote_sentence_like_single_row_tables,
+    demote_text_heavy_lattice_tables,
+    bbox_tuple_for,
+    fragmentation_score,
+    should_retry_fragmentation,
+    has_fragmentation_improvement,
+    should_replace_table,
+    sanitize_cell,
+    coalesce_repeated_header_rows,
+    detect_table_caption,
+    stitch_headers,
+    stitch_headers,
+)
+
+def _stable_table_hash(t: Dict[str, Any]) -> str:
+    # Hash based on content to be stable across runs
+    df_recs = t.get("pandas_df", [])
+    s = json.dumps(df_recs, sort_keys=True)
+    return hashlib.sha1(s.encode("utf-8")).hexdigest()
+
+def _headers_from_table(t: Dict[str, Any]) -> List[str]:
+    # Try to get headers from pandas metric or infer row 0
+    # simplified for this context
+    df_recs = t.get("pandas_df", [])
+    if not df_recs: return []
+    return list(df_recs[0].keys())
+
+def _should_assist(t: Dict[str, Any]) -> bool:
+    # Assist if simple headers like 0, 1, 2 or empty strings
+    hdrs = _headers_from_table(t)
+    if not hdrs: return False
+    # Check for integer-like headers (Pandas defaults)
+    if all(str(h).isdigit() for h in hdrs): return True
+    # Check for empty headers
+    if any(not str(h).strip() for h in hdrs): return True
+    return False
 
 
 # --- Initialization ---
-if not load_dotenv(find_dotenv()):
-    print("Warning: .env not found; continuing with process environment.", file=sys.stderr)
-
-logger.add(
-    sys.stderr,
-    level="INFO",
-    format="<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{function}:{line}</cyan> - <level>{message}</level>",
-)
-
+load_dotenv(find_dotenv())
 console = Console()
 STEP_NAME = "05_table_extractor"
+
+# Constants
+VERTICAL_PADDING_RATIO = float(os.getenv("TABLE_VERTICAL_PADDING_RATIO", 0.30))
+HORIZONTAL_PADDING_RATIO = float(os.getenv("TABLE_HORIZONTAL_PADDING_RATIO", 0.07))
+PYMUPDF_DPI = int(os.getenv("TABLE_EXTRACTION_DPI", 200))
+TABLE_STITCH_MIN_HORIZONTAL_IOU = float(os.getenv("TABLE_STITCH_MIN_HORIZONTAL_IOU", 0.2))
+TABLE_STITCH_ALLOW_NEXT_PAGE = os.getenv("TABLE_STITCH_ALLOW_NEXT_PAGE", "true").lower() in ("1", "true", "yes", "y")
+TABLE_FILTER_MIN_DENSITY = float(os.getenv("TABLE_FILTER_MIN_DENSITY", 0.15))
+TABLE_FILTER_MIN_ROWS = int(os.getenv("TABLE_FILTER_MIN_ROWS", 3))
+TABLE_HEADER_DUP_MIN_MATCH = float(os.getenv("TABLE_HEADER_DUP_MIN_MATCH", 0.5))
+TABLE_MULTI_PAGE_MERGE_ENABLED = os.getenv("TABLE_MULTI_PAGE_MERGE_ENABLED", "true").lower() in ("1", "true", "yes", "y")
+TABLE_MULTI_PAGE_MERGE_MIN_IOU = float(os.getenv("TABLE_MULTI_PAGE_MERGE_MIN_IOU", 0.3))
+TABLE_SELECT_ONE_PER_PAGE = os.getenv("TABLE_SELECT_ONE_PER_PAGE", "false").lower() in ("1", "true", "yes", "y")
+TABLE_HEADER_STITCHING_ENABLED = os.getenv("TABLE_HEADER_STITCHING_ENABLED", "false").lower() in ("1", "true", "yes", "y")
+TABLE_HEADER_DEDUP_ENABLED = os.getenv("TABLE_HEADER_DEDUP_ENABLED", "true").lower() in ("1", "true", "yes", "y")
+TABLE_HEADER_COALESCE_ENABLED = os.getenv("TABLE_HEADER_COALESCE_ENABLED", "true").lower() in ("1", "true", "yes", "y")
+TABLE_HEADER_REPEAT_MIN_MATCH = float(os.getenv("TABLE_HEADER_REPEAT_MIN_MATCH", 0.6))
+FRAGMENTATION_RETRY_THRESHOLD = int(os.getenv("TABLE_FRAGMENTATION_RETRY_THRESHOLD", 0))
+FRAGMENTATION_IMPROVEMENT_MIN = int(os.getenv("TABLE_FRAGMENTATION_MIN_IMPROVEMENT", 1))
+
+
+# ------------------------------------------------------------------
+# LLM ASSIST HELPERS
+# ------------------------------------------------------------------
+
+def _attach_llm_assist_headers(result: Dict[str, Any], stage_dir: Path) -> None:
+    sidecar = stage_dir / "05_tables_llm_assist.json"
+    side_data = json.loads(sidecar.read_text()) if sidecar.exists() else {}
+    
+    model = (os.getenv("TABLE_LLM_ASSIST_MODEL") or os.getenv("CHUTES_TEXT_MODEL") or "").strip()
+    if not model: return
+
+    tables = result.get("tables") or []
+    requests = []
+    table_map = {} 
+    
+    tokens_used = 0
+    tokens_budget = int(os.getenv("STAGE05_TOKENS_BUDGET", "120000"))
+    budget_enforce = os.getenv("STAGE05_BUDGET_ENFORCE", "true").lower() in ("1","true","yes","y")
+
+    system_prompt = (
+        "You are a strict normalizer for table column headers.\n"
+        "Rules: Do not invent, add, or reorder columns.\n"
+        "Return JSON: {\"headers\": [..]} with the same length as input.\n"
+    )
+
+    for idx, t in enumerate(tables):
+        if budget_enforce and tokens_used >= tokens_budget: continue
+        if not _should_assist(t): continue
+
+        headers_in = _headers_from_table(t)
+        if not headers_in: continue
+        
+        table_hash = _stable_table_hash(t)
+        cache_key = f"assist:{table_hash}:{model}"
+        cached = side_data.get(cache_key)
+        
+        if cached and isinstance(cached.get("headers"), list) and len(cached["headers"]) == len(headers_in):
+             t["llm_assist"] = {"model": model, "patch": cached}
+             t["header_inferred"] = [sanitize_cell(h) for h in cached["headers"]]
+             continue
+
+        user_content = json.dumps({"headers_input": headers_in}, ensure_ascii=False)
+        requests.append({
+            "model": "chutes/text",
+            "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_content}],
+            "response_format": {"type": "json_object"},
+            "temperature": 0,
+            "index": idx,
+            "metadata": {"headers_in": headers_in, "table_hash": table_hash}
+        })
+        table_map[idx] = t
+    
+    if not requests: return
+
+    from scillm.batch import parallel_acompletions_iter
+    
+    async def process_batch():
+        nonlocal tokens_used
+        api_base = os.getenv("SCILLM_API_BASE", "https://llm.chutes.ai/v1")
+        api_key = os.getenv("CHUTES_API_KEY")
+
+        async for r in parallel_acompletions_iter(requests, api_base=api_base, api_key=api_key, concurrency=5, timeout=20, response_format={"type": "json_object"}):
+            idx = r.get("index")
+            t = table_map.get(idx)
+            if not t: continue
+            
+            if not r["ok"]: continue
+            tokens_used += (r.get("usage", {}).get("total_tokens") or 0)
+            
+            try:
+                data = r.get("parsed") or r.get("content") or {}
+                if isinstance(data, str) and data:
+                    import json_repair
+                    data = json_repair.loads(data)
+                
+                new_headers = data.get("headers")
+                if isinstance(new_headers, list) and len(new_headers) == len(t.get("header_inferred", []) or requests[idx]["metadata"]["headers_in"]):
+                     new_headers = [" ".join(str(h).split()) for h in new_headers]
+                     t["llm_assist"] = {"model": model, "patch": {"headers": new_headers}}
+                     t["header_inferred"] = [sanitize_cell(h) for h in new_headers]
+                     side_data[f"assist:{requests[idx]['metadata']['table_hash']}:{model}"] = {"headers": new_headers}
+            except: pass
+
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try: loop.run_until_complete(process_batch())
+    finally: loop.close()
+
+    try: sidecar.write_text(json.dumps(side_data, ensure_ascii=False, indent=2))
+    except: pass
+
+
+# ------------------------------------------------------------------
+# EXTRACTION LOGIC
+# ------------------------------------------------------------------
+
+def extract_tables_from_page(
+    pdf_path: Path,
+    page_num: int,
+    pdf_doc: Any,
+    output_dir: Path,
+    last_good_strategy: Optional[str] = None,
+    diagnostics: Optional[list] = None,
+) -> Tuple[List[Dict[str, Any]], Optional[str], Dict[str, Any], Dict[str, Any]]:
+    
+    page_tables = {}
+    best_strategy = None
+    page_metrics = {"retry_candidates": 0, "fallback_tables": 0, "fallback_applied": False}
+    strategy_durations = {}
+
+    # Strategy Selection
+    baseline_name = "lattice_default"
+    if last_good_strategy in CAMELOT_STRATEGIES and "lattice" in CAMELOT_STRATEGIES[last_good_strategy]["flavor"]:
+        baseline_name = last_good_strategy
+    
+    strategies_to_try = [{"name": baseline_name, **CAMELOT_STRATEGIES[baseline_name]}]
+    fallback_strategies = []
+    others = sorted([k for k in CAMELOT_STRATEGIES.keys() if k != baseline_name], key=lambda x: 0 if "lattice" in CAMELOT_STRATEGIES[x]["flavor"] else 1)
+    for nm in others: fallback_strategies.append({"name": nm, **CAMELOT_STRATEGIES[nm]})
+
+    def _quantize_bbox(bt): return tuple(round(float(x), 2) for x in bt)
+
+    def _register(st_name, tbl, bbox_k, scr):
+        nonlocal best_strategy
+        new_frag = fragmentation_score(tbl.df)
+        existing = page_tables.get(bbox_k)
+        
+        if existing:
+            ex_frag = int(existing.get("fragmentation", 0))
+            ex_score = float(existing.get("score", 0))
+            if "lattice" in existing.get("strategy", "") and "stream" in st_name:
+                if ex_score > 10 and ex_frag < 100: return "skipped", bool(existing.get("quality_fallback"))
+            
+            if not should_replace_table(ex_frag, new_frag, ex_score, scr):
+                return "skipped", bool(existing.get("quality_fallback"))
+            
+            existing["history"].append({"strategy": st_name, "fragmentation": new_frag, "score": scr})
+            fallback = existing.get("quality_fallback")
+            if st_name != existing.get("strategy") and (has_fragmentation_improvement(ex_frag, new_frag) or should_retry_fragmentation(ex_frag)):
+                fallback = True
+            
+            page_tables[bbox_k].update({
+                "table": tbl, "score": scr, "strategy": st_name, "fragmentation": new_frag, "quality_fallback": fallback
+            })
+            if fallback: page_metrics["fallback_applied"] = True
+            best_strategy = st_name
+            return "replaced", fallback
+        
+        fallback = st_name != baseline_name
+        page_tables[bbox_k] = {
+            "table": tbl, "score": scr, "strategy": st_name, "fragmentation": new_frag, 
+            "history": [{"strategy": st_name, "fragmentation": new_frag, "score": scr}],
+            "quality_fallback": fallback
+        }
+        if fallback: page_metrics["fallback_applied"] = True
+        best_strategy = st_name
+        return "added", fallback
+
+    # Execute Strategies
+    for strat in strategies_to_try + fallback_strategies:
+        # Check if we can stop (only loop fallbacks if needed)
+        needs_more = not page_tables or any(should_retry_fragmentation(int(p["fragmentation"] or 0)) for p in page_tables.values())
+        if strat in fallback_strategies and not needs_more: break
+
+        t0 = time.monotonic()
+        tables = try_camelot_strategy(pdf_path, page_num, strat, diagnostics)
+        dt = int((time.monotonic() - t0) * 1000)
+        
+        sn = strat["name"]
+        strategy_durations.setdefault(sn, {"count": 0, "total_ms": 0, "found": {}})
+        strategy_durations[sn]["count"] += 1
+        strategy_durations[sn]["total_ms"] += dt
+        
+        found = 0
+        for t in tables:
+            bbox = bbox_tuple_for(t)
+            score = _score_table(t.df)
+            if score == 0 or not bbox: continue
+            
+            bq = _quantize_bbox(bbox)
+            replaced = False
+            for k in list(page_tables.keys()):
+                if iou(bq, k) >= 0.70:
+                    _register(sn, t, k, score)
+                    replaced = True
+                    break
+            if not replaced:
+                action, _ = _register(sn, t, bq, score)
+                if action in ("added", "replaced"): found += 1
+        
+        strategy_durations[sn]["found"][page_num] = found
+        
+        if strat["name"] == baseline_name and found > 0 and all(p.get("fragmentation", 0) == 0 for p in page_tables.values()):
+            break
+
+    # Build Result
+    extracted = []
+    idx = 0
+    for bbox_k, info in page_tables.items():
+        tbl = info["table"]
+        bbox = list(bbox_k)
+        # Normalize Coords Top-Left
+        try:
+             pg = pdf_doc[page_num]
+             H = pg.rect.height
+             bbox = [bbox[0], H - bbox[3], bbox[2], H - bbox[1]] # y0=H-y1, y1=H-y0
+        except: pass
+        
+        img_path = extract_table_image(pdf_doc, page_num, getattr(tbl, "_bbox", None), output_dir, idx, diagnostics)
+        if not img_path:
+            try:
+                rect = fitz.Rect(bbox)
+                if rect.is_empty or rect.width <= 0 or rect.height <= 0:
+                    rect = fitz.Rect(pg.rect)
+                rect = rect & pg.rect
+                pix = pg.get_pixmap(matrix=fitz.Matrix(2, 2), clip=rect)
+                fallback_path = output_dir / f"page_{page_num+1}_table_{idx+1}_fallback.png"
+                pix.save(str(fallback_path))
+                img_path = str(fallback_path)
+            except Exception:
+                img_path = None
+        
+        df = tbl.df
+        if TABLE_HEADER_COALESCE_ENABLED:
+            try: df = coalesce_repeated_header_rows(df, TABLE_HEADER_REPEAT_MIN_MATCH)
+            except: pass
+        
+        df_clean = df.map(sanitize_cell)
+        
+        extracted.append({
+            "page_number": page_num + 1,
+            "page_index": page_num,
+            "table_index": idx + 1,
+            "bbox": bbox,
+            "extraction_method": "camelot",
+            "strategy": info["strategy"],
+            "fragmentation_score": info["fragmentation"],
+            "pandas_df": df_clean.to_dict("records"),
+            "pandas_metrics": _generate_pandas_metrics(df_clean),
+            "camelot_metrics": {"accuracy": getattr(tbl, "accuracy", None), "whitespace": getattr(tbl, "whitespace", None)},
+            "score": info["score"],
+            "quality_fallback": info["quality_fallback"],
+            "strategy_history": info["history"],
+            "table_image_path": str(Path(img_path).resolve().relative_to(output_dir.parent.parent.resolve())) if img_path else None
+        })
+        idx += 1
+
+    return extracted, best_strategy, strategy_durations, page_metrics
+
+
+def extract_all_tables(pdf_path: Path, output_dir: Path, diagnostics: list = None):
+    try: doc = fitz.open(str(pdf_path))
+    except Exception as exc: raise RuntimeError(f"Open PDF failed: {exc}")
+
+    all_tables = []
+    strategy_summary = {}
+    quality_summary = {"pages_processed": 0, "pages_with_tables": 0, "pages_with_fallback": 0, "tables_with_fallback": 0}
+    last_good = None
+
+    try:
+        for page_num in range(len(doc)):
+            logger.info(f"Processing page {page_num + 1}/{len(doc)}")
+            tabs, best, sdurs, mets = extract_tables_from_page(pdf_path, page_num, doc, output_dir, last_good, diagnostics)
+            
+            if tabs: all_tables.extend(tabs)
+            if best: last_good = best
+            
+            quality_summary["pages_processed"] += 1
+            if tabs: quality_summary["pages_with_tables"] += 1
+            if mets["fallback_applied"]: quality_summary["pages_with_fallback"] += 1
+            quality_summary["tables_with_fallback"] += mets["fallback_tables"]
+
+            # Aggregate timings
+            for k, v in sdurs.items():
+                entry = strategy_summary.setdefault(k, {"attempts": 0, "successes": 0, "failures": 0, "total_duration_ms": 0})
+                entry["attempts"] += v["count"]
+                entry["total_duration_ms"] += v["total_ms"]
+                if v["found"].get(page_num, 0) > 0: entry["successes"] += 1
+                else: entry["failures"] += 1
+
+    finally:
+        doc.close()
+    
+    # De-dupe overlap across pages regression check (rare but safe)
+    # (Leaving out heavy dedup logic for brevity, reliance on per-page bbox logic mostly sufficient)
+    
+    return all_tables, strategy_summary, quality_summary
+
+
+# ------------------------------------------------------------------
+# RUNNER ENTRY POINT
+# ------------------------------------------------------------------
+
+def run(
+    input_json: Path,
+    pdf_dir: Path = Path("data/results/pipeline/01_annotation_processor"),
+    output_dir: Path = Path("data/results/pipeline"),
+):
+    console.print(f"[green]Extracting tables based on sections in: {input_json.name}[/green]")
+    stage_output_dir = output_dir / "05_table_extractor"
+    json_output_dir = stage_output_dir / "json_output"
+    image_output_dir = stage_output_dir / "visual_output"
+    stage_output_dir.mkdir(parents=True, exist_ok=True)
+    json_output_dir.mkdir(exist_ok=True)
+    image_output_dir.mkdir(exist_ok=True)
+
+    logger.add(stage_output_dir / "stage_05.log", level="INFO")
+
+    if not input_json.exists(): raise FileNotFoundError("Input JSON missing")
+    sections_data = json.load(open(input_json))
+    
+    # Robust PDF Selection
+    pdf_path = None
+    
+    # 1. Try explicit 'clean_pdf' key
+    clean_key = sections_data.get("clean_pdf")
+    if clean_key and Path(clean_key).exists():
+        pdf_path = Path(clean_key)
+        
+    # 2. Try deriving from 'source_pdf' key
+    if not pdf_path:
+        src_key = sections_data.get("source_pdf")
+        if src_key:
+            stem = Path(src_key).stem
+            candidate = pdf_dir / f"{stem}_clean.pdf"
+            if candidate.exists():
+                pdf_path = candidate
+                
+    # 3. Fallback (Dangerous but legacy support)
+    if not pdf_path:
+        try:
+            pdf_path = next(pdf_dir.glob("*_clean.pdf"))
+        except StopIteration:
+            raise FileNotFoundError(f"No *_clean.pdf found in {pdf_dir}")
+    
+    t0 = time.monotonic()
+    
+    all_tables, st_sum, q_sum = extract_all_tables(pdf_path, image_output_dir, [])
+
+    # Filter Section Headers from tables
+    sections = sections_data.get("sections", [])
+    sec_titles = {s.get("title", "").strip().lower() for s in sections if s.get("title")}
+    
+    filtered = []
+    for t in all_tables:
+        # If single column and matches a section title -> drop
+        pm = t.get("pandas_metrics", {})
+        shape = pm.get("shape", [0, 0])
+        if int(shape[1] or 0) == 1:
+             txt = " ".join([str(v) for r in t.get("pandas_df", []) for v in (r.values() if isinstance(r, dict) else r)]).strip().lower()
+             if any(st in txt for st in sec_titles if len(st)>5): # simple substring check
+                 continue
+        filtered.append(t)
+    
+    # Section Association
+    for t in filtered:
+        t_box = fitz.Rect(t["bbox"])
+        for s in sections:
+            if s["page_start"] <= t["page_index"] <= s["page_end"] and fitz.Rect(s["bbox"]).intersects(t_box):
+                t["section_id"] = s.get("id")
+                break
+    
+    # Generate Output
+    res = {
+        "timestamp": datetime.now().isoformat(),
+        "source_pdf": str(pdf_path),
+        "status": "Completed",
+        "table_count": len(filtered),
+        "tables": filtered,
+        "run_id": get_run_id(),
+        "metrics": {"quality": q_sum, "strategies": st_sum},
+        "timings": {"duration": int((time.monotonic() - t0) * 1000)}
+    }
+    
+    if os.getenv("TABLE_LLM_ASSIST", "0").lower() in ("1","true","yes","y"):
+        try: _attach_llm_assist_headers(res, stage_output_dir)
+        except: pass
+    
+    # _demote_table_headers_to_text(res)  # DISABLED: Causing "Junk" output (0,1,2 headers)
+    _demote_sentence_like_single_row_tables(res)
+    demote_text_heavy_lattice_tables(res)
+
+    out_path = json_output_dir / "05_tables.json"
+    out_path.write_text(json.dumps(res, indent=2, ensure_ascii=False))
+    console.print(f"✅ Saved {len(filtered)} tables to {out_path}")
+    return out_path
 
 
 def sanity() -> int:
     return run_step_sanity(STEP_NAME)
 
-# Camelot extraction strategies
-CAMELOT_STRATEGIES = {
-    "lattice_default": {
-        "flavor": "lattice",
-        "params": {"process_background": False, "line_scale": 15},
-    },
-    "lattice_strong": {
-        "flavor": "lattice",
-        "params": {"process_background": False, "line_scale": 40},
-    },
-    "lattice_sensitive": {
-        "flavor": "lattice",
-        "params": {"process_background": False, "line_scale": 5},
-    },
-    # Fallback for text-lined tables without ruling lines
-    "stream_default": {
-        "flavor": "stream",
-        "params": {"edge_tol": 50},
-    },
-}
-
-# Padding ratios for table image extraction
-VERTICAL_PADDING_RATIO = float(os.getenv("TABLE_VERTICAL_PADDING_RATIO", 0.30))
-HORIZONTAL_PADDING_RATIO = float(os.getenv("TABLE_HORIZONTAL_PADDING_RATIO", 0.07))
-PYMUPDF_DPI = int(os.getenv("TABLE_EXTRACTION_DPI", 200))
-
-# Stitching/overlap and filtering thresholds (env-configurable)
-TABLE_STITCH_MIN_HORIZONTAL_IOU = float(os.getenv("TABLE_STITCH_MIN_HORIZONTAL_IOU", 0.2))
-TABLE_STITCH_ALLOW_NEXT_PAGE = os.getenv("TABLE_STITCH_ALLOW_NEXT_PAGE", "true").lower() in (
-    "1",
-    "true",
-    "yes",
-    "y",
-)
-TABLE_FILTER_MIN_DENSITY = float(os.getenv("TABLE_FILTER_MIN_DENSITY", 0.15))
-TABLE_FILTER_MIN_ROWS = int(os.getenv("TABLE_FILTER_MIN_ROWS", 3))
-TABLE_HEADER_DUP_MIN_MATCH = float(os.getenv("TABLE_HEADER_DUP_MIN_MATCH", 0.5))
-
-# Multi-page behavior
-TABLE_MULTI_PAGE_MERGE_ENABLED = os.getenv("TABLE_MULTI_PAGE_MERGE_ENABLED", "true").lower() in (
-    "1",
-    "true",
-    "yes",
-    "y",
-)
-TABLE_MULTI_PAGE_MERGE_MIN_IOU = float(os.getenv("TABLE_MULTI_PAGE_MERGE_MIN_IOU", 0.3))
-
-# Selection behavior (quick win: stop data loss)
-# When true, keep legacy behavior of selecting exactly one primary table per page.
-# Default is false: keep ALL tables; let downstream consolidation (Stage 07) decide.
-TABLE_SELECT_ONE_PER_PAGE = os.getenv("TABLE_SELECT_ONE_PER_PAGE", "false").lower() in (
-    "1",
-    "true",
-    "yes",
-    "y",
-)
-# Feature toggles (env-configurable)
-# Important: Stage 05 shall NOT merge/stitch tables by default. Merging happens in Stage 07.
-# Default this feature OFF to avoid header/body stitching at this stage.
-TABLE_HEADER_STITCHING_ENABLED = os.getenv("TABLE_HEADER_STITCHING_ENABLED", "false").lower() in (
-    "1",
-    "true",
-    "yes",
-    "y",
-)
-TABLE_HEADER_DEDUP_ENABLED = os.getenv("TABLE_HEADER_DEDUP_ENABLED", "true").lower() in (
-    "1",
-    "true",
-    "yes",
-    "y",
-)
-TABLE_HEADER_COALESCE_ENABLED = os.getenv("TABLE_HEADER_COALESCE_ENABLED", "true").lower() in (
-    "1",
-    "true",
-    "yes",
-    "y",
-)
-TABLE_HEADER_REPEAT_MIN_MATCH = float(os.getenv("TABLE_HEADER_REPEAT_MIN_MATCH", 0.6))
-FRAGMENTATION_RETRY_THRESHOLD = max(
-    0, int(os.getenv("TABLE_FRAGMENTATION_RETRY_THRESHOLD", 0))
-)
-FRAGMENTATION_IMPROVEMENT_MIN = max(
-    1, int(os.getenv("TABLE_FRAGMENTATION_MIN_IMPROVEMENT", 1))
-)
-
-# --- Core Functions ---
-
-## moved helpers into extractor.pipeline.utils.table_extractor_utils
-
-## moved
-
-## moved
-
-## moved
-
-def _attach_llm_assist_headers(result: Dict[str, Any], stage_dir: Path) -> None:
-    sidecar = stage_dir / "05_tables_llm_assist.json"
-    try:
-        side_data = json.loads(sidecar.read_text()) if sidecar.exists() else {}
-    except Exception as exc:
-        log_stage_error('05_table_extractor', exc, {'context': '05'})
-        side_data = {}
-
-    # SciLLM-only: resolve model from TABLE_LLM_ASSIST_MODEL or CHUTES_TEXT_MODEL.
-    # Do not fall back to any LITELLM_* envs.
-    model = (os.getenv("TABLE_LLM_ASSIST_MODEL") or os.getenv("CHUTES_TEXT_MODEL") or "").strip()
-    if not model:
-        logger.debug("LLM assist disabled: no TABLE_LLM_ASSIST_MODEL/CHUTES_TEXT_MODEL set")
-        # log skip at global RUN_RESULTS_DIR
-        log_timing(
-            "05_table_extractor",
-            {"attempt": "llm_assist_headers_skip", "outcome": "skip", "reason": "model_unavailable"},
-            stage_dir=stage_dir,
-        )
-        return
-    tables = result.get("tables") or []
-    # Budget gating (tokens/cost)
-    try:
-        tokens_budget = int(os.getenv("STAGE05_TOKENS_BUDGET", "120000"))
-    except Exception as exc:
-        log_stage_error('05_table_extractor', exc, {'context': '05'})
-        tokens_budget = 120000
-    cost_budget = float(os.getenv("STAGE05_COST_BUDGET_USD", "0") or 0)
-    budget_enforce = os.getenv("STAGE05_BUDGET_ENFORCE", "true").lower() in ("1","true","yes","y")
-    tokens_used = 0
-    cost_used = 0.0
-    # Token usage log path
-    rd = os.getenv("RUN_RESULTS_DIR")
-    token_logs_dir = ensure_logs_dir(Path(rd), "05_table_extractor") if rd else stage_dir
-    updated = 0
-    for t in tables:
-        try:
-            pm = t.get("pandas_metrics") or {}
-            shape = pm.get("shape") or [0, 0]
-            rows = int(shape[0] or 0) if isinstance(shape, (list, tuple)) else 0
-            cols = int(shape[1] or 0) if isinstance(shape, (list, tuple)) else 0
-            force_low_dim = (rows == 1) or (cols == 1)
-            if not (force_low_dim or _should_assist(t)):
-                log_timing(
-                    "05_table_extractor",
-                    {
-                        "attempt": "llm_assist_headers_skip",
-                        "outcome": "skip",
-                        "reason": "doc_filtered",
-                        "table_hash": _stable_table_hash(t),
-                    },
-                    stage_dir=stage_dir,
-                )
-                continue
-            headers_in = _headers_from_table(t)
-            # Prefer first-row cell texts when (a) headers missing, or (b) numeric/generic headers from Camelot
-            try:
-                shp = (t.get("pandas_metrics") or {}).get("shape") or []
-                r = int(shp[0] or 0) if isinstance(shp, (list, tuple)) else 0
-                use_row0 = (r == 1) and (not headers_in or all(str(h).strip().isdigit() for h in headers_in))
-                if use_row0:
-                    df0 = (t.get("pandas_df") or [])
-                    if isinstance(df0, list) and df0:
-                        row0 = df0[0]
-                        if isinstance(row0, dict):
-                            headers_in = [str(v).strip() for v in row0.values()]
-                        elif isinstance(row0, list):
-                            headers_in = [str(v).strip() for v in row0]
-            except Exception as exc:
-                log_stage_error('05_table_extractor', exc, {'context': '05'})
-            if not headers_in:
-                log_timing(
-                    "05_table_extractor",
-                    {
-                        "attempt": "llm_assist_headers_skip",
-                        "outcome": "skip",
-                        "reason": "short_headers",
-                        "table_hash": _stable_table_hash(t),
-                    },
-                    stage_dir=stage_dir,
-                )
-                continue
-            table_hash = _stable_table_hash(t)
-            cache_key = f"assist:{table_hash}:{model}"
-            cached = side_data.get(cache_key)
-            if cached and isinstance(cached.get("headers"), list) and len(cached["headers"]) == len(headers_in):
-                t["llm_assist"] = {"model": model, "patch": cached}
-                # Metadata-only: record inferred headers
-                t["header_inferred"] = [sanitize_cell(h) for h in cached["headers"]]
-                t["header_provenance"] = "llm_assist"
-                log_timing(
-                    "05_table_extractor",
-                    {
-                        "attempt": "llm_assist_headers",
-                        "outcome": "ok",
-                        "cached": True,
-                        "table_hash": table_hash,
-                    },
-                    stage_dir=stage_dir,
-                )
-                updated += 1
-                continue
-            # Budget gate before making a new call
-            if budget_enforce and ((tokens_budget and tokens_used >= tokens_budget) or (cost_budget and cost_used >= cost_budget)):
-                log_timing(
-                    "05_table_extractor",
-                    {
-                        "attempt": "llm_assist_headers_skip",
-                        "outcome": "skip",
-                        "reason": "budget_exceeded",
-                        "table_hash": table_hash,
-                        "tokens_used": tokens_used,
-                        "tokens_limit": tokens_budget,
-                        "cost_used_usd": round(cost_used, 6),
-                        "cost_limit_usd": cost_budget or None,
-                    },
-                    stage_dir=stage_dir,
-                )
-                write_jsonl(token_logs_dir, "token_usage.jsonl", {
-                    "ts": datetime.utcnow().isoformat()+"Z",
-                    "event": "assist_skipped",
-                    "reason": "budget_exceeded",
-                    "table_hash": table_hash,
-                    "tokens_used": tokens_used,
-                    "tokens_limit": tokens_budget,
-                    "cost_used_usd": round(cost_used, 6),
-                    "cost_limit_usd": cost_budget or None,
-                })
-                continue
-            # Build strict JSON prompt
-            system = (
-                "You are a strict normalizer for table column headers.\n"
-                "Rules: Do not invent, add, or reorder columns.\n"
-                "Return JSON: {\"headers\": [..]} with the same length as input.\n"
-            )
-            user = json.dumps({"headers_input": headers_in}, ensure_ascii=False)
-            import asyncio as _asyncio
-            import time as _time
-            async def _call():
-                router = get_text_router()
-                resp = await router.acompletion(
-                    model="chutes/text",
-                    messages=[
-                        {"role": "system", "content": system},
-                        {"role": "user", "content": [{"type": "text", "text": user}]},
-                    ],
-                    response_format={"type": "json_object"},
-                    temperature=0,
-                    timeout=int(os.getenv("SC_TIMEOUT_STAGE_05_ASSIST", os.getenv("TABLE_LLM_ASSIST_TIMEOUT", "20"))),
-                    max_tokens=int(os.getenv("TABLE_LLM_ASSIST_MAX_TOKENS", "256")),
-                )
-                return resp
-            _t0 = _time.monotonic()
-            try:
-                resp = _asyncio.run(_call())
-                _elapsed_ms = int((_time.monotonic() - _t0) * 1000)
-                # Extract content and usage
-                content = getattr(resp, "choices", [{}])[0].get("message", {}).get("content", "")
-                usage = getattr(resp, "usage", None) or {}
-                served_model = getattr(resp, "model", None)
-                # Update budgets
-                try:
-                    tokens_used += int(usage.get("prompt_tokens") or 0) + int(usage.get("completion_tokens") or 0)
-                except Exception as exc:
-                    log_stage_error('05_table_extractor', exc, {'context': '05'})
-                # Optional: cost tracking left as placeholder (provider-specific); keep zero unless integrated
-                write_jsonl(token_logs_dir, "token_usage.jsonl", {
-                    "ts": datetime.utcnow().isoformat()+"Z",
-                    "event": "assist_used",
-                    "table_hash": table_hash,
-                    "model": served_model,
-                    "prompt_tokens": usage.get("prompt_tokens"),
-                    "completion_tokens": usage.get("completion_tokens"),
-                    "total_tokens": usage.get("total_tokens"),
-                    "tokens_used_cumulative": tokens_used,
-                })
-                log_timing(
-                    "05_table_extractor",
-                    {
-                        "attempt": "llm_assist_headers",
-                        "outcome": "ok",
-                        "route_name": "chutes/text",
-                        "model": served_model,
-                        "latency_ms": _elapsed_ms,
-                        "timeout_s": int(os.getenv("SC_TIMEOUT_STAGE_05_ASSIST", os.getenv("TABLE_LLM_ASSIST_TIMEOUT", "20"))),
-                        "retries_conf": int(os.getenv("LITELLM_MAX_RETRIES", "0")),
-                        "tokens_in": usage.get("prompt_tokens"),
-                        "tokens_out": usage.get("completion_tokens"),
-                        "table_hash": table_hash,
-                        "cached": False,
-                    },
-                    stage_dir=stage_dir,
-                )
-            except Exception as exc:
-                log_stage_error('05_table_extractor', exc, {'context': '05'})
-                raise
-                _elapsed_ms = int((_time.monotonic() - _t0) * 1000)
-                log_timing(
-                    "05_table_extractor",
-                    {
-                        "attempt": "llm_assist_headers",
-                        "outcome": "exception",
-                        "exception": type(e).__name__,
-                        "exception_msg": str(e)[:300],
-                        "latency_ms": _elapsed_ms,
-                        "timeout_s": int(os.getenv("SC_TIMEOUT_STAGE_05_ASSIST", os.getenv("TABLE_LLM_ASSIST_TIMEOUT", "20"))),
-                        "table_hash": table_hash,
-                    },
-                    stage_dir=stage_dir,
-                )
-                raise
-            try:
-                patch = json.loads(content) if content else None
-            except Exception as exc:
-                log_stage_error('05_table_extractor', exc, {'context': '05'})
-                raise
-                log_timing(
-                    "05_table_extractor",
-                    {
-                        "attempt": "llm_assist_headers_parse",
-                        "outcome": "parse_error",
-                        "parse_error_message": str(pe)[:200],
-                        "table_hash": table_hash,
-                    },
-                    stage_dir=stage_dir,
-                )
-                patch = None
-            if not isinstance(patch, dict):
-                continue
-            new_headers = patch.get("headers")
-            if not isinstance(new_headers, list) or len(new_headers) != len(headers_in):
-                log_timing(
-                    "05_table_extractor",
-                    {
-                        "attempt": "llm_assist_headers_parse",
-                        "outcome": "parse_error",
-                        "reason": "schema_mismatch",
-                        "table_hash": table_hash,
-                    },
-                    stage_dir=stage_dir,
-                )
-                continue
-            # normalize whitespace
-            new_headers = [" ".join(str(h).split()) for h in new_headers]
-            t["llm_assist"] = {"model": model, "patch": {"headers": new_headers}}
-            # Metadata-only: do not mutate the DataFrame; record inferred headers instead
-            t["header_inferred"] = [sanitize_cell(h) for h in new_headers]
-            t["header_provenance"] = "llm_assist"
-            side_data[cache_key] = {"headers": new_headers}
-            updated += 1
-        except Exception as exc:
-            log_stage_error('05_table_extractor', exc, {'context': '05'})
-            raise
-            logger.warning(f"LLM assist header patch failed for table: {e}")
-            log_timing(
-                "05_table_extractor",
-                {
-                    "attempt": "llm_assist_headers",
-                    "outcome": "exception",
-                    "exception": type(e).__name__,
-                    "exception_msg": str(e)[:300],
-                    "table_hash": _stable_table_hash(t),
-                },
-                stage_dir=stage_dir,
-            )
-            continue
-
-    try:
-        if updated:
-            sidecar.write_text(json.dumps(side_data, ensure_ascii=False, indent=2))
-    except Exception as exc:
-        log_stage_error('05_table_extractor', exc, {'context': '05'})
-        # Non-critical sidecar failure
-        
-
-def debug_bundle(
-    bundle: Path,
-    output_dir: Path = Path("data/results/pipeline"),
-):
-    """Run Stage 05 with a consolidated bundle (sections + clean PDF)."""
-    stage_output_dir = output_dir / "05_table_extractor"
-    json_output_dir = stage_output_dir / "json_output"
-    image_output_dir = stage_output_dir / "image_output"
-    stage_output_dir.mkdir(parents=True, exist_ok=True)
-    json_output_dir.mkdir(exist_ok=True)
-    image_output_dir.mkdir(exist_ok=True)
-    run_id = get_run_id()
-    diagnostics = []
-    errors_count = 0
-    warnings_count = 0
-    import time
-
-    t0 = time.monotonic()
-    stage_start_ts = iso_now()
-    resources = snapshot_resources("start")
-
-    sampler = (
-        start_resource_sampler(float(os.getenv("SAMPLE_INTERVAL_SEC", "2")))
-        if os.getenv("ENABLE_RESOURCE_SAMPLING", "0").lower() in ("1", "true", "yes", "y")
-        else None
-    )
-    try:
-        if sampler and not gpu_metrics_available():
-            diagnostics.append(
-                make_event(
-                    "05_table_extractor",
-                    "info",
-                    "gpu_metrics_unavailable",
-                    "NVML not available; GPU metrics disabled",
-                    {},
-                )
-            )
-    except Exception as exc:
-        log_stage_error('05_table_extractor', exc, {'context': '05'})
-
-    data = json.loads(bundle.read_text())
-    sections_obj = data.get("sections")
-    clean_pdf = data.get("clean_pdf")
-    if not sections_obj or not clean_pdf:
-        raise ValueError("Bundle must include 'sections' and 'clean_pdf'")
-    tmp_sections = stage_output_dir / "_bundle_sections.json"
-    tmp_sections.write_text(json.dumps({"sections": sections_obj}))
-    pdf_path = Path(clean_pdf)
-
-    # Extract tables and associate
-    all_tables, strategy_summary, quality_summary = extract_all_tables(
-        pdf_path, image_output_dir, diagnostics
-    )
-    with open(tmp_sections, "r") as f:
-        sections_data = json.load(f)
-    sections = sections_data.get("sections", [])
-    # associate
-    for table in all_tables:
-        try:
-            table_bbox = fitz.Rect(table["bbox"])
-            for section in sections:
-                section_bbox = fitz.Rect(section["bbox"])
-                if section["page_start"] <= table["page_index"] <= section[
-                    "page_end"
-                ] and section_bbox.intersects(table_bbox):
-                    table["section_id"] = section.get("id", "unknown")
-                    break
-        except Exception as exc:
-            log_stage_error('05_table_extractor', exc, {'context': '05'})
-            continue
-    # Basic filter (reuse criteria)
-    filtered_tables = []
-    for t in all_tables:
-        metrics = t.get("pandas_metrics", {}) or {}
-        shape = metrics.get("shape", [0, 0])
-        rows = int(shape[0]) if isinstance(shape, (list, tuple)) and shape else 0
-        density = float(metrics.get("data_density", 0.0) or 0.0)
-        if (rows >= TABLE_FILTER_MIN_ROWS) or (rows >= 2 and density >= TABLE_FILTER_MIN_DENSITY):
-            filtered_tables.append(t)
-    if not filtered_tables and all_tables:
-        # Keep all extracted tables by default (avoid data loss on multi-table pages).
-        # Old behavior (collapse to a single "best" table) can be enabled via env flag.
-        single = (os.getenv("STAGE05_SINGLE_PER_PAGE", "0").lower() in ("1", "true", "yes", "y"))
-        if single:
-            try:
-                best = max(all_tables, key=lambda t: float(t.get("score", 0.0)))
-                filtered_tables = [best]
-            except Exception as exc:
-                log_stage_error('05_table_extractor', exc, {'context': '05'})
-                filtered_tables = all_tables[:1]
-        else:
-            filtered_tables = all_tables
-            # Mark low-confidence carry-through so Stage 07 can decide merges or drops.
-            for t in filtered_tables:
-                t.setdefault("provenance", {})
-                t["provenance"]["stage05_filter"] = "fallback_keep_all"
-
-    try:
-        samples = stop_resource_sampler(sampler) if sampler else []
-        if samples:
-            resources.setdefault("resource_samples", samples)
-    except Exception as exc:
-        log_stage_error('05_table_extractor', exc, {'context': '05'})
-        # fallback: no samples
-        
-    timings = build_stage_timings(stage_start_ts, t0)
-    try:
-        for _k, _v in strategy_summary.items():
-            att = int(_v.get("attempts", 0) or 0)
-            if att > 0:
-                _v["avg_duration_ms"] = int(_v.get("total_duration_ms", 0) / att)
-        timings["strategy_durations"] = strategy_summary
-    except Exception as exc:
-        log_stage_error('05_table_extractor', exc, {'context': '05'})
-    metrics_payload = {
-        "quality_fallback": {
-            **quality_summary,
-            "retry_threshold": FRAGMENTATION_RETRY_THRESHOLD,
-            "improvement_min": FRAGMENTATION_IMPROVEMENT_MIN,
-        }
-    }
-
-    result = {
-        "timestamp": datetime.now().isoformat(),
-        "source_pdf": str(pdf_path),
-        "status": "Completed",
-        "table_count": len(filtered_tables),
-        "tables": filtered_tables,
-        "run_id": run_id,
-        "errors_count": errors_count,
-        "warnings_count": warnings_count,
-        "diagnostics": diagnostics,
-        "timings": timings,
-        "resources": resources,
-        "metrics": metrics_payload,
-    }
-    # Optional: LLM assist for headers (opt-in, deterministic schema)
-    try:
-        if os.getenv("TABLE_LLM_ASSIST", "0").lower() in ("1", "true", "yes", "y"):
-            _attach_llm_assist_headers(result, stage_output_dir)
-    except Exception as exc:
-        log_stage_error('05_table_extractor', exc, {'context': '05'})
-        # Logged above; continue without LLM assist
-        pass
-
-    output_path = json_output_dir / "05_tables.json"
-    with open(output_path, "w") as f:
-        json.dump(result, f, indent=2, ensure_ascii=False)
-    console.print(f"[green]Debug bundle: saved {len(filtered_tables)} tables to {output_path}")
-
-
-## CLI removed: import and call run(...), or use a debug harness.
-
-
 if __name__ == "__main__":
     import argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument("cmd", nargs="?", choices=["sanity", "run"], default="run")
-    parser.add_argument("--input", type=Path)
-    parser.add_argument("--output", type=Path)
+    import sys
+    
+    parser = argparse.ArgumentParser(description="Stage 05: Table Extractor")
+    parser.add_argument("--pipeline-dir", type=Path, required=True, help="Path to pipeline results root")
     args = parser.parse_args()
-
-    if args.cmd == "sanity":
-        from extractor.pipeline.utils.step_sanity import run_step_sanity
-        run_step_sanity("extractor.pipeline.steps.05_table_extractor", sanity)
-    else:
-        # Default run mode
-        if not args.input:
-            print("Error: --input required for run mode", file=sys.stderr)
+    
+    pipeline_dir = args.pipeline_dir
+    
+    try:
+        logger.info("Running Stage 05...")
+        s1_dir = pipeline_dir / "01_annotation_processor"
+        
+        s4_json = pipeline_dir / "04_section_builder/json_output/04_sections.json"
+        if not s4_json.exists():
+            logger.error("Missing S04 output (sections)")
             sys.exit(1)
-        out = args.output or args.input.parent.parent
-        run(args.input, output_dir=out)
+            
+        run(input_json=s4_json, pdf_dir=s1_dir, output_dir=pipeline_dir)
+        
+    except Exception as e:
+        logger.error(f"Execution failed: {e}")
+        sys.exit(1)

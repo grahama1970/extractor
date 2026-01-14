@@ -1,0 +1,12 @@
+{
+  "step": "s10",
+  "fixture": "synthesis_complex",
+  "name": "Markdown Exporter",
+  "output": "",
+  "format": [],
+  "expected": {
+    "section_headers": 3,
+    "equations_min": 3
+  },
+  "sanity": []
+}

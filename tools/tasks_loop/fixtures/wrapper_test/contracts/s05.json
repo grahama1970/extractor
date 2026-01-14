@@ -1,0 +1,11 @@
+{
+  "step": "s05",
+  "fixture": "wrapper_test",
+  "name": "Table Extractor",
+  "output": "",
+  "format": [],
+  "expected": {
+    "table_count": 1
+  },
+  "sanity": []
+}

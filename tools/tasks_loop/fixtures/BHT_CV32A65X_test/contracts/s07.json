@@ -1,0 +1,11 @@
+{
+  "step": "s07",
+  "fixture": "BHT_CV32A65X_test",
+  "name": "Auto-Generated S07",
+  "output": "",
+  "format": [],
+  "expected": {
+    "database": "pipeline.duckdb"
+  },
+  "sanity": []
+}

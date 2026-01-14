@@ -8,6 +8,7 @@ telemetry logging via log_llm_call.
 from __future__ import annotations
 
 import time
+import os
 from typing import Any, Dict, List, Optional
 from extractor.pipeline.utils.debug_utils import log_llm_call
 from extractor.pipeline.utils.scillm_router import get_text_router
@@ -48,15 +49,52 @@ async def call_reflow_llm(
     resp = None
 
     try:
-        resp = await router.acompletion(
-            model=model_name,
-            messages=messages,
-            response_format={"type": "json_object"},
-            max_tokens=max_tokens,
-            temperature=temperature,
+        from scillm.batch import parallel_acompletions_iter
+        
+        reqs = [{
+            "model": model_name,
+            "messages": messages,
+            "response_format": {"type": "json_object"},
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "timeout": timeout,
+            "index": 0
+        }]
+        
+        api_key = os.getenv("CHUTES_API_KEY")
+        api_base = os.getenv("CHUTES_API_BASE", "https://llm.chutes.ai/v1")
+
+        async for r in parallel_acompletions_iter(
+            reqs, 
+            api_base=api_base, 
+            api_key=api_key, 
+            concurrency=1, 
             timeout=timeout,
-        )
-        success = True
+            response_format={"type": "json_object"}
+        ):
+            if r.get("ok"):
+                # Adapt to expected response format (dict or object)
+                # The original code handled both dict and object.
+                # parallel_acompletions_iter returns a dict.
+                # We can just return a dict mimicking the OpenAI structure for compatibility 
+                # or just return the scillm result if the caller handles it.
+                # Looking at usage in call_reflow_llm, it extracts 'usage' and 'model'.
+                
+                content = r.get("content")
+                
+                resp = {
+                    "model": r.get("model", model_name),
+                    "usage": r.get("usage"),
+                    "choices": [{"message": {"content": content}}],
+                    # Scillm might put parsed json in 'parsed'
+                    "parsed": r.get("parsed")
+                }
+                success = True
+            else:
+                # If checking "ok", treating as exception?
+                # Original code raised exception on fail.
+                raise RuntimeError(f"Reflow LLM Error: {r.get('error')}")
+
     except Exception as exc:
         err_ex = exc
         raise
@@ -69,22 +107,11 @@ async def call_reflow_llm(
         served_model = None
 
         if success and resp:
-            usage = getattr(resp, "usage", None)
-            if not usage and isinstance(resp, dict):
-                usage = resp.get("usage")
-            
+            usage = resp.get("usage")
             if usage:
-                if isinstance(usage, dict):
-                    tokens_in = usage.get("prompt_tokens")
-                    tokens_out = usage.get("completion_tokens")
-                else:
-                    tokens_in = getattr(usage, "prompt_tokens", None)
-                    tokens_out = getattr(usage, "completion_tokens", None)
-            
-            if isinstance(resp, dict):
-                served_model = resp.get("model")
-            else:
-                served_model = getattr(resp, "model", None)
+                tokens_in = usage.get("prompt_tokens")
+                tokens_out = usage.get("completion_tokens")
+            served_model = resp.get("model")
 
         log_llm_call(
             stage_key=stage_key,

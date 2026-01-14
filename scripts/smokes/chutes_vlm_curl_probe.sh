@@ -38,7 +38,7 @@ require MODEL
 
 # 2) Locate a section image; fall back to a quick render if none found
 IMG_PATH=""
-for p in data/results/**/04_section_builder/image_output/section_*.png; do IMG_PATH=$p; break; done
+for p in data/results/**/04_section_builder/visual_output/section_*.png; do IMG_PATH=$p; break; done
 if [[ -z "$IMG_PATH" ]]; then
   for p in data/results/**/06b_layout_sketcher/visual/section_*.png; do IMG_PATH=$p; break; done
 fi

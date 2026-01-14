@@ -1,0 +1,14 @@
+{
+  "step": "s01",
+  "fixture": "BHT_CV32A65X_test",
+  "name": "Auto-Generated S01",
+  "output": "",
+  "format": [],
+  "expected": {
+    "output_dir": "01_annotation_processor",
+    "output_files": [
+      "source_clean.pdf"
+    ]
+  },
+  "sanity": []
+}

@@ -1,0 +1,11 @@
+{
+  "step": "s10",
+  "fixture": "synthesis_mimic_test",
+  "name": "Markdown Exporter",
+  "output": "",
+  "format": [],
+  "expected": {
+    "section_headers": 3
+  },
+  "sanity": []
+}

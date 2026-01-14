@@ -1,0 +1,63 @@
+# tricky_pdf_elements.yml
+# Configuration for PDF Mimicry Generators (complex & scale)
+# Defines content patterns that historically trip up the pipeline.
+
+ambiguous_headers:
+  - text: "E = mc^2 is a famous equation."
+    font: "Helvetica"
+    size: 11
+    note: "Equation starting with Capital Letter, looks like Header but is Sentence."
+  - text: "A. = B + C is another one."
+    font: "Helvetica"
+    size: 11
+    note: "Equation starting with 'A.', looks like List Item but is Math."
+  - text: "10.0.0.1 is an IP address."
+    font: "Helvetica"
+    size: 11
+    note: "Starts with numbers, looks like Section Number but is Data."
+
+false_positives:
+  - text: "REQ-FAKE-001: This is an illustrative example, not a normative requirement."
+    id: "REQ-FAKE-001"
+    note: "Should be ignored by negative heuristic (contains 'example')."
+  - text: "NOTE: The system shall behave nicely."
+    id: "NOTE-001"
+    note: "Notes are often non-normative."
+
+tables:
+  split_across_pages: true
+  embedded_false_headers: true
+  false_header_text: "SECTION 5 START" # Trap text inside a table cell that looks like a section header
+  strict_verification: false # REQUIRE 100% exact match for tables
+
+layout:
+  column_break_simulation: true
+  floating_figures: true
+
+critical_content:
+  - id: "REQ-CRIT-001"
+    text: "The system MUST operate within 50ms latency."
+    type: "Requirement"
+    strict_verification: true
+  - id: "REQ-CRIT-002"
+    text: "All data shall be encrypted at rest using AES-256."
+    type: "Requirement"
+    strict_verification: true
+  - id: "TBL-002"
+    text: "Requirement 2: Must handle split tables."
+    type: "Requirement"
+    strict_verification: true
+
+# Sophisticated Chaos (Phase 27)
+chaos:
+  hyphenation_probability: 0.15 # 15% chance a line ends with a hyphenated split
+  ligature_map:
+    "fi": "ﬁ"
+    "fl": "ﬂ"
+    "ff": "ﬀ"
+  mojibake_probability: 0.01 # 1% chance a character is corrupted to '□' or '?'
+
+text_noise:
+  - "Copyright 2024 - All Rights Reserved"
+  - "CONFIDENTIAL - DO NOT DISTRIBUTE"
+  - "Page {i} of {n}"

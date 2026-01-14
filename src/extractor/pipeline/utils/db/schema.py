@@ -58,7 +58,8 @@ def create_schema(con: duckdb.DuckDBPyConnection):
             section_id VARCHAR,
             sort_order INTEGER,  -- page * 10000 + y0 for reading order
             llm_title VARCHAR,
-            llm_description VARCHAR
+            llm_description VARCHAR,
+            image_path VARCHAR
         );
         
         CREATE TABLE IF NOT EXISTS figures (
@@ -88,7 +89,9 @@ def create_schema(con: duckdb.DuckDBPyConnection):
              condition_text VARCHAR,  -- The condition clause if is_conditional
              sort_order INTEGER,      -- Reading order within document
              page INTEGER,
-             y0 DOUBLE                -- For positioning context
+             y0 DOUBLE,               -- For positioning context
+             metadata_json VARCHAR,   -- JSON metadata (bbox, source, etc.)
+             run_id VARCHAR           -- Execution run ID for safe cleanup
         );
         
         CREATE TABLE IF NOT EXISTS lean4_proofs (
@@ -100,6 +103,19 @@ def create_schema(con: duckdb.DuckDBPyConnection):
              compilation_error VARCHAR,
              proof_result VARCHAR,    -- proven, counterexample, timeout
              created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS annotations (
+            id VARCHAR PRIMARY KEY,
+            page INTEGER,
+            type VARCHAR,
+            x0 DOUBLE,
+            y0 DOUBLE,
+            x1 DOUBLE,
+            y1 DOUBLE,
+            human_note VARCHAR,
+            image_path VARCHAR,
+            provenance VARCHAR
         );
         
         -- merged_content: Unified reading order for all content types

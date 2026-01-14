@@ -24,7 +24,7 @@ A single source of truth defining the **Input/Output Schema** for every step.
 - **Not just**: "Does execute?"
 - **But**: "Does `pipeline.duckdb` contain > 0 rows in table `merged_content`?"
 
-### 2. The Runner (`run_contract_pipeline.py`)
+### 2. The Runner (Contract Loop)
 
 A specialized orchestrator replaces generic loops.
 
@@ -53,4 +53,5 @@ def verify_step_07(db_path):
 
 ## Implementation
 
-This pattern is implemented in `scripts/run_contract_pipeline.py` and defined in `src/extractor/pipeline/steps/CONTRACT.md`.
+This pattern is implemented in `tools/contract_loop/verify_pipeline_contract.py`
+and defined in `tools/contract_loop/adapters/extractor/docs/CONTRACT.md`.

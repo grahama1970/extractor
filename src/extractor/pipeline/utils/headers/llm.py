@@ -18,7 +18,7 @@ from extractor.pipeline.utils.model_params import build_chat_extras
 from extractor.pipeline.utils.prompt_loader import load_prompt
 from extractor.pipeline.utils.reliability import log_stage_error
 from extractor.pipeline.utils.scillm_router import get_text_router, get_vlm_router
-from extractor.pipeline.steps.scillm_preflight_validator import quick_scillm_check
+# from extractor.pipeline.steps.scillm_preflight_validator import quick_scillm_check (Moved inside function)
 
 
 # Load prompt once at module level
@@ -89,6 +89,7 @@ async def verify_header_with_llm(
         pass
     
     # AGENTS.md compliance: validate SciLLM environment
+    from extractor.pipeline.steps.scillm_preflight_validator import quick_scillm_check
     if not quick_scillm_check():
         raise RuntimeError("SciLLM environment not configured; header verification requires Chutes.")
     
@@ -97,16 +98,61 @@ async def verify_header_with_llm(
     
     # Timed SciLLM Router call
     t0 = time.monotonic()
+    resp = None
     try:
-        resp = await router.acompletion(
-            model=route_model,
-            messages=messages,
-            response_format={"type": "json_object"},
-            max_tokens=max_tokens,
-            temperature=0,
+        from scillm.batch import parallel_acompletions_iter
+        
+        # Prepare single request batch
+        reqs = [{
+            "model": route_model,
+            "messages": messages,
+            "response_format": {"type": "json_object"},
+            "max_tokens": max_tokens,
+            "temperature": 0,
+            "timeout": item_timeout,
+            "index": 0
+        }]
+        
+        api_key = os.getenv("CHUTES_API_KEY")
+        api_base = os.getenv("CHUTES_API_BASE", "https://llm.chutes.ai/v1")
+        
+        async for r in parallel_acompletions_iter(
+            reqs, 
+            api_base=api_base, 
+            api_key=api_key, 
+            concurrency=1, 
             timeout=item_timeout,
-        )
+            response_format={"type": "json_object"},
+            repair_invalid_json=True
+        ):
+            if r.get("ok"):
+                # Reconstruct a mock response object or just use the parsed content?
+                # The downstream logic expects a 'resp' object with attributes or dict.
+                # parallel_acompletions_iter yields a dict with 'parsed', 'content', 'usage'.
+                # We need to adapt it to what the subsequent code expects (dict with 'model', 'usage', 'choices').
+                
+                content = r.get("content")
+                parsed = r.get("parsed")
+                
+                # If parsed is available, dump it back to string for the downstream parser?
+                # Or just construct the choices dict.
+                
+                # Downstream code:
+                # if isinstance(resp, dict): choices = resp.get("choices") ...
+                # msg = (choices[0]...).get("content") -> answer
+                # payload = json.loads(answer)
+                
+                # So we can construct a compatible dict
+                resp = {
+                    "model": r.get("model", route_model),
+                    "usage": r.get("usage"),
+                    "choices": [{"message": {"content": content}}]
+                }
+            else:
+                raise RuntimeError(f"SciLLM Error: {r.get('error')}")
+                
         elapsed_ms = int((time.monotonic() - t0) * 1000)
+        
     except Exception as e:
         elapsed_ms = int((time.monotonic() - t0) * 1000)
         log_llm_call(
@@ -123,18 +169,13 @@ async def verify_header_with_llm(
     
     # Log success metrics
     try:
-        if isinstance(resp, dict):
-            served_model = resp.get("model")
-            usage = resp.get("usage") or {}
-        else:
-            served_model = getattr(resp, "model", None)
-            usage = getattr(resp, "usage", None) or {}
+        usage = resp.get("usage") or {}
         
         log_llm_call(
             stage_key="03_suspicious_headers",
             task_kind="verify_header",
             route=route_model,
-            model=served_model or normalize_model_alias(model),
+            model=normalize_model_alias(model),
             success=True,
             latency_ms=elapsed_ms,
             tokens_in=usage.get("prompt_tokens"),
@@ -152,7 +193,12 @@ async def verify_header_with_llm(
     answer = (msg or {}).get("content", "")
     
     try:
-        payload = json.loads(answer) if answer else {}
+        if isinstance(answer, dict):
+            payload = answer
+        elif isinstance(answer, str):
+            payload = json.loads(answer) if answer else {}
+        else:
+            payload = {}
     except Exception:
         payload = {"verdict": "reject", "confidence": 0.0, "reasons": ["parse_error"]}
 

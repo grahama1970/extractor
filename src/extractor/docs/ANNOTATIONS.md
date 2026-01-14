@@ -128,7 +128,7 @@ Running Stage 01 Locally
   ```
 - Outputs saved under `data/results/pipeline/01_annotation_processor/` with:
   - `json_output/01_annotations.json` — parsed annotations + LLM interpretations
-  - `image_output/annot_p{page}_a{index}.png` — cropped region images
+  - `visual_output/annot_p{page}_a{index}.png` — cropped region images
 
 Do / Don’t
 - Do: Use a Box for each target region; add one FreeText per Box with the mini-schema.

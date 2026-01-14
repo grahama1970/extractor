@@ -2,10 +2,11 @@
 
 > **Inherits standards from global and workspace CLAUDE.md files with overrides below.**
 
-## Intitial Steps
+## Initial Steps
 - cd into the project directory
 - activate the virtual environment (.venv)
 - peruse the .env and pyproject.toml for PYTHONPATH or environment variables
+- check for inter-agent messages: `agent-inbox check`
 
 ## Project Context
 **Purpose:** Advanced multi-format document processing with AI accuracy improvements  

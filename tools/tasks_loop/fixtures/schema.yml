@@ -1,0 +1,107 @@
+# Global Fixture Schema
+# Used by compile_contracts.py to validate SPEC.md files.
+
+type: object
+required: [fixture, pdf, steps]
+properties:
+  fixture:
+    type: string
+    description: "Unique identifier for this fixture (e.g. synthesis_messy_BHT)"
+  
+  pdf:
+    type: string
+    description: "Relative path to the source PDF"
+    
+  description:
+    type: string
+    description: "Human-readable description of the test case"
+
+  # Agent Policy Section (Workflow)
+  agent_config:
+    type: object
+    properties:
+      allow_auto_tune:
+        type: boolean
+        description: "If true, Agent optimizes config without human review."
+        default: true
+      strict_calibration:
+        type: boolean
+        description: "If true, requires passing Twin before Real run."
+        default: true
+      category:
+        type: string
+        description: "Category for Twin reuse (e.g. 'Invoices', 'Datasheets')."
+
+  # Common PDF Extraction Errors (for Twin generation)
+  # These are the chaos elements that should be injectable into Mimics.
+  chaos_catalog:
+    type: object
+    description: "Catalog of common PDF extraction errors to inject."
+    properties:
+      hyphenation:
+        type: boolean
+        description: "Words split with hyphen across lines (e.g. 'require-\\nment')"
+        default: true
+      ligatures:
+        type: boolean
+        description: "Unicode ligatures (fi → ﬁ, fl → ﬂ)"
+        default: true
+      mojibake:
+        type: boolean
+        description: "Encoding corruption (é → Ã©)"
+        default: false
+      split_tables:
+        type: boolean
+        description: "Tables spanning multiple pages"
+        default: true
+      ocr_artifacts:
+        type: boolean
+        description: "Character confusion (| → I, 0 → O)"
+        default: false
+      trapped_headers:
+        type: boolean
+        description: "Data rows that look like section headers"
+        default: true
+      invisible_text:
+        type: boolean
+        description: "Text with zero opacity or clipped regions"
+        default: false
+      nested_columns:
+        type: boolean
+        description: "Multi-column layouts with complex reading order"
+        default: false
+
+  # Configuration Section (Intent)
+  # This is compiled into the runtime profile.
+  config:
+    type: object
+    additionalProperties: true
+    properties:
+      requirement_patterns:
+        type: object
+        properties:
+          id_prefixes:
+            type: array
+            items: {type: string}
+          modal_verbs:
+            type: array
+            items: {type: string}
+          tables_are_requirements:
+            type: boolean
+          conditional_keywords:
+             type: array
+             items: {type: string}
+
+  # Steps Section (Contract)
+  # This is compiled into contracts/*.json
+  steps:
+    type: object
+    patternProperties:
+      "^s\d+[a-z]?$":
+        type: object
+        required: [name]
+        properties:
+          name: {type: string}
+          expected:
+            type: object
+            # Flexible validation for expected output metrics

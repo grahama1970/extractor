@@ -62,11 +62,11 @@ def _find_section_image(sec: dict) -> Path | None:
             return p
     # Common results location
     candidates = [
-        ROOT / "data/results/pipeline/04_section_builder/image_output/sec_0001.png",
+        ROOT / "data/results/pipeline/04_section_builder/visual_output/sec_0001.png",
     ]
     sid = sec.get("id")
     if isinstance(sid, str) and sid:
-        candidates.append(ROOT / f"data/results/pipeline/04_section_builder/image_output/{sid}.png")
+        candidates.append(ROOT / f"data/results/pipeline/04_section_builder/visual_output/{sid}.png")
     for cand in candidates:
         if cand.exists():
             return cand

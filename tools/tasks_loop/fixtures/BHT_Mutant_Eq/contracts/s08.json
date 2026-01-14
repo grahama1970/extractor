@@ -1,0 +1,11 @@
+{
+  "step": "s08",
+  "fixture": "BHT_Mutant_Eq",
+  "name": "Requirements (LLM)",
+  "output": "",
+  "format": [],
+  "expected": {
+    "requirement_count_min": 1
+  },
+  "sanity": []
+}

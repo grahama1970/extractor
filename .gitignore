@@ -325,3 +325,14 @@ deprecated/
 # Node/npm lockfiles from auxiliary tools/prototypes
 /package-lock.json
 /prototypes/**/package-lock.json
+
+# Temporary integration tests
+test_validation/
+*.duckdb
+
+# Debug files
+debug_*.py
+debug_*.json
+temp_check.json
+scanner_debug/
+mimic_spec_test.json

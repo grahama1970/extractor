@@ -1,0 +1,11 @@
+{
+  "step": "s06",
+  "fixture": "BHT_Mutant_Eq",
+  "name": "Figure Extractor",
+  "output": "",
+  "format": [],
+  "expected": {
+    "figure_count_min": 0
+  },
+  "sanity": []
+}

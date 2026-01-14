@@ -9,6 +9,7 @@ Uses SciLLM v1.78.1 parallel_acompletions_iter for standardized execution.
 import os
 import json
 import asyncio
+import shutil
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 from datetime import datetime
@@ -21,6 +22,11 @@ load_dotenv(find_dotenv(usecwd=True), override=False)
 
 from loguru import logger
 from extractor.pipeline.utils.db.connection import get_connection
+
+
+
+# ------------------------------------------------------------------------
+
 
 # Default model and API settings
 DEFAULT_MODEL = os.getenv("CHUTES_TEXT_MODEL", "moonshotai/Kimi-K2-Instruct-0905")
@@ -113,7 +119,7 @@ async def run_summarizer(
     concurrency: int = DEFAULT_CONCURRENCY,
 ) -> Dict[str, int]:
     """Batch summarize sections with rolling context via parallel_acompletions_iter."""
-    from scillm import parallel_acompletions_iter
+    from scillm.batch import parallel_acompletions_iter
     
     # 1. Fetch sections
     sections_query = "SELECT id, title FROM sections ORDER BY page_start, id"
@@ -245,6 +251,85 @@ async def run_summarizer(
 
     return {"summaries": len([r for r in all_results if r["success"]])}
 
+def _emit_summary_visuals(pipeline_dir: Path, con: Any) -> None:
+    stage_dir = pipeline_dir / "09_section_summarizer"
+    visual_dir = stage_dir / "visual_output"
+    visual_dir.mkdir(parents=True, exist_ok=True)
+
+    sections_json = pipeline_dir / "04_section_builder" / "json_output" / "04_sections.json"
+    section_visuals: dict[str, Path] = {}
+    source_pdf = None
+    if sections_json.exists():
+        try:
+            data = json.loads(sections_json.read_text())
+            source_pdf = data.get("source_pdf") or None
+            for sec in data.get("sections") or []:
+                sid = sec.get("id")
+                vrel = sec.get("visual_path")
+                if sid and vrel:
+                    cand = Path(str(vrel))
+                    if not cand.is_absolute():
+                        cand = pipeline_dir / cand
+                    if cand.exists():
+                        section_visuals[str(sid)] = cand
+        except Exception:
+            pass
+
+    doc = None
+    if source_pdf:
+        try:
+            import fitz
+            doc = fitz.open(str(source_pdf))
+        except Exception:
+            doc = None
+
+    rows = con.execute(
+        "SELECT id, page_start FROM sections WHERE llm_summary IS NOT NULL ORDER BY page_start, id"
+    ).fetchall()
+    visuals = []
+    for idx, (sid, page_start) in enumerate(rows):
+        out_path = visual_dir / f"section_{idx:04d}.png"
+        src = section_visuals.get(str(sid)) if sid is not None else None
+        if src and src.exists():
+            if not out_path.exists():
+                shutil.copy2(src, out_path)
+            visuals.append(
+                {
+                    "section_id": sid,
+                    "visual_path": str(out_path.relative_to(pipeline_dir)),
+                }
+            )
+            continue
+        if doc is None:
+            continue
+        try:
+            pg = int(page_start or 0)
+            if pg < 0 or pg >= len(doc):
+                pg = 0
+            page = doc[pg]
+            rect = page.rect
+            pix = page.get_pixmap(matrix=fitz.Matrix(2, 2), clip=rect)
+            pix.save(str(out_path))
+            visuals.append(
+                {
+                    "section_id": sid,
+                    "visual_path": str(out_path.relative_to(pipeline_dir)),
+                }
+            )
+        except Exception:
+            continue
+
+    if doc is not None:
+        doc.close()
+
+    json_dir = stage_dir / "json_output"
+    json_dir.mkdir(parents=True, exist_ok=True)
+    summary_path = json_dir / "09_section_summaries.json"
+    summary_path.write_text(
+        json.dumps({"visuals": visuals}, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
 def run_stage_09_summarizer(
     pipeline_dir: Path,
     model: str = DEFAULT_MODEL,
@@ -252,42 +337,50 @@ def run_stage_09_summarizer(
     concurrency: int = DEFAULT_CONCURRENCY,
 ):
     """Entry point for the pipeline driver."""
-    from scillm.paved import list_models_openai_like
     
     db_path = pipeline_dir / "pipeline.duckdb"
     if not db_path.exists():
         logger.error(f"Database not found at {db_path}")
         return
 
-    # Check model availability first
-    api_key = os.getenv("CHUTES_API_KEY")
-    try:
-        models = list_models_openai_like(api_base=api_base, api_key=api_key)
-        if not models or model not in models:
-            logger.warning(f"Model {model} not listed at {api_base}, but attempting anyway.")
-    except Exception as e:
-        logger.warning(f"Could not list models: {e}")
+    # Skip manual model list check (outdated API), rely on runtime errors.
+    # api_key = os.getenv("CHUTES_API_KEY")
 
     con = get_connection(db_path)
     try:
         asyncio.run(run_summarizer(con, model, api_base, concurrency))
+        if os.getenv("CONTRACT_LOOP_DEBUG_VISUALS", "0").lower() in {"1", "true", "yes", "y"}:
+            _emit_summary_visuals(pipeline_dir, con)
         logger.info("Stage 09 Section Summarizer complete.")
+    except Exception as e:
+        logger.error(f"Stage 09 Failed: {e}")
+        # Re-raise to signal failure to pipeline
+        raise e
     finally:
         con.close()
 
 if __name__ == "__main__":
     import argparse
-    parser = argparse.ArgumentParser(description="Stage 09: Section Summarizer")
-    parser.add_argument("--pipeline-dir", type=str, required=True)
-    parser.add_argument("--model", type=str, default=DEFAULT_MODEL)
-    parser.add_argument("--api-base", type=str, default=DEFAULT_API_BASE)
-    parser.add_argument("--concurrency", type=int, default=DEFAULT_CONCURRENCY)
+    import sys
     
+    parser = argparse.ArgumentParser(description="Stage 09: Section Summarizer")
+    parser.add_argument("--pipeline-dir", type=Path, required=True, help="Path to pipeline results root")
     args = parser.parse_args()
     
-    run_stage_09_summarizer(
-        Path(args.pipeline_dir),
-        args.model,
-        args.api_base,
-        args.concurrency
-    )
+    db_path = args.pipeline_dir / "pipeline.duckdb"
+    if not db_path.exists():
+        logger.error(f"Database missing: {db_path}")
+        sys.exit(1)
+        
+    con = get_connection(db_path)
+    
+    try:
+        logger.info("Running Stage 09...")
+        asyncio.run(run_summarizer(con))
+        if os.getenv("CONTRACT_LOOP_DEBUG_VISUALS", "0").lower() in {"1", "true", "yes", "y"}:
+            _emit_summary_visuals(args.pipeline_dir, con)
+    except Exception as e:
+        logger.error(f"Execution failed: {e}")
+        sys.exit(1)
+    finally:
+        con.close()

@@ -1053,26 +1053,42 @@ def _build_section_sketch_llm(
         from extractor.pipeline.utils.scillm_router import get_vlm_router
         from extractor.pipeline.utils.response_utils import normalize_json_content
         from extractor.pipeline.utils.debug_utils import ensure_logs_dir, time_block
-        router = get_vlm_router()
+        from scillm import parallel_acompletions_iter
+        
+        async def _do_vlm_call():
+            reqs = [{
+                "model": "chutes/vlm",
+                "messages": messages,
+                "response_format": {"type": "json_object"},
+                "temperature": 0,
+                "timeout": timeout,
+                "index": 0
+            }]
+             
+            api_key = os.getenv("CHUTES_API_KEY")
+            api_base = os.getenv("CHUTES_API_BASE", "https://llm.chutes.ai/v1")
+             
+            async for r in parallel_acompletions_iter(
+                reqs, api_base=api_base, api_key=api_key, concurrency=1, timeout=timeout, response_format={"type": "json_object"}
+            ):
+                if r.get("ok"):
+                    return {
+                        "model": r.get("model", "chutes/vlm"),
+                        "usage": r.get("usage"),
+                        "choices": [{"message": {"content": r.get("content")}}],
+                        "id": r.get("id")
+                    }
+                else:
+                    raise RuntimeError(f"SciLLM VLM Error: {r.get('error')}")
+            return None
+
         _rd = os.getenv("RUN_RESULTS_DIR")
         if _rd:
             logs_dir = ensure_logs_dir(Path(_rd), "06b_layout_sketcher")
             with time_block(logs_dir, "section_vlm_sketch", section_id=str(sec.get("id"))):
-                resp = asyncio.run(router.acompletion(
-                    model="chutes/vlm",
-                    messages=messages,
-                    response_format={"type":"json_object"},
-                    temperature=0,
-                    timeout=timeout,
-                ))
+                resp = asyncio.run(_do_vlm_call())
         else:
-            resp = asyncio.run(router.acompletion(
-                model="chutes/vlm",
-                messages=messages,
-                response_format={"type":"json_object"},
-                temperature=0,
-                timeout=timeout,
-            ))
+            resp = asyncio.run(_do_vlm_call())
         _, obj = normalize_json_content(resp)
         if isinstance(obj, dict) and obj.get("elements"):
             obj.setdefault("schema_version", SCHEMA_VERSION)

@@ -1,0 +1,866 @@
+{
+  "pdf_source": "source.pdf",
+  "page_count": 4,
+  "page_dimensions": {
+    "width": 612.0,
+    "height": 792.0
+  },
+  "sections": [
+    {
+      "title": "Document Start",
+      "level": 1,
+      "bbox": [
+        0,
+        0,
+        612.0,
+        100
+      ],
+      "page": 0,
+      "content": []
+    },
+    {
+      "title": "Document Start",
+      "level": 2,
+      "bbox": [
+        72.0,
+        46.31999969482422,
+        250.67999267578125,
+        79.36799621582031
+      ],
+      "page": 0,
+      "content": [
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit amet, consectetur adipisc",
+          "bbox": [
+            72.0,
+            97.25,
+            283.7399597167969,
+            110.98999786376953
+          ],
+          "page": 0
+        }
+      ]
+    },
+    {
+      "title": "Lorem ipsum dolor sit amet, \u00b7BHT is implemented as a memory which is composed of",
+      "level": 2,
+      "bbox": [
+        72.0,
+        119.25,
+        612.1597900390625,
+        158.13999938964844
+      ],
+      "page": 0,
+      "content": [
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet",
+          "bbox": [
+            72.0,
+            173.25,
+            413.7798767089844,
+            200.99000549316406
+          ],
+          "page": 0
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consec",
+          "bbox": [
+            72.0,
+            209.25,
+            413.7798767089844,
+            236.99000549316406
+          ],
+          "page": 0
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor",
+          "bbox": [
+            72.0,
+            245.25,
+            400.9998779296875,
+            258.989990234375
+          ],
+          "page": 0
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adipi",
+          "bbox": [
+            72.0,
+            267.25,
+            413.7798767089844,
+            294.989990234375
+          ],
+          "page": 0
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consect",
+          "bbox": [
+            72.0,
+            303.25,
+            413.7798767089844,
+            330.989990234375
+          ],
+          "page": 0
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consec",
+          "bbox": [
+            72.0,
+            339.25,
+            413.7798767089844,
+            366.989990234375
+          ],
+          "page": 0
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit amet, consectetur adipisci",
+          "bbox": [
+            72.0,
+            375.25,
+            285.9599609375,
+            388.989990234375
+          ],
+          "page": 0
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsu",
+          "bbox": [
+            152.0,
+            472.25,
+            194.239990234375,
+            485.989990234375
+          ],
+          "page": 0
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit amet, ",
+          "bbox": [
+            72.0,
+            553.3250122070312,
+            187.04696655273438,
+            565.6909790039062
+          ],
+          "page": 0
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectet",
+          "bbox": [
+            72.0,
+            577.25,
+            413.7798767089844,
+            604.989990234375
+          ],
+          "page": 0
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum",
+          "bbox": [
+            72.0,
+            613.25,
+            375.9898986816406,
+            626.989990234375
+          ],
+          "page": 0
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit amet,",
+          "bbox": [
+            72.0,
+            635.25,
+            195.36997985839844,
+            648.989990234375
+          ],
+          "page": 0
+        }
+      ]
+    },
+    {
+      "title": "Col1 Col2 Col3 Col4 Col5",
+      "level": 2,
+      "bbox": [
+        77.0,
+        657.2999877929688,
+        473.0699768066406,
+        671.0700073242188
+      ],
+      "page": 0,
+      "content": [
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit am",
+          "bbox": [
+            77.0,
+            678.3250122070312,
+            474.4039611816406,
+            690.6909790039062
+          ],
+          "page": 0
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adi",
+          "bbox": [
+            72.0,
+            61.25,
+            413.7798767089844,
+            88.98999786376953
+          ],
+          "page": 1
+        }
+      ]
+    },
+    {
+      "title": "Lorem ipsum dolor sit amet, consectetur \u00b7For any HW configuration,\u00b7",
+      "level": 2,
+      "bbox": [
+        72.0,
+        97.25,
+        333.1399841308594,
+        136.13999938964844
+      ],
+      "page": 1,
+      "content": []
+    },
+    {
+      "title": "Lorem ipsum dolor sit amet, consectetu \u00b7As DebugEn = False,\u00b7",
+      "level": 2,
+      "bbox": [
+        72.0,
+        151.25,
+        281.5199890136719,
+        190.13999938964844
+      ],
+      "page": 1,
+      "content": [
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit amet, consectetur",
+          "bbox": [
+            72.0,
+            205.25,
+            249.8399658203125,
+            218.99000549316406
+          ],
+          "page": 1
+        }
+      ]
+    },
+    {
+      "title": "Col1 Col2 Col3 Col4 Col5 Col6 Col7",
+      "level": 2,
+      "bbox": [
+        77.0,
+        227.3000030517578,
+        499.8128356933594,
+        241.07000732421875
+      ],
+      "page": 1,
+      "content": [
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit amet, consec",
+          "bbox": [
+            77.0,
+            248.3249969482422,
+            501.1468200683594,
+            260.6910095214844
+          ],
+          "page": 1
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit amet, consec",
+          "bbox": [
+            77.0,
+            268.32501220703125,
+            501.1468200683594,
+            280.6910095214844
+          ],
+          "page": 1
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit amet, consec",
+          "bbox": [
+            77.0,
+            288.32501220703125,
+            501.1468200683594,
+            300.6910095214844
+          ],
+          "page": 1
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit amet, consec",
+          "bbox": [
+            77.0,
+            308.32501220703125,
+            501.1468200683594,
+            320.6910095214844
+          ],
+          "page": 1
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit amet, consec",
+          "bbox": [
+            77.0,
+            328.32501220703125,
+            501.1468200683594,
+            340.6910095214844
+          ],
+          "page": 1
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit amet, consec",
+          "bbox": [
+            77.0,
+            348.32501220703125,
+            501.1468200683594,
+            360.6910095214844
+          ],
+          "page": 1
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit amet, consec",
+          "bbox": [
+            77.0,
+            368.32501220703125,
+            501.1468200683594,
+            380.6910095214844
+          ],
+          "page": 1
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit amet, consect",
+          "bbox": [
+            72.0,
+            402.25,
+            232.60997009277344,
+            415.989990234375
+          ],
+          "page": 1
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur a",
+          "bbox": [
+            72.0,
+            424.25,
+            413.7798767089844,
+            493.989990234375
+          ],
+          "page": 1
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor si",
+          "bbox": [
+            72.0,
+            502.25,
+            164.79998779296875,
+            515.989990234375
+          ],
+          "page": 1
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit",
+          "bbox": [
+            72.0,
+            524.25,
+            413.7798767089844,
+            705.989990234375
+          ],
+          "page": 1
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor si",
+          "bbox": [
+            72.0,
+            61.25,
+            413.7798767089844,
+            186.99000549316406
+          ],
+          "page": 2
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit amet, consectetur adipiscing elit. L",
+          "bbox": [
+            72.0,
+            195.25,
+            323.75994873046875,
+            208.99000549316406
+          ],
+          "page": 2
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor si",
+          "bbox": [
+            72.0,
+            217.25,
+            413.7798767089844,
+            272.989990234375
+          ],
+          "page": 2
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit amet, consecte",
+          "bbox": [
+            72.0,
+            281.25,
+            238.1699676513672,
+            294.989990234375
+          ],
+          "page": 2
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adipi",
+          "bbox": [
+            72.0,
+            303.25,
+            413.7798767089844,
+            344.989990234375
+          ],
+          "page": 2
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit amet, consectetur",
+          "bbox": [
+            72.0,
+            353.25,
+            249.8399658203125,
+            366.989990234375
+          ],
+          "page": 2
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit amet, consectetur",
+          "bbox": [
+            72.0,
+            375.25,
+            249.8399658203125,
+            388.989990234375
+          ],
+          "page": 2
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit am",
+          "bbox": [
+            72.0,
+            397.25,
+            413.7798767089844,
+            452.989990234375
+          ],
+          "page": 2
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lore",
+          "bbox": [
+            72.0,
+            461.25,
+            338.2099304199219,
+            474.989990234375
+          ],
+          "page": 2
+        }
+      ]
+    },
+    {
+      "title": "Col1 Col2 Col3 Col4",
+      "level": 2,
+      "bbox": [
+        77.0,
+        483.29998779296875,
+        449.66998291015625,
+        497.07000732421875
+      ],
+      "page": 2,
+      "content": [
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor s",
+          "bbox": [
+            77.0,
+            504.32501220703125,
+            451.00396728515625,
+            516.6909790039062
+          ],
+          "page": 2
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor s",
+          "bbox": [
+            77.0,
+            524.3250122070312,
+            451.00396728515625,
+            536.6909790039062
+          ],
+          "page": 2
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor s",
+          "bbox": [
+            77.0,
+            544.3250122070312,
+            451.00396728515625,
+            556.6909790039062
+          ],
+          "page": 2
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor s",
+          "bbox": [
+            77.0,
+            564.3250122070312,
+            451.00396728515625,
+            576.6909790039062
+          ],
+          "page": 2
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor s",
+          "bbox": [
+            77.0,
+            584.3250122070312,
+            451.00396728515625,
+            596.6909790039062
+          ],
+          "page": 2
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor s",
+          "bbox": [
+            77.0,
+            604.3250122070312,
+            451.00396728515625,
+            616.6909790039062
+          ],
+          "page": 2
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor s",
+          "bbox": [
+            77.0,
+            624.3250122070312,
+            451.00396728515625,
+            636.6909790039062
+          ],
+          "page": 2
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit amet, consectetur adipiscing",
+          "bbox": [
+            72.0,
+            658.25,
+            297.0799560546875,
+            671.989990234375
+          ],
+          "page": 2
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit amet, consectetur adipiscing e",
+          "bbox": [
+            72.0,
+            61.25,
+            305.4199523925781,
+            74.98999786376953
+          ],
+          "page": 3
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit ame",
+          "bbox": [
+            72.0,
+            83.25,
+            413.7798767089844,
+            110.98999786376953
+          ],
+          "page": 3
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit",
+          "bbox": [
+            72.0,
+            119.25,
+            167.57998657226562,
+            132.99000549316406
+          ],
+          "page": 3
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit am",
+          "bbox": [
+            72.0,
+            141.25,
+            413.7798767089844,
+            168.99000549316406
+          ],
+          "page": 3
+        }
+      ]
+    },
+    {
+      "title": "Col1 Col2 Col3 Col4",
+      "level": 2,
+      "bbox": [
+        77.0,
+        177.3000030517578,
+        449.66998291015625,
+        191.07000732421875
+      ],
+      "page": 3,
+      "content": [
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor s",
+          "bbox": [
+            77.0,
+            198.3249969482422,
+            451.00396728515625,
+            210.6909942626953
+          ],
+          "page": 3
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor s",
+          "bbox": [
+            77.0,
+            218.3249969482422,
+            451.00396728515625,
+            230.6909942626953
+          ],
+          "page": 3
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor s",
+          "bbox": [
+            77.0,
+            238.3249969482422,
+            451.00396728515625,
+            250.6909942626953
+          ],
+          "page": 3
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor s",
+          "bbox": [
+            77.0,
+            258.32501220703125,
+            451.00396728515625,
+            270.6910095214844
+          ],
+          "page": 3
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor s",
+          "bbox": [
+            77.0,
+            278.32501220703125,
+            451.00396728515625,
+            290.6910095214844
+          ],
+          "page": 3
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor s",
+          "bbox": [
+            77.0,
+            298.32501220703125,
+            451.00396728515625,
+            310.6910095214844
+          ],
+          "page": 3
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor s",
+          "bbox": [
+            77.0,
+            318.32501220703125,
+            451.00396728515625,
+            330.6910095214844
+          ],
+          "page": 3
+        }
+      ]
+    },
+    {
+      "title": "Col1 Col2 Col3",
+      "level": 2,
+      "bbox": [
+        77.0,
+        352.29998779296875,
+        410.66998291015625,
+        366.07000732421875
+      ],
+      "page": 3,
+      "content": [
+        {
+          "type": "text",
+          "text": "Lorem ipsum do",
+          "bbox": [
+            77.0,
+            373.32501220703125,
+            412.00396728515625,
+            385.6910095214844
+          ],
+          "page": 3
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum do",
+          "bbox": [
+            77.0,
+            393.32501220703125,
+            412.00396728515625,
+            405.6910095214844
+          ],
+          "page": 3
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum do",
+          "bbox": [
+            77.0,
+            413.32501220703125,
+            412.00396728515625,
+            425.6910095214844
+          ],
+          "page": 3
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum do",
+          "bbox": [
+            77.0,
+            433.32501220703125,
+            412.00396728515625,
+            445.6910095214844
+          ],
+          "page": 3
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum do",
+          "bbox": [
+            77.0,
+            453.32501220703125,
+            412.00396728515625,
+            465.6910095214844
+          ],
+          "page": 3
+        }
+      ]
+    },
+    {
+      "title": "Col1 Col2 Col3",
+      "level": 2,
+      "bbox": [
+        77.0,
+        487.29998779296875,
+        410.66998291015625,
+        501.07000732421875
+      ],
+      "page": 3,
+      "content": [
+        {
+          "type": "text",
+          "text": "Lorem ipsum do",
+          "bbox": [
+            77.0,
+            508.32501220703125,
+            412.00396728515625,
+            520.6909790039062
+          ],
+          "page": 3
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum do",
+          "bbox": [
+            77.0,
+            528.3250122070312,
+            412.00396728515625,
+            540.6909790039062
+          ],
+          "page": 3
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum do",
+          "bbox": [
+            77.0,
+            548.3250122070312,
+            412.00396728515625,
+            560.6909790039062
+          ],
+          "page": 3
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum do",
+          "bbox": [
+            77.0,
+            568.3250122070312,
+            412.00396728515625,
+            580.6909790039062
+          ],
+          "page": 3
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum do",
+          "bbox": [
+            77.0,
+            588.3250122070312,
+            412.00396728515625,
+            600.6909790039062
+          ],
+          "page": 3
+        }
+      ]
+    }
+  ]
+}

@@ -20,7 +20,7 @@ Notes
 
 ## Stage Status (01–10)
 
-- 01 Annotation Processor: Verified. Saves annotation images inline; improved prompt; safer FreeText checks; JSON logs truncated. Output: `01_annotation_processor/{json_output,image_output}`.
+- 01 Annotation Processor: Verified. Saves annotation images inline; improved prompt; safer FreeText checks; JSON logs truncated. Output: `01_annotation_processor/{json_output,visual_output}`.
 - 02 Marker Extractor: CLI/test OK. Runtime requires project Marker internals (`extractor.core.converters.pdf`, `extractor.core.models`). Errors now surface clearly if missing.
 - 03 Suspicious Headers: Verified. If suspicious headers exist, uses vision LLM (4o); otherwise writes pass-through `03_verified_blocks.json`.
 - 04 Section Builder: Verified. spaCy optional; regex fallback if model missing. Saves section visuals and stores path relative to results root.

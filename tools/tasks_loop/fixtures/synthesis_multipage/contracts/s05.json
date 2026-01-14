@@ -1,0 +1,11 @@
+{
+  "step": "s05",
+  "fixture": "synthesis_multipage",
+  "name": "Table Extractor",
+  "output": "",
+  "format": [],
+  "expected": {
+    "table_count": 1
+  },
+  "sanity": []
+}

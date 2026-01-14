@@ -1,0 +1,11 @@
+{
+  "step": "s14",
+  "fixture": "BHT_CV32A65X_test",
+  "name": "Auto-Generated S14",
+  "output": "",
+  "format": [],
+  "expected": {
+    "status": "PASS"
+  },
+  "sanity": []
+}

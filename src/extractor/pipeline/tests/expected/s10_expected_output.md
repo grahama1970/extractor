@@ -6,7 +6,7 @@ BHT is implemented as a memory which is composed of BHTDepth configuration param
 
 ### Figure
 
-![Figure](pipeline/06_figure_extractor/image_output/figure_001.png)
+![Figure](pipeline/06_figure_extractor/visual_output/figure_001.png)
 
 When a branch instruction is pre-decoded by instr_scan submodule, the BHT valids whether the PC address is in the BHT and provides the taken or not prediction. The BHT is never flushed.
 

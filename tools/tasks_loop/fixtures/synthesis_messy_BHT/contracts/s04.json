@@ -1,0 +1,23 @@
+{
+  "step": "s04",
+  "fixture": "synthesis_messy_BHT",
+  "name": "Section Builder",
+  "output": "04_section_builder/json_output/04_sections.json",
+  "format": [],
+  "expected": {
+    "section_count": 2,
+    "sections": [
+      {
+        "id": 0,
+        "title": "1. Introduction",
+        "page_start": 0
+      },
+      {
+        "id": 1,
+        "title": "2. Requirements",
+        "page_start": 1
+      }
+    ]
+  },
+  "sanity": []
+}

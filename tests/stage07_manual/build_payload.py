@@ -284,7 +284,7 @@ def main() -> None:
                 continue
             src = Path(rel)
             if not src.is_absolute():
-                src = results / "01_annotation_processor" / "image_output" / src.name
+                src = results / "01_annotation_processor" / "visual_output" / src.name
             if src.exists():
                 dst = tdir / f"annotation{a_idx}.png"
                 dst.write_bytes(src.read_bytes())

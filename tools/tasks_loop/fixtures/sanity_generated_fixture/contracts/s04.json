@@ -1,0 +1,11 @@
+{
+  "step": "s04",
+  "fixture": "sanity_generated_fixture",
+  "name": "Section Builder",
+  "output": "",
+  "format": [],
+  "expected": {
+    "section_count": 2
+  },
+  "sanity": []
+}

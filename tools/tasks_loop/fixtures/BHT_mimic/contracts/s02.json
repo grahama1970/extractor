@@ -1,0 +1,11 @@
+{
+  "step": "s02",
+  "fixture": "BHT_mimic",
+  "name": "Marker Blocks",
+  "output": "",
+  "format": [],
+  "expected": {
+    "block_count_min": 27
+  },
+  "sanity": []
+}

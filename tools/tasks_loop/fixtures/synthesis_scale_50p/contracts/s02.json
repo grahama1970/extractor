@@ -1,0 +1,11 @@
+{
+  "step": "s02",
+  "fixture": "synthesis_scale_50p",
+  "name": "Marker Blocks (Volume)",
+  "output": "02_marker_extractor/json_output/02_marker_blocks.json",
+  "format": [],
+  "expected": {
+    "block_count_min": 100
+  },
+  "sanity": []
+}

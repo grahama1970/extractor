@@ -1,0 +1,11 @@
+{
+  "step": "s08",
+  "fixture": "sanity_generated_fixture",
+  "name": "Requirements (LLM)",
+  "output": "",
+  "format": [],
+  "expected": {
+    "requirement_count": 1
+  },
+  "sanity": []
+}

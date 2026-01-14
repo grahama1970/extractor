@@ -525,19 +525,49 @@ async def reflow_section_with_llm(
 
                 try:
                     import time as _t
-                    _router_s = _build_text_router()
+                    from scillm.batch import parallel_acompletions_iter
                     _t0 = _t.monotonic()
-                    _r_s = await _router_s.acompletion(
-                        model="chutes/text",
-                        messages=messages_simple,
-                        response_format={"type": "json_object"},
-                        temperature=0,
-                        max_tokens=min(STAGE07_MAX_TOKENS, 1024),
+                    
+                    reqs = [{
+                        "model": "chutes/text",
+                        "messages": messages_simple,
+                        "response_format": {"type": "json_object"},
+                        "temperature": 0,
+                        "max_tokens": min(STAGE07_MAX_TOKENS, 1024),
+                        "timeout": max(30, int(os.getenv("STAGE07_TIMEOUT","90"))),
+                        "index": 0
+                    }]
+                    
+                    api_key = os.getenv("CHUTES_API_KEY")
+                    api_base = os.getenv("CHUTES_API_BASE", "https://llm.chutes.ai/v1")
+                    
+                    _r_s = None
+                    async for r in parallel_acompletions_iter(
+                        reqs,
+                        api_base=api_base,
+                        api_key=api_key,
+                        concurrency=1,
                         timeout=max(30, int(os.getenv("STAGE07_TIMEOUT","90"))),
-                    )
+                        response_format={"type": "json_object"}
+                    ):
+                        if r.get("ok"):
+                            # Adapt scillm result to object-like structure expected by rest of function
+                            # or just use the dict content directly.
+                            # The code expects _r_s to have .usage and .model attributes or be a dict.
+                            # Let's construct a compatible dict.
+                            _r_s = {
+                                "model": r.get("model", "chutes/text"),
+                                "usage": r.get("usage"),
+                                "choices": [{"message": {"content": r.get("content")}}],
+                                "id": r.get("id")
+                            }
+                        else:
+                            raise RuntimeError(f"SciLLM Reflow Error: {r.get('error')}")
+
                     _elapsed_ms = int((_t.monotonic() - _t0) * 1000)
-                    _usage = getattr(_r_s, "usage", None) or {}
-                    _model_served = getattr(_r_s, "model", None)
+                    _usage = _r_s.get("usage") or {}
+                    _model_served = _r_s.get("model")
+                    
                     # Persist the exact request/response payloads in logs
                     try:
                         logs_dir = ensure_logs_dir(results_base_dir, "07_reflow_section")
@@ -552,6 +582,7 @@ async def reflow_section_with_llm(
                         (logs_dir / f"request_payload_compact_section_{sid_str}.json").write_text(
                             json.dumps(req, ensure_ascii=False, indent=2, default=str)
                         )
+                        # Helper expects object or dict. Our _r_s is a dict.
                         resp_content = _router_content(_r_s)
                         (logs_dir / f"response_compact_section_{sid_str}.json").write_text(
                             json.dumps(resp_content, ensure_ascii=False, indent=2, default=str)
@@ -561,11 +592,6 @@ async def reflow_section_with_llm(
                     except Exception as exc:
                         log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
                         raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
-                        raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07'})
-                        raise
-                        pass
                     log_timing(
                         "07_reflow_section",
                         {
@@ -583,10 +609,6 @@ async def reflow_section_with_llm(
                 except Exception as exc:
                     log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
-                    raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07'})
-                    raise
                     try:
                         log_timing(
                             "07_reflow_section",
@@ -595,18 +617,13 @@ async def reflow_section_with_llm(
                                 "outcome": "exception",
                                 "route_name": "chutes/text",
                                 "served_model": None,
-                                "error": str(_ex)[:200],
+                                "error": str(exc)[:200],
                                 "raw_preview": None,
                             },
                         )
                     except Exception as exc:
                         log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
                         raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
-                        raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07'})
-                        raise
-                        pass
                     content_simple = None
 
                 result: dict[str, Any] | None = None
@@ -659,17 +676,8 @@ async def reflow_section_with_llm(
                         except Exception as exc:
                             log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
                             raise
-                            log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
-                            raise
-                            log_stage_error('07_reflow_section', exc, {'context': '07'})
-                            raise
-                            pass
                     except Exception as exc:
                         log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
-                        raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
-                        raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07'})
                         raise
                         result = None
 
@@ -691,19 +699,11 @@ async def reflow_section_with_llm(
                     except Exception as exc:
                         log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
                         raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
-                        raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07'})
-                        raise
                         prev = []
                     prev.append(entry)
                     summary_path.write_text(json.dumps(prev, indent=2))
                 except Exception as exc:
                     log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
-                    raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
-                    raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07'})
                     raise
                     pass
 
@@ -712,10 +712,6 @@ async def reflow_section_with_llm(
                 # If compact path failed to produce JSON, fall through to existing strict/relaxed branches
             except Exception as exc:
                 log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
-                raise
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
-                raise
-                log_stage_error('07_reflow_section', exc, {'context': '07'})
                 raise
                 pass
 
@@ -748,26 +744,47 @@ async def reflow_section_with_llm(
                 except Exception as exc:
                     log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
-                    raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07'})
-                    raise
                     pass
                 try:
                     import time as _t
-                    _router_min = _build_text_router()
+                    from scillm.batch import parallel_acompletions_iter
                     _t0 = _t.monotonic()
-                    _r_min = await _router_min.acompletion(
-                        model="chutes/text",
-                        messages=messages_min,
-                        response_format={"type": "json_object"},
-                        temperature=0,
-                        max_tokens=min(STAGE07_MAX_TOKENS, 512),
+                    
+                    reqs_min = [{
+                        "model": "chutes/text",
+                        "messages": messages_min,
+                        "response_format": {"type": "json_object"},
+                        "temperature": 0,
+                        "max_tokens": min(STAGE07_MAX_TOKENS, 512),
+                        "timeout": llm_timeout,
+                        "index": 0
+                    }]
+                    
+                    api_key = os.getenv("CHUTES_API_KEY")
+                    api_base = os.getenv("CHUTES_API_BASE", "https://llm.chutes.ai/v1")
+                    
+                    _r_min = None
+                    async for r in parallel_acompletions_iter(
+                        reqs_min,
+                        api_base=api_base,
+                        api_key=api_key,
+                        concurrency=1,
                         timeout=llm_timeout,
-                    )
+                        response_format={"type": "json_object"}
+                    ):
+                        if r.get("ok"):
+                            _r_min = {
+                                "model": r.get("model", "chutes/text"),
+                                "usage": r.get("usage"),
+                                "choices": [{"message": {"content": r.get("content")}}],
+                                "id": r.get("id")
+                            }
+                        else:
+                            raise RuntimeError(f"SciLLM Reflow Min Error: {r.get('error')}")
+
                     _elapsed_ms = int((_t.monotonic() - _t0) * 1000)
-                    _usage = getattr(_r_min, "usage", None) or {}
-                    _model_served = getattr(_r_min, "model", None)
+                    _usage = _r_min.get("usage") or {}
+                    _model_served = _r_min.get("model")
                     log_timing(
                         "07_reflow_section",
                         {
@@ -785,10 +802,6 @@ async def reflow_section_with_llm(
                 except Exception as exc:
                     log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
-                    raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07'})
-                    raise
                     try:
                         log_timing(
                             "07_reflow_section",
@@ -797,18 +810,13 @@ async def reflow_section_with_llm(
                                 "outcome": "exception",
                                 "route_name": "chutes/text",
                                 "served_model": None,
-                                "error": str(_ex)[:200],
+                                "error": str(exc)[:200],
                                 "raw_preview": None,
                             },
                         )
                     except Exception as exc:
                         log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
                         raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
-                        raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07'})
-                        raise
-                        pass
                     content_min = None
                 try:
                     (logs_dir / f"response_forced_min_{section_data.get('id','section')}.json").write_text(
@@ -1214,18 +1222,45 @@ async def reflow_section_with_llm(
 
             # Run strict call via SciLLM Router (OpenAI-compatible JSON mode)
             try:
-                _router = _build_text_router()
                 import time as _t
+                from scillm import parallel_acompletions_iter
                 _t0 = _t.monotonic()
+                
+                reqs = [{
+                    "model": "chutes/text",
+                    "messages": messages,
+                    "response_format": call_params.get("response_format", {"type": "json_object"}),
+                    "temperature": 0,
+                    "max_tokens": int(call_params.get("max_tokens") or 1024),
+                    "timeout": llm_timeout,
+                    "index": 0
+                }]
+                
+                api_key = os.getenv("CHUTES_API_KEY")
+                api_base = os.getenv("CHUTES_API_BASE", "https://llm.chutes.ai/v1")
+                
+                _r = None
+                async for r in parallel_acompletions_iter(
+                    reqs,
+                    api_base=api_base,
+                    api_key=api_key,
+                    concurrency=1,
+                    timeout=llm_timeout,
+                    response_format=call_params.get("response_format", {"type": "json_object"})
+                ):
+                    if r.get("ok"):
+                        _r = {
+                            "model": r.get("model", "chutes/text"),
+                            "usage": r.get("usage"),
+                            "choices": [{"message": {"content": r.get("content")}}],
+                            "id": r.get("id")
+                        }
+                    else:
+                        raise RuntimeError(f"SciLLM Strict Reflow Error: {r.get('error')}")
+
                 with time_block(logs_dir, "attempt_strict", section_id=str(section_data.get("id","section")), **summarize_messages(messages)):
-                    _r = await _router.acompletion(
-                        model="chutes/text",
-                        messages=messages,
-                        response_format=call_params.get("response_format", {"type": "json_object"}),
-                        temperature=0,
-                        max_tokens=int(call_params.get("max_tokens") or 1024),
-                        timeout=llm_timeout,
-                    )
+                    pass # Timing handled by wrapper but logic moved inside try block
+                
                 content_obj = _router_content(_r)
                 try:
                     _elapsed_ms = int((_t.monotonic() - _t0) * 1000)
@@ -2576,5 +2611,4 @@ async def reflow_section_with_llm(
         raise RuntimeError(
             "Stage 07 failed: LLM call did not return usable JSON. Check 07_reflow_section/logs, verify API keys, and confirm the configured Chat model is reachable."
         )
-
 

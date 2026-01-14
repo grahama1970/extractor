@@ -26,6 +26,7 @@ vision, only bbox maths.
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
@@ -81,6 +82,8 @@ def run(results_root: Path | str = Path("data/results/pipeline")) -> Path:
     json_dir = stage_dir / "json_output"
     json_dir.mkdir(parents=True, exist_ok=True)
     audit_path = json_dir / "04a_layout_audit.json"
+    visual_dir = stage_dir / "visual_output"
+    visual_dir.mkdir(parents=True, exist_ok=True)
 
     sections_path = root / "04_section_builder" / "json_output" / "04_sections.json"
     data = _read_json(sections_path)
@@ -141,6 +144,8 @@ def run(results_root: Path | str = Path("data/results/pipeline")) -> Path:
             )
 
     errors = sum(1 for c in checks if not c["ok"])
+    visuals: List[Dict[str, Any]] = []
+
     summary_payload = {
         "step": STEP_NAME,
         "ok": errors == 0,
@@ -148,7 +153,68 @@ def run(results_root: Path | str = Path("data/results/pipeline")) -> Path:
         "results_root": str(root),
         "sections_checked": sum(1 for c in checks if c.get("section_title") != "__GLOBAL__"),
         "checks": checks,
+        "visuals": visuals,
     }
+
+    # Copy or derive visuals for audited sections (debug tooling expects visuals).
+    try:
+        source_pdf = data.get("source_pdf")
+        doc = None
+        if source_pdf:
+            try:
+                import fitz
+                doc = fitz.open(str(source_pdf))
+            except Exception:
+                doc = None
+
+        for idx, sec in enumerate(sections):
+            sid = sec.get("id") or f"section_{idx}"
+            out_path = visual_dir / f"{sid}.png"
+            src_rel = sec.get("visual_path") or sec.get("image_path")
+            src_path = None
+            if src_rel:
+                cand = Path(str(src_rel))
+                if not cand.is_absolute():
+                    cand = root / cand
+                if cand.exists():
+                    src_path = cand
+            if src_path:
+                if not out_path.exists():
+                    shutil.copy2(src_path, out_path)
+                visuals.append(
+                    {
+                        "section_id": sid,
+                        "visual_path": str(out_path.relative_to(root)),
+                    }
+                )
+                continue
+            if doc is not None:
+                try:
+                    page_idx = int(sec.get("page_start", 0) or 0)
+                    if page_idx < 0 or page_idx >= len(doc):
+                        page_idx = 0
+                    page = doc[page_idx]
+                    bbox = sec.get("bbox") or []
+                    if not isinstance(bbox, list) or len(bbox) != 4:
+                        bbox = [page.rect.x0, page.rect.y0, page.rect.x1, page.rect.y1]
+                    rect = fitz.Rect(*[float(v) for v in bbox])
+                    if rect.is_empty or rect.width <= 0 or rect.height <= 0:
+                        rect = fitz.Rect(page.rect)
+                    rect = rect & page.rect
+                    pix = page.get_pixmap(matrix=fitz.Matrix(2, 2), clip=rect)
+                    pix.save(str(out_path))
+                    visuals.append(
+                        {
+                            "section_id": sid,
+                            "visual_path": str(out_path.relative_to(root)),
+                        }
+                    )
+                except Exception:
+                    continue
+        if doc is not None:
+            doc.close()
+    except Exception as exc:
+        log_stage_error(STEP_NAME, exc, {"context": "visual_copy"})
 
     audit_path.write_text(json.dumps(summary_payload, ensure_ascii=False, indent=2), encoding="utf-8")
     logger.info("%s: errors=%s", STEP_NAME, errors)
@@ -169,10 +235,15 @@ def sanity() -> int:
 
 
 if __name__ == "__main__":
+    import argparse
     import sys
-
-    argv = sys.argv[1:]
-    if argv and argv[0] == "sanity":
-        raise SystemExit(sanity())
-    print("Usage: python -m extractor.pipeline.steps.04a_layout_audit sanity", file=sys.stderr)
-    raise SystemExit(2)
+    
+    parser = argparse.ArgumentParser(description="Stage 04a: Layout Audit")
+    parser.add_argument("--pipeline-dir", type=Path, required=True)
+    args = parser.parse_args()
+    
+    try:
+        run(args.pipeline_dir)
+    except Exception as e:
+        logger.error(f"S04a execution failed: {e}")
+        sys.exit(1)

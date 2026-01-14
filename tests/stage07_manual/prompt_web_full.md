@@ -902,7 +902,7 @@ Section JSON (sanitized):
     "composite_size_bytes": 316547,
     "composite_width": 1224,
     "composite_height": 3171,
-    "visual_path": "04_section_builder/image_output/section_section_0.png"
+    "visual_path": "04_section_builder/visual_output/section_section_0.png"
   },
   "display_title": "BHT (Branch History Table) submodule",
   "id": "section_0",
@@ -912,7 +912,7 @@ Section JSON (sanitized):
     1
   ],
   "has_visual": true,
-  "visual_path": "04_section_builder/image_output/section_section_0.png"
+  "visual_path": "04_section_builder/visual_output/section_section_0.png"
 }
 ```
 

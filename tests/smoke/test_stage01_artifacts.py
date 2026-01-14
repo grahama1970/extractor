@@ -62,8 +62,8 @@ def test_stage01_saves_images_and_clean_pdf(tmp_path):
     # Expect at least one annotation and saved images
     assert isinstance(annotations, list)
     assert len(annotations) > 0, "Expected at least one annotation from fixture PDF"
-    img_dir = stage_dir / "image_output"
-    assert img_dir.exists(), "image_output directory not created"
+    img_dir = stage_dir / "visual_output"
+    assert img_dir.exists(), "visual_output directory not created"
     assert any(img_dir.iterdir()), "No images saved for annotations"
 
     # Create the clean PDF and verify it exists

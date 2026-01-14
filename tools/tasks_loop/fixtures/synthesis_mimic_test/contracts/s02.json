@@ -1,0 +1,11 @@
+{
+  "step": "s02",
+  "fixture": "synthesis_mimic_test",
+  "name": "Marker Blocks",
+  "output": "",
+  "format": [],
+  "expected": {
+    "block_count_min": 15
+  },
+  "sanity": []
+}

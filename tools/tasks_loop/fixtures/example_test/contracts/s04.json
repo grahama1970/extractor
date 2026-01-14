@@ -1,0 +1,11 @@
+{
+  "step": "s04",
+  "fixture": "example_test",
+  "name": "Section Builder",
+  "output": "",
+  "format": [],
+  "expected": {
+    "section_count": 3
+  },
+  "sanity": []
+}

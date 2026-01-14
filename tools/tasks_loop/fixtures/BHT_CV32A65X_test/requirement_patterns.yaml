@@ -1,0 +1,65 @@
+# Client-Specific Requirement Patterns
+#
+# This file defines regex patterns for deterministic requirement extraction.
+# Place in fixture directory: fixtures/<name>/requirement_patterns.yaml
+#
+# These patterns are used BEFORE the LLM to find high-precision "anchors".
+# The LLM then validates/classifies these candidates rather than hallucinating.
+
+# Requirement ID prefixes (e.g., "REQ-BHT-1", "REQ-001")
+# These trigger formal pattern matching: {prefix}{id}: {text}
+id_prefixes:
+  - "REQ-"
+  - "REQ-BHT-"
+  - "CVA6-" # Example for CVA6 project
+
+# Modal verbs that indicate requirement statements
+# Sentences containing these words are extracted as candidates
+modal_verbs:
+  - "shall"
+  - "must"
+  - "will"
+  - "should" # Optional: lower confidence
+
+# Custom regex patterns (advanced)
+# Each pattern should have a named group "text" for the requirement text
+custom_patterns:
+  # BHT-SPECIFIC: All tables are requirements (e.g., Table 4-2, Table 4-3)
+  # Tables in BHT documents define behavioral specifications, not just data
+  - pattern: 'Table\s+\d+-\d+\s*[:\s]*(?P<text>.+?)(?=Table\s+\d+-\d+|$)'
+    source: table_requirement
+    treat_as_requirement: true
+  # Table row requirements (individual rows with "shall")
+  - pattern: 'Table\s+\d+-\d+.*?(?P<text>The\s+.+?shall.+?\.)'
+    source: table_row
+  # Numbered list requirements
+  - pattern: '^\s*\d+\.\s*(?P<text>.+?(?:shall|must).+?\.)'
+    source: numbered_list
+
+# Table extraction mode
+# If true, each table is treated as a requirement entity
+tables_are_requirements: true
+
+# Conditional requirement patterns
+# These identify requirements that are contingent on a condition
+# Format: "When <condition>: <requirement>" or "If <condition>, <requirement>"
+conditional_patterns:
+  # "When X is Y:" style - common in BHT specs
+  - pattern: 'When\s+(?P<condition>[^:]+):\s*(?P<text>.+?)(?=When\s+|If\s+|$)'
+    source: when_clause
+  # "If X, then Y" style
+  - pattern: 'If\s+(?P<condition>[^,]+),\s*(?P<text>.+?(?:shall|must|will).+?\.)'
+    source: if_then
+  # "If X:" block style
+  - pattern: 'If\s+(?P<condition>[^:]+):\s*(?P<text>.+?)(?=If\s+|When\s+|$)'
+    source: if_block
+
+# Conditional indicators
+# Keywords that signal a requirement has conditions
+conditional_keywords:
+  - "when"
+  - "if"
+  - "provided that"
+  - "in the event"
+  - "unless"
+  - "only if"

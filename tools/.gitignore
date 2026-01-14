@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+verify.log
+soft_judge.txt
+.loop_status.json
+.run_all_status.json
+out_cli.json
+out/
+fixtures/camelot_fixture.pdf

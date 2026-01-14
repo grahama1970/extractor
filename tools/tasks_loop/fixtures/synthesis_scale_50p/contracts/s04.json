@@ -1,0 +1,11 @@
+{
+  "step": "s04",
+  "fixture": "synthesis_scale_50p",
+  "name": "Section Builder (Volume)",
+  "output": "04_section_builder/json_output/04_sections.json",
+  "format": [],
+  "expected": {
+    "section_count_min": 80
+  },
+  "sanity": []
+}

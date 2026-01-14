@@ -12,7 +12,7 @@ Inputs
 
 Outputs
 - `03_suspicious_headers/json_output/03_verified_blocks.json` (flattened `blocks`).
-- `03_suspicious_headers/image_output/*.png` (context images per candidate).
+- `03_suspicious_headers/visual_output/*.png` (context images per candidate).
 - Optional DB inserts into `headers_verified` (when env + `--persist-headers`).
 
 Key Behavior

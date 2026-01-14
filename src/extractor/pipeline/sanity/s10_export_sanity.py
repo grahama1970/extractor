@@ -15,7 +15,7 @@ def main():
     con.execute("CREATE TABLE sections (id VARCHAR, title VARCHAR, page_start INTEGER, page_end INTEGER, parent_id VARCHAR, display_title VARCHAR, title_display VARCHAR, llm_title VARCHAR, llm_summary VARCHAR, llm_key_concepts VARCHAR, llm_metadata VARCHAR)")
     con.execute("CREATE TABLE tables (id VARCHAR, page INTEGER, x0 DOUBLE, y0 DOUBLE, x1 DOUBLE, y1 DOUBLE, csv_data VARCHAR, html_data VARCHAR, section_id VARCHAR, sort_order INTEGER, llm_title VARCHAR, llm_description VARCHAR, image_path VARCHAR)")
     con.execute("CREATE TABLE figures (id VARCHAR, page INTEGER, x0 DOUBLE, y0 DOUBLE, x1 DOUBLE, y1 DOUBLE, image_path VARCHAR, section_id VARCHAR, sort_order INTEGER, llm_title VARCHAR, llm_description VARCHAR)")
-    con.execute("CREATE TABLE requirements (id VARCHAR, req_id VARCHAR, section_id VARCHAR, text VARCHAR, type VARCHAR, confidence DOUBLE, citation_snippet VARCHAR, is_table_row BOOLEAN, is_conditional BOOLEAN, condition_text VARCHAR, sort_order INTEGER, page INTEGER, y0 DOUBLE, proving_status VARCHAR, verification_artifact VARCHAR, proof_file VARCHAR)")
+    con.execute("CREATE TABLE requirements (id VARCHAR, req_id VARCHAR, section_id VARCHAR, text VARCHAR, type VARCHAR, confidence DOUBLE, citation_snippet VARCHAR, is_table_row BOOLEAN, is_conditional BOOLEAN, condition_text VARCHAR, sort_order INTEGER, page INTEGER, y0 DOUBLE, metadata_json VARCHAR, proving_status VARCHAR, verification_artifact VARCHAR, proof_file VARCHAR)")
     
     # Insert Dummy Data
     con.execute("INSERT INTO sections (id, title) VALUES ('s1', 'Sanity Section')")

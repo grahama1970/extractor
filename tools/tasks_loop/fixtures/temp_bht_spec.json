@@ -1,0 +1,604 @@
+{
+  "pdf_source": "BHT_CV32A65X_test.pdf",
+  "page_count": 5,
+  "page_dimensions": {
+    "width": 612.0,
+    "height": 792.0
+  },
+  "sections": [
+    {
+      "title": "Document Start",
+      "level": 1,
+      "bbox": [
+        0,
+        0,
+        612.0,
+        100
+      ],
+      "page": 0,
+      "content": [
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit amet, consectetur adipisc",
+          "bbox": [
+            72.0,
+            82.37848663330078,
+            316.1101989746094,
+            95.22335052490234
+          ],
+          "page": 0
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit amet, ",
+          "bbox": [
+            100.0,
+            96.70000457763672,
+            251.427978515625,
+            113.18800354003906
+          ],
+          "page": 0
+        },
+        {
+          "type": "header",
+          "text": "\u202dBHT is implemented as a memory which is composed of\u202c \u202dBHTDepth configuration parameter\u202c",
+          "bbox": [
+            72.0,
+            116.37841796875,
+            536.935302734375,
+            129.66748046875
+          ],
+          "page": 0
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet",
+          "bbox": [
+            72.0,
+            138.45654296875,
+            455.7890625,
+            151.74560546875
+          ],
+          "page": 0
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consec",
+          "bbox": [
+            72.0,
+            175.53466796875,
+            531.946533203125,
+            188.82373046875
+          ],
+          "page": 0
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor",
+          "bbox": [
+            72.0,
+            197.61279296875,
+            412.75762939453125,
+            210.90185546875
+          ],
+          "page": 0
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adipi",
+          "bbox": [
+            72.0,
+            234.69091796875,
+            542.7408447265625,
+            247.97998046875
+          ],
+          "page": 0
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consect",
+          "bbox": [
+            72.0,
+            256.76904296875,
+            508.2360534667969,
+            270.05810546875
+          ],
+          "page": 0
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consec",
+          "bbox": [
+            72.0,
+            278.84716796875,
+            500.6040344238281,
+            292.13623046875
+          ],
+          "page": 0
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit amet, consectetur adipisci",
+          "bbox": [
+            72.0,
+            300.92529296875,
+            292.656005859375,
+            314.21435546875
+          ],
+          "page": 0
+        },
+        {
+          "type": "figure",
+          "description": "Figure from Page 1",
+          "bbox": [
+            73.5,
+            338.99365234375,
+            541.5,
+            489.7436828613281
+          ],
+          "page": 0
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectet",
+          "bbox": [
+            72.0,
+            516.12841796875,
+            536.2560424804688,
+            529.41748046875
+          ],
+          "page": 0
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum",
+          "bbox": [
+            72.0,
+            538.20654296875,
+            393.9720153808594,
+            551.49560546875
+          ],
+          "page": 0
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit amet,",
+          "bbox": [
+            72.0,
+            575.28466796875,
+            202.64401245117188,
+            588.57373046875
+          ],
+          "page": 0
+        },
+        {
+          "type": "table",
+          "bbox": [
+            72.0,
+            611.3347470463495,
+            541.92,
+            685.7122084216904
+          ],
+          "page": 0,
+          "columns": [
+            "Col1",
+            "Col2",
+            "Col3",
+            "Col4",
+            "Col5"
+          ],
+          "rows": 1,
+          "table_index": 0
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adi",
+          "bbox": [
+            72.0,
+            479.447265625,
+            541.9200439453125,
+            492.736328125
+          ],
+          "page": 1
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit amet, consectetur ",
+          "bbox": [
+            72.0,
+            501.525390625,
+            253.2960205078125,
+            514.814453125
+          ],
+          "page": 1
+        },
+        {
+          "type": "header",
+          "text": "\u202dFor any HW configuration,\u202c",
+          "bbox": [
+            72.0,
+            538.603515625,
+            215.00399780273438,
+            551.892578125
+          ],
+          "page": 1
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit amet, consectetu",
+          "bbox": [
+            144.0,
+            587.564453125,
+            315.0081787109375,
+            601.88037109375
+          ],
+          "page": 1
+        },
+        {
+          "type": "equation",
+          "text": "\u202dAs DebugEn = False,\u202c",
+          "bbox": [
+            72.0,
+            645.7454833984375,
+            181.84799194335938,
+            659.0345458984375
+          ],
+          "page": 1
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit amet, consectetur ",
+          "bbox": [
+            144.0,
+            694.7064208984375,
+            328.80743408203125,
+            709.0223388671875
+          ],
+          "page": 1
+        },
+        {
+          "type": "table",
+          "bbox": [
+            72.0,
+            71.97818842774916,
+            541.92,
+            478.89488033929115
+          ],
+          "page": 1,
+          "columns": [
+            "Col1",
+            "Col2",
+            "Col3",
+            "Col4",
+            "Col5",
+            "Col6",
+            "Col7"
+          ],
+          "rows": 7,
+          "table_index": 0
+        }
+      ]
+    },
+    {
+      "title": "4.1.5.4.1. REQUIREMENTS (Simulated)",
+      "level": 2,
+      "bbox": [
+        54.0,
+        71.99999237060547,
+        259.7362976074219,
+        87.79755401611328
+      ],
+      "page": 2,
+      "content": [
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur a",
+          "bbox": [
+            54.0,
+            110.00401306152344,
+            553.6080322265625,
+            169.93199157714844
+          ],
+          "page": 2
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor si",
+          "bbox": [
+            54.0,
+            183.2040252685547,
+            161.66400146484375,
+            199.21202087402344
+          ],
+          "page": 2
+        },
+        {
+          "type": "requirement",
+          "id": "REQ-001",
+          "text": "REQ-BHT-1: The BHT shall implement BHTDepth entries and index them using the lower bits of VPC_i. The width of VPC_i shall match CVA6Cfg.VLEN. REQ-BHT-2: Each BHT entry shall contain a two-bit saturating counter that encodes taken/not-taken and shall saturate at its limits. REQ-BHT-3: The BHT shall accept update information from the execute stage (bht_update_i) including the branch PC and resolved outcome, and shall update the corresponding counter accordingly. REQ-BHT-4: The BHT shall provide a prediction output (bht_prediction_o) aligned with the front-end fetch group width (CVA6Cfg.INSTR_PER_FETCH). REQ-BHT-5: The BHT shall not be flushed by pipeline events. Only rst_ni shall initialize internal state. REQ-BHT-6: The subsystem clock clk_i and asynchronous active-low reset rst_ni shall be the only clock/reset inputs required for BHT operation. REQ-BHT-7: When a branch is pre-decoded by the instr_scan submodule, the BHT shall indicate whether a VPC_i address hits and shall return the taken/not-taken prediction to the front end in the same fetch cycle when available. REQ-BHT-8: In cv32a65x configuration, flush_bp_i shall be tied to 0. When DebugEn is False, debug_mode_i shall be tied to 0 and shall not appear as an external port. REQ-BHT-9: All signal widths and types exposed by the BHT interfaces shall be consistent with the configuration package definitions (e.g., CVA6Cfg.VLEN and any package enums used by prediction/update types). REQ-BHT-10: The prediction datapath shall not introduce structural hazards with instruction fetch; updates from the execute stage shall not stall front-end prediction availability.",
+          "bbox": [
+            68.0,
+            197.84397888183594,
+            554.5880126953125,
+            535.9320068359375
+          ],
+          "page": 2
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit amet, consectetur adipiscing elit. L",
+          "bbox": [
+            54.0,
+            549.2039794921875,
+            215.31600952148438,
+            579.8519897460938
+          ],
+          "page": 2
+        },
+        {
+          "type": "requirement",
+          "id": "REQ-002",
+          "text": "The BHT shall locate the entry indexed by the provided VPC and shall increment or decrement the two-bit counter based on the resolved outcome (taken/not-taken). The update shall saturate at the counter bounds and shall not invalidate other entries.",
+          "bbox": [
+            68.0,
+            578.4840087890625,
+            542.5880126953125,
+            623.7720336914062
+          ],
+          "page": 2
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit amet, consecte",
+          "bbox": [
+            54.0,
+            637.0440063476562,
+            236.96401977539062,
+            653.052001953125
+          ],
+          "page": 2
+        },
+        {
+          "type": "requirement",
+          "id": "REQ-003",
+          "text": "If the indexed entry exists, the BHT shall return the current prediction in bht_prediction_o aligned to the fetch slot. If the indexed entry does not exist, the BHT shall return a default not-taken prediction (unless",
+          "bbox": [
+            68.0,
+            651.6840209960938,
+            551.93603515625,
+            696.9719848632812
+          ],
+          "page": 2
+        }
+      ]
+    },
+    {
+      "title": "4.1.6 TABLE MERGE SCENARIOS (Simulated)",
+      "level": 2,
+      "bbox": [
+        54.0,
+        71.13768768310547,
+        297.4366149902344,
+        86.93524932861328
+      ],
+      "page": 3,
+      "content": []
+    },
+    {
+      "title": "4.1.5. TABLE MERGE SCENARIOS (Simulated)",
+      "level": 2,
+      "bbox": [
+        54.0,
+        71.99999237060547,
+        300.6329345703125,
+        87.79755401611328
+      ],
+      "page": 3,
+      "content": [
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit am",
+          "bbox": [
+            54.0,
+            104.94349670410156,
+            548.2979125976562,
+            144.57049560546875
+          ],
+          "page": 3
+        },
+        {
+          "type": "equation",
+          "text": "Mergeable Tables: Table 4-1. BHT Prediction Outcomes (Part 1)",
+          "bbox": [
+            54.0,
+            151.21751403808594,
+            273.6360168457031,
+            182.95201110839844
+          ],
+          "page": 3
+        },
+        {
+          "type": "table",
+          "bbox": [
+            53.519999999999996,
+            193.141472281127,
+            514.56,
+            320.3029385034838
+          ],
+          "page": 3,
+          "columns": [
+            "Col1",
+            "Col2",
+            "Col3",
+            "Col4"
+          ],
+          "rows": 7,
+          "table_index": 0
+        },
+        {
+          "type": "header",
+          "text": "4.1.6 TABLE MERGE SCENARIOS (Simulated) - Continued",
+          "bbox": [
+            54.0,
+            71.13768768310547,
+            360.0635681152344,
+            86.93524932861328
+          ],
+          "page": 4,
+          "metadata": {
+            "merged_continued": true
+          }
+        },
+        {
+          "type": "header",
+          "text": "4.1.5. TABLE MERGE SCENARIOS (Simulated) - Continued",
+          "bbox": [
+            54.0,
+            71.99999237060547,
+            363.2598876953125,
+            87.79755401611328
+          ],
+          "page": 4,
+          "metadata": {
+            "merged_continued": true
+          }
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit ame",
+          "bbox": [
+            54.0,
+            105.47000122070312,
+            432.5400390625,
+            134.57200622558594
+          ],
+          "page": 4
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit",
+          "bbox": [
+            54.0,
+            292.0375061035156,
+            174.1519775390625,
+            307.8385009765625
+          ],
+          "page": 4
+        },
+        {
+          "type": "requirement",
+          "id": "REQ-004",
+          "text": "Table 4-2 and Table 4-3 are distinct datasets and shall not be merged. Each is preceded by its own paragraph. Table 4-2. Interface Signals",
+          "bbox": [
+            54.0,
+            313.8699951171875,
+            491.4000244140625,
+            342.9720153808594
+          ],
+          "page": 4
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit am",
+          "bbox": [
+            60.0,
+            353.19049072265625,
+            478.7499694824219,
+            368.531494140625
+          ],
+          "page": 4
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit a",
+          "bbox": [
+            60.0,
+            371.19049072265625,
+            455.75,
+            386.531494140625
+          ],
+          "page": 4
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit amet, conse",
+          "bbox": [
+            60.0,
+            389.19049072265625,
+            455.75,
+            404.531494140625
+          ],
+          "page": 4
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit amet, consect",
+          "bbox": [
+            60.0,
+            407.19049072265625,
+            530.8104858398438,
+            422.531494140625
+          ],
+          "page": 4
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit amet, consectetur adipiscing elit. L",
+          "bbox": [
+            60.0,
+            425.19049072265625,
+            602.3862915039062,
+            440.531494140625
+          ],
+          "page": 4
+        },
+        {
+          "type": "text",
+          "text": "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adipi",
+          "bbox": [
+            54.0,
+            443.07000732421875,
+            356.69000244140625,
+            472.1719970703125
+          ],
+          "page": 4
+        },
+        {
+          "type": "table",
+          "bbox": [
+            53.519999999999996,
+            144.91608603453506,
+            514.56,
+            271.83762496213274
+          ],
+          "page": 4,
+          "columns": [
+            "Col1",
+            "Col2",
+            "Col3",
+            "Col4"
+          ],
+          "rows": 7,
+          "table_index": 0
+        },
+        {
+          "type": "table",
+          "bbox": [
+            53.519999999999996,
+            482.49378976067857,
+            554.64,
+            573.4262344744017
+          ],
+          "page": 4,
+          "columns": [
+            "Col1",
+            "Col2",
+            "Col3"
+          ],
+          "rows": 5,
+          "table_index": 2
+        }
+      ]
+    }
+  ]
+}

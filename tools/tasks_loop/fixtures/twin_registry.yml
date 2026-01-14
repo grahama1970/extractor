@@ -1,0 +1,29 @@
+# Twin Registry
+# Maps PDF categories/patterns to existing Twin fixtures for reuse.
+
+categories:
+  engineering_spec:
+    description: "Engineering specification documents with requirements"
+    twin_fixture: synthesis_messy_BHT
+    id_patterns: ["REQ-", "SYS-", "HW-", "SW-"]
+
+  datasheet:
+    description: "Component datasheets with tables and specs"
+    twin_fixture: null # TODO: Create datasheet Twin
+    id_patterns: []
+
+  invoice:
+    description: "Financial documents with tables"
+    twin_fixture: null # TODO: Create invoice Twin
+    id_patterns: ["INV-", "PO-"]
+
+# Pattern matching for auto-detection
+detection_rules:
+  - pattern: "requirement|specification|shall|must"
+    category: engineering_spec
+
+  - pattern: "datasheet|absolute maximum|electrical characteristics"
+    category: datasheet
+
+  - pattern: "invoice|bill|total|amount due"
+    category: invoice

@@ -1,0 +1,13 @@
+{
+  "step": "s10",
+  "fixture": "source_mimic",
+  "name": "Markdown Exporter",
+  "output": "",
+  "format": [],
+  "expected": {
+    "not_contains": [
+      "SECTION 5 START"
+    ]
+  },
+  "sanity": []
+}

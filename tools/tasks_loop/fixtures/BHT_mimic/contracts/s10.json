@@ -1,0 +1,11 @@
+{
+  "step": "s10",
+  "fixture": "BHT_mimic",
+  "name": "Markdown Exporter",
+  "output": "",
+  "format": [],
+  "expected": {
+    "section_headers": 4
+  },
+  "sanity": []
+}

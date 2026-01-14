@@ -1,0 +1,33 @@
+{
+  "task_id": "task_03_contract_examples",
+  "title": "Smoke: contract examples present",
+  "prompt": "No code changes required. Return JSON with ok=true, summary, and artifacts=[] per schema.",
+  "max_iters": 2,
+  "deterministic_checks": {
+    "commands": [
+      {
+        "name": "echo_example_ok",
+        "cmd": "python -c \"print('example ok')\""
+      }
+    ],
+    "files_exist": [
+      "tools/contract_loop/docs/examples/CONTRACT.md",
+      "tools/contract_loop/docs/examples/contract_task_example.json"
+    ],
+    "files_contain": [
+      {
+        "path": "tools/contract_loop/docs/examples/CONTRACT.md",
+        "contains": [
+          "Contract file:"
+        ]
+      }
+    ]
+  },
+  "agent": {
+    "output_schema": "tools/contract_loop/judges/agent_task.schema.json"
+  },
+  "llm_gate": {
+    "schema": "tools/contract_loop/judges/contract_gate.schema.json",
+    "prompt": "If deterministic.ok is true, return ok=true with notes and next_actions=[]. Otherwise ok=false and include next_actions."
+  }
+}

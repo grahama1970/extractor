@@ -1,0 +1,12 @@
+{
+  "step": "s02",
+  "fixture": "synthesis_messy_BHT",
+  "name": "Marker Blocks",
+  "output": "02_marker_extractor/json_output/02_marker_blocks.json",
+  "format": [],
+  "expected": {
+    "block_count_min": 10,
+    "block_count_max": 30
+  },
+  "sanity": []
+}

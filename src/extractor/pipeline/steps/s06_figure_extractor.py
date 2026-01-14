@@ -5,7 +5,7 @@ Stage 06 — Figure Extractor (Deterministic)
 Contract:
 - Inputs: Stage 02 blocks (Figure/Image), Stage 04 sections, cleaned PDF path, output dir.
 - For each figure block:
-  - Crop region (small vertical padding), save image to image_output/.
+  - Crop region (small vertical padding), save image to visual_output/.
   - Collect text bands immediately above/below + nearby text for context.
   - Map to section if bbox intersects.
 - Output: writes 06_figure_extractor/json_output/06_figures.json.
@@ -31,9 +31,7 @@ from loguru import logger
 from extractor.pipeline.utils.reliability import log_stage_error
 from rich.console import Console
 from extractor.pipeline.utils.scillm_router import get_vlm_router
-from extractor.pipeline.steps.scillm_preflight_validator import (
-    quick_scillm_check,
-)
+# from extractor.pipeline.steps.scillm_preflight_validator import quick_scillm_check (Unused)
 from extractor.pipeline.utils.response_utils import normalize_json_content
 from extractor.pipeline.utils.debug_utils import ensure_logs_dir, log_llm_call, time_block
 
@@ -244,7 +242,7 @@ def run(
     # Output dirs
     stage_dir = output_dir / "06_figure_extractor"
     json_dir = stage_dir / "json_output"
-    img_dir = stage_dir / "image_output"
+    img_dir = stage_dir / "visual_output"
     json_dir.mkdir(parents=True, exist_ok=True)
     img_dir.mkdir(parents=True, exist_ok=True)
 
@@ -304,53 +302,39 @@ def run(
 
 
 if __name__ == "__main__":
-    # Minimal entry: either --bundle BUNDLE_JSON [OUT_DIR] [--skip-descriptions]
-    # or STAGE02_JSON STAGE04_JSON PDF_DIR [OUT_DIR] [--skip-descriptions]
-    try:
-        from dotenv import find_dotenv, load_dotenv
-
-        load_dotenv(find_dotenv())
-    except Exception as exc:
-        log_stage_error('06_figure_extractor', exc, {'context': '06', 'step': 'dotenv_load'})
-        raise
+    import argparse
     import sys
-    argv = sys.argv[1:]
-    if argv and argv[0] == "sanity":
-        sys.exit(sanity())
-    if not argv or argv[0] in ("-h", "--help"):
-        print(
-            "Usage: python -m extractor.pipeline.steps.06_figure_extractor --bundle BUNDLE [OUT_DIR] [--skip-descriptions]\n"
-            "   or: python -m extractor.pipeline.steps.06_figure_extractor STAGE02_JSON STAGE04_JSON PDF_DIR [OUT_DIR] [--skip-descriptions]",
-            file=sys.stderr,
-        )
-        sys.exit(2)
-    skip = False
-    if "--skip-descriptions" in argv:
-        skip = True
-        argv = [a for a in argv if a != "--skip-descriptions"]
-    kw = {}
-    if argv and argv[0] == "--bundle":
-        try:
-            bundle = Path(argv[1])
-        except IndexError:
-            print("--bundle requires a path", file=sys.stderr)
-            sys.exit(2)
-        out_dir = Path(argv[2]) if len(argv) > 2 else Path("data/results/pipeline")
-        kw = {"bundle": bundle, "output_dir": out_dir, "skip_descriptions": skip}
-    else:
-        if len(argv) < 3:
-            print("Missing args. See --help.", file=sys.stderr)
-            sys.exit(2)
-        s02 = Path(argv[0])
-        s04 = Path(argv[1])
-        pdf_dir = Path(argv[2])
-        out_dir = Path(argv[3]) if len(argv) > 3 else Path("data/results/pipeline")
-        kw = {
-            "stage_02_json": s02,
-            "stage_04_json": s04,
-            "pdf_dir": pdf_dir,
-            "output_dir": out_dir,
-            "skip_descriptions": skip,
-        }
-    out = run(**kw)
-    print(str(out))
+    
+    parser = argparse.ArgumentParser(description="Stage 06: Figure Extractor")
+    parser.add_argument("--pipeline-dir", type=Path, required=True, help="Path to pipeline results root")
+    parser.add_argument("--pdf-dir", type=Path, help="Dir containing input PDF")
+    args = parser.parse_args()
+    
+    pipeline_dir = args.pipeline_dir
+    
+    try:
+        logger.info("Running Stage 06...")
+        stage_02 = pipeline_dir / "02_marker_extractor/json_output/02_marker_blocks.json"
+        stage_04 = pipeline_dir / "04_section_builder/json_output/04_sections.json"
+        
+        if not stage_02.exists() or not stage_04.exists():
+            logger.error("Missing input dependencies (S02 or S04)")
+            sys.exit(1)
+        
+        # Locate PDF
+        # If --pdf-dir is provided, use it. Otherwise, look in S01.
+        pdf_dir = args.pdf_dir
+        if not pdf_dir:
+             s01_dir = pipeline_dir / "01_annotation_processor"
+             if s01_dir.exists():
+                 pdf_dir = s01_dir
+        
+        if not pdf_dir:
+             logger.error("--pdf-dir required for execution (or S01 output must exist)")
+             sys.exit(1)
+
+        run(stage_02_json=stage_02, stage_04_json=stage_04, pdf_dir=pdf_dir, output_dir=pipeline_dir)
+        
+    except Exception as e:
+        logger.error(f"Execution failed: {e}")
+        sys.exit(1)

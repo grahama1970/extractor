@@ -1,0 +1,11 @@
+{
+  "step": "s04",
+  "fixture": "BHT_Mutant_Eq",
+  "name": "Section Builder",
+  "output": "",
+  "format": [],
+  "expected": {
+    "section_count_min": 1
+  },
+  "sanity": []
+}

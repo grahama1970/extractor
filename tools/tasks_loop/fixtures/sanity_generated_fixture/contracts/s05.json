@@ -1,0 +1,11 @@
+{
+  "step": "s05",
+  "fixture": "sanity_generated_fixture",
+  "name": "Table Extractor",
+  "output": "",
+  "format": [],
+  "expected": {
+    "table_count": 1
+  },
+  "sanity": []
+}

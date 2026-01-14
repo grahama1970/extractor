@@ -1,0 +1,11 @@
+{
+  "step": "s06",
+  "fixture": "wrapper_test",
+  "name": "Figure Extractor",
+  "output": "",
+  "format": [],
+  "expected": {
+    "figure_count": 1
+  },
+  "sanity": []
+}
