@@ -129,15 +129,13 @@ smokes = [
   "pandas>=2.0.0",
   "tenacity>=9.1.2",
 ]
-# NOTE: These extras require local workspace setup (repos not public)
-# Install manually: pip install -e /path/to/repo
+# NOTE: These extras use private repos - requires SSH key authentication
 lessons = [
-  # "graph-memory @ git+https://github.com/grahama1970/graph-memory-operator.git",
+  "graph-memory @ git+ssh://git@github.com/grahama1970/graph-memory-operator.git",
 ]
 prover = [
-  # Optional Lean4/FAISS extras - requires local certainly package
-  # Install: pip install -e /path/to/lean4
-  # "certainly @ git+https://github.com/grahama1970/certainly.git",
+  # Optional Lean4/FAISS extras
+  "certainly @ git+ssh://git@github.com/grahama1970/certainly.git",
 ]
 accurate = [
   "torch>=2.5.1,<3",
