@@ -61,6 +61,8 @@ from extractor.core.schema.text.span import Span
 # # Ignore pypdfium2 warning about form flattening
 logging.getLogger("pypdfium2").setLevel(logging.ERROR)
 
+from extractor.core.schema.unified_document import UnifiedDocument
+
 
 class PdfProvider(BaseProvider):
     """
@@ -124,6 +126,52 @@ class PdfProvider(BaseProvider):
         Optional[List[str]],
         "List of allowed directories for PDF processing. If None, uses defaults.",
     ] = None
+
+    def extract_document(self, filepath: str) -> UnifiedDocument:
+        """Extract PDF content using the standard pipeline.
+        
+        This implementation runs the S01-S06 pipeline and reconstructs 
+        a UnifiedDocument from the resulting artifacts.
+        """
+        from extractor.pipeline.run_pipeline import main as run_pipeline_main
+        import tempfile
+        from pathlib import Path
+        import shutil
+        import sys
+        
+        filepath_str = str(Path(filepath).resolve())
+        
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            out_dir = Path(tmp_dir)
+            
+            # Prepare arguments for run_pipeline.py
+            # Note: We skip proving by default for general extraction
+            argv = [
+                "--pdf", filepath_str,
+                "--out", str(out_dir),
+                "--skip-proving"
+            ]
+            
+            # Optional: Add --fast if requested via some config? 
+            # For now, we use standard calibrated run if twins exist.
+            
+            logger.info(f"PdfProvider: Running extraction pipeline for {filepath_str}")
+            
+            # The pipeline main returns 0 on success
+            # We need to catch sys.exit or just trust main returns int
+            try:
+                ret = run_pipeline_main(argv)
+            except SystemExit as se:
+                ret = se.code
+            
+            if ret != 0:
+                raise RuntimeError(f"Extraction pipeline failed for {filepath_str} (code {ret})")
+                
+            # Reconstruct UnifiedDocument from artifacts
+            doc = UnifiedDocument.from_artifacts(out_dir)
+            doc.source_path = filepath_str
+            
+            return doc
 
     def validate_pdf_path(self, file_path: str) -> Path:
         """Validate PDF file path for security."""

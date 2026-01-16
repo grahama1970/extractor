@@ -308,6 +308,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     )
     p.add_argument("--stop-on-fail", action="store_true", default=True)
     p.add_argument("--continue-on-error", action="store_true", help="Allow stages to continue after failure")
+    p.add_argument("--use-llm", action="store_true", help="Use LLM for improved accuracy in s02 (Chutes.ai)")
 
 
     # Batch control
@@ -537,7 +538,7 @@ def _run_html_strategy(html_path: Path, out: Path, args: argparse.Namespace) -> 
         
         # 3. Run common downstream stages (07-14)
         logger.info("Running common pipeline stages (S07-S14)...")
-        return _run_common_stages(out, args, manifest, results, stage_latencies, served_model)
+        return _run_common_stages(out, args, manifest, results, stage_latencies, served_model, pdf=None, preset_config=None)
         
     except Exception as e:
         logger.exception(f"HTML Strategy failed: {e}")
@@ -605,6 +606,61 @@ def _run_pdf_strategy(pdf: Path, out: Path, args: argparse.Namespace) -> int:
         except ImportError:
             logger.info("Stage 10 [Arango Export] skipped: s10_arangodb_exporter module not found.")
 
+    # 00: Profile Detector (Context Injection)
+    # ----------------------------------------------------
+    preset_config = {}
+    preset_name = None
+    
+    if not getattr(args, "skip_s00", False):
+        try:
+            from extractor.pipeline.steps import s00_profile_detector as s00
+            from extractor.core.presets import PRESET_REGISTRY
+            
+            logger.info("00_profile_detector: Running profile detection...")
+            
+            # Run S00
+            s00_out_file = _step(
+                "00_profile_detector",
+                s00.run,
+                pdf,
+                out,
+                stop_on_fail=False, # Don't crash pipeline if profile fails, just warn
+                timeout_sec=args.stage_timeout,
+                log_dir_base=out,
+            )
+            
+            # Load Profile and Context
+            if s00_out_file and s00_out_file.exists():
+                try:
+                    profile_data = json.loads(s00_out_file.read_text())
+                    preset_name = profile_data.get("detected_preset")
+                    logger.info(f"00_profile_detector: Detected Preset = {preset_name}")
+                    
+                    if preset_name in PRESET_REGISTRY:
+                        preset_config = PRESET_REGISTRY[preset_name]
+                        logger.info(f"00_profile_detector: Loaded config for {preset_name}")
+                    elif preset_name:
+                         logger.warning(f"00_profile_detector: Preset '{preset_name}' not in registry. Using defaults.")
+                    
+                except Exception as e:
+                    logger.warning(f"00_profile_detector: Failed to load profile JSON: {e}")
+            else:
+                 logger.warning("00_profile_detector: No output file produced.")
+
+            # Save Context Artifact
+            context_data = {
+                "preset_name": preset_name,
+                "config": preset_config,
+                "timestamp": time.time(),
+                "profile_path": str(s00_out_file) if s00_out_file else None
+            }
+            (out / "pipeline_context.json").write_text(json.dumps(context_data, indent=2))
+            
+        except ImportError:
+            logger.warning("00_profile_detector: Module not found. Skipping context injection.")
+        except Exception as e:
+             logger.error(f"00_profile_detector: Unexpected failure: {e}")
+
     # Enforce implications: proving implies requirements miner
     if args.prove_requirements and not args.extract_requirements:
         args.extract_requirements = True
@@ -642,6 +698,7 @@ def _run_pdf_strategy(pdf: Path, out: Path, args: argparse.Namespace) -> int:
         log_dir_base=out,
         on_timing=lambda n, dt: stage_latencies.update({n: dt}),
         timeout=args.stage_timeout,
+        use_llm=getattr(args, 'use_llm', False),
     )
     if not a02:
         return 1
@@ -696,6 +753,8 @@ def _run_pdf_strategy(pdf: Path, out: Path, args: argparse.Namespace) -> int:
         a03,
         pdf_dir,
         out,
+        preset_config=preset_config, # Validate with context
+
         stop_on_fail=args.stop_on_fail,
         timeout_sec=args.stage_timeout,
         log_dir_base=out,
@@ -856,7 +915,7 @@ def _run_pdf_strategy(pdf: Path, out: Path, args: argparse.Namespace) -> int:
          )
 
     # Common Downstream Stages (S07-S14)
-    return _run_common_stages(out, args, manifest, results, stage_latencies, served_model)
+    return _run_common_stages(out, args, manifest, results, stage_latencies, served_model, pdf=pdf, preset_config=preset_config)
 
 
 def _run_common_stages(
@@ -865,7 +924,9 @@ def _run_common_stages(
     manifest: RunManifest,
     results: Dict[str, Any],
     stage_latencies: Dict[str, int],
-    served_model: Dict[str, str]
+    served_model: Dict[str, str],
+    pdf: Optional[Path] = None,
+    preset_config: Optional[Dict[str, Any]] = None,
 ) -> int:
     """Shared pipeline stages (07 Assembler -> 14 Report) for all input formats."""
     
@@ -941,41 +1002,52 @@ def _run_common_stages(
             counts={"requirements": int(str(a08)) if a08 and str(a08).isdigit() else 0}
         )
 
-        # 08b (Lean4 Theorem Prover) - DISABLED (Aspirational/Experimental)
-        # def _run_08b(ip: Path, op: Path) -> str:
-        #     from extractor.pipeline.steps.s08_lean4_theorem_prover import prove_requirements
-        #     asyncio.run(prove_requirements(db_path, op / "08_lean4_theorem_prover"))
-        #     # Fetch proof count for manifest
-        #     import duckdb
-        #     con = duckdb.connect(str(db_path), read_only=True)
-        #     res = con.execute("SELECT count(*) FROM lean4_proofs").fetchone()
-        #     con.close()
-        #     return str(res[0]) if res else "0"
+        # 08b (Lean4 Theorem Prover) - Context-Aware
+        should_prove = getattr(args, "prove_theorems", False)
+        if not should_prove and preset_config:
+             if preset_config.get("features", {}).get("enable_proving") is True:
+                 should_prove = True
+                 logger.info(f"08b [Lean4] auto-enabled by preset config")
 
-        # a08b = _step(
-        #     "08b_lean4_theorem_prover",
-        #     _run_08b,
-        #     out,
-        #     out,
-        #     stop_on_fail=False,  # Don't block pipeline if proving fails
-        #     timeout_sec=args.stage_timeout * 3,  # Proofs take longer
-        #     log_dir_base=out,
-        #     on_timing=lambda n, dt: stage_latencies.update({n: dt}),
-        # )
-        # if a08b:
-        #     manifest.record_stage(
-        #         "08b_lean4_theorem_prover",
-        #         "Completed",
-        #         {"latency_ms": stage_latencies.get("08b_lean4_theorem_prover")},
-        #         counts={"proofs": int(str(a08b)) if a08b and str(a08b).isdigit() else 0}
-        #     )
+        if should_prove:
+            def _run_08b(ip: Path, op: Path) -> str:
+                import asyncio
+                from extractor.pipeline.steps.s08_lean4_theorem_prover import prove_requirements
+                asyncio.run(prove_requirements(db_path, op / "08_lean4_theorem_prover"))
+                # Fetch proof count for manifest
+                import duckdb
+                con = duckdb.connect(str(db_path), read_only=True)
+                try:
+                    res = con.execute("SELECT count(*) FROM lean4_proofs").fetchone()
+                except Exception:
+                    res = None
+                con.close()
+                return str(res[0]) if res else "0"
+
+            a08b = _step(
+                "08b_lean4_theorem_prover",
+                _run_08b,
+                out,
+                out,
+                stop_on_fail=False,  # Don't block pipeline if proving fails
+                timeout_sec=args.stage_timeout * 3,  # Proofs take longer
+                log_dir_base=out,
+                on_timing=lambda n, dt: stage_latencies.update({n: dt}),
+            )
+            if a08b:
+                manifest.record_stage(
+                    "08b_lean4_theorem_prover",
+                    "Completed",
+                    {"latency_ms": stage_latencies.get("08b_lean4_theorem_prover")},
+                    counts={"proofs": int(str(a08b)) if a08b and str(a08b).isdigit() else 0}
+                )
 
     # 09b (Section Summarizer)
     if args.summary_only:
         logger.info("09_section_summarizer: skipped via --summary-only")
     else:
         def _run_09_summ(ip: Path, op: Path) -> Path:
-            s09_summ.run_stage_09_summarizer(op)
+            s09_summ.run_stage_09_summarizer(op, preset_config=preset_config)
             return op / "pipeline.duckdb"
 
         a09_summ = _step(

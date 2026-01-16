@@ -92,8 +92,6 @@ properties:
              type: array
              items: {type: string}
 
-  # Steps Section (Contract)
-  # This is compiled into contracts/*.json
   steps:
     type: object
     patternProperties:
@@ -105,3 +103,26 @@ properties:
           expected:
             type: object
             # Flexible validation for expected output metrics
+
+  # Step 00: Profile Detector (Pre-Flight Assessment)
+  # This runs BEFORE Twin creation to assess document characteristics.
+  profile:
+    type: object
+    description: "Expected profile characteristics for this fixture type."
+    properties:
+      domain:
+        type: string
+        enum: [scientific, engineering, legal, book, general]
+      layout:
+        type: string
+        enum: [single, double]
+      elements:
+        type: object
+        properties:
+          tables: {type: boolean}
+          figures: {type: boolean}
+          formulas: {type: boolean}
+          requirements: {type: boolean}
+      section_style:
+        type: string
+        enum: [decimal, roman, chapter, markdown, none]

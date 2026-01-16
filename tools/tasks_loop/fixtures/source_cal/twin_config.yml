@@ -1,0 +1,13 @@
+pages: 5
+layout: single
+chaos:
+  hyphenation_probability: 0.15
+  ligature_map:
+    fi: "\uFB01"
+    fl: "\uFB02"
+  mojibake_probability: 0
+features:
+  split_tables: false
+  trapped_headers: true
+  ocr_artifacts: false
+  nesting_complexity: true

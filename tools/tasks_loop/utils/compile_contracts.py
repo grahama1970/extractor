@@ -98,9 +98,10 @@ def compile_fixture(fixture_name: str) -> int:
     print(f"  Steps: {len(steps)}")
     
     known_steps = [
-        "s01", "s02", "s03", "s04", "s04a", "s05", "s05b", "s05c", 
+        "s00", "s01", "s02", "s03", "s04", "s04a", "s05", "s05b", "s05c", 
         "s06", "s06b", "s07", "s08", "s09", "s10", "s14"
     ]
+
     
     # Merge specified steps with defaults for missing ones
     for step_id in known_steps:

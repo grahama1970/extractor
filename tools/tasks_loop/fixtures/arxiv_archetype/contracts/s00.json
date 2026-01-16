@@ -1,0 +1,16 @@
+{
+  "step": "s00",
+  "fixture": "arxiv_archetype",
+  "name": "Profile Detector",
+  "output": "",
+  "format": [],
+  "expected": {
+    "domain": "engineering",
+    "layout": {
+      "columns": 2,
+      "style": "double"
+    },
+    "route": "fast"
+  },
+  "sanity": []
+}

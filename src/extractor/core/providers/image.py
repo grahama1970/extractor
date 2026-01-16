@@ -29,7 +29,37 @@ except Exception:  # pragma: no cover - optional dependency in minimal/offline m
         ...
 
 
+from extractor.core.schema.unified_document import (
+    UnifiedDocument,
+    BlockType,
+    SourceType,
+    ImageBlock,
+    BlockMetadata,
+    DocumentMetadata,
+)
+
 class ImageProvider(BaseProvider):
+    def extract_document(self, filepath: str = None) -> UnifiedDocument:
+        """Extract image content to a UnifiedDocument.
+        
+        Currently returns each frame as an ImageBlock. 
+        Full OCR pipeline for images can be linked here in the future.
+        """
+        blocks = []
+        for i in range(self.image_count):
+            blocks.append(ImageBlock(
+                id=f"img_{i}",
+                src=str(self.filepath),
+                metadata=BlockMetadata(page_number=i + 1)
+            ))
+            
+        return UnifiedDocument(
+            id=Path(self.filepath).stem,
+            source_type=SourceType.IMAGE,
+            blocks=blocks,
+            metadata=DocumentMetadata(title=Path(self.filepath).stem)
+        )
+
     def __init__(self, filepath: str, config: Optional[Dict[str, Any]] = None):
         resolved_path, fetch_download = ensure_local_source(filepath)
         super().__init__(str(resolved_path), config)

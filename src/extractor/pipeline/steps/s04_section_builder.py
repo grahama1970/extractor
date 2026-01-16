@@ -345,7 +345,9 @@ def _append_diag(section: dict, severity: str, code: str, message: str, context:
 
 
 def build_sections_from_blocks(
-    blocks: List[Dict[str, Any]], fallback_heuristics: bool = True
+    blocks: List[Dict[str, Any]], 
+    fallback_heuristics: bool = True,
+    preset_config: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
     """Build section hierarchy from flat blocks, trusting Stage 03 decisions."""
     sections: List[Dict[str, Any]] = []
@@ -357,6 +359,18 @@ def build_sections_from_blocks(
         if fallback_heuristics and block_type != "SectionHeader":
             txt = block.get("text") or block.get("content") or ""
             na = analyze_section_numbering(txt)
+            
+            # Context-Aware Detection (Preset)
+            is_preset_match = False
+            if preset_config:
+                det = preset_config.get("detection", {})
+                pat = det.get("section_pattern")
+                if pat:
+                    try:
+                        if re.search(pat, txt):
+                            is_preset_match = True
+                    except Exception: pass
+
             
             # Check font properties for promotion
             fsf = block.get("first_span_font") or {}
@@ -370,6 +384,7 @@ def build_sections_from_blocks(
                 looks_like_header_text(txt) 
                 or na.get("has_numbering")
                 or (is_bold and (font_size or 0) >= LARGE_FONT_THRESHOLD)
+                or is_preset_match
             ):
                 block_type = "SectionHeader"
                 block["block_type"] = "SectionHeader"
@@ -607,10 +622,15 @@ async def process_sections_comprehensive(
     image_output_dir: Optional[Path] = None,
     fallback_heuristics: bool = True,
     max_visual_pages: int = MAX_VISUAL_PAGES_DEFAULT,
+    preset_config: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Process blocks into sections with comprehensive validation and enhanced visuals."""
 
-    sections = build_sections_from_blocks(blocks, fallback_heuristics=fallback_heuristics)
+    sections = build_sections_from_blocks(
+        blocks, 
+        fallback_heuristics=fallback_heuristics,
+        preset_config=preset_config
+    )
 
     # Safety net: prelude synthesis
     try:
@@ -719,6 +739,7 @@ async def build_and_validate_sections_comprehensive(
     output_dir: Optional[Path] = None,
     fallback_heuristics: bool = True,
     max_visual_pages: int = MAX_VISUAL_PAGES_DEFAULT,
+    preset_config: Optional[Dict[str, Any]] = None,
 ) -> Tuple[Path, Dict[str, Any]]:
     """Main pipeline execution point."""
     stage_start_ts = datetime.now().isoformat()
@@ -762,6 +783,7 @@ async def build_and_validate_sections_comprehensive(
         image_output_dir,
         fallback_heuristics=fallback_heuristics,
         max_visual_pages=max_visual_pages,
+        preset_config=preset_config,
     )
     
     result = {
@@ -795,6 +817,7 @@ def run(
     debug: bool = False,
     fallback_heuristics: bool = True,
     max_visual_pages: int = MAX_VISUAL_PAGES_DEFAULT,
+    preset_config: Optional[Dict[str, Any]] = None,
 ) -> Path:
     """Runs the section builder (Pipeline Interface)."""
     console.print(f"[green]Building sections from verified blocks: {input_json.name}[/green]")
@@ -836,6 +859,7 @@ def run(
             output_dir,
             fallback_heuristics=fallback_heuristics,
             max_visual_pages=max_visual_pages,
+            preset_config=preset_config,
         )
     )
     
@@ -846,8 +870,7 @@ def run(
         raise RuntimeError("Section building failed")
 
 
-    asyncio.run(process_pdf_pipeline(cfg))
-    return stage_output_dir / "json_output" / "03_verified_blocks.json"
+
 
 if __name__ == "__main__":
     import argparse

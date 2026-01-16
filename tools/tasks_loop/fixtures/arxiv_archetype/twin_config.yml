@@ -1,0 +1,42 @@
+layout: double
+pages: 5
+preset_id: arxiv
+category: Scientific
+description: "Academic papers (2-column, math, citations)"
+runtime:
+  features:
+    enable_proving: true
+    summarization_prompt: |
+      Analyze this section of a scientific paper. Summarize the methodology, results, and key claims.
+      Focus on the technical contribution.
+  errors: ["hyphenation", "ligatures", "split_tables", "trapped_headers"]
+  detection:
+    keywords: ["arXiv", "Abstract", "References", "Introduction", "Fig."]
+    min_score: 2
+    layout: double
+    section_pattern: "^\\d+\\.\\s+[A-Z]"
+    filename_triggers: ["arxiv", "paper", "journal", "proceedings"]
+ambiguous_headers:
+  - text: "Equation 1: Schrödinger equation"
+    size: 10
+    font: "Times-Italic"
+  - text: "Note: [1] indicates a citation"
+    size: 9
+tables:
+  false_header_text: "TABLE CONTINUES"
+  strict_verification: true
+false_positives:
+  - text: "This is not a requirement, just a comment."
+  - text: "The researchers should eventually consider testing."
+critical_content:
+  - id: "REQ-SCI-001"
+    text: "The pipeline shall correctly segment 2-column layouts."
+    type: "Requirement"
+    strict_verification: true
+  - id: "REQ-SCI-002"
+    text: "Equations must be preserved as discrete blocks."
+    type: "Requirement"
+    strict_verification: true
+text_noise:
+  - "ArXiv:2401.12345v1 [cs.LG] 1 Jan 2024"
+  - "Page 1 of 5"

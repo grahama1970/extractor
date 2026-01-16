@@ -117,6 +117,7 @@ async def run_summarizer(
     model: str = DEFAULT_MODEL,
     api_base: str = DEFAULT_API_BASE,
     concurrency: int = DEFAULT_CONCURRENCY,
+    preset_config: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, int]:
     """Batch summarize sections with rolling context via parallel_acompletions_iter."""
     from scillm.batch import parallel_acompletions_iter
@@ -132,7 +133,13 @@ async def run_summarizer(
     from extractor.pipeline.utils.prompt_loader import load_prompt
     prompts = load_prompt("09_section_summarizer")
     system_prompt = prompts["system"]
-    user_prompt_tmpl = prompts["user"]
+    
+    user_override = preset_config.get("features", {}).get("summarization_prompt") if preset_config else None
+    if user_override:
+        user_prompt_tmpl = user_override
+        logger.info("Using Custom Summarization Prompt from Preset Context")
+    else:
+        user_prompt_tmpl = prompts["user"]
 
     # Columns llm_summary, llm_key_concepts, llm_metadata are now defined in schema.py
     # No runtime ALTER TABLE needed - schema handles this at DB creation time
@@ -335,6 +342,7 @@ def run_stage_09_summarizer(
     model: str = DEFAULT_MODEL,
     api_base: str = DEFAULT_API_BASE,
     concurrency: int = DEFAULT_CONCURRENCY,
+    preset_config: Optional[Dict[str, Any]] = None,
 ):
     """Entry point for the pipeline driver."""
     
@@ -348,7 +356,7 @@ def run_stage_09_summarizer(
 
     con = get_connection(db_path)
     try:
-        asyncio.run(run_summarizer(con, model, api_base, concurrency))
+        asyncio.run(run_summarizer(con, model, api_base, concurrency, preset_config=preset_config))
         if os.getenv("CONTRACT_LOOP_DEBUG_VISUALS", "0").lower() in {"1", "true", "yes", "y"}:
             _emit_summary_visuals(pipeline_dir, con)
         logger.info("Stage 09 Section Summarizer complete.")

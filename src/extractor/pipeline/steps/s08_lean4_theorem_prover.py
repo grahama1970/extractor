@@ -75,6 +75,8 @@ LEAN4_MODEL = os.getenv("LEAN4_MODEL", "openai/gpt-5-mini")
 LEAN4_PROVER_MODEL = os.getenv("LEAN4_PROVER_MODEL", os.getenv("LEAN4_MODEL", "certainly/lean4"))
 MAX_CONCURRENT_PROOFS = int(os.getenv("MAX_CONCURRENT_LEAN4_CALLS", 1))
 LEAN4_CLI_CMD = os.getenv("LEAN4_CLI_CMD", "").strip()
+# Max theorems to prove (0 = unlimited, useful for testing)
+MAX_THEOREMS = int(os.getenv("LEAN4_MAX_THEOREMS", 0))
 
 def sanity() -> int:
     return run_step_sanity(STEP_NAME)
@@ -107,6 +109,11 @@ async def prove_requirements(db_path: Path, output_dir: Path):
     # User contract: items=[{"requirement_text": "..."}]
     # We pass ID to track it back.
     items = [{"requirement_text": r[1], "id": r[0], "section_id": r[2]} for r in reqs]
+    
+    # Apply MAX_THEOREMS limit if set
+    if MAX_THEOREMS > 0 and len(items) > MAX_THEOREMS:
+        logger.info(f"Limiting to first {MAX_THEOREMS} theorems (MAX_THEOREMS env)")
+        items = items[:MAX_THEOREMS]
     
     logger.info(f"Proving {len(items)} requirements via certainly_prove_iter (Model: {LEAN4_PROVER_MODEL})...")
     if not items:

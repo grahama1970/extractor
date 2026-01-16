@@ -51,9 +51,9 @@ from extractor.pipeline.utils.reliability import log_stage_error
 from extractor.pipeline.utils.headers.llm import verify_header_with_llm as _verify_header_with_llm
 from extractor.pipeline.utils.headers import (
     normalize_model_alias as _normalize_model_alias,
-    retrieve_prior_decisions as _retrieve_prior_decisions,
 )
 from extractor.pipeline.utils.suspicious_headers_utils import (
+
     norm_text,
     text_sha1,
     has_bullet_prefix,

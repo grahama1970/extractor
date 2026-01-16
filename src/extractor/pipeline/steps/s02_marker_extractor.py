@@ -52,15 +52,23 @@ try:
     if not hasattr(_tx, "QuantizedCacheConfig"):
         class QuantizedCacheConfig: pass
         _tx.QuantizedCacheConfig = QuantizedCacheConfig
-except Exception: pass
+except Exception as _polyfill_exc:
+    # Optional polyfill for older transformers versions - safe to ignore
+    logger.debug(f"Transformers QuantizedCacheConfig polyfill skipped: {_polyfill_exc}")
+
 
 
 # --------------------------------------------------------------------------- #
 # CORE LOGIC
 # --------------------------------------------------------------------------- #
 
-def extract_blocks(pdf_path: Path) -> Tuple[List[Dict[str, Any]], Dict[str, bool]]:
-    """Return the native JSON list of blocks produced by Marker."""
+def extract_blocks(pdf_path: Path, use_llm: bool = False) -> Tuple[List[Dict[str, Any]], Dict[str, bool]]:
+    """Return the native JSON list of blocks produced by Marker.
+    
+    Args:
+        pdf_path: Path to PDF file
+        use_llm: If True, use LLM service for improved accuracy (tables, math)
+    """
     
     # 1. Imports (lazy)
     try:
@@ -85,10 +93,24 @@ def extract_blocks(pdf_path: Path) -> Tuple[List[Dict[str, Any]], Dict[str, bool
     }
     
     config = {
-        "use_llm": False,
+        "use_llm": use_llm,
         "batch_multiplier": 1,
         "disable_multiprocessing": True,
     }
+    
+    # LLM Service Configuration (Chutes.ai / OpenAI-compatible)
+    if use_llm:
+        from extractor.core.presets import LLM_CONFIG
+        api_key = os.getenv(LLM_CONFIG.get("api_key_env", "CHUTES_API_KEY"))
+        if api_key:
+            config["llm_service"] = LLM_CONFIG.get("service")
+            config["openai_api_key"] = api_key
+            config["openai_base_url"] = LLM_CONFIG.get("base_url")
+            config["openai_model"] = LLM_CONFIG.get("model")
+            logger.info(f"LLM Mode: Using {LLM_CONFIG.get('model')} via Chutes.ai")
+        else:
+            logger.warning(f"LLM Mode requested but {LLM_CONFIG.get('api_key_env')} not set. Falling back to non-LLM.")
+            config["use_llm"] = False
 
     # 3. Convert
     converter = PdfConverter(artifact_dict=models, config=config)
@@ -183,10 +205,10 @@ def extract_blocks(pdf_path: Path) -> Tuple[List[Dict[str, Any]], Dict[str, bool
     return blocks, predictor_presence
 
 
-def _worker(pdf_str: str, q: "mp.Queue[Dict[str, Any]]", dump_dir_str: str):
+def _worker(pdf_str: str, q: "mp.Queue[Dict[str, Any]]", dump_dir_str: str, use_llm: bool = False):
     """Worker process to run extraction in isolation."""
     try:
-        blocks_local, presence = extract_blocks(Path(pdf_str))
+        blocks_local, presence = extract_blocks(Path(pdf_str), use_llm=use_llm)
         dump_dir = Path(dump_dir_str)
         dump_dir.mkdir(parents=True, exist_ok=True)
         tmp_path = dump_dir / f"02_blocks_{uuid.uuid4().hex}.json"
@@ -210,8 +232,13 @@ def run(
     no_spawn: bool = False,
     mark_all_headers_suspicious: bool = False,
     output_suffix: str = "",
+    use_llm: bool = False,
 ) -> Path:
-    """Extracts text and layout blocks from a PDF using Marker."""
+    """Extracts text and layout blocks from a PDF using Marker.
+    
+    Args:
+        use_llm: If True, use LLM for improved accuracy (accurate mode).
+    """
     
     # 1. Preflight
     if os.getenv("OFFLINE_PDF_PREDICTORS", "1").lower() in {"0", "false"}:
@@ -252,14 +279,14 @@ def run(
     
     if no_spawn:
         try:
-            blocks, presence = extract_blocks(pdf_path)
+            blocks, presence = extract_blocks(pdf_path, use_llm=use_llm)
         except Exception as exc:
             logger.exception("Step 02 Inline Failed")
             if os.getenv("PIPELINE_FAIL_FAST", "0").lower() == "1": raise
             blocks = []
     else:
         q = mp.Queue()
-        p = mp.Process(target=_worker, args=(str(pdf_path), q, str(json_output_dir)), daemon=True)
+        p = mp.Process(target=_worker, args=(str(pdf_path), q, str(json_output_dir), use_llm), daemon=True)
         p.start()
         try:
             res = q.get(timeout=timeout)
@@ -303,6 +330,7 @@ def run(
     blocks.sort(key=canonical_block_order_key)
     
     # 5. Optional visuals (debug contract enforcement)
+    page_count = 0
     if os.getenv("CONTRACT_LOOP_DEBUG_VISUALS", "0").lower() in {"1", "true", "yes", "y"}:
         visual_output_dir = stage_output_dir / "visual_output"
         visual_output_dir.mkdir(exist_ok=True)
@@ -313,6 +341,7 @@ def run(
             logger.error(f"Failed to open PDF for visuals: {exc}")
             doc = None
         if doc is not None:
+            page_count = len(doc)
             for idx, block in enumerate(blocks):
                 try:
                     page_idx = block.get("page_idx")
@@ -342,10 +371,24 @@ def run(
                     logger.warning(f"Failed to render block visual {idx}: {exc}")
             doc.close()
 
+    # Fallback to get page count if visuals were skipped
+    if page_count == 0:
+        try:
+            import fitz
+            with fitz.open(str(pdf_path)) as tmp_doc:
+                page_count = len(tmp_doc)
+        except Exception:
+            pass
+
     # 6. Output
     summary = {
         "timestamp": datetime.now().isoformat(),
         "run_id": run_id,
+        "metadata": {
+            "llm_used": use_llm,
+            "page_count": page_count,
+            "source_pdf": str(pdf_path),
+        },
         "source_pdf": str(pdf_path),
         "status": "Completed",
         "block_count": len(blocks),

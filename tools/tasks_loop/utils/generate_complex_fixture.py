@@ -16,6 +16,14 @@ import json
 import yaml
 from pathlib import Path
 
+# Column widths for 2-column layout
+COL_WIDTH = 250
+COL_GAP = 25
+LEFT_COL_START = 50
+RIGHT_COL_START = LEFT_COL_START + COL_WIDTH + COL_GAP
+PAGE_WIDTH = 595
+PAGE_HEIGHT = 842
+
 def create_messy_fixture(output_path: Path, config_path: Path = None):
     # Load Config
     config = {}
@@ -44,20 +52,72 @@ def create_messy_fixture(output_path: Path, config_path: Path = None):
     expected_md_lines.append("# 1. Introduction")
     expected_md_lines.append("This document is a synthetic test fixture.\n")
     
-    # Inject Ambiguous Headers from Config
-    y = 110
-    ambiguous_headers = config.get("ambiguous_headers", [])
-    if not ambiguous_headers: # Default fallback
-        ambiguous_headers = [{"text": "E = mc^2 is a famous equation."}]
+    layout_mode = config.get("layout", "single") # "single" or "double"
+    
+    if layout_mode == "double":
+        # ArXiv style 2-column intro
+        y = 100
+        # Column 1
+        p1.insert_text((LEFT_COL_START, y), "Abstract", fontsize=12, fontname="Helvetica-Bold")
+        y += 15
+        abstract_text = (
+            "This paper presents a canonical ArXiv archetype for PDF extraction calibration. "
+            "We focus on the intersection of layout-aware parsing and VLM-enriched data recovery."
+        )
+        p1.insert_textbox(fitz.Rect(LEFT_COL_START, y, LEFT_COL_START + COL_WIDTH, y+60), abstract_text, fontsize=9)
+        y += 70
         
-    for item in ambiguous_headers:
-        text = item.get("text", "")
-        fontsize = item.get("size", 11)
-        font = item.get("font", "Helvetica")
+        # Section 1
+        p1.insert_text((LEFT_COL_START, y), "1. Background", fontsize=11, fontname="Helvetica-Bold")
+        y += 15
+        bg_text = (
+            "Scientific papers often use 2-column layouts to maximize data density. This tests column detection. "
+            "Difficult boundaries often occur when text spans multiple lines and contains scientific notation "
+            "like H₂O or CO₂. Ligatures such as 'ffi' and 'fl' can also cause issues if not mapped properly."
+        )
+        p1.insert_textbox(fitz.Rect(LEFT_COL_START, y, LEFT_COL_START + COL_WIDTH, y+100), bg_text, fontsize=9)
+        y += 110
         
-        p1.insert_text((50, y), text, fontsize=fontsize, fontname=font)
-        expected_md_lines.append(text) # In MD, it's just text, NOT a header
-        y += 20
+        # Column 2
+        y2 = 100
+        p1.insert_text((RIGHT_COL_START, y2), "Equations & Math", fontsize=11, fontname="Helvetica-Bold")
+        y2 += 20
+        # Equation block
+        p1.draw_rect(fitz.Rect(RIGHT_COL_START, y2, RIGHT_COL_START+COL_WIDTH, y2+40), color=(0.9,0.9,0.9), fill=(0.9,0.9,0.9))
+        p1.insert_text((RIGHT_COL_START + 10, y2 + 25), "∮ E · dA = Q / ε₀", fontsize=12, fontname="Times-Italic")
+        y2 += 50
+        
+        p1.insert_text((RIGHT_COL_START, y2), "2. Methodology", fontsize=11, fontname="Helvetica-Bold")
+        y2 += 15
+        meth_text = "We evaluate the pipeline using a 'Twin-First' approach, injecting chaos into synthetic fixtures."
+        p1.insert_textbox(fitz.Rect(RIGHT_COL_START, y2, RIGHT_COL_START + COL_WIDTH, y2+40), meth_text, fontsize=9)
+        y2 += 50
+        
+        p1.insert_text((RIGHT_COL_START, y2), "References", fontsize=11, fontname="Helvetica-Bold")
+        y2 += 15
+        p1.insert_text((RIGHT_COL_START, y2), "[1] Doe, J. 'Scientific PDF Parsing'. 2024.", fontsize=8)
+        
+        expected_md_lines.append("## Abstract\n" + abstract_text)
+        expected_md_lines.append("\n## 1. Background\n" + bg_text)
+        expected_md_lines.append("\n### Equations\n∮ E · dA = Q / ε₀")
+        expected_md_lines.append("\n## 2. Methodology\n" + meth_text)
+        expected_md_lines.append("\n### References\n[1] Doe, J. 'Scientific PDF Parsing'. 2024.")
+        y = max(y, y2 + 20)
+    else:
+        # Inject Ambiguous Headers from Config
+        y = 110
+        ambiguous_headers = config.get("ambiguous_headers", [])
+        if not ambiguous_headers: # Default fallback
+            ambiguous_headers = [{"text": "E = mc^2 is a famous equation."}]
+            
+        for item in ambiguous_headers:
+            text = item.get("text", "")
+            fontsize = item.get("size", 11)
+            font = item.get("font", "Helvetica")
+            
+            p1.insert_text((50, y), text, fontsize=fontsize, fontname=font)
+            expected_md_lines.append(text) # In MD, it's just text, NOT a header
+            y += 20
     
     expected_md_lines.append("") # Spacer
         
@@ -207,15 +267,29 @@ def create_messy_fixture(output_path: Path, config_path: Path = None):
         y += 20
         expected_md_lines.append("\n## Critical Requirements")
         
+        has_nesting = "nesting_complexity" in config.get("features", {}) or config.get("chaos", {}).get("nesting_probability", 0) > 0
+        
         for item in critical_content:
             rid = item.get("id")
             rtext = item.get("text")
-            full_text = f"{rid}: {rtext}"
             
-            p2.insert_text((50, y), full_text, fontsize=11, color=(0,0,0)) # Normal logic
+            # Enterprise Status Marker
+            status = item.get("status", "")
+            if status:
+                p2.insert_text((50, y), f"[{status}]", fontsize=8, fontname="Helvetica-Bold", color=(0.7, 0, 0))
+            
+            full_text = f"{rid}: {rtext}"
+            p2.insert_text((50, y), full_text, fontsize=11, color=(0,0,0))
             y += 20
             
-            expected_md_lines.append(f"- **{rid}**: {rtext}")
+            # Nesting Complexity (Sub-bullets)
+            if has_nesting and rid.startswith("REQ-SCI"):
+                sub_text = "Sub-clause A: This requirement applies to all sub-systems."
+                p2.insert_text((70, y), "• " + sub_text, fontsize=9)
+                y += 15
+                expected_md_lines.append(f"- **{rid}**: {rtext}\n  - {sub_text}")
+            else:
+                expected_md_lines.append(f"- **{rid}**: {rtext}")
             
             # Add to expected with STRICT flag
             expected_data.append({

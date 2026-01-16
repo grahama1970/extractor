@@ -1,0 +1,46 @@
+# Preset Registry
+# Maps PDF characteristics to extraction presets and test fixtures.
+#
+# Terminology:
+#   - Preset: User-facing extraction configuration (arxiv, requirements_spec)
+#   - Fixture: Internal test case for gate verification (advanced, under tasks_loop/)
+
+# Preset → Fixture Mapping
+# Each preset has a corresponding fixture for verification testing.
+presets:
+  arxiv:
+    description: "Academic papers with 2-column layout, formulas, citations"
+    fixture: arxiv_archetype
+    category: Scientific
+
+  requirements_spec:
+    description: "Engineering specification documents with requirements"
+    fixture: boeing_spec
+    category: Engineering
+    id_patterns: ["REQ-", "SYS-", "HW-", "SW-"]
+
+  datasheet:
+    description: "Component datasheets with tables and specs"
+    fixture: null # TODO: Create fixture
+    category: Engineering
+
+  invoice:
+    description: "Financial documents with tables"
+    fixture: null # TODO: Create fixture
+    category: Financial
+    id_patterns: ["INV-", "PO-"]
+
+# Detection Rules (fallback regex matching)
+# Used when Step 00 profile detection is unavailable.
+detection_rules:
+  - pattern: "requirement|specification|shall|must"
+    preset: requirements_spec
+
+  - pattern: "datasheet|absolute maximum|electrical characteristics"
+    preset: datasheet
+
+  - pattern: "invoice|bill|total|amount due"
+    preset: invoice
+
+  - pattern: "arXiv|Abstract|References|Introduction"
+    preset: arxiv

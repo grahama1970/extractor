@@ -152,6 +152,20 @@ class BaseProvider:
         """
         raise NotImplementedError("Subclasses must implement get_page_refs")
 
+    def extract_document(self, filepath: str) -> "UnifiedDocument":
+        """Extract the document content into a UnifiedDocument format.
+
+        Args:
+            filepath: Path to the file to extract
+
+        Returns:
+            UnifiedDocument: The extracted document
+
+        Raises:
+            NotImplementedError: Must be implemented by subclasses
+        """
+        raise NotImplementedError("Subclasses must implement extract_document")
+
     def __enter__(self):
         return self
 

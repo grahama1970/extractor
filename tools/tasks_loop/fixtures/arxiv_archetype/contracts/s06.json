@@ -1,0 +1,11 @@
+{
+  "step": "s06",
+  "fixture": "arxiv_archetype",
+  "name": "Figure Extractor",
+  "output": "",
+  "format": [],
+  "expected": {
+    "figure_count": 0
+  },
+  "sanity": []
+}

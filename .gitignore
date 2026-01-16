@@ -336,3 +336,9 @@ debug_*.json
 temp_check.json
 scanner_debug/
 mimic_spec_test.json
+
+# External agent/skill directories (symlinks)
+.agents/
+.skills
+.agent
+FETCH_HEAD

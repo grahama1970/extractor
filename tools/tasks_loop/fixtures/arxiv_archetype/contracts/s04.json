@@ -1,0 +1,17 @@
+{
+  "step": "s04",
+  "fixture": "arxiv_archetype",
+  "name": "Section Builder",
+  "output": "",
+  "format": [],
+  "expected": {
+    "section_count": 5,
+    "required_headings": [
+      "Abstract",
+      "1. Background",
+      "Equations & Math",
+      "References [1]"
+    ]
+  },
+  "sanity": []
+}

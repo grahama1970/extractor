@@ -18,11 +18,6 @@ from extractor.pipeline.utils.headers.llm import (
     verify_header_with_llm,
 )
 
-# Priors
-from extractor.pipeline.utils.headers.priors import (
-    retrieve_prior_decisions,
-)
-
 __all__ = [
     # Heuristics
     "normalize_header_text",
@@ -32,6 +27,4 @@ __all__ = [
     # LLM
     "normalize_model_alias",
     "verify_header_with_llm",
-    # Priors
-    "retrieve_prior_decisions",
 ]

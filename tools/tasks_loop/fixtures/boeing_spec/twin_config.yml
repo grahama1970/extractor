@@ -1,0 +1,33 @@
+layout: single
+pages: 3
+preset_id: requirements_spec
+category: Engineering
+description: "Requirements spec (Boeing/BHT style, nested lists)"
+runtime:
+  features:
+    enable_proving: false
+    summarization_prompt: |
+      Analyze this section of a requirements specification. Summarize the key requirements, constraints, and verification criteria.
+      Highlight any compliant or non-compliant states.
+  errors: ["hyphenation", "ligatures", "trapped_headers", "nesting_complexity"]
+  detection:
+    keywords: ["REQ-", "Shall", "Specification", "Revision", "Document Number"]
+    min_score: 2
+    layout: single
+    section_pattern: "^\\d+(\\.\\d+){2,}"
+    filename_triggers: ["spec", "requirement", "bht", "boeing", "std"]
+features:
+  nesting_complexity: true
+  trapped_headers: true
+critical_content:
+  - id: "REQ-SCI-001"
+    text: "The system shall maintain audit logs for all configuration changes."
+    status: "APPROVED"
+    strict_verification: true
+  - id: "REQ-SCI-002"
+    text: "Safety-critical sub-systems must undergo weekly diagnostic checks."
+    status: "DRAFT"
+    strict_verification: true
+text_noise:
+  - "PROPRIETARY - BOEING/BHT EXTERNAL USE"
+  - "DISTRIBUTION STATEMENT A: Approved for public release."
