@@ -862,7 +862,7 @@ def _run_pdf_strategy(pdf: Path, out: Path, args: argparse.Namespace) -> int:
         return 1
     results["05c"] = a05c
 
-    # 06
+    # 06 (deterministic extraction, VLM descriptions done in 06b)
     a06 = _step(
         "06_figure_extractor",
         s06.run,
@@ -870,7 +870,6 @@ def _run_pdf_strategy(pdf: Path, out: Path, args: argparse.Namespace) -> int:
         a04_path,
         pdf_dir,
         out,
-        skip_descriptions=args.skip_fig_descriptions,
         stop_on_fail=args.stop_on_fail,
         timeout_sec=args.stage_timeout,
         log_dir_base=out,
