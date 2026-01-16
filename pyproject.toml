@@ -63,14 +63,14 @@ dependencies = [
  # On Python >= 3.11 use faiss-cpu instead (see markers above)
  "pdfplumber>=0.11.7",
  "ruff>=0.13.0",
- # SciLLM (fork) as a local file:// dependency; pairs with litellm runtime API
- "scillm[certainly] @ file:///home/graham/workspace/experiments/litellm",
+ # SciLLM (fork) via GitHub; pairs with litellm runtime API
+ "scillm[certainly] @ git+https://github.com/grahama1970/scillm.git",
  "urlextract>=1.9.0",
  "strip_tags>=0.6",
  "sentence-transformers>=5.0.0",
  "pyflakes>=3.4.0",
- # Shared web-ingestion toolkit (local path per AGENT guidance)
- "fetcher @ file:///home/graham/workspace/experiments/fetcher",
+ # Shared web-ingestion toolkit
+ "fetcher @ git+https://github.com/grahama1970/fetcher.git",
  "pynvml>=13.0.1",
  "faiss-cpu>=1.12.0",
  "duckdb>=1.1.0",
@@ -129,11 +129,11 @@ smokes = [
   "tenacity>=9.1.2",
 ]
 lessons = [
-  "graph-memory @ file:///home/graham/workspace/experiments/memory",
+  "graph-memory @ git+https://github.com/grahama1970/graph-memory-operator.git",
 ]
 prover = [
-  # Optional Lean/FAISS powered extras (depends on local path); install on environments where available
-  "certainly @ file:///home/graham/workspace/experiments/lean4",
+  # Optional Lean/FAISS powered extras; install on environments where available
+  "certainly @ git+https://github.com/grahama1970/certainly.git",
 ]
 accurate = [
   "torch>=2.5.1,<3",
