@@ -25,7 +25,16 @@ load_dotenv(find_dotenv(usecwd=True), override=False)
 
 from extractor.pipeline.utils.db.connection import get_connection
 from extractor.pipeline.utils.db.schema import create_schema
+from extractor.pipeline.utils.step_sanity import run_step_sanity
 from loguru import logger
+
+STEP_NAME = "07_duckdb_ingest"
+
+
+def sanity() -> int:
+    """Run sanity check for this step."""
+    return run_step_sanity(STEP_NAME)
+
 
 def clean_text(text: str) -> str:
     if text is None:
@@ -493,6 +502,10 @@ def suppress_overlapping_blocks(con: duckdb.DuckDBPyConnection, tables_json: Pat
         
     except Exception as e:
         logger.warning(f"Suppression failed: {e}")
+
+
+# Standard entry point alias for consistency across pipeline steps
+run = run_assemble_corpus
 
 
 if __name__ == "__main__":

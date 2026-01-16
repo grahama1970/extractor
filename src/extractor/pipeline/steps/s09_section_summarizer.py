@@ -374,6 +374,10 @@ def sanity() -> int:
     return run_step_sanity(STEP_NAME)
 
 
+# Standard entry point alias for consistency across pipeline steps
+run = run_stage_09_summarizer
+
+
 if __name__ == "__main__":
     import argparse
     import sys

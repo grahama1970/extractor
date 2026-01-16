@@ -46,6 +46,11 @@ console = Console(stderr=True)
 STEP_NAME = "02_marker_extractor"
 
 
+def sanity() -> int:
+    """Run sanity check for this step."""
+    return run_step_sanity(STEP_NAME)
+
+
 # Workaround: some versions of `surya` import QuantizedCacheConfig from transformers
 try:
     import transformers as _tx
