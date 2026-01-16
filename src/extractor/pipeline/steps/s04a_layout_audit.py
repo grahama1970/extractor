@@ -28,7 +28,7 @@ from __future__ import annotations
 import json
 import shutil
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from loguru import logger
 from extractor.pipeline.utils.reliability import log_stage_error
@@ -46,7 +46,6 @@ def _read_json(path: Path) -> Dict[str, Any]:
     except Exception as exc:
         log_stage_error('04a_layout_audit', exc, {'context': '04a'})
         raise
-        logger.exception("Failed to read JSON from %s", path)
     return {}
 
 
@@ -76,7 +75,10 @@ def _add_check(
         pass
 
 
-def run(results_root: Path | str = Path("data/results/pipeline")) -> Path:
+def run(
+    results_root: Path | str = Path("data/results/pipeline"),
+    preset_config: Optional[Dict[str, Any]] = None,
+) -> Path:
     root = Path(results_root)
     stage_dir = root / STEP_NAME
     json_dir = stage_dir / "json_output"

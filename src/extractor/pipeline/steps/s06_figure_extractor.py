@@ -30,9 +30,6 @@ from dotenv import find_dotenv, load_dotenv
 from loguru import logger
 from extractor.pipeline.utils.reliability import log_stage_error
 from rich.console import Console
-from extractor.pipeline.utils.scillm_router import get_vlm_router
-# from extractor.pipeline.steps.scillm_preflight_validator import quick_scillm_check (Unused)
-from extractor.pipeline.utils.response_utils import normalize_json_content
 from extractor.pipeline.utils.debug_utils import ensure_logs_dir, log_llm_call, time_block
 
 from extractor.pipeline.utils.figure_extractor_utils import (
@@ -85,8 +82,6 @@ async def _process_one(
     block: dict[str, Any],
     figure_id: str,
     image_output_dir: Path,
-    skip_descriptions: bool,
-    router: Any | None = None,
 ) -> dict[str, Any] | None:
     try:
         page_num = int(block.get("page_idx", 0))
@@ -153,8 +148,6 @@ async def _process_all(
                 block=blk,
                 figure_id=f"figure_{i+1:03d}",
                 image_output_dir=image_output_dir,
-                skip_descriptions=True, # no-op, but kept for signature if needed
-                router=None,
             )
 
     tasks = []
@@ -206,7 +199,7 @@ def run(
     pdf_dir: Optional[Path] = None,
     output_dir: Path = Path("data/results/pipeline"),
     bundle: Optional[Path] = None,
-    skip_descriptions: bool = False, # Ignored, kept for compat
+    preset_config: Optional[dict[str, Any]] = None,
 ) -> Path:
     """Extract figures, deterministically (image + band texts), write JSON."""
     import time

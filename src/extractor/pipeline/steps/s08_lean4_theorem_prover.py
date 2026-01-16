@@ -41,7 +41,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, cast, List, Dict
+from typing import Any, cast, Dict, List, Optional
 
 from dotenv import find_dotenv, load_dotenv
 from loguru import logger
@@ -92,20 +92,8 @@ async def prove_requirements(db_path: Path, output_dir: Path):
     con.close()
     
     logger.info(f"Found {len(reqs)} requirements to verify.")
-    
-    # Paved Path: scillm.parallel_acompletions_iter (simulating certainly_prove_iter)
-    # Using the bridge as an OpenAI-compatible LLM endpoint
-    
-    # 1. Prepare Payloads
-    # API Setup
-    # scillm.extras.providers.certainly_prove_iter likely uses environment or defaults
-    # We can rely on default or pass explicit if needed, but certainly_prove_iter encapsulates it.
-    pass
-    
-    # Paved Path: scillm.extras.providers.certainly_prove_iter (Official API)
-    # Docs: "LLM-like, as-completed... yields results like parallel_acompletions_iter"
-    
-    # 1. Prepare Items
+
+    # Prepare Items for certainly_prove_iter
     # User contract: items=[{"requirement_text": "..."}]
     # We pass ID to track it back.
     items = [{"requirement_text": r[1], "id": r[0], "section_id": r[2]} for r in reqs]
@@ -292,7 +280,11 @@ async def prove_requirements(db_path: Path, output_dir: Path):
     logger.info(f"Proof results saved to DuckDB table 'lean4_proofs'. Inserted: {inserted}/{len(results)}")
 
 
-def run_extract_requirements(pipeline_dir: Path, db_path: Path):
+def run_extract_requirements(
+    pipeline_dir: Path,
+    db_path: Path,
+    preset_config: Optional[Dict[str, Any]] = None,
+):
     """
     Main entry point invoked by run_pipeline.py when proving is enabled.
     1. Runs the standard requirements miner (_s08).

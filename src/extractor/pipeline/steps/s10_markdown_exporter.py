@@ -16,6 +16,8 @@ Output:
 import sys
 import os
 import json
+from typing import Any, Dict, Optional
+
 import duckdb
 from pathlib import Path
 from loguru import logger
@@ -31,11 +33,16 @@ def sanity() -> int:
     return run_step_sanity(STEP_NAME)
 
 
-def run(input_path: Path, output_dir: Path = None):
+def run(
+    input_path: Path,
+    output_dir: Path = None,
+    preset_config: Optional[Dict[str, Any]] = None,
+):
     """
     Run the Markdown Export step.
     Args:
         input_path: Path to `07_assemble_corpus` output or the db file itself.
+        preset_config: Optional preset configuration for format-specific options.
     """
     db_path = None
     pipeline_dir = input_path

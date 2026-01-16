@@ -17,7 +17,7 @@ import sys
 import json
 import logging
 from pathlib import Path
-from typing import List, Dict, Any, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 import duckdb
 
 from dotenv import load_dotenv, find_dotenv
@@ -361,136 +361,13 @@ def assign_assets_to_sections(con: duckdb.DuckDBPyConnection):
     logger.info(f"Assigned {t_assigned}/{t_total} tables and {f_assigned}/{f_total} figures to sections.")
 
 
-def merge_page_break_tables(con: duckdb.DuckDBPyConnection, pipeline_dir: Path):
-    """
-    Merge tables split across page breaks.
-    
-    Conservative, deterministic approach:
-    - Table 1 at bottom of page N (y1 > 80% page height)
-    - Table 2 at top of page N+1 (y0 < 20% page height)
-    - Same section, same column count
-    - Table 1 has few rows (orphan)
-    - No paragraph text between
-    - Headers match OR table 2 has no real header
-    """
-    import pandas as pd
-    import io
-    
-    # Get page dimensions from first page (assume uniform)
-    # Default to standard letter size if not available
-    PAGE_HEIGHT = 792.0  # Standard PDF page height
-    
-    # Get all tables ordered by page and position
-    tables = con.execute("""
-        SELECT id, page, x0, y0, x1, y1, csv_data, section_id, sort_order
-        FROM tables
-        ORDER BY page, y0
-    """).fetchall()
-    
-    if len(tables) < 2:
-        return
-    
-    merged_ids = set()
-    merge_count = 0
-    
-    for i in range(len(tables) - 1):
-        t1_id, t1_page, t1_x0, t1_y0, t1_x1, t1_y1, t1_csv, t1_section, t1_sort = tables[i]
-        t2_id, t2_page, t2_x0, t2_y0, t2_x1, t2_y1, t2_csv, t2_section, t2_sort = tables[i + 1]
-        
-        # Skip if already merged
-        if t1_id in merged_ids or t2_id in merged_ids:
-            continue
-        
-        # === HARD REQUIREMENTS ===
-        
-        # 1. Adjacent pages
-        if t2_page != t1_page + 1:
-            continue
-        
-        # 2. Same section
-        if t1_section != t2_section:
-            continue
-        
-        # 3. (Removed) Coordinate checks - rely on sequence and headers
-        # if t1_y1 < PAGE_HEIGHT * 0.50: continue
-        # if t2_y0 > PAGE_HEIGHT * 0.50: continue
-        
-        # 5. Parse CSVs and check column count
-        try:
-            df1 = pd.read_csv(io.StringIO(t1_csv)) if t1_csv else pd.DataFrame()
-            df2 = pd.read_csv(io.StringIO(t2_csv)) if t2_csv else pd.DataFrame()
-        except Exception:
-            continue
-        
-        if df1.empty or df2.empty:
-            continue
-        
-        if len(df1.columns) != len(df2.columns):
-            continue
-        
-        # 6. (Removed) Table 1 size check - allow large tables to merge
-        # if len(df1) > 3: continue
-        
-        # 7. Check if table 1 looks like a sentence (false positive)
-        first_row_text = " ".join(str(v) for v in df1.iloc[0].values if pd.notna(v))
-        word_count = len(first_row_text.split())
-        if word_count > 15 and len(df1) == 1:
-            # Likely a sentence, not a table row
-            continue
-        
-        # 8. Headers match OR table 2 has numeric headers (no real header)
-        h1 = [str(c).strip().lower() for c in df1.columns]
-        h2 = [str(c).strip().lower() for c in df2.columns]
-        h2_is_numeric = all(str(c).isdigit() or c.startswith("unnamed") for c in df2.columns)
-        
-        if not h2_is_numeric and h1 != h2:
-             logger.info(f"Header mismatch for {t1_id} / {t2_id}. Treating T2 header as data row due to strong geometry match.")
-             # Demote header to data
-             df2_row = pd.DataFrame([df2.columns], columns=df2.columns)
-             df2 = pd.concat([df2_row, df2], ignore_index=True)
-             df2.columns = df1.columns
-
-        # === MERGE ===
-        logger.info(f"Merging table {t1_id} with {t2_id} (page break split)")
-        
-        # Combine DataFrames
-        if h2_is_numeric:
-            # Table 2 has no header, use table 1's header
-            df2.columns = df1.columns
-        
-        merged_df = pd.concat([df1, df2], ignore_index=True)
-        merged_csv = merged_df.to_csv(index=False)
-        
-        # Update table 2 with merged data and expanded bbox
-        new_y0 = min(t1_y0, t2_y0)
-        new_y1 = max(t1_y1, t2_y1)
-        new_x0 = min(t1_x0, t2_x0)
-        new_x1 = max(t1_x1, t2_x1)
-        
-        con.execute("""
-            UPDATE tables
-            SET csv_data = ?, y0 = ?, y1 = ?, x0 = ?, x1 = ?
-            WHERE id = ?
-        """, [merged_csv, new_y0, new_y1, new_x0, new_x1, t2_id])
-        
-        # Delete table 1 (it's now part of table 2)
-        con.execute("DELETE FROM tables WHERE id = ?", [t1_id])
-        
-        merged_ids.add(t1_id)
-        merge_count += 1
-    
-    if merge_count > 0:
-        logger.info(f"Merged {merge_count} page-break split table(s)")
-
-
-
-
 def run_assemble_corpus(
     results_db_path: Path,
     sections_json: Path,
     tables_json: Path,
     figures_json: Path,
-    annotations_json: Path = None
+    annotations_json: Path = None,
+    preset_config: Optional[Dict[str, Any]] = None,
 ):
     """
     Main entry point for Assembler.
@@ -533,20 +410,12 @@ def run_assemble_corpus(
         logger.error(f"Transaction failed: {e}")
         raise
     
-    # 3. Post-processing: Merge page-break split tables
-    # DEPRECATED in S07: Now handled by S05c (Table Merger) before ingestion.
-    # merge_page_break_tables(con, None)
-    
     # 3. Suppress Text Blocks that overlap with Tables
     # This prevents "Garbled Text" (OCR artifacts) from appearing alongside clean tables.
     if tables_json:
         suppress_overlapping_blocks(con, tables_json)
-    
-    # 4. Post-processing: Merge contiguous text blocks
-    # MOVED TO S07b (Process Text Cleaner)
-    # merge_contiguous_blocks(con)
-        
-    # 5. Validation / Stats
+
+    # 4. Validation / Stats
     try:
         blocks_count = con.sql("SELECT count(*) FROM blocks").fetchone()[0]
         suppressed = con.sql("SELECT count(*) FROM blocks WHERE suppressed=TRUE").fetchone() if False else [0] # suppressed col doesn't exist, we delete

@@ -270,74 +270,6 @@ def generate_verification_report(results: Dict[str, Any]) -> Dict[str, Any]:
     return report
 
 
-async def generate_comprehensive_report(
-    pipeline_dir: Path, output_dir: Optional[Path] = None
-) -> Tuple[Path, Dict[str, Any]]:
-    """Generate comprehensive pipeline report."""
-
-    # 1. Load all results
-    results = load_results(pipeline_dir)
-
-    # 2. Calculate Statistics
-    stats = calculate_pipeline_statistics(results)
-
-    # 3. Generate Content Summary
-    content_summary = generate_content_summary(results)
-
-    # 4. Generate Verification Report
-    verification = generate_verification_report(results)
-
-    # 5. Compile Final Report
-    final_report = {
-        "meta": {
-            "version": "1.0",
-            "pipeline_id": pipeline_dir.name,
-            "generated_at": datetime.now().isoformat(),
-        },
-        "statistics": stats,
-        "content_summary": content_summary,
-        "verification": verification,
-    }
-
-    # 6. Generate Markdown Representation
-    markdown_report = generate_markdown_report(stats, content_summary, results)
-
-    # 7. Save Outputs
-    out_dir = output_dir or (pipeline_dir / "14_report_generator")
-    json_dir = out_dir / "json_output"
-    text_dir = out_dir / "text_output"
-    html_dir = out_dir / "visual_output"
-    
-    json_dir.mkdir(parents=True, exist_ok=True)
-    text_dir.mkdir(parents=True, exist_ok=True)
-    html_dir.mkdir(parents=True, exist_ok=True)
-
-    json_path = json_dir / "final_report.json"
-    md_path = text_dir / "report.md"
-    html_path = html_dir / "visual_report.html"
-
-    json_path.write_text(_safe_json(final_report), encoding="utf-8")
-    md_path.write_text(markdown_report, encoding="utf-8")
-    
-    # 8. Visual Report (if source PDF available)
-    source_pdf = results.get("meta", {}).get("source_pdf")
-    if source_pdf and Path(source_pdf).exists():
-        try:
-            generate_visual_html_report(Path(source_pdf), results, html_path)
-            console.print(f"  • Visual: {html_path}")
-        except Exception as e:
-            logger.error(f"Visual report generation failed: {e}")
-
-    # 9. Log Summary
-    console.print("[bold green]Pipeline Report Generated[/bold green]")
-    console.print(f"  • JSON: {json_path}")
-    console.print(f"  • Markdown: {md_path}")
-    console.print(f"  • Sections: {stats['metrics'].get('total_sections', 0)}")
-    console.print(f"  • Status: {verification['status']}")
-
-    return json_path, final_report
-
-
 def generate_visual_html_report(pdf_path: Path, results: Dict[str, Any], output_path: Path):
     """Generate side-by-side HTML report."""
     import fitz
@@ -434,7 +366,12 @@ def generate_visual_html_report(pdf_path: Path, results: Dict[str, Any], output_
     output_path.write_text("\n".join(html_parts), encoding="utf-8")
 
 
-def run(results_dir: Path, output_dir: Path, source_pdf: Optional[Path] = None) -> Optional[Path]:
+def run(
+    results_dir: Path,
+    output_dir: Path,
+    source_pdf: Optional[Path] = None,
+    preset_config: Optional[Dict[str, Any]] = None,
+) -> Optional[Path]:
     try:
         # Inject source_pdf into results for reporting
         # Note: We can't easily modify the full comprehensive report signature without changing calls everywhere,

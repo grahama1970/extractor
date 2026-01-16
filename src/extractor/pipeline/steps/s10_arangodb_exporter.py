@@ -23,6 +23,8 @@ Configuration:
 import os
 import sys
 import json
+from typing import Any, Dict, Optional
+
 import duckdb
 import hashlib
 from pathlib import Path
@@ -63,7 +65,11 @@ def ensure_collections(db):
         if not db.has_collection(edge):
             db.create_collection(edge, edge=True)
 
-def run(input_path: Path, output_dir: Path = None):
+def run(
+    input_path: Path,
+    output_dir: Path = None,
+    preset_config: Optional[Dict[str, Any]] = None,
+):
     pipeline_dir = input_path.parent.parent if input_path.is_file() else input_path
     db_path = pipeline_dir / "pipeline.duckdb"
     

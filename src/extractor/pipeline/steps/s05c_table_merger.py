@@ -27,7 +27,7 @@ import io
 import time
 import shutil
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import Any, Dict, List, Optional
 
 from loguru import logger
 from extractor.pipeline.utils.reliability import log_stage_error, write_json_strict
@@ -217,7 +217,8 @@ def merge_tables(tables: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 def run(
     input_dir: Path,
-    output_dir: Path, 
+    output_dir: Path,
+    preset_config: Optional[Dict[str, Any]] = None,
 ) -> Path:
     
     # Input from S05b (described) or S05 (raw)

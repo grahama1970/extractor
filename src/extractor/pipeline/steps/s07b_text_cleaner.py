@@ -13,6 +13,8 @@ Output: `merged_content` table.
 """
 
 import sys
+from typing import Any, Dict, Optional
+
 import duckdb
 from pathlib import Path
 from loguru import logger
@@ -189,7 +191,10 @@ def merge_contiguous_blocks(con: duckdb.DuckDBPyConnection):
     logger.info(f"Created {count} merged content entries ({text_count} text blocks)")
 
 
-def run(pipeline_dir: Path):
+def run(
+    pipeline_dir: Path,
+    preset_config: Optional[Dict[str, Any]] = None,
+):
     """Run Stage 07b."""
     db_path = pipeline_dir / "pipeline.duckdb"
     if not db_path.exists():

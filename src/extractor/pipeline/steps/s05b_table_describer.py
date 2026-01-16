@@ -18,7 +18,7 @@ import json
 import os
 import time
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from dotenv import find_dotenv, load_dotenv
 from loguru import logger
@@ -157,8 +157,9 @@ async def process_tables(tables: List[Dict[str, Any]], output_dir: Path) -> List
 
 def run(
     stage_05_dir: Path,
-    output_dir: Path, 
-    skip_descriptions: bool = False
+    output_dir: Path,
+    skip_descriptions: bool = False,
+    preset_config: Optional[Dict[str, Any]] = None,
 ) -> Path:
     
     if skip_descriptions:

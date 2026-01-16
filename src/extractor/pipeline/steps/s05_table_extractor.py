@@ -80,7 +80,6 @@ from extractor.pipeline.utils.tables import (
     coalesce_repeated_header_rows,
     detect_table_caption,
     stitch_headers,
-    stitch_headers,
 )
 
 def _stable_table_hash(t: Dict[str, Any]) -> str:

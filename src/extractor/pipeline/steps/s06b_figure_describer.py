@@ -22,7 +22,7 @@ import json
 import os
 import time
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from dotenv import find_dotenv, load_dotenv
 from loguru import logger
@@ -70,10 +70,6 @@ async def process_figures(figures: List[Dict[str, Any]], output_dir: Path) -> Li
 
     valid_req_count = 0
     for idx, fig in enumerate(figures):
-        # Skip if already described (idempotency) or missing context
-        if fig.get("start_description"): # Example check, or just overwrite?
-            pass
-            
         # Fix: Step 06 produces "image_path", but code was using "img_path". Support both.
         img_rel = fig.get("image_path") or fig.get("img_path")
         if not img_rel:
@@ -187,8 +183,9 @@ async def process_figures(figures: List[Dict[str, Any]], output_dir: Path) -> Li
 
 def run(
     stage_06_dir: Path,
-    output_dir: Path, 
-    skip_descriptions: bool = False
+    output_dir: Path,
+    skip_descriptions: bool = False,
+    preset_config: Optional[Dict[str, Any]] = None,
 ) -> Path:
     
     if skip_descriptions:
@@ -228,7 +225,7 @@ def run(
     out_file = json_out / "06b_figures.json"
     
     data["figures"] = enriched_figures
-    data["enriched_timestamp"] = getattr(time, "time")()
+    data["enriched_timestamp"] = time.time()
     
     write_json_strict(out_file, data)
     
