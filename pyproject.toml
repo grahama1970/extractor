@@ -64,7 +64,8 @@ dependencies = [
  "pdfplumber>=0.11.7",
  "ruff>=0.13.0",
  # SciLLM (fork) via GitHub; pairs with litellm runtime API
- "scillm[certainly] @ git+https://github.com/grahama1970/scillm.git",
+ # Note: [certainly] extra removed from core deps - install 'prover' extra if needed
+ "scillm @ git+https://github.com/grahama1970/scillm.git",
  "urlextract>=1.9.0",
  "strip_tags>=0.6",
  "sentence-transformers>=5.0.0",
@@ -128,12 +129,15 @@ smokes = [
   "pandas>=2.0.0",
   "tenacity>=9.1.2",
 ]
+# NOTE: These extras require local workspace setup (repos not public)
+# Install manually: pip install -e /path/to/repo
 lessons = [
-  "graph-memory @ git+https://github.com/grahama1970/graph-memory-operator.git",
+  # "graph-memory @ git+https://github.com/grahama1970/graph-memory-operator.git",
 ]
 prover = [
-  # Optional Lean/FAISS powered extras; install on environments where available
-  "certainly @ git+https://github.com/grahama1970/certainly.git",
+  # Optional Lean4/FAISS extras - requires local certainly package
+  # Install: pip install -e /path/to/lean4
+  # "certainly @ git+https://github.com/grahama1970/certainly.git",
 ]
 accurate = [
   "torch>=2.5.1,<3",
