@@ -43,7 +43,7 @@ PRESET_REGISTRY = {   'arxiv': {   'category': 'Scientific',
                                            'ligatures',
                                            'trapped_headers',
                                            'nesting_complexity'],
-                             'features': {   'enable_proving': False,
+                             'features': {   'enable_proving': True,
                                              'summarization_prompt': 'Analyze this section of a '
                                                                      'requirements specification. '
                                                                      'Summarize the key '

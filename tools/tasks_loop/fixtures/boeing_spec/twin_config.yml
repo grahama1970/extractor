@@ -5,7 +5,7 @@ category: Engineering
 description: "Requirements spec (Boeing/BHT style, nested lists)"
 runtime:
   features:
-    enable_proving: false
+    enable_proving: true
     summarization_prompt: |
       Analyze this section of a requirements specification. Summarize the key requirements, constraints, and verification criteria.
       Highlight any compliant or non-compliant states.
