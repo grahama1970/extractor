@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional, List
 from loguru import logger
 from extractor.core.presets import PRESET_REGISTRY, COMPLEXITY_THRESHOLDS
+from extractor.pipeline.utils.step_sanity import run_step_sanity
 
 STEP_NAME = "00_profile_detector"
 
@@ -384,6 +385,11 @@ def run(pdf_path: Path, output_dir: Path) -> Path:
     logger.info(f"Preset: {result.get('detected_preset')} | Route: {result.get('route')}")
     
     return out_file
+
+
+def sanity() -> int:
+    """Run sanity check for this step."""
+    return run_step_sanity(STEP_NAME)
 
 
 if __name__ == "__main__":

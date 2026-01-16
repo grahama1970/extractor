@@ -407,9 +407,6 @@ def run(
     return out_path
 
 
-    return out_path
-
-
 if __name__ == "__main__":
     import argparse
     import sys

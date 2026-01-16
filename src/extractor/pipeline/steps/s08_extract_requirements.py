@@ -30,8 +30,11 @@ from extractor.pipeline.utils.db.connection import get_connection
 from extractor.pipeline.utils.reliability import log_stage_error
 from extractor.pipeline.steps.scillm_preflight_validator import require_scillm_preflight
 from extractor.pipeline.utils.diagnostics import get_run_id
+from extractor.pipeline.utils.step_sanity import run_step_sanity
 
 load_dotenv(find_dotenv(usecwd=True), override=False)
+
+STEP_NAME = "08_extract_requirements"
 
 # Configuration
 THRESHOLD_CONFIDENCE = 0.5
@@ -987,6 +990,9 @@ def deduplicate_source_text(con: duckdb.DuckDBPyConnection):
     logger.info("Source text deduplication complete.")
 
 
+def sanity() -> int:
+    """Run sanity check for this step."""
+    return run_step_sanity(STEP_NAME)
 
 
 

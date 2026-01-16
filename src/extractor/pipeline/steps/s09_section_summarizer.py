@@ -22,8 +22,9 @@ load_dotenv(find_dotenv(usecwd=True), override=False)
 
 from loguru import logger
 from extractor.pipeline.utils.db.connection import get_connection
+from extractor.pipeline.utils.step_sanity import run_step_sanity
 
-
+STEP_NAME = "09_section_summarizer"
 
 # ------------------------------------------------------------------------
 
@@ -366,6 +367,12 @@ def run_stage_09_summarizer(
         raise e
     finally:
         con.close()
+
+
+def sanity() -> int:
+    """Run sanity check for this step."""
+    return run_step_sanity(STEP_NAME)
+
 
 if __name__ == "__main__":
     import argparse

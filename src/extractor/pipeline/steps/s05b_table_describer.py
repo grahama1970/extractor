@@ -207,7 +207,7 @@ def run(
     out_file = json_out / "05b_tables.json"
     
     data["tables"] = enriched_tables
-    data["enriched_timestamp"] = getattr(time, "time")()
+    data["enriched_timestamp"] = time.time()
     
     write_json_strict(out_file, data)
     

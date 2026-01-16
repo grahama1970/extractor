@@ -38,6 +38,7 @@ from extractor.pipeline.utils.reliability import log_stage_error
 from extractor.pipeline.utils.scillm_router import get_text_router
 from extractor.pipeline.utils.debug_utils import log_timing
 from extractor.pipeline.utils.step_sanity import run_step_sanity
+from extractor.pipeline.steps.scillm_preflight_validator import require_scillm_preflight
 from extractor.pipeline.utils.diagnostics import (
     start_resource_sampler,
     stop_resource_sampler,

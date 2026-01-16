@@ -870,6 +870,9 @@ def run(
         raise RuntimeError("Section building failed")
 
 
+def sanity() -> int:
+    """Run sanity check for this step."""
+    return run_step_sanity(STEP_NAME)
 
 
 if __name__ == "__main__":
