@@ -1002,9 +1002,11 @@ def _run_common_stages(
         )
 
         # 08b (Lean4 Theorem Prover) - Context-Aware
-        should_prove = getattr(args, "prove_theorems", False)
+        # Note: --skip-proving sets args.prove_requirements = False
+        should_prove = getattr(args, "prove_requirements", False)
         if not should_prove and preset_config:
-             if preset_config.get("features", {}).get("enable_proving") is True:
+             # Only auto-enable if --skip-proving wasn't explicitly passed
+             if preset_config.get("features", {}).get("enable_proving") is True and not getattr(args, "skip_proving", False):
                  should_prove = True
                  logger.info(f"08b [Lean4] auto-enabled by preset config")
 

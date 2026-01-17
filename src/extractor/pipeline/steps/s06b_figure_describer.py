@@ -136,8 +136,11 @@ async def process_figures(figures: List[Dict[str, Any]], output_dir: Path) -> Li
         requests,
         api_base=api_base,
         api_key=api_key,
+        custom_llm_provider="openai_like",  # Required per SCILLM_PAVED_PATH_CONTRACT
         concurrency=CONCURRENCY,
         timeout=VLM_TIMEOUT_SEC,
+        wall_time_s=300,  # 5 min max for whole batch
+        tenacious=False,  # Fail fast
         response_format={"type": "json_object"},
         retry_invalid_json=2,
     ):

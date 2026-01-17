@@ -370,6 +370,7 @@ class SanityChecker:
             cmd = [
                 sys.executable, "-m", "extractor.pipeline",
                 "--use-llm",
+                "--skip-proving",  # Skip Lean4 proving (requires separate container)
                 "--pdf", str(self.test_pdf),
                 "--out", str(out_dir),
             ]
@@ -380,7 +381,7 @@ class SanityChecker:
                 capture_output=True,
                 text=True,
                 cwd=str(EXTRACTOR_ROOT),
-                timeout=600,  # 10 min for VLM
+                timeout=120,  # 2 min is enough for VLM without Lean4 proving
             )
             duration = int((time.monotonic() - t0) * 1000)
 
@@ -412,7 +413,7 @@ class SanityChecker:
                 self._log(f"PDF accurate: Pipeline failed", "FAIL")
 
         except subprocess.TimeoutExpired:
-            result["error"] = "Timeout (600s)"
+            result["error"] = "Timeout (120s)"
             self._log("PDF accurate: Timeout", "FAIL")
         except Exception as e:
             result["error"] = str(e)
