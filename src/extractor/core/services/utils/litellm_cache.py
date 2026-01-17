@@ -117,6 +117,8 @@ def initialize_litellm_cache() -> None:
                         litellm.enable_cache()  # type: ignore[attr-defined]
                     except Exception:
                         pass
+                except Exception:
+                    pass  # Fall through if namespace adjustment fails
             return
     # If redis is not installed, fall back to local cache
     redis_host = os.getenv("REDIS_HOST", "localhost")

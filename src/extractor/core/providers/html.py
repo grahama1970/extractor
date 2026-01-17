@@ -181,6 +181,15 @@ class HTMLProvider:
 
         return blocks
 
+    @staticmethod
+    def _clean_inline_text(text: str) -> str:
+        """Normalize inline markup to plain text for downstream heuristics."""
+        if not text:
+            return ""
+        text = re.sub(r"\s+", " ", text)
+        text = re.sub(r"(\*\*|__)(.*?)\1", r"\2", text)
+        return text.replace("*", "").replace("__", "").strip()
+
     def _process_element(
         self,
         element: Union[Tag, NavigableString],
@@ -212,30 +221,8 @@ class HTMLProvider:
 
         # Tables
         if element.name == "table":
-            rows: List[TableCell] = []
-            r_count = 0
-            c_count = 0
-            header_rows: List[int] = []
-            for r_idx, tr in enumerate(element.find_all("tr", recursive=False)):
-                cells = tr.find_all(["th", "td"], recursive=False)
-                if r_idx == 0 and any(td.name == "th" for td in cells):
-                    header_rows.append(r_idx)
-                c_count = max(c_count, len(cells))
-                for c_idx, td in enumerate(cells):
-                    text = td.get_text(" ", strip=True)
-                    rows.append(TableCell(row=r_idx, col=c_idx, content=text))
-                r_count += 1
-            if r_count and c_count:
-                table_block = TableBlock(
-                    id=self._generate_block_id(),
-                    type=BlockType.TABLE,
-                    content={},
-                    rows=r_count,
-                    cols=c_count,
-                    cells=rows,
-                    headers=header_rows or None,
-                    metadata=BlockMetadata(attributes={"tag": "table"}, confidence=1.0),
-                )
+            table_block = self._process_table(element, parent_id)
+            if table_block:
                 blocks.append(table_block)
             return
 
@@ -375,18 +362,24 @@ class HTMLProvider:
         if element.get("data-caption-consumed") == "true":
             return None
         # Check for nested tables or lists that could break markdown
-        if element.find(["table", "ul", "ol"]):
-            # Use plain text extraction for complex nested content
-            text = element.get_text(strip=True)
+        has_nested = element.find(["table", "ul", "ol"])
+        if has_nested:
+            text = element.get_text(" ", strip=True)
         else:
-            # Safe to use markdown for simple formatting
+            text = element.get_text(" ", strip=True)
             try:
-                text = md(str(element), strip=["p"])
+                enriched = md(str(element), strip=["p"])
+                if enriched:
+                    text = enriched
             except Exception as e:
-                logger.warning("Markdownify failed for paragraph: {error}, falling back to plain text", error=e)
-                text = element.get_text(strip=True)
+                logger.warning(
+                    "Markdownify failed for paragraph: {error}, falling back to plain text",
+                    error=e,
+                )
 
-        if not text.strip():
+        text = self._clean_inline_text(text)
+
+        if not text:
             return None
 
         return BaseBlock(
@@ -405,36 +398,46 @@ class HTMLProvider:
         if not rows:
             return None
 
-        cells = []
-        headers = []
+        cells: List[TableCell] = []
+        headers: List[int] = []
+        caption_text = ""
+        caption_tag = element.find("caption")
+        if caption_tag is not None:
+            caption_text = caption_tag.get_text(" ", strip=True)
 
         for row_idx, row in enumerate(rows):
-            # Check if this is a header row
             if row.find_parent("thead") or all(
                 cell.name == "th" for cell in row.find_all(["td", "th"])
             ):
                 headers.append(row_idx)
 
             for col_idx, cell in enumerate(row.find_all(["td", "th"])):
+                content = self._clean_inline_text(cell.get_text(" ", strip=True))
                 cells.append(
                     TableCell(
                         row=row_idx,
                         col=col_idx,
-                        content=cell.get_text(strip=True),
+                        content=content,
                         rowspan=int(cell.get("rowspan", 1)),
                         colspan=int(cell.get("colspan", 1)),
                         style={"is_header": cell.name == "th"},
                     )
                 )
 
-        # Calculate table dimensions
+        if not cells:
+            return None
+
         max_row = max((cell.row for cell in cells), default=0)
         max_col = max((cell.col for cell in cells), default=0)
+
+        table_content: Dict[str, Any] = {}
+        if caption_text:
+            table_content["title"] = caption_text
 
         return TableBlock(
             id=self._generate_block_id(),
             type=BlockType.TABLE,
-            content={},
+            content=table_content,
             rows=max_row + 1,
             cols=max_col + 1,
             cells=cells,

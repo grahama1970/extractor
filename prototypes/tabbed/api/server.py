@@ -901,11 +901,7 @@ class RunPipelineRequest(BaseModel):
 
 
 DETERMINISTIC_FLAGS = [
-    "--skip-llm03",
-    "--skip-descriptions06",
-    "--summary-only07",
-    "--skip-proving08",
-    "--fast-embeddings10",
+    "--offline-smoke",  # Most aggressive flag: skips LLM/VLM/DB/Lean4/annotator/tables
 ]
 
 def _to_pipeline_annotations(pdf: Path, boxes_by_page: Dict[str, List[Dict[str, Any]]]) -> Dict:
@@ -1632,7 +1628,7 @@ async def api_coco_export(payload: Dict[str, Any]):
     if fitz is None:
         return JSONResponse({"ok": False, "error": "pymupdf_missing"}, status_code=500)
     ts = time.strftime("%Y%m%d_%H%M%S")
-    out_dir = os.path.abspath(os.path.join("scripts", "artifacts", f"coco_export_{ts}"))
+    out_dir = os.path.join(ARTIFACTS_ROOT, f"coco_export_{ts}")
     os.makedirs(out_dir, exist_ok=True)
     images_out = os.path.join(out_dir, "images")
     os.makedirs(images_out, exist_ok=True)

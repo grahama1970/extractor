@@ -16,6 +16,7 @@ Example Usage:
 >>> # Add usage examples
 """
 
+from pathlib import Path
 from typing import List, Optional, Any, Dict
 from PIL import Image
 
@@ -49,6 +50,7 @@ class ImageProvider(BaseProvider):
         for i in range(self.image_count):
             blocks.append(ImageBlock(
                 id=f"img_{i}",
+                content="",  # Image content is binary, stored via src
                 src=str(self.filepath),
                 metadata=BlockMetadata(page_number=i + 1)
             ))

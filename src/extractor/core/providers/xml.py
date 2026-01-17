@@ -248,25 +248,37 @@ class XMLProvider:
         current_path = f"{parent_path}/{element.tag}" if parent_path else element.tag
 
         # Extract text content if present
-        if element.text and element.text.strip():
+        text_content = element.text.strip() if element.text else ""
+        tag_lower = element.tag.lower()
+
+        # For section elements, use title/name attribute as content if no text
+        if tag_lower == "section" and not text_content:
+            attribs = {k.lower(): v for k, v in element.attrib.items()}
+            text_content = attribs.get("title", attribs.get("name", ""))
+
+        if text_content:
             block_type = self._determine_block_type(element)
             attrs: Dict[str, Any] = {
                 "xml_path": current_path,
                 "tag": element.tag,
                 "attributes": dict(element.attrib) if self.extract_attributes else {},
             }
-            tag_lower = element.tag.lower()
             if block_type == BlockType.HEADING:
-                # Derive heading level from tag (h1..h6) when possible
+                # Derive heading level from tag (h1..h6) or level attribute
                 m = re.match(r"h([1-6])$", tag_lower)
                 if m:
                     attrs["level"] = int(m.group(1))
+                elif "level" in element.attrib:
+                    try:
+                        attrs["level"] = int(element.attrib["level"])
+                    except ValueError:
+                        attrs["level"] = 1
                 else:
                     attrs["level"] = 1
             block = BaseBlock(
                 id=self._generate_block_id(),
                 type=block_type,
-                content=element.text.strip(),
+                content=text_content,
                 metadata=BlockMetadata(
                     attributes=attrs,
                     confidence=0.95,
@@ -304,6 +316,13 @@ class XMLProvider:
             for h in ["h1", "h2", "h3", "h4", "h5", "h6", "heading", "title"]
         ):
             return BlockType.HEADING
+
+        # Section tags with title attribute are headings
+        if tag_lower == "section":
+            # Check for title attribute or level attribute (indicates a section header)
+            attribs = {k.lower(): v for k, v in element.attrib.items()}
+            if "title" in attribs or "level" in attribs or "name" in attribs:
+                return BlockType.HEADING
 
         # List patterns
         if tag_lower in ["li", "listitem", "item"] or tag_lower.endswith("item"):

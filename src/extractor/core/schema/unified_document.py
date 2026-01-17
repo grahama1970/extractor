@@ -125,7 +125,8 @@ class BlockMetadata(BaseModel):
 class BaseBlock(BaseModel):
     """Base class for all content blocks"""
 
-    model_config = ConfigDict(use_enum_values=True)
+    # Keep enums accessible via `.value` while JSON dumps stay stringified
+    model_config = ConfigDict(use_enum_values=False)
 
     id: str = Field(..., description="Unique block identifier")
     type: BlockType = Field(..., description="Type of content block")
@@ -231,7 +232,7 @@ class UnifiedDocument(BaseModel):
     This is the standard output format for all Marker extractors.
     """
 
-    model_config = ConfigDict(use_enum_values=True, populate_by_name=True)
+    model_config = ConfigDict(use_enum_values=False, populate_by_name=True)
 
     # Core fields
     id: str = Field(..., description="Unique document identifier")

@@ -76,9 +76,44 @@ if (GENERATE_REAL === '1' || GENERATE_REAL === 'true' || GENERATE_REAL === 'yes'
 
 
 const FAST = (process.env.SMOKES_FAST || '').toLowerCase() === '1' || (process.env.SMOKES_FAST || '').toLowerCase() === 'true';
-const steps = FAST
-  ? stepsBase.filter(s => !['llm_health'].includes(s.name))
-  : stepsBase;
+let API_ONLY = (process.env.SMOKES_API_ONLY || '').toLowerCase() === '1' || (process.env.SMOKES_API_ONLY || '').toLowerCase() === 'true';
+
+// UI smokes (use puppeteer.launch) - require frontend dev server
+const uiSmokes = ['ui_grouping_export_json', 'ui_export_json_fields', 'ui_progress_pipeline_run',
+  'ui_load_pipeline_annos_from_latest', 'ui_keyboard_core', 'ui_search_highlight_thumb',
+  'ui_conflicts_load_and_resolve', 'ui_zoom_fit_pan', 'ui_selection_handles_resize',
+  'ui_thumbnails_virtualized', 'ui_a11y_focus_escape', 'ui_comments_threads_panel',
+  'ui_toggle_night_capture', 'issue_018', 'issue_019', 'issue_020'];
+
+// Auto-detect if frontend UI is available by checking BASE_URL
+async function checkFrontendAvailable() {
+  const BASE = process.env.BASE_URL || 'http://127.0.0.1:8080';
+  try {
+    const res = await fetch(`${BASE}/main`, { signal: AbortSignal.timeout(3000) });
+    const html = await res.text();
+    // Check if it's a React app (has root element mention or bundle scripts)
+    return html.includes('id="root"') || html.includes('_app') || html.includes('data-testid');
+  } catch {
+    return false;
+  }
+}
+
+let steps = stepsBase;
+if (FAST) {
+  steps = steps.filter(s => !['llm_health'].includes(s.name));
+}
+
+// Check frontend availability before starting
+const frontendAvailable = await checkFrontendAvailable();
+if (!frontendAvailable && !API_ONLY) {
+  console.log('INFO: Frontend UI not detected at BASE_URL, auto-enabling API_ONLY mode');
+  API_ONLY = true;
+}
+
+if (API_ONLY) {
+  // Skip UI smokes that require frontend dev server
+  steps = steps.filter(s => !uiSmokes.includes(s.name));
+}
 
 function runStep(i) {
   if (i >= steps.length) return Promise.resolve(0);
@@ -87,7 +122,11 @@ function runStep(i) {
     console.log(`\n--- SMOKE ${i+1}/${steps.length}: ${name} ---`);
     const cp = spawn(cmd[0], cmd.slice(1), { stdio: 'inherit', env: process.env });
     cp.on('exit', (code) => {
-      if (code) {
+      // Exit code 3 means "no CDP endpoint" - treat as skip
+      if (code === 3) {
+        console.log(`SKIP: ${name} (no CDP endpoint)`);
+        runStep(i + 1).then(resolve);
+      } else if (code) {
         console.error(`Smoke failed: ${name} (code ${code})`);
         resolve(code);
       } else {

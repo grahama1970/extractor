@@ -25,6 +25,8 @@ from extractor.core.schema.unified_document import (
     BlockMetadata,
     DocumentMetadata,
     HierarchyNode,
+    TableBlock,
+    TableCell,
 )
 
 
@@ -65,14 +67,25 @@ class MarkdownProvider:
                 pending_items = []
                 current_list_type = None
 
-        for raw in text.splitlines():
-            line = raw.rstrip("\n")
-            if not line.strip():
+        lines = text.splitlines()
+        i = 0
+        while i < len(lines):
+            raw = lines[i].rstrip("\n")
+            if not raw.strip():
                 flush_list()
+                i += 1
                 continue
-            line = line.rstrip("\n")
-            if not line.strip():
+
+            if self._is_table_header(lines, i):
+                flush_list()
+                table_lines, advance = self._collect_table(lines, i)
+                tbl = self._build_table_block(table_lines)
+                if tbl:
+                    blocks.append(tbl)
+                i += advance
                 continue
+
+            line = raw
             m = _HEADING_RE.match(line)
             if m:
                 flush_list()
@@ -86,12 +99,13 @@ class MarkdownProvider:
                 )
                 blocks.append(hb)
                 last_heading_id = hb.id
+                i += 1
                 continue
             m = _LISTITEM_RE.match(line)
             if m:
                 indent_spaces = len(m.group(1) or "")
                 ordered = bool(re.match(r"\d+\.\s+", m.group(2)))
-                content = m.group(3).strip()
+                content = self._clean_inline_text(m.group(3).strip())
                 list_type = "ol" if ordered else "ul"
                 # Simple depth heuristic: 2 spaces per level -> 1-based depth
                 depth = max(1, indent_spaces // 2 + 1)
@@ -99,6 +113,7 @@ class MarkdownProvider:
                     flush_list()
                 current_list_type = list_type
                 pending_items.append((content, depth))
+                i += 1
                 continue
             # paragraph
             flush_list()
@@ -106,10 +121,11 @@ class MarkdownProvider:
                 BaseBlock(
                     id=self._next_id(),
                     type=BlockType.PARAGRAPH,
-                    content=line.strip(),
+                    content=self._clean_inline_text(line.strip()),
                     metadata=BlockMetadata(attributes={}, confidence=1.0),
                 )
             )
+            i += 1
         # flush any pending list at EOF
         flush_list()
 
@@ -134,6 +150,64 @@ class MarkdownProvider:
     def _next_id(self) -> str:
         self.block_counter += 1
         return f"md-block-{self.block_counter}"
+
+    @staticmethod
+    def _clean_inline_text(text: str) -> str:
+        if not text:
+            return ""
+        text = re.sub(r"\s+", " ", text)
+        text = re.sub(r"(\*\*|__)(.*?)\1", r"\2", text)
+        return text.replace("*", "").strip()
+
+    def _is_table_header(self, lines: List[str], idx: int) -> bool:
+        if idx + 1 >= len(lines):
+            return False
+        header = lines[idx].strip()
+        separator = lines[idx + 1].strip()
+        if "|" not in header:
+            return False
+        sep_pattern = re.compile(r"^\s*\|?\s*:?[-]{2,}.*")
+        return bool(sep_pattern.match(separator))
+
+    def _collect_table(self, lines: List[str], idx: int) -> tuple[List[str], int]:
+        collected: List[str] = []
+        i = idx
+        while i < len(lines):
+            line = lines[i]
+            if not line.strip() or "|" not in line:
+                break
+            collected.append(line)
+            i += 1
+        return collected, max(1, i - idx)
+
+    def _build_table_block(self, table_lines: List[str]) -> Optional[TableBlock]:
+        if len(table_lines) < 2:
+            return None
+        header = [cell.strip() for cell in table_lines[0].strip().strip("|").split("|")]
+        data_rows = [
+            [cell.strip() for cell in line.strip().strip("|").split("|")]
+            for line in table_lines[2:]
+        ]
+        cells: List[TableCell] = []
+        for col_idx, text in enumerate(header):
+            cells.append(TableCell(row=0, col=col_idx, content=text, style={"is_header": True}))
+        for r, row in enumerate(data_rows, start=1):
+            for c, text in enumerate(row):
+                cells.append(TableCell(row=r, col=c, content=text))
+        if not cells:
+            return None
+        rows = len(data_rows) + 1
+        cols = max(len(header), *(len(r) for r in data_rows)) if data_rows else len(header)
+        return TableBlock(
+            id=self._next_id(),
+            type=BlockType.TABLE,
+            content={},
+            rows=rows,
+            cols=cols,
+            cells=cells,
+            headers=[0],
+            metadata=BlockMetadata(attributes={"source": "markdown"}, confidence=1.0),
+        )
 
     def _build_hierarchy(self, blocks: List[BaseBlock]) -> Optional[HierarchyNode]:
         heads = [b for b in blocks if b.type == BlockType.HEADING]

@@ -60,6 +60,110 @@ class DOCXProvider:
             "Heading 6": 6,
             "Subtitle": 1,
         }
+        # Regex for detecting numbered section patterns (e.g., "1.", "1.1", "1.1.1")
+        self._section_number_re = re.compile(r'^(\d+\.)+\s*\S')
+        # Numbering depth map (optional) used during list extraction
+        self._numbering_map: Dict[str, List[int]] = {}
+
+    def _detect_pdf_import(self, doc) -> bool:
+        """
+        Detect if DOCX was likely imported/converted from PDF.
+
+        Signs of PDF-imported DOCX:
+        - No defined custom styles (only built-ins like Normal)
+        - All paragraphs use same generic style
+        - Core properties may have converter metadata
+        - Tables may have unusual cell structures
+
+        Returns True if likely PDF-imported.
+        """
+        try:
+            # Check core properties for converter hints
+            props = doc.core_properties
+            if props.creator:
+                creator_lower = props.creator.lower()
+                pdf_converters = ['adobe', 'pdf', 'acrobat', 'nitro', 'smallpdf', 'ilovepdf', 'zamzar']
+                if any(conv in creator_lower for conv in pdf_converters):
+                    return True
+
+            # Check if document uses only generic styles
+            style_names = set()
+            for para in doc.paragraphs[:20]:  # Sample first 20 paragraphs
+                try:
+                    if para.style:
+                        style_names.add(para.style.name)
+                except Exception:
+                    pass
+
+            # If only "Normal" style or very few styles, likely PDF-imported
+            if style_names <= {"Normal", "Body Text", "Default Paragraph Font"}:
+                if len(doc.paragraphs) > 10:  # And has significant content
+                    return True
+
+        except Exception:
+            pass
+
+        return False
+
+    def _detect_heading_heuristic(self, para, text: str) -> Optional[int]:
+        """
+        Heuristic heading detection for DOCX files imported from PDFs.
+
+        These files often have broken/generic styles (e.g., "Normal" for everything).
+        Uses visual formatting cues to detect headings.
+
+        Returns heading level (1-6) or None if not a heading.
+        """
+        if not text or len(text) > 200:  # Headings are typically short
+            return None
+
+        # Check for numbered section patterns: "1.", "1.1", "1.1.1", etc.
+        if self._section_number_re.match(text):
+            # Count dots to estimate level
+            dots = text.split()[0].count('.')
+            return min(dots, 6)
+
+        # Check formatting via paragraph runs
+        try:
+            runs = para.runs
+            if not runs:
+                return None
+
+            # Check if entire paragraph is bold
+            all_bold = all(run.bold for run in runs if run.text.strip())
+
+            # Check font size (larger = heading)
+            font_sizes = []
+            for run in runs:
+                if run.font and run.font.size:
+                    # Size is in EMUs (914400 EMUs = 1 inch, 72 points = 1 inch)
+                    pt_size = run.font.size.pt if hasattr(run.font.size, 'pt') else run.font.size / 12700
+                    font_sizes.append(pt_size)
+
+            avg_size = sum(font_sizes) / len(font_sizes) if font_sizes else 0
+
+            # Heuristics:
+            # - Bold + short text = likely heading
+            # - Large font (>14pt) + short = likely heading
+            # - ALL CAPS + short = likely heading
+            is_short = len(text) < 80
+            is_all_caps = text.isupper() and len(text) > 3
+
+            if is_short:
+                if avg_size >= 18:
+                    return 1  # Very large = level 1
+                elif avg_size >= 14 or (all_bold and avg_size >= 12):
+                    return 2  # Large or bold+medium = level 2
+                elif all_bold:
+                    return 3  # Bold alone = level 3
+                elif is_all_caps:
+                    return 2  # ALL CAPS = level 2
+
+        except Exception:
+            # If we can't access runs/formatting, skip heuristics
+            pass
+
+        return None
 
     # ------------------------------------------------------------------
     def _extract_simple(self, filepath: Path) -> UnifiedDocument:
@@ -69,33 +173,44 @@ class DOCXProvider:
         - One block per paragraph, one block per table
         - No styling/metadata; deterministic and lightweight
         """
+        from docx.oxml.ns import qn
 
         doc = PythonDocxDocument(filepath)
         blocks: List[BaseBlock] = []
-
         doc_id = filepath.stem
 
-        def iter_block_items(parent):
-            from docx.oxml.ns import qn
-            from docx.table import _Cell, Table
-            from docx.text.paragraph import Paragraph
+        # Detect if this DOCX was imported from PDF
+        is_pdf_imported = self._detect_pdf_import(doc)
+        if is_pdf_imported:
+            logger.warning(
+                f"DOCX file '{filepath.name}' appears to be imported from PDF. "
+                "Styles and tables may be unreliable. Consider using the original PDF for better extraction accuracy."
+            )
 
+        # Build a mapping from XML elements to actual document paragraphs/tables
+        # This preserves order while allowing proper style access
+        para_map = {p._element: p for p in doc.paragraphs}
+        table_map = {t._element: t for t in doc.tables}
+
+        def iter_block_items(parent):
+            """Iterate body elements in document order, yielding (type, element)."""
             for child in parent.iterchildren():
                 if child.tag == qn("w:p"):
-                    yield Paragraph(child, parent)
+                    yield ("para", child)
                 elif child.tag == qn("w:tbl"):
-                    yield Table(child, parent)
+                    yield ("table", child)
                 elif child.tag == qn("w:sdt"):
                     # content controls can wrap paragraphs/tables
                     for sub in child.iterchildren():
-                        for item in iter_block_items(sub):
-                            yield item
+                        yield from iter_block_items(sub)
 
-        for item in iter_block_items(doc.element.body):
-            if hasattr(item, "rows"):
-                # table
+        for item_type, element in iter_block_items(doc.element.body):
+            if item_type == "table":
+                table = table_map.get(element)
+                if not table:
+                    continue
                 rows: List[List[str]] = []
-                for row in item.rows:
+                for row in table.rows:
                     rows.append([cell.text for cell in row.cells])
                 cells = []
                 for r_idx, r in enumerate(rows):
@@ -113,15 +228,55 @@ class DOCXProvider:
                     )
                 )
             else:
-                txt = getattr(item, "text", "").strip()
+                # Paragraph - look up in our map to get properly linked object
+                para = para_map.get(element)
+                if not para:
+                    continue
+
+                txt = para.text.strip()
                 if not txt:
                     continue
+
+                # Get style name safely from the properly linked paragraph
+                style_name = ""
+                try:
+                    if para.style:
+                        style_name = para.style.name or ""
+                except Exception:
+                    # Style might not be available (corrupted DOCX or imported from PDF)
+                    pass
+
+                block_type = BlockType.PARAGRAPH
+                level = None
+
+                if style_name and style_name in self.style_hierarchy:
+                    block_type = BlockType.HEADING
+                    level = self.style_hierarchy[style_name]
+                elif style_name and style_name.startswith("Heading"):
+                    # Handle "Heading 7", "Heading 8", etc.
+                    block_type = BlockType.HEADING
+                    try:
+                        level = int(style_name.split()[-1])
+                    except (ValueError, IndexError):
+                        level = 1
+                else:
+                    # Fallback: heuristic heading detection for PDF-imported DOCX
+                    # These files often have broken/generic styles
+                    heuristic_level = self._detect_heading_heuristic(para, txt)
+                    if heuristic_level:
+                        block_type = BlockType.HEADING
+                        level = heuristic_level
+
+                metadata = BlockMetadata(page_number=1)
+                if level is not None:
+                    metadata.attributes = {"level": level}
+
                 blocks.append(
                     BaseBlock(
                         id=str(len(blocks)),
-                        type=BlockType.PARAGRAPH,
+                        type=block_type,
                         content=txt,
-                        metadata=BlockMetadata(page_number=1),
+                        metadata=metadata,
                     )
                 )
 
@@ -132,9 +287,13 @@ class DOCXProvider:
             metadata=DocumentMetadata(
                 title=filepath.stem,
                 author=None,
-                created=None,
-                modified=None,
-                extra={},
+                format_metadata={
+                    "pdf_imported": is_pdf_imported,
+                    "pdf_import_warning": (
+                        "This DOCX was likely converted from PDF. Styles and tables may be unreliable."
+                        if is_pdf_imported else None
+                    ),
+                },
             ),
         )
 

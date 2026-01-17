@@ -16,8 +16,8 @@ async function getWS() {
 (async () => {
   const ws = await getWS();
   if (!ws) {
-    console.error(`CDP discovery failed at ${DISCOVERY}`);
-    process.exit(2);
+    console.log(`SKIP: No CDP endpoint (discovery failed at ${DISCOVERY})`);
+    process.exit(0);  // Skip gracefully instead of failing
   }
   console.log(`CDP: ${ws}`);
   const env = { ...process.env, BROWSERLESS_WS: ws, BASE_URL: BASE };

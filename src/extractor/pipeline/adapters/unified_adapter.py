@@ -119,7 +119,10 @@ class UnifiedAdapter:
                     "page": block.metadata.page_number or 0,
                     "bbox": block.metadata.bbox or [0, 0, 0, 0],
                     "text": str(block.content),
-                    "block_type": "Text"  # Normalize to "Text" for pipeline
+                    "block_type": "Text",  # Normalize to "Text" for pipeline
+                    "metadata": {
+                        "attributes": block.metadata.attributes or {}
+                    } if block.metadata and block.metadata.attributes else {}
                 }
                 current_section["blocks"].append(pipeline_block)
         

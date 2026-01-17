@@ -72,7 +72,7 @@ dependencies = [
  "pyflakes>=3.4.0",
  # Shared web-ingestion toolkit
  "fetcher @ git+https://github.com/grahama1970/fetcher.git",
- "pynvml>=13.0.1",
+ "nvidia-ml-py>=12.0.0",  # Official NVIDIA ML Python bindings (replaces deprecated pynvml)
  "faiss-cpu>=1.12.0",
  "duckdb>=1.1.0",
  "nltk>=3.9.2",

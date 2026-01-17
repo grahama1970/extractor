@@ -235,7 +235,8 @@ class EPUBProvider:
                             content=li_text,
                             parent_id=list_block.id,
                             metadata=BlockMetadata(
-                                {"index": idx, "ordered": tag == "ol", "list_type": list_type, "depth": _li_depth(li)}, confidence=1.0
+                                attributes={"index": idx, "ordered": tag == "ol", "list_type": list_type, "depth": _li_depth(li)},
+                                confidence=1.0,
                             ),
                         )
                     )

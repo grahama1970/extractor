@@ -62,8 +62,11 @@ help:
 	@echo "  make setup         # create venv + install dev deps (uv if available)"
 	@echo "  make dev           # start backend + vite (scripts/dev.sh)"
 	@echo "  make stop          # kill 8080/8001"
+	@echo "  make chrome-cdp    # start Chrome with CDP for UI smokes"
+	@echo "  make chrome-stop   # stop Chrome CDP"
 	@echo "  make lint fmt type test  # fast gates"
 	@echo "  make api-smokes    # API-only smokes (no browser)"
+	@echo "  make smokes-full   # full smokes with CDP (auto-starts/stops Chrome)"
 	@echo "  make ux-health     # basic UX health gate (CDP)"
 	@echo "  make smokes        # full UX smokes (requires live servers + CDP)"
 	@echo "  make ci            # local CI gate (server checks + full suite)"
@@ -152,6 +155,26 @@ dev:
 stop:
 	- fuser -k 8080/tcp 2>/dev/null || true
 	- fuser -k 8001/tcp 2>/dev/null || true
+
+# --- Chrome CDP for UI smoke tests ---
+.PHONY: chrome-cdp chrome-stop smokes-full
+
+chrome-cdp:
+	@./scripts/start_chrome_cdp.sh
+
+chrome-stop:
+	@if [ -f /tmp/chrome-cdp.pid ]; then \
+		kill $$(cat /tmp/chrome-cdp.pid) 2>/dev/null || true; \
+		rm -f /tmp/chrome-cdp.pid; \
+		echo "Chrome CDP stopped"; \
+	else \
+		echo "No Chrome CDP pid file found"; \
+	fi
+
+# Full smokes with CDP (starts Chrome, runs smokes, stops Chrome)
+smokes-full: chrome-cdp
+	BROWSERLESS_DISCOVERY_URL=http://127.0.0.1:9222/json/version $(MAKE) smokes || ($(MAKE) chrome-stop; exit 1)
+	$(MAKE) chrome-stop
 
 # --- Pipeline 01→05 + Annotator helpers ---
 
@@ -246,7 +269,7 @@ ux-health:
 	BASE_URL=$(BASE_URL) BROWSERLESS_DISCOVERY_URL=$(CDP_URL) node scripts/ux_check_cdp_auto.mjs
 
 smokes:
-	BASE_URL=$(BASE_URL) BROWSERLESS_DISCOVERY_URL=$(CDP_URL) node scripts/smokes/all.mjs
+	BASE_URL=$(BASE_URL) BROWSERLESS_DISCOVERY_URL=$${BROWSERLESS_DISCOVERY_URL:-$(CDP_URL)} node scripts/smokes/all.mjs
 
 ci:
 	BASE_URL=$(BASE_URL) BROWSERLESS_DISCOVERY_URL=$(CDP_URL) bash scripts/ci_local.sh
