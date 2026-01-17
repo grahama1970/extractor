@@ -65,11 +65,14 @@ async def call_reflow_llm(
         api_base = os.getenv("CHUTES_API_BASE", "https://llm.chutes.ai/v1")
 
         async for r in parallel_acompletions_iter(
-            reqs, 
-            api_base=api_base, 
-            api_key=api_key, 
-            concurrency=1, 
+            reqs,
+            api_base=api_base,
+            api_key=api_key,
+            custom_llm_provider="openai_like",  # Required per SCILLM_PAVED_PATH_CONTRACT
+            concurrency=1,
             timeout=timeout,
+            wall_time_s=180,  # 3 min max
+            tenacious=False,  # Fail fast
             response_format={"type": "json_object"}
         ):
             if r.get("ok"):

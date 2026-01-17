@@ -192,7 +192,7 @@ def _attach_llm_assist_headers(result: Dict[str, Any], stage_dir: Path) -> None:
         api_base = os.getenv("SCILLM_API_BASE", "https://llm.chutes.ai/v1")
         api_key = os.getenv("CHUTES_API_KEY")
 
-        async for r in parallel_acompletions_iter(requests, api_base=api_base, api_key=api_key, concurrency=5, timeout=20, response_format={"type": "json_object"}):
+        async for r in parallel_acompletions_iter(requests, api_base=api_base, api_key=api_key, custom_llm_provider="openai_like", concurrency=5, timeout=20, wall_time_s=120, tenacious=False, response_format={"type": "json_object"}):
             idx = r.get("index")
             t = table_map.get(idx)
             if not t: continue

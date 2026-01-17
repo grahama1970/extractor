@@ -547,8 +547,11 @@ async def process_sections_batch(
         requests,
         api_base=api_base,
         api_key=api_key,
+        custom_llm_provider="openai_like",  # Required per SCILLM_PAVED_PATH_CONTRACT
         concurrency=CONCURRENCY,
         timeout=120,
+        wall_time_s=600,  # 10 min max for batch
+        tenacious=False,  # Fail fast
         response_format={"type": "json_object"},
         repair_invalid_json=True,
     ):

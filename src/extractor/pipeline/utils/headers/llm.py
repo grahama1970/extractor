@@ -117,11 +117,14 @@ async def verify_header_with_llm(
         api_base = os.getenv("CHUTES_API_BASE", "https://llm.chutes.ai/v1")
         
         async for r in parallel_acompletions_iter(
-            reqs, 
-            api_base=api_base, 
-            api_key=api_key, 
-            concurrency=1, 
+            reqs,
+            api_base=api_base,
+            api_key=api_key,
+            custom_llm_provider="openai_like",  # Required per SCILLM_PAVED_PATH_CONTRACT
+            concurrency=1,
             timeout=item_timeout,
+            wall_time_s=120,  # 2 min max
+            tenacious=False,  # Fail fast
             response_format={"type": "json_object"},
             repair_invalid_json=True
         ):

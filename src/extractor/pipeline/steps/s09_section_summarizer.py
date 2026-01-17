@@ -206,11 +206,14 @@ async def run_summarizer(
             payloads,
             api_base=api_base,
             api_key=api_key,
+            custom_llm_provider="openai_like",  # Required per SCILLM_PAVED_PATH_CONTRACT
             concurrency=batch_size,
             repair_invalid_json=True,
             retry_invalid_json=2,
             schema=summary_schema,
-            timeout=120
+            timeout=120,
+            wall_time_s=600,  # 10 min max for batch
+            tenacious=False,  # Fail fast
         ):
             # SciLLM v1.78.x returns dict with 'request' key
             req = r.get("request", {})

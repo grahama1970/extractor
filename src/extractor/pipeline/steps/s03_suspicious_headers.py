@@ -516,8 +516,11 @@ async def process_pdf_pipeline(config: Config):
             requests,
             api_base=api_base,
             api_key=api_key,
+            custom_llm_provider="openai_like",  # Required per SCILLM_PAVED_PATH_CONTRACT
             concurrency=config.llm_concurrency,
             timeout=config.item_timeout_seconds,
+            wall_time_s=300,  # 5 min max for batch
+            tenacious=False,  # Fail fast
             response_format={"type": "json_object"},
             repair_invalid_json=True
         ):
