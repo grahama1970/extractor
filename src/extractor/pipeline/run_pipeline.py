@@ -311,6 +311,10 @@ def main(argv: Optional[list[str]] = None) -> int:
     p.add_argument("--use-llm", action="store_true", help="Use LLM for improved accuracy in s02 (Chutes.ai)")
 
 
+    # Preset override (skip auto-detection)
+    p.add_argument("--preset", type=str, choices=["arxiv", "requirements_spec", "auto"],
+                   help="Force a specific preset instead of auto-detection (skips s00)")
+
     # Batch control
     p.add_argument("--workers", type=int, default=1, help="Number of concurrent workers (default: 1)")
     p.add_argument("--glob", type=str, default="**/*.pdf", help="Glob pattern for directory scan (default: **/*.pdf)")
@@ -610,14 +614,38 @@ def _run_pdf_strategy(pdf: Path, out: Path, args: argparse.Namespace) -> int:
     # ----------------------------------------------------
     preset_config = {}
     preset_name = None
-    
-    if not getattr(args, "skip_s00", False):
+    forced_preset = getattr(args, "preset", None)
+
+    if forced_preset and forced_preset != "auto":
+        # User specified --preset; skip s00 auto-detection
+        from extractor.core.presets import PRESET_REGISTRY
+
+        preset_name = forced_preset
+        logger.info(f"00_profile_detector: SKIPPED - Using forced preset '{preset_name}'")
+
+        if preset_name in PRESET_REGISTRY:
+            preset_config = PRESET_REGISTRY[preset_name]
+            logger.info(f"00_profile_detector: Loaded config for forced preset '{preset_name}'")
+        else:
+            logger.warning(f"00_profile_detector: Forced preset '{preset_name}' not in registry. Using defaults.")
+
+        # Save Context Artifact for forced preset
+        context_data = {
+            "preset_name": preset_name,
+            "config": preset_config,
+            "timestamp": time.time(),
+            "profile_path": None,
+            "forced": True,
+        }
+        (out / "pipeline_context.json").write_text(json.dumps(context_data, indent=2))
+
+    elif not getattr(args, "skip_s00", False):
         try:
             from extractor.pipeline.steps import s00_profile_detector as s00
             from extractor.core.presets import PRESET_REGISTRY
-            
+
             logger.info("00_profile_detector: Running profile detection...")
-            
+
             # Run S00
             s00_out_file = _step(
                 "00_profile_detector",
@@ -628,20 +656,20 @@ def _run_pdf_strategy(pdf: Path, out: Path, args: argparse.Namespace) -> int:
                 timeout_sec=args.stage_timeout,
                 log_dir_base=out,
             )
-            
+
             # Load Profile and Context
             if s00_out_file and s00_out_file.exists():
                 try:
                     profile_data = json.loads(s00_out_file.read_text())
                     preset_name = profile_data.get("detected_preset")
                     logger.info(f"00_profile_detector: Detected Preset = {preset_name}")
-                    
+
                     if preset_name in PRESET_REGISTRY:
                         preset_config = PRESET_REGISTRY[preset_name]
                         logger.info(f"00_profile_detector: Loaded config for {preset_name}")
                     elif preset_name:
                          logger.warning(f"00_profile_detector: Preset '{preset_name}' not in registry. Using defaults.")
-                    
+
                 except Exception as e:
                     logger.warning(f"00_profile_detector: Failed to load profile JSON: {e}")
             else:
@@ -655,7 +683,7 @@ def _run_pdf_strategy(pdf: Path, out: Path, args: argparse.Namespace) -> int:
                 "profile_path": str(s00_out_file) if s00_out_file else None
             }
             (out / "pipeline_context.json").write_text(json.dumps(context_data, indent=2))
-            
+
         except ImportError:
             logger.warning("00_profile_detector: Module not found. Skipping context injection.")
         except Exception as e:

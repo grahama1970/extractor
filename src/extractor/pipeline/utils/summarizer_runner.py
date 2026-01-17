@@ -66,7 +66,9 @@ async def summarize_section(
             
             resp = None
             async for r in parallel_acompletions_iter(
-                reqs, api_base=api_base, api_key=api_key, concurrency=1, timeout=request_timeout, 
+                reqs, api_base=api_base, api_key=api_key,
+                custom_llm_provider="openai_like",  # Required per SCILLM_PAVED_PATH_CONTRACT
+                concurrency=1, timeout=request_timeout, wall_time_s=180, tenacious=False,
                 response_format={"type": "json_object"} if strict_json else None
             ):
                 if r.get("ok"):
@@ -251,7 +253,10 @@ async def create_checkpoint_summary(
             
             resp = None
             async for r in parallel_acompletions_iter(
-                reqs, api_base=api_base, api_key=api_key, concurrency=1, timeout=request_timeout, response_format={"type": "json_object"}
+                reqs, api_base=api_base, api_key=api_key,
+                custom_llm_provider="openai_like",  # Required per SCILLM_PAVED_PATH_CONTRACT
+                concurrency=1, timeout=request_timeout, wall_time_s=180, tenacious=False,
+                response_format={"type": "json_object"}
             ):
                 if r.get("ok"):
                     resp = {

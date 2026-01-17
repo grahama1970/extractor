@@ -546,8 +546,11 @@ async def reflow_section_with_llm(
                         reqs,
                         api_base=api_base,
                         api_key=api_key,
+                        custom_llm_provider="openai_like",  # Required per SCILLM_PAVED_PATH_CONTRACT
                         concurrency=1,
                         timeout=max(30, int(os.getenv("STAGE07_TIMEOUT","90"))),
+                        wall_time_s=180,
+                        tenacious=False,
                         response_format={"type": "json_object"}
                     ):
                         if r.get("ok"):
@@ -768,8 +771,11 @@ async def reflow_section_with_llm(
                         reqs_min,
                         api_base=api_base,
                         api_key=api_key,
+                        custom_llm_provider="openai_like",  # Required per SCILLM_PAVED_PATH_CONTRACT
                         concurrency=1,
                         timeout=llm_timeout,
+                        wall_time_s=180,
+                        tenacious=False,
                         response_format={"type": "json_object"}
                     ):
                         if r.get("ok"):
@@ -1244,8 +1250,11 @@ async def reflow_section_with_llm(
                     reqs,
                     api_base=api_base,
                     api_key=api_key,
+                    custom_llm_provider="openai_like",  # Required per SCILLM_PAVED_PATH_CONTRACT
                     concurrency=1,
                     timeout=llm_timeout,
+                    wall_time_s=180,
+                    tenacious=False,
                     response_format=call_params.get("response_format", {"type": "json_object"})
                 ):
                     if r.get("ok"):

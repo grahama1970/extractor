@@ -508,7 +508,10 @@ async def identify_requirements_in_section(
                     api_base = os.getenv("CHUTES_API_BASE", "https://llm.chutes.ai/v1")
                     
                     async for r in parallel_acompletions_iter(
-                        reqs, api_base=api_base, api_key=api_key, concurrency=1, timeout=120, response_format={"type": "json_object"}
+                        reqs, api_base=api_base, api_key=api_key,
+                        custom_llm_provider="openai_like",  # Required per SCILLM_PAVED_PATH_CONTRACT
+                        concurrency=1, timeout=120, wall_time_s=300, tenacious=False,
+                        response_format={"type": "json_object"}
                     ):
                         if r.get("ok"):
                             resp = {
@@ -721,7 +724,10 @@ async def prove_requirement(requirement: str, strategy: Any):
                     }]
                     
                     async for r in parallel_acompletions_iter(
-                        reqs, api_base=ch_base, api_key=ch_key, concurrency=1, timeout=300, response_format={"type": "json_object"}
+                        reqs, api_base=ch_base, api_key=ch_key,
+                        custom_llm_provider="openai_like",  # Required per SCILLM_PAVED_PATH_CONTRACT
+                        concurrency=1, timeout=300, wall_time_s=600, tenacious=False,
+                        response_format={"type": "json_object"}
                     ):
                         if r.get("ok"):
                             resp = {
