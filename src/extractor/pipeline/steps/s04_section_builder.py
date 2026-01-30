@@ -95,8 +95,127 @@ STAGE04_COLOR_ENRICH = os.getenv("STAGE04_COLOR_ENRICH", "1").lower() in {"1", "
 LARGE_FONT_THRESHOLD = 11.0 # Approximate default
 console = Console(stderr=True)
 
+# TOC Entry Patterns (to filter out table of contents entries)
+TOC_ENTRY_PATTERNSS = [
+    r'^\s*\.{3,}',  # Leading dots (common in TOCs)
+    r'^\s*\d+\s+\.{3,}',  # Number followed by dots
+    r'^\s*[A-Z][a-z]+\s+\.{3,}',  # Word followed by dots
+    r'^\s*\.{3,}\s*\d+\s*$',  # Dots followed by page number
+    r'^\s*\.{3,}\s*[ivx]+\s*$',  # Dots followed by roman numeral
+    # Enhanced V3 patterns
+    r'\.\.\.',          # Multiple dots
+    r'\. \. \.',        # Spaced dots  
+    r'\t+\.*\d+$',      # Tab + dots + page number
+    r'^\d+\.\d+.*\.*\.{3,}', # Numbered section + dots
+    r'^.*\s+\.+\s+\d+$', # Title + dots + page number
+    r'^.*\s+\t+\.*\d+$', # Title + tab + page number (New V3)
+    r'^\s*[\. ]{10,}\s*\d+\s*$', # Long dots/spaces followed by page (New V3)
+    r'\.{5,}',           # 5+ consecutive dots (TOC noise)
+]
+
+# Page Header/Footer Patterns (to filter out page headers and footers)
+PAGE_HEADER_FOOTER_PATTERNSS = [
+    r'^\s*\d+\s*$',  # Just a page number
+    r'^Page\s+\d+\s*$',  # "Page X"
+    r'^\d+\s*/\s*\d+\s*$',  # "X/Y" page numbers
+    r'^\d+\s+of\s+\d+\s*$',  # "X of Y" page numbers
+    r'^Jkt\s+\d+\s+PO\s+\d+\s+Frm\s+\d+', # PDF Metadata Artifact (e.g. Jkt 067464 PO 00000 Frm 00010)
+    r'^PO\s+\d+\s+Frm\s+\d+\s*$', # Short PO/Frm artifact
+]
+
 
 # --- Internal Functions (Merged from runner.py) ---
+
+def _is_toc_or_page_header_footer(text: str) -> bool:
+    """Check if text matches TOC entry or page header/footer patterns."""
+    text = text.strip()
+    
+    # Check TOC patterns
+    for pattern in TOC_ENTRY_PATTERNSS:
+        if re.match(pattern, text, re.IGNORECASE):
+            return True
+    
+    # Check page header/footer patterns
+    for pattern in PAGE_HEADER_FOOTER_PATTERNSS:
+        if re.match(pattern, text, re.IGNORECASE):
+            return True
+    
+    return False
+
+
+def _split_header_from_body(text: str) -> Tuple[str, str]:
+    """
+    Split a text block that may contain both a section header and body text.
+    
+    In many PDFs, the section header and its initial body text are extracted
+    together as a single block. This function attempts to separate them.
+    
+    Strategy:
+    1. Look for section numbering patterns at the start
+    2. Find the end of the header (typically at first sentence break after title)
+    3. Return (header_text, body_text) tuple
+    
+    Args:
+        text: Combined text that may contain header + body
+        
+    Returns:
+        Tuple of (header_text, body_text). If no split found, returns (text, "")
+    """
+    if not text or not text.strip():
+        return text, ""
+    
+    text = text.strip()
+    lines = text.split('\n')
+    
+    # If single line, check if it looks like a header
+    if len(lines) == 1:
+        # Check for section numbering pattern
+        na = analyze_section_numbering(text)
+        if na.get("has_numbering"):
+            # Single line with numbering is just a header
+            return text, ""
+        # Check if it looks like a header without numbering
+        if looks_like_header_text(text) and len(text) < 200:
+            return text, ""
+        # Otherwise, might be body only (no header detected)
+        return "", text
+    
+    # Multiple lines - first line is often the header
+    first_line = lines[0].strip()
+    
+    # Check if first line has section numbering
+    na = analyze_section_numbering(first_line)
+    if na.get("has_numbering"):
+        # First line is header, rest is body
+        header = first_line
+        body = '\n'.join(lines[1:]).strip()
+        return header, body
+    
+    # Check if first line looks like a header (short, title-case, etc.)
+    if looks_like_header_text(first_line) and len(first_line) < 150:
+        header = first_line
+        body = '\n'.join(lines[1:]).strip()
+        return header, body
+    
+    # Check for common header patterns:
+    # "1. Title" followed by paragraph
+    # "Chapter 1: Title" followed by paragraph
+    header_patterns = [
+        r'^(\d+(?:\.\d+)*\.?\s+.{3,80})$',  # "1.2 Title" 
+        r'^((?:Chapter|Section|Part)\s+\d+[:\s].{3,80})$',  # "Chapter 1: Title"
+        r'^([A-Z][^.!?]{2,80})$',  # Title-case short line without sentence ending
+    ]
+    
+    for pattern in header_patterns:
+        match = re.match(pattern, first_line, re.IGNORECASE)
+        if match:
+            header = first_line
+            body = '\n'.join(lines[1:]).strip()
+            return header, body
+    
+    # No clear header found - return as body only
+    return "", text
+
 
 def find_parent_section_advanced(
     previous_sections: List[Dict], current_level: int
@@ -345,14 +464,144 @@ def _append_diag(section: dict, severity: str, code: str, message: str, context:
 
 
 def build_sections_from_blocks(
-    blocks: List[Dict[str, Any]], 
+    blocks: List[Dict[str, Any]],
     fallback_heuristics: bool = True,
     preset_config: Optional[Dict[str, Any]] = None,
+    is_slide_deck: bool = False,
 ) -> List[Dict[str, Any]]:
     """Build section hierarchy from flat blocks, trusting Stage 03 decisions."""
     sections: List[Dict[str, Any]] = []
+    # Track section quality metrics
+    sections_with_body = 0
+    sections_title_only = 0
+    sections_short = 0
+
     current_section: Optional[Dict[str, Any]] = None
 
+    # For slide decks: create 1 section per page
+    if is_slide_deck:
+        logger.info("Slide deck detected - using page-boundary sectioning")
+        # Group blocks by page
+        page_blocks = {}
+        for block in blocks:
+            page_num = block.get("page", block.get("page_idx", 0))
+            if page_num not in page_blocks:
+                page_blocks[page_num] = []
+            page_blocks[page_num].append(block)
+        
+        logger.info(f"Slide deck has {len(page_blocks)} pages with blocks")
+        
+        # Create 1 section per page
+        for page_num in sorted(page_blocks.keys()):
+            section_id = f"section-{page_num + 1:03d}"
+            page_title = f"Slide {page_num + 1}"
+            
+            # Try to find a title for this slide (first header block)
+            first_bbox = [0, 0, 100, 100]
+            for block in page_blocks[page_num]:
+                if block.get("bbox"):
+                    first_bbox = block["bbox"]
+                if block.get("block_type") == "SectionHeader" or block.get("is_header"):
+                    candidate_title = block.get("text", "") or block.get("content", "")
+                    if candidate_title and len(candidate_title.strip()) > 1:
+                        page_title = candidate_title.strip()
+                        break
+            
+            # Combine all text content for the section body
+            section_content_parts = []
+            for block in page_blocks[page_num]:
+                txt = block.get("text", "") or block.get("content", "")
+                if txt.strip():
+                    section_content_parts.append(txt.strip())
+            section_content = "\n\n".join(section_content_parts)
+            
+            section = {
+                "id": section_id,
+                "title": page_title,
+                "level": 1,  # All slide pages are level 1
+                "page_start": page_num,
+                "page_end": page_num,
+                "parent_id": None,
+                "blocks": page_blocks[page_num],
+                "bbox": first_bbox,
+                "content": section_content,  # Aggregated body content
+                "metadata": {
+                    "is_slide": True,
+                    "slide_number": page_num + 1,
+                    "block_count": len(page_blocks[page_num]),
+                    "section_number": str(page_num + 1),
+                    "section_depth": [page_num + 1],
+                    "validation_method": "slide_deck_page_boundary",
+                },
+            }
+            sections.append(section)
+            sections_with_body += 1
+        
+        logger.info(f"Created {len(sections)} slide sections from {len(page_blocks)} pages")
+        # Handle sparse slide decks (< 50 words/page average)
+        avg_words = _calculate_avg_words_per_page(sections)
+        if avg_words < 50 and len(sections) > 3:
+            logger.info(f"Sparse slide deck detected (avg {avg_words:.1f} words/page) - merging slides")
+            # Merge more aggressively for very sparse decks
+            if avg_words < 15:
+                merge_size = 5
+            elif avg_words < 30:
+                merge_size = 4
+            else:
+                merge_size = 3
+            merged_sections = []
+            
+            for i in range(0, len(sections), merge_size):
+                group = sections[i:i+merge_size]
+                if len(group) == 1:
+                    merged_sections.append(group[0])
+                    continue
+                
+                # Merge group into one section
+                first = group[0]
+                last = group[-1]
+                all_blocks = []
+                all_content_parts = []
+                slide_titles = []
+                
+                for s in group:
+                    all_blocks.extend(s.get("blocks", []))
+                    content = s.get("content", "")
+                    if content.strip():
+                        all_content_parts.append(content.strip())
+                    title = s.get("title", "")
+                    if title and not title.startswith("Slide "):
+                        slide_titles.append(title)
+                
+                # Create merged section
+                merged_title = " + ".join(slide_titles) if slide_titles else f"Slides {first['page_start']+1}-{last['page_end']+1}"
+                merged_section = {
+                    "id": f"section-{first['page_start']+1:03d}-merged",
+                    "title": merged_title,
+                    "level": 1,
+                    "page_start": first["page_start"],
+                    "page_end": last["page_end"],
+                    "parent_id": None,
+                    "blocks": all_blocks,
+                    "bbox": first.get("bbox", [0, 0, 100, 100]),
+                    "content": "\n\n".join(all_content_parts),
+                    "metadata": {
+                        "is_slide": True,
+                        "is_merged_slides": True,
+                        "slide_count": len(group),
+                        "slide_numbers": [int(s["page_start"])+1 for s in group],
+                        "block_count": len(all_blocks),
+                        "validation_method": "slide_deck_page_boundary_merged",
+                    },
+                }
+                merged_sections.append(merged_section)
+            
+            sections = merged_sections
+            logger.info(f"Merged into {len(sections)} sections ({merge_size} slides per section)")
+        
+        return sections
+
+    # Regular document processing (existing logic)
     for block in blocks:
         block_type = block.get("type", "") or block.get("block_type", "")
         # Heuristic uplift
@@ -395,7 +644,7 @@ def build_sections_from_blocks(
             txt = block.get("text") or block.get("content") or ""
             # Check for negative heuristic (requires heuristic import if not available, 
             # but we can use our existing knowledge of the pattern or implicit check)
-            # We must import is_probable_pdf_section_header from sections utils.
+            # We must import is_probable_pdf_section_header from sections/utils.
             # Lazy import to avoid circular dep if any, or just use the pattern directly for safety.
             if re.match(r"^\s*REQ-[\w-]+[:\s]", txt, re.IGNORECASE):
                  # Force demote
@@ -427,6 +676,15 @@ def build_sections_from_blocks(
                 )
             else:
                 accepted = True
+
+                # Filter out TOC entries and page headers/footers
+                txt = block.get("text", "") or block.get("content", "")
+                if _is_toc_or_page_header_footer(txt):
+                    # Demote to content instead of creating a section
+                    accepted = False
+                    block_type = "Text"
+                    block["block_type"] = "Text"
+                
 
             if accepted:
                 if current_section:
@@ -502,8 +760,6 @@ def build_sections_from_blocks(
                     block["header_char_spans"] = {"number": number_span, "title": title_span}
                 if section_depth:
                     block["section_depth"] = section_depth
-                if breadcrumb_titles and not block.get("section_breadcrumbs"):
-                    block["section_breadcrumbs"] = breadcrumb_titles
             else:
                 # not accepted: treat as content
                 if current_section:
@@ -566,7 +822,7 @@ def build_sections_from_blocks(
     if current_section:
         sections.append(current_section)
     
-    # Post-process merges
+    # Post-processing merges
     try:
         if sections and (not (sections[0].get("title") or "").strip()) and len(sections) > 1:
             lead = sections[0]
@@ -579,6 +835,33 @@ def build_sections_from_blocks(
         merged: list[Dict[str, Any]] = []
         for sec in sections:
             title = str(sec.get("title") or "").strip()
+            
+            # Mid-sentence header merging (V3 Fix)
+            # If current title starts with lowercase or common mid-sentence word
+            is_lowercase_start = title and title[0].islower()
+            is_continuation_word = title.lower().startswith(('and ', 'or ', 'with ', 'by ', 'in ', 'on '))
+            
+            if merged and (is_lowercase_start or is_continuation_word):
+                prev = merged[-1]
+                # Synthesize previous content (expensive but needed for check)
+                prev_text_parts = []
+                for b in prev.get('blocks', []):
+                    t = b.get('text', '') or b.get('content', '')
+                    if t: prev_text_parts.append(t)
+                prev_content = "\n".join(prev_text_parts).strip()
+                
+                # Check for terminal punctuation or if it's an "Untitled" auto-gen section
+                is_untitled = not prev.get("title") or prev.get("title") == "Untitled"
+                has_no_punctuation = prev_content and not prev_content.endswith(('.', '?', '!', ':', ';'))
+                
+                if is_untitled or has_no_punctuation:
+                    # Merge into previous
+                    prev["page_end"] = max(prev.get("page_end", 0), sec.get("page_end", prev.get("page_end", 0)))
+                    prev["blocks"].extend(sec.get("blocks", []))
+                    prev["metadata"]["block_count"] = prev["metadata"].get("block_count", 0) + len(sec.get("blocks", []))
+                    logger.debug(f"Merged mid-sentence header: {title[:30]}...")
+                    continue
+
             if merged and title and ("(continued)" in title.lower() or title.lower().endswith("- continued")):
                 prev = merged[-1]
                 prev["page_end"] = max(prev.get("page_end", 0), sec.get("page_end", prev.get("page_end", 0)))
@@ -590,7 +873,6 @@ def build_sections_from_blocks(
                 prev["blocks"].extend(sec.get("blocks", []))
                 prev["metadata"]["block_count"] = prev["metadata"].get("block_count", 0) + len(sec.get("blocks", []))
                 prev["page_end"] = max(prev.get("page_end", 0), sec.get("page_end", prev.get("page_end", 0)))
-                continue
             merged.append(sec)
         sections = merged
     except Exception: pass
@@ -612,8 +894,170 @@ def build_sections_from_blocks(
         except Exception:
             section.setdefault("pages", [])
 
+    # Post-processing: mark short sections as metadata type
+    for section in sections:
+        # Calculate content from blocks instead of non-existent 'content' field
+        content = '\n'.join(
+            b.get('text', '') or b.get('content', '')
+            for b in section.get('blocks', [])
+            if isinstance(b, dict)
+        )
+        content_len = len(content)
+        
+        if content_len == 0:
+            sections_title_only += 1
+            # Only mark as metadata if truly empty (title-only)
+            section["type"] = "metadata"
+            section["metadata_type"] = "title_only"
+        elif content_len < 100:
+            section["type"] = "metadata"
+            section["metadata_type"] = "short_section"
+            sections_short += 1
+        else:
+            # Sections with substantial content should be type='content'
+            section["type"] = "content"
+            sections_with_body += 1
+    
+    # Log section quality metrics
+    logger.info(
+        f"Section quality metrics: {sections_with_body} sections with body, "
+        f"{sections_title_only} title-only sections, "
+        f"{sections_short} short sections marked as metadata"
+    )
+    
+    # Edge case post-processing
+    filtered_sections = []
+    references_sections = []
+    hex_dump_sections = []
+    code_sections = []
+    toc_sections = []
+    
+    for section in sections:
+        # Get content for analysis
+        content = '\n'.join(
+            b.get('text', '') or b.get('content', '')
+            for b in section.get('blocks', [])
+            if isinstance(b, dict)
+        )
+        
+        # Filter out TOC sections
+        if _is_toc_section(section):
+            toc_sections.append(section)
+            section["type"] = "metadata"
+            section["metadata_type"] = "table_of_contents"
+            logger.debug(f"Filtered TOC section: {section.get('title', 'Untitled')[:50]}")
+            continue
+        
+        # Collect references sections for merging
+        if _is_references_section(section.get("title", "")):
+            references_sections.append(section)
+            section["type"] = "references"
+            continue
+        
+        # Mark hex dump sections
+        if _is_hex_dump(content):
+            hex_dump_sections.append(section)
+            section["type"] = "binary_data"
+            section["metadata_type"] = "hex_dump"
+            logger.debug(f"Detected hex dump section: {section.get('title', 'Untitled')[:50]}")
+        
+        # Mark code block sections
+        if _is_code_block(content):
+            code_sections.append(section)
+            section["type"] = "code"
+            section["metadata_type"] = "source_code"
+            logger.debug(f"Detected code section: {section.get('title', 'Untitled')[:50]}")
+        
+        filtered_sections.append(section)
+    
+    # Merge all references sections into one if multiple found
+    if len(references_sections) > 1:
+        logger.info(f"Merging {len(references_sections)} references sections into one")
+        first_ref = references_sections[0]
+        all_blocks = []
+        for ref_sec in references_sections:
+            all_blocks.extend(ref_sec.get("blocks", []))
+        
+        merged_ref = {
+            **first_ref,
+            "blocks": all_blocks,
+            "page_end": references_sections[-1].get("page_end", first_ref.get("page_end", 0)),
+            "metadata": {
+                **first_ref.get("metadata", {}),
+                "merged_from": len(references_sections),
+                "merged_sections": [r.get("id") for r in references_sections],
+            },
+        }
+        filtered_sections.append(merged_ref)
+    elif references_sections:
+        filtered_sections.append(references_sections[0])
+    
+    # Log edge case stats
+    if toc_sections or hex_dump_sections or code_sections or references_sections:
+        logger.info(
+            f"Edge cases detected: {len(toc_sections)} TOC, "
+            f"{len(references_sections)} references, "
+            f"{len(hex_dump_sections)} hex dumps, "
+            f"{len(code_sections)} code blocks"
+        )
+    
+    sections = filtered_sections
+    
     prepare_section_hierarchy(sections)
+
+    # V3 Quality Improvements: Filter TOC noise and merge short sections
+    sections = _filter_toc_noise(sections)
+    sections = _merge_short_sections(sections)
+
     return sections
+
+
+def _filter_toc_noise(sections: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Remove sections that look like TOC entries (excessive dots)."""
+    filtered = []
+    for s in sections:
+        content = s.get("content", "")
+        # If content contains 5+ consecutive dots and is short, it's likely TOC noise
+        if "....." in content and len(content) < 200:
+            logger.debug(f"Filtering TOC noise section: {s.get('title', '')[:30]}...")
+            continue
+        filtered.append(s)
+    return filtered
+
+
+def _merge_short_sections(sections: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Merge consecutive very short sections (<150 chars) into the previous one."""
+    if not sections:
+        return []
+
+    merged = [sections[0]]
+    for i in range(1, len(sections)):
+        curr = sections[i]
+        prev = merged[-1]
+
+        curr_content = curr.get("content", "")
+        prev_content = prev.get("content", "")
+
+        # Don't merge if current section has a parent_id pointing to the previous section (hierarchical structure)
+        curr_parent_id = curr.get("parent_id")
+        prev_id = prev.get("id")
+        if curr_parent_id is not None and prev_id is not None and curr_parent_id == prev_id:
+            # This is a child of the previous section, don't merge
+            merged.append(curr)
+            continue
+
+        # Heuristic: If current is very short and previous is also short, or if current is just a fragment
+        if len(curr_content) < 150 and len(prev_content) < 500:
+             # Merge into previous
+             prev["content"] = prev_content + "\n\n" + curr_content
+             # Combine page lists
+             curr_pages = curr.get("pages", [])
+             prev_pages = prev.get("pages", [])
+             prev["pages"] = sorted(list(set(prev_pages + curr_pages)))
+             logger.debug(f"Merged short section '{curr.get('title')}' into '{prev.get('title')}'")
+        else:
+            merged.append(curr)
+    return merged
 
 
 async def process_sections_comprehensive(
@@ -623,13 +1067,15 @@ async def process_sections_comprehensive(
     fallback_heuristics: bool = True,
     max_visual_pages: int = MAX_VISUAL_PAGES_DEFAULT,
     preset_config: Optional[Dict[str, Any]] = None,
+    is_slide_deck: bool = False,
 ) -> Dict[str, Any]:
     """Process blocks into sections with comprehensive validation and enhanced visuals."""
 
     sections = build_sections_from_blocks(
-        blocks, 
+        blocks,
         fallback_heuristics=fallback_heuristics,
-        preset_config=preset_config
+        preset_config=preset_config,
+        is_slide_deck=is_slide_deck,
     )
 
     # Safety net: prelude synthesis
@@ -658,7 +1104,7 @@ async def process_sections_comprehensive(
             for i, s in enumerate(sections):
                 title = str(s.get("title") or "").strip()
                 lowered = title.lower()
-                if title.endswith(" - Continued"):
+                if title.endswith(" - continued"):
                     s["level"] = min(6, int(s.get("level", base)) + 1)
                     s.setdefault("metadata", {})["continued"] = True
                     continue
@@ -772,6 +1218,19 @@ async def build_and_validate_sections_comprehensive(
         blocks = [block for page in input_data["pages"] for block in page.get("blocks", [])]
     else:
         blocks = input_data.get("blocks", [])
+    
+    # Check if this is a slide deck
+    is_slide_deck = False
+    diagnostics = input_data.get("diagnostics", {})
+    # Check both paths: direct document_type and nested scanned_pdf_detection.document_type
+    if diagnostics.get("document_type") == "slide_deck":
+        is_slide_deck = True
+    elif isinstance(diagnostics.get("scanned_pdf_detection"), dict):
+        if diagnostics["scanned_pdf_detection"].get("document_type") == "slide_deck":
+            is_slide_deck = True
+
+    if is_slide_deck:
+        logger.info("Detected slide deck - will use page-boundary sectioning")
         
     # Table Header Demotion (optional merge from Stage 05)
     # ... (omitted for brevity, can re-add if needed, keeping simple for now) ...
@@ -784,6 +1243,7 @@ async def build_and_validate_sections_comprehensive(
         fallback_heuristics=fallback_heuristics,
         max_visual_pages=max_visual_pages,
         preset_config=preset_config,
+        is_slide_deck=is_slide_deck,
     )
     
     result = {
@@ -794,7 +1254,7 @@ async def build_and_validate_sections_comprehensive(
         "status": "Completed",
         "section_count": section_result["section_count"],
         "hierarchy_depth": section_result["hierarchy_depth"],
-        "visual_captures": section_result.get("visual_captures", 0),
+        "visual_captures": section_result["visual_captures"],
         "suspicious_header_analysis": section_result["suspicious_analysis"],
         "sections": section_result["sections"],
         "timings": build_stage_timings(stage_start_ts, t_stage0),
@@ -807,6 +1267,100 @@ async def build_and_validate_sections_comprehensive(
         json.dump(result, f, indent=2)
         
     return output_path, result
+
+
+def _is_toc_section(section: Dict[str, Any]) -> bool:
+    """Detect if a section is a table of contents based on content analysis."""
+    title = section.get("title", "").lower()
+    content = section.get("content", [])
+    
+    # Check title
+    if any(keyword in title for keyword in ["table of contents", "contents", "toc"]):
+        return True
+    
+    # Check content for TOC patterns
+    if not content:
+        return False
+    
+    lines = [line.strip() for line in content.split("\n") if line.strip()]
+    if len(lines) < 3:
+        return False
+    
+    # Count lines with dot leaders (5+ consecutive dots)
+    dot_lines = sum(1 for line in lines if re.search(r'\.{5,}', line))
+    dot_ratio = dot_lines / len(lines)
+    
+    return dot_ratio > 0.3
+
+
+def _is_hex_dump(content: str) -> bool:
+    """Detect if content is a hex dump or binary data."""
+    if not content or len(content) < 20:
+        return False
+    
+    lines = [line.strip() for line in content.split("\n") if line.strip()]
+    if len(lines) < 2:
+        return False
+    
+    # Check for hex patterns: "XX XX XX" or "XX  XX  XX"
+    hex_pattern = r'\b[0-9A-Fa-f]{2}[\s]+[0-9A-Fa-f]{2}\b'
+    hex_lines = sum(1 for line in lines if re.search(hex_pattern, line))
+    hex_ratio = hex_lines / len(lines)
+    
+    return hex_ratio > 0.6
+
+
+def _is_references_section(title: str) -> bool:
+    """Detect if a section is References/Bibliography."""
+    title_lower = title.lower()
+    return any(keyword in title_lower for keyword in [
+        "references",
+        "bibliography", 
+        "cited literature",
+        "works cited",
+    ])
+
+
+def _is_code_block(content: str) -> bool:
+    """Detect if content is source code."""
+    if not content or len(content) < 30:
+        return False
+    
+    lines = [line for line in content.split("\n")]
+    if len(lines) < 3:
+        return False
+    
+    # Count lines with code indicators
+    code_indicators = 0
+    for line in lines:
+        # Common code patterns
+        if re.match(r'^\s{4,}', line):  # Heavy indentation
+            code_indicators += 1
+        elif re.search(r'[{};]$', line.strip()):  # C-style syntax
+            code_indicators += 1
+        elif re.search(r'^\s*(def |class |import |from |if |for |while )', line):  # Python keywords
+            code_indicators += 1
+    
+    code_ratio = code_indicators / len(lines)
+    return code_ratio > 0.6
+
+
+def _calculate_avg_words_per_page(sections: List[Dict[str, Any]]) -> float:
+    """Calculate average words per page across all sections."""
+    if not sections:
+        return 0.0
+    
+    total_words = 0
+    total_pages = 0
+    
+    for section in sections:
+        content = section.get("content", "")
+        words = len(content.split())
+        pages = section.get("page_end", 0) - section.get("page_start", 0) + 1
+        total_words += words
+        total_pages += pages
+    
+    return total_words / max(1, total_pages)
 
 
 # --- Entry Point ---
