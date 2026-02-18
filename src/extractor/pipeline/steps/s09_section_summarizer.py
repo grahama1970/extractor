@@ -6,23 +6,23 @@ Consolidates logic and adheres to the SCILLM Paved Path.
 Uses SciLLM v1.78.1 parallel_acompletions_iter for standardized execution.
 """
 
-import os
-import json
 import asyncio
+import json
+import os
 import shutil
-from pathlib import Path
-from typing import Dict, List, Any, Optional
 from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, Optional
 
-# Move SCILLM_JSON_STRICT=1 to top to ensure all imports honor it
-os.environ["SCILLM_JSON_STRICT"] = "1"
-
-from dotenv import load_dotenv, find_dotenv
-load_dotenv(find_dotenv(usecwd=True), override=False)
-
+from dotenv import find_dotenv, load_dotenv
 from loguru import logger
-from extractor.pipeline.utils.db.connection import get_connection
+
+from extractor.pipeline.utils.content_query import ContentRepository
 from extractor.pipeline.utils.step_sanity import run_step_sanity
+
+# Ensure JSON strict mode before SciLLM calls
+os.environ["SCILLM_JSON_STRICT"] = "1"
+load_dotenv(find_dotenv(usecwd=True), override=False)
 
 STEP_NAME = "09_section_summarizer"
 
@@ -32,7 +32,11 @@ STEP_NAME = "09_section_summarizer"
 # Default model and API settings
 DEFAULT_MODEL = os.getenv("CHUTES_TEXT_MODEL", "moonshotai/Kimi-K2-Instruct-0905")
 DEFAULT_API_BASE = os.getenv("SCILLM_API_BASE", "https://llm.chutes.ai/v1")
-DEFAULT_CONCURRENCY = int(os.getenv("SCILLM_CONCURRENCY", "4"))
+DEFAULT_CONCURRENCY = int(os.getenv("SCILLM_CONCURRENCY", "6"))
+
+# Minimum content requirements to avoid summarizing boilerplate
+MIN_SECTION_WORDS = int(os.getenv("STAGE09_MIN_SECTION_WORDS", "20"))
+
 
 def extract_message_content(r: Any) -> Optional[str]:
     """Normalize SciLLM response content extraction."""
@@ -40,13 +44,9 @@ def extract_message_content(r: Any) -> Optional[str]:
         if isinstance(r, dict):
             # Try to get from 'parsed' first if schema/JSON was used
             if r.get("parsed"):
-                # If parsed is a dict, we might want it as JSON string or keep it?
-                # For consistency with parallel_acompletions_iter usage elsewhere,
-                # we return the content as string if we need to parse it later,
-                # but better to return the dict if available.
                 return r["parsed"]
             return r.get("content")
-        
+
         # Fallback for raw objects
         choices = getattr(r, "choices", None)
         if choices:
@@ -58,43 +58,59 @@ def extract_message_content(r: Any) -> Optional[str]:
         logger.debug(f"extraction_normalization_failed: {e}")
         return None
 
-def fetch_ordered_section_content(con: Any, section_id: str) -> str:
+
+def fetch_ordered_section_content(repo: ContentRepository, section_id: str) -> str:
     """
     Fetches all artifacts for a section and joins them in reading order.
     Merges contiguous text blocks.
     """
-    # 1. Fetch all assets
-    # Use v_clean_blocks to avoid text that is actually part of tables/figures
-    blocks = con.execute("SELECT page, y0, text, type FROM v_clean_blocks WHERE section_id = ? ORDER BY page, y0", (section_id,)).fetchall()
-    tables = con.execute("SELECT page, y0, llm_title, llm_description FROM tables WHERE section_id = ? ORDER BY page, y0", (section_id,)).fetchall()
-    figures = con.execute("SELECT page, y0, llm_title, llm_description FROM figures WHERE section_id = ? ORDER BY page, y0", (section_id,)).fetchall()
-    
+    # 1. Fetch all assets using ContentRepository
+    clean_blocks = repo.get_clean_blocks(section_id)
+    section_tables = repo.get_tables_for_section(section_id)
+    section_figures = repo.get_figures_for_section(section_id)
+
     # 2. Interleave
     all_items = []
-    for b in blocks:
-        all_items.append({"page": b[0], "y0": b[1], "type": "text", "content": b[2], "sub_type": b[3]})
-    for t in tables:
-        title = t[2] or "Untitled Table"
-        desc = t[3] or ""
-        all_items.append({"page": t[0], "y0": t[1], "type": "table", "content": f"[TABLE: {title}] {desc}".strip()})
-    for f in figures:
-        title = f[2] or "Untitled Figure"
-        desc = f[3] or ""
-        all_items.append({"page": f[0], "y0": f[1], "type": "figure", "content": f"[FIGURE: {title}] {desc}".strip()})
-        
+    for b in clean_blocks:
+        all_items.append(
+            {"page": b.get("page", 0), "y0": b.get("y0", 0), "type": "text",
+             "content": b.get("text", ""), "sub_type": b.get("type", "")}
+        )
+    for t in section_tables:
+        title = t.get("llm_title") or "Untitled Table"
+        desc = t.get("llm_description") or ""
+        all_items.append(
+            {
+                "page": t.get("page", 0),
+                "y0": t.get("y0", 0),
+                "type": "table",
+                "content": f"[TABLE: {title}] {desc}".strip(),
+            }
+        )
+    for f in section_figures:
+        title = f.get("llm_title") or "Untitled Figure"
+        desc = f.get("llm_description") or ""
+        all_items.append(
+            {
+                "page": f.get("page", 0),
+                "y0": f.get("y0", 0),
+                "type": "figure",
+                "content": f"[FIGURE: {title}] {desc}".strip(),
+            }
+        )
+
     all_items.sort(key=lambda x: (x["page"], x["y0"]))
-    
+
     # 3. Merge contiguous text and format
     final_lines = []
     current_text = []
-    
+
     for item in all_items:
         if item["type"] == "text":
-            # For headers, we might want to emphasize them
             line = item["content"].strip()
             if not line:
                 continue
-            if item["sub_type"] == "SectionHeader":
+            if item.get("sub_type") == "SectionHeader":
                 if current_text:
                     final_lines.append(" ".join(current_text))
                     current_text = []
@@ -107,14 +123,15 @@ def fetch_ordered_section_content(con: Any, section_id: str) -> str:
                 final_lines.append(" ".join(current_text))
                 current_text = []
             final_lines.append(item["content"])
-            
+
     if current_text:
         final_lines.append(" ".join(current_text))
-        
+
     return "\n\n".join(final_lines)
 
+
 async def run_summarizer(
-    con: Any,
+    repo: ContentRepository,
     model: str = DEFAULT_MODEL,
     api_base: str = DEFAULT_API_BASE,
     concurrency: int = DEFAULT_CONCURRENCY,
@@ -122,147 +139,277 @@ async def run_summarizer(
 ) -> Dict[str, int]:
     """Batch summarize sections with rolling context via parallel_acompletions_iter."""
     from scillm.batch import parallel_acompletions_iter
-    
+
     # 1. Fetch sections
-    sections_query = "SELECT id, title FROM sections ORDER BY page_start, id"
-    section_rows = con.execute(sections_query).fetchall()
+    section_rows = [(s["id"], s.get("title", "")) for s in
+                    sorted(repo.sections, key=lambda s: (s.get("page_start") or 0, s.get("id", "")))]
     if not section_rows:
         logger.warning("No sections found for summarization.")
         return {"summaries": 0}
 
     # Load prompts
     from extractor.pipeline.utils.prompt_loader import load_prompt
+
     prompts = load_prompt("09_section_summarizer")
     system_prompt = prompts["system"]
-    
-    user_override = preset_config.get("features", {}).get("summarization_prompt") if preset_config else None
+
+    user_override = (
+        preset_config.get("features", {}).get("summarization_prompt") if preset_config else None
+    )
     if user_override:
         user_prompt_tmpl = user_override
         logger.info("Using Custom Summarization Prompt from Preset Context")
     else:
         user_prompt_tmpl = prompts["user"]
 
-    # Columns llm_summary, llm_key_concepts, llm_metadata are now defined in schema.py
-    # No runtime ALTER TABLE needed - schema handles this at DB creation time
-
     # Schema for validation
     summary_schema = {
         "type": "object",
         "properties": {
             "summary": {"type": "string", "minLength": 20},
-            "key_concepts": {
-                "type": "array",
-                "items": {"type": "string"},
-                "minItems": 2
-            }
+            "key_concepts": {"type": "array", "items": {"type": "string"}, "minItems": 2},
         },
-        "required": ["summary", "key_concepts"]
+        "required": ["summary", "key_concepts"],
     }
 
-    # We process in batches to maintain semi-rolling context.
-    # Within a batch, items use context from the PREVIOUS batch.
     batch_size = concurrency if concurrency > 0 else 4
     all_results = []
     previous_summaries = []
-    
+
     api_key = os.getenv("CHUTES_API_KEY")
+
+    # 1.1 Verify bridge connectivity before starting
+    if "localhost" in api_base or "127.0.0.1" in api_base:
+        import aiohttp
+
+        logger.info(f"Checking bridge connectivity at {api_base}...")
+        try:
+            async with aiohttp.ClientSession() as session:
+                test_url = api_base.rstrip("/") + "/models"
+                async with session.get(test_url, timeout=aiohttp.ClientTimeout(total=2)) as resp:
+                    if resp.status >= 500:
+                        logger.warning(f"Bridge returned {resp.status}; summarization might fail.")
+                    else:
+                        logger.info("Bridge is reachable.")
+        except Exception as e:
+            logger.error(f"Bridge unreachable at {api_base}: {e}")
+            logger.warning("Skipping summarization to avoid timeout waits.")
+            return {"summaries": 0}
 
     logger.info(f"Summarizing {len(section_rows)} sections in batches of {batch_size}...")
 
     for i in range(0, len(section_rows), batch_size):
         batch_rows = section_rows[i : i + batch_size]
-        
+
         # Build context from the last 3 successful summaries
-        context_str = "\n".join([
-            f"- {s['title']}: {s['summary']}"
-            for s in previous_summaries[-3:]
-        ])
+        context_str = "\n".join(
+            [f"- {s['title']}: {s['summary']}" for s in previous_summaries[-3:]]
+        )
         if not context_str:
             context_str = "(none)"
 
         payloads = []
         for s_id, title in batch_rows:
-            section_text = fetch_ordered_section_content(con, s_id)
+            section_text = fetch_ordered_section_content(repo, s_id)
+
+            # Skip sections with insufficient content
+            word_count = len(section_text.split())
+            if word_count < MIN_SECTION_WORDS:
+                logger.debug(f"Skipping section {s_id} ({title}): only {word_count} words")
+                continue
+
             prompt = user_prompt_tmpl.format(
                 previous_summaries=context_str,
                 section_title=title,
-                section_level=0, # Could fetch from DB if needed
-                section_text=section_text[:15000]
+                section_level=0,
+                section_text=section_text[:15000],
             )
-            payloads.append({
-                "model": model,
-                "id": s_id,
-                "title": title,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": prompt}
-                ],
-                "response_format": {"type": "json_object"},
-                "temperature": 0.0
-            })
+            payloads.append(
+                {
+                    "model": model,
+                    "id": s_id,
+                    "title": title,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": prompt},
+                    ],
+                    "response_format": {"type": "json_object"},
+                    "temperature": 0.0,
+                }
+            )
 
         # Run this batch
         async for r in parallel_acompletions_iter(
             payloads,
             api_base=api_base,
             api_key=api_key,
-            custom_llm_provider="openai_like",  # Required per SCILLM_PAVED_PATH_CONTRACT
+            custom_llm_provider="openai_like",
             concurrency=batch_size,
             repair_invalid_json=True,
             retry_invalid_json=2,
             schema=summary_schema,
             timeout=120,
-            wall_time_s=600,  # 10 min max for batch
-            tenacious=False,  # Fail fast
+            wall_time_s=600,
+            tenacious=True,
         ):
-            # SciLLM v1.78.x returns dict with 'request' key
             req = r.get("request", {})
             s_id = req.get("id")
             title = req.get("title")
-            
-            # Use extract_message_content for consistency
+
             content_val = extract_message_content(r)
-            
+
             if isinstance(content_val, dict):
                 data = content_val
             elif isinstance(content_val, str):
                 try:
                     data = json.loads(content_val)
-                except:
+                except Exception:
                     data = {}
             else:
                 data = {}
 
             summary = data.get("summary", "")
             key_concepts = data.get("key_concepts", [])
-            
+
             if summary:
                 logger.info(f"Successfully summarized section {s_id}: {title}")
                 res = {"id": s_id, "title": title, "summary": summary, "success": True}
                 previous_summaries.append(res)
                 all_results.append(res)
-                
+
                 # Metadata capture
                 meta = {
                     "usage": r.get("usage"),
                     "model": r.get("model", model),
-                    "latency_ms": r.get("metrics", {}).get("total_time_ms"), 
-                    "timings": r.get("timings"), # scillm internal timings if available
-                    "generated_at": datetime.utcnow().isoformat()
+                    "latency_ms": r.get("metrics", {}).get("total_time_ms"),
+                    "timings": r.get("timings"),
+                    "generated_at": datetime.utcnow().isoformat(),
                 }
 
-                # Update DB
-                con.execute(
-                    "UPDATE sections SET llm_summary = ?, llm_key_concepts = ?, llm_metadata = ? WHERE id = ?",
-                    (summary, json.dumps(key_concepts), json.dumps(meta), s_id)
+                # Update in-memory data via ContentRepository
+                repo.update_section(
+                    s_id,
+                    llm_summary=summary,
+                    llm_key_concepts=json.dumps(key_concepts),
+                    llm_metadata=json.dumps(meta),
                 )
             else:
                 err_msg = r.get("error", "Unknown error")
                 logger.warning(f"Failed to summarize section {s_id}: {title} | Error: {err_msg}")
 
-    return {"summaries": len([r for r in all_results if r["success"]])}
+    # --- Document-level summary (ONE call with all section summaries) ---
+    successful_summaries = [r for r in all_results if r["success"]]
+    if successful_summaries:
+        doc_summary = await create_document_summary(
+            repo, successful_summaries, model, api_base, api_key
+        )
+        if doc_summary:
+            logger.info(f"Document summary created: {len(doc_summary.get('summary', ''))} chars")
 
-def _emit_summary_visuals(pipeline_dir: Path, con: Any) -> None:
+    # Save all updates back to JSON
+    repo.save()
+
+    return {"summaries": len(successful_summaries)}
+
+
+async def create_document_summary(
+    repo: ContentRepository,
+    section_summaries: list[dict],
+    model: str,
+    api_base: str,
+    api_key: str | None,
+) -> dict | None:
+    """Create ONE document-level summary from all section summaries."""
+    from scillm.batch import parallel_acompletions_iter
+
+    if not section_summaries:
+        return None
+
+    section_texts = []
+    for s in section_summaries:
+        title = s.get("title", "Untitled")
+        summary = s.get("summary", "")
+        if summary:
+            section_texts.append(f"## {title}\n{summary}")
+
+    all_summaries_text = "\n\n".join(section_texts)
+
+    estimated_tokens = len(all_summaries_text) // 4
+    logger.info(f"Creating document summary from {len(section_summaries)} sections (~{estimated_tokens} tokens)")
+
+    system_prompt = """You are a document summarization assistant. Create a comprehensive summary of the entire document based on the section summaries provided. Return JSON only."""
+
+    user_prompt = f"""Based on these section summaries, create an overall document summary.
+
+SECTION SUMMARIES:
+{all_summaries_text}
+
+Return strictly JSON:
+{{
+  "summary": "A comprehensive 3-5 paragraph summary of the entire document",
+  "key_themes": ["major theme 1", "major theme 2", ...],
+  "document_type": "requirements spec | technical report | user manual | other",
+  "audience": "intended audience description"
+}}"""
+
+    payload = {
+        "model": model,
+        "id": "document_summary",
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        "response_format": {"type": "json_object"},
+        "temperature": 0.0,
+    }
+
+    result = None
+    async for r in parallel_acompletions_iter(
+        [payload],
+        api_base=api_base,
+        api_key=api_key,
+        custom_llm_provider="openai_like",
+        concurrency=1,
+        repair_invalid_json=True,
+        timeout=120,
+    ):
+        content_val = extract_message_content(r)
+        if isinstance(content_val, dict):
+            result = content_val
+        elif isinstance(content_val, str):
+            try:
+                result = json.loads(content_val)
+            except Exception:
+                result = {"summary": content_val}
+
+    if result:
+        # Preserve existing scanned_pdf metadata
+        existing_meta = repo.document_metadata or {}
+        scanned_pdf = existing_meta.get("scanned_pdf")
+        scanned_pdf_detection = existing_meta.get("scanned_pdf_detection")
+
+        meta = {
+            "model": model,
+            "section_count": len(section_summaries),
+            "generated_at": datetime.utcnow().isoformat(),
+        }
+
+        doc_meta = {
+            "id": "doc",
+            "document_summary": result.get("summary", ""),
+            "key_themes": json.dumps(result.get("key_themes", [])),
+            "section_count": len(section_summaries),
+            "llm_metadata": json.dumps(meta),
+            "scanned_pdf": scanned_pdf,
+            "scanned_pdf_detection": scanned_pdf_detection,
+        }
+        repo.set_document_metadata(doc_meta)
+        logger.info("Document summary stored in assembled_content.json")
+
+    return result
+
+
+def _emit_summary_visuals(pipeline_dir: Path, repo: ContentRepository) -> None:
     stage_dir = pipeline_dir / "09_section_summarizer"
     visual_dir = stage_dir / "visual_output"
     visual_dir.mkdir(parents=True, exist_ok=True)
@@ -290,15 +437,21 @@ def _emit_summary_visuals(pipeline_dir: Path, con: Any) -> None:
     if source_pdf:
         try:
             import fitz
+
             doc = fitz.open(str(source_pdf))
         except Exception:
             doc = None
 
-    rows = con.execute(
-        "SELECT id, page_start FROM sections WHERE llm_summary IS NOT NULL ORDER BY page_start, id"
-    ).fetchall()
+    # Get sections with summaries
+    summarized_sections = [
+        (s["id"], s.get("page_start", 0))
+        for s in repo.sections
+        if s.get("llm_summary")
+    ]
+    summarized_sections.sort(key=lambda x: (x[1] or 0, x[0]))
+
     visuals = []
-    for idx, (sid, page_start) in enumerate(rows):
+    for idx, (sid, page_start) in enumerate(summarized_sections):
         out_path = visual_dir / f"section_{idx:04d}.png"
         src = section_visuals.get(str(sid)) if sid is not None else None
         if src and src.exists():
@@ -341,6 +494,7 @@ def _emit_summary_visuals(pipeline_dir: Path, con: Any) -> None:
         encoding="utf-8",
     )
 
+
 def run_stage_09_summarizer(
     pipeline_dir: Path,
     model: str = DEFAULT_MODEL,
@@ -349,27 +503,21 @@ def run_stage_09_summarizer(
     preset_config: Optional[Dict[str, Any]] = None,
 ):
     """Entry point for the pipeline driver."""
-    
-    db_path = pipeline_dir / "pipeline.duckdb"
-    if not db_path.exists():
-        logger.error(f"Database not found at {db_path}")
+
+    json_path = pipeline_dir / "07_assembled" / "assembled_content.json"
+    if not json_path.exists():
+        logger.error(f"assembled_content.json not found at {json_path}")
         return
 
-    # Skip manual model list check (outdated API), rely on runtime errors.
-    # api_key = os.getenv("CHUTES_API_KEY")
-
-    con = get_connection(db_path)
+    repo = ContentRepository(json_path)
     try:
-        asyncio.run(run_summarizer(con, model, api_base, concurrency, preset_config=preset_config))
+        asyncio.run(run_summarizer(repo, model, api_base, concurrency, preset_config=preset_config))
         if os.getenv("CONTRACT_LOOP_DEBUG_VISUALS", "0").lower() in {"1", "true", "yes", "y"}:
-            _emit_summary_visuals(pipeline_dir, con)
+            _emit_summary_visuals(pipeline_dir, repo)
         logger.info("Stage 09 Section Summarizer complete.")
     except Exception as e:
         logger.error(f"Stage 09 Failed: {e}")
-        # Re-raise to signal failure to pipeline
         raise e
-    finally:
-        con.close()
 
 
 def sanity() -> int:
@@ -384,25 +532,25 @@ run = run_stage_09_summarizer
 if __name__ == "__main__":
     import argparse
     import sys
-    
+
     parser = argparse.ArgumentParser(description="Stage 09: Section Summarizer")
-    parser.add_argument("--pipeline-dir", type=Path, required=True, help="Path to pipeline results root")
+    parser.add_argument(
+        "--pipeline-dir", type=Path, required=True, help="Path to pipeline results root"
+    )
     args = parser.parse_args()
-    
-    db_path = args.pipeline_dir / "pipeline.duckdb"
-    if not db_path.exists():
-        logger.error(f"Database missing: {db_path}")
+
+    json_path = args.pipeline_dir / "07_assembled" / "assembled_content.json"
+    if not json_path.exists():
+        logger.error(f"assembled_content.json missing: {json_path}")
         sys.exit(1)
-        
-    con = get_connection(db_path)
-    
+
+    repo = ContentRepository(json_path)
+
     try:
         logger.info("Running Stage 09...")
-        asyncio.run(run_summarizer(con))
+        asyncio.run(run_summarizer(repo))
         if os.getenv("CONTRACT_LOOP_DEBUG_VISUALS", "0").lower() in {"1", "true", "yes", "y"}:
-            _emit_summary_visuals(args.pipeline_dir, con)
+            _emit_summary_visuals(args.pipeline_dir, repo)
     except Exception as e:
         logger.error(f"Execution failed: {e}")
         sys.exit(1)
-    finally:
-        con.close()

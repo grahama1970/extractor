@@ -1,6 +1,6 @@
 [project]
 name = "extractor"
-version = "1.0.0"
+version = "1.1.2"
 description = "Universal document extractor with AI enhancements: Extract content from PDF, DOCX, PPTX, XML, and HTML with advanced table detection and multi-LLM support."
 requires-python = ">=3.10.11"
 readme = "README.md"
@@ -26,8 +26,8 @@ dependencies = [
  "tree-sitter>=0.23.2",
  "asyncio>=3.4.3,<4",
  "json-repair>=0.44.1",
- "tree-sitter-languages>=1.10.2",
- "tree-sitter-language-pack>=0.7.3",
+ "tree-sitter-languages>=1.10.2; python_version < '3.13'",
+ "tree-sitter-language-pack>=0.7.3; python_version < '3.13'",
  "numpy>=2.2.6",
  "loguru>=0.7.0,<0.8",
  "beautifulsoup4>=4.13.4",
@@ -59,6 +59,7 @@ dependencies = [
  "unidecode>=1.4.0",
  "backoff>=2.2.1",
  "jsonpickle>=4.1.1",
+ "jsonschema>=4.23.0",
  # Gate the local 'certainly' package (which pulls faiss-gpu) to Python < 3.11
  # On Python >= 3.11 use faiss-cpu instead (see markers above)
  "pdfplumber>=0.11.7",
@@ -72,10 +73,10 @@ dependencies = [
  "pyflakes>=3.4.0",
  # Shared web-ingestion toolkit
  "fetcher @ git+https://github.com/grahama1970/fetcher.git",
- "nvidia-ml-py>=12.0.0",  # Official NVIDIA ML Python bindings (replaces deprecated pynvml)
+ "nvidia-ml-py>=12.0.0", # Official NVIDIA ML Python bindings (replaces deprecated pynvml)
  "faiss-cpu>=1.12.0",
- "duckdb>=1.1.0",
  "nltk>=3.9.2",
+ "pymupdf-layout>=1.27.1",
 ]
 [[project.authors]]
 name = "Graham Anderson"
@@ -135,10 +136,12 @@ lessons = [
 ]
 prover = [
   # Optional Lean4/FAISS extras
-  "certainly @ git+ssh://git@github.com/grahama1970/certainly.git",
+  # "certainly @ git+ssh://git@github.com/grahama1970/certainly.git",
 ]
 accurate = [
   "torch>=2.5.1,<3",
+  "torchvision>=0.20.0",
+  "timm>=0.9.0",
   "transformers>=4.45.2,<5",
   "sentence-transformers>=5.0.0",
   "spacy>=3.8.7",
@@ -185,6 +188,8 @@ pipeline-happy = "extractor.pipeline.cli_happy:main"
 # Core pipeline entrypoints (flattened API)
 extract-pipeline = "extractor.pipeline.api:cli_main"
 extract-sections = "extractor.pipeline.api:cli_main"
+# Universal self-healing extractor (simplest entry point)
+extract = "extractor.self_healing_extractor:main"
 pipeline-run-all = "extractor.pipeline.run_all:app"
 pipeline-run = "extractor.pipeline.cli_mode:app"
 pipeline-validate-gold = "extractor.pipeline.tools.validate_gold_standard:app"

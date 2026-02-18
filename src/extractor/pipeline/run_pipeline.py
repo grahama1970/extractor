@@ -386,6 +386,22 @@ def _step(
                 pass
 
 
+def _s00_timeout(out: Path, default: int) -> int:
+    """Read S00's estimated_timeout_seconds from pipeline_context.json.
+
+    Returns the larger of (S00 estimate, default) so the global
+    --stage-timeout always acts as a minimum floor.
+    """
+    try:
+        ctx = json.loads((out / "pipeline_context.json").read_text())
+        est = int(ctx.get("estimated_timeout_seconds", 0))
+        if est > 0:
+            return max(est, default)
+    except Exception:
+        pass
+    return default
+
+
 def _detect_scanned_pdf_path(pdf_path: Path) -> Optional[Dict[str, Any]]:
     try:
         import fitz
@@ -530,6 +546,11 @@ def main(argv: Optional[list[str]] = None) -> int:
         help="Deterministic smoke: disable LLM/VLM/DB/Lean4/annotator/tables",
     )
     p.add_argument(
+        "--fast-batch",
+        action="store_true",
+        help="Fast batch mode: skip heavy stages (summarizer, prover, table/fig descriptions) for quick extraction",
+    )
+    p.add_argument(
         "--skip-scillm-preflight",
         action="store_true",
         help="Bypass SciLLM preflight (use only if service is healthy)",
@@ -541,8 +562,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     p.add_argument(
         "--stage-timeout",
         type=int,
-        default=int(__import__("os").getenv("PIPELINE_STAGE_TIMEOUT", "600")),
-        help="Per-stage wall timeout in seconds (fail-fast)",
+        default=int(__import__("os").getenv("PIPELINE_STAGE_TIMEOUT", "900")),
+        help="Per-stage wall timeout in seconds (fail-fast). Recommended: 900s for batch, 600s for interactive",
     )
     p.add_argument(
         "--skip-proving",
@@ -578,6 +599,11 @@ def main(argv: Optional[list[str]] = None) -> int:
         dest="auto_ocr",
         action="store_false",
         help="Disable OCRmyPDF preprocessing for scanned PDFs",
+    )
+    p.add_argument(
+        "--skip-table-descriptions",
+        action="store_true",
+        help="Skip Stage 05b VLM table descriptions (faster, save tokens)",
     )
     p.add_argument(
         "--skip-scanned",
@@ -714,6 +740,16 @@ def main(argv: Optional[list[str]] = None) -> int:
             args.auto_ocr = False
         logger.info(
             "offline-smoke mode: forcing deterministic flags and skipping online/optional stages"
+        )
+
+    if args.fast_batch:
+        # Fast batch mode: skip expensive stages but keep basic extraction
+        args.summary_only = True  # Skip LLM summarization
+        args.skip_fig_descriptions = True  # Skip VLM figure descriptions
+        args.prove_requirements = False  # Skip Lean4 proving
+        args.skip_proving = True
+        logger.info(
+            "fast-batch mode: skipping heavy stages (summarizer, prover, descriptions) for speed"
         )
 
     try:
@@ -1080,14 +1116,21 @@ def _run_pdf_strategy(pdf: Path, out: Path, args: argparse.Namespace) -> int:
             else:
                 logger.warning("00_profile_detector: No output file produced.")
 
-            # Save Context Artifact
-            context_data = {
+            # Save Context Artifact — merge with S00's existing data (timeout, table estimates)
+            context_file = out / "pipeline_context.json"
+            context_data = {}
+            if context_file.exists():
+                try:
+                    context_data = json.loads(context_file.read_text())
+                except Exception:
+                    pass
+            context_data.update({
                 "preset_name": preset_name,
                 "config": preset_config,
                 "timestamp": time.time(),
                 "profile_path": str(s00_out_file) if s00_out_file else None,
-            }
-            (out / "pipeline_context.json").write_text(json.dumps(context_data, indent=2))
+            })
+            context_file.write_text(json.dumps(context_data, indent=2))
 
         except ImportError:
             logger.warning("00_profile_detector: Module not found. Skipping context injection.")
@@ -1111,7 +1154,9 @@ def _run_pdf_strategy(pdf: Path, out: Path, args: argparse.Namespace) -> int:
         timeout=args.stage_timeout,
     )
     if not a01:
-        return 1
+        if args.stop_on_fail:
+            return 1
+        logger.warning("Stage 01 failed, continuing with empty result")
     results["01"] = a01
     _write_artifacts_index(out, (out / "01_annotation_processor"))
     manifest.record_stage(
@@ -1137,7 +1182,9 @@ def _run_pdf_strategy(pdf: Path, out: Path, args: argparse.Namespace) -> int:
         use_llm=getattr(args, "use_llm", False),
     )
     if not a02:
-        return 1
+        if args.stop_on_fail:
+            return 1
+        logger.warning("Stage 02 failed, continuing with empty result")
     results["02"] = a02
     _write_artifacts_index(out, (out / "02_marker_extractor"))
     manifest.record_stage(
@@ -1148,6 +1195,10 @@ def _run_pdf_strategy(pdf: Path, out: Path, args: argparse.Namespace) -> int:
             "latency_ms": stage_latencies.get("02_marker_extractor"),
         },
     )
+
+    # 02b (Equation Extractor) — REMOVED: S02 pymupdf already has font-based
+    # equation detection via _detect_equation(). Future: /create-classifier for
+    # vision-based equation region detection + /create-gpt for Unicode→LaTeX.
 
     # 03
     pdf_dir = out / "01_annotation_processor"
@@ -1164,7 +1215,9 @@ def _run_pdf_strategy(pdf: Path, out: Path, args: argparse.Namespace) -> int:
         on_timing=lambda n, dt: stage_latencies.update({n: dt}),
     )
     if not a03:
-        return 1
+        if args.stop_on_fail:
+            return 1
+        logger.warning("Stage 03 failed, continuing with empty result")
     results["03"] = a03
     _write_artifacts_index(out, (out / "03_suspicious_headers"))
     try:
@@ -1191,8 +1244,8 @@ def _run_pdf_strategy(pdf: Path, out: Path, args: argparse.Namespace) -> int:
         ):
             raise ValueError("Stage 03 output missing required key 'blocks' (list)")
     except Exception as e:
-        logger.error(f"04_section_builder: missing or invalid Stage 03 outputs → {e}")
-        return 1
+        logger.warning(f"04_section_builder: Stage 03 outputs validation failed → {e}")
+        # Proceed with a03 as-is (if it exists) or None; s04 handles None.
     a04_path = _step(
         "04_section_builder",
         s04.run,
@@ -1206,7 +1259,9 @@ def _run_pdf_strategy(pdf: Path, out: Path, args: argparse.Namespace) -> int:
         on_timing=lambda n, dt: stage_latencies.update({n: dt}),
     )
     if not a04_path:
-        return 1
+        if args.stop_on_fail:
+            return 1
+        logger.warning("Stage 04 failed, continuing with empty result")
     results["04"] = a04_path
     _write_artifacts_index(out, (out / "04_section_builder"))
     try:
@@ -1269,6 +1324,9 @@ def _run_pdf_strategy(pdf: Path, out: Path, args: argparse.Namespace) -> int:
                 },
             )
 
+    # 04b (Footnote Detector) — REMOVED: S02 pymupdf already tags blocks with
+    # block_type="Footnote" using font/layout heuristics. Downstream filters by type.
+
     # 05
     if args.skip_tables05:
         stub_dir = out / "05_table_extractor" / "json_output"
@@ -1290,12 +1348,12 @@ def _run_pdf_strategy(pdf: Path, out: Path, args: argparse.Namespace) -> int:
             pdf_dir,
             out,
             stop_on_fail=args.stop_on_fail,
-            timeout_sec=args.stage_timeout,
+            timeout_sec=_s00_timeout(out, args.stage_timeout),
             log_dir_base=out,
             on_timing=lambda n, dt: stage_latencies.update({n: dt}),
         )
         if not a05:
-            return 1
+            logger.warning("05_table_extractor: failed, continuing")
     results["05"] = a05
     _write_artifacts_index(out, (out / "05_table_extractor"))
     try:
@@ -1318,14 +1376,16 @@ def _run_pdf_strategy(pdf: Path, out: Path, args: argparse.Namespace) -> int:
         s05b.run,
         out / "05_table_extractor",  # Input dir
         out,  # Output dir
-        skip_descriptions=bool(args.summary_only) or bool(args.skip_tables05),
+        skip_descriptions=bool(args.summary_only)
+        or bool(args.skip_tables05)
+        or bool(args.skip_table_descriptions),
         stop_on_fail=args.stop_on_fail,
         timeout_sec=args.stage_timeout,
         log_dir_base=out,
         on_timing=lambda n, dt: stage_latencies.update({n: dt}),
     )
-    if not a05b and args.stop_on_fail and not args.skip_tables05:
-        return 1
+    if not a05b and args.stop_on_fail and not args.skip_tables05 and not args.skip_table_descriptions:
+        logger.warning("05b_table_describer: failed, continuing")
     results["05b"] = a05b
 
     # 05c (Table Merger)
@@ -1340,7 +1400,7 @@ def _run_pdf_strategy(pdf: Path, out: Path, args: argparse.Namespace) -> int:
         on_timing=lambda n, dt: stage_latencies.update({n: dt}),
     )
     if not a05c and args.stop_on_fail and not args.skip_tables05:
-        return 1
+        logger.warning("05c_table_merger: failed, continuing")
     results["05c"] = a05c
 
     # 06 (deterministic extraction, VLM descriptions done in 06b)
@@ -1357,7 +1417,7 @@ def _run_pdf_strategy(pdf: Path, out: Path, args: argparse.Namespace) -> int:
         on_timing=lambda n, dt: stage_latencies.update({n: dt}),
     )
     if not a06:
-        return 1
+        logger.warning("06_figure_extractor: failed, continuing")
     results["06"] = a06
     _write_artifacts_index(out, (out / "06_figure_extractor"))
     try:
@@ -1388,7 +1448,7 @@ def _run_pdf_strategy(pdf: Path, out: Path, args: argparse.Namespace) -> int:
     )
     if not a06b:
         if args.stop_on_fail:
-            return 1
+            logger.warning("06b_figure_describer: failed, continuing")
     else:
         results["06b"] = a06b
         _write_artifacts_index(out, (out / "06b_figure_describer"))
@@ -1428,12 +1488,12 @@ def _run_common_stages(
 
     # Lazy imports for shared stages
     from extractor.pipeline.steps import (
-        s07_duckdb_ingest as s07,
-        s07b_text_cleaner as s07b,
+        s07_json_assembler as s07,
         s08_extract_requirements as s08,
         s09_section_summarizer as s09_summ,
         s14_report_generator as s14,
         s10_markdown_exporter as s10_export,
+        s11_json_exporter as s11_export,
     )
 
     # Import s10_arangodb_exporter for JSON output (QRA/downstream compatibility)
@@ -1447,12 +1507,12 @@ def _run_common_stages(
             "Stage 10 [Arango Export] not available: s10_arangodb_exporter module not found."
         )
 
-    # 07 (Assembler)
-    db_path = out / "pipeline.duckdb"
+    # 07 (JSON Assembler)
+    json_path = out / "07_assembled" / "assembled_content.json"
 
     def _run_07(ip: Path, op: Path) -> str:
         s07.run_assemble_corpus(
-            results_db_path=db_path,
+            output_json_path=json_path,
             sections_json=results.get("04"),
             tables_json=results.get("05c")
             or results.get("05b")
@@ -1461,8 +1521,9 @@ def _run_common_stages(
             annotations_json=results.get("01"),
             marker_json=results.get("02"),  # Stage 02 output with TOC entries
             scanned_info_json=out / "scanned_pdf.json",
+            preset_config=preset_config,
         )
-        return str(db_path)
+        return str(json_path)
 
     a07 = _step(
         "07_assemble_corpus",
@@ -1475,44 +1536,17 @@ def _run_common_stages(
         on_timing=lambda n, dt: stage_latencies.update({n: dt}),
     )
     if not a07:
-        return 1
+        logger.warning("07_assemble_corpus: failed (critical stage), continuing to report")
     manifest.record_stage(
         "07_assemble_corpus",
         "Completed",
         {
-            "db": str(db_path.relative_to(out)),
+            "json": str(json_path.relative_to(out)),
             "latency_ms": stage_latencies.get("07_assemble_corpus"),
         },
     )
 
-    # 07b (Text Cleaner - populates merged_content with text blocks)
-    def _run_07b(ip: Path, op: Path) -> str:
-        s07b.run(out, preset_config=preset_config)
-        # Count text items inserted
-        import duckdb
-
-        con = duckdb.connect(str(db_path), read_only=True)
-        res = con.execute("SELECT count(*) FROM merged_content WHERE type = 'text'").fetchone()
-        con.close()
-        return str(res[0]) if res else "0"
-
-    a07b = _step(
-        "07b_text_cleaner",
-        _run_07b,
-        out,
-        out,
-        stop_on_fail=args.stop_on_fail,
-        timeout_sec=args.stage_timeout,
-        log_dir_base=out,
-        on_timing=lambda n, dt: stage_latencies.update({n: dt}),
-    )
-    if not a07b:
-        return 1
-    manifest.record_stage(
-        "07b_text_cleaner",
-        "Completed",
-        {"text_items": a07b, "latency_ms": stage_latencies.get("07b_text_cleaner")},
-    )
+    # 07b (Text Cleaner) — folded into S07 JSON assembler; no separate step needed.
 
     # 08 (Extractor)
     if args.summary_only:
@@ -1520,14 +1554,11 @@ def _run_common_stages(
     else:
 
         def _run_08(ip: Path, op: Path) -> str:
-            s08.run_extract_requirements(op, db_path)
+            s08.run_extract_requirements(op, json_path)
             # Fetch count for manifest
-            import duckdb
-
-            con = duckdb.connect(str(db_path), read_only=True)
-            res = con.execute("SELECT count(*) FROM requirements").fetchone()
-            con.close()
-            return str(res[0]) if res else "0"
+            from extractor.pipeline.utils.content_query import ContentRepository
+            repo = ContentRepository(json_path)
+            return str(len(repo.requirements))
 
         a08 = _step(
             "08_extract_requirements",
@@ -1540,7 +1571,7 @@ def _run_common_stages(
             on_timing=lambda n, dt: stage_latencies.update({n: dt}),
         )
         if not a08 and args.stop_on_fail:
-            return 1
+            logger.warning("08_extract_requirements: failed, continuing")
 
         manifest.record_stage(
             "08_extract_requirements",
@@ -1566,17 +1597,11 @@ def _run_common_stages(
                 import asyncio
                 from extractor.pipeline.steps.s08_lean4_theorem_prover import prove_requirements
 
-                asyncio.run(prove_requirements(db_path, op / "08_lean4_theorem_prover"))
+                asyncio.run(prove_requirements(json_path, op / "08_lean4_theorem_prover"))
                 # Fetch proof count for manifest
-                import duckdb
-
-                con = duckdb.connect(str(db_path), read_only=True)
-                try:
-                    res = con.execute("SELECT count(*) FROM lean4_proofs").fetchone()
-                except Exception:
-                    res = None
-                con.close()
-                return str(res[0]) if res else "0"
+                from extractor.pipeline.utils.content_query import ContentRepository
+                repo = ContentRepository(json_path)
+                return str(len(repo.lean4_proofs))
 
             a08b = _step(
                 "08b_lean4_theorem_prover",
@@ -1603,7 +1628,7 @@ def _run_common_stages(
 
         def _run_09_summ(ip: Path, op: Path) -> Path:
             s09_summ.run_stage_09_summarizer(op, preset_config=preset_config)
-            return op / "pipeline.duckdb"
+            return op / "07_assembled" / "assembled_content.json"
 
         a09_summ = _step(
             "09_section_summarizer",
@@ -1642,6 +1667,27 @@ def _run_common_stages(
                 {
                     "file": str(a10.relative_to(out)),
                     "latency_ms": stage_latencies.get("10_markdown_exporter"),
+                },
+            )
+
+    # 11 (Structural JSON Exporter)
+    if True:
+        a11 = _step(
+            "11_json_exporter",
+            s11_export.run,
+            out,
+            stop_on_fail=args.stop_on_fail,
+            timeout_sec=args.stage_timeout,
+            log_dir_base=out,
+            on_timing=lambda n, dt: stage_latencies.update({n: dt}),
+        )
+        if a11:
+            manifest.record_stage(
+                "11_json_exporter",
+                "Completed",
+                {
+                    "file": str(a11.relative_to(out)),
+                    "latency_ms": stage_latencies.get("11_json_exporter"),
                 },
             )
 
