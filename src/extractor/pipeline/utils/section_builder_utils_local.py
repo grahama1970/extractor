@@ -10,9 +10,9 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from extractor.pipeline.utils.section_builder_utils import (
     _bucket_color,
-    _roman_to_int,
     pdf_analyze_section_numbering as _pdf_analyze_numbering,
 )
+from extractor.pipeline.utils.sections.heuristics import _roman_to_int
 
 
 def normalize_section_number(value: Optional[str]) -> str:
@@ -194,7 +194,10 @@ def detect_header_level(text: str) -> int:
         return numbering_analysis["depth_level"]
 
     lower_text = text.lower()
-    if any(k in lower_text for k in ["introduction", "abstract", "conclusion", "references", "appendix"]):
+    if any(
+        k in lower_text
+        for k in ["introduction", "abstract", "conclusion", "references", "appendix"]
+    ):
         return 1
     if any(k in lower_text for k in ["methodology", "implementation", "results", "discussion"]):
         return 2
@@ -207,7 +210,7 @@ def looks_like_header_text(text: str) -> bool:
     t = (text or "").strip()
     if not t:
         return False
-    if re.match(r"^\d+(?:\.\d+){1,}\s+.+", t):
+    if re.match(r"^\d+\.(?:\d+\.?)*\s+.+", t):
         return True
     if t.endswith("(Simulated)") or t.endswith("(SIMULATED)"):
         return True
@@ -226,7 +229,9 @@ def prepare_section_hierarchy(sections: List[Dict[str, Any]]) -> None:
 
     for section in sections:
         meta = section.setdefault("metadata", {})
-        sec_num = normalize_section_number(meta.get("section_number") or section.get("section_number"))
+        sec_num = normalize_section_number(
+            meta.get("section_number") or section.get("section_number")
+        )
         if sec_num:
             meta["section_number"] = sec_num
             section["section_number"] = sec_num
