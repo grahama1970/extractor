@@ -47,6 +47,41 @@ from extractor.pipeline.utils.diagnostics import (
 from extractor.pipeline.utils.step_sanity import run_step_sanity
 
 # Table Utils (keep these external as they are granular helpers)
+# Shadow S00 classifier (Shadow-LEGO seed producer)
+SHADOW_S00_ENABLED = os.environ.get("SHADOW_S00", "false").lower() == "true"
+_shadow_s00_predictor = None
+
+def _get_shadow_s00_prediction(profile: dict) -> dict:
+    """Get Shadow S00 prediction. Returns empty dict on any failure.
+
+    This is a SEED PRODUCER — informs strategy ordering, never gates.
+    """
+    global _shadow_s00_predictor
+    if not SHADOW_S00_ENABLED:
+        return {}
+    try:
+        if _shadow_s00_predictor is None:
+            # Import from sibling pi-mono repo. Use env var or path discovery.
+            scripts_dir = os.environ.get("SHADOW_S00_SCRIPTS_DIR", "")
+            if not scripts_dir:
+                # Auto-discover from extractor repo → pi-mono sibling
+                extractor_root = Path(__file__).resolve().parents[5]
+                scripts_dir = str(extractor_root.parent / "pi-mono" / ".pi" / "skills" / "create-table-classifier" / "scripts")
+            if scripts_dir not in sys.path:
+                sys.path.insert(0, scripts_dir)
+            from shadow_s00_inference import ShadowS00Predictor
+            _shadow_s00_predictor = ShadowS00Predictor()
+        pred = _shadow_s00_predictor.predict(profile)
+        return {
+            "predicted_class": pred.predicted_class,
+            "needs_stream": pred.needs_stream,
+            "stream_confidence": pred.stream_confidence,
+            "class_probabilities": pred.class_probabilities,
+        }
+    except Exception as e:
+        logger.debug(f"Shadow S00 prediction failed (non-blocking): {e}")
+        return {}
+
 from extractor.pipeline.utils.tables import (
     CAMELOT_STRATEGIES,
     generate_pandas_metrics as _generate_pandas_metrics,
@@ -714,8 +749,9 @@ def extract_tables_from_page(
     fallback_strategies = []
 
     # ML-based strategy prediction (if enabled)
+    # Skip predictor when S00 found zero table evidence — saves ~2s/page
     predictor_suggestion = None
-    if USE_STRATEGY_PREDICTOR:
+    if USE_STRATEGY_PREDICTOR and s00_expected_tables > 0:
         # Get a sample region from the page center (common table location)
         try:
             page = pdf_doc[page_num]
@@ -802,9 +838,9 @@ def extract_tables_from_page(
         return "added", fallback
 
     # Execute Strategies
-    # When S00 detected tables on this page, we should try stream strategies
-    # even if lattice found some tables — borderless tables are invisible to lattice.
-    # s00_expected_tables is the per-page average (total / table_pages) or 0 if unknown.
+    # Always try stream as a fallback after lattice — borderless tables are invisible
+    # to lattice mode. S00's table estimates are approximate (PyMuPDF heuristics) and
+    # unreliable as a gatekeeper, so we always try stream rather than gating on S00.
     _tried_stream = False
 
     for strat in strategies_to_try + fallback_strategies:
@@ -816,26 +852,21 @@ def extract_tables_from_page(
         ) if page_tables else False
         needs_more = not page_tables or has_fragmentation
 
-        # S00 says there should be more tables than we found — keep trying
-        # until we've tried at least one stream strategy (for borderless tables).
-        s00_wants_more = (
-            s00_expected_tables > 0
-            and len(page_tables) < s00_expected_tables
-            and not _tried_stream
-        )
+        # Always try at least one stream strategy — borderless tables are common
+        # in datasheets, defense specs, and engineering docs. Don't gate on S00.
+        should_try_stream = is_stream and not _tried_stream
 
-        if strat in fallback_strategies and not needs_more and not s00_wants_more:
+        if strat in fallback_strategies and not needs_more and not should_try_stream:
             break
 
         # Track after break check so stream strategies are always executed
         if is_stream:
             _tried_stream = True
-            if s00_expected_tables > 0:
-                logger.info(
-                    f"S05 stream forced by S00: page={page_num+1} "
-                    f"s00_expected={s00_expected_tables} found={len(page_tables)} "
-                    f"strategy={strat.get('name')}"
-                )
+            logger.info(
+                f"S05 trying stream: page={page_num+1} "
+                f"lattice_found={len(page_tables)} "
+                f"strategy={strat.get('name')}"
+            )
 
         t0 = time.monotonic()
         tables = try_camelot_strategy(pdf_path, page_num, strat, diagnostics)
@@ -867,13 +898,13 @@ def extract_tables_from_page(
 
         strategy_durations[sn]["found"][page_num] = found
 
-        # Early exit after baseline only if no fragmentation AND S00 doesn't
-        # expect more tables than lattice found
+        # Early exit after baseline only if no fragmentation AND we've tried stream.
+        # Always try stream before stopping — borderless tables need it.
         if (
             strat["name"] == baseline_name
             and found > 0
             and all(p.get("fragmentation", 0) == 0 for p in page_tables.values())
-            and not (s00_expected_tables > 0 and len(page_tables) < s00_expected_tables)
+            and _tried_stream
         ):
             break
 
@@ -942,6 +973,9 @@ def extract_tables_from_page(
             }
         )
         idx += 1
+
+    # Populate fallback metrics from extracted results
+    page_metrics["fallback_tables"] = sum(1 for t in extracted if t.get("quality_fallback"))
 
     return extracted, best_strategy, strategy_durations, page_metrics
 
@@ -1027,6 +1061,34 @@ def extract_all_tables(
 
     quality_summary["param_source"] = param_source
     quality_summary["params_used"] = params_used
+
+    # Shadow S00 prediction (Shadow-LEGO seed producer)
+    # If the classifier predicts this PDF needs stream mode, reorder strategies
+    # to try stream FIRST instead of last. This is a seed, not a gate.
+    shadow_prediction = {}
+    if SHADOW_S00_ENABLED and context:
+        # Load S00 profile from pipeline context or disk
+        profile_path = output_dir.parent / "00_profile_detector" / "profile.json"
+        s00_profile = {}
+        if profile_path.exists():
+            try:
+                s00_profile = json.loads(profile_path.read_text())
+            except (json.JSONDecodeError, OSError):
+                pass
+        if s00_profile:
+            shadow_prediction = _get_shadow_s00_prediction(s00_profile)
+            if shadow_prediction:
+                quality_summary["shadow_s00"] = shadow_prediction
+                if shadow_prediction.get("needs_stream") and shadow_prediction.get("stream_confidence", 0) >= 0.6:
+                    # Reorder: put stream_default BEFORE lattice strategies
+                    # This dramatically speeds up extraction for borderless-table PDFs
+                    if "stream_default" in CAMELOT_STRATEGIES and not last_good:
+                        last_good = "stream_default"
+                        quality_summary["shadow_s00_applied"] = True
+                        logger.info(
+                            f"Shadow S00: needs_stream predicted (conf={shadow_prediction['stream_confidence']:.2f}), "
+                            f"prioritizing stream_default strategy"
+                        )
 
     # Compute per-page expected table count from S00 estimates.
     # If S00 says 20 tables across 5 table_pages, expect ~4 per page on average.

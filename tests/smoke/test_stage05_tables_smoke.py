@@ -12,7 +12,7 @@ except Exception:
 
 def _load_mod():
     spec = importlib.util.spec_from_file_location(
-        "stage05", "src/extractor/pipeline/steps/05_table_extractor.py"
+        "stage05", "src/extractor/pipeline/steps/s05_table_extractor.py"
     )
     assert spec and spec.loader
     mod = importlib.util.module_from_spec(spec)
@@ -28,7 +28,9 @@ def test_camelot_strategy_callable():
     # Actual PDF work is covered in integration runs; this keeps the smoke tiny and fast.
     fn = getattr(mod, "try_camelot_strategy")
     # Use an obviously invalid page to exercise error handling quickly
-    out = fn(pdf_path=__file__, page_num=0, strategy={"flavor": "lattice", "params": {}}, diagnostics=[])
+    out = fn(
+        pdf_path=__file__, page_num=0, strategy={"flavor": "lattice", "params": {}}, diagnostics=[]
+    )
     assert isinstance(out, list)
 
 
@@ -67,7 +69,9 @@ def test_quality_fallback_retries_fragmented_table(monkeypatch, tmp_path):
         return []
 
     monkeypatch.setattr(mod, "try_camelot_strategy", fake_try)
-    monkeypatch.setattr(mod, "extract_table_image", lambda *args, **kwargs: str(tmp_path / "mock.png"))
+    monkeypatch.setattr(
+        mod, "extract_table_image", lambda *args, **kwargs: str(tmp_path / "mock.png")
+    )
 
     tables, best_strategy, durations, page_metrics = mod.extract_tables_from_page(
         pdf_path=tmp_path / "dummy.pdf",

@@ -6,7 +6,7 @@ from pathlib import Path
 
 def _load_stage01_module() -> object:
     """Dynamically load stage 01 module since filename starts with digits."""
-    file_path = Path("src/extractor/pipeline/steps/01_annotation_processor.py").resolve()
+    file_path = Path("src/extractor/pipeline/steps/s01_annotation_processor.py").resolve()
     assert file_path.exists(), f"Missing Stage 01 script at {file_path}"
     spec = importlib.util.spec_from_file_location("stage01_module", str(file_path))
     assert spec and spec.loader, "Failed to load spec for Stage 01"

@@ -659,7 +659,6 @@ def main(argv: Optional[list[str]] = None) -> int:
     p.add_argument(
         "--preset",
         type=str,
-        choices=["arxiv", "requirements_spec", "auto"],
         help="Force a specific preset instead of auto-detection (skips s00)",
     )
 
@@ -748,8 +747,10 @@ def main(argv: Optional[list[str]] = None) -> int:
         args.skip_fig_descriptions = True  # Skip VLM figure descriptions
         args.prove_requirements = False  # Skip Lean4 proving
         args.skip_proving = True
+        args.skip_llm03 = True  # Skip VLM header verification
+        args.skip_scillm_preflight = True  # No LLM needed, skip preflight
         logger.info(
-            "fast-batch mode: skipping heavy stages (summarizer, prover, descriptions) for speed"
+            "fast-batch mode: skipping heavy stages (summarizer, prover, descriptions, LLM) for speed"
         )
 
     try:
@@ -1077,6 +1078,41 @@ def _run_pdf_strategy(pdf: Path, out: Path, args: argparse.Namespace) -> int:
             "forced": True,
         }
         (out / "pipeline_context.json").write_text(json.dumps(context_data, indent=2))
+
+        # Write a minimal profile.json so downstream consumers find it
+        # (discovery.py, review-pdf, etc. expect 00_profile_detector/profile.json)
+        s00_dir = out / "00_profile_detector"
+        s00_dir.mkdir(parents=True, exist_ok=True)
+        pdf_path = Path(args.pdf) if hasattr(args, "pdf") and args.pdf else None
+        page_count = 0
+        file_size_mb = 0.0
+        if pdf_path and pdf_path.exists():
+            file_size_mb = round(pdf_path.stat().st_size / (1024 * 1024), 2)
+            try:
+                import fitz
+                with fitz.open(str(pdf_path)) as doc:
+                    page_count = len(doc)
+            except Exception:
+                pass
+        minimal_profile = {
+            "domain": preset_name or "unknown",
+            "page_count": page_count,
+            "file_size_mb": file_size_mb,
+            "estimated_timeout_seconds": 0,
+            "layout": {},
+            "hierarchy": {},
+            "elements": {},
+            "preset_match": {"matched": preset_name, "confidence": 1.0, "forced": True},
+            "route": "forced_preset",
+            "complexity_score": 0.0,
+            "thresholds_hit": [],
+            "detected_preset": preset_name,
+            "file": str(pdf_path) if pdf_path else "",
+            "timestamp": time.time(),
+            "duration_ms": 0,
+        }
+        (s00_dir / "profile.json").write_text(json.dumps(minimal_profile, indent=2))
+        logger.info(f"00_profile_detector: Wrote minimal profile.json for forced preset '{preset_name}'")
 
     elif not getattr(args, "skip_s00", False):
         try:

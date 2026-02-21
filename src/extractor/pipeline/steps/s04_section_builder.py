@@ -999,7 +999,8 @@ def build_sections_from_blocks(
                     try:
                         if re.search(pat, txt):
                             is_preset_match = True
-                    except Exception: pass
+                    except re.error as e:
+                        logger.warning(f"Invalid preset section_pattern regex '{pat}': {e}")
 
             
             # Check font properties for promotion
@@ -1148,7 +1149,8 @@ def build_sections_from_blocks(
                         .strip()
                         .encode("utf-8")
                     ).hexdigest()
-                except Exception: pass
+                except Exception as e:
+                    logger.warning(f"Failed to compute section hash for '{clean_title[:50]}': {e}")
                 
                 page_num = block.get("page", block.get("page_idx", 0))
                 current_section = {
@@ -1234,7 +1236,8 @@ def build_sections_from_blocks(
                 block["section_level"] = header_level
                 if sec_depth:
                     block["section_depth"] = sec_depth
-            except Exception: pass
+            except Exception as e:
+                logger.warning(f"Failed to propagate section metadata for block on page {block.get('page', '?')}: {e}")
         else:
              current_section = {
                 "title": "",
@@ -1257,7 +1260,8 @@ def build_sections_from_blocks(
             try:
                 nxt["blocks"] = (lead.get("blocks") or []) + (nxt.get("blocks") or [])
                 nxt["metadata"]["block_count"] = int(nxt["metadata"].get("block_count", 0)) + int(lead["metadata"].get("block_count", 0))
-            except Exception: pass
+            except Exception as e:
+                logger.warning(f"Failed to merge leading untitled section into next: {e}")
             sections = sections[1:]
         merged: list[Dict[str, Any]] = []
         for sec in sections:
@@ -1302,7 +1306,8 @@ def build_sections_from_blocks(
                 prev["page_end"] = max(prev.get("page_end", 0), sec.get("page_end", prev.get("page_end", 0)))
             merged.append(sec)
         sections = merged
-    except Exception: pass
+    except Exception as e:
+        logger.error(f"Section merge post-processing failed, using unmerged sections: {e}", exc_info=True)
 
     for i, section in enumerate(sections):
         if "blocks" in section:
@@ -1557,18 +1562,20 @@ async def process_sections_comprehensive(
         body_font_size=body_font_size,
     )
 
-    # Safety net: prelude synthesis
+    # Safety net: prelude synthesis — capture orphaned leading blocks before first section
     try:
         first_start = min((s.get("page_start", 10**9) for s in sections), default=10**9)
         min_page = min((b.get("page", b.get("page_idx", 0)) for b in blocks), default=0)
         if min_page < first_start:
             leading_blocks = [b for b in blocks if (b.get("page", b.get("page_idx", 0)) or 0) < first_start]
             heading = next((b for b in leading_blocks if analyze_section_numbering(b.get("text", "")).get("has_numbering")), None)
-            if heading:
-                # ... (logic reused from runner) ...
-                # For brevity in this merged file, basic synthesis is implemented
-                pass 
-    except Exception: pass
+            if heading and sections:
+                # Prepend leading blocks to the first section
+                sections[0]["blocks"] = leading_blocks + sections[0].get("blocks", [])
+                sections[0]["page_start"] = min_page
+                logger.debug(f"Prepended {len(leading_blocks)} leading blocks to first section")
+    except Exception as e:
+        logger.warning(f"Prelude synthesis failed, leading blocks may be orphaned: {e}")
 
     # Color Enrichment
     if STAGE04_COLOR_ENRICH and pdf_path and pdf_path.exists():
@@ -1594,7 +1601,8 @@ async def process_sections_comprehensive(
                 if len(title) <= 40 and title.endswith(":"):
                     s["level"] = min(6, int(s.get("level", base)) + 1)
                     s.setdefault("metadata", {})["normalized_wrapper"] = "short_colon"
-    except Exception: pass
+    except Exception as e:
+        logger.warning(f"Wrapper normalization failed, section hierarchy may be incorrect: {e}")
 
     suspicious_analysis = summarize_suspicious_from_verified(blocks, sections)
     
@@ -1613,30 +1621,44 @@ async def process_sections_comprehensive(
                 for s in cands:
                      if len([x for x in sections if int(x.get("level", base)) == base]) >= target: break
                      s["level"] = base
-    except Exception: pass
+    except Exception as e:
+        logger.warning(f"CONTRACT_EXPECT_SECTIONS enforcement failed: {e}")
 
     visual_count = 0
+    MAX_VISUAL_SECTIONS = 200  # Cap to prevent timeout on large docs
     if pdf_path and pdf_path.exists() and image_output_dir:
-        logger.info("Capturing section visuals...")
-        results_root = image_output_dir.parent.parent
-        for section in sections:
-            visual_path = image_output_dir / f"section_{section['id']}.png"
-            visual_b64 = extract_section_visual_enhanced(
-                pdf_path, section, visual_path, expand=0.3, max_pages=max_visual_pages
+        if len(sections) > MAX_VISUAL_SECTIONS:
+            logger.warning(
+                f"Skipping section visuals: {len(sections)} sections exceeds "
+                f"cap of {MAX_VISUAL_SECTIONS} (would be too slow)"
             )
-            if visual_b64:
-                section["has_visual"] = True
-                try: section["visual_path"] = str(visual_path.relative_to(results_root))
-                except ValueError: section["visual_path"] = str(visual_path)
-                visual_count += 1
-            else:
-                try:
-                    import fitz
-                    with fitz.open(str(pdf_path)) as doc:
+        else:
+            logger.info(f"Capturing section visuals for {len(sections)} sections...")
+            results_root = image_output_dir.parent.parent
+            # Open PDF once for fallback rendering
+            fallback_doc = None
+            try:
+                import fitz
+                fallback_doc = fitz.open(str(pdf_path))
+            except Exception:
+                pass
+
+            for section in sections:
+                visual_path = image_output_dir / f"section_{section['id']}.png"
+                visual_b64 = extract_section_visual_enhanced(
+                    pdf_path, section, visual_path, expand=0.3, max_pages=max_visual_pages
+                )
+                if visual_b64:
+                    section["has_visual"] = True
+                    try: section["visual_path"] = str(visual_path.relative_to(results_root))
+                    except ValueError: section["visual_path"] = str(visual_path)
+                    visual_count += 1
+                elif fallback_doc:
+                    try:
                         page_idx = int(section.get("page_start", 0) or 0)
-                        if page_idx < 0 or page_idx >= len(doc):
+                        if page_idx < 0 or page_idx >= len(fallback_doc):
                             page_idx = 0
-                        page = doc[page_idx]
+                        page = fallback_doc[page_idx]
                         rect = page.rect
                         pix = page.get_pixmap(matrix=fitz.Matrix(2, 2), clip=rect)
                         visual_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1645,8 +1667,11 @@ async def process_sections_comprehensive(
                         try: section["visual_path"] = str(visual_path.relative_to(results_root))
                         except ValueError: section["visual_path"] = str(visual_path)
                         visual_count += 1
-                except Exception:
-                    pass
+                    except Exception:
+                        pass
+
+            if fallback_doc:
+                fallback_doc.close()
 
     return {
         "success": True,
@@ -1874,7 +1899,8 @@ async def build_and_validate_sections_comprehensive(
             level="DEBUG",
             rotation="1 MB"
         )
-    except Exception: pass
+    except Exception as e:
+        logger.warning(f"Could not set up file logging to {output_dir / 'stage_04.log'}: {e}")
 
     # Load Inputs
     with open(blocks_path, "r") as f:

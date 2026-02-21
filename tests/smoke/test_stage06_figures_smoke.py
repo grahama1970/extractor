@@ -1,4 +1,3 @@
-import os
 import importlib.util
 from pathlib import Path
 import pytest
@@ -12,7 +11,7 @@ except Exception:
 
 def _load_mod():
     spec = importlib.util.spec_from_file_location(
-        "stage06", "src/extractor/pipeline/steps/06_figure_extractor.py"
+        "stage06", "src/extractor/pipeline/steps/s06_figure_extractor.py"
     )
     assert spec and spec.loader
     mod = importlib.util.module_from_spec(spec)
@@ -36,4 +35,3 @@ async def test_extract_and_describe_figure_offline(tmp_path):
     result = await fn(pdf_path, block, "fig-smoke", out_dir, skip_descriptions=True)
     assert result is not None
     assert (out_dir / "fig-smoke.png").exists(), "Image not saved"
-
