@@ -1,4 +1,0 @@
-low_confidence_cutoff: 0.45
-notes: |
-  Below this cutoff, attach the table image for vision reflow.
-
