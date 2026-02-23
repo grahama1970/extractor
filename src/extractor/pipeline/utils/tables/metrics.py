@@ -6,11 +6,163 @@ Generates quality metrics and scores for extracted tables.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import os
 import re
 import pandas as pd
+from pathlib import Path
+
+from loguru import logger
+
+# ---------------------------------------------------------------------------
+# ML Fragmentation Pre-filter (Tier 0.5)
+# ---------------------------------------------------------------------------
+
+USE_ML_FRAGMENTATION_REPAIR = (
+    os.environ.get("USE_ML_FRAGMENTATION_REPAIR", "false").lower() == "true"
+)
+
+_FRAG_MODEL_DIR = Path(
+    os.environ.get(
+        "FRAGMENTATION_MODEL_DIR",
+        str(Path.home() / ".pi" / "skills" / "create-table-classifier" / "models" / "fragmentation-repair"),
+    )
+)
+
+_frag_model: Optional[object] = None
+_frag_scaler: Optional[object] = None
+_frag_tfidf: Optional[object] = None
+_frag_threshold: float = 0.61
+_frag_loaded: bool = False
+
+
+def _load_frag_model() -> bool:
+    """Lazily load the fragmentation repair ML model (singleton)."""
+    global _frag_model, _frag_scaler, _frag_tfidf, _frag_threshold, _frag_loaded
+    if _frag_loaded:
+        return _frag_model is not None
+    _frag_loaded = True
+
+    model_path = _FRAG_MODEL_DIR / "best_model.joblib"
+    scaler_path = _FRAG_MODEL_DIR / "scaler.joblib"
+    tfidf_path = _FRAG_MODEL_DIR / "tfidf_vectorizer.joblib"
+    meta_path = _FRAG_MODEL_DIR / "model_meta.json"
+
+    if not model_path.exists():
+        logger.debug(f"Fragmentation ML model not found at {model_path}")
+        return False
+
+    try:
+        import joblib
+        import json
+
+        _frag_model = joblib.load(model_path)
+        if scaler_path.exists():
+            _frag_scaler = joblib.load(scaler_path)
+        if tfidf_path.exists():
+            _frag_tfidf = joblib.load(tfidf_path)
+        if meta_path.exists():
+            meta = json.loads(meta_path.read_text())
+            _frag_threshold = meta.get("decision_threshold", 0.61)
+        logger.info(f"Loaded fragmentation ML model from {_FRAG_MODEL_DIR}")
+        return True
+    except Exception as e:
+        logger.warning(f"Failed to load fragmentation ML model: {e}")
+        _frag_model = None
+        return False
+
+
+def _extract_frag_features(text: str) -> Dict[str, float]:
+    """Extract numeric features for the fragmentation classifier."""
+    words = text.split()
+    num_words = len(words)
+    num_spaces = text.count(" ")
+    alpha_chars = sum(1 for c in text if c.isalpha())
+    alpha_ratio = alpha_chars / max(len(text), 1)
+
+    # Find the space-split point (if any)
+    space_idx = text.find(" ")
+    left_word = text[:space_idx] if space_idx > 0 else text
+    right_word = text[space_idx + 1:] if space_idx > 0 and space_idx < len(text) - 1 else ""
+
+    # Count alpha-alpha spaces (spaces between two alpha characters)
+    alpha_alpha_spaces = 0
+    for i in range(1, len(text) - 1):
+        if text[i] == " " and text[i - 1].isalpha() and text[i + 1].isalpha():
+            alpha_alpha_spaces += 1
+
+    return {
+        "cell_len": float(len(text)),
+        "num_spaces": float(num_spaces),
+        "num_words": float(num_words),
+        "left_word_len": float(len(left_word)),
+        "right_word_len": float(len(right_word)),
+        "alpha_ratio": alpha_ratio,
+        "has_space_in_middle": float(space_idx > 0 and space_idx < len(text) - 1),
+        "is_uppercase": float(text.isupper()),
+        "has_underscore": float("_" in text),
+        "has_digit": float(any(c.isdigit() for c in text)),
+        "has_hyphen": float("-" in text),
+        "has_short_after_long": float(len(left_word) > 3 and len(right_word) <= 2 and right_word.isalpha()),
+        "has_unicode_math": float(any(ord(c) > 127 for c in text)),
+        "has_equals": float("=" in text),
+        "has_parens": float("(" in text or ")" in text),
+        "char_before_space_is_alpha": float(space_idx > 0 and text[space_idx - 1].isalpha()),
+        "char_after_space_is_alpha": float(
+            space_idx > 0 and space_idx < len(text) - 1 and text[space_idx + 1].isalpha()
+        ),
+        "char_before_space_is_upper": float(space_idx > 0 and text[space_idx - 1].isupper()),
+        "char_after_space_is_lower": float(
+            space_idx > 0 and space_idx < len(text) - 1 and text[space_idx + 1].islower()
+        ),
+        "alpha_alpha_spaces": float(alpha_alpha_spaces),
+    }
+
+
+def _ml_is_fragmented(text: str) -> Optional[bool]:
+    """Use ML model to predict if text is fragmented.
+
+    Returns:
+        True if ML predicts fragmented, False if not, None if model unavailable.
+    """
+    if not USE_ML_FRAGMENTATION_REPAIR or not _load_frag_model():
+        return None
+    if _frag_model is None:
+        return None
+
+    try:
+        import numpy as np
+
+        features = _extract_frag_features(text)
+        feature_order = [
+            "cell_len", "num_spaces", "num_words", "left_word_len", "right_word_len",
+            "alpha_ratio", "has_space_in_middle", "is_uppercase", "has_underscore",
+            "has_digit", "has_hyphen", "has_short_after_long", "has_unicode_math",
+            "has_equals", "has_parens", "char_before_space_is_alpha",
+            "char_after_space_is_alpha", "char_before_space_is_upper",
+            "char_after_space_is_lower", "alpha_alpha_spaces",
+        ]
+        numeric_vec = np.array([[features[k] for k in feature_order]])
+
+        if _frag_scaler is not None:
+            numeric_vec = _frag_scaler.transform(numeric_vec)
+
+        if _frag_tfidf is not None:
+            from scipy.sparse import hstack
+            tfidf_vec = _frag_tfidf.transform([text])
+            X = hstack([numeric_vec, tfidf_vec])
+        else:
+            X = numeric_vec
+
+        proba = _frag_model.predict_proba(X)
+        # Determine the "fragmented" class index
+        classes = list(_frag_model.classes_)
+        frag_idx = classes.index(1) if 1 in classes else 0
+        frag_prob = float(proba[0, frag_idx])
+        return frag_prob >= _frag_threshold
+    except Exception:
+        return None
 
 
 def generate_pandas_metrics(df: pd.DataFrame) -> Dict[str, Any]:
@@ -170,7 +322,8 @@ def normalize_cell(val: Any) -> str:
 def _fix_broken_words(text: str) -> str:
     """Fix OCR-broken words using generalizable patterns.
 
-    Three-tier approach:
+    Four-tier approach:
+    0.5. ML pre-filter: if enabled and model says "not fragmented", skip heuristic
     1. Specific suffix patterns: -tion/-sion/-xion breaks (safe, high-confidence)
     2. General regex + stopword filter: merges non-word trailing fragments
     3. Lookup: handles known longer breaks discovered from real PDFs
@@ -178,6 +331,12 @@ def _fix_broken_words(text: str) -> str:
     The stopword filter prevents merging common English short words
     ("vibration to" stays as-is, "EXECU TE" gets merged).
     """
+    # Tier 0.5: ML pre-filter — skip heuristic if ML says "not fragmented"
+    if USE_ML_FRAGMENTATION_REPAIR and " " in text:
+        ml_result = _ml_is_fragmented(text)
+        if ml_result is False:
+            return text  # ML confident it's not fragmented — skip heuristic
+
     # Fix underscore-identifier splits first ("bht_updat e_i" → "bht_update_i")
     text = _BROKEN_IDENT_RE.sub(r"\1\2\3", text)
 
@@ -245,6 +404,8 @@ def sanitize_cell(val: Any) -> str:
     """Full sanitization: normalize whitespace + fix OCR errors.
 
     This is the public API used by downstream code that needs clean text.
+    When USE_ML_FRAGMENTATION_REPAIR=true, the ML model acts as a Tier 0.5
+    pre-filter that skips heuristic repair for cells it classifies as clean.
     For fragmentation scoring, use fragmentation_score() which only counts
     OCR-level changes (not whitespace normalization).
     """
@@ -252,6 +413,21 @@ def sanitize_cell(val: Any) -> str:
     text = _fix_broken_words(text)
     text = _fix_direction_tokens(text)
     return text
+
+
+def ml_sanitize_cell(val: Any) -> str:
+    """Sanitize cell with ML pre-filter explicitly enabled.
+
+    Same as sanitize_cell() but forces ML pre-filter regardless of env var.
+    Useful for testing and benchmarking.
+    """
+    global USE_ML_FRAGMENTATION_REPAIR
+    original = USE_ML_FRAGMENTATION_REPAIR
+    try:
+        USE_ML_FRAGMENTATION_REPAIR = True
+        return sanitize_cell(val)
+    finally:
+        USE_ML_FRAGMENTATION_REPAIR = original
 
 
 def fragmentation_score(df: pd.DataFrame) -> int:

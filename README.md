@@ -51,8 +51,7 @@ python -m extractor.pipeline paper.pdf --preset arxiv
 ┌────────────────────────────────▼────────────────────────────────────────────┐
 │                     COMMON STAGES (07-14)                                    │
 │                                                                              │
-│  s07 duckdb_ingest          │  Assemble into queryable DuckDB               │
-│  s07b text_cleaner          │  Clean and normalize text                     │
+│  s07 json_assembler         │  Assemble sections + tables + figures → JSON   │
 │  s08 extract_requirements   │  Mine requirements (REQ-xxx, SHALL, MUST)     │
 │  s08 lean4_theorem_prover   │  Formal proofs (scientific papers)            │
 │  s09 section_summarizer     │  LLM summaries per section                    │

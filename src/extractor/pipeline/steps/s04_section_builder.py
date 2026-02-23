@@ -62,6 +62,7 @@ from extractor.pipeline.utils.sections import (
     detect_header_level,
     looks_like_header_text,
 )
+from extractor.pipeline.utils.sections.heuristics import _VALID_HEADERS
 
 # sbul helpers (keeping these external for now as they are shared utilities)
 import extractor.pipeline.utils.section_builder_utils_local as sbul
@@ -1385,7 +1386,14 @@ def build_sections_from_blocks(
             references_sections.append(section)
             section["type"] = "references"
             continue
-        
+
+        # Tag glossary/acronyms/definitions/abbreviations as structural metadata
+        section_content = content if isinstance(content, str) else ""
+        if _is_glossary_section(section.get("title", ""), section_content):
+            section["type"] = "metadata"
+            section["metadata_type"] = "glossary"
+            logger.debug(f"Tagged glossary section: {section.get('title', 'Untitled')[:50]}")
+
         # Mark hex dump sections
         if _is_hex_dump(content):
             hex_dump_sections.append(section)
@@ -1513,6 +1521,14 @@ def _merge_short_sections(sections: List[Dict[str, Any]]) -> List[Dict[str, Any]
         if curr_title and re.match(r'^\d+(\.\d+)*\s', curr_title):
             merged.append(curr)
             continue
+
+        # Don't merge sections whose title matches known structural headers
+        # (e.g. "ACRONYMS AND DEFINITIONS", "GLOSSARY", "REFERENCES")
+        if curr_title:
+            title_words = {w.capitalize() for w in re.findall(r'[A-Za-z]+', curr_title)}
+            if title_words & _VALID_HEADERS:
+                merged.append(curr)
+                continue
 
         # Heuristic: If current is very short and previous is also short, merge
         if curr_len < 150 and prev_len < 500:
@@ -1990,6 +2006,59 @@ async def build_and_validate_sections_comprehensive(
         json.dump(result, f, indent=2)
         
     return output_path, result
+
+
+from extractor.pipeline.utils.glossary_extractor import GLOSSARY_KEYWORDS
+
+
+def _keyword_is_glossary(title: str) -> bool:
+    """Fast-path: keyword match against known glossary section titles."""
+    t = title.strip().lower()
+    if not t:
+        return False
+    return any(kw in t for kw in GLOSSARY_KEYWORDS)
+
+
+def _is_glossary_section(title: str, content: str = "") -> bool:
+    """
+    Detect glossary section via keyword heuristic + ML classifier + content verification.
+
+    Tier 0: Keyword match (fast path, existing heuristic)
+    Tier 1: ML classifier (catches titles the keyword list misses)
+    Content verification: /assistant extraction confirms ≥3 term→definition pairs
+    """
+    # Tier 0: Quick keyword check (existing fast-path)
+    if _keyword_is_glossary(title):
+        if content:
+            try:
+                from extractor.pipeline.utils.glossary_extractor import verify_glossary_content
+                if verify_glossary_content(content):
+                    return True
+                # Content verification failed — keyword match alone is unreliable
+                # but still tag if no content to check
+                return False
+            except ImportError:
+                pass
+        return True  # No content yet at detection time, trust keyword
+
+    # Tier 1: ML classifier (if available)
+    try:
+        from extractor.pipeline.utils.glossary_extractor import (
+            glossary_classifier_predict,
+            _glossary_classifier_available,
+            verify_glossary_content,
+        )
+        if _glossary_classifier_available():
+            score = glossary_classifier_predict(title)
+            if score > 0.5:
+                if content and verify_glossary_content(content):
+                    return True
+                if not content:
+                    return score > 0.8  # Higher threshold without content verification
+    except ImportError:
+        pass
+
+    return False
 
 
 def _is_toc_section(section: Dict[str, Any]) -> bool:

@@ -19,12 +19,13 @@
 ### Special Dependencies
 ```toml
 # Marker requires document processing libraries
-pymupdf = "^1.23.0"
-python-pptx = "^0.6.21"
-python-docx = "^1.1.0"
-pillow = "^10.0.0"
-opencv-python = "^4.8.0"
-transformers = "^4.35.0"
+pymupdf = ">=1.26.1"
+python-pptx = ">=1.0.2"
+python-docx = ">=1.1.2"
+pillow = ">=10.1.0,<11.0.0"
+opencv-python = ">=4.11.0"
+transformers = ">=4.45.2,<5"
+camelot-py = ">=1.0.9"
 ```
 
 

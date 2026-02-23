@@ -1,0 +1,63 @@
+{
+  "status": "ok",
+  "selected_backbone": "logistic_regression",
+  "selected_metrics": {
+    "macro_f1": 0.8564730647784902,
+    "accuracy": 0.9973333333333333
+  },
+  "source": {
+    "mode": "jsonl",
+    "labels_jsonl": "/home/graham/workspace/experiments/extractor/data/glossary_section_titles_tabular.jsonl"
+  },
+  "results": [
+    {
+      "backbone": "gradient_boosting",
+      "status": "ok",
+      "accuracy": 0.9953333333333333,
+      "macro_f1": 0.6099409339128496,
+      "train_samples": 8500,
+      "val_samples": 1500,
+      "num_classes": 2,
+      "feature_count": 4
+    },
+    {
+      "backbone": "random_forest",
+      "status": "ok",
+      "accuracy": 0.996,
+      "macro_f1": 0.6989966555183946,
+      "train_samples": 8500,
+      "val_samples": 1500,
+      "num_classes": 2,
+      "feature_count": 4
+    },
+    {
+      "backbone": "logistic_regression",
+      "status": "ok",
+      "accuracy": 0.9973333333333333,
+      "macro_f1": 0.8564730647784902,
+      "train_samples": 8500,
+      "val_samples": 1500,
+      "num_classes": 2,
+      "feature_count": 4
+    }
+  ],
+  "taxonomy": {
+    "status": "ok",
+    "result": {
+      "bridge_tags": [],
+      "collection_tags": {},
+      "confidence": 0.3,
+      "method": "keywords",
+      "worth_remembering": false
+    }
+  },
+  "memory_store": {
+    "status": "ok",
+    "returncode": 0,
+    "memory_scope": "datalake_classifier",
+    "memory_events_path": "/home/graham/workspace/experiments/pi-mono/.pi/skills/classifier-lab/.artifacts/classifier_lab_memory_events.jsonl",
+    "event_file": "/home/graham/workspace/experiments/pi-mono/.pi/skills/classifier-lab/.artifacts/classifier_lab_event_1771860011.json",
+    "stdout_tail": "[quality-gate] WARNING: Memory scored as AMBIGUOUS (score=0.0)\n[quality-gate] Deficits: ['no_event_anchor', 'no_sensory', 'no_bridges', 'no_contradiction_reachable']\n{\n  \"meta\": {\n    \"ok\": true,\n    \"action\": \"learned\",\n    \"embedding_created\": true\n  },\n  \"items\": [\n    {\n      \"_key\": \"76426688\",\n      \"title\": \"classifier-lab benchmark status=ok selected_backbone=logisti...\",\n      \"problem\": \"classifier-lab benchmark status=ok selected_backbone=logistic_regression\",\n      \"solution\": \"{\\\"selected_metrics\\\": {\\\"macro_f1\\\": 0.8564730647784902, \\\"accuracy\\\": 0.9973333333333333}, \\\"candidate_count\\\": 3, \\\"source\\\": {\\\"mode\\\": \\\"jsonl\\\", \\\"labels_jsonl\\\": \\\"/home/graham/workspace/experiments/extractor/data/glossary_section_titles_tabular.jsonl\\\"}, \\\"taxonomy\\\": {\\\"status\\\": \\\"ok\\\", \\\"result\\\": {\\\"bridge_tags\\\": [], \\\"collection_tags\\\": {}, \\\"confidence\\\": 0.3, \\\"method\\\": \\\"keywords\\\", \\\"worth_remembering\\\": false}}, \\\"event_file\\\": \\\"/home/graham/workspace/experiments/pi-mono/.pi/skills/classifier-lab/.artifacts/classifier_lab_event_1771860011.json\\\"}\",\n      \"scope\": \"datalake_classifier\"\n    }\n  ],\n  \"errors\": []\n}",
+    "stderr_tail": "warning: `VIRTUAL_ENV=/home/graham/.claude/skills/classifier-lab/.venv` does not match the project environment path `.venv` and will be ignored; use `--active` to target the active environment instead"
+  }
+}
