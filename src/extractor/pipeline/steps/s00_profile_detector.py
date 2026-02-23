@@ -647,6 +647,8 @@ def detect_preset(pdf_path: Path, verbose_preset: bool = False) -> Dict[str, Any
         **route_info,
         "detected_preset": preset_info.get("matched"),
         "classifier": routing_info,
+        "table_style": analysis.get("table_style", "none"),
+        "has_multi_column": analysis.get("has_multi_column", False),
     }
 
     return profile
