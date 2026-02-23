@@ -1,4 +1,3 @@
-import types
 
 
 def test_litellm_response_utils_reexports_extract_content():
@@ -17,4 +16,3 @@ def test_litellm_image_utils_reexports_helpers():
     for name in ("compress_image_cached", "fetch_remote_image_cached", "extract_images"):
         assert hasattr(lih, name)
         assert getattr(lih, name) is getattr(ih, name)
-

@@ -1,13 +1,14 @@
-from __future__ import annotations
-
-from extractor.pipeline.utils.reliability import log_stage_error
 """Shared helpers for extractor pipeline sanity checks (Sparta-style)."""
+
+from __future__ import annotations
 
 import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
+
+from extractor.pipeline.utils.reliability import log_stage_error
 
 
 @dataclass(frozen=True)
@@ -24,7 +25,7 @@ def read_json(path: Path) -> dict[str, Any]:
     try:
         return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
     except Exception as exc:
-        log_stage_error('sanity_utils.py', exc, {'context': 'sanity_utils.py'})
+        log_stage_error("sanity_utils.py", exc, {"context": "sanity_utils.py"})
         raise
         return {}
 
@@ -43,7 +44,7 @@ def count_jsonl(path: Path, limit: int | None = None) -> int:
                 if limit and total >= limit:
                     break
     except Exception as exc:
-        log_stage_error('sanity_utils.py', exc, {'context': 'sanity_utils.py'})
+        log_stage_error("sanity_utils.py", exc, {"context": "sanity_utils.py"})
         raise
         return 0
     return total
@@ -53,20 +54,19 @@ def file_exists(path: Path, *, min_bytes: int = 1) -> bool:
     try:
         return path.exists() and path.stat().st_size >= min_bytes
     except Exception as exc:
-        log_stage_error('sanity_utils.py', exc, {'context': 'sanity_utils.py'})
+        log_stage_error("sanity_utils.py", exc, {"context": "sanity_utils.py"})
         raise
         return False
 
 
-def emit_sanity(step: str, *, ok: bool, issues: Iterable[SanityIssue] | None = None, **payload: Any) -> int:
+def emit_sanity(
+    step: str, *, ok: bool, issues: Iterable[SanityIssue] | None = None, **payload: Any
+) -> int:
     """Print a JSON sanity summary and return 0/1."""
 
     summary: dict[str, Any] = {"step": step, "ok": ok}
     if issues:
-        summary["issues"] = [
-            {"message": issue.message, **issue.details}
-            for issue in issues
-        ]
+        summary["issues"] = [{"message": issue.message, **issue.details} for issue in issues]
     summary.update(payload)
     print(json.dumps(summary, ensure_ascii=False))
     return 0 if ok else 1

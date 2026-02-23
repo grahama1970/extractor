@@ -66,7 +66,17 @@ def load_stage(step: str, out_root: Path) -> tuple[Path, List[Box]]:
             bbox = b.get("bbox") or b.get("bbox0")
             if not bbox:
                 continue
-            boxes.append(Box(page=int(b.get("page_idx", 0)), x0=bbox[0], y0=bbox[1], x1=bbox[2], y1=bbox[3], label=b.get("block_type", "block"), idx=i))
+            boxes.append(
+                Box(
+                    page=int(b.get("page_idx", 0)),
+                    x0=bbox[0],
+                    y0=bbox[1],
+                    x1=bbox[2],
+                    y1=bbox[3],
+                    label=b.get("block_type", "block"),
+                    idx=i,
+                )
+            )
         return p, boxes
     if step == "05":
         p = out_root / "05_table_extractor/json_output/05_tables.json"
@@ -76,7 +86,17 @@ def load_stage(step: str, out_root: Path) -> tuple[Path, List[Box]]:
             bbox = t.get("bbox")
             if not bbox:
                 continue
-            boxes.append(Box(page=int(t.get("page_idx", 0)), x0=bbox[0], y0=bbox[1], x1=bbox[2], y1=bbox[3], label=t.get("title") or "table", idx=i))
+            boxes.append(
+                Box(
+                    page=int(t.get("page_idx", 0)),
+                    x0=bbox[0],
+                    y0=bbox[1],
+                    x1=bbox[2],
+                    y1=bbox[3],
+                    label=t.get("title") or "table",
+                    idx=i,
+                )
+            )
         return p, boxes
     if step == "06":
         p = out_root / "06_figure_extractor/json_output/06_figures.json"
@@ -87,7 +107,17 @@ def load_stage(step: str, out_root: Path) -> tuple[Path, List[Box]]:
             if not bbox:
                 continue
             lbl = f.get("title") or f.get("inferred_title") or "figure"
-            boxes.append(Box(page=int(f.get("page_idx", 0)), x0=bbox[0], y0=bbox[1], x1=bbox[2], y1=bbox[3], label=lbl, idx=i))
+            boxes.append(
+                Box(
+                    page=int(f.get("page_idx", 0)),
+                    x0=bbox[0],
+                    y0=bbox[1],
+                    x1=bbox[2],
+                    y1=bbox[3],
+                    label=lbl,
+                    idx=i,
+                )
+            )
         return p, boxes
     raise ValueError("Unsupported step: " + step)
 
@@ -96,13 +126,19 @@ def save_corrections(pdf: Path, step: str, corrections: list[dict], out_dir: Pat
     out_dir.mkdir(parents=True, exist_ok=True)
     name = f"{pdf.stem}_{step}_corrections.json"
     out = out_dir / name
-    out.write_text(json.dumps({"pdf": str(pdf), "step": step, "corrections": corrections}, indent=2))
+    out.write_text(
+        json.dumps({"pdf": str(pdf), "step": step, "corrections": corrections}, indent=2)
+    )
     return out
 
 
 def main():
     st.set_page_config(page_title="Visual Review", layout="wide")
-    pdf = Path(st.sidebar.text_input("PDF path", "data/input/pipeline/BHT_CV32A65X_with_requirements_noannots.pdf"))
+    pdf = Path(
+        st.sidebar.text_input(
+            "PDF path", "data/input/pipeline/BHT_CV32A65X_with_requirements_noannots.pdf"
+        )
+    )
     out_root = Path(st.sidebar.text_input("Pipeline out root", "data/results/pipeline"))
     step = st.sidebar.selectbox("Step", ["02", "05", "06"], index=1)
     dpi = st.sidebar.slider("Render DPI", 100, 200, 144, step=4)
@@ -128,15 +164,17 @@ def main():
             dy = st.number_input(f"dy_{b.idx}", value=0, step=1)
             dw = st.number_input(f"dw_{b.idx}", value=0, step=1)
             dh = st.number_input(f"dh_{b.idx}", value=0, step=1)
-            updated.append({
-                "idx": b.idx,
-                "page": b.page,
-                "label": new_label,
-                "dx": dx,
-                "dy": dy,
-                "dw": dw,
-                "dh": dh,
-            })
+            updated.append(
+                {
+                    "idx": b.idx,
+                    "page": b.page,
+                    "label": new_label,
+                    "dx": dx,
+                    "dy": dy,
+                    "dw": dw,
+                    "dh": dh,
+                }
+            )
 
     if st.button("Save corrections"):
         out = save_corrections(pdf, step, updated, Path("scripts/artifacts/corrections"))
@@ -145,4 +183,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

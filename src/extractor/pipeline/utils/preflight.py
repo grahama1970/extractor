@@ -34,9 +34,8 @@ def scillm_quick_check(timeout: float = 3.0) -> Tuple[bool, str]:
     except urllib.error.HTTPError as e:  # pragma: no cover
         return False, f"http error: {e.code}"
     except Exception as exc:
-        log_stage_error('preflight.py', exc, {'context': 'preflight.py'})
+        log_stage_error("preflight.py", exc, {"context": "preflight.py"})
         raise
-        return False, f"http error: {e}"
 
 
 def require_scillm_env() -> Tuple[bool, str]:
@@ -60,7 +59,7 @@ def require_scillm_env() -> Tuple[bool, str]:
             try:
                 os.environ.pop(var, None)
             except Exception as exc:
-                log_stage_error('preflight.py', exc, {'context': 'preflight.py'})
+                log_stage_error("preflight.py", exc, {"context": "preflight.py"})
                 raise
     return True, "ok"
 
@@ -73,7 +72,7 @@ def forbid_input_writes(path_str: str) -> Tuple[bool, str]:
         if os.path.commonpath([p, root]) == root:
             return False, f"Refusing to write under data/input/: {p}"
     except Exception as exc:
-        log_stage_error('preflight.py', exc, {'context': 'preflight.py'})
+        log_stage_error("preflight.py", exc, {"context": "preflight.py"})
         raise
     return True, "ok"
 
@@ -85,9 +84,8 @@ def camelot_quick_check() -> Tuple[bool, str]:
         _ = camelot.__version__
         return True, "ok"
     except Exception as exc:
-        log_stage_error('preflight.py', exc, {'context': 'preflight.py'})
+        log_stage_error("preflight.py", exc, {"context": "preflight.py"})
         raise
-        return False, f"camelot import error: {e}"
 
 
 def litellm_quick_check() -> Tuple[bool, str]:

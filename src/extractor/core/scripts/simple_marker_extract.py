@@ -13,12 +13,14 @@ create_model_dict = None  # type: ignore
 try:
     from marker.converters.pdf import PdfConverter as _PdfConverter  # type: ignore
     from marker.models import create_model_dict as _create_model_dict  # type: ignore
+
     PdfConverter = _PdfConverter
     create_model_dict = _create_model_dict
 except Exception:
     try:
         from extractor.core.converters.pdf import PdfConverter as _PdfConverter2  # type: ignore
         from extractor.core.models import create_model_dict as _create_model_dict2  # type: ignore
+
         PdfConverter = _PdfConverter2
         create_model_dict = _create_model_dict2
     except Exception:
@@ -58,7 +60,7 @@ def main():
             print("Converting PDF…")
             result, images, metadata = converter(str(pdf_path))
             blocks = getattr(result, "blocks", []) if result is not None else []
-            
+
             # FIX: If Marker returns 0 blocks, force fallback to PyMuPDF
             if not blocks:
                 raise RuntimeError("Marker returned 0 blocks; forcing PyMuPDF fallback")
@@ -75,6 +77,7 @@ def main():
         print(f"WARN: Marker path failed ({e}); falling back to PyMuPDF block extraction")
         try:
             import fitz  # PyMuPDF
+
             doc = fitz.open(pdf_path)
             blocks = []
             for page_idx, page in enumerate(doc):
@@ -86,13 +89,15 @@ def main():
                         text = ""
                         if len(rest) >= 1 and isinstance(rest[0], str):
                             text = rest[0]
-                        blocks.append({
-                            "block_type": "Text",
-                            "page_idx": page_idx,
-                            "page": page_idx,
-                            "text": (text or "").strip(),
-                            "bbox": [float(x0), float(y0), float(x1), float(y1)],
-                        })
+                        blocks.append(
+                            {
+                                "block_type": "Text",
+                                "page_idx": page_idx,
+                                "page": page_idx,
+                                "text": (text or "").strip(),
+                                "bbox": [float(x0), float(y0), float(x1), float(y1)],
+                            }
+                        )
                 except Exception:
                     continue
             output_data = {"blocks": blocks, "metadata": {"source": str(pdf_path)}}
@@ -103,6 +108,7 @@ def main():
         except Exception as e2:
             print(f"ERROR: Fallback extraction failed: {e2}")
             import traceback
+
             traceback.print_exc()
             return 1
 

@@ -24,10 +24,18 @@ OUT = Path("data/results/with_requirements_summary")
 @app.command()
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
-    rc = subprocess.run([
-        "/home/graham/workspace/experiments/extractor/.venv/bin/python",
-        "-m", "src.cli", "extract", str(PDF), str(OUT), "--mode", "accurate",
-    ]).returncode
+    rc = subprocess.run(
+        [
+            "/home/graham/workspace/experiments/extractor/.venv/bin/python",
+            "-m",
+            "src.cli",
+            "extract",
+            str(PDF),
+            str(OUT),
+            "--mode",
+            "accurate",
+        ]
+    ).returncode
     if rc != 0:
         raise SystemExit(rc)
     run_summary = OUT / "run_summary.json"
@@ -38,11 +46,13 @@ def main():
     req_stats = data.get("requirements") or {}
     ok = isinstance(req_stats, dict)
     Path("scripts/artifacts").mkdir(parents=True, exist_ok=True)
-    (Path("scripts/artifacts")/"req_summary_report.json").write_text(json.dumps({"ok": ok, "requirements": req_stats}, indent=2))
+    (Path("scripts/artifacts") / "req_summary_report.json").write_text(
+        json.dumps({"ok": ok, "requirements": req_stats}, indent=2)
+    )
     if not ok:
         raise SystemExit(1)
     print(json.dumps({"ok": ok}, indent=2))
 
+
 if __name__ == "__main__":
     app()
-

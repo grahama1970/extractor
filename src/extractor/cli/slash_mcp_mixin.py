@@ -171,11 +171,11 @@ def add_slash_mcp_commands(
                 # Type mapping
                 param_type = "string"
                 if param.annotation != param.empty:
-                    if param.annotation == int:
+                    if param.annotation is int:
                         param_type = "integer"
-                    elif param.annotation == bool:
+                    elif param.annotation is bool:
                         param_type = "boolean"
-                    elif param.annotation == float:
+                    elif param.annotation is float:
                         param_type = "number"
 
                 parameters[param_name] = {

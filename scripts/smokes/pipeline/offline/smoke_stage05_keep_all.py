@@ -24,7 +24,9 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--tables", required=True, help="Path to 05_tables.json")
     ap.add_argument("--page", type=int, required=True, help="0-based page index to check")
-    ap.add_argument("--min", dest="min_count", type=int, default=2, help="Minimum tables expected on the page")
+    ap.add_argument(
+        "--min", dest="min_count", type=int, default=2, help="Minimum tables expected on the page"
+    )
     args = ap.parse_args()
 
     p = Path(args.tables)
@@ -47,4 +49,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-

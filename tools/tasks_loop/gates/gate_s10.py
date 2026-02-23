@@ -32,7 +32,7 @@ def load_contract(fixture_name: str) -> dict:
             expected="s10.json",
             actual="missing",
             file=str(contract_path),
-            hint="Run: python utils/compile_contracts.py"
+            hint="Run: python utils/compile_contracts.py",
         )
     return json.loads(contract_path.read_text())
 
@@ -41,7 +41,7 @@ def checks(fixture_name: str):
     contract = load_contract(fixture_name)
     expected = contract.get("expected", {})
     expected_sections = expected.get("section_headers")
-    
+
     md_file = MD_DIR / "full_document.md"
     if not md_file.exists():
         raise GateError(
@@ -49,49 +49,52 @@ def checks(fixture_name: str):
             expected="file exists",
             actual="missing",
             file=str(md_file),
-            hint="Run S10"
+            hint="Run S10",
         )
-    
+
     content = md_file.read_text(encoding="utf-8")
-    
+
     if not content.strip():
         raise GateError(
             message="full_document.md is empty",
             expected="non-empty",
             actual="empty",
             file=str(md_file),
-            hint="Check S10 execution"
+            hint="Check S10 execution",
         )
-    
+
     # 1. Verify Structure (Sections)
-    section_headers = re.findall(r'^## .+$', content, re.MULTILINE)
+    section_headers = re.findall(r"^## .+$", content, re.MULTILINE)
     actual_sections = len(section_headers)
-    
+
     if expected_sections is not None and actual_sections != expected_sections:
         raise GateError(
             message="Section header count mismatch",
             expected=expected_sections,
             actual=actual_sections,
             file=str(md_file),
-            hint="Check section export or SPEC.md"
+            hint="Check section export or SPEC.md",
         )
-    
-    print(f"✅ Section headers: {actual_sections}" + (f" == {expected_sections}" if expected_sections else ""))
-    
+
+    print(
+        f"✅ Section headers: {actual_sections}"
+        + (f" == {expected_sections}" if expected_sections else "")
+    )
+
     # 2. Verify Content Fidelity (Specific strings)
     # Check if critical tables/requirements are present in correct order
     # Simplistic check: regex search for headers and IDs
-    
+
     if expected.get("requirements"):
-        req_count = len(re.findall(r'> \*\*\[REQ-.*?\]', content))
+        req_count = len(re.findall(r"> \*\*\[REQ-.*?\]", content))
         exp_req = expected["requirements"]
         if req_count < exp_req:
-             print(f"⚠️  WARNING: Found {req_count} requirements, expected {exp_req}")
+            print(f"⚠️  WARNING: Found {req_count} requirements, expected {exp_req}")
         else:
-             print(f"✅ Requirements found: {req_count} >= {exp_req}")
+            print(f"✅ Requirements found: {req_count} >= {exp_req}")
 
     if expected.get("lean4_proofs_included"):
-        proofs = len(re.findall(r'<details>', content))
+        proofs = len(re.findall(r"<details>", content))
         if proofs == 0:
             print("⚠️  WARNING: Lean4 proofs expected but not found (collapsed details)")
         else:
@@ -103,14 +106,14 @@ def checks(fixture_name: str):
         for s in expected["contains"]:
             if s not in content:
                 missing.append(s)
-        
+
         if missing:
             raise GateError(
                 message=f"Missing expected content strings: {missing}",
                 expected="all strings present",
                 actual=f"missing {len(missing)} strings",
                 file=str(md_file),
-                hint="Check S10 export logic or requirements extraction"
+                hint="Check S10 export logic or requirements extraction",
             )
         print(f"✅ Verified {len(expected['contains'])} expected content strings")
 
@@ -119,22 +122,22 @@ def checks(fixture_name: str):
         print("✅ Requirement Proof Summary table present")
 
     # 4. Check for broken images
-    broken_imgs = re.findall(r'!\[.*?\]\(\s*\)', content)
+    broken_imgs = re.findall(r"!\[.*?\]\(\s*\)", content)
     if broken_imgs:
-         raise GateError(
+        raise GateError(
             message="Broken image links detected",
             expected="valid image paths",
             actual=f"{len(broken_imgs)} broken links",
             file=str(md_file),
-            hint="Check S06/S10 image path logic"
+            hint="Check S06/S10 image path logic",
         )
 
-    print(f"✅ Content structure verified")
+    print("✅ Content structure verified")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Gate S10: Markdown Exporter")
     parser.add_argument("--fixture", required=True, help="Fixture name")
     args = parser.parse_args()
-    
+
     sys.exit(run_gate("S10: Markdown Exporter", lambda: checks(args.fixture)))

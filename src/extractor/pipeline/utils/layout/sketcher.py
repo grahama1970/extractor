@@ -1,25 +1,17 @@
 """
 Layout sketcher core logic extracted from 06b_layout_sketcher.py.
 """
+
+import asyncio
+import hashlib
 import json
 import os
-import re
-import hashlib
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from loguru import logger
 
 from extractor.pipeline.utils.reliability import log_stage_error
-from extractor.pipeline.utils.diagnostics import (
-    get_run_id,
-    iso_now,
-    make_event,
-    snapshot_resources,
-    start_resource_sampler,
-    stop_resource_sampler,
-)
 from extractor.pipeline.steps.scillm_preflight_validator import require_scillm_preflight
 
 EMIT_MERGE_HINTS = os.getenv("STAGE06B_EMIT_MERGE_HINTS", "0").lower() in ("1", "true", "yes", "y")
@@ -31,15 +23,18 @@ VISUAL_PROOF = os.getenv("VISUAL_PROOF", "0").lower() in ("1", "true", "yes", "y
 HEADER_PROPAGATION = True
 STEP_NAME = "06b_layout_sketcher"
 
+
 def _norm(v: float, a: float, b: float) -> float:
     if b <= a:
         return 0.0
     x = (v - a) / (b - a)
     return 0.0 if x < 0 else (1.0 if x > 1 else x)
 
+
 def _grid_bbox(bbox: list[float], page: list[float], grid: int) -> dict[str, int]:
     """Map page bbox → grid cells using half-open contract [x0,x1), [y0,y1)."""
     import math
+
     x0, y0, x1, y1 = bbox or [0.0, 0.0, 0.0, 0.0]
     px0, py0, px1, py1 = page or [0.0, 0.0, 1.0, 1.0]
     nx0 = _norm(float(x0), float(px0), float(px1))
@@ -50,9 +45,12 @@ def _grid_bbox(bbox: list[float], page: list[float], grid: int) -> dict[str, int
     gy0 = max(0, min(grid, int(math.floor(ny0 * grid))))
     gx1 = max(0, min(grid, int(math.ceil(nx1 * grid))))
     gy1 = max(0, min(grid, int(math.ceil(ny1 * grid))))
-    if gx1 <= gx0: gx1 = min(grid, gx0 + 1)
-    if gy1 <= gy0: gy1 = min(grid, gy0 + 1)
+    if gx1 <= gx0:
+        gx1 = min(grid, gx0 + 1)
+    if gy1 <= gy0:
+        gy1 = min(grid, gy0 + 1)
     return {"x0": gx0, "y0": gy0, "x1": gx1, "y1": gy1}
+
 
 def _summ(text: str, limit: int = 80) -> str:
     if not text:
@@ -60,24 +58,31 @@ def _summ(text: str, limit: int = 80) -> str:
     s = " ".join(str(text).split())
     return s if len(s) <= limit else s[: limit - 1] + "…"
 
+
 def _norm_text(s: str) -> str:
     return " ".join((s or "").split())
 
+
 def _text_sha1(s: str) -> str:
-    import hashlib
+
     return hashlib.sha1(_norm_text(s).encode("utf-8")).hexdigest()
+
 
 def _area(b: list[float]) -> float:
     if not b or len(b) != 4:
         return 0.0
     return max(0.0, (b[2] - b[0])) * max(0.0, (b[3] - b[1]))
 
+
 def _aspect(b: list[float]) -> float:
     w = max(1e-6, (b[2] - b[0]))
     h = max(1e-6, (b[3] - b[1]))
     return w / h
 
-def _detect_columns(elements: list[dict[str, Any]], page_bbox: list[float], min_gap_ratio: float = 0.04) -> list[list[float]]:
+
+def _detect_columns(
+    elements: list[dict[str, Any]], page_bbox: list[float], min_gap_ratio: float = 0.04
+) -> list[list[float]]:
     """Detect 1–3 columns deterministically using x-center gaps."""
     pts: list[float] = []
     for e in elements:
@@ -95,9 +100,12 @@ def _detect_columns(elements: list[dict[str, Any]], page_bbox: list[float], min_
     cuts = [i for g, i in gaps if g / page_w >= min_gap_ratio]
     if not cuts:
         return [[page_bbox[0], page_bbox[2]]]
-    bounds: list[float] = [page_bbox[0]] + [(pts[i] + pts[i + 1]) / 2.0 for i in cuts] + [page_bbox[2]]
+    bounds: list[float] = (
+        [page_bbox[0]] + [(pts[i] + pts[i + 1]) / 2.0 for i in cuts] + [page_bbox[2]]
+    )
     cols = [[bounds[j], bounds[j + 1]] for j in range(len(bounds) - 1)]
     return cols[:3]
+
 
 def _assign_cols_and_span(bbox: List[float], columns: List[List[float]]) -> Tuple[List[int], bool]:
     x0, _, x1, _ = [float(v) for v in (bbox or [0, 0, 0, 0])]
@@ -113,9 +121,13 @@ def _assign_cols_and_span(bbox: List[float], columns: List[List[float]]) -> Tupl
     if len(col_ids) >= 2:
         spans = True
     if not col_ids:
-        best = max(range(len(columns)), key=lambda i: max(0.0, min(x1, float(columns[i][1])) - max(x0, float(columns[i][0]))))
+        best = max(
+            range(len(columns)),
+            key=lambda i: max(0.0, min(x1, float(columns[i][1])) - max(x0, float(columns[i][0]))),
+        )
         col_ids = [best]
     return col_ids, spans
+
 
 def _col_id_for(xc: float, columns: list[list[float]]) -> int:
     for i, (a, b) in enumerate(columns):
@@ -123,51 +135,80 @@ def _col_id_for(xc: float, columns: list[list[float]]) -> int:
             return i
     return 0
 
+
 def _iou(a: list[float], b: list[float]) -> float:
     try:
-        ax0, ay0, ax1, ay1 = map(float, a); bx0, by0, bx1, by1 = map(float, b)
+        ax0, ay0, ax1, ay1 = map(float, a)
+        bx0, by0, bx1, by1 = map(float, b)
         ix0, iy0, ix1, iy1 = max(ax0, bx0), max(ay0, by0), min(ax1, bx1), min(ay1, by1)
         inter = max(0.0, ix1 - ix0) * max(0.0, iy1 - iy0)
-        if inter <= 0: return 0.0
-        union = max(1e-9, max(0.0, (ax1 - ax0) * (ay1 - ay0)) + max(0.0, (bx1 - bx0) * (by1 - by0)) - inter)
+        if inter <= 0:
+            return 0.0
+        union = max(
+            1e-9, max(0.0, (ax1 - ax0) * (ay1 - ay0)) + max(0.0, (bx1 - bx0) * (by1 - by0)) - inter
+        )
         return inter / union
     except Exception as exc:
-        log_stage_error(STEP_NAME, exc, {'context': '06b'})
+        log_stage_error(STEP_NAME, exc, {"context": "06b"})
         raise
 
-def _build_flow_stream(elements: list[dict[str, Any]], columns_grid: list[dict[str, int]], *, exclude_header_footer: bool, place_floats: str = "inline") -> str:
+
+def _build_flow_stream(
+    elements: list[dict[str, Any]],
+    columns_grid: list[dict[str, int]],
+    *,
+    exclude_header_footer: bool,
+    place_floats: str = "inline",
+) -> str:
     lines: list[str] = ["[SECTION START]"]
     col_count = len(columns_grid) if columns_grid else 1
     lines.append(f"[COLUMNS {col_count}]")
     by_col: dict[int, list[dict[str, Any]]] = {}
     for e in elements:
-        if exclude_header_footer and e.get("header_footer_candidate"): continue
+        if exclude_header_footer and e.get("header_footer_candidate"):
+            continue
         by_col.setdefault(int(e.get("column_id", 0)), []).append(e)
+
     def _emit_elem(e):
         gid = e.get("id") or "?"
-        if e.get("kind") == "text": return f"[PARA id={gid}] {e.get('summary','')}"
-        if e.get("kind") == "table": return f"[TABLE id={gid} header=\"{e.get('summary', '').replace(chr(10), ' ')}\"]"
-        if e.get("kind") == "figure": return f"[FIGURE id={gid} cap=\"{e.get('summary', '').replace(chr(10), ' ')}\"]" + (f" [ANCHOR={e.get('anchor_element_id')} dist={e.get('anchor_distance')}]" if e.get('anchor_element_id') else "")
+        if e.get("kind") == "text":
+            return f"[PARA id={gid}] {e.get('summary','')}"
+        if e.get("kind") == "table":
+            return f"[TABLE id={gid} header=\"{e.get('summary', '').replace(chr(10), ' ')}\"]"
+        if e.get("kind") == "figure":
+            return f"[FIGURE id={gid} cap=\"{e.get('summary', '').replace(chr(10), ' ')}\"]" + (
+                f" [ANCHOR={e.get('anchor_element_id')} dist={e.get('anchor_distance')}]"
+                if e.get("anchor_element_id")
+                else ""
+            )
         return f"[ELEM id={gid} kind={e.get('kind')}]"
-    if place_floats not in {"inline", "sidebar", "append"}: place_floats = "inline"
+
+    if place_floats not in {"inline", "sidebar", "append"}:
+        place_floats = "inline"
     for cidx in sorted(by_col):
         lines.append(f"[COL {cidx} START]")
         col_elems = by_col[cidx]
         if place_floats == "inline":
-            for e in col_elems: lines.append(_emit_elem(e))
+            for e in col_elems:
+                lines.append(_emit_elem(e))
         elif place_floats == "sidebar":
             for e in col_elems:
-                if e.get("kind") == "text": lines.append(_emit_elem(e))
+                if e.get("kind") == "text":
+                    lines.append(_emit_elem(e))
             for e in col_elems:
-                if e.get("kind") in ("table", "figure"): lines.append(_emit_elem(e))
+                if e.get("kind") in ("table", "figure"):
+                    lines.append(_emit_elem(e))
         else:
             for e in col_elems:
-                if e.get("kind") not in ("table", "figure"): lines.append(_emit_elem(e))
+                if e.get("kind") not in ("table", "figure"):
+                    lines.append(_emit_elem(e))
             for e in col_elems:
-                if e.get("kind") in ("table", "figure"): lines.append(_emit_elem(e))
+                if e.get("kind") in ("table", "figure"):
+                    lines.append(_emit_elem(e))
         lines.append(f"[COL {cidx} END]")
     lines.append("[SECTION END]")
     return "\n".join(lines)
+
 
 def _collect_page_index_from_sections(sections: List[dict]) -> Dict[int, Dict[str, Any]]:
     page_index: Dict[int, Dict[str, Any]] = {}
@@ -175,8 +216,11 @@ def _collect_page_index_from_sections(sections: List[dict]) -> Dict[int, Dict[st
         for b in sec.get("blocks") or []:
             page = int(b.get("page") or b.get("page_idx") or b.get("page_index") or -1)
             bbox = b.get("bbox") or []
-            if page < 0 or len(bbox) != 4: continue
-            rec = page_index.setdefault(page, {"text_bboxes": [], "page_bbox": [None, None, None, None]})
+            if page < 0 or len(bbox) != 4:
+                continue
+            rec = page_index.setdefault(
+                page, {"text_bboxes": [], "page_bbox": [None, None, None, None]}
+            )
             rec["text_bboxes"].append([float(x) for x in bbox])
             pb = rec["page_bbox"]
             x0, y0, x1, y1 = [float(x) for x in bbox]
@@ -185,25 +229,55 @@ def _collect_page_index_from_sections(sections: List[dict]) -> Dict[int, Dict[st
             pb[2] = x1 if pb[2] is None else max(pb[2], x1)
             pb[3] = y1 if pb[3] is None else max(pb[3], y1)
     for _, rec in page_index.items():
-        if any(v is None for v in rec["page_bbox"]): rec["page_bbox"] = [0.0, 0.0, 1.0, 1.0]
+        if any(v is None for v in rec["page_bbox"]):
+            rec["page_bbox"] = [0.0, 0.0, 1.0, 1.0]
     return page_index
 
-def _pymupdf_fill_missing_pages(page_index: Dict[int, Dict[str, Any]], source_pdf: Optional[Path]) -> None:
-    if not os.getenv("STAGE06B_PYMUPDF_FALLBACK", "").lower() in ("1", "true", "yes", "y") or not source_pdf or not source_pdf.exists(): return
+
+def _pymupdf_fill_missing_pages(
+    page_index: Dict[int, Dict[str, Any]], source_pdf: Optional[Path]
+) -> None:
+    if (
+        os.getenv("STAGE06B_PYMUPDF_FALLBACK", "").lower() not in ("1", "true", "yes", "y")
+        or not source_pdf
+        or not source_pdf.exists()
+    ):
+        return
     try:
         import fitz
+
         doc = fitz.open(str(source_pdf))
         for pno in range(len(doc)):
-            rec = page_index.setdefault(pno, {"text_bboxes": [], "page_bbox": [0.0, 0.0, doc[pno].rect.width, doc[pno].rect.height]})
-            if rec.get("text_bboxes"): continue
+            rec = page_index.setdefault(
+                pno,
+                {
+                    "text_bboxes": [],
+                    "page_bbox": [0.0, 0.0, doc[pno].rect.width, doc[pno].rect.height],
+                },
+            )
+            if rec.get("text_bboxes"):
+                continue
             for blk in doc[pno].get_text("blocks"):
                 if len(blk) >= 5 and blk[4].strip():
-                    rec["text_bboxes"].append([float(blk[0]), float(blk[1]), float(blk[2]), float(blk[3])])
-            if not rec.get("page_bbox"): rec["page_bbox"] = [0.0, 0.0, float(doc[pno].rect.width), float(doc[pno].rect.height)]
+                    rec["text_bboxes"].append(
+                        [float(blk[0]), float(blk[1]), float(blk[2]), float(blk[3])]
+                    )
+            if not rec.get("page_bbox"):
+                rec["page_bbox"] = [
+                    0.0,
+                    0.0,
+                    float(doc[pno].rect.width),
+                    float(doc[pno].rect.height),
+                ]
         doc.close()
-    except Exception as exc: log_stage_error(STEP_NAME, exc, {'context': '06b'}); raise
+    except Exception as exc:
+        log_stage_error(STEP_NAME, exc, {"context": "06b"})
+        raise
 
-def _build_page_layout(page_index: Dict[int, Dict[str, Any]], *, min_gap_ratio: float, grid: int) -> Dict[int, Dict[str, Any]]:
+
+def _build_page_layout(
+    page_index: Dict[int, Dict[str, Any]], *, min_gap_ratio: float, grid: int
+) -> Dict[int, Dict[str, Any]]:
     layout: Dict[int, Dict[str, Any]] = {}
     for pno, rec in page_index.items():
         page_bbox: List[float] = rec.get("page_bbox") or [0.0, 0.0, 1.0, 1.0]
@@ -214,8 +288,14 @@ def _build_page_layout(page_index: Dict[int, Dict[str, Any]], *, min_gap_ratio: 
             gb = _grid_bbox([cx0, page_bbox[1], cx1, page_bbox[3]], page_bbox, grid)
             grid_cols.append({"id": idx, "x0": gb["x0"], "x1": gb["x1"]})
         conf = 0.6 if len(cols) <= 1 else 0.85
-        layout[pno] = {"page_bbox": page_bbox, "columns": cols, "grid_columns": grid_cols, "conf": {"columns": conf, "source": "marker"}}
+        layout[pno] = {
+            "page_bbox": page_bbox,
+            "columns": cols,
+            "grid_columns": grid_cols,
+            "conf": {"columns": conf, "source": "marker"},
+        }
     return layout
+
 
 def _build_section_sketch(
     sec: dict[str, Any],
@@ -236,14 +316,19 @@ def _build_section_sketch(
     if page_layout is None:
         page_layout = {}
     first_page_idx = int(sec.get("page_start", sec.get("page_index", 0)) or 0)
-    page_bbox = (page_layout.get(first_page_idx, {}) or {}).get("page_bbox") or sec.get("bbox") or sec.get("page_bbox") or [0, 0, 1, 1]
+    page_bbox = (
+        (page_layout.get(first_page_idx, {}) or {}).get("page_bbox")
+        or sec.get("bbox")
+        or sec.get("page_bbox")
+        or [0, 0, 1, 1]
+    )
     section_page_idx = int(sec.get("page_index", first_page_idx))
 
     raw_elements: list[dict[str, Any]] = []
     # Text blocks
     for b in sec.get("blocks") or []:
         bbox = b.get("bbox") or [0, 0, 0, 0]
-        text = (b.get("text") or "")
+        text = b.get("text") or ""
         raw_elements.append(
             {
                 "kind": "text",
@@ -252,7 +337,9 @@ def _build_section_sketch(
                 "grid_bbox": _grid_bbox(bbox, page_bbox, grid),
                 "summary": _summ(text, summary_limit),
                 "text_sha1": _text_sha1(text),
-                "page": int(b.get("page") or b.get("page_idx") or b.get("page_index") or section_page_idx),
+                "page": int(
+                    b.get("page") or b.get("page_idx") or b.get("page_index") or section_page_idx
+                ),
                 "area": _area(bbox),
                 "aspect": _aspect(bbox),
                 "char_count": len(text or ""),
@@ -260,7 +347,7 @@ def _build_section_sketch(
             }
         )
     # Tables from Stage 05 (associated via section_id)
-    for t in (tables_for_section or []):
+    for t in tables_for_section or []:
         bbox = t.get("bbox") or [0, 0, 0, 0]
         pm = t.get("pandas_metrics") or {}
         camel = t.get("camelot_metrics") or {}
@@ -292,41 +379,46 @@ def _build_section_sketch(
                     if len([c for c in cand if c]) >= 3:
                         hdr = cand
         except Exception as exc:
-            log_stage_error(STEP_NAME, exc, {'context': '06b'})
+            log_stage_error(STEP_NAME, exc, {"context": "06b"})
             raise
         hdr_text = " | ".join([str(h) for h in hdr])
+
         # Normalize header string for logical grouping
         def _norm_hdr(h: str) -> str:
             s = " ".join(str(h or "").strip().lower().split())
             return s.replace(" ", "_")
+
         header_norm = "|".join([_norm_hdr(h) for h in hdr]) if hdr else ""
         shp = pm.get("shape") or [0, 0]
         try:
             rows = int(shp[0] or 0)
             cols = int(shp[1] or 0)
         except Exception as exc:
-            log_stage_error(STEP_NAME, exc, {'context': '06b'})
+            log_stage_error(STEP_NAME, exc, {"context": "06b"})
             raise
         try:
             density = float(pm.get("data_density") or 0.0)
         except Exception as exc:
-            log_stage_error(STEP_NAME, exc, {'context': '06b'})
+            log_stage_error(STEP_NAME, exc, {"context": "06b"})
             raise
         try:
             camel_acc = float(camel.get("accuracy") or 0.0)
         except Exception as exc:
-            log_stage_error(STEP_NAME, exc, {'context': '06b'})
+            log_stage_error(STEP_NAME, exc, {"context": "06b"})
             raise
         try:
             camel_ws = float(camel.get("whitespace") or 0.0)
         except Exception as exc:
-            log_stage_error(STEP_NAME, exc, {'context': '06b'})
+            log_stage_error(STEP_NAME, exc, {"context": "06b"})
             raise
         frag = float(t.get("fragmentation_score") or 0.0)
         total_cells = int(pm.get("total_cells") or 0)
         non_empty_cells = int(pm.get("non_empty_cells") or 0)
         import hashlib as _hl
-        logical_table_id = f"lt_{_hl.sha1(header_norm.encode('utf-8')).hexdigest()[:10]}" if header_norm else None
+
+        logical_table_id = (
+            f"lt_{_hl.sha1(header_norm.encode('utf-8')).hexdigest()[:10]}" if header_norm else None
+        )
         raw_elements.append(
             {
                 "kind": "table",
@@ -334,7 +426,9 @@ def _build_section_sketch(
                 "bbox": bbox,
                 "grid_bbox": _grid_bbox(bbox, page_bbox, grid),
                 "summary": _summ(hdr_text, summary_limit),
-                "page": int(t.get("page") or t.get("page_idx") or t.get("page_index") or section_page_idx),
+                "page": int(
+                    t.get("page") or t.get("page_idx") or t.get("page_index") or section_page_idx
+                ),
                 "area": _area(bbox),
                 "aspect": _aspect(bbox),
                 "confidence": float((t.get("confidence") or pm.get("data_density") or 1.0)),
@@ -355,7 +449,7 @@ def _build_section_sketch(
             }
         )
     # Figures from Stage 06
-    for f in (figures_for_section or []):
+    for f in figures_for_section or []:
         bbox = f.get("bbox") or [0, 0, 0, 0]
         cap = f.get("caption") or f.get("ai_description") or ""
         raw_elements.append(
@@ -365,7 +459,9 @@ def _build_section_sketch(
                 "bbox": bbox,
                 "grid_bbox": _grid_bbox(bbox, page_bbox, grid),
                 "summary": _summ(cap, summary_limit),
-                "page": int(f.get("page") or f.get("page_idx") or f.get("page_index") or section_page_idx),
+                "page": int(
+                    f.get("page") or f.get("page_idx") or f.get("page_index") or section_page_idx
+                ),
                 "area": _area(bbox),
                 "aspect": _aspect(bbox),
                 "llm_assist": bool((f.get("ai_description") or "").strip()),
@@ -404,16 +500,18 @@ def _build_section_sketch(
             y1 = float(b[3])
             e["header_footer_candidate"] = bool(y1 <= top_band or y0 >= bot_band)
         except Exception as exc:
-            log_stage_error(STEP_NAME, exc, {'context': '06b'})
+            log_stage_error(STEP_NAME, exc, {"context": "06b"})
             raise
         enriched.append(e)
-    enriched.sort(key=lambda x: (
-        int(x.get("column_id", 0)),
-        round(float(x.get("_top", 0.0)), 3),
-        round(float(x.get("_left", 0.0)), 3),
-        round(float(x.get("_neg_area", 0.0)), 1),
-        str(x.get("id", "")),
-    ))
+    enriched.sort(
+        key=lambda x: (
+            int(x.get("column_id", 0)),
+            round(float(x.get("_top", 0.0)), 3),
+            round(float(x.get("_left", 0.0)), 3),
+            round(float(x.get("_neg_area", 0.0)), 1),
+            str(x.get("id", "")),
+        )
+    )
     for i, e in enumerate(enriched):
         e["reading_order"] = i
         e.pop("_top", None)
@@ -425,7 +523,7 @@ def _build_section_sketch(
             prefix = {"text": "txt", "table": "tbl", "figure": "fig"}.get(e.get("kind"), "blk")
             e["sketch_id"] = f"{sid}-{prefix}-{i:03d}"
         except Exception as exc:
-            log_stage_error(STEP_NAME, exc, {'context': '06b'})
+            log_stage_error(STEP_NAME, exc, {"context": "06b"})
             raise
     # Overlap flag via pairwise IoU
     try:
@@ -440,7 +538,7 @@ def _build_section_sketch(
                     break
             a["overlapped"] = overlapped
     except Exception as exc:
-        log_stage_error(STEP_NAME, exc, {'context': '06b'})
+        log_stage_error(STEP_NAME, exc, {"context": "06b"})
         raise
     # Anchor floats (figures/tables) to nearest text
     texts = [e for e in enriched if e.get("kind") == "text"]
@@ -466,7 +564,14 @@ def _build_section_sketch(
     top_text = next((e for e in enriched if e.get("kind") == "text" and e.get("summary")), None)
     first_table = next((e for e in enriched if e.get("kind") == "table" and e.get("summary")), None)
     qs = " | ".join(
-        [s for s in [top_text.get("summary", "") if top_text else "", first_table.get("summary", "") if first_table else ""] if s]
+        [
+            s
+            for s in [
+                top_text.get("summary", "") if top_text else "",
+                first_table.get("summary", "") if first_table else "",
+            ]
+            if s
+        ]
     )
 
     # Columns expressed in grid units for downstream uniformity (use first page of section)
@@ -481,23 +586,28 @@ def _build_section_sketch(
     pages_present = sorted({int(e.get("page", section_page_idx)) for e in enriched})
     # Section ordering confidence: mean of per-page column confidence where available
     try:
-        conf_vals = [float((page_layout.get(p, {}).get("conf") or {}).get("columns", 0.0)) for p in pages_present]
+        conf_vals = [
+            float((page_layout.get(p, {}).get("conf") or {}).get("columns", 0.0))
+            for p in pages_present
+        ]
         ordering_conf = float(sum(conf_vals) / max(1, len(conf_vals))) if conf_vals else 0.6
     except Exception as exc:
-        log_stage_error(STEP_NAME, exc, {'context': '06b'})
+        log_stage_error(STEP_NAME, exc, {"context": "06b"})
         raise
     # Optional: table merge hints (non-binding)
     table_merge_hints: List[Dict[str, Any]] = []
     # Always compute merge hints for local propagation; emission to JSON remains gated by emit_merge_hints.
     if tables_for_section and len(tables_for_section) > 1:
+
         def _rows_cols(t: Dict[str, Any]) -> Tuple[int, int]:
             m = t.get("pandas_metrics") or {}
             shp = m.get("shape") or [0, 0]
             try:
                 return int(shp[0] or 0), int(shp[1] or 0)
             except Exception as exc:
-                log_stage_error(STEP_NAME, exc, {'context': '06b'})
+                log_stage_error(STEP_NAME, exc, {"context": "06b"})
                 raise
+
         def _h_iou(a: List[float], b: List[float]) -> float:
             try:
                 ax0, _, ax1, _ = a
@@ -506,9 +616,13 @@ def _build_section_sketch(
                 uni = max(float(ax1), float(bx1)) - min(float(ax0), float(bx0))
                 return float(inter / uni) if uni > 0 else 0.0
             except Exception as exc:
-                log_stage_error(STEP_NAME, exc, {'context': '06b'})
+                log_stage_error(STEP_NAME, exc, {"context": "06b"})
                 raise
-        tabs = sorted(list(tables_for_section), key=lambda t: (int(t.get("page_index", 0) or 0), int(t.get("table_index", 0) or 0)))
+
+        tabs = sorted(
+            list(tables_for_section),
+            key=lambda t: (int(t.get("page_index", 0) or 0), int(t.get("table_index", 0) or 0)),
+        )
         for i in range(len(tabs)):
             for j in range(i + 1, len(tabs)):
                 t1, t2 = tabs[i], tabs[j]
@@ -524,18 +638,33 @@ def _build_section_sketch(
                 iou = _h_iou(t1.get("bbox", []) or [0, 0, 0, 0], t2.get("bbox", []) or [0, 0, 0, 0])
                 if iou < 0.2:
                     continue
-                header_body = (r1 == 1 and r2 >= 2)
+                header_body = r1 == 1 and r2 >= 2
                 density1 = float((t1.get("pandas_metrics") or {}).get("data_density") or 0.0)
                 density2 = float((t2.get("pandas_metrics") or {}).get("data_density") or 0.0)
-                conf = 0.5 + 0.3 * iou + 0.1 * (1.0 if header_body else 0.0) + 0.1 * (1.0 if abs(density1 - density2) <= 0.2 else 0.0)
-                table_merge_hints.append({
-                    "group_id": f"G_tbl_{t1.get('table_index')}_{t2.get('table_index')}",
-                    "tables": [t1.get("id") or f"tbl_{t1.get('table_index')}", t2.get("id") or f"tbl_{t2.get('table_index')}"],
-                    "reason": ["same_columns", "adjacent_pages_or_same", f"h_iou>={iou:.2f}"] + (["header_body"] if header_body else []),
-                    "scores": {"h_iou": round(iou, 2), "density_compat": round(1.0 - abs(density1 - density2), 2)},
-                    "header_body": header_body,
-                    "conf": round(min(0.95, conf), 2),
-                })
+                conf = (
+                    0.5
+                    + 0.3 * iou
+                    + 0.1 * (1.0 if header_body else 0.0)
+                    + 0.1 * (1.0 if abs(density1 - density2) <= 0.2 else 0.0)
+                )
+                table_merge_hints.append(
+                    {
+                        "group_id": f"G_tbl_{t1.get('table_index')}_{t2.get('table_index')}",
+                        "tables": [
+                            t1.get("id") or f"tbl_{t1.get('table_index')}",
+                            t2.get("id") or f"tbl_{t2.get('table_index')}",
+                        ],
+                        "reason": ["same_columns", "adjacent_pages_or_same", f"h_iou>={iou:.2f}"]
+                        + (["header_body"] if header_body else []),
+                        "scores": {
+                            "h_iou": round(iou, 2),
+                            "density_compat": round(1.0 - abs(density1 - density2), 2),
+                        },
+                        "header_body": header_body,
+                        "conf": round(min(0.95, conf), 2),
+                    }
+                )
+
     # Helper: build a compact, instructive DSL (plain text) for prompts
     def _build_instructive_dsl(
         sec_id: str,
@@ -556,15 +685,13 @@ def _build_section_sketch(
             if len(cols) >= 2:
                 px0, py0, px1, py1 = first_page_bbox
                 bands = []
-                for (cx0, cx1) in cols:
+                for cx0, cx1 in cols:
                     a = (float(cx0) - px0) / max(1e-6, (px1 - px0))
                     b = (float(cx1) - px0) / max(1e-6, (px1 - px0))
                     bands.append(f"{a:.2f}–{b:.2f}")
-                lines.append(
-                    f"Columns: {len(cols)} bands " + ", ".join(bands)
-                )
+                lines.append(f"Columns: {len(cols)} bands " + ", ".join(bands))
         except Exception as exc:
-            log_stage_error(STEP_NAME, exc, {'context': '06b'})
+            log_stage_error(STEP_NAME, exc, {"context": "06b"})
             raise
         # Flow lines (reading order already assigned)
         for i, e in enumerate(elements_sorted, start=1):
@@ -575,7 +702,7 @@ def _build_section_sketch(
             hint_src = (e.get("summary") or "").replace("\n", " ")
             hint = _summ(hint_src, 120)
             if k == "table":
-                m = (e.get("metrics") or {})
+                m = e.get("metrics") or {}
                 rows, cols = int(m.get("rows", 0)), int(m.get("cols", 0))
                 den = m.get("density")
                 acc = m.get("camelot_acc")
@@ -583,24 +710,24 @@ def _build_section_sketch(
                 lt = e.get("logical_table_id") or ""
                 title_hint = (e.get("title_hint") or "").strip()
                 lines.append(
-                    f"{i}) id={sid} type=table page={pg} bbox={bb} header_norm=\"{hnorm}\" logical_table_id={lt} meta(shape={rows}x{cols},density={den},camelot_acc={acc}) title_hint=\"{_summ(title_hint,80)}\" hint=\"{hint}\""
+                    f'{i}) id={sid} type=table page={pg} bbox={bb} header_norm="{hnorm}" logical_table_id={lt} meta(shape={rows}x{cols},density={den},camelot_acc={acc}) title_hint="{_summ(title_hint,80)}" hint="{hint}"'
                 )
             elif k == "figure":
-                lines.append(
-                    f"{i}) id={sid} type=figure page={pg} bbox={bb} hint=\"{hint}\""
-                )
+                lines.append(f'{i}) id={sid} type=figure page={pg} bbox={bb} hint="{hint}"')
             else:
                 # paragraph/list hints; mark too-short and coalesce group when applicable
                 try:
-                    too_short = bool(int(e.get("char_count", 0)) < 40 and (float(bb[3])-float(bb[1])) <= 20)
+                    too_short = bool(
+                        int(e.get("char_count", 0)) < 40 and (float(bb[3]) - float(bb[1])) <= 20
+                    )
                 except Exception as exc:
-                    log_stage_error(STEP_NAME, exc, {'context': '06b'})
+                    log_stage_error(STEP_NAME, exc, {"context": "06b"})
                     raise
                 cg = e.get("coalesce_group")
                 cg_part = f" coalesce_group={cg}" if cg else ""
                 ts_part = " too_short=1" if too_short else ""
                 lines.append(
-                    f"{i}) id={sid} type=paragraph page={pg} bbox={bb}{ts_part}{cg_part} hint=\"{hint}\""
+                    f'{i}) id={sid} type=paragraph page={pg} bbox={bb}{ts_part}{cg_part} hint="{hint}"'
                 )
         return "\n".join(lines)
 
@@ -636,18 +763,23 @@ def _build_section_sketch(
 
     sec_bbox_union = _union_bbox(enriched)
     pw_start, pw_end = _page_window(enriched)
-    first_p = sorted({int(e.get("page", section_page_idx)) for e in enriched})[0] if enriched else section_page_idx
+    first_p = (
+        sorted({int(e.get("page", section_page_idx)) for e in enriched})[0]
+        if enriched
+        else section_page_idx
+    )
     first_cols = columns_by_page.get(first_p) or [[page_bbox[0], page_bbox[2]]]
     # Heuristic gutter estimate
     try:
         if len(first_cols) >= 2:
-            gaps = [first_cols[i+1][0] - first_cols[i][1] for i in range(len(first_cols)-1)]
+            gaps = [first_cols[i + 1][0] - first_cols[i][1] for i in range(len(first_cols) - 1)]
             gutter = max(0, int(min(gaps)))
         else:
             gutter = 0
     except Exception as exc:
-        log_stage_error(STEP_NAME, exc, {'context': '06b'})
+        log_stage_error(STEP_NAME, exc, {"context": "06b"})
         raise
+
     def _obj_to_v2(e: dict[str, Any]) -> dict[str, Any]:
         sid = e.get("sketch_id") or e.get("id")
         out: dict[str, Any] = {
@@ -663,53 +795,61 @@ def _build_section_sketch(
             # too_short heuristic (persist)
             try:
                 bb = out["bbox"]
-                too_short = bool(int(e.get("char_count", 0)) < 40 and (float(bb[3]) - float(bb[1])) <= 20)
+                too_short = bool(
+                    int(e.get("char_count", 0)) < 40 and (float(bb[3]) - float(bb[1])) <= 20
+                )
             except Exception as exc:
-                log_stage_error(STEP_NAME, exc, {'context': '06b'})
+                log_stage_error(STEP_NAME, exc, {"context": "06b"})
                 raise
-            out.update({
-                "reflow_hint": True,
-                "too_short": bool(too_short),
-                "text_preview": _summ(e.get("summary") or "", 160),
-            })
+            out.update(
+                {
+                    "reflow_hint": True,
+                    "too_short": bool(too_short),
+                    "text_preview": _summ(e.get("summary") or "", 160),
+                }
+            )
             # refs
             r = refs_map.get(e.get("id")) or refs_map.get(sid) or []
             if r:
                 out["refs"] = r
         elif e.get("kind") == "table":
-            m = (e.get("metrics") or {})
-            out.update({
-                "title_hint": (e.get("title_hint") or ""),
-                "header_norm": e.get("header_norm") or "",
-                "rows": int(m.get("rows", 0)),
-                "cols": int(m.get("cols", 0)),
-                "logical_table_id": e.get("logical_table_id") or "",
-                "continued": False,
-                "merge": False,
-                # Back-compat quick fields
-                "density": m.get("data_density"),
-                "camelot_acc": m.get("camelot_acc"),
-                # Rich metrics for smarter prompts/ops
-                "metrics": {
-                    "data_density": m.get("data_density"),
-                    "total_cells": m.get("total_cells"),
-                    "non_empty_cells": m.get("non_empty_cells"),
+            m = e.get("metrics") or {}
+            out.update(
+                {
+                    "title_hint": (e.get("title_hint") or ""),
+                    "header_norm": e.get("header_norm") or "",
+                    "rows": int(m.get("rows", 0)),
+                    "cols": int(m.get("cols", 0)),
+                    "logical_table_id": e.get("logical_table_id") or "",
+                    "continued": False,
+                    "merge": False,
+                    # Back-compat quick fields
+                    "density": m.get("data_density"),
                     "camelot_acc": m.get("camelot_acc"),
-                    "camelot_whitespace": m.get("camelot_whitespace"),
-                    "fragmentation": m.get("fragmentation"),
-                },
-            })
+                    # Rich metrics for smarter prompts/ops
+                    "metrics": {
+                        "data_density": m.get("data_density"),
+                        "total_cells": m.get("total_cells"),
+                        "non_empty_cells": m.get("non_empty_cells"),
+                        "camelot_acc": m.get("camelot_acc"),
+                        "camelot_whitespace": m.get("camelot_whitespace"),
+                        "fragmentation": m.get("fragmentation"),
+                    },
+                }
+            )
             try:
                 if out.get("page") is not None and out.get("page_index") is None:
                     out["page_index"] = int(out.get("page"))
             except Exception as exc:
-                log_stage_error(STEP_NAME, exc, {'context': '06b'})
+                log_stage_error(STEP_NAME, exc, {"context": "06b"})
                 raise
         elif e.get("kind") == "figure":
-            out.update({
-                "caption_hint": _summ(e.get("summary") or "", 160),
-                "desc_hint": _summ(e.get("summary") or "", 160),
-            })
+            out.update(
+                {
+                    "caption_hint": _summ(e.get("summary") or "", 160),
+                    "desc_hint": _summ(e.get("summary") or "", 160),
+                }
+            )
         return out
 
     def _round_bbox(b):
@@ -717,8 +857,9 @@ def _build_section_sketch(
             x0, y0, x1, y1 = [float(x) for x in b]
             return [round(x0, 2), round(y0, 2), round(x1, 2), round(y1, 2)]
         except Exception as exc:
-            log_stage_error(STEP_NAME, exc, {'context': '06b'})
+            log_stage_error(STEP_NAME, exc, {"context": "06b"})
             raise
+
     # Round bbox and trim noisy metrics for token efficiency
     objects_v2 = []
     seen_ids = set()
@@ -745,106 +886,122 @@ def _build_section_sketch(
         objects_v2.append(o)
     # If header/body merge hints exist, propagate header_norm/logical_table_id
     try:
-        if HEADER_PROPAGATION and 'table_merge_hints' in locals() and table_merge_hints:
+        if HEADER_PROPAGATION and "table_merge_hints" in locals() and table_merge_hints:
             by_id: Dict[str, dict] = {}
             for o in objects_v2:
                 try:
-                    oid = str(o.get('id'))
+                    oid = str(o.get("id"))
                     by_id[oid] = o
                 except Exception as exc:
-                    log_stage_error(STEP_NAME, exc, {'context': '06b'})
+                    log_stage_error(STEP_NAME, exc, {"context": "06b"})
                     raise
-            import re as _re
-            for hint in (table_merge_hints or []):
+
+            for hint in table_merge_hints or []:
                 try:
-                    tlist = hint.get('tables') or []
+                    tlist = hint.get("tables") or []
                     if len(tlist) != 2:
                         continue
                     h_id, b_id = str(tlist[0]), str(tlist[1])
-                    h = by_id.get(h_id); b = by_id.get(b_id)
+                    h = by_id.get(h_id)
+                    b = by_id.get(b_id)
                     if not (h and b):
                         continue
-                    hnorm = h.get('header_norm')
+                    hnorm = h.get("header_norm")
                     if not hnorm:
                         continue
                     # Detect generic body header like "0|1|2|3|4"
-                    bnorm = b.get('header_norm') or ""
-                    is_generic = bool(bnorm) and all(tok.isdigit() for tok in bnorm.split('|'))
+                    bnorm = b.get("header_norm") or ""
+                    is_generic = bool(bnorm) and all(tok.isdigit() for tok in bnorm.split("|"))
                     # Also propagate when columns match and pages are adjacent with reasonable horizontal alignment.
-                    reason = hint.get('reason') or []
-                    scores = hint.get('scores') or {}
+                    reason = hint.get("reason") or []
+                    scores = hint.get("scores") or {}
                     try:
-                        hiou = float(scores.get('h_iou') or 0.0)
+                        hiou = float(scores.get("h_iou") or 0.0)
                     except Exception as exc:
-                        log_stage_error(STEP_NAME, exc, {'context': '06b'})
+                        log_stage_error(STEP_NAME, exc, {"context": "06b"})
                         raise
-                    same_cols = ('same_columns' in reason)
-                    adjacent = any('adjacent' in str(r) for r in reason)
-                    should_propagate = bool(hint.get('header_body') or is_generic or (same_cols and adjacent and hiou >= 0.2))
+                    same_cols = "same_columns" in reason
+                    adjacent = any("adjacent" in str(r) for r in reason)
+                    should_propagate = bool(
+                        hint.get("header_body")
+                        or is_generic
+                        or (same_cols and adjacent and hiou >= 0.2)
+                    )
                     # Propagate if flagged as header_body OR when body header looks generic OR heuristic matches
                     if should_propagate:
-                        b['header_norm'] = hnorm
+                        b["header_norm"] = hnorm
                     # Recompute shared logical_table_id
                     import hashlib as _hl
+
                     lid = f"lt_{_hl.sha1(hnorm.encode('utf-8')).hexdigest()[:10]}"
-                    h['logical_table_id'] = lid
-                    b['logical_table_id'] = lid
+                    h["logical_table_id"] = lid
+                    b["logical_table_id"] = lid
                 except Exception as exc:
-                    log_stage_error(STEP_NAME, exc, {'context': '06b'})
+                    log_stage_error(STEP_NAME, exc, {"context": "06b"})
                     raise
     except Exception as exc:
-        log_stage_error(STEP_NAME, exc, {'context': '06b'})
+        log_stage_error(STEP_NAME, exc, {"context": "06b"})
         raise
     # Secondary deterministic propagation: header (rows==1, non-generic header_norm) → body on next page
     # when columns match and horizontal IoU is reasonable. This does not depend on merge_hints.
     try:
         if not HEADER_PROPAGATION:
             raise RuntimeError("header propagation disabled")
+
         def _is_generic_hdr(h: str) -> bool:
-            return bool(h) and all(tok.isdigit() for tok in h.split('|'))
+            return bool(h) and all(tok.isdigit() for tok in h.split("|"))
+
         def _h_iou_bbox(a: list[float], b: list[float]) -> float:
             try:
-                ax0, _, ax1, _ = a; bx0, _, bx1, _ = b
+                ax0, _, ax1, _ = a
+                bx0, _, bx1, _ = b
                 inter = max(0.0, min(float(ax1), float(bx1)) - max(float(ax0), float(bx0)))
                 uni = max(float(ax1), float(bx1)) - min(float(ax0), float(bx0))
                 return float(inter / uni) if uni > 0 else 0.0
             except Exception as exc:
-                log_stage_error(STEP_NAME, exc, {'context': '06b'})
+                log_stage_error(STEP_NAME, exc, {"context": "06b"})
                 raise
-        tables_v2 = [o for o in objects_v2 if o.get('type') == 'table']
+
+        tables_v2 = [o for o in objects_v2 if o.get("type") == "table"]
         by_page: Dict[int, List[dict]] = {}
         for o in tables_v2:
             try:
-                by_page.setdefault(int(o.get('page', section_page_idx)), []).append(o)
+                by_page.setdefault(int(o.get("page", section_page_idx)), []).append(o)
             except Exception as exc:
-                log_stage_error(STEP_NAME, exc, {'context': '06b'})
+                log_stage_error(STEP_NAME, exc, {"context": "06b"})
                 raise
         for p, hdrs in by_page.items():
             nxt = by_page.get(p + 1) or []
             for h in hdrs:
                 try:
-                    if int(h.get('rows', 0)) != 1:
+                    if int(h.get("rows", 0)) != 1:
                         continue
-                    hn = (h.get('header_norm') or '').strip()
+                    hn = (h.get("header_norm") or "").strip()
                     if not hn or _is_generic_hdr(hn):
                         continue
-                    cols_h = int(h.get('cols', 0))
+                    cols_h = int(h.get("cols", 0))
                     for b in nxt:
-                        if int(b.get('cols', 0)) != cols_h:
+                        if int(b.get("cols", 0)) != cols_h:
                             continue
-                        if _h_iou_bbox(h.get('bbox') or [0,0,0,0], b.get('bbox') or [0,0,0,0]) < 0.2:
+                        if (
+                            _h_iou_bbox(
+                                h.get("bbox") or [0, 0, 0, 0], b.get("bbox") or [0, 0, 0, 0]
+                            )
+                            < 0.2
+                        ):
                             continue
                         # Propagate header_norm and logical_table_id
-                        b['header_norm'] = hn
+                        b["header_norm"] = hn
                         import hashlib as _hl
+
                         lid = f"lt_{_hl.sha1(hn.encode('utf-8')).hexdigest()[:10]}"
-                        h['logical_table_id'] = lid
-                        b['logical_table_id'] = lid
+                        h["logical_table_id"] = lid
+                        b["logical_table_id"] = lid
                 except Exception as exc:
-                    log_stage_error(STEP_NAME, exc, {'context': '06b'})
+                    log_stage_error(STEP_NAME, exc, {"context": "06b"})
                     raise
     except Exception as exc:
-        log_stage_error(STEP_NAME, exc, {'context': '06b'})
+        log_stage_error(STEP_NAME, exc, {"context": "06b"})
         raise
     # Mark table continuity/merge by logical_table_id
     try:
@@ -858,9 +1015,9 @@ def _build_section_sketch(
                 items.sort(key=lambda x: int(x.get("ro", 0)))
                 for j, t in enumerate(items):
                     t["merge"] = True
-                    t["continued"] = (j < len(items)-1)
+                    t["continued"] = j < len(items) - 1
     except Exception as exc:
-        log_stage_error(STEP_NAME, exc, {'context': '06b'})
+        log_stage_error(STEP_NAME, exc, {"context": "06b"})
         raise
     sketch_v2 = {
         "sketch_format": "SKETCH_V2",
@@ -874,11 +1031,22 @@ def _build_section_sketch(
         "section_title_source": "actual",
         "page_window": {"start": int(pw_start), "end": int(pw_end)},
         "frame": {
-            "page_size": [round(float(page_bbox[2]-page_bbox[0]), 2), round(float(page_bbox[3]-page_bbox[1]), 2)],
+            "page_size": [
+                round(float(page_bbox[2] - page_bbox[0]), 2),
+                round(float(page_bbox[3] - page_bbox[1]), 2),
+            ],
             "section_bbox": [round(float(x), 2) for x in sec_bbox_union],
             "section_area": round(float(_area(sec_bbox_union)), 1),
             "grid": {"cols": len(first_cols), "gutter": round(float(gutter), 2)},
-            "columns": [{"id": i, "x0": round(float(c[0]), 2), "x1": round(float(c[1]), 2), "width": round(float(c[1]-c[0]), 2)} for i, c in enumerate(first_cols)],
+            "columns": [
+                {
+                    "id": i,
+                    "x0": round(float(c[0]), 2),
+                    "x1": round(float(c[1]), 2),
+                    "width": round(float(c[1] - c[0]), 2),
+                }
+                for i, c in enumerate(first_cols)
+            ],
         },
         "objects": objects_v2,
     }
@@ -893,10 +1061,7 @@ def _build_section_sketch(
             for e in enriched
         ],
         # Keep original bboxes for audit
-        "elements_original_bbox": [
-            {"id": e.get("id"), "bbox": e.get("bbox")}
-            for e in enriched
-        ],
+        "elements_original_bbox": [{"id": e.get("id"), "bbox": e.get("bbox")} for e in enriched],
         "page_breaks": pages_present,
         "quick_summary": qs,
         "conf": {"ordering": ordering_conf},
@@ -908,7 +1073,7 @@ def _build_section_sketch(
         if table_merge_hints:
             sketch_v2["merge_hints"] = table_merge_hints
     except Exception as exc:
-        log_stage_error(STEP_NAME, exc, {'context': '06b'})
+        log_stage_error(STEP_NAME, exc, {"context": "06b"})
         raise
     if include_flow:
         result["flow_stream"] = _build_flow_stream(
@@ -937,13 +1102,13 @@ def _build_section_sketch(
                 # Do not generate a duplicate crop when a canonical image exists.
                 return result
         except Exception as exc:
-            log_stage_error(STEP_NAME, exc, {'context': '06b'})
+            log_stage_error(STEP_NAME, exc, {"context": "06b"})
             raise
         if base_results_dir is not None and source_pdf is not None and source_pdf.exists():
             try:
                 import fitz  # PyMuPDF
             except Exception as exc:
-                log_stage_error(STEP_NAME, exc, {'context': '06b'})
+                log_stage_error(STEP_NAME, exc, {"context": "06b"})
                 raise
             if fitz is not None:
                 pages_present = sorted({int(e.get("page", section_page_idx)) for e in enriched})
@@ -958,7 +1123,7 @@ def _build_section_sketch(
                     if int(e.get("page", section_page_idx)) != pno:
                         continue
                     b = e.get("bbox")
-                    if not (isinstance(b, (list, tuple)) and len(b)==4):
+                    if not (isinstance(b, (list, tuple)) and len(b) == 4):
                         continue
                     x0, y0, x1, y1 = map(float, b)
                     xs0 = min(xs0, x0)
@@ -967,12 +1132,12 @@ def _build_section_sketch(
                     ys1 = max(ys1, y1)
                     found = True
                 if not found:
-                    xs0,ys0,xs1,ys1 = map(float, page_bbox)
+                    xs0, ys0, xs1, ys1 = map(float, page_bbox)
                 doc = fitz.open(str(source_pdf))
                 try:
                     page = doc[pno]
-                    rect = fitz.Rect(xs0,ys0,xs1,ys1)
-                    zoom = 1024.0/max(1.0, rect.width)
+                    rect = fitz.Rect(xs0, ys0, xs1, ys1)
+                    zoom = 1024.0 / max(1.0, rect.width)
                     mat = fitz.Matrix(zoom, zoom)
                     pix = page.get_pixmap(matrix=mat, clip=rect, alpha=False)
                     vis_dir = base_results_dir / "06b_layout_sketcher" / "visual"
@@ -983,7 +1148,7 @@ def _build_section_sketch(
                     try:
                         rel = out_path.relative_to(base_results_dir)
                     except Exception as exc:
-                        log_stage_error(STEP_NAME, exc, {'context': '06b'})
+                        log_stage_error(STEP_NAME, exc, {"context": "06b"})
                         raise
                     result["visual_path"] = str(rel)
                     if isinstance(result.get("sketch_v2"), dict):
@@ -991,7 +1156,7 @@ def _build_section_sketch(
                 finally:
                     doc.close()
     except Exception as exc:
-        log_stage_error(STEP_NAME, exc, {'context': '06b'})
+        log_stage_error(STEP_NAME, exc, {"context": "06b"})
         raise
     # Router lifecycle is managed at run() end for efficiency
     return result
@@ -1020,6 +1185,7 @@ def _build_section_sketch_llm(
             return None
         # Single-source VLM model only
         from extractor.pipeline.utils.model_select import get_vlm_model
+
         model = get_vlm_model()
         if not model:
             return None
@@ -1050,36 +1216,42 @@ def _build_section_sketch_llm(
                 ],
             },
         ]
-        from extractor.pipeline.utils.scillm_router import get_vlm_router
         from extractor.pipeline.utils.response_utils import normalize_json_content
         from extractor.pipeline.utils.debug_utils import ensure_logs_dir, time_block
         from scillm import parallel_acompletions_iter
-        
+
         async def _do_vlm_call():
-            reqs = [{
-                "model": "chutes/vlm",
-                "messages": messages,
-                "response_format": {"type": "json_object"},
-                "temperature": 0,
-                "timeout": timeout,
-                "index": 0
-            }]
-             
+            reqs = [
+                {
+                    "model": "chutes/vlm",
+                    "messages": messages,
+                    "response_format": {"type": "json_object"},
+                    "temperature": 0,
+                    "timeout": timeout,
+                    "index": 0,
+                }
+            ]
+
             api_key = os.getenv("CHUTES_API_KEY")
             api_base = os.getenv("CHUTES_API_BASE", "https://llm.chutes.ai/v1")
-             
+
             async for r in parallel_acompletions_iter(
-                reqs, api_base=api_base, api_key=api_key,
+                reqs,
+                api_base=api_base,
+                api_key=api_key,
                 custom_llm_provider="openai_like",  # Required per SCILLM_PAVED_PATH_CONTRACT
-                concurrency=1, timeout=timeout, wall_time_s=180, tenacious=False,
-                response_format={"type": "json_object"}
+                concurrency=1,
+                timeout=timeout,
+                wall_time_s=180,
+                tenacious=False,
+                response_format={"type": "json_object"},
             ):
                 if r.get("ok"):
                     return {
                         "model": r.get("model", "chutes/vlm"),
                         "usage": r.get("usage"),
                         "choices": [{"message": {"content": r.get("content")}}],
-                        "id": r.get("id")
+                        "id": r.get("id"),
                     }
                 else:
                     raise RuntimeError(f"SciLLM VLM Error: {r.get('error')}")
@@ -1095,12 +1267,16 @@ def _build_section_sketch_llm(
         _, obj = normalize_json_content(resp)
         if isinstance(obj, dict) and obj.get("elements"):
             obj.setdefault("schema_version", SCHEMA_VERSION)
-            obj.setdefault("grid_contract", {"cell": "half-open", "rounding": "floor/ceil", "eps": 1e-6})
+            obj.setdefault(
+                "grid_contract", {"cell": "half-open", "rounding": "floor/ceil", "eps": 1e-6}
+            )
             return obj
         return None
     except Exception as exc:
-        log_stage_error(STEP_NAME, exc, {'context': '06b'})
+        log_stage_error(STEP_NAME, exc, {"context": "06b"})
         raise
+
+
 def run(input_path: str, output_path: str, **kwargs) -> dict[str, Any]:
     """
     Build 06b_layout_sketch.json under 06b_layout_sketcher/json_output/.
@@ -1114,9 +1290,11 @@ def run(input_path: str, output_path: str, **kwargs) -> dict[str, Any]:
     stage_dir.mkdir(parents=True, exist_ok=True)
     sink_id = None
     try:
-        sink_id = logger.add(stage_dir / "stage.log", level="DEBUG", enqueue=True, rotation="5 MB", retention=3)
+        sink_id = logger.add(
+            stage_dir / "stage.log", level="DEBUG", enqueue=True, rotation="5 MB", retention=3
+        )
     except Exception as exc:
-        log_stage_error(STEP_NAME, exc, {'context': '06b'})
+        log_stage_error(STEP_NAME, exc, {"context": "06b"})
         raise
     if ALLOW_VLM:
         try:
@@ -1125,6 +1303,7 @@ def run(input_path: str, output_path: str, **kwargs) -> dict[str, Any]:
             logger.error(f"Stage 06b SciLLM preflight failed: {exc}")
             raise
     import time as _t
+
     _t0 = _t.monotonic()
     # Try to find Stage 04 sections file
     sec_json = base / "04_section_builder" / "json_output" / "04_sections.json"
@@ -1134,7 +1313,10 @@ def run(input_path: str, output_path: str, **kwargs) -> dict[str, Any]:
         if alt.exists():
             sec_json = alt
         else:
-            strict = bool(kwargs.get("strict") or (os.getenv("STAGE06B_STRICT","0").lower() in ("1","true","yes","y")))
+            strict = bool(
+                kwargs.get("strict")
+                or (os.getenv("STAGE06B_STRICT", "0").lower() in ("1", "true", "yes", "y"))
+            )
             msg = "06b_layout_sketcher: missing Stage 04 sections (04_sections.json)"
             logger.error(msg)
             if strict:
@@ -1147,8 +1329,15 @@ def run(input_path: str, output_path: str, **kwargs) -> dict[str, Any]:
             # Emit minimal timings
             t_ms = int((_t.monotonic() - _t0) * 1000)
             with (stage_dir / "timings.jsonl").open("a", encoding="utf-8") as fp:
-                fp.write(json.dumps({"stage":"06b_layout_sketcher","latency_ms":t_ms,"outcome":"empty"})+"\n")
-            (stage_dir / "timings_summary.json").write_text(json.dumps({"total_ms":t_ms}, indent=2))
+                fp.write(
+                    json.dumps(
+                        {"stage": "06b_layout_sketcher", "latency_ms": t_ms, "outcome": "empty"}
+                    )
+                    + "\n"
+                )
+            (stage_dir / "timings_summary.json").write_text(
+                json.dumps({"total_ms": t_ms}, indent=2)
+            )
             if sink_id is not None:
                 logger.remove(sink_id)
             return out
@@ -1159,13 +1348,22 @@ def run(input_path: str, output_path: str, **kwargs) -> dict[str, Any]:
     page_layout: Dict[int, Dict[str, Any]] = {}
     try:
         from extractor.pipeline.utils.page_geometry_cache import build_or_load as _pg_build
+
         src_pdf = None
         sp = data.get("source_pdf")
         src_pdf = Path(sp) if isinstance(sp, str) else None
         cache = _pg_build(base, sections, src_pdf)
         for pno, pg in cache.pages.items():
             page_bbox = [0.0, 0.0, float(pg.width or 1.0), float(pg.height or 1.0)]
-            cols = _detect_columns([{"bbox": list(bb)} for bb in (pg.text_bboxes or [])], page_bbox, min_gap_ratio=kwargs.get("min_gap_ratio", 0.04) if isinstance(kwargs.get("min_gap_ratio", 0.04), (float, int)) else 0.04)
+            cols = _detect_columns(
+                [{"bbox": list(bb)} for bb in (pg.text_bboxes or [])],
+                page_bbox,
+                min_gap_ratio=(
+                    kwargs.get("min_gap_ratio", 0.04)
+                    if isinstance(kwargs.get("min_gap_ratio", 0.04), (float, int))
+                    else 0.04
+                ),
+            )
             grid_cols = []
             for idx, (cx0, cx1) in enumerate(cols):
                 gb = _grid_bbox([cx0, page_bbox[1], cx1, page_bbox[3]], page_bbox, GRID)
@@ -1178,7 +1376,7 @@ def run(input_path: str, output_path: str, **kwargs) -> dict[str, Any]:
                 "conf": {"columns": conf, "source": "pg_cache"},
             }
     except Exception as exc:
-        log_stage_error(STEP_NAME, exc, {'context': '06b'})
+        log_stage_error(STEP_NAME, exc, {"context": "06b"})
         raise
     # Optionally load Stage 05/06 to attach tables/figures by section
     tabs_by_sec: Dict[str, List[dict]] = {}
@@ -1192,7 +1390,7 @@ def run(input_path: str, output_path: str, **kwargs) -> dict[str, Any]:
                 if sid:
                     tabs_by_sec.setdefault(sid, []).append(t)
     except Exception as exc:
-        log_stage_error(STEP_NAME, exc, {'context': '06b'})
+        log_stage_error(STEP_NAME, exc, {"context": "06b"})
         raise
     try:
         fpath = base / "06_figure_extractor" / "json_output" / "06_figures.json"
@@ -1203,7 +1401,7 @@ def run(input_path: str, output_path: str, **kwargs) -> dict[str, Any]:
                 if sid:
                     figs_by_sec.setdefault(sid, []).append(f)
     except Exception as exc:
-        log_stage_error(STEP_NAME, exc, {'context': '06b'})
+        log_stage_error(STEP_NAME, exc, {"context": "06b"})
         raise
     if not page_layout:
         # Per-page layout cache from section blocks (+ optional PyMuPDF for missing)
@@ -1220,7 +1418,11 @@ def run(input_path: str, output_path: str, **kwargs) -> dict[str, Any]:
         _pymupdf_fill_missing_pages(page_index, source_pdf)
         page_layout = _build_page_layout(
             page_index,
-            min_gap_ratio=kwargs.get("min_gap_ratio", 0.04) if isinstance(kwargs.get("min_gap_ratio", 0.04), (float, int)) else 0.04,
+            min_gap_ratio=(
+                kwargs.get("min_gap_ratio", 0.04)
+                if isinstance(kwargs.get("min_gap_ratio", 0.04), (float, int))
+                else 0.04
+            ),
             grid=GRID,
         )
 
@@ -1231,15 +1433,18 @@ def run(input_path: str, output_path: str, **kwargs) -> dict[str, Any]:
         if tpath2.exists():
             all_tables = json.loads(tpath2.read_text(encoding="utf-8")).get("tables") or []
     except Exception as exc:
-        log_stage_error(STEP_NAME, exc, {'context': '06b'})
+        log_stage_error(STEP_NAME, exc, {"context": "06b"})
         raise
+
     def _rect_intersects(a: list[float], b: list[float]) -> bool:
         try:
-            ax0, ay0, ax1, ay1 = map(float, a); bx0, by0, bx1, by1 = map(float, b)
+            ax0, ay0, ax1, ay1 = map(float, a)
+            bx0, by0, bx1, by1 = map(float, b)
             return not (ax1 <= bx0 or bx1 <= ax0 or ay1 <= by0 or by1 <= ay0)
         except Exception as exc:
-            log_stage_error(STEP_NAME, exc, {'context': '06b'})
+            log_stage_error(STEP_NAME, exc, {"context": "06b"})
             raise
+
     sketches: dict[str, Any] = {"sections": {}}
     for sec in sections:
         sid = str(sec.get("id"))
@@ -1253,16 +1458,17 @@ def run(input_path: str, output_path: str, **kwargs) -> dict[str, Any]:
             _tables_for_sec = list(tabs_by_sec.get(sid, []))
             if not _tables_for_sec and all_tables:
                 try:
-                    ps = int(sec.get("page_start", 0)); pe = int(sec.get("page_end", ps))
+                    ps = int(sec.get("page_start", 0))
+                    pe = int(sec.get("page_end", ps))
                 except Exception as exc:
-                    log_stage_error(STEP_NAME, exc, {'context': '06b'})
+                    log_stage_error(STEP_NAME, exc, {"context": "06b"})
                     raise
                 sb = sec.get("bbox") or []
                 for t in all_tables:
                     try:
                         tp = int(t.get("page_index", 0) or 0)
                     except Exception as exc:
-                        log_stage_error(STEP_NAME, exc, {'context': '06b'})
+                        log_stage_error(STEP_NAME, exc, {"context": "06b"})
                         raise
                     if tp < ps or tp > pe:
                         continue
@@ -1271,15 +1477,33 @@ def run(input_path: str, output_path: str, **kwargs) -> dict[str, Any]:
                         _tables_for_sec.append(t)
                 # As a last resort, if still empty but within the same pages, allow loose include
                 if not _tables_for_sec:
-                    _tables_for_sec = [t for t in all_tables if ps <= int(t.get("page_index", 0) or 0) <= pe]
+                    _tables_for_sec = [
+                        t for t in all_tables if ps <= int(t.get("page_index", 0) or 0) <= pe
+                    ]
 
             sketch = _build_section_sketch(
                 sec,
                 GRID,
-                summary_limit=kwargs.get("summary_limit", 80) if isinstance(kwargs.get("summary_limit", 80), int) else 80,
-                min_gap_ratio=kwargs.get("min_gap_ratio", 0.04) if isinstance(kwargs.get("min_gap_ratio", 0.04), (float, int)) else 0.04,
-                header_footer_band=kwargs.get("header_footer_band", 0.05) if isinstance(kwargs.get("header_footer_band", 0.05), (float, int)) else 0.05,
-                place_floats=kwargs.get("place_floats", "inline") if isinstance(kwargs.get("place_floats", "inline"), str) else "inline",
+                summary_limit=(
+                    kwargs.get("summary_limit", 80)
+                    if isinstance(kwargs.get("summary_limit", 80), int)
+                    else 80
+                ),
+                min_gap_ratio=(
+                    kwargs.get("min_gap_ratio", 0.04)
+                    if isinstance(kwargs.get("min_gap_ratio", 0.04), (float, int))
+                    else 0.04
+                ),
+                header_footer_band=(
+                    kwargs.get("header_footer_band", 0.05)
+                    if isinstance(kwargs.get("header_footer_band", 0.05), (float, int))
+                    else 0.05
+                ),
+                place_floats=(
+                    kwargs.get("place_floats", "inline")
+                    if isinstance(kwargs.get("place_floats", "inline"), str)
+                    else "inline"
+                ),
                 include_flow=True,
                 page_layout=page_layout,
                 tables_for_section=_tables_for_sec,
@@ -1291,19 +1515,25 @@ def run(input_path: str, output_path: str, **kwargs) -> dict[str, Any]:
     # Optional: render column/order overlays per section (visual proof)
     if VISUAL_PROOF:
         from extractor.pipeline.visual.overlay import Box, draw_overlays
+
         tp = data.get("source_pdf")
         src_pdf = Path(tp) if isinstance(tp, str) and Path(tp).exists() else None
         if not src_pdf and SOURCE_PDF_ENV:
             p = Path(SOURCE_PDF_ENV)
             src_pdf = p if p.exists() else None
         if not src_pdf:
-            logger.warning("06b_layout_sketcher: VISUAL_PROOF requested but source PDF missing; skipping overlays")
+            logger.warning(
+                "06b_layout_sketcher: VISUAL_PROOF requested but source PDF missing; skipping overlays"
+            )
         else:
             overlays_root = base / "06b_layout_sketcher" / "visual_output"
             overlays_root.mkdir(parents=True, exist_ok=True)
             for sid, sk in sketches.get("sections", {}).items():
                 elems = sk.get("elements") or []
-                orig = {e.get("id"): (e.get("bbox") or None) for e in sk.get("elements_original_bbox", [])}
+                orig = {
+                    e.get("id"): (e.get("bbox") or None)
+                    for e in sk.get("elements_original_bbox", [])
+                }
                 boxes = []
                 for e in elems:
                     bid = e.get("id")
@@ -1315,8 +1545,23 @@ def run(input_path: str, output_path: str, **kwargs) -> dict[str, Any]:
                     ro = e.get("reading_order")
                     col = int(e.get("column_id", 0))
                     label = f"{kind}:{ro}@c{col}"
-                    color = (0, 170, 255) if kind == "text" else ((0, 200, 0) if kind == "table" else (255, 128, 0))
-                    boxes.append(Box(page=pg, x0=float(bb[0]), y0=float(bb[1]), x1=float(bb[2]), y1=float(bb[3]), label=label, color=color, width=3))
+                    color = (
+                        (0, 170, 255)
+                        if kind == "text"
+                        else ((0, 200, 0) if kind == "table" else (255, 128, 0))
+                    )
+                    boxes.append(
+                        Box(
+                            page=pg,
+                            x0=float(bb[0]),
+                            y0=float(bb[1]),
+                            x1=float(bb[2]),
+                            y1=float(bb[3]),
+                            label=label,
+                            color=color,
+                            width=3,
+                        )
+                    )
                 if boxes:
                     vout = overlays_root / sid
                     draw_overlays(src_pdf, boxes, vout)
@@ -1326,7 +1571,9 @@ def run(input_path: str, output_path: str, **kwargs) -> dict[str, Any]:
 
     out_dir = base / "06b_layout_sketcher" / "json_output"
     out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / "06b_layout_sketch.json").write_text(json.dumps(sketches, ensure_ascii=False, indent=2))
+    (out_dir / "06b_layout_sketch.json").write_text(
+        json.dumps(sketches, ensure_ascii=False, indent=2)
+    )
     # Also emit a SKETCH_V2 consolidated view for convenience
     v2 = {"sections": {}}
     _vis_by_sid = {}

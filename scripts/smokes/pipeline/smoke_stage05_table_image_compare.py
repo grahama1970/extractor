@@ -13,10 +13,11 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Dict, List
+from typing import List
 
 import typer
 from dotenv import find_dotenv, load_dotenv
+
 try:
     from litellm import Router  # type: ignore
 except Exception:
@@ -26,6 +27,7 @@ except Exception:
 
 def _load_stage07():
     import importlib.util
+
     p = Path("src/extractor/pipeline/steps/07_reflow_section.py").resolve()
     spec = importlib.util.spec_from_file_location("stage07", str(p))
     if not spec or not spec.loader:
@@ -33,6 +35,7 @@ def _load_stage07():
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)  # type: ignore[attr-defined]
     return mod
+
 
 app = typer.Typer(add_completion=False, help="Compare Camelot tables to vision transcription")
 
@@ -93,23 +96,21 @@ def _vision_transcribe(image_path: Path, columns: List[str], router: Router) -> 
     prompt = (
         "You are a meticulous OCR agent. Transcribe the table shown in the image. "
         "Return JSON with keys 'columns' and 'rows'. Columns must exactly match: "
-        f"{columns}. Rows must be an array of arrays where each sub-array corresponds to a row." \
+        f"{columns}. Rows must be an array of arrays where each sub-array corresponds to a row."
         " Do not summarize; transcribe cell text verbatim."
     )
     messages = [
         {"role": "system", "content": prompt},
-        {"role": "user", "content": [
-            {"type": "text", "text": "Here is the table screenshot."}
-        ]}
+        {"role": "user", "content": [{"type": "text", "text": "Here is the table screenshot."}]},
     ]
     stage07 = _load_stage07()
     get_table_image_b64 = getattr(stage07, "get_table_image_b64")
-    table_stub = {
-        "table_image_path": str(image_path.resolve().relative_to(RESULTS_DIR.resolve()))
-    }
+    table_stub = {"table_image_path": str(image_path.resolve().relative_to(RESULTS_DIR.resolve()))}
     b64 = get_table_image_b64(table_stub, RESULTS_DIR)
     if b64:
-        messages[1]["content"].append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}})
+        messages[1]["content"].append(
+            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}}
+        )
     resp = router.completion(
         model="gemini/gemini-2.5-flash",
         messages=messages,
@@ -123,13 +124,16 @@ def _vision_transcribe(image_path: Path, columns: List[str], router: Router) -> 
                         "columns": {"type": "array", "items": {"type": "string"}},
                         "rows": {
                             "type": "array",
-                            "items": {"type": "array", "items": {"type": ["string", "number", "null"]}}
+                            "items": {
+                                "type": "array",
+                                "items": {"type": ["string", "number", "null"]},
+                            },
                         },
                     },
                     "required": ["columns", "rows"],
                     "additionalProperties": False,
                 }
-            }
+            },
         },
     )
     try:
@@ -150,17 +154,29 @@ def run_smoke(results: Path) -> None:
         raise SystemExit(0)
 
     router = Router(
-        model_list=[{
-            "model_name": "gemini/gemini-2.5-flash",
-            "litellm_params": {"model": "gemini/gemini-2.5-flash", "provider": "google", "api_key": gemini_key},
-        }]
+        model_list=[
+            {
+                "model_name": "gemini/gemini-2.5-flash",
+                "litellm_params": {
+                    "model": "gemini/gemini-2.5-flash",
+                    "provider": "google",
+                    "api_key": gemini_key,
+                },
+            }
+        ]
     )
 
     tables_json = json.loads(TABLE_JSON.read_text(encoding="utf-8"))
     issues = []
     stage07 = _load_stage07()
-    sanitize_fn = stage07._sanitize_table_cell if hasattr(stage07, "_sanitize_table_cell") else _sanitize
-    canonical_fn = stage07._build_table_block_from_stage05 if hasattr(stage07, "_build_table_block_from_stage05") else None
+    sanitize_fn = (
+        stage07._sanitize_table_cell if hasattr(stage07, "_sanitize_table_cell") else _sanitize
+    )
+    canonical_fn = (
+        stage07._build_table_block_from_stage05
+        if hasattr(stage07, "_build_table_block_from_stage05")
+        else None
+    )
     for t in tables_json.get("tables", []):
         img_rel = t.get("table_image_path")
         if not img_rel:
@@ -185,13 +201,15 @@ def run_smoke(results: Path) -> None:
                 canonical_rows = None
 
         if camelot_rows != vision_rows:
-            issues.append({
-                "image": str(img_path),
-                "camelot_raw": raw_rows,
-                "camelot_sanitized": camelot_rows,
-                "vision": vision_rows,
-                "canonical_stage07": canonical_rows,
-            })
+            issues.append(
+                {
+                    "image": str(img_path),
+                    "camelot_raw": raw_rows,
+                    "camelot_sanitized": camelot_rows,
+                    "vision": vision_rows,
+                    "canonical_stage07": canonical_rows,
+                }
+            )
 
     if issues:
         art_dir = Path("scripts/artifacts")
@@ -201,8 +219,12 @@ def run_smoke(results: Path) -> None:
         )
         sanitized_mismatch = [i for i in issues if i["camelot_sanitized"] != i["canonical_stage07"]]
         if sanitized_mismatch:
-            raise SystemExit("Vision transcription differs from sanitized Stage 05 output. See scripts/artifacts/stage05_table_image_compare.json")
-        typer.echo("WARN: Vision transcription differs from raw Camelot, but sanitized output matches canonical Stage 07.")
+            raise SystemExit(
+                "Vision transcription differs from sanitized Stage 05 output. See scripts/artifacts/stage05_table_image_compare.json"
+            )
+        typer.echo(
+            "WARN: Vision transcription differs from raw Camelot, but sanitized output matches canonical Stage 07."
+        )
         raise SystemExit(0)
 
     typer.echo("OK: Vision transcription matches Camelot sanitized output")

@@ -15,25 +15,25 @@ def detect_columns(
     min_gap_ratio: float = 0.04,
 ) -> List[List[float]]:
     """Detect 1–3 columns deterministically using x-center gaps.
-    
+
     Returns list of [x0, x1] column bounds in page coordinates.
     """
     if not elements:
         return [[page_bbox[0], page_bbox[2]]]
-    
+
     centers = []
     for e in elements:
         box = e.get("bbox")
         if isinstance(box, (list, tuple)) and len(box) == 4:
             centers.append((box[0] + box[2]) / 2.0)
-    
+
     if not centers:
         return [[page_bbox[0], page_bbox[2]]]
-    
+
     centers = sorted(centers)
     page_width = max(1.0, page_bbox[2] - page_bbox[0])
     min_gap = page_width * min_gap_ratio
-    
+
     # Find significant gaps
     gaps = []
     for i in range(1, len(centers)):
@@ -41,11 +41,11 @@ def detect_columns(
         if gap >= min_gap:
             mid = (centers[i] + centers[i - 1]) / 2.0
             gaps.append((gap, mid))
-    
+
     # Sort by gap size, take up to 2 largest gaps
     gaps.sort(key=lambda x: -x[0])
     dividers = sorted([g[1] for g in gaps[:2]])
-    
+
     # Build column ranges
     cols = []
     prev = page_bbox[0]
@@ -54,7 +54,7 @@ def detect_columns(
             cols.append([prev, d])
             prev = d
     cols.append([prev, page_bbox[2]])
-    
+
     return cols
 
 
@@ -63,7 +63,7 @@ def assign_cols_and_span(
     columns: List[List[float]],
 ) -> Tuple[List[int], bool]:
     """Return ([col_ids], spans_columns) based on overlap with column bands.
-    
+
     Uses 50% overlap threshold to assign to column.
     """
     x0, _, x1, _ = [float(v) for v in (bbox or [0, 0, 0, 0])]

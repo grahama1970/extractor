@@ -22,7 +22,8 @@ try:
     # Model weights / artifact registry helper
     from extractor.core.models import create_model_dict  # type: ignore
 except ImportError:
-    create_model_dict = lambda: {}
+    def create_model_dict():
+        return {}
 
 
 def convert_pdf_to_json(pdf_path: str, **config_overrides: Any) -> Dict[str, Any]:

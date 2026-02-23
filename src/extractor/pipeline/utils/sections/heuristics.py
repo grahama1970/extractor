@@ -26,10 +26,12 @@ def get_pdf_large_font_threshold() -> float:
         return PDF_LARGE_FONT_THRESHOLD
 
 # Precompiled heading recognition
+# FIX (sparta_f98d68e9): Use alternation to avoid greedy \s* consuming space
+# Now matches both "1. Introduction" and "1 Introduction"
 _RE_DECIMAL = re.compile(
     r"""^\s*
         (?P<num>\d+(?:\.\d+)*(?:\.[a-z])?)
-        \s*(?:[.:)\-–—])?\s+
+        (?:[.:)\-–—]\s*|\s+)
         (?P<title>\S.*)$
     """,
     re.IGNORECASE | re.VERBOSE,

@@ -17,7 +17,9 @@ import typer
 from dotenv import load_dotenv, find_dotenv
 
 
-app = typer.Typer(add_completion=False, help="Smoke: Stage 08 Lean4 identify (litellm path, no prover)")
+app = typer.Typer(
+    add_completion=False, help="Smoke: Stage 08 Lean4 identify (litellm path, no prover)"
+)
 
 
 @app.command()
@@ -59,7 +61,12 @@ def main(
         outdir = os.path.join("scripts", "artifacts")
         os.makedirs(outdir, exist_ok=True)
         with open(os.path.join(outdir, "stage08_litellm.json"), "w", encoding="utf-8") as f:
-            json.dump({"ok": ok, "requirements": reqs, "constraints": cons}, f, ensure_ascii=False, indent=2)
+            json.dump(
+                {"ok": ok, "requirements": reqs, "constraints": cons},
+                f,
+                ensure_ascii=False,
+                indent=2,
+            )
         if not ok:
             raise SystemExit("Stage 08 identify returned invalid types")
         typer.echo("OK: Stage 08 litellm identify returned lists")

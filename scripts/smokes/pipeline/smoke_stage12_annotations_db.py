@@ -17,7 +17,9 @@ import typer
 from dotenv import load_dotenv, find_dotenv
 
 
-app = typer.Typer(add_completion=False, help="Smoke: Stage 12 annotations insert + bridge in Arango")
+app = typer.Typer(
+    add_completion=False, help="Smoke: Stage 12 annotations insert + bridge in Arango"
+)
 
 
 @app.command()
@@ -35,9 +37,7 @@ def main(results: Path = typer.Option(Path("data/results/pipeline_db_smoke"), "-
                 "type": "section_header",
                 "original_rect": [50, 50, 140, 90],
                 "expanded_rect": [40, 40, 160, 120],
-                "inside_blocks": [
-                    {"lines": [{"spans": [{"text": "Intro"}]}]}
-                ],
+                "inside_blocks": [{"lines": [{"spans": [{"text": "Intro"}]}]}],
                 "above_blocks": [],
                 "below_blocks": [],
             }
@@ -90,4 +90,3 @@ def main(results: Path = typer.Option(Path("data/results/pipeline_db_smoke"), "-
 
 if __name__ == "__main__":
     app()
-

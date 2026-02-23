@@ -21,7 +21,11 @@ app = typer.Typer(add_completion=False)
 
 
 def _find_latest(root: Path) -> Path | None:
-    cands = sorted(root.rglob("10_arangodb_exporter/json_output/10_flattened_data.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    cands = sorted(
+        root.rglob("10_arangodb_exporter/json_output/10_flattened_data.json"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
     return cands[0] if cands else None
 
 
@@ -45,4 +49,3 @@ def main(root: Path = typer.Option(Path("data/results"))):
 
 if __name__ == "__main__":
     app()
-

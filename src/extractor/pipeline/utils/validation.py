@@ -12,13 +12,12 @@ from functools import wraps
 
 from extractor.pipeline.schemas.reflow import ReflowOutput, validate_reflow_output
 from extractor.pipeline.schemas.summarizer import SummaryOutput, validate_summary_output
-from extractor.pipeline.schemas.llm_call import LLMCallRecord
 
 
 def validate_json_file(filepath: str, schema: BaseModel) -> Tuple[bool, Optional[str]]:
     """Validate a JSON file against a Pydantic schema."""
     try:
-        with open(filepath, 'r') as f:
+        with open(filepath, "r") as f:
             data = json.load(f)
 
         # Use schema-specific validation functions if available
@@ -40,12 +39,14 @@ def validate_json_file(filepath: str, schema: BaseModel) -> Tuple[bool, Optional
         return False, f"File not found: {filepath}"
 
 
-def validate_stage_output(stage_name: str, output_data: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
+def validate_stage_output(
+    stage_name: str, output_data: Dict[str, Any]
+) -> Tuple[bool, Optional[str]]:
     """Validate output from a specific pipeline stage."""
     # Map stage names to their expected schemas
     stage_schemas = {
-        'stage07': (ReflowOutput, validate_reflow_output),
-        'stage09': (SummaryOutput, validate_summary_output),
+        "stage07": (ReflowOutput, validate_reflow_output),
+        "stage09": (SummaryOutput, validate_summary_output),
         # Add more stages as their schemas are integrated
     }
 
@@ -66,8 +67,11 @@ def validate_stage_output(stage_name: str, output_data: Dict[str, Any]) -> Tuple
         return False, f"Validation error: {str(e)}"
 
 
-def with_stage_validation(stage_name: str, validate_input: bool = True, validate_output: bool = True):
+def with_stage_validation(
+    stage_name: str, validate_input: bool = True, validate_output: bool = True
+):
     """Decorator to add validation to stage functions."""
+
     def decorator(stage_func):
         @wraps(stage_func)
         def wrapper(input_data: Dict[str, Any], *args, **kwargs) -> Dict[str, Any]:
@@ -86,7 +90,9 @@ def with_stage_validation(stage_name: str, validate_input: bool = True, validate
                     raise ValueError(f"Stage {stage_name} output validation failed: {error}")
 
             return output_data
+
         return wrapper
+
     return decorator
 
 
@@ -126,10 +132,13 @@ class StageInputSchema:
             return False, str(e)
 
 
-def create_stage_validator(stage_num: int,
-                           input_schema: Optional[Type[BaseModel]] = None,
-                           output_schema: Optional[Type[BaseModel]] = None):
+def create_stage_validator(
+    stage_num: int,
+    input_schema: Optional[Type[BaseModel]] = None,
+    output_schema: Optional[Type[BaseModel]] = None,
+):
     """Factory function to create validators for specific stages."""
+
     def validator_wrapper(stage_func):
         @wraps(stage_func)
         def validated_function(*args, **kwargs):
@@ -151,11 +160,15 @@ def create_stage_validator(stage_num: int,
                     raise ValueError(f"Invalid output from stage {stage_num}: {error}")
 
             return result
+
         return validated_function
+
     return validator_wrapper
 
 
-def validate_data_with_schema(data: Dict[str, Any], schema: Type[BaseModel]) -> Tuple[bool, Optional[str]]:
+def validate_data_with_schema(
+    data: Dict[str, Any], schema: Type[BaseModel]
+) -> Tuple[bool, Optional[str]]:
     """Generic validation helper."""
     try:
         schema.model_validate(data)

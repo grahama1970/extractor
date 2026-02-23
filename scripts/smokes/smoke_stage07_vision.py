@@ -88,10 +88,14 @@ def main(
                 continue
             cf = a.get("computed_features") or {}
             vs = a.get("validator_suggestion") or {}
-            if section_img is None and (vs.get("type") == "section_header" or cf.get("has_numbering") is True):
+            if section_img is None and (
+                vs.get("type") == "section_header" or cf.get("has_numbering") is True
+            ):
                 section_img = Path(img)
                 continue
-            if len(table_imgs) < 2 and (vs.get("type") == "table_region" or cf.get("gridlines_detected") is True):
+            if len(table_imgs) < 2 and (
+                vs.get("type") == "table_region" or cf.get("gridlines_detected") is True
+            ):
                 table_imgs.append(Path(img))
             if section_img and len(table_imgs) >= 2:
                 break
@@ -121,12 +125,16 @@ def main(
             "(b) a figure block with a non-empty title, short caption, and image_ref when applicable. "
             "Always provide ocr_corrections and improvements_made; include summary."
         )
-        context = (
-            "Section: 4.1.5.4. BHT (Branch History Table) submodule. Contains 2 related tables. Use the images to infer titles and preserve cell values exactly."
-        )
-        messages = [{"role": "user", "content": [{"type": "text", "text": f"{guard}\n\n{context}"}, *images]}]
+        context = "Section: 4.1.5.4. BHT (Branch History Table) submodule. Contains 2 related tables. Use the images to infer titles and preserve cell values exactly."
+        messages = [
+            {
+                "role": "user",
+                "content": [{"type": "text", "text": f"{guard}\n\n{context}"}, *images],
+            }
+        ]
 
         import asyncio
+
         adapter = LLMAdapter(logs_root=Path("logs"))
         res = asyncio.run(
             adapter.reflow_section(

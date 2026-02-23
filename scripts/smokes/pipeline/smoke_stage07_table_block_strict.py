@@ -80,7 +80,7 @@ def run_smoke(results: Path) -> None:
     # Verify first row matches Stage 05 pandas_df for same section (if mapping exists)
     sid = sec.get("id") or sec.get("section_id")
     canon_source = None
-    for t in (sec.get("tables") or []):
+    for t in sec.get("tables") or []:
         canon_source = t
         break
     if not canon_source:

@@ -10,10 +10,9 @@ avoid import errors; no new code should depend on it.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import uuid
 from dataclasses import dataclass
-from typing import Any, AsyncIterator, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 
 @dataclass

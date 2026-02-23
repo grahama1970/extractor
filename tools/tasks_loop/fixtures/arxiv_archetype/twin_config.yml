@@ -2,20 +2,35 @@ layout: double
 pages: 5
 preset_id: arxiv
 category: Scientific
-description: "Academic papers (2-column, math, citations)"
+description: "Academic papers (2-column, math, citations) - optimized for LaTeX-generated PDFs"
 runtime:
   features:
     enable_proving: true
+    # Learned from 264 arxiv PDFs: scientific papers take ~6% longer
+    timeout_multiplier: 1.06
+    # LaTeX tables need more sensitive line detection (thinner borders)
+    table_strategy: "lattice_sensitive"
+    line_scale: 12  # Higher sensitivity for thin LaTeX table lines
+    edge_tol: 300   # More tolerance for edge detection
+    # Domain for timeout model
+    domain: "scientific"
     summarization_prompt: |
       Analyze this section of a scientific paper. Summarize the methodology, results, and key claims.
-      Focus on the technical contribution.
-  errors: ["hyphenation", "ligatures", "split_tables", "trapped_headers"]
+      Focus on the technical contribution. Preserve variable names and mathematical notation.
+  errors:
+    - hyphenation         # Column-break hyphenation common in 2-column
+    - ligatures           # fi, fl, ff ligatures from LaTeX
+    - split_tables        # Tables spanning columns
+    - trapped_headers     # Headers trapped in page margins
+    - latex_table_borders # Thin LaTeX table lines often missed
+    - formula_fragments   # Equations split across lines
+    - column_merge        # Text merging across columns
   detection:
-    keywords: ["arXiv", "Abstract", "References", "Introduction", "Fig."]
+    keywords: ["arXiv", "Abstract", "References", "Introduction", "Fig.", "Theorem", "Lemma", "Proof"]
     min_score: 2
     layout: double
     section_pattern: "^\\d+\\.\\s+[A-Z]"
-    filename_triggers: ["arxiv", "paper", "journal", "proceedings"]
+    filename_triggers: ["arxiv", "paper", "journal", "proceedings", "2401", "2402", "2403", "2404", "2405", "2406", "2407", "2408", "2409", "2410", "2411", "2412", "2501", "2502", "2503", "2504", "2505", "2506", "2507", "2508", "2509", "2510", "2511", "2512", "2601", "2602"]
 ambiguous_headers:
   - text: "Equation 1: Schrödinger equation"
     size: 10

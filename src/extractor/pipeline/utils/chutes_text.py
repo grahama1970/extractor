@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import asyncio
 import json
 import os
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from scillm import acompletion as sc_acompletion
 
@@ -26,7 +25,7 @@ async def achutes_text_json(
     - Falls back to scillm.acompletion (OpenAI-compatible) with Bearer.
     - Final fallback: curl; saves artifacts under scripts/artifacts/.
     """
-    force_curl = os.getenv("SCILLM_FORCE_CURL", "").lower() in {"1","true","yes","y"}
+    force_curl = os.getenv("SCILLM_FORCE_CURL", "").lower() in {"1", "true", "yes", "y"}
     # 1) Router-first (unless force-curl)
     try:
         if not force_curl:

@@ -1,6 +1,7 @@
 """
 Helpers for Stage 03 (suspicious_headers).
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -46,7 +47,11 @@ def bucket_color_hex(hex_str: str) -> str:
 
 def ensure_first_span_color(page: fitz.Page, block: dict[str, Any]) -> None:
     """Populate block.first_span_font.color_{hex,bucket,rgb} if missing, using span intersect."""
-    fsf = block.setdefault("first_span_font", {}) if isinstance(block.get("first_span_font"), dict) else block.setdefault("first_span_font", {})
+    fsf = (
+        block.setdefault("first_span_font", {})
+        if isinstance(block.get("first_span_font"), dict)
+        else block.setdefault("first_span_font", {})
+    )
     if fsf.get("color_hex") or fsf.get("color_bucket"):
         return
     bb = block.get("bbox")

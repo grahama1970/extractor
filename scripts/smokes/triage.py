@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -25,9 +24,13 @@ def _run(cmd: list[str], env: dict | None = None) -> Tuple[int, str, str]:
 def _model_preference() -> str | None:
     # Prefer Gemini if key is present, else OpenAI, else None
     if os.getenv("GEMINI_API_KEY"):
-        return os.getenv("LITELLM_DEFAULT_MODEL", os.getenv("DEFAULT_LITELLM_MODEL", "gemini/gemini-2.5-flash"))
+        return os.getenv(
+            "LITELLM_DEFAULT_MODEL", os.getenv("DEFAULT_LITELLM_MODEL", "gemini/gemini-2.5-flash")
+        )
     if os.getenv("OPENAI_API_KEY"):
-        return os.getenv("LITELLM_DEFAULT_MODEL", os.getenv("DEFAULT_LITELLM_MODEL", "openai/gpt-4o-mini"))
+        return os.getenv(
+            "LITELLM_DEFAULT_MODEL", os.getenv("DEFAULT_LITELLM_MODEL", "openai/gpt-4o-mini")
+        )
     return os.getenv("LITELLM_DEFAULT_MODEL", os.getenv("DEFAULT_LITELLM_MODEL"))
 
 
@@ -68,7 +71,9 @@ def triage(target: str) -> int:
 
     if not auto_research:
         print(err2 or out2, file=sys.stderr)
-        print("Auto-fix attempt failed; leaving artifacts in logs/ for inspection.", file=sys.stderr)
+        print(
+            "Auto-fix attempt failed; leaving artifacts in logs/ for inspection.", file=sys.stderr
+        )
         return rc2
 
     # Attempt 2 (research-guided): toggle compact prompt env or trim context, then re-run
@@ -82,7 +87,10 @@ def triage(target: str) -> int:
         return 0
 
     print(err3 or out3, file=sys.stderr)
-    print("Research-guided attempt failed; please inspect logs/ and consider a prompt/rules/adapter tweak.", file=sys.stderr)
+    print(
+        "Research-guided attempt failed; please inspect logs/ and consider a prompt/rules/adapter tweak.",
+        file=sys.stderr,
+    )
     return rc3
 
 

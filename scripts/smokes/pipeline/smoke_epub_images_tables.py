@@ -36,13 +36,22 @@ def main(tmp_dir: Path = typer.Option(Path("data/results/structured_parity_smoke
       <table><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table>
     </body></html>"""
     book.add_item(c)
-    book.add_item(epub.EpubNcx()); book.add_item(epub.EpubNav())
+    book.add_item(epub.EpubNcx())
+    book.add_item(epub.EpubNav())
     book.spine = ["nav", c]
     book.toc = []
     epub.write_epub(str(epub_path), book)
 
     meta = STRUCTURED_PIPELINES[EPUBProvider]
-    artifacts = run_structured_pipeline(EPUBProvider, epub_path, tmp_dir, stage_prefix=meta.stage_prefix, skip_export10=True, skip_embeddings10=True, fast_embeddings10=True)
+    artifacts = run_structured_pipeline(
+        EPUBProvider,
+        epub_path,
+        tmp_dir,
+        stage_prefix=meta.stage_prefix,
+        skip_export10=True,
+        skip_embeddings10=True,
+        fast_embeddings10=True,
+    )
     s07 = json.loads(Path(artifacts["stage07"]).read_text())
     secs = s07.get("reflowed_sections") or []
     assert secs, "No sections built"

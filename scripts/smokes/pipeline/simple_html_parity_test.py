@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Simple HTML vs PDF extraction parity test."""
 
-import json
 import sys
 from pathlib import Path
+
 
 def test_html_pdf_parity(pdf_file: Path, html_file: Path, tolerance: int = 2) -> bool:
     """Basic parity test with reasonable tolerance."""
@@ -24,18 +24,27 @@ def test_html_pdf_parity(pdf_file: Path, html_file: Path, tolerance: int = 2) ->
     try:
         # Import the existing test
         import subprocess
-        result = subprocess.run([
-            "python", str(parity_script),
-            "--pdf-stage07", str(pdf_file),
-            "--html-path", str(html_file),
-            "--allowed-delta", str(tolerance)
-        ], capture_output=True, text=True)
+
+        result = subprocess.run(
+            [
+                "python",
+                str(parity_script),
+                "--pdf-stage07",
+                str(pdf_file),
+                "--html-path",
+                str(html_file),
+                "--allowed-delta",
+                str(tolerance),
+            ],
+            capture_output=True,
+            text=True,
+        )
 
         if result.returncode == 0:
             print("✅ Basic parity passed")
             return True
         else:
-            print(f"❌ Parity test failed")
+            print("❌ Parity test failed")
             print(result.stderr)
             return False
 
@@ -54,15 +63,19 @@ def main():
     html_default = "data/input/pipeline/indexed/test_document.html"
 
     import argparse
+
     parser = argparse.ArgumentParser(description="Simple HTML vs PDF parity test")
     parser.add_argument("--pdf", type=Path, default=Path(pdf_default), help="PDF file to test")
     parser.add_argument("--html", type=Path, default=Path(html_default), help="HTML file to test")
-    parser.add_argument("--tolerance", type=int, default=2, help="Allowed difference in object count")
+    parser.add_argument(
+        "--tolerance", type=int, default=2, help="Allowed difference in object count"
+    )
 
     args = parser.parse_args()
 
     success = test_html_pdf_parity(args.pdf, args.html, args.tolerance)
     sys.exit(0 if success else 1)
+
 
 if __name__ == "__main__":
     main()

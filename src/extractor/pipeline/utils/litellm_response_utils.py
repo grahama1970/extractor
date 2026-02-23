@@ -25,4 +25,3 @@ __all__ = [
     "classify_error",
     "format_error",
 ]
-

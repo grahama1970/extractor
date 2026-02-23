@@ -33,4 +33,3 @@ def test_scorecard_contract(tmp_path: Path):
     sc.validate_winner()
     assert set(sc.scales) == {"S", "M", "L"}
     assert sc.winner is None or sc.winner in sc.approaches
-

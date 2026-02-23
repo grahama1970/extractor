@@ -10,7 +10,9 @@ Acceptance: Ensure Section 1 has at least 1 figure (Stage 06 carried into Stage 
 """
 from __future__ import annotations
 
-import json, os, subprocess, sys
+import json
+import os
+import subprocess
 from pathlib import Path
 import typer
 
@@ -27,7 +29,13 @@ def ensure_stage07() -> Path:
         return p07
     cmd = [
         "/home/graham/workspace/experiments/extractor/.venv/bin/python",
-        "-m", "src.cli", "extract", str(PDF), str(OUT), "--mode", "accurate"
+        "-m",
+        "src.cli",
+        "extract",
+        str(PDF),
+        str(OUT),
+        "--mode",
+        "accurate",
     ]
     if subprocess.run(cmd).returncode != 0:
         raise SystemExit("extract failed")
@@ -46,12 +54,15 @@ def main():
     figures = s1.get("figures") or []
     report = {"section1_figures": len(figures)}
     Path("scripts/artifacts").mkdir(parents=True, exist_ok=True)
-    (Path("scripts/artifacts")/"figures_section1_summary.json").write_text(json.dumps(report, indent=2))
-    strict = os.getenv("ACCEPT_STRICT", "").lower() in {"1","true","yes","y"}
+    (Path("scripts/artifacts") / "figures_section1_summary.json").write_text(
+        json.dumps(report, indent=2)
+    )
+    strict = os.getenv("ACCEPT_STRICT", "").lower() in {"1", "true", "yes", "y"}
     if strict and len(figures) < 1:
         typer.echo("Section 1 has no figures", err=True)
         raise typer.Exit(1)
     print(json.dumps(report, indent=2))
+
 
 if __name__ == "__main__":
     app()

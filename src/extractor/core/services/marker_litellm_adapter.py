@@ -11,7 +11,6 @@ import io
 
 from extractor.core.services import BaseService
 from extractor.core.services.litellm import LiteLLMService
-from extractor.pipeline.utils.litellm_response_utils import extract_content
 
 
 class MarkerLiteLLMAdapter(BaseService):
@@ -35,21 +34,9 @@ class MarkerLiteLLMAdapter(BaseService):
             # Convert PIL image to base64 for LiteLLM
             buffered = io.BytesIO()
             image.save(buffered, format="PNG")
-            image_base64 = base64.b64encode(buffered.getvalue()).decode()
+            base64.b64encode(buffered.getvalue()).decode()
 
             # Create messages in LiteLLM format
-            messages = [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt},
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": f"data:image/png;base64,{image_base64}"},
-                        },
-                    ],
-                }
-            ]
 
             # Call through the underlying service (now backed by scillm/openai-http)
             result = self.litellm_service(

@@ -34,8 +34,7 @@ def test_wait_here_with_short_timeouts_creates_scorecard(tmp_path: Path):
         "--run-id",
         run_id,
     ]
-    r = _run(cmd)
+    _run(cmd)
     # Return code can be 0 even on timeouts (handled internally); assert scorecard exists
     sc = Path(f"workspace/runs/{run_id}/scorecard.json")
     assert sc.exists(), f"missing scorecard for run_id={run_id}"
-

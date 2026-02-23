@@ -43,7 +43,6 @@ from pydantic import BaseModel, ValidationError
 
 # Import local utilities
 from arangodb.core.utils.json_utils import clean_json_string, json_to_markdown
-from extractor.pipeline.utils.litellm_response_utils import extract_content
 from arangodb.core.utils.initialize_litellm_cache import initialize_litellm_cache
 
 # Import text processing and workflow tracking
@@ -209,10 +208,15 @@ def llm_summarize(
                 repo_workflow.log_llm_request(model, prompt_tokens, len(user_prompt))
 
             # OpenAI-compatible HTTP (scillm) standard approach
-            base = (os.getenv("OPENAI_BASE_URL") or os.getenv("OPENAI_API_BASE") or os.getenv("CHUTES_API_BASE") or "").rstrip("/")
+            base = (
+                os.getenv("OPENAI_BASE_URL")
+                or os.getenv("OPENAI_API_BASE")
+                or os.getenv("CHUTES_API_BASE")
+                or ""
+            ).rstrip("/")
             key = os.getenv("OPENAI_API_KEY") or os.getenv("CHUTES_API_KEY") or ""
             payload = {
-                "model": model.split("/",1)[1] if model.lower().startswith("openai/") else model,
+                "model": model.split("/", 1)[1] if model.lower().startswith("openai/") else model,
                 "messages": [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
@@ -222,7 +226,9 @@ def llm_summarize(
             }
             data = json.dumps(payload).encode("utf-8")
             headers = {"Content-Type": "application/json", "Authorization": f"Bearer {key}"}
-            req = urllib.request.Request(url=f"{base}/v1/chat/completions", data=data, headers=headers, method="POST")
+            req = urllib.request.Request(
+                url=f"{base}/v1/chat/completions", data=data, headers=headers, method="POST"
+            )
             with urllib.request.urlopen(req, timeout=60) as resp:
                 response = json.loads(resp.read().decode("utf-8"))
 
@@ -231,7 +237,9 @@ def llm_summarize(
                 repo_workflow.workflow_logger.complete_step("Process content with LLM")
 
             try:
-                content_text = (response.get("choices") or [{}])[0].get("message", {}).get("content", "")
+                content_text = (
+                    (response.get("choices") or [{}])[0].get("message", {}).get("content", "")
+                )
             except Exception:
                 content_text = ""
 

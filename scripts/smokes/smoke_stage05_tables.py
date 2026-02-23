@@ -8,7 +8,6 @@
 #   "pymupdf>=1.22.0",
 # ]
 # ///
-import sys
 from pathlib import Path
 import importlib.util
 import typer
@@ -30,9 +29,7 @@ def _load_stage05():
 
 @app.command()
 def main(
-    input_pdf: Path = typer.Option(
-        Path("data/input/pipeline/BHT_CV32A65X_marked.pdf"), exists=True
-    )
+    input_pdf: Path = typer.Option(Path("data/input/pipeline/BHT_CV32A65X_marked.pdf"), exists=True)
 ):
     try:
         load_dotenv(find_dotenv())
@@ -40,6 +37,7 @@ def main(
         # If Camelot is missing, just ensure import succeeded
         try:
             import camelot  # type: ignore  # noqa: F401
+
             have_camelot = True
         except Exception:
             have_camelot = False

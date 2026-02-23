@@ -18,7 +18,6 @@ Example Usage:
 """
 
 from typing import Annotated, List, Tuple, Optional, Dict, Any
-import logging
 from pathlib import Path
 
 from bs4 import BeautifulSoup
@@ -132,9 +131,6 @@ class MetadataKey(Enum):
     SIMILAR_ANNOTATIONS = "similar_annotations"
 
 
-# Set up logger first
-logger = logging.getLogger(__name__)
-
 # Try to import Camelot for table extraction fallback
 try:
     import camelot
@@ -143,6 +139,14 @@ try:
 except ImportError:
     CAMELOT_AVAILABLE = False
     logger.warning("Camelot-py not available. Install with: pip install camelot-py[cv]")
+
+try:
+    from extractor.core.processors.llm.annotation_learner import AnnotationLearner
+
+    ANNOTATION_LEARNER_AVAILABLE = True
+except Exception:
+    AnnotationLearner = None  # type: ignore[assignment]
+    ANNOTATION_LEARNER_AVAILABLE = False
 
 
 class LLMTableProcessor(BaseLLMComplexBlockProcessor):

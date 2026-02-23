@@ -17,7 +17,9 @@ import typer
 from dotenv import load_dotenv, find_dotenv
 
 
-app = typer.Typer(add_completion=False, help="Smoke: happy path with external annotations (skip Stage 01)")
+app = typer.Typer(
+    add_completion=False, help="Smoke: happy path with external annotations (skip Stage 01)"
+)
 
 
 @app.command()
@@ -84,4 +86,3 @@ def main(
 
 if __name__ == "__main__":
     app()
-

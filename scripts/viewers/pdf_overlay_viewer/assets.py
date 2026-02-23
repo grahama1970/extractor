@@ -384,6 +384,6 @@ footer {
 """
 
 ASSETS = {
-  "viewer.js": VIEWER_JS,
-  "viewer.css": VIEWER_CSS,
+    "viewer.js": VIEWER_JS,
+    "viewer.css": VIEWER_CSS,
 }

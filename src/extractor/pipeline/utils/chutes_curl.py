@@ -41,7 +41,11 @@ def chutes_curl_chat_json(
     base = os.environ.get("CHUTES_API_BASE", "").rstrip("/")
     api_key = os.environ.get("CHUTES_API_KEY", "")
     if not base or not api_key:
-        return None, {"error": "missing_env", "CHUTES_API_BASE": bool(base), "CHUTES_API_KEY": bool(api_key)}
+        return None, {
+            "error": "missing_env",
+            "CHUTES_API_BASE": bool(base),
+            "CHUTES_API_KEY": bool(api_key),
+        }
 
     model = model or os.environ.get("CHUTES_TEXT_MODEL") or ""
     ts = time.strftime("%Y%m%d_%H%M%S")
@@ -78,7 +82,7 @@ def chutes_curl_chat_json(
     try:
         r = subprocess.run(cmd, check=False, capture_output=True, text=True)
     except Exception as exc:
-        log_stage_error('chutes_curl.py', exc, {'context': 'chutes_curl.py'})
+        log_stage_error("chutes_curl.py", exc, {"context": "chutes_curl.py"})
         raise
         return None, {"error": "subprocess", "exc": str(e)}
 
@@ -93,8 +97,7 @@ def chutes_curl_chat_json(
     try:
         data = json.loads(resp_path.read_text(encoding="utf-8"))
     except Exception as exc:
-        log_stage_error('chutes_curl.py', exc, {'context': 'chutes_curl.py'})
+        log_stage_error("chutes_curl.py", exc, {"context": "chutes_curl.py"})
         raise
         return None, {**meta, "error": "json_load_failed"}
     return data, meta
-

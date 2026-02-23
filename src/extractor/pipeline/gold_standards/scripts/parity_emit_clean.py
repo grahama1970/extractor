@@ -10,7 +10,8 @@
 # ///
 """Emit simple, provider-friendly formats from canonical flattened blocks."""
 from __future__ import annotations
-import argparse, json
+import argparse
+import json
 from pathlib import Path
 from typing import List, Dict, Any
 from docx import Document
@@ -52,8 +53,8 @@ def write_html(out: Path, blocks: List[Dict[str, Any]]):
             parts.append('<table border="1">')
             for row in cells:
                 vals = list(row.values()) if isinstance(row, dict) else row
-                parts.append('<tr>' + ''.join(f'<td>{v}</td>' for v in vals) + '</tr>')
-            parts.append('</table></div>')
+                parts.append("<tr>" + "".join(f"<td>{v}</td>" for v in vals) + "</tr>")
+            parts.append("</table></div>")
         else:
             txt = _block_text(blk)
             parts.append(f'<div class="block"><p>{txt}</p></div>')
@@ -155,7 +156,7 @@ def write_epub(out: Path, blocks: List[Dict[str, Any]]):
     c1 = epub.EpubHtml(title="content", file_name="content.xhtml", lang="en")
     c1.content = "\n".join(html_parts)
     book.add_item(c1)
-    book.spine = ['nav', c1]
+    book.spine = ["nav", c1]
     book.add_item(epub.EpubNcx())
     book.add_item(epub.EpubNav())
     epub.write_epub(str(out), book)

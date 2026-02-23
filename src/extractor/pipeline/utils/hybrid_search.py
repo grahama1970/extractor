@@ -29,7 +29,7 @@ def hybrid_search_annotations(
             env_ann = os.getenv("ARANGO_ANNOTATIONS_COLLECTION", "").strip()
             env_edge = os.getenv("ARANGO_EDGES_COLLECTION", "").strip()
         except Exception as exc:
-            log_stage_error('hybrid_search.py', exc, {'context': 'hybrid_search.py'})
+            log_stage_error("hybrid_search.py", exc, {"context": "hybrid_search.py"})
             raise
 
         ann_coll_candidates = ([env_ann] if env_ann else []) + [
@@ -96,9 +96,8 @@ def hybrid_search_annotations(
                         dc = DB.aql.execute(aql_docs, bind_vars={"ids": vids})
                         connected_list = list(cast(Any, dc))
             except Exception as exc:
-                log_stage_error('hybrid_search.py', exc, {'context': 'hybrid_search.py'})
+                log_stage_error("hybrid_search.py", exc, {"context": "hybrid_search.py"})
                 raise
-                logger.debug(f"Graph-connected annotation fetch failed: {ge}")
 
         combined: Dict[str, Dict[str, Any]] = {}
 
@@ -143,12 +142,9 @@ def hybrid_search_annotations(
                 if top_k and len(results) > top_k:
                     results = results[:top_k]
         except Exception as exc:
-            log_stage_error('hybrid_search.py', exc, {'context': 'hybrid_search.py'})
+            log_stage_error("hybrid_search.py", exc, {"context": "hybrid_search.py"})
             raise
-            logger.debug(f"Annotation re-ranking failed (continuing): {re}")
         return results
     except Exception as exc:
-        log_stage_error('hybrid_search.py', exc, {'context': 'hybrid_search.py'})
+        log_stage_error("hybrid_search.py", exc, {"context": "hybrid_search.py"})
         raise
-        logger.warning(f"Hybrid search failed; returning empty list: {e}")
-        return []

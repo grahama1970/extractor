@@ -84,7 +84,9 @@ def main(
     prompts_dir: Path = typer.Option(DEFAULT_PROMPTS_DIR, exists=True, file_okay=False),
     docs_dir: Path = typer.Option(DEFAULT_DOCS_DIR, exists=True, file_okay=False),
     critiques_dir: Path = typer.Option(DEFAULT_CRITIQUES_DIR, exists=True, file_okay=False),
-    write_output: bool = typer.Option(True, help="Write audit result to data/audit/prompt_audit.json"),
+    write_output: bool = typer.Option(
+        True, help="Write audit result to data/audit/prompt_audit.json"
+    ),
 ):
     if not GRADE_PROMPT_PATH.exists():
         raise typer.Exit(code=1)

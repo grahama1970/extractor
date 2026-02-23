@@ -8,7 +8,6 @@
 # ///
 
 from __future__ import annotations
-import math
 import json
 import typer
 from scripts.lessons.arango_client import get_db
@@ -85,14 +84,15 @@ def multihop(
                 },
             }
 
-    ranked = sorted(best.values(), key=lambda x: x["score"], reverse=True)[: limit]
+    ranked = sorted(best.values(), key=lambda x: x["score"], reverse=True)[:limit]
     if json_out:
         print(json.dumps(ranked, ensure_ascii=False))
         return
     for i, r in enumerate(ranked, 1):
-        print(f"{i}. {r['neighbor']['title']}  [score={r['score']:.4f}]  ({r['neighbor']['scope']})")
+        print(
+            f"{i}. {r['neighbor']['title']}  [score={r['score']:.4f}]  ({r['neighbor']['scope']})"
+        )
 
 
 if __name__ == "__main__":
     app()
-

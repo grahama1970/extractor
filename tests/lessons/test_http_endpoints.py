@@ -36,7 +36,19 @@ def test_http_edge_lifecycle():
 
     # Add two lessons via API
     for t in (title_a, title_b):
-        r = _post("/api/lessons/add", {"title": t, "scope": "tabbed", "tags": ["http"], "status": "active", "problem": "temp", "playbook": "temp", "demo": True, "demo_batch": "http"})
+        r = _post(
+            "/api/lessons/add",
+            {
+                "title": t,
+                "scope": "tabbed",
+                "tags": ["http"],
+                "status": "active",
+                "problem": "temp",
+                "playbook": "temp",
+                "demo": True,
+                "demo_batch": "http",
+            },
+        )
         assert r.status_code == 200 and r.json().get("ok")
 
     # Create symmetric related edges with rationale
@@ -64,7 +76,13 @@ def test_http_edge_lifecycle():
     # Approve edge with human rationale
     r = _post(
         "/api/lessons/edge/approve",
-        {"from_title": title_a, "from_scope": "tabbed", "to_title": title_b, "to_scope": "tabbed", "rationale": "approved via http"},
+        {
+            "from_title": title_a,
+            "from_scope": "tabbed",
+            "to_title": title_b,
+            "to_scope": "tabbed",
+            "rationale": "approved via http",
+        },
     )
     assert r.status_code == 200 and r.json().get("ok")
 

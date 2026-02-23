@@ -13,7 +13,9 @@ from extractor.pipeline.steps import _11_arango_create_graph as stage11
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--bundle", type=Path, required=True, help="Bundle with documents[] (flattened pdf_objects)")
+    ap.add_argument(
+        "--bundle", type=Path, required=True, help="Bundle with documents[] (flattened pdf_objects)"
+    )
     ap.add_argument("--out", type=Path, required=True, help="Results root (pipeline)")
     ap.add_argument("--k", type=int, default=10)
     ap.add_argument("--thr", type=float, default=0.55)
@@ -31,4 +33,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

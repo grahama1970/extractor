@@ -13,12 +13,14 @@ from scripts.lessons.arango_client import get_db
 
 app = typer.Typer(add_completion=False)
 
+
 def resolve_key(col, title: str | None, scope: str | None) -> str | None:
     if not title:
         return None
     cur = col.find({"title": title, "scope": scope or "tabbed"})
     docs = list(cur) if cur else []
     return docs[0]["_key"] if docs else None
+
 
 @app.command()
 def related(
@@ -61,21 +63,35 @@ def related(
         except Exception:
             ldoc = None
         if ldoc:
-            rels.append({
-                "neighbor": {"_key": ldoc.get("_key"), "title": ldoc.get("title"), "scope": ldoc.get("scope"), "tags": ldoc.get("tags", [])},
-                "edge": {"weight": float(e.get("weight", 0)), "rationale": e.get("rationale"), "date": e.get("date")},
-            })
+            rels.append(
+                {
+                    "neighbor": {
+                        "_key": ldoc.get("_key"),
+                        "title": ldoc.get("title"),
+                        "scope": ldoc.get("scope"),
+                        "tags": ldoc.get("tags", []),
+                    },
+                    "edge": {
+                        "weight": float(e.get("weight", 0)),
+                        "rationale": e.get("rationale"),
+                        "date": e.get("date"),
+                    },
+                }
+            )
     rels.sort(key=lambda x: x["edge"]["weight"], reverse=True)
     rels = rels[:k]
     if json_out:
         import json as _json
+
         print(_json.dumps(rels, ensure_ascii=False))
     else:
         for i, r in enumerate(rels, 1):
-            print(f"{i}. {r['neighbor']['title']}  [w={r['edge']['weight']:.2f}]  ({r['neighbor']['scope']})")
-            if r['edge'].get('rationale'):
+            print(
+                f"{i}. {r['neighbor']['title']}  [w={r['edge']['weight']:.2f}]  ({r['neighbor']['scope']})"
+            )
+            if r["edge"].get("rationale"):
                 print(f"   {r['edge']['rationale']}")
+
 
 if __name__ == "__main__":
     app()
-

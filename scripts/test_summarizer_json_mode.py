@@ -42,12 +42,10 @@ except Exception:
 
 async def test_summarize(section: dict, *, model: str, strict_json: bool) -> dict:
     base_text = (
-        section.get("reflowed_text")
-        or section.get("merged_text")
-        or section.get("raw_text")
-        or ""
+        section.get("reflowed_text") or section.get("merged_text") or section.get("raw_text") or ""
     )
-    prompt = dedent(f"""
+    prompt = dedent(
+        f"""
         Summarize the following document section in 2–4 sentences and list 3–7 key concepts.
 
         Section title: {section.get('title','Untitled')}
@@ -60,7 +58,8 @@ async def test_summarize(section: dict, *, model: str, strict_json: bool) -> dic
           "summary": "concise summary",
           "key_concepts": ["concept1", "concept2", "..."]
         }}
-    """).strip()
+    """
+    ).strip()
 
     system_json_guard = (
         "You output ONLY well-formed JSON objects. No prose, markdown, or extra text. "

@@ -36,7 +36,10 @@ def main() -> int:
 
     model = env("LITELLM_DEFAULT_MODEL") or env("DEFAULT_LITELLM_MODEL") or env("LITELLM_VLM_MODEL")
     if not model:
-        print("No LLM model set (LITELLM_DEFAULT_MODEL/DEFAULT_LITELLM_MODEL/LITELLM_VLM_MODEL)", file=sys.stderr)
+        print(
+            "No LLM model set (LITELLM_DEFAULT_MODEL/DEFAULT_LITELLM_MODEL/LITELLM_VLM_MODEL)",
+            file=sys.stderr,
+        )
         return 4
 
     print(f"Using model: {model}")
@@ -45,7 +48,7 @@ def main() -> int:
             model=model,
             messages=[
                 {"role": "system", "content": "You are a helpful assistant."},
-                {"role": "user", "content": "Return only the JSON {\"ok\": true}."},
+                {"role": "user", "content": 'Return only the JSON {"ok": true}.'},
             ],
             timeout=30,
             # For providers supporting response_format, litellm will adapt as needed
@@ -81,4 +84,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-

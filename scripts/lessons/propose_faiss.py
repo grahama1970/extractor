@@ -10,39 +10,47 @@
 # ///
 
 from __future__ import annotations
-import os, time, math, hashlib
+import time
+import hashlib
 from typing import List, Dict, Any
 import numpy as np
 import typer
 
+from scripts.lessons.arango_client import get_db
+
 app = typer.Typer(add_completion=False)
 
-from scripts.lessons.arango_client import get_db
 
 def l2_normalize(x: np.ndarray) -> np.ndarray:
     n = np.linalg.norm(x, axis=1, keepdims=True) + 1e-8
     return x / n
 
+
 def pair_id(a_id: str, b_id: str) -> str:
     a, b = (a_id, b_id) if a_id <= b_id else (b_id, a_id)
-    return hashlib.sha1((a + '|' + b).encode('utf-8')).hexdigest()
+    return hashlib.sha1((a + "|" + b).encode("utf-8")).hexdigest()
+
 
 def doc_text(d: Dict[str, Any]) -> str:
     parts: List[str] = []
-    for k in ("title","problem","playbook"):
+    for k in ("title", "problem", "playbook"):
         v = d.get(k)
-        if v: parts.append(str(v))
+        if v:
+            parts.append(str(v))
     tags = d.get("tags") or []
     if tags:
         parts.append(" ".join(tags))
     return "\n".join(parts)
 
+
 def tags_overlap(a: List[str], b: List[str]) -> float:
     A, B = set([t.lower() for t in a or []]), set([t.lower() for t in b or []])
-    if not A and not B: return 0.0
+    if not A and not B:
+        return 0.0
     inter = len(A & B)
     uni = len(A | B)
     return inter / max(1, uni)
+
 
 @app.command()
 def propose(
@@ -69,17 +77,17 @@ def propose(
     tags_list = [d.get("tags") or [] for d in lessons]
     scopes = [d.get("scope") or "" for d in lessons]
 
-    model = SentenceTransformer('all-MiniLM-L6-v2')
+    model = SentenceTransformer("all-MiniLM-L6-v2")
     emb = model.encode(texts, convert_to_numpy=True, normalize_embeddings=True)
-    emb = l2_normalize(emb.astype('float32'))
+    emb = l2_normalize(emb.astype("float32"))
 
     index = faiss.IndexFlatIP(emb.shape[1])
     index.add(emb)
-    D, I = index.search(emb, k+1)  # self included
+    D, indices = index.search(emb, k + 1)  # self included
 
     ts = int(time.time())
     wrote = 0
-    for i, (sims, idxs) in enumerate(zip(D, I)):
+    for i, (sims, idxs) in enumerate(zip(D, indices)):
         src_id = ids[i]
         src_tags = tags_list[i]
         src_scope = scopes[i]
@@ -92,7 +100,7 @@ def propose(
         cands = sorted(cands, key=lambda x: x[1], reverse=True)
         cands_eval = [c for c in cands if c[1] >= sim_thresh]
         if len(cands_eval) < min_top:
-            cands_eval = cands[: min_top]
+            cands_eval = cands[:min_top]
 
         for cand_id, sim, j in cands_eval:
             pid = pair_id(src_id, cand_id)
@@ -120,23 +128,27 @@ def propose(
                 overlaps.append(f"{tok_overlap} title tokens overlap")
             if len(overlaps) < 2:
                 try:
-                    db.collection("rejected_pairs").insert({
-                        "_key": pid,
-                        "pair_id": pid,
-                        "reason": "insufficient concrete overlap",
-                        "last_checked_at": ts,
-                        "attempts": 1,
-                    })
+                    db.collection("rejected_pairs").insert(
+                        {
+                            "_key": pid,
+                            "pair_id": pid,
+                            "reason": "insufficient concrete overlap",
+                            "last_checked_at": ts,
+                            "attempts": 1,
+                        }
+                    )
                 except Exception:
                     pass
                 continue
             # compute weight (agent-chosen), store raw_sim
-            weight = 0.60*sim + 0.15*tovl + 0.15*scope_match
+            weight = 0.60 * sim + 0.15 * tovl + 0.15 * scope_match
             weight = max(0.0, min(1.0, weight))
             rationale = f"Related because: {', '.join(overlaps)}"
             approved = (weight >= 0.60) and (scope_match == 1.0) and (sim >= 0.55)
             if dry_run:
-                print(f"PAIR {src_id} ~ {cand_id} sim={sim:.2f} weight={weight:.2f} approved={approved} :: {rationale}")
+                print(
+                    f"PAIR {src_id} ~ {cand_id} sim={sim:.2f} weight={weight:.2f} approved={approved} :: {rationale}"
+                )
                 continue
             # write symmetric edges
             for frm, to in ((src_id, cand_id), (cand_id, src_id)):
@@ -145,11 +157,24 @@ def propose(
                     "INSERT { _from: @from, _to: @to, type: 'related', source: 'faiss', weight: @w, raw_sim: @sim, confidence: @conf, approved: @appr, rationale: @rat, rationales: [ { by: 'agent', text: @rat, at: @ts } ], status: @status, created_at: @ts, updated_at: @ts, last_verified_at: @ts, pair_id: @pid, decay_policy: 'standard' } "
                     "UPDATE { source: 'faiss', weight: @w, raw_sim: @sim, confidence: @conf, approved: @appr, rationale: @rat, updated_at: @ts, last_verified_at: @ts, status: @status, pair_id: @pid } IN lesson_edges"
                 )
-                db.aql.execute(aql, bind_vars={
-                    'from': frm, 'to': to, 'w': weight, 'sim': sim, 'conf': weight, 'appr': approved, 'rat': rationale, 'ts': ts, 'status': 'active' if approved else 'pending', 'pid': pid
-                })
+                db.aql.execute(
+                    aql,
+                    bind_vars={
+                        "from": frm,
+                        "to": to,
+                        "w": weight,
+                        "sim": sim,
+                        "conf": weight,
+                        "appr": approved,
+                        "rat": rationale,
+                        "ts": ts,
+                        "status": "active" if approved else "pending",
+                        "pid": pid,
+                    },
+                )
             wrote += 1
     print(f"Proposed/updated {wrote} edges.")
+
 
 if __name__ == "__main__":
     app()

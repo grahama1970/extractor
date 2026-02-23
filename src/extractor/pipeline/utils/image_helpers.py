@@ -29,7 +29,7 @@ def _get_cache_dir(explicit_dir: Optional[str] = None) -> Optional[Path]:
         p.mkdir(parents=True, exist_ok=True)
         return p
     except Exception as exc:
-        log_stage_error('image_helpers.py', exc, {'context': 'image_helpers.py'})
+        log_stage_error("image_helpers.py", exc, {"context": "image_helpers.py"})
         raise
         return None
 
@@ -40,7 +40,7 @@ def safe_image(path: Path) -> bool:
             path.exists() and path.suffix.lower() in IMAGE_EXT and Image.open(path).verify() is None
         )
     except Exception as exc:
-        log_stage_error('image_helpers.py', exc, {'context': 'image_helpers.py'})
+        log_stage_error("image_helpers.py", exc, {"context": "image_helpers.py"})
         raise
         return False
 
@@ -103,7 +103,7 @@ def compress_image_cached(
             try:
                 return fp.read_text()
             except Exception as exc:
-                log_stage_error('image_helpers.py', exc, {'context': 'image_helpers.py'})
+                log_stage_error("image_helpers.py", exc, {"context": "image_helpers.py"})
                 raise
 
     img_bytes = path.read_bytes()
@@ -116,7 +116,7 @@ def compress_image_cached(
             try:
                 fp.write_text(out)
             except Exception as exc:
-                log_stage_error('image_helpers.py', exc, {'context': 'image_helpers.py'})
+                log_stage_error("image_helpers.py", exc, {"context": "image_helpers.py"})
                 raise
         return out
 
@@ -131,7 +131,7 @@ def compress_image_cached(
                 try:
                     fp.write_text(out)
                 except Exception as exc:
-                    log_stage_error('image_helpers.py', exc, {'context': 'image_helpers.py'})
+                    log_stage_error("image_helpers.py", exc, {"context": "image_helpers.py"})
                     raise
             return out
         quality -= 10
@@ -144,7 +144,7 @@ def compress_image_cached(
         try:
             fp.write_text(out)
         except Exception as exc:
-            log_stage_error('image_helpers.py', exc, {'context': 'image_helpers.py'})
+            log_stage_error("image_helpers.py", exc, {"context": "image_helpers.py"})
             raise
     return out
 
@@ -161,7 +161,7 @@ def fetch_remote_image_cached(
             try:
                 return fp.read_text()
             except Exception as exc:
-                log_stage_error('image_helpers.py', exc, {'context': 'image_helpers.py'})
+                log_stage_error("image_helpers.py", exc, {"context": "image_helpers.py"})
                 raise
 
     try:
@@ -173,11 +173,11 @@ def fetch_remote_image_cached(
             try:
                 fp.write_text(out)
             except Exception as exc:
-                log_stage_error('image_helpers.py', exc, {'context': 'image_helpers.py'})
+                log_stage_error("image_helpers.py", exc, {"context": "image_helpers.py"})
                 raise
         return out
     except Exception as exc:
-        log_stage_error('image_helpers.py', exc, {'context': 'image_helpers.py'})
+        log_stage_error("image_helpers.py", exc, {"context": "image_helpers.py"})
         raise
         return None
 

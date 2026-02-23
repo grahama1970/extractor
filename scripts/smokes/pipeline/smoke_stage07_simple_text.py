@@ -28,6 +28,7 @@ from pathlib import Path
 
 import typer
 from dotenv import load_dotenv, find_dotenv
+
 try:
     import litellm  # type: ignore
     from litellm import Router  # type: ignore
@@ -57,8 +58,7 @@ def run_smoke() -> None:
     img_data_url = SECTION_IMAGE_DATAURL.read_text(encoding="utf-8").strip()
 
     context = (
-        f"Section: {sec.get('title','Untitled')}\n"
-        f"Text: {sec.get('raw_text','').strip()}\n"
+        f"Section: {sec.get('title','Untitled')}\n" f"Text: {sec.get('raw_text','').strip()}\n"
     )
     messages = [
         {"role": "system", "content": "Return ONLY valid JSON. No prose, no fences."},
@@ -97,10 +97,16 @@ def run_smoke() -> None:
 
     litellm.drop_params = False
     router = Router(
-        model_list=[{
-            "model_name": "gemini/gemini-2.5-flash",
-            "litellm_params": {"model": "gemini/gemini-2.5-flash", "provider": "google", "api_key": gemini_key},
-        }]
+        model_list=[
+            {
+                "model_name": "gemini/gemini-2.5-flash",
+                "litellm_params": {
+                    "model": "gemini/gemini-2.5-flash",
+                    "provider": "google",
+                    "api_key": gemini_key,
+                },
+            }
+        ]
     )
 
     kwargs = {
@@ -117,7 +123,9 @@ def run_smoke() -> None:
                 messages[0],
                 {"role": "user", "content": [{"type": "text", "text": context}]},
             ]
-            resp = router.completion(model="gemini/gemini-2.5-flash", messages=messages_no_img, **kwargs)
+            resp = router.completion(
+                model="gemini/gemini-2.5-flash", messages=messages_no_img, **kwargs
+            )
         else:
             raise
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import threading
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, List, Optional, Sequence
 
@@ -147,7 +147,5 @@ def _run_flask_session(session: ClarifySession) -> None:
     finished = server.wait(session.timeout_sec)
     server.stop()
     if not finished or not server.responses:
-        raise ClarifyTimeout(
-            f"Clarifying UI timed out after {session.timeout_sec // 60} minutes."
-        )
+        raise ClarifyTimeout(f"Clarifying UI timed out after {session.timeout_sec // 60} minutes.")
     session.save_responses(server.responses, extra=server.payload)

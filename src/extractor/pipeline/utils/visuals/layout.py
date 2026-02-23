@@ -1,7 +1,7 @@
 import json
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Dict, List, Set, Union
+from typing import Any, Dict, List, Set
 
 import fitz
 from loguru import logger
@@ -20,11 +20,13 @@ LABEL_TEXT_COLOR = (0.1, 0.1, 0.1)
 STEP_NAME = "09a_pdf_annotator"
 
 
-def collect_tabs(sections: List[Dict[str, Any]], overlays: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def collect_tabs(
+    sections: List[Dict[str, Any]], overlays: List[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
     """Build a sorted list of tabs (sections and merged tables) for the gutter."""
     tabs: list[dict[str, Any]] = []
     section_index: dict[str, dict[str, Any]] = {}
-    
+
     for s in sections:
         sid_raw = s.get("id") or s.get("section_id")
         sid = str(sid_raw) if sid_raw is not None else None
@@ -53,7 +55,11 @@ def collect_tabs(sections: List[Dict[str, Any]], overlays: List[Dict[str, Any]])
     for section in section_index.values():
         section["pages"] = sorted(section["pages"])
         section["primary_page"] = section["pages"][0] if section["pages"] else 0
-        section["stable_id"] = f"{section['key']}@{section['primary_page'] + 1}" if section["pages"] else section["key"]
+        section["stable_id"] = (
+            f"{section['key']}@{section['primary_page'] + 1}"
+            if section["pages"]
+            else section["key"]
+        )
         tabs.append(section)
 
     merged_groups: dict[str, dict[str, Any]] = {}
@@ -80,7 +86,7 @@ def collect_tabs(sections: List[Dict[str, Any]], overlays: List[Dict[str, Any]])
                 try:
                     pg = int(p) - 1
                 except Exception as exc:
-                    log_stage_error(STEP_NAME, exc, {'context': 'collect_tabs'})
+                    log_stage_error(STEP_NAME, exc, {"context": "collect_tabs"})
                     raise
                     pg = coerce_page(p)
                 if pg is not None:
@@ -93,7 +99,13 @@ def collect_tabs(sections: List[Dict[str, Any]], overlays: List[Dict[str, Any]])
         group["stable_id"] = f"{group['key']}@{group['primary_page'] + 1}"
         tabs.append(group)
 
-    tabs.sort(key=lambda t: (t.get("primary_page", 0), 0 if t.get("kind") == "section" else 1, t.get("label", "")))
+    tabs.sort(
+        key=lambda t: (
+            t.get("primary_page", 0),
+            0 if t.get("kind") == "section" else 1,
+            t.get("label", ""),
+        )
+    )
     for idx, tab in enumerate(tabs):
         tab["_rank"] = idx
     return tabs
@@ -131,7 +143,9 @@ def draw_vertical_tabs(
         return mapping
 
     per_page_all = _build_per_page(tabs)
-    overflow_initial = sorted(pg for pg, lst in per_page_all.items() if len(lst) > max_tabs_per_page)
+    overflow_initial = sorted(
+        pg for pg, lst in per_page_all.items() if len(lst) > max_tabs_per_page
+    )
     use_tabs = tabs
     downgraded = False
     if overflow_initial and any(tab.get("kind") == "table" for tab in tabs):
@@ -148,7 +162,11 @@ def draw_vertical_tabs(
 
     summary.update(
         {
-            "mode": "both" if not downgraded and any(tab.get("kind") == "table" for tab in tabs) else ("sections_only" if use_tabs else "none"),
+            "mode": (
+                "both"
+                if not downgraded and any(tab.get("kind") == "table" for tab in tabs)
+                else ("sections_only" if use_tabs else "none")
+            ),
             "sections": sum(1 for tab in use_tabs if tab.get("kind") == "section"),
             "tables": sum(1 for tab in use_tabs if tab.get("kind") == "table"),
             "total": len(use_tabs),
@@ -176,7 +194,7 @@ def draw_vertical_tabs(
             tab_list,
             key=lambda t: (0 if t.get("kind") == "section" else 1, t.get("_rank", 0)),
         )
-        display_tabs = ordered[: max_tabs_per_page]
+        display_tabs = ordered[:max_tabs_per_page]
         overflow = len(ordered) > max_tabs_per_page
         if overflow and display_tabs:
             target = ordered[max_tabs_per_page - 1].get("primary_page", pno)
@@ -223,14 +241,16 @@ def draw_vertical_tabs(
                     }
                 )
             except Exception as exc:
-                log_stage_error(STEP_NAME, exc, {'context': 'draw_vertical_tabs'})
+                log_stage_error(STEP_NAME, exc, {"context": "draw_vertical_tabs"})
                 raise
                 continue
 
     return summary
 
 
-def emit_overlay_map(stage_dir: Path, overlays: List[Dict[str, Any]], pages_touched: Set[int], dpi: int = PREVIEW_DPI) -> None:
+def emit_overlay_map(
+    stage_dir: Path, overlays: List[Dict[str, Any]], pages_touched: Set[int], dpi: int = PREVIEW_DPI
+) -> None:
     """Preview generation and JSON mapping."""
     vis_dir = stage_dir / "visual_output"
     vis_dir.mkdir(parents=True, exist_ok=True)
@@ -245,7 +265,11 @@ def emit_overlay_map(stage_dir: Path, overlays: List[Dict[str, Any]], pages_touc
         for ov in by_page.get(pg, []):
             rb = ov.get("render_bbox") or ov.get("bbox") or [0, 0, 0, 0]
             x0, y0, x1, y1 = rb
-            meta = {k: v for k, v in ov.items() if k not in {"bbox", "render_bbox", "page", "kind", "_label"}}
+            meta = {
+                k: v
+                for k, v in ov.items()
+                if k not in {"bbox", "render_bbox", "page", "kind", "_label"}
+            }
             meta.setdefault("_label", ov.get("_label"))
             overlays_px.append(
                 {

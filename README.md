@@ -2,126 +2,220 @@
 
 Advanced multi-format document extraction system with self-correcting AI agents, annotation-guided learning, and continuous improvement through metadata accumulation. Handles PDFs, DOCX, PPTX, XML, HTML, and more with enterprise-grade accuracy.
 
-## 🚀 Key Innovation: Self-Correcting Multi-Stage Pipeline
-
-Unlike traditional extraction systems, this uses a **10-stage pipeline** where each stage contributes metadata, and AI agents make intelligent decisions based on accumulated knowledge.
-
-## 🎯 Quick Start
-
-The Extractor comes with a smart Agent Interface that handles format detection and calibration for you.
-
-### Single Document (Interactive)
-
-To extract any document, simply run:
+## Quick Start
 
 ```bash
-./run.sh extract my_document.pdf
+# Extract any document (auto-detects format and preset)
+python -m extractor.pipeline paper.pdf --out results/
+
+# Fast mode (no LLM, quick extraction)
+python -m extractor.pipeline paper.pdf --mode fast
+
+# Accurate mode (full LLM pipeline)
+python -m extractor.pipeline paper.pdf --use-llm
+
+# Force specific preset (skip auto-detection)
+python -m extractor.pipeline paper.pdf --preset arxiv
 ```
 
-- **Structured Files (HTML, DOCX, XML)**: The agent extracts them immediately (Frictionless).
-- **PDFs (Unknown Layouts)**: The agent pauses and asks for guidance if it doesn't recognize the format.
-
-**Example Interactive Handshake:**
+## Complete Pipeline Architecture
 
 ```
-⚠️  Unknown Document Layout: 'my_document.pdf'.
-
-[ Scientific ]
-[1] ★ Academic papers (2-column, math)
-
-[ Engineering ]
-[2] Requirements spec (Boeing/BHT style)
-
-[ Standard ]
-[3] Custom Calibration
-[4] Fast Mode (Skip Calibration)
-
-Select an option [1]:
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              INPUT DOCUMENT                                  │
+│                    (PDF, HTML, DOCX, XML, EPUB, PPTX, etc.)                 │
+└────────────────────────────────┬────────────────────────────────────────────┘
+                                 │
+┌────────────────────────────────▼────────────────────────────────────────────┐
+│                     STAGE 00: PROFILE DETECTOR                               │
+│  • Analyze: domain, layout, tables, formulas, requirements                   │
+│  • Match preset: arxiv, requirements_spec, auto                              │
+│  • Determine route: fast vs accurate                                         │
+└────────────────────────────────┬────────────────────────────────────────────┘
+                                 │
+┌────────────────────────────────▼────────────────────────────────────────────┐
+│                     PDF EXTRACTION (STAGES 01-06)                            │
+│                                                                              │
+│  s01 annotation_processor   │  Strip/process PDF annotations                │
+│  s02 marker_extractor       │  Extract blocks via Marker/pymupdf4llm        │
+│  s03 suspicious_headers     │  VLM verification of headers                  │
+│  s04 section_builder        │  Build hierarchical sections                  │
+│  s04a layout_audit          │  Audit layout quality                         │
+│  s05 table_extractor        │  Extract tables (Camelot)                     │
+│  s05b table_describer       │  VLM descriptions for tables                  │
+│  s05c table_merger          │  Merge & deduplicate tables                   │
+│  s06 figure_extractor       │  Extract figures/images                       │
+│  s06b figure_describer      │  VLM descriptions for figures                 │
+└────────────────────────────────┬────────────────────────────────────────────┘
+                                 │
+┌────────────────────────────────▼────────────────────────────────────────────┐
+│                     COMMON STAGES (07-14)                                    │
+│                                                                              │
+│  s07 duckdb_ingest          │  Assemble into queryable DuckDB               │
+│  s07b text_cleaner          │  Clean and normalize text                     │
+│  s08 extract_requirements   │  Mine requirements (REQ-xxx, SHALL, MUST)     │
+│  s08 lean4_theorem_prover   │  Formal proofs (scientific papers)            │
+│  s09 section_summarizer     │  LLM summaries per section                    │
+│  s10 markdown_exporter      │  Export to Markdown                           │
+│  s10 arangodb_exporter      │  Sync to ArangoDB graph                       │
+│  s14 report_generator       │  Generate extraction report                   │
+└────────────────────────────────┬────────────────────────────────────────────┘
+                                 │
+┌────────────────────────────────▼────────────────────────────────────────────┐
+│                          PIPELINE OUTPUTS                                    │
+│                                                                              │
+│  pipeline.duckdb            │  Queryable structured data                    │
+│  04_sections.json           │  Hierarchical sections                        │
+│  05_tables.json             │  Extracted tables with descriptions           │
+│  06_figures.json            │  Extracted figures with descriptions          │
+│  08_requirements.json       │  Mined requirements                           │
+│  document.md                │  Human-readable Markdown                      │
+│  ArangoDB Graph             │  documents → sections → requirements          │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-Selecting a **preset** (1 or 2) calibrates the pipeline and extracts your document with high accuracy.
+## Separation of Concerns
 
-### Smart Batch Processing (Auto-Detect)
+Extractor focuses on **structure extraction**. For knowledge generation (Q&A pairs), use the downstream skills:
 
-To process a folder of mixed documents without interruption, use the `--auto` flag. The agent will scan each file's content and automatically select the best calibration preset.
+```
+EXTRACTOR (this project)     QRA SKILL (separate)        MEMORY SKILL (separate)
+────────────────────────     ───────────────────         ────────────────────────
+• Extract sections           • Generate Q&A pairs        • Store with embeddings
+• Extract tables             • Validate grounding        • Search & recall
+• Extract figures            • Domain-focused            • Learn patterns
+• Extract requirements       • LLM-intensive
+• Export to DB/MD
+
+Output: Structured JSON      Output: Q&A pairs           Output: Searchable memory
+Cost: Low (mostly offline)   Cost: High (LLM tokens)     Cost: Embedding
+```
+
+**Orchestration:** The `/distill` skill combines all three:
 
 ```bash
-# Process all PDFs in the current directory
-for f in *.pdf; do
-  ./run.sh extract "$f" --auto
-done
+# One command: Extract → QRA → Memory
+.pi/skills/distill/run.sh --file paper.pdf --scope research
 ```
 
-**What happens?**
+## Supported Formats & Parity
 
-- `paper.pdf` -> Detects "Abstract/References" -> Uses [ArXiv] preset -> High Accuracy.
-- `reqs.pdf` -> Detects "REQ-001" -> Uses [Requirements] preset -> High Accuracy.
-- `meme.png` -> No match -> Skips or uses Fast Mode.
+Cross-format parity measured against HTML reference:
 
-### Extraction Modes
+| Format       | Method                   | Parity    | Notes                            |
+| ------------ | ------------------------ | --------- | -------------------------------- |
+| **Markdown** | Direct parse             | 100%      | Perfect structural match         |
+| **DOCX**     | Native XML (python-docx) | 100%      | Perfect structural match         |
+| **HTML**     | BeautifulSoup            | Reference | Baseline for comparison          |
+| **XML**      | defusedxml               | 90%       | Structure preserved              |
+| **PDF**      | 14-stage pipeline        | 87%       | Varies by document complexity    |
+| **RST**      | docutils                 | 85%       | Section structure varies         |
+| **EPUB**     | ebooklib                 | 82%       | Chapter structure varies         |
+| **PPTX**     | python-pptx              | 81%       | Slide-based structure            |
+| **XLSX**     | openpyxl                 | 16%       | Expected (spreadsheet format)    |
+| **Images**   | OCR/VLM                  | 16%       | Requires VLM for text extraction |
+
+## ArangoDB Schema
+
+```
+s10_arangodb_exporter creates:
+
+NODES (Vertices):
+  documents/doc_{hash}     ← Root document node
+  sections/sec_{hash}      ← Section nodes (hierarchical)
+  requirements/req_{id}    ← Requirement nodes
+
+EDGES:
+  has_section: Document → Section
+  has_section: Section → SubSection (hierarchy)
+  has_requirement: Section → Requirement
+```
+
+## Presets
+
+| Preset                | Detected When                                           | Features                         |
+| --------------------- | ------------------------------------------------------- | -------------------------------- |
+| **arxiv**             | Academic papers (2-column, math, "Abstract/References") | Full LLM pipeline, Lean4 proving |
+| **requirements_spec** | Engineering specs (REQ-xxx, "Shall", nested sections)   | Requirements mining enabled      |
+| **auto**              | Unknown documents                                       | Heuristic-based routing          |
+
+## CLI Reference
 
 ```bash
-# Auto mode (default): Step 00 decides based on complexity
-./run.sh extract paper.pdf
+# Basic extraction
+python -m extractor.pipeline <pdf> --out <dir>
 
-# Fast mode: PyMuPDF only, no ML/LLM
-./run.sh extract paper.pdf --mode fast
+# Key flags
+--preset <name>          # Force preset (arxiv, requirements_spec, auto)
+--use-llm                # Enable LLM for improved accuracy
+--offline-smoke          # Deterministic mode, no network calls
+--skip-export            # Don't write to ArangoDB
+--extract-requirements   # Mine requirements (s08)
+--annotate-pdf           # Generate annotated PDF with overlays
+--auto-ocr/--no-auto-ocr # Control scanned PDF handling
+--skip-scanned           # Skip detected scanned PDFs
+--ocr-lang <code(s)>     # Set OCR language (default: eng)
 
-# Accurate mode: Uses LLM for complex extraction (tables, math)
-./run.sh extract paper.pdf --mode accurate
+
+# Batch processing
+python -m extractor.pipeline ./documents/ --out ./results --glob "**/*.pdf"
 ```
 
-## 📊 Supported Formats & Accuracy
+## Environment Variables
 
-| Format   | Method        | Profile (Preset) | Accuracy Goal    |
-| -------- | ------------- | ---------------- | ---------------- |
-| **PDF**  | Marker + AI   | ArXiv, Boeing    | 99% (Calibrated) |
-| **DOCX** | Native XML    | Fast Path        | 100%             |
-| **HTML** | BeautifulSoup | Fast Path        | 100%             |
-| **XML**  | Native parser | Fast Path        | 100%             |
-| **PPTX** | Native XML    | Fast Path        | 95%              |
+```bash
+# Required for LLM stages
+CHUTES_API_BASE=https://llm.chutes.ai/v1
+CHUTES_API_KEY=<your-key>
+CHUTES_VLM_MODEL=Qwen/Qwen3-VL-235B-A22B-Instruct
+CHUTES_TEXT_MODEL=moonshotai/Kimi-K2-Instruct-0905
 
-## 🔌 API Usage
+# Required for ArangoDB export
+ARANGO_HOST=http://localhost:8529
+ARANGO_DB=extractor_graph
+ARANGO_USER=root
+ARANGO_PASSWORD=<password>
 
-You can also use the Python API for integration:
-
-```python
-from extractor import ExtractorLogic
-from pathlib import Path
-
-async def main():
-    logic = ExtractorLogic()
-
-    # 1. Auto-Detect preset
-    preset = logic.detect_preset(Path("doc.pdf"))
-
-    # 2. Calibrate & Extract
-    if preset:
-        await logic.calibrate_pdf(Path("doc.pdf"), preset=preset)
-        await logic.extract_real(Path("doc.pdf"), strict=True, use_llm=True)
-    else:
-        # Fallback (fast mode)
-        await logic.extract_real(Path("doc.pdf"), strict=False, use_llm=False)
+# Optional for Lean4 proving
+SCILLM_API_BASE=http://localhost:8787/v1
 ```
 
-## 🧠 Architecture: Preset-First Methodology
+## Project Structure
 
-For complex PDFs, we use a **Preset-First** approach:
+```
+src/extractor/
+├── core/
+│   ├── presets.py           # Preset registry (arxiv, requirements_spec)
+│   ├── providers/           # Format-specific extractors
+│   │   ├── docx.py
+│   │   ├── html.py
+│   │   ├── epub.py
+│   │   └── ...
+│   └── schema/
+│       └── unified_document.py
+├── pipeline/
+│   ├── run_pipeline.py      # Main orchestrator
+│   └── steps/
+│       ├── s00_profile_detector.py
+│       ├── s01_annotation_processor.py
+│       ├── s02_marker_extractor.py
+│       └── ... (14+ stages)
+└── tools/
+    └── tasks_loop/
+        ├── sanity/          # API sanity scripts
+        └── tasks/           # Task files
+```
 
-1. **Profile**: Step 00 analyzes the PDF (domain, layout, elements).
-2. **Match**: Find the closest preset in the registry (arxiv, requirements_spec).
-3. **Calibrate**: Tune the pipeline until it perfectly extracts a test fixture.
-4. **Extract**: Apply those tuned settings to your real document.
+## Related Skills (pi-mono)
 
-This ensures **provenance** and **reliability** that generic "chat with PDF" tools cannot match.
+| Skill         | Purpose                                |
+| ------------- | -------------------------------------- |
+| `/extractor`  | User-facing interface to this pipeline |
+| `/distill`    | Extract → QRA → Memory (orchestrator)  |
+| `/qra`        | Generate Q&A pairs from text           |
+| `/doc-to-qra` | Document → Memory (simplified)         |
+| `/memory`     | Store and recall knowledge             |
 
-### Terminology
-
-| Term        | Definition                                                 |
-| :---------- | :--------------------------------------------------------- |
-| **Preset**  | Extraction configuration for a document type (user-facing) |
-| **Fixture** | Internal test case for verification (developer-facing)     |
-
-## 📝 License
+## License
 
 Apache License 2.0 - See [LICENSE](LICENSE) for details.

@@ -5,11 +5,13 @@ except Exception:
     raise SystemExit(0)
 import os
 
-r = Router(default_litellm_params={
-    "api_base": os.environ["CHUTES_API_BASE"],
-    "api_key": None,                         # prevent Bearer injection
-    "extra_headers": {"x-api-key": os.environ["CHUTES_API_KEY"]},
-})
+r = Router(
+    default_litellm_params={
+        "api_base": os.environ["CHUTES_API_BASE"],
+        "api_key": None,  # prevent Bearer injection
+        "extra_headers": {"x-api-key": os.environ["CHUTES_API_KEY"]},
+    }
+)
 
 _mid = open("scripts/artifacts/chutes_models_ids.txt", "r", encoding="utf-8").read().splitlines()[0]
 model = _mid if _mid.startswith("openai/") else f"openai/{_mid}"

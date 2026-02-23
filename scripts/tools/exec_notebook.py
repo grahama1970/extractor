@@ -25,10 +25,11 @@ def main(argv: list[str]) -> int:
     if len(argv) != 3:
         print("usage: exec_notebook.py <in.ipynb> <out.html>")
         return 2
-    in_path = Path(argv[1]); out_path = Path(argv[2])
+    in_path = Path(argv[1])
+    out_path = Path(argv[2])
     nb = nbformat.read(in_path.open(), as_version=4)
-    ep = ExecutePreprocessor(timeout=900, kernel_name='python3')
-    ep.preprocess(nb, {'metadata': {'path': '.'}})
+    ep = ExecutePreprocessor(timeout=900, kernel_name="python3")
+    ep.preprocess(nb, {"metadata": {"path": "."}})
     body, _ = HTMLExporter().from_notebook_node(nb)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(body)
@@ -38,4 +39,3 @@ def main(argv: list[str]) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main(sys.argv))
-

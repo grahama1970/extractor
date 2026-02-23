@@ -11,7 +11,10 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import List, Tuple
-import json, time, pathlib, shutil
+import json
+import time
+import pathlib
+import shutil
 
 ROOT = Path(__file__).resolve().parents[1]
 SCEN_DIR = ROOT / "scenarios"
@@ -28,21 +31,51 @@ SCENARIOS: List[Tuple[str, list[str]]] = [
     ("ux_zoom_tooltip", ["node", str(SCEN_DIR / "ux" / "zoom_tooltip.mjs")]),
     ("ux_zoom_fit_pan", ["node", str(SCEN_DIR / "ux" / "zoom_fit_pan.mjs")]),
     ("ux_toolbar_hierarchy", ["node", str(SCEN_DIR / "ux" / "toolbar_hierarchy.mjs")]),
-    ("ux_selection_handles_resize", ["node", str(SCEN_DIR / "ux" / "selection_handles_resize.mjs")]),
+    (
+        "ux_selection_handles_resize",
+        ["node", str(SCEN_DIR / "ux" / "selection_handles_resize.mjs")],
+    ),
     ("ux_inspector_pane_present", ["node", str(SCEN_DIR / "ux" / "inspector_pane_present.mjs")]),
     ("ux_requirements_pane_dom", ["node", str(SCEN_DIR / "ux" / "requirements_pane_dom.mjs")]),
     ("ux_keyboard_core", ["node", str(SCEN_DIR / "ux" / "keyboard_core.mjs")]),
     ("ux_a11y_focus_escape", ["node", str(SCEN_DIR / "ux" / "a11y_focus_escape.mjs")]),
     ("pipeline_api_health", [sys.executable, str(SCEN_DIR / "pipeline" / "api_health.py")]),
-    ("pipeline_step_10_export_flattened", [sys.executable, str(SCEN_DIR / "pipeline" / "step_10_export_flattened.py")]),
-    ("pipeline_check_stage10_flattened", [sys.executable, str(SCEN_DIR / "pipeline" / "check_stage10_flattened.py")]),
-    ("pipeline_step_11_graph_db", [sys.executable, str(SCEN_DIR / "pipeline" / "step_11_graph_db.py")]),
-    ("pipeline_step_eval_step10", [sys.executable, str(SCEN_DIR / "pipeline" / "step_eval_agent.py")]),
-    ("pipeline_step_eval_step05", [sys.executable, str(SCEN_DIR / "pipeline" / "step05_eval_agent.py")]),
-    ("pipeline_step_eval_step06", [sys.executable, str(SCEN_DIR / "pipeline" / "step06_eval_agent.py")]),
-    ("pipeline_step_eval_step07", [sys.executable, str(SCEN_DIR / "pipeline" / "step07_eval_agent.py")]),
-    ("pipeline_step_eval_step09", [sys.executable, str(SCEN_DIR / "pipeline" / "step09_eval_agent.py")]),
-    ("pipeline_step_eval_step14", [sys.executable, str(SCEN_DIR / "pipeline" / "step14_eval_agent.py")]),
+    (
+        "pipeline_step_10_export_flattened",
+        [sys.executable, str(SCEN_DIR / "pipeline" / "step_10_export_flattened.py")],
+    ),
+    (
+        "pipeline_check_stage10_flattened",
+        [sys.executable, str(SCEN_DIR / "pipeline" / "check_stage10_flattened.py")],
+    ),
+    (
+        "pipeline_step_11_graph_db",
+        [sys.executable, str(SCEN_DIR / "pipeline" / "step_11_graph_db.py")],
+    ),
+    (
+        "pipeline_step_eval_step10",
+        [sys.executable, str(SCEN_DIR / "pipeline" / "step_eval_agent.py")],
+    ),
+    (
+        "pipeline_step_eval_step05",
+        [sys.executable, str(SCEN_DIR / "pipeline" / "step05_eval_agent.py")],
+    ),
+    (
+        "pipeline_step_eval_step06",
+        [sys.executable, str(SCEN_DIR / "pipeline" / "step06_eval_agent.py")],
+    ),
+    (
+        "pipeline_step_eval_step07",
+        [sys.executable, str(SCEN_DIR / "pipeline" / "step07_eval_agent.py")],
+    ),
+    (
+        "pipeline_step_eval_step09",
+        [sys.executable, str(SCEN_DIR / "pipeline" / "step09_eval_agent.py")],
+    ),
+    (
+        "pipeline_step_eval_step14",
+        [sys.executable, str(SCEN_DIR / "pipeline" / "step14_eval_agent.py")],
+    ),
     ("pipeline_run_all", [sys.executable, str(SCEN_DIR / "pipeline" / "run_pipeline_all.py")]),
     ("pipeline_pytest_smokes", [sys.executable, str(SCEN_DIR / "pipeline" / "pytest_smokes.py")]),
 ]
@@ -82,7 +115,11 @@ def main() -> None:
         if root_for_prune.parent.exists():
             # prune by count
             if max_entries > 0:
-                entries = sorted((p for p in root_for_prune.parent.iterdir() if p.is_dir()), key=lambda p: p.stat().st_mtime, reverse=True)
+                entries = sorted(
+                    (p for p in root_for_prune.parent.iterdir() if p.is_dir()),
+                    key=lambda p: p.stat().st_mtime,
+                    reverse=True,
+                )
                 for p in entries[max_entries:]:
                     shutil.rmtree(p, ignore_errors=True)
             # prune by age
@@ -98,9 +135,7 @@ def main() -> None:
         pass
     base = env.get("BASE_URL", "").strip()
     if not base:
-        print(
-            f"{YELLOW}Note: BASE_URL is not set. Defaulting to http://127.0.0.1:8080/main{RESET}"
-        )
+        print(f"{YELLOW}Note: BASE_URL is not set. Defaulting to http://127.0.0.1:8080/main{RESET}")
         env["BASE_URL"] = "http://127.0.0.1:8080/main"
 
     # Prefer explicit websocket endpoint, otherwise allow discovery URL.
@@ -110,7 +145,7 @@ def main() -> None:
         # Offer a helpful default for local headless Chrome
         env.setdefault("BROWSERLESS_WS", "ws://127.0.0.1:9222/devtools/browser")
 
-    stop_on_fail = (env.get("SCENARIOS_STOP_ON_FIRST_FAILURE", "").lower() in {"1","true","yes"})
+    stop_on_fail = env.get("SCENARIOS_STOP_ON_FIRST_FAILURE", "").lower() in {"1", "true", "yes"}
     plan = _filtered_scenarios(SCENARIOS)
     results: list[tuple[str, bool, int]] = []
     json_results: list[dict] = []
@@ -121,11 +156,17 @@ def main() -> None:
         proc = subprocess.run(cmd, env=env)
         ok = proc.returncode == 0
         results.append((name, ok, proc.returncode))
-        json_results.append({
-            "name": name,
-            "status": "pass" if ok else ("skip" if proc.returncode == 0 and 'SKIP' in name.upper() else "fail"),
-            "exit_code": proc.returncode,
-        })
+        json_results.append(
+            {
+                "name": name,
+                "status": (
+                    "pass"
+                    if ok
+                    else ("skip" if proc.returncode == 0 and "SKIP" in name.upper() else "fail")
+                ),
+                "exit_code": proc.returncode,
+            }
+        )
         if ok:
             print(f"{GREEN}✓ {name} succeeded{RESET}\n")
         else:
@@ -147,7 +188,10 @@ def main() -> None:
     # Write JSON summary
     summary = {
         "elapsed_sec": round(time.time() - t0, 3),
-        "results": [{"name": n, "status": ("pass" if ok else "fail"), "exit_code": rc} for n, ok, rc in results],
+        "results": [
+            {"name": n, "status": ("pass" if ok else "fail"), "exit_code": rc}
+            for n, ok, rc in results
+        ],
     }
     try:
         (artifact_dir / "scenarios_summary.json").write_text(json.dumps(summary, indent=2))

@@ -15,7 +15,6 @@ Notes:
 from __future__ import annotations
 
 import argparse
-import sys
 from pathlib import Path
 
 from . import run_pipeline
@@ -25,7 +24,9 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="Compatibility wrapper for run_pipeline")
     p.add_argument("--pdf", required=True, type=Path)
     p.add_argument("--results", "--out", dest="out", required=True, type=Path)
-    p.add_argument("--annotations-json", type=str, help="Accepted for compatibility; currently ignored")
+    p.add_argument(
+        "--annotations-json", type=str, help="Accepted for compatibility; currently ignored"
+    )
     p.add_argument("--clean-pdf", type=str, help="Accepted for compatibility; currently ignored")
     # Pass-through flags commonly used by callers
     p.add_argument("--stop-on-fail", action="store_true", default=False)
@@ -39,8 +40,10 @@ def main(argv: list[str] | None = None) -> int:
 
     # Build argv for run_pipeline.main
     forwarded = [
-        "--pdf", str(args.pdf),
-        "--out", str(args.out),
+        "--pdf",
+        str(args.pdf),
+        "--out",
+        str(args.out),
     ]
     if args.stop_on_fail:
         forwarded.append("--stop-on-fail")

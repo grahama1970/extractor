@@ -38,7 +38,6 @@ from __future__ import annotations
 
 import argparse
 import sys
-import os
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Iterable, List, Tuple
@@ -56,10 +55,16 @@ DEFAULT_OUTPUT = "scripts/artifacts/tabbed_ui_bundle.txt"
 
 # Extensions considered textual/code for directory recursion
 ALLOW_EXT = {
-    ".ts", ".tsx", ".js", ".jsx",
-    ".css", ".scss",
-    ".html", ".md",
-    ".json", ".svg",
+    ".ts",
+    ".tsx",
+    ".js",
+    ".jsx",
+    ".css",
+    ".scss",
+    ".html",
+    ".md",
+    ".json",
+    ".svg",
     ".txt",
 }
 
@@ -133,12 +138,7 @@ def write_bundle(files: Iterable[Path], repo_root: Path, out_path: Path) -> Tupl
             fence_close = "```"
             delim_top = "=" * 88
             delim_bot = "-" * 88
-            block_header = (
-                f"{delim_top}\n"
-                f"FILE: {rel}\n"
-                f"{delim_bot}\n"
-                f"{fence_open}\n"
-            )
+            block_header = f"{delim_top}\n" f"FILE: {rel}\n" f"{delim_bot}\n" f"{fence_open}\n"
             out.write(block_header)
             try:
                 text = fp.read_text(encoding="utf-8")

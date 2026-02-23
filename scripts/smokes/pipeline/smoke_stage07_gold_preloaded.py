@@ -28,6 +28,7 @@ from pathlib import Path
 
 import typer
 from dotenv import load_dotenv, find_dotenv
+
 try:
     import litellm  # type: ignore
     from litellm import Router  # type: ignore
@@ -58,10 +59,16 @@ def run_smoke() -> None:
 
     litellm.drop_params = False
     router = Router(
-        model_list=[{
-            "model_name": "gemini/gemini-2.5-flash",
-            "litellm_params": {"model": "gemini/gemini-2.5-flash", "provider": "google", "api_key": gemini_key},
-        }]
+        model_list=[
+            {
+                "model_name": "gemini/gemini-2.5-flash",
+                "litellm_params": {
+                    "model": "gemini/gemini-2.5-flash",
+                    "provider": "google",
+                    "api_key": gemini_key,
+                },
+            }
+        ]
     )
 
     kwargs = {

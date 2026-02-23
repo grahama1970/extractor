@@ -501,6 +501,15 @@ def _build_hierarchy(analysis: Dict) -> Dict[str, Any]:
 
     if toc_count > 0:
         combined = toc_count
+    elif regex_count > 0 and font_count > 0:
+        # When regex and font diverge heavily (>3x), regex is likely counting
+        # inline references/equations as sections. Use the geometric mean to
+        # dampen outliers instead of blindly taking max.
+        ratio = max(regex_count, font_count) / min(regex_count, font_count)
+        if ratio > 3.0:
+            combined = int((regex_count * font_count) ** 0.5)
+        else:
+            combined = max(regex_count, font_count)
     else:
         combined = max(regex_count, font_count)
 

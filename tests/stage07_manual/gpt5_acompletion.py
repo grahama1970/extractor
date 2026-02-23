@@ -31,6 +31,7 @@ def _file_to_data_uri(path: Path) -> str:
     b64 = base64.b64encode(data).decode("ascii")
     return f"{_guess_mime(path)};base64,{b64}"
 
+
 def _file_to_data_uri_tail(path: Path) -> str:
     """Return 'image/<type>;base64,<b64>' (no 'data:' prefix)."""
     data = path.read_bytes()
@@ -65,7 +66,7 @@ async def main():
 
     images = [
         "tests/stage07_manual/images/smoke/panda.png",
-        "tests/stage07_manual/images/smoke/parrot.png"
+        "tests/stage07_manual/images/smoke/parrot.png",
     ]
 
     messages = [
@@ -80,20 +81,18 @@ async def main():
         },
         {
             "role": "user",
-            "content": images_to_mm_content(
-                "Describe the content of each image.", images
-            ),
+            "content": images_to_mm_content("Describe the content of each image.", images),
         },
     ]
 
     models = ["openai/gpt-5-mini", "gemini/gemini-2.5-flash"]
     resp = await acompletion(
-        model= models[1],
-        messages=messages,           # keeping your original field name
+        model=models[1],
+        messages=messages,  # keeping your original field name
         max_tokens=1000,
-        response_format={"type": "json_object"}
+        response_format={"type": "json_object"},
     )
-    cost = resp._hidden_params["response_cost"]
+    resp._hidden_params["response_cost"]
     # litellm returns a response object; `.text` usually holds the assistant text
     print(resp.choices[0].message)
 

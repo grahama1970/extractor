@@ -15,7 +15,6 @@ import json
 from pathlib import Path
 import typer
 from scripts.lessons.arango_client import get_db
-import math
 
 app = typer.Typer(add_completion=False)
 
@@ -116,78 +115,12 @@ def recall(
         typer.echo("No results.")
         raise typer.Exit(0)
     for i, r in enumerate(results, 1):
-        typer.echo(f"{i}. {r['title']}  [tags: {', '.join(r.get('tags', []))}]  (scope: {r.get('scope')})")
-        prob = (r.get('problem') or '')
+        typer.echo(
+            f"{i}. {r['title']}  [tags: {', '.join(r.get('tags', []))}]  (scope: {r.get('scope')})"
+        )
+        prob = r.get("problem") or ""
         typer.echo(f"   {prob[:140].strip()}...")
 
 
 if __name__ == "__main__":
     app()
-cursor = db.aql.execute(aql, bind_vars=bind)
-bm25 = list(cursor)
-# Graph fusion (optional)
-scores = {}
-if use_graph and bm25:
-    # Normalize BM25 by rank
-    n = len(bm25)
-    for idx, r in enumerate(bm25, start=1):
-        scores[r['_key']] = {'bm25': (n - idx) / max(1,n-1), 'graph': 0.0}
-    # Multihop per candidate
-    depth = max(1, min(4, depth))
-    import time as _t
-    for r in bm25:
-        seed = f"lessons/{r['_key']}"
-        aqlg = ("""
-            FOR v, e, p IN 1..@depth ANY @seed lesson_edges
-              OPTIONS { bfs: true, uniqueVertices: 'path' }
-              FILTER v._id != @seed
-              LIMIT 50
-              RETURN p.edges
-            """)
-        paths = list(db.aql.execute(aqlg, bind_vars={'seed': seed, 'depth': depth}))
-        best = 0.0
-        for edges in paths:
-            logsum = 0.0
-            for ed in edges or []:
-                w = float(ed.get('weight') or 0)
-                created = int(ed.get('last_verified_at') or ed.get('created_at') or 0)
-                age_days = max(0.0, (_t.time() - created) / 86400.0)
-                policy = ed.get('decay_policy') or 'standard'
-                if policy == 'manual_exempt' and age_days <= 180:
-                    dw = w
-                else:
-                    hl = 365.0 if policy == 'manual_exempt' else 90.0
-                    dw = w * (0.5 ** (age_days / hl))
-                dw = max(1e-6, min(1.0, dw))
-                logsum += 0.9 * math.log(dw)
-            score = math.exp(logsum) if edges else 0.0
-            if score > best:
-                best = score
-        scores[r['_key']]['graph'] = best
-    vals = [v['graph'] for v in scores.values()]
-    mn, mx = (min(vals), max(vals)) if vals else (0.0, 0.0)
-    for k2,v2 in scores.items():
-        g = v2['graph']
-        v2['graph'] = 0.0 if mx<=mn else (g - mn) / (mx - mn)
-    fused = []
-    for r in bm25:
-        sc = scores[r['_key']]
-        final = 0.6*sc['bm25'] + 0.4*sc['graph']
-        fused.append((final, r))
-    fused.sort(key=lambda x: x[0], reverse=True)
-    out = [r for _, r in fused[:k]]
-else:
-    out = bm25
-if json_out:
-    print(json.dumps(out, ensure_ascii=False))
-    raise typer.Exit(0)
-if not out:
-    typer.echo("No results.")
-    raise typer.Exit(0)
-for i, r in enumerate(out, 1):
-    typer.echo(f"{i}. {r['title']}  [tags: {', '.join(r.get('tags', []))}]  (scope: {r.get('scope')})")
-    prob = (r.get('problem') or '')
-    typer.echo(f"   {prob[:140].strip()}...")
-if __name__ == "__main__":
-    app()
-

@@ -38,24 +38,27 @@ def main() -> None:
     summary = {"stages": []}
     # Import step modules directly from file paths to avoid alias issues
     import importlib.util as _ilu
+
     def _load(step_file: str, as_name: str):
-        p = Path('src/extractor/pipeline/steps') / step_file
+        p = Path("src/extractor/pipeline/steps") / step_file
         modname = f"smoke.{as_name}"
         spec = _ilu.spec_from_file_location(modname, str(p))
         if not spec or not spec.loader:
             raise RuntimeError(f"spec load failed for {p}")
         mod = _ilu.module_from_spec(spec)
         import sys as _sys
+
         _sys.modules[modname] = mod
         spec.loader.exec_module(mod)  # type: ignore[attr-defined]
         return mod
-    s01  = _load('01_annotation_processor.py', 's01')
-    s04  = _load('04_section_builder.py', 's04')
-    s05  = _load('05_table_extractor.py', 's05')
-    s06a = _load('06a_title_caption_enricher.py', 's06a')
-    s06b = _load('06b_layout_sketcher.py', 's06b')
-    s07  = _load('07_reflow_section.py', 's07')
-    s07rm= _load('07_requirements_miner.py', 's07rm')
+
+    s01 = _load("01_annotation_processor.py", "s01")
+    s04 = _load("04_section_builder.py", "s04")
+    s05 = _load("05_table_extractor.py", "s05")
+    s06a = _load("06a_title_caption_enricher.py", "s06a")
+    s06b = _load("06b_layout_sketcher.py", "s06b")
+    s07 = _load("07_reflow_section.py", "s07")
+    s07rm = _load("07_requirements_miner.py", "s07rm")
 
     # Stage 01
     s01_dir = OUT / "01_annotation_processor" / "json_output"
@@ -77,9 +80,17 @@ def main() -> None:
             v03 = OUT / "03_suspicious_headers" / "json_output" / "03_verified_blocks.json"
             b02 = OUT / "02_marker_extractor" / "json_output" / "02_marker_blocks.json"
             if v03.exists():
-                s04.run(v03, OUT / "01_annotation_processor", OUT, debug=False, fallback_heuristics=False)
+                s04.run(
+                    v03,
+                    OUT / "01_annotation_processor",
+                    OUT,
+                    debug=False,
+                    fallback_heuristics=False,
+                )
             elif b02.exists():
-                s04.run(b02, OUT / "01_annotation_processor", OUT, debug=False, fallback_heuristics=True)
+                s04.run(
+                    b02, OUT / "01_annotation_processor", OUT, debug=False, fallback_heuristics=True
+                )
         if s04_out.exists():
             summary["stages"].append({"stage": "04", "status": "ok", "out": str(s04_out)})
         else:
@@ -110,15 +121,22 @@ def main() -> None:
     s06a_dir = OUT / "06a_title_caption_enricher" / "json_output"
     try:
         if s05_out.exists():
-            s06a.run(s05_out, s06_fig, sections_json=s04_out if s04_out.exists() else None, output_dir=OUT)
+            s06a.run(
+                s05_out,
+                s06_fig,
+                sections_json=s04_out if s04_out.exists() else None,
+                output_dir=OUT,
+            )
             s06a_tables = s06a_dir / "05_tables.enriched.json"
             s06a_figs = s06a_dir / "06_figures.enriched.json"
-            summary["stages"].append({
-                "stage": "06a",
-                "status": "ok",
-                "tables": str(s06a_tables),
-                "figures": str(s06a_figs),
-            })
+            summary["stages"].append(
+                {
+                    "stage": "06a",
+                    "status": "ok",
+                    "tables": str(s06a_tables),
+                    "figures": str(s06a_figs),
+                }
+            )
         else:
             summary["stages"].append({"stage": "06a", "status": "skip", "reason": "missing 05"})
     except Exception as e:

@@ -12,72 +12,66 @@ External Dependencies:
 - fastapi: https://fastapi.tiangolo.com/
 - uvicorn: [Documentation URL]
 
-Sample Input:
->>> # Add specific examples based on module functionality
-
-Expected Output:
->>> # Add expected output examples
-
-Example Usage:
->>> # Add usage examples
+Notes:
+- Heavy pipeline imports (torch, PdfConverter, etc.) are optional and loaded lazily so
+  the logging endpoints work even when those dependencies aren't available.
 """
 
-import traceback
-import subprocess
+import asyncio
+import base64
 import datetime
+import io
+import json
+import json as _json
+import os
+import subprocess
 import time
+import traceback
+from contextlib import asynccontextmanager
+from typing import Annotated, Any, Dict, List, Optional
 
 import click
-import os
-
+from dotenv import find_dotenv, load_dotenv
+from fastapi import FastAPI, File, Form, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
-from starlette.responses import HTMLResponse, JSONResponse
+from starlette.responses import HTMLResponse
 
 from extractor.core.config.parser import ConfigParser
 from extractor.core.output import text_from_rendered
-
-import base64
-from contextlib import asynccontextmanager
-from typing import Optional, Annotated, Any, Dict, List
-import io
-
-from fastapi import FastAPI, Form, File, UploadFile, WebSocket, WebSocketDisconnect
-from fastapi.middleware.cors import CORSMiddleware
-from dotenv import load_dotenv, find_dotenv
-
-
-"""
-Lightweight web logger and prototype API server.
-
-Important: Heavy pipeline imports (torch, PdfConverter, etc.) are optional and
-loaded lazily so that the logging endpoints work even when those dependencies
-aren't available. This allows the Gamified web logger to start without GPU/
-Torch present.
-"""
+from scillm import acompletion as sc_acompletion  # type: ignore
 
 # Lazy/heavy imports guarded to avoid hard Torch dependency for logger-only mode
 try:  # pragma: no cover - optional heavy deps
     from extractor.core.converters.pdf import PdfConverter  # type: ignore
     from extractor.core.models import create_model_dict  # type: ignore
     from extractor.core.settings import settings  # type: ignore
+
     _MARKER_FEATURES_AVAILABLE = True
 except Exception:  # pragma: no cover - run without heavy deps
     PdfConverter = None  # type: ignore
     create_model_dict = None  # type: ignore
-    settings = type("_S", (), {"OUTPUT_IMAGE_FORMAT": "PNG", "OUTPUT_ENCODING": "utf-8"})()  # minimal
+    settings = type(
+        "_S", (), {"OUTPUT_IMAGE_FORMAT": "PNG", "OUTPUT_ENCODING": "utf-8"}
+    )()  # minimal
     _MARKER_FEATURES_AVAILABLE = False
 
-from scillm import acompletion as sc_acompletion  # type: ignore
-import json as _json
-
-async def _sc_chat(messages, model: str, *, response_format: str|None=None, timeout: int=60, temperature: float=0.0):
+async def _sc_chat(
+    messages,
+    model: str,
+    *,
+    response_format: str | None = None,
+    timeout: int = 60,
+    temperature: float = 0.0,
+):
     resp = await sc_acompletion(
         model=model,
         api_base=os.getenv("CHUTES_API_BASE"),
         api_key=os.getenv("CHUTES_API_KEY"),
         custom_llm_provider="openai",
         messages=messages,
-        response_format={"type": "json_object"} if response_format=="json_object" else None,
+        response_format={"type": "json_object"} if response_format == "json_object" else None,
         timeout=timeout,
         temperature=temperature,
     )
@@ -85,12 +79,6 @@ async def _sc_chat(messages, model: str, *, response_format: str|None=None, time
     return content
 
 
-from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
-import asyncio
-import json
-import time
-import base64
-import io
 try:
     import fitz  # PyMuPDF
 except Exception:
@@ -124,7 +112,7 @@ os.makedirs(UPLOAD_DIRECTORY, exist_ok=True)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Only initialize heavy model artifacts if available
-    if locals().get('_MARKER_FEATURES_AVAILABLE') and create_model_dict is not None:
+    if locals().get("_MARKER_FEATURES_AVAILABLE") and create_model_dict is not None:
         try:
             app_data["models"] = create_model_dict()
         except Exception:
@@ -228,8 +216,11 @@ class CommonParams(BaseModel):
 
 async def _convert_pdf(params: CommonParams):
     assert params.output_format in ["markdown", "json", "html"], "Invalid output format"
-    if not locals().get('_MARKER_FEATURES_AVAILABLE') or PdfConverter is None:
-        return {"success": False, "error": "Marker conversion unavailable on this server (heavy dependencies missing)."}
+    if not locals().get("_MARKER_FEATURES_AVAILABLE") or PdfConverter is None:
+        return {
+            "success": False,
+            "error": "Marker conversion unavailable on this server (heavy dependencies missing).",
+        }
     try:
         options = params.model_dump()
         print(options)
@@ -336,7 +327,7 @@ async def ws_generate(websocket: WebSocket):
         await websocket.send_json({"type": "status", "stage": "running"})
         try:
             content = await _sc_chat(
-                messages=[{"role":"user","content": prompt}],
+                messages=[{"role": "user", "content": prompt}],
                 model=model,
                 response_format=None,
                 timeout=60,
@@ -377,7 +368,7 @@ async def http_generate(payload: dict):
         debug_flag = bool(payload.get("debug"))
         if debug_flag:
             content = await _sc_chat(
-                messages=[{"role":"user","content": prompt}],
+                messages=[{"role": "user", "content": prompt}],
                 model=model,
                 response_format="json_object",
                 timeout=60,
@@ -388,10 +379,14 @@ async def http_generate(payload: dict):
                     obj = _json.loads(content)
                     return JSONResponse({"ok": True, "data": obj, "debug": dbg})
                 except Exception:
-                    return JSONResponse({"ok": False, "error": "non_json_output", "debug": dbg}, status_code=502)
-            return JSONResponse({"ok": False, "error": "empty_output", "debug": dbg}, status_code=502)
+                    return JSONResponse(
+                        {"ok": False, "error": "non_json_output", "debug": dbg}, status_code=502
+                    )
+            return JSONResponse(
+                {"ok": False, "error": "empty_output", "debug": dbg}, status_code=502
+            )
         content = await _sc_chat(
-            messages=[{"role":"user","content": prompt}],
+            messages=[{"role": "user", "content": prompt}],
             model=model,
             response_format="json_object",
             timeout=60,
@@ -541,7 +536,7 @@ async def api_health_llm(model: str | None = None, timeout: float = 20.0):
     t0 = time.perf_counter()
     try:
         out = await _sc_chat(
-            messages=[{"role":"user","content": prompt}],
+            messages=[{"role": "user", "content": prompt}],
             model=eff_model,
             response_format="json_object",
             timeout=timeout,
@@ -1123,8 +1118,10 @@ async def api_coco_export(payload: dict):
             img_path = os.path.join(images_out, img_name)
             pix.save(img_path)
             width, height = pix.width, pix.height
-            coco["images"].append({"id": img_id, "file_name": img_name, "width": width, "height": height})
-            for b in (boxes or []):
+            coco["images"].append(
+                {"id": img_id, "file_name": img_name, "width": width, "height": height}
+            )
+            for b in boxes or []:
                 bx = float(b.get("x", 0))
                 by = float(b.get("y", 0))
                 bw = float(b.get("w", 0))
@@ -1137,7 +1134,16 @@ async def api_coco_export(payload: dict):
                 y_px = max(0, min(height, int(by * height)))
                 w_px = max(1, min(width - x_px, int(bw * width)))
                 h_px = max(1, min(height - y_px, int(bh * height)))
-                coco["annotations"].append({"id": ann_id, "image_id": img_id, "category_id": cat_id, "bbox": [x_px, y_px, w_px, h_px], "iscrowd": 0, "area": w_px * h_px})
+                coco["annotations"].append(
+                    {
+                        "id": ann_id,
+                        "image_id": img_id,
+                        "category_id": cat_id,
+                        "bbox": [x_px, y_px, w_px, h_px],
+                        "iscrowd": 0,
+                        "area": w_px * h_px,
+                    }
+                )
                 ann_id += 1
             img_id += 1
         for name, cid in seen_types.items():
@@ -1148,6 +1154,7 @@ async def api_coco_export(payload: dict):
         return {"ok": True, "dir": out_dir, "json": out_json}
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
 
 # -----------------------------
 # Suggestions: Camelot tables
@@ -1192,10 +1199,12 @@ async def api_suggest_tables(rel: str, page: int):
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
+
 # -----------------------------
 # Simple pipeline job scaffolding
 # -----------------------------
 JOBS: dict[str, dict] = {}
+
 
 @app.post("/api/pipeline/run")
 async def api_pipeline_run(payload: dict):
@@ -1204,17 +1213,22 @@ async def api_pipeline_run(payload: dict):
         return JSONResponse({"ok": False, "error": "missing_rel"}, status_code=400)
     job_id = f"job_{int(time.time()*1000)}"
     JOBS[job_id] = {"id": job_id, "rel": rel, "status": "queued", "started": time.time()}
+
     async def _runner(jid: str, rel_path: str):
         JOBS[jid]["status"] = "running"
         try:
             await asyncio.sleep(1.0)
-            JOBS[jid]["result"] = {"out_dir": os.path.abspath(os.path.join("scripts", "artifacts", f"pipeline_{jid}"))}
+            JOBS[jid]["result"] = {
+                "out_dir": os.path.abspath(os.path.join("scripts", "artifacts", f"pipeline_{jid}"))
+            }
             JOBS[jid]["status"] = "done"
         except Exception as e:
             JOBS[jid]["status"] = "error"
             JOBS[jid]["error"] = str(e)
+
     asyncio.create_task(_runner(job_id, rel))
     return {"ok": True, "job_id": job_id}
+
 
 @app.get("/api/pipeline/status")
 async def api_pipeline_status(job_id: str):
@@ -1222,6 +1236,7 @@ async def api_pipeline_status(job_id: str):
     if not j:
         return JSONResponse({"ok": False, "error": "unknown_job"}, status_code=404)
     return {"ok": True, "job": j}
+
 
 @app.get("/api/pipeline/result")
 async def api_pipeline_result(job_id: str):

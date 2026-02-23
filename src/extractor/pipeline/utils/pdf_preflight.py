@@ -9,7 +9,7 @@ from typing import Dict, List, Optional
 try:
     import fitz  # PyMuPDF
 except Exception as exc:
-    log_stage_error('pdf_preflight.py', exc, {'context': 'pdf_preflight.py'})
+    log_stage_error("pdf_preflight.py", exc, {"context": "pdf_preflight.py"})
     raise
     fitz = None  # type: ignore
 
@@ -53,13 +53,13 @@ def _phash_image(pix: "fitz.Pixmap", size: int = 32, hash_size: int = 8) -> str:
         bits = "".join("1" if x else "0" for x in diff.flatten())
         return f"{int(bits, 2):0{hash_size*hash_size//4}x}"
     except Exception as exc:
-        log_stage_error('pdf_preflight.py', exc, {'context': 'pdf_preflight.py'})
+        log_stage_error("pdf_preflight.py", exc, {"context": "pdf_preflight.py"})
         raise
         # Conservative fallback
         try:
             return hashlib.md5(pix.samples).hexdigest()
         except Exception as exc:
-            log_stage_error('pdf_preflight.py', exc, {'context': 'pdf_preflight.py'})
+            log_stage_error("pdf_preflight.py", exc, {"context": "pdf_preflight.py"})
             raise
             return ""
 
@@ -84,7 +84,7 @@ def _dominant_text_angle(page: "fitz.Page") -> Optional[int]:  # type: ignore
         best = max(counts.items(), key=lambda kv: kv[1])[0]
         return best if best in (0, 90, 180, 270) else None
     except Exception as exc:
-        log_stage_error('pdf_preflight.py', exc, {'context': 'pdf_preflight.py'})
+        log_stage_error("pdf_preflight.py", exc, {"context": "pdf_preflight.py"})
         raise
         return None
 
@@ -118,7 +118,7 @@ def strip_annotations_and_normalize(
                     page.delete_annot(annot)
                     annot = next_ann
             except Exception as exc:
-                log_stage_error('pdf_preflight.py', exc, {'context': 'pdf_preflight.py'})
+                log_stage_error("pdf_preflight.py", exc, {"context": "pdf_preflight.py"})
                 raise
             # Optional rotation normalization based on text angle
             if normalize_rotation:
@@ -128,7 +128,7 @@ def strip_annotations_and_normalize(
                         page.set_rotation(ang)
                         rotations += 1
                     except Exception as exc:
-                        log_stage_error('pdf_preflight.py', exc, {'context': 'pdf_preflight.py'})
+                        log_stage_error("pdf_preflight.py", exc, {"context": "pdf_preflight.py"})
                         raise
                         notes.append(f"rotation_set_failed_page_{pno}")
 
@@ -153,11 +153,13 @@ def strip_annotations_and_normalize(
                             else:
                                 seen[h] = 1
                         except Exception as exc:
-                            log_stage_error('pdf_preflight.py', exc, {'context': 'pdf_preflight.py'})
+                            log_stage_error(
+                                "pdf_preflight.py", exc, {"context": "pdf_preflight.py"}
+                            )
                             raise
                             continue
             except Exception as exc:
-                log_stage_error('pdf_preflight.py', exc, {'context': 'pdf_preflight.py'})
+                log_stage_error("pdf_preflight.py", exc, {"context": "pdf_preflight.py"})
                 raise
                 notes.append("image_dedupe_failed")
 

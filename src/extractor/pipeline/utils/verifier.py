@@ -54,7 +54,7 @@ async def verify_header_with_llm(image_b64: str, context_text: str, model: str) 
     try:
         payload = json.loads(answer) if answer else {}
     except Exception as exc:
-        log_stage_error('verifier.py', exc, {'context': 'verifier.py'})
+        log_stage_error("verifier.py", exc, {"context": "verifier.py"})
         raise
         payload = {"error": {"type": "ParseError", "message": answer[:200]}}
     if isinstance(payload, dict) and payload.get("error"):

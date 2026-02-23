@@ -45,7 +45,9 @@ def main() -> None:
     db = client.db(dbname, username=user, password=password)
     collections = db.collections()
     names = [c["name"] for c in collections if not c.get("system")]
-    has_nodes = any(n.lower().startswith("nodes") for n in names) or any(n.lower().startswith("v_") for n in names)
+    has_nodes = any(n.lower().startswith("nodes") for n in names) or any(
+        n.lower().startswith("v_") for n in names
+    )
     print("Scenario pipeline/step_11_graph_db: collections=", names[:10])
     sys.exit(0 if has_nodes else 1)
 

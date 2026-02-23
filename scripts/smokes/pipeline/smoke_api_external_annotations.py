@@ -20,7 +20,10 @@ import typer
 from dotenv import load_dotenv, find_dotenv
 
 
-app = typer.Typer(add_completion=False, help="Smoke: POST UI annotations to pipeline server and expect run summary")
+app = typer.Typer(
+    add_completion=False,
+    help="Smoke: POST UI annotations to pipeline server and expect run summary",
+)
 
 
 def _wait_http(url: str, timeout: float = 25.0) -> None:
@@ -41,24 +44,30 @@ def main(
 ):
     load_dotenv(find_dotenv() or None)
     import sys
+
     env = os.environ.copy()
     src_path = str(Path.cwd() / "src")
-    env["PYTHONPATH"] = src_path + (":" + env.get("PYTHONPATH", "") if env.get("PYTHONPATH") else "")
+    env["PYTHONPATH"] = src_path + (
+        ":" + env.get("PYTHONPATH", "") if env.get("PYTHONPATH") else ""
+    )
     runner = sys.executable
     # Launch the pipeline bridge server
-    server = subprocess.Popen([
-        runner,
-        "-m",
-        "prototypes.tabbed.api.pipeline_server",
-    ], env=env)
+    server = subprocess.Popen(
+        [
+            runner,
+            "-m",
+            "prototypes.tabbed.api.pipeline_server",
+        ],
+        env=env,
+    )
     try:
         _wait_http(f"http://127.0.0.1:{port}/openapi.json")
         payload = {
             "pdf_path": str(pdf),
             "mode": "deterministic",  # keep smoke fast and offline
             "boxes_by_page": {
-                1: [ {"id": "t1", "type": "Table", "x": 0.15, "y": 0.40, "w": 0.70, "h": 0.40} ]
-            }
+                1: [{"id": "t1", "type": "Table", "x": 0.15, "y": 0.40, "w": 0.70, "h": 0.40}]
+            },
         }
         data = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(

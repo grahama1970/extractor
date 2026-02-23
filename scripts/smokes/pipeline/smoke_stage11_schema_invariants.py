@@ -39,8 +39,20 @@ def main():
     bundle_dir = out_dir / "tmp"
     bundle_dir.mkdir(parents=True, exist_ok=True)
     docs = [
-        {"_key": "a", "section_id": "S1", "source_pdf": "x.pdf", "text_content": "alpha", "embedding": [1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]},
-        {"_key": "b", "section_id": "S2", "source_pdf": "x.pdf", "text_content": "alphabet", "embedding": [0.9,0.1,0.0,0.0,0.0,0.0,0.0,0.0]},
+        {
+            "_key": "a",
+            "section_id": "S1",
+            "source_pdf": "x.pdf",
+            "text_content": "alpha",
+            "embedding": [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        },
+        {
+            "_key": "b",
+            "section_id": "S2",
+            "source_pdf": "x.pdf",
+            "text_content": "alphabet",
+            "embedding": [0.9, 0.1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        },
     ]
     bundle = bundle_dir / "bundle.json"
     bundle.write_text(json.dumps({"documents": docs}, indent=2))
@@ -49,7 +61,15 @@ def main():
     env = dict(**os.environ)
     src_dir = str((Path(__file__).resolve().parents[3] / "src").resolve())
     env["PYTHONPATH"] = f"{src_dir}:{env.get('PYTHONPATH','')}"
-    cmd = [sys.executable, "-m", "extractor.pipeline.steps.11_arango_create_graph", "debug-bundle", str(bundle), "-o", str(out_dir)]
+    cmd = [
+        sys.executable,
+        "-m",
+        "extractor.pipeline.steps.11_arango_create_graph",
+        "debug-bundle",
+        str(bundle),
+        "-o",
+        str(out_dir),
+    ]
     rc = subprocess.run(cmd, env=env).returncode
     if rc != 0:
         typer.echo("Stage 11 debug-bundle failed", err=True)
@@ -66,7 +86,9 @@ def main():
         raise typer.Exit(1)
 
     Path("scripts/artifacts").mkdir(parents=True, exist_ok=True)
-    (Path("scripts/artifacts")/"stage11_schema_summary.json").write_text(json.dumps(data, indent=2))
+    (Path("scripts/artifacts") / "stage11_schema_summary.json").write_text(
+        json.dumps(data, indent=2)
+    )
     print("OK: Stage 11 schema/invariants summary present")
 
 

@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import List, Tuple
+from typing import List
 import numpy as np
 import typer
 
@@ -27,11 +27,17 @@ def _load_items(p: Path) -> List[dict]:
 
 @app.command()
 def main(
-    stage10_flat: Path = typer.Argument(..., exists=True, readable=True, help="Stage 10 flattened JSON with items[]"),
+    stage10_flat: Path = typer.Argument(
+        ..., exists=True, readable=True, help="Stage 10 flattened JSON with items[]"
+    ),
     out_edges: Path = typer.Argument(..., help="Output edges JSON for similar_knn"),
     model_name: str = typer.Option("sentence-transformers/all-MiniLM-L6-v2", "--model"),
     knn_k: int = typer.Option(5, "--knn-k", min=1),
-    arango_db: str = typer.Option("", "--arangodb", help="If set, upsert similar_knn edges into this DB (requires ARANGODB_URL/USERNAME/PASSWORD)"),
+    arango_db: str = typer.Option(
+        "",
+        "--arangodb",
+        help="If set, upsert similar_knn edges into this DB (requires ARANGODB_URL/USERNAME/PASSWORD)",
+    ),
 ):
     items = _load_items(stage10_flat)
     # Extract texts and ids
@@ -39,7 +45,7 @@ def main(
     texts: List[str] = []
     for it in items:
         sid = str(it.get("section_id") or "").strip()
-        txt = str(it.get("requirement_text") or it.get("rtm",{}).get("lean4_norm") or "").strip()
+        txt = str(it.get("requirement_text") or it.get("rtm", {}).get("lean4_norm") or "").strip()
         if sid and txt:
             ids.append(sid)
             texts.append(txt)
@@ -99,8 +105,16 @@ def main(
             db.create_collection("similar_knn", edge=True)
         coll = db.collection("similar_knn")
         for e in edges:
-            coll.insert({"_from": f"sections/{e['from']}", "_to": f"sections/{e['to']}", "score": e["score"]})
-        typer.secho(f"OK: upserted {len(edges)} edges into {arango_db}.similar_knn", fg=typer.colors.GREEN)
+            coll.insert(
+                {
+                    "_from": f"sections/{e['from']}",
+                    "_to": f"sections/{e['to']}",
+                    "score": e["score"],
+                }
+            )
+        typer.secho(
+            f"OK: upserted {len(edges)} edges into {arango_db}.similar_knn", fg=typer.colors.GREEN
+        )
 
 
 if __name__ == "__main__":

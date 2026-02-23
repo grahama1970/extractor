@@ -5,7 +5,7 @@ import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from .agent_runner import AgentRunner
 from .contracts import CommandCheck, Contract, FileContainsCheck
@@ -40,9 +40,7 @@ def _run_command(
         text=True,
         timeout=cmd.timeout_sec,
     )
-    log_path.write_text(
-        (result.stdout or "") + (result.stderr or ""), encoding="utf-8"
-    )
+    log_path.write_text((result.stdout or "") + (result.stderr or ""), encoding="utf-8")
     return {
         "name": cmd.name,
         "cmd": cmd.cmd,
@@ -56,26 +54,22 @@ def _check_contains(check: FileContainsCheck, *, root: Path) -> list[dict[str, A
     failures: list[dict[str, Any]] = []
     path = root / check.path
     if not path.exists():
-        failures.append(
-            {"kind": "file_missing", "path": str(path), "missing": check.contains}
-        )
+        failures.append({"kind": "file_missing", "path": str(path), "missing": check.contains})
         return failures
     text = path.read_text(encoding="utf-8", errors="ignore")
     missing = [needle for needle in check.contains if needle not in text]
     if missing:
-        failures.append(
-            {"kind": "file_contains", "path": str(path), "missing": missing}
-        )
+        failures.append({"kind": "file_contains", "path": str(path), "missing": missing})
     if check.regex:
         for pattern in check.regex:
             if not re.search(pattern, text, flags=re.MULTILINE):
-                failures.append(
-                    {"kind": "file_regex", "path": str(path), "missing": [pattern]}
-                )
+                failures.append({"kind": "file_regex", "path": str(path), "missing": [pattern]})
     return failures
 
 
-def run_deterministic_checks(contract: Contract, run_root: Path) -> tuple[bool, list[dict[str, Any]], list[str]]:
+def run_deterministic_checks(
+    contract: Contract, run_root: Path
+) -> tuple[bool, list[dict[str, Any]], list[str]]:
     failures: list[dict[str, Any]] = []
     evidence_paths: list[str] = []
     gate_dir = run_root / "gate"
@@ -141,7 +135,7 @@ def run_llm_gate(
     prompt = contract.llm_gate.prompt or _default_llm_prompt()
     payload = json.dumps(failure_report, indent=2)
     full_prompt = f"{prompt}\n\nfailure_report.json:\n{payload}\n"
-    handle = runner.start(
+    runner.start(
         full_prompt,
         schema_path=schema_path,
         output_path=output_path,
@@ -163,7 +157,7 @@ def run_llm_gate(
                 text = text[fence_start:]
                 nl = text.find("\n")
                 if nl != -1:
-                    text = text[nl+1:]
+                    text = text[nl + 1 :]
                 if text.endswith("```"):
                     text = text[:-3]
                 text = text.strip()

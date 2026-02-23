@@ -6,9 +6,10 @@ import subprocess
 from pathlib import Path
 import tempfile
 
+
 def create_test_html():
     """Create HTML with real engineering content that should extract perfectly."""
-    return '''<!DOCTYPE html>
+    return """<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -114,18 +115,22 @@ def create_test_html():
         <p><strong>Note:</strong> This specification document is provided under NDA to authorized personnel only.</p>
     </aside>
 </body>
-</html>'''
+</html>"""
+
 
 class HTMLExtractionFailure(Exception):
     pass
 
+
 def run_pipeline_on_file(file_path: Path, output_dir: Path) -> dict:
     """Run pipeline on a file and return key results."""
     cmd = [
-        "python", "src/extractor/pipeline/run_pipeline.py",
+        "python",
+        "src/extractor/pipeline/run_pipeline.py",
         str(file_path),
-        "--out", str(output_dir),
-        "--offline-smoke"
+        "--out",
+        str(output_dir),
+        "--offline-smoke",
     ]
 
     result = subprocess.run(cmd, capture_output=True, text=True)
@@ -143,7 +148,7 @@ def run_pipeline_on_file(file_path: Path, output_dir: Path) -> dict:
         "success": True,
         "sections": [],
         "tables": [],
-        "figures": []
+        "figures": [],
     }
 
     try:
@@ -163,19 +168,21 @@ def run_pipeline_on_file(file_path: Path, output_dir: Path) -> dict:
 
     return metrics
 
+
 def analyze_structure_loss(html_content: str, extracted_data: dict) -> dict:
     """Analyze what structure was lost during extraction."""
     from bs4 import BeautifulSoup
-    soup = BeautifulSoup(html_content, 'html.parser')
+
+    soup = BeautifulSoup(html_content, "html.parser")
 
     original = {
-        "headings": len(soup.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6'])),
-        "tables": len(soup.find_all('table')),
-        "figures": len(soup.find_all('figure')),
-        "lists": len(soup.find_all(['ul', 'ol'])),
-        "images": len(soup.find_all('img')),
-        "tables_with_caption": len(soup.find_all('table', caption=True)),
-        "figures_with_figcaption": len(soup.find_all('figure', figcaption=True)),
+        "headings": len(soup.find_all(["h1", "h2", "h3", "h4", "h5", "h6"])),
+        "tables": len(soup.find_all("table")),
+        "figures": len(soup.find_all("figure")),
+        "lists": len(soup.find_all(["ul", "ol"])),
+        "images": len(soup.find_all("img")),
+        "tables_with_caption": len(soup.find_all("table", caption=True)),
+        "figures_with_figcaption": len(soup.find_all("figure", figcaption=True)),
     }
 
     extracted = {
@@ -183,23 +190,29 @@ def analyze_structure_loss(html_content: str, extracted_data: dict) -> dict:
         "tables": len(extracted_data.get("tables", [])),
         "figures": len(extracted_data.get("figures", [])),
         "csv_tables": len([t for t in extracted_data.get("tables", []) if t.get("csv_filename")]),
-        "figures_with_description": len([f for f in extracted_data.get("figures", []) if f.get("ai_description") or f.get("description")]),
+        "figures_with_description": len(
+            [
+                f
+                for f in extracted_data.get("figures", [])
+                if f.get("ai_description") or f.get("description")
+            ]
+        ),
     }
 
     # Semantic loss analysis
     losses = {
         "class_metadata": len([elem for elem in soup.find_all(attrs={"class": True})]),
-        "internal_links": len(soup.find_all('a', href=lambda x: x and x.startswith('#'))),
+        "internal_links": len(soup.find_all("a", href=lambda x: x and x.startswith("#"))),
         "metadata_in_head": {
             "title": soup.title.string if soup.title else None,
-            "meta_tags": len(soup.head.find_all('meta')) if soup.head else 0,
+            "meta_tags": len(soup.head.find_all("meta")) if soup.head else 0,
         },
         "semantic_html5_tags": {
-            "aside": len(soup.find_all('aside')),
-            "section": len(soup.find_all('section')),
-            "article": len(soup.find_all('article')),
-            "figure": len(soup.find_all('figure')),
-        }
+            "aside": len(soup.find_all("aside")),
+            "section": len(soup.find_all("section")),
+            "article": len(soup.find_all("article")),
+            "figure": len(soup.find_all("figure")),
+        },
     }
 
     return {
@@ -209,9 +222,10 @@ def analyze_structure_loss(html_content: str, extracted_data: dict) -> dict:
         "extraction_ratio": {
             "sections": extracted["sections"] / max(original["headings"], 1),
             "tables": extracted["tables"] / max(original["tables"], 1),
-            "figures": extracted["figures"] / max(original["figures"])
-        }
+            "figures": extracted["figures"] / max(original["figures"]),
+        },
     }
+
 
 def main():
     """Run diagnostic comparison."""
@@ -234,8 +248,9 @@ def main():
         print("3. CSS class information completely lost")
         print("4. Internal link relationships not preserved")
         print("5. No error handling for real-world HTML")
-        print("\nConclusion: Current HTML provider needs focused fixes, not abandonment."), end())
+        print("\nConclusion: Current HTML provider needs focused fixes, not abandonment.")
     return 1
+
 
 if __name__ == "__main__":
     main()

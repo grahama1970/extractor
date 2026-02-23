@@ -38,7 +38,9 @@ def normalize(s: str) -> str:
     return " ".join(s.split())
 
 
-def compare(pdf_blocks: List[Dict[str, Any]], clean_blocks: List[Dict[str, Any]], threshold: float) -> bool:
+def compare(
+    pdf_blocks: List[Dict[str, Any]], clean_blocks: List[Dict[str, Any]], threshold: float
+) -> bool:
     if len(pdf_blocks) != len(clean_blocks):
         print(f"FAIL: block count mismatch pdf={len(pdf_blocks)} clean={len(clean_blocks)}")
         return False
@@ -59,7 +61,9 @@ def compare(pdf_blocks: List[Dict[str, Any]], clean_blocks: List[Dict[str, Any]]
             if normalize(block_text(p)) != normalize(block_text(c)):
                 mismatches += 1
                 if sampled < 5:
-                    print(f"  text mismatch @ {idx}:\n    pdf: {normalize(block_text(p))[:120]}\n    clean:{normalize(block_text(c))[:120]}")
+                    print(
+                        f"  text mismatch @ {idx}:\n    pdf: {normalize(block_text(p))[:120]}\n    clean:{normalize(block_text(c))[:120]}"
+                    )
                     sampled += 1
 
     match_rate = (total - mismatches) / max(total, 1)
@@ -70,7 +74,13 @@ def compare(pdf_blocks: List[Dict[str, Any]], clean_blocks: List[Dict[str, Any]]
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--pdf-flat", type=Path, required=True)
-    ap.add_argument("--clean-flat", type=Path, required=True, nargs="+", help="One or more re-flattened clean artifacts (html/md/docx/pptx/xlsx/rst)")
+    ap.add_argument(
+        "--clean-flat",
+        type=Path,
+        required=True,
+        nargs="+",
+        help="One or more re-flattened clean artifacts (html/md/docx/pptx/xlsx/rst)",
+    )
     ap.add_argument(
         "--ignore-ext",
         type=str,
@@ -80,7 +90,7 @@ def main():
     ap.add_argument("--threshold", type=float, default=0.95)
     args = ap.parse_args()
 
-    ignore_exts = {e.strip().lstrip('.') for e in args.ignore_ext.split(',') if e.strip()}
+    ignore_exts = {e.strip().lstrip(".") for e in args.ignore_ext.split(",") if e.strip()}
 
     pdf_blocks = load(args.pdf_flat)
     if len(pdf_blocks) != 53:
@@ -89,7 +99,7 @@ def main():
 
     all_ok = True
     for clean in args.clean_flat:
-        ext = clean.suffix.lower().lstrip('.')
+        ext = clean.suffix.lower().lstrip(".")
         if not clean.exists():
             print(f"SKIP parity for {clean} (missing file)")
             continue

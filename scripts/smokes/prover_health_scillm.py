@@ -20,7 +20,9 @@ app = typer.Typer(add_completion=False, help="Health smoke for LEAN4_PROVER_MODE
 
 @app.command()
 def main(
-    model: str = typer.Option(os.getenv("LEAN4_PROVER_MODEL", os.getenv("LEAN4_MODEL", "certainly/lean4")), "--model"),
+    model: str = typer.Option(
+        os.getenv("LEAN4_PROVER_MODEL", os.getenv("LEAN4_MODEL", "certainly/lean4")), "--model"
+    ),
     timeout: int = typer.Option(60, "--timeout"),
 ) -> None:
     base = (os.getenv("CHUTES_API_BASE") or "").strip()
@@ -38,7 +40,10 @@ def main(
         "Use an extremely simple requirement like '1+1=2' in Lean 4."
     )
     messages = [
-        {"role": "system", "content": "You are a Lean 4 prover service returning STRICT JSON only."},
+        {
+            "role": "system",
+            "content": "You are a Lean 4 prover service returning STRICT JSON only.",
+        },
         {"role": "user", "content": prompt},
     ]
     t0 = time.time()
@@ -58,8 +63,17 @@ def main(
         obj: dict[str, Any] = json.loads(content) if isinstance(content, str) else {}
     except Exception:
         obj = {}
-    ok = bool(isinstance(obj, dict) and set(["success", "lean_code", "stdout", "stderr"]).issubset(obj.keys()))
-    out = {"ok": ok, "elapsed_sec": round(dt, 3), "model": model, "schema_ok": ok, "raw": obj if ok else (content[:200] if isinstance(content, str) else str(type(content)))}
+    ok = bool(
+        isinstance(obj, dict)
+        and set(["success", "lean_code", "stdout", "stderr"]).issubset(obj.keys())
+    )
+    out = {
+        "ok": ok,
+        "elapsed_sec": round(dt, 3),
+        "model": model,
+        "schema_ok": ok,
+        "raw": obj if ok else (content[:200] if isinstance(content, str) else str(type(content))),
+    }
     typer.echo(json.dumps(out, indent=2))
     raise typer.Exit(code=0 if ok else 1)
 

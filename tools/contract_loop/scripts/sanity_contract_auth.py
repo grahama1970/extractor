@@ -33,14 +33,10 @@ def main() -> int:
     mode = _auth_store_mode(codex_home)
     if mode == "file":
         if not auth_path.exists():
-            raise SystemExit(
-                f"Codex auth missing at {auth_path}. Run `codex login` (OAuth) first."
-            )
+            raise SystemExit(f"Codex auth missing at {auth_path}. Run `codex login` (OAuth) first.")
         print(f"OK: Codex auth file present at {auth_path}")
     else:
-        print(
-            f"OK: Codex auth store mode is '{mode}'. No auth.json required."
-        )
+        print(f"OK: Codex auth store mode is '{mode}'. No auth.json required.")
     return 0
 
 

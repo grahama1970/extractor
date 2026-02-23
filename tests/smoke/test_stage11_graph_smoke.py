@@ -1,5 +1,8 @@
 import importlib.util
-import os, sys, types
+import os
+import sys
+import types
+
 sys.path.insert(0, os.path.abspath("src"))
 import numpy as np
 import pytest
@@ -8,21 +11,27 @@ import pytest
 def _load_mod():
     # Provide a lightweight stub to avoid importing litellm_call and its transitive deps.
     stub = types.ModuleType("extractor.pipeline.utils.litellm_call")
+
     def _noop(*args, **kwargs):
         return []
+
     stub.litellm_call = _noop  # type: ignore[attr-defined]
     sys.modules["extractor.pipeline.utils.litellm_call"] = stub
     # Provide a minimal 'faiss' stub so type annotations don't crash on import
     if "faiss" not in sys.modules:
         faiss_stub = types.ModuleType("faiss")
+
         class IndexFlatIP:  # noqa: N801
             def __init__(self, d):
                 self.d = d
                 self.ntotal = 0
+
             def add(self, arr):
                 self.ntotal += len(arr)
+
         def normalize_L2(x):
             return x
+
         faiss_stub.IndexFlatIP = IndexFlatIP  # type: ignore[attr-defined]
         faiss_stub.normalize_L2 = normalize_L2  # type: ignore[attr-defined]
         sys.modules["faiss"] = faiss_stub

@@ -6,12 +6,10 @@ Label generation and text wrapping for annotations.
 
 from __future__ import annotations
 
-import hashlib
 from typing import Any, Dict, List, Optional
 
 import fitz
 
-from extractor.pipeline.utils.reliability import log_stage_error
 
 STEP_NAME = "09a_pdf_annotator"
 
@@ -34,11 +32,11 @@ def wrap_label_lines(
         if len(truncated) < len(text):
             truncated = truncated.rstrip(" .,;") + "…"
         return [truncated]
-    
+
     words = text.split()
     if not words:
         return []
-    
+
     lines: List[str] = []
     idx = 0
     while idx < len(words) and len(lines) < max_lines:
@@ -240,7 +238,7 @@ def table_payload_from_obj(table_obj: Dict[str, Any]) -> Dict[str, Any]:
         pandas_acc = float((table_obj.get("pandas_metrics", {}) or {}).get("data_density"))
     except Exception:
         pandas_acc = table_obj.get("pandas_accuracy")
-    
+
     payload = {
         "table_index": table_obj.get("table_index"),
         "title": table_obj.get("title"),

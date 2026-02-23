@@ -19,7 +19,7 @@ app = typer.Typer(add_completion=False)
 def main(
     slug: str = typer.Option(..., help="Slug used in annotated file name (annotated_<slug>.pdf)"),
     artifacts_dir: Path = typer.Option(Path("scripts/artifacts"), help="Artifacts root"),
-    output: Path = typer.Option(None, help="Output tar.gz (default under scripts/artifacts)")
+    output: Path = typer.Option(None, help="Output tar.gz (default under scripts/artifacts)"),
 ) -> None:
     artifacts_dir = artifacts_dir.resolve()
     pdf = artifacts_dir / f"annotated_{slug}.pdf"
@@ -43,4 +43,3 @@ def main(
 
 if __name__ == "__main__":
     app()
-

@@ -12,7 +12,7 @@ def test_codex_smoke_optional():
     if not shutil.which("codex"):
         return
     # Keep test minimal and fast
-    env = os.environ.copy()
+    os.environ.copy()
     proc = subprocess.run(
         [
             "python",
@@ -38,4 +38,3 @@ def test_codex_smoke_optional():
     else:
         # Provide some diagnostics when failing in local envs
         assert "codex" in (proc.stderr or "") or out.get("ok") is False
-

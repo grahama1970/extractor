@@ -62,17 +62,16 @@ def analyze(out: Path) -> Dict[str, Any]:
     v2_p = out / "06b_layout_sketcher" / "json_output" / "06b_layout_sketch_v2.json"
     v2 = _load_json(v2_p) or {"sections": {}}
     merged_groups: List[Dict[str, Any]] = []
-    expected_hn = "signal|io|description|connection|type"
     spanning_p0p1 = False
     for s in (v2.get("sections") or {}).values():
-        for o in (s.get("objects") or []):
+        for o in s.get("objects") or []:
             if o.get("type") != "table":
                 continue
     # Build lid → pages mapping
     by_lid: Dict[str, set] = {}
     by_lid_hn: Dict[str, str] = {}
     for s in (v2.get("sections") or {}).values():
-        for o in (s.get("objects") or []):
+        for o in s.get("objects") or []:
             if o.get("type") != "table":
                 continue
             lid = o.get("logical_table_id")
@@ -90,7 +89,9 @@ def analyze(out: Path) -> Dict[str, Any]:
                 by_lid_hn[lid] = o.get("header_norm")
     for lid, pages in by_lid.items():
         if len(pages) > 1:
-            merged_groups.append({"lid": lid, "pages": sorted(pages), "header_norm": by_lid_hn.get(lid)})
+            merged_groups.append(
+                {"lid": lid, "pages": sorted(pages), "header_norm": by_lid_hn.get(lid)}
+            )
         if {0, 1}.issubset(pages):
             spanning_p0p1 = True
     report["sketch06b"] = {

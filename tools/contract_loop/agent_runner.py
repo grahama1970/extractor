@@ -37,9 +37,7 @@ def _ensure_codex_auth(env: dict) -> None:
     mode = _auth_store_mode(codex_home)
     auth_path = codex_home / "auth.json"
     if mode == "file" and not auth_path.exists():
-        raise RuntimeError(
-            f"Codex OAuth auth file missing: {auth_path}. Run `codex login` first."
-        )
+        raise RuntimeError(f"Codex OAuth auth file missing: {auth_path}. Run `codex login` first.")
 
 
 @dataclass(frozen=True)
@@ -61,8 +59,7 @@ class AgentRunner(Protocol):
         log_path: Path,
         model: Optional[str] = None,
         timeout_sec: Optional[int] = None,
-    ) -> RunHandle:
-        ...
+    ) -> RunHandle: ...
 
     def resume(
         self,
@@ -74,8 +71,7 @@ class AgentRunner(Protocol):
         log_path: Path,
         model: Optional[str] = None,
         timeout_sec: Optional[int] = None,
-    ) -> RunHandle:
-        ...
+    ) -> RunHandle: ...
 
 
 def _extract_thread_id(log_path: Path) -> str | None:
@@ -125,7 +121,7 @@ class BaseSubprocessRunner:
             # Find first newline after fence
             nl = text.find("\n")
             if nl != -1:
-                text = text[nl+1:]
+                text = text[nl + 1 :]
         if text.endswith("```"):
             text = text[:-3]
         return text.strip()
@@ -160,7 +156,7 @@ class BaseSubprocessRunner:
             )
             if proc.stdin is None:
                 raise RuntimeError(f"Failed to open stdin for {cmd[0]}")
-            
+
             proc.stdin.write(prompt)
             proc.stdin.close()
 
@@ -179,9 +175,7 @@ class BaseSubprocessRunner:
                 proc.wait()
                 stdout_thread.join()
                 stderr_thread.join()
-                raise RuntimeError(
-                    f"{cmd[0]} timed out after {timeout}s (log: {log_path})"
-                )
+                raise RuntimeError(f"{cmd[0]} timed out after {timeout}s (log: {log_path})")
             stdout_thread.join()
             stderr_thread.join()
 
@@ -231,7 +225,7 @@ class CodexRunner(BaseSubprocessRunner):
         _ensure_codex_auth(env)
 
         super()._execute(full_cmd, prompt, log_path, output_path, timeout, env=env)
-        
+
         thread_id = _extract_thread_id(log_path)
         return RunHandle(thread_id=thread_id, log_path=log_path, output_path=output_path)
 
@@ -283,6 +277,7 @@ class CodexRunner(BaseSubprocessRunner):
 
 class ClaudeRunner(BaseSubprocessRunner):
     """Runner for `claude -p`."""
+
     name = "claude"
 
     def _run(
@@ -294,34 +289,42 @@ class ClaudeRunner(BaseSubprocessRunner):
         timeout_sec: Optional[int],
     ) -> RunHandle:
         cmd = [
-            "claude", 
-            "-p", prompt,
-            "--output-format", "json",
+            "claude",
+            "-p",
+            prompt,
+            "--output-format",
+            "json",
             "--dangerously-skip-permissions",
         ]
         if model:
             cmd.extend(["--model", model])
 
         timeout = timeout_sec or 600
-        
+
         # Clear env vars that interfere with OAuth-based headless mode
         env = os.environ.copy()
         for key in [
-            "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL",
-            "ANTHROPIC_API_BASE", "ANTHROPIC_ORG_ID", "CLAUDE_API_KEY",
-            "CLAUDE_AUTH_TOKEN", "CLAUDE_CODE_API_KEY"
+            "ANTHROPIC_API_KEY",
+            "ANTHROPIC_AUTH_TOKEN",
+            "ANTHROPIC_BASE_URL",
+            "ANTHROPIC_API_BASE",
+            "ANTHROPIC_ORG_ID",
+            "CLAUDE_API_KEY",
+            "CLAUDE_AUTH_TOKEN",
+            "CLAUDE_CODE_API_KEY",
         ]:
             env.pop(key, None)
-        
+
         super()._execute(cmd, "", log_path, output_path, timeout, env=env)
-        
+
         # Post-process: extract result from JSON output
         if log_path.exists():
             text = log_path.read_text(encoding="utf-8")
-            # Claude --output-format json returns {"result": "..."} 
+            # Claude --output-format json returns {"result": "..."}
             # Try to extract the inner result
             try:
                 import json as _json
+
                 data = _json.loads(text)
                 if isinstance(data, dict) and "result" in data:
                     output_path.write_text(data["result"], encoding="utf-8")
@@ -362,6 +365,7 @@ class ClaudeRunner(BaseSubprocessRunner):
 
 class OpenCodeRunner(BaseSubprocessRunner):
     """Runner for `opencode run ...`."""
+
     name = "opencode"
 
     def _run(
@@ -375,12 +379,12 @@ class OpenCodeRunner(BaseSubprocessRunner):
         cmd = ["opencode", "run", prompt, "--format", "json"]
         if model:
             cmd.extend(["--model", model])
-        
+
         timeout = timeout_sec or 600
         env = os.environ.copy()
-        
+
         super()._execute(cmd, "", log_path, output_path, timeout, env=env)
-        
+
         if log_path.exists():
             text = log_path.read_text(encoding="utf-8")
             clean_json = BaseSubprocessRunner._sanitize_json(text)
@@ -400,10 +404,7 @@ class OpenCodeRunner(BaseSubprocessRunner):
     ) -> RunHandle:
         return self._run(prompt, log_path, output_path, model, timeout_sec)
 
-    def resume(
-        self,
-        *args, **kwargs
-    ) -> RunHandle:
+    def resume(self, *args, **kwargs) -> RunHandle:
         return self.start(*args, **kwargs)
 
 
@@ -412,6 +413,7 @@ class GenericRunner(BaseSubprocessRunner):
     Runner that uses CONTRACT_LOOP_GENERIC_CMD template.
     Example: my-tool --input {prompt_file} --output {output_file}
     """
+
     name = "generic"
 
     def _run(
@@ -435,15 +437,15 @@ class GenericRunner(BaseSubprocessRunner):
             output_file=str(output_path),
             model=model or "",
         )
-        
+
         cmd = shlex.split(cmd_str)
         timeout = timeout_sec or 600
         env = os.environ.copy()
 
         super()._execute(cmd, "", log_path, output_path, timeout, env=env)
-        
+
         if not output_path.exists() and log_path.exists():
-             output_path.write_text(log_path.read_text(), encoding="utf-8")
+            output_path.write_text(log_path.read_text(), encoding="utf-8")
 
         return RunHandle(thread_id=None, log_path=log_path, output_path=output_path)
 
@@ -459,10 +461,7 @@ class GenericRunner(BaseSubprocessRunner):
     ) -> RunHandle:
         return self._run(prompt, log_path, output_path, model, timeout_sec)
 
-    def resume(
-        self,
-        *args, **kwargs
-    ) -> RunHandle:
+    def resume(self, *args, **kwargs) -> RunHandle:
         return self.start(*args, **kwargs)
 
 
@@ -478,10 +477,18 @@ class AgentFactory:
     def create(cls, name: str) -> AgentRunner:
         name = name.lower()
         if name not in cls._runners:
-             raise ValueError(f"Unknown runner: {name}. Available: {list(cls._runners.keys())}")
-        
+            raise ValueError(f"Unknown runner: {name}. Available: {list(cls._runners.keys())}")
+
         runner_cls = cls._runners[name]
         return runner_cls()  # type: ignore
 
 
-__all__ = ["AgentRunner", "CodexRunner", "ClaudeRunner", "OpenCodeRunner", "GenericRunner", "AgentFactory", "RunHandle"]
+__all__ = [
+    "AgentRunner",
+    "CodexRunner",
+    "ClaudeRunner",
+    "OpenCodeRunner",
+    "GenericRunner",
+    "AgentFactory",
+    "RunHandle",
+]

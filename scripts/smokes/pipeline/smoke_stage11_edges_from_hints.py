@@ -24,7 +24,9 @@ def main(tmpdir: Path = typer.Option(Path("/tmp/extractor_smoke11"))):
         },
         "edges": {
             "depends_on": [{"from": "S1", "to": "Nat_add_comm", "source": "used_lemmas"}],
-            "contradicts_candidates": [{"a": "S1", "b": "S2", "reason": "opposite_polarity_same_prop"}],
+            "contradicts_candidates": [
+                {"a": "S1", "b": "S2", "reason": "opposite_polarity_same_prop"}
+            ],
             "refines_candidates": [],
         },
     }
@@ -33,6 +35,7 @@ def main(tmpdir: Path = typer.Option(Path("/tmp/extractor_smoke11"))):
     out_edges = tmpdir / "edges.json"
     import importlib.util as _util
     from pathlib import Path as _Path
+
     p = _Path("scripts/pipeline/stage11_build_edges.py").resolve()
     spec = _util.spec_from_file_location("stage11_build_edges", str(p))
     mod = _util.module_from_spec(spec)

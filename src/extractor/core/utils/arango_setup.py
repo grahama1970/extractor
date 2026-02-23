@@ -71,7 +71,8 @@ DEFAULT_CONFIG = {
         "host": os.environ.get("ARANGO_HOST", "localhost"),
         "port": int(os.environ.get("ARANGO_PORT", 8529)),
         "user": os.environ.get("ARANGO_USERNAME") or os.environ.get("ARANGO_USER", "root"),
-        "password": os.environ.get("ARANGO_PASS") or os.environ.get("ARANGO_PASSWORD", "openSesame"),
+        "password": os.environ.get("ARANGO_PASS")
+        or os.environ.get("ARANGO_PASSWORD", "openSesame"),
         "db_name": os.environ.get("ARANGO_DB") or os.environ.get("ARANGO_DATABASE", "marker"),
     },
     "embedding": {

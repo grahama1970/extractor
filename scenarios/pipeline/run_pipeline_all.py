@@ -23,13 +23,17 @@ ROOT = Path(__file__).resolve().parents[2]
 ART_ROOT = Path(os.getenv("SCENARIOS_ARTIFACT_ROOT", ROOT / "scripts" / "artifacts"))
 ART_ROOT.mkdir(parents=True, exist_ok=True)
 
+
 def ts() -> str:
-    return datetime.utcnow().isoformat(timespec="milliseconds").replace(":", "-").replace(".", "-") + "Z"
+    return (
+        datetime.utcnow().isoformat(timespec="milliseconds").replace(":", "-").replace(".", "-")
+        + "Z"
+    )
 
 
 def main() -> None:
-    if os.getenv('PIPELINE_LIVE','').lower() not in {'1','true','yes'}:
-        print('SKIP: pipeline_run_all requires PIPELINE_LIVE=1')
+    if os.getenv("PIPELINE_LIVE", "").lower() not in {"1", "true", "yes"}:
+        print("SKIP: pipeline_run_all requires PIPELINE_LIVE=1")
         return
     stamp = ts()
     log = ART_ROOT / f"pipeline_all_{stamp}.log"
@@ -47,7 +51,12 @@ def main() -> None:
         code = proc.returncode
     elapsed = round(time.time() - t0, 3)
 
-    summary = {"command": args, "exit_code": code, "elapsed_sec": elapsed, "artifacts": {"log": str(log)}}
+    summary = {
+        "command": args,
+        "exit_code": code,
+        "elapsed_sec": elapsed,
+        "artifacts": {"log": str(log)},
+    }
     summary_path.write_text(json.dumps(summary, indent=2))
     print(f"pipeline/run_pipeline_all: exit={code} log={log} summary={summary_path}")
     sys.exit(code)

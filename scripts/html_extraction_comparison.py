@@ -5,8 +5,7 @@ Direct comparison: What HTML extraction SHOULD produce vs. what it currently pro
 This shows the specific gaps between what we have (PDF-shoehorned) and what we need (HTML-native).
 """
 
-import json
-from pathlib import Path
+
 
 def show_current_html_extraction():
     """What the current PDF pipeline produces for HTML."""
@@ -19,7 +18,7 @@ def show_current_html_extraction():
                 "bbox": [0, 0, 100, 100],
                 "page_index": 0,  # Fake page number
                 "page": 1,
-                "confidence": 1.0
+                "confidence": 1.0,
             },
             {  # Table from current adapter
                 "id": "table_0002",
@@ -28,8 +27,8 @@ def show_current_html_extraction():
                 "bbox": [0, 0, 100, 100],  # All HTML uses same fake bbox
                 "page_index": 0,
                 "page": 1,
-                "confidence": 1.0
-            }
+                "confidence": 1.0,
+            },
         ],
         "issues": [
             "All blocks use fake coordinates [0,0,100,100]",
@@ -38,9 +37,10 @@ def show_current_html_extraction():
             "No internal link structure",
             "No CSS class information",
             "No <figure>/<figcaption> semantics",
-            "No HTML5 structure (missing <aside>, <section>)"
-        ]
+            "No HTML5 structure (missing <aside>, <section>)",
+        ],
     }
+
 
 def show_proper_html_extraction():
     """What native HTML extraction would produce."""
@@ -54,9 +54,9 @@ def show_proper_html_extraction():
                         "kind": "Heading",
                         "level": 1,
                         "original_tag": "h1",
-                        "html_heading": True
+                        "html_heading": True,
                     }
-                }
+                },
             },
             {
                 "type": "Table",
@@ -67,7 +67,7 @@ def show_proper_html_extraction():
                         "content": "Mnemonic",
                         "style": {"is_header": True},
                         "colspan": 1,
-                        "rowspan": 1
+                        "rowspan": 1,
                     },
                     # ... detailed table cells
                 ],
@@ -75,9 +75,9 @@ def show_proper_html_extraction():
                     "attributes": {
                         "html_table": True,
                         "has_caption": True,
-                        "caption": "Memory Specifications"
+                        "caption": "Memory Specifications",
                     }
-                }
+                },
             },
             {
                 "type": "Image",
@@ -85,15 +85,12 @@ def show_proper_html_extraction():
                     "src": "cache-diagram.png",
                     "display": "System Cache Hierarchy",
                     "alt": "Cache hierarchy showing L1 I/D caches connected to L2 shared cache",
-                    "is_html5_figure": True
+                    "is_html5_figure": True,
                 },
                 "metadata": {
-                    "attributes": {
-                        "html_figure": True,
-                        "figcaption": "System Cache Hierarchy"
-                    }
-                }
-            }
+                    "attributes": {"html_figure": True, "figcaption": "System Cache Hierarchy"}
+                },
+            },
         ],
         "advantages": [
             "Preserved HTML5 semantics",
@@ -102,16 +99,17 @@ def show_proper_html_extraction():
             "CSS class metadata available",
             "No fake bounding boxes",
             "Proper <aside>, <section> recognition",
-            "Internal link structure preserved"
+            "Internal link structure preserved",
         ],
         "metadata": {
             "source_type": "html",
             "title": "RISC-V Core Specification v3.2",
             "meta_version": "3.2",
             "meta_author": "System Architecture Team",
-            "has_hierarchy": True
-        }
+            "has_hierarchy": True,
+        },
     }
+
 
 def main():
     """Show clear before/after comparison."""
@@ -128,8 +126,9 @@ def main():
     for advantage in proper["advantages"]:
         print(f"  + {advantage}")
 
-    print(f"\n🎯 The Fix: Create proper Stage 01 HTML ingestor > Stage 02 format\n")
+    print("\n🎯 The Fix: Create proper Stage 01 HTML ingestor > Stage 02 format\n")
     print("Would preserve HTML semantics while giving PDF pipeline what it expects.")
+
 
 if __name__ == "__main__":
     main()

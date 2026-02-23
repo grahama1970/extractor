@@ -42,7 +42,15 @@ A      B
         encoding="utf-8",
     )
     meta = STRUCTURED_PIPELINES[RSTProvider]
-    artifacts = run_structured_pipeline(RSTProvider, rst_path, tmp_dir, stage_prefix=meta.stage_prefix, skip_export10=True, skip_embeddings10=True, fast_embeddings10=True)
+    artifacts = run_structured_pipeline(
+        RSTProvider,
+        rst_path,
+        tmp_dir,
+        stage_prefix=meta.stage_prefix,
+        skip_export10=True,
+        skip_embeddings10=True,
+        fast_embeddings10=True,
+    )
     s07 = json.loads(Path(artifacts["stage07"]).read_text())
     sections = s07.get("reflowed_sections") or []
     assert sections, "No sections built"
@@ -59,4 +67,3 @@ A      B
 
 if __name__ == "__main__":
     app()
-

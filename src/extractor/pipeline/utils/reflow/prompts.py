@@ -62,14 +62,16 @@ def build_compact_prompt(
     by_key: Dict[str, List[str]] = {}
     for t in tabs_for_sec:
         key = f"{t.get('logical_table_id') or ''}|{t.get('header_norm') or ''}"
-        if key.strip('|'):
-            by_key.setdefault(key, []).append(str(t.get('id') or t.get('table_id') or 'tbl'))
+        if key.strip("|"):
+            by_key.setdefault(key, []).append(str(t.get("id") or t.get("table_id") or "tbl"))
     for k, ids in by_key.items():
         if len(ids) >= 2:
             merges.append(f"logical={k} parts={','.join(ids[:6])}")
 
     lines: List[str] = []
-    lines.append("You output ONLY a compact JSON object with keys: reflowed_json, ocr_corrections, improvements_made, summary. No markdown, no code fences.")
+    lines.append(
+        "You output ONLY a compact JSON object with keys: reflowed_json, ocr_corrections, improvements_made, summary. No markdown, no code fences."
+    )
     lines.append("")
     lines.append(f"Section id: {sid}")
     lines.append(f"Tables: {len(tabs_for_sec)} | Figures: {len(figs_for_sec)}")
@@ -81,15 +83,17 @@ def build_compact_prompt(
     if objs:
         mini = []
         for o in objs[:20]:
-            mini.append({
-                "id": o.get("id"),
-                "type": o.get("type"),
-                "page": o.get("page"),
-                "grid_bbox": o.get("grid_bbox"),
-                "header_norm": o.get("header_norm"),
-                "logical_table_id": o.get("logical_table_id"),
-                "summary": o.get("summary"),
-            })
+            mini.append(
+                {
+                    "id": o.get("id"),
+                    "type": o.get("type"),
+                    "page": o.get("page"),
+                    "grid_bbox": o.get("grid_bbox"),
+                    "header_norm": o.get("header_norm"),
+                    "logical_table_id": o.get("logical_table_id"),
+                    "summary": o.get("summary"),
+                }
+            )
         try:
             lines.append("")
             lines.append("Sketch (minimal):")
@@ -122,10 +126,10 @@ def build_compact_prompt_simple(
     text_char_cap: int = 1200,
 ) -> str:
     """Build a compact, string-only prompt with minimal context.
-    
+
     Includes:
     - Top Summary: counts and per-table metrics
-    - Layout Sketch DSL (from 06b) 
+    - Layout Sketch DSL (from 06b)
     - Minimal inputs: trimmed text, tables (headers + first row), figures
     - Strict JSON contract reminder
     """
@@ -141,22 +145,24 @@ def build_compact_prompt_simple(
     # Top Summary
     lines.append(f"Top Summary\n- title: {title}\n- pages: {pg0}–{pg1}\n- blocks: {blocks_count}")
     lines.append(f"- tables: {len(tables)}\n- figures: {len(figures)}")
-    
+
     # Table metrics
     used_idx = set()
     next_idx = 0
     for tb in tables:
         pm = tb.get("pandas_metrics") or {}
         shape = pm.get("shape") or [0, 0]
-        rows, cols = (int(shape[0] or 0), int(shape[1] or 0)) if isinstance(shape, (list, tuple)) else (0, 0)
+        rows, cols = (
+            (int(shape[0] or 0), int(shape[1] or 0)) if isinstance(shape, (list, tuple)) else (0, 0)
+        )
         density = pm.get("data_density")
         camel = tb.get("camelot_metrics") or {}
         acc = camel.get("accuracy")
         strat = tb.get("strategy") or tb.get("strategy_history") or None
         qf = tb.get("quality_fallback") or None
-        
+
         try:
-            tbi = int(tb.get('table_index'))
+            tbi = int(tb.get("table_index"))
         except Exception:
             tbi = None
         if tbi in used_idx or tbi is None:
@@ -168,13 +174,13 @@ def build_compact_prompt_simple(
         else:
             disp_idx = tbi
             used_idx.add(disp_idx)
-        
+
         def _r2(x):
             try:
                 return round(float(x), 2)
             except Exception:
                 return x
-        
+
         lines.append(
             f"  • table idx {disp_idx}: rows×cols={rows}×{cols}, density={_r2(density)}, camelot_acc={_r2(acc)}, strategy={strat}, quality_fallback={qf}"
         )
@@ -217,12 +223,14 @@ def build_compact_prompt_simple(
             sample_rows = tb.get("pandas_df") or tb.get("pandas_df_dict") or tb.get("rows") or []
             first = sample_rows[0] if sample_rows else []
             try:
-                first_row_list = first if isinstance(first, list) else [first.get(h, "") for h in headers]
+                first_row_list = (
+                    first if isinstance(first, list) else [first.get(h, "") for h in headers]
+                )
             except Exception:
                 first_row_list = first if isinstance(first, list) else []
-            
+
             try:
-                tbi2 = int(tb.get('table_index'))
+                tbi2 = int(tb.get("table_index"))
             except Exception:
                 tbi2 = None
             if tbi2 in used_idx2 or tbi2 is None:
@@ -245,11 +253,19 @@ def build_compact_prompt_simple(
             title_f = (fg.get("title") or "").strip()
             cap = (fg.get("caption") or fg.get("ai_description") or "").strip()
             bbox = fg.get("bbox") or fg.get("bbox0") or []
-            page = fg.get("page") if fg.get("page") is not None else (fg.get("page_idx") if fg.get("page_idx") is not None else None)
+            page = (
+                fg.get("page")
+                if fg.get("page") is not None
+                else (fg.get("page_idx") if fg.get("page_idx") is not None else None)
+            )
             if page is None:
-                lines.append(f"- figure id={fg.get('figure_id')} title={title_f or None} caption={cap[:160] if cap else None} bbox={bbox}")
+                lines.append(
+                    f"- figure id={fg.get('figure_id')} title={title_f or None} caption={cap[:160] if cap else None} bbox={bbox}"
+                )
             else:
-                lines.append(f"- figure id={fg.get('figure_id')} title={title_f or None} caption={cap[:160] if cap else None} bbox={bbox} page={page}")
+                lines.append(
+                    f"- figure id={fg.get('figure_id')} title={title_f or None} caption={cap[:160] if cap else None} bbox={bbox} page={page}"
+                )
 
     # Strict JSON schema reminder
     lines.append(

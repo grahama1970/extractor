@@ -16,7 +16,9 @@ app = typer.Typer(add_completion=False)
 
 @app.command()
 def main(
-    lean4_out: Path = typer.Argument(..., exists=True, readable=True, help="Lean4 OUT.json (batch object)"),
+    lean4_out: Path = typer.Argument(
+        ..., exists=True, readable=True, help="Lean4 OUT.json (batch object)"
+    ),
     out_json: Path = typer.Argument(..., help="Output flattened JSON with rtm.lean4_* fields"),
 ):
     payload = json.loads(lean4_out.read_text())

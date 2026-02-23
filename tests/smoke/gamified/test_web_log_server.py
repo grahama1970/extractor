@@ -1,30 +1,33 @@
 from __future__ import annotations
 
-import json
 import time
-from pathlib import Path
 
 from fastapi.testclient import TestClient
-import sys, types
+import sys
+import types
 
 # Stub heavy/optional modules to allow importing the FastAPI app without full ML stack
-if 'torch' not in sys.modules:
-    sys.modules['torch'] = types.ModuleType('torch')
-if 'numpy' not in sys.modules:
-    sys.modules['numpy'] = types.ModuleType('numpy')
-if 'requests' not in sys.modules:
-    sys.modules['requests'] = types.ModuleType('requests')
-if 'dotenv' not in sys.modules:
-    dotenv = types.ModuleType('dotenv')
+if "torch" not in sys.modules:
+    sys.modules["torch"] = types.ModuleType("torch")
+if "numpy" not in sys.modules:
+    sys.modules["numpy"] = types.ModuleType("numpy")
+if "requests" not in sys.modules:
+    sys.modules["requests"] = types.ModuleType("requests")
+if "dotenv" not in sys.modules:
+    dotenv = types.ModuleType("dotenv")
+
     def _find_dotenv(*a, **k):
-        return ''
+        return ""
+
     dotenv.find_dotenv = _find_dotenv
-    sys.modules['dotenv'] = dotenv
-if 'pydantic_settings' not in sys.modules:
-    ps = types.ModuleType('pydantic_settings')
+    sys.modules["dotenv"] = dotenv
+if "pydantic_settings" not in sys.modules:
+    ps = types.ModuleType("pydantic_settings")
+
     class BaseSettings: ...
+
     ps.BaseSettings = BaseSettings
-    sys.modules['pydantic_settings'] = ps
+    sys.modules["pydantic_settings"] = ps
 
 from extractor.core.scripts.server import app
 

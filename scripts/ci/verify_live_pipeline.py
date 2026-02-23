@@ -73,10 +73,12 @@ def main() -> int:
         keys.append(key)
     unique_keys = set(keys)
     unique_tables = len(unique_keys) if keys else 0
-    assert unique_tables == 5, f"Expected 5 logical tables after merge; got {unique_tables} (raw={raw_tables})"
+    assert (
+        unique_tables == 5
+    ), f"Expected 5 logical tables after merge; got {unique_tables} (raw={raw_tables})"
+
     # Count merged groups (appear on >1 page)
     def table_pages_for_key(k: str) -> set[int]:
-        pages: set[int] = set()
         for s in rs:
             for b in (s.get("reflowed_json", {}) or {}).get("blocks", []):
                 if (b.get("type") or b.get("kind")) != "table":
@@ -86,13 +88,17 @@ def main() -> int:
                 key = str(lid or hdr or b.get("id") or b.get("table_id") or "t")
                 if key != k:
                     continue
-                bids = ((b.get("source") or {}).get("block_ids") or [])
+                bids = (b.get("source") or {}).get("block_ids") or []
                 for bid in bids:
-                    t = (out / "02_marker_extractor" / "json_output" / "02_marker_blocks.json")
+                    out / "02_marker_extractor" / "json_output" / "02_marker_blocks.json"
                     # We already validated 02 exists; load once outside loop would be nicer, but keep simple here
         # Load stage 02 once
-    s02 = json.loads((out / "02_marker_extractor" / "json_output" / "02_marker_blocks.json").read_text())
+
+    s02 = json.loads(
+        (out / "02_marker_extractor" / "json_output" / "02_marker_blocks.json").read_text()
+    )
     block_lookup = {str(b.get("id") or b.get("block_id")): b for b in s02.get("blocks", [])}
+
     def pages_for_block_ids(ids):
         p = set()
         for bid in ids:
@@ -106,6 +112,7 @@ def main() -> int:
                 continue
             p.add(pg)
         return p
+
     merged_count = 0
     for k in unique_keys:
         pages = set()
@@ -121,15 +128,23 @@ def main() -> int:
                 pages |= pages_for_block_ids(((b.get("source") or {}).get("block_ids") or []))
         if len(pages) > 1:
             merged_count += 1
-    assert merged_count == 1, f"Expected exactly 1 merged logical table group (spanning >1 page), got {merged_count}"
-    assert unique_tables - merged_count == 4, f"Expected 4 unmerged logical tables, got {unique_tables - merged_count}"
+    assert (
+        merged_count == 1
+    ), f"Expected exactly 1 merged logical table group (spanning >1 page), got {merged_count}"
+    assert (
+        unique_tables - merged_count == 4
+    ), f"Expected 4 unmerged logical tables, got {unique_tables - merged_count}"
 
     # Requirements: ≥ 12 total, ≥ 2 conditional
     r07 = out / "07_requirements_miner" / "json_output" / "07_requirements.json"
     assert r07.exists(), f"Missing 07_requirements.json at {r07}"
     d07 = json.loads(r07.read_text())
     reqs = d07.get("requirements", [])
-    conds = [r for r in reqs if (r.get("is_conditional") or "conditional" in str(r.get("category", "")).lower())]
+    conds = [
+        r
+        for r in reqs
+        if (r.get("is_conditional") or "conditional" in str(r.get("category", "")).lower())
+    ]
     assert len(reqs) >= 12, f"Expected ≥12 requirements, got {len(reqs)}"
     assert len(conds) >= 2, f"Expected ≥2 conditional requirements, got {len(conds)}"
 
@@ -142,7 +157,9 @@ def main() -> int:
     summ = aj.get("summary", {})
     total = int(summ.get("total_overlays", 0))
     byk = {str(k): int(v) for k, v in (summ.get("by_kind", {}) or {}).items()}
-    assert total >= (byk.get("section", 0) + byk.get("table", 0)), "Overlay total sanity check failed"
+    assert total >= (
+        byk.get("section", 0) + byk.get("table", 0)
+    ), "Overlay total sanity check failed"
     # Figure overlay present (fixture says 1 figure exists)
     assert raw_figs >= 1, "Fixture expects ≥1 figure in Stage 06"
     assert byk.get("figure", 0) >= 1, "Expected at least 1 figure overlay in 09a"

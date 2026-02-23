@@ -45,14 +45,13 @@ def main(
             "(b) a figure block with a non-empty title, short caption, and image_ref when applicable. "
             "Always provide ocr_corrections and improvements_made; include summary."
         )
-        context = (
-            "Section: 4.1.5.4. BHT (Branch History Table) submodule. Includes a branch history table and explanatory text."
-        )
+        context = "Section: 4.1.5.4. BHT (Branch History Table) submodule. Includes a branch history table and explanatory text."
         messages = [
             {"role": "user", "content": [{"type": "text", "text": f"{guard}\n\n{context}"}]}
         ]
 
         import asyncio
+
         adapter = LLMAdapter(logs_root=Path("logs"))
         res = asyncio.run(
             adapter.reflow_section(

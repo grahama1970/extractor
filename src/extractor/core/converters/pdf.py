@@ -31,19 +31,27 @@ from collections import defaultdict
 from typing import Annotated, Any, Dict, List, Optional, Type, Tuple
 
 from extractor.core.processors import BaseProcessor
+
 try:
     from extractor.core.processors.llm.llm_table_merge import LLMTableMergeProcessor
 except Exception:  # pragma: no cover
+
     class LLMTableMergeProcessor:  # type: ignore
         ...
+
+
 from extractor.core.providers.registry import provider_from_filepath
 from extractor.core.builders.document import DocumentBuilder
 from extractor.core.builders.layout import LayoutBuilder
+
 try:
     from extractor.core.builders.llm_layout import LLMLayoutBuilder
 except Exception:  # pragma: no cover
+
     class LLMLayoutBuilder:  # type: ignore
         ...
+
+
 from extractor.core.builders.line import LineBuilder
 from extractor.core.builders.ocr import OcrBuilder
 from extractor.core.builders.structure import StructureBuilder
@@ -52,28 +60,32 @@ from extractor.core.processors.blockquote import BlockquoteProcessor
 from extractor.core.processors.code_processor import CodeProcessor
 from extractor.core.processors.debug import DebugProcessor
 from extractor.core.processors.document_toc import DocumentTOCProcessor
+
 try:
     from extractor.core.processors.equation import EquationProcessor
 except Exception:  # pragma: no cover
+
     class EquationProcessor:  # type: ignore
-        def __init__(self, *args, **kwargs):
-            ...
-        def __call__(self, *args, **kwargs):
-            ...
+        def __init__(self, *args, **kwargs): ...
+        def __call__(self, *args, **kwargs): ...
+
+
 from extractor.core.processors.footnote import FootnoteProcessor
 from extractor.core.processors.ignoretext import IgnoreTextProcessor
 from extractor.core.processors.line_numbers import LineNumbersProcessor
 from extractor.core.processors.list import ListProcessor
+
 try:
     from extractor.core.processors.llm.llm_complex import LLMComplexRegionProcessor
     from extractor.core.processors.llm.llm_form import LLMFormProcessor
     from extractor.core.processors.llm.llm_image_description import LLMImageDescriptionProcessor
     from extractor.core.processors.llm.llm_table import LLMTableProcessor
-    from extractor.core.processors.llm.llm_table_merge import LLMTableMergeProcessor as _LLMTableMergeProcessor2
     from extractor.core.processors.llm.llm_inlinemath import LLMInlineMathLinesProcessor
 except Exception:  # pragma: no cover
+
     class _NoOp:  # type: ignore
         ...
+
     LLMComplexRegionProcessor = _NoOp
     LLMFormProcessor = _NoOp
     LLMImageDescriptionProcessor = _NoOp
@@ -83,53 +95,68 @@ from extractor.core.processors.page_header import PageHeaderProcessor
 from extractor.core.processors.reference import ReferenceProcessor
 from extractor.core.processors.sectionheader import SectionHeaderProcessor
 from extractor.core.processors.font_header import FontHeaderProcessor
+
 try:
     from extractor.core.processors.table import TableProcessor
 except Exception:  # pragma: no cover
+
     class TableProcessor:  # type: ignore
-        def __init__(self, *args, **kwargs):
-            ...
-        def __call__(self, *args, **kwargs):
-            ...
+        def __init__(self, *args, **kwargs): ...
+        def __call__(self, *args, **kwargs): ...
+
+
 from extractor.core.processors.text import TextProcessor
+
 try:
     from extractor.core.processors.llm.llm_equation import LLMEquationProcessor
 except Exception:  # pragma: no cover
+
     class LLMEquationProcessor:  # type: ignore
         ...
+
+
 try:
     from extractor.core.renderers.markdown import MarkdownRenderer
 except Exception:
     # Lightweight fallback so import-time dependencies don't block Stage 02
     class MarkdownRenderer:  # type: ignore
-        def __init__(self, *args, **kwargs):
-            ...
+        def __init__(self, *args, **kwargs): ...
 
         def __call__(self, document):  # pragma: no cover - fallback path
             return ""
+
+
 from extractor.core.schema import BlockTypes
 from extractor.core.schema.blocks import Block
 from extractor.core.schema.registry import register_block_class
 from extractor.core.util import strings_to_classes
+
 try:
     from extractor.core.processors.llm.llm_handwriting import LLMHandwritingProcessor
 except Exception:  # pragma: no cover
+
     class LLMHandwritingProcessor:  # type: ignore
         ...
+
+
 from extractor.core.processors.order import OrderProcessor
 
 # MARKER FORK ADDITION START - LiteLLM service
 try:
     from extractor.core.services.litellm import LiteLLMService
 except Exception:  # pragma: no cover
+
     class LiteLLMService:  # type: ignore
         ...
 
+
 # MARKER FORK ADDITION END
 from extractor.core.processors.line_merge import LineMergeProcessor
+
 try:
     from extractor.core.processors.llm.llm_mathblock import LLMMathBlockProcessor
 except Exception:  # pragma: no cover
+
     class LLMMathBlockProcessor:  # type: ignore
         ...
 
@@ -259,11 +286,12 @@ class PdfConverter(BaseConverter):
             processor_list = list(processor_list)
 
         # Drop EquationProcessor when no real texify is available (offline mode)
-        offline_optional = os.getenv("OFFLINE_PDF_PREDICTORS", "1").lower() not in {"0", "false"}
+        os.getenv("OFFLINE_PDF_PREDICTORS", "1").lower() not in {"0", "false"}
         try:
             from extractor.core.processors.equation import EquationProcessor as _EqProc  # type: ignore
         except Exception:
             _EqProc = None  # type: ignore
+
         def _has_real_texify(model):
             if not model:
                 return False
@@ -273,7 +301,10 @@ class PdfConverter(BaseConverter):
             except Exception:
                 return False
             return True
-        if _EqProc in processor_list and not _has_real_texify(self.artifact_dict.get("texify_model")):
+
+        if _EqProc in processor_list and not _has_real_texify(
+            self.artifact_dict.get("texify_model")
+        ):
             # Always drop EquationProcessor unless a real texify model is available
             processor_list = [p for p in processor_list if p is not _EqProc]
 

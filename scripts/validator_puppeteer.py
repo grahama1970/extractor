@@ -40,7 +40,9 @@ async def _run_episode(
         browser: Browser = await p.chromium.launch(headless=True)
         page: Page = await browser.new_page()
 
-        page.on("console", lambda msg: (errors if msg.type == 'error' else warnings).append(msg.text))
+        page.on(
+            "console", lambda msg: (errors if msg.type == "error" else warnings).append(msg.text)
+        )
         page.on("pageerror", lambda exc: errors.append(str(exc)))
 
         # Preflight and load classic layout
@@ -78,7 +80,11 @@ async def _run_episode(
                 # Use dev hook to draw a box as a proxy for an annotation
                 await page.evaluate(
                     "(p, x0, y0, x1, y1) => { window.__ux?.setPage?.(p); window.__ux?.drawBox?.(p, x0, y0, x1, y1); }",
-                    page_num, x0, y0, x1, y1,
+                    page_num,
+                    x0,
+                    y0,
+                    x1,
+                    y1,
                 )
             else:
                 # Unknown task type -> no-op
@@ -161,7 +167,9 @@ def episode(
         tasks = tasks["tasks"]
     assert isinstance(tasks, list), "tasks_file must be a JSON list or object with 'tasks' list"
 
-    result = asyncio.run(_run_episode(target, api_base, run_id, episode_id, variant, tasks, screenshot_dir))
+    result = asyncio.run(
+        _run_episode(target, api_base, run_id, episode_id, variant, tasks, screenshot_dir)
+    )
     print(json.dumps(result, ensure_ascii=False))
 
 

@@ -19,11 +19,23 @@ app = typer.Typer(add_completion=False)
 
 @app.command()
 def main(
-    input_pdf: Path = typer.Option(Path("data/results/pipeline/01_annotation_processor/BHT_CV32A65X_marked_clean.pdf"), exists=True),
+    input_pdf: Path = typer.Option(
+        Path("data/results/pipeline/01_annotation_processor/BHT_CV32A65X_marked_clean.pdf"),
+        exists=True,
+    ),
     output_dir: Path = typer.Option(Path("data/results/cli_smokes/fast_pdf")),
 ):
     output_dir.mkdir(parents=True, exist_ok=True)
-    cmd = [sys.executable, "-m", "src.cli", "extract", "--mode", "fast", str(input_pdf), str(output_dir)]
+    cmd = [
+        sys.executable,
+        "-m",
+        "src.cli",
+        "extract",
+        "--mode",
+        "fast",
+        str(input_pdf),
+        str(output_dir),
+    ]
     proc = subprocess.run(cmd)
     if proc.returncode != 0:
         typer.echo("CLI fast extract failed.", err=True)
@@ -37,4 +49,3 @@ def main(
 
 if __name__ == "__main__":
     app()
-

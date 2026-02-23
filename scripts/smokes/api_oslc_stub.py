@@ -33,14 +33,22 @@ def main() -> int:
     svc = httpx.get(f"{BASE}/api/oslc/service", timeout=5)
     ok_service = svc.status_code == 200 and (svc.json() or {}).get("ok") is True
 
-    link_payload = {"source": "urn:pdf-object:obj-1", "target": "urn:test:case-1", "type": "oslc_rm:satisfies"}
+    link_payload = {
+        "source": "urn:pdf-object:obj-1",
+        "target": "urn:test:case-1",
+        "type": "oslc_rm:satisfies",
+    }
     post = httpx.post(f"{BASE}/api/oslc/link", json=link_payload, timeout=5)
     ok_post = post.status_code == 200 and (post.json() or {}).get("ok") is True
 
     listing = httpx.get(f"{BASE}/api/oslc/links", timeout=5)
     body = listing.json() if listing.status_code == 200 else {}
     links = body.get("links") or []
-    found = any(l.get("source") == link_payload["source"] and l.get("target") == link_payload["target"] for l in links if isinstance(l, dict))
+    found = any(
+        l.get("source") == link_payload["source"] and l.get("target") == link_payload["target"]
+        for l in links
+        if isinstance(l, dict)
+    )
 
     summary = {
         "base": BASE,
@@ -59,4 +67,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-

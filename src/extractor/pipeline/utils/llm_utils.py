@@ -91,10 +91,8 @@ async def call_llm_with_image(
             return {"response": content}
 
     except Exception as exc:
-        log_stage_error('llm_utils.py', exc, {'context': 'llm_utils.py'})
+        log_stage_error("llm_utils.py", exc, {"context": "llm_utils.py"})
         raise
-        logger.error(f"LLM call failed: {e}")
-        return None
 
 
 def prepare_image_base64(image: Union[Image.Image, str, Path]) -> Optional[str]:
@@ -124,10 +122,8 @@ def prepare_image_base64(image: Union[Image.Image, str, Path]) -> Optional[str]:
             return base64.b64encode(buffer.getvalue()).decode()
 
     except Exception as exc:
-        log_stage_error('llm_utils.py', exc, {'context': 'llm_utils.py'})
+        log_stage_error("llm_utils.py", exc, {"context": "llm_utils.py"})
         raise
-        logger.error(f"Failed to prepare image: {e}")
-        return None
 
 
 async def interpret_annotation_with_llm(

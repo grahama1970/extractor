@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { FileText, Layout, Grid3X3, Layers } from "lucide-react";
+import { FileText, Layout, Grid3X3, Layers, Eye } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -44,6 +44,14 @@ const Index = () => {
       icon: FileText,
       route: "/ask",
       features: ["Search + Chat", "Citations", "Session memory (scaffold)"]
+    },
+    {
+      id: 6,
+      title: "Review Extractions",
+      description: "Spot-check pipeline extractions with pre-loaded bounding boxes from S02/S05/S06. Browse runs, inspect annotations, save corrections.",
+      icon: Eye,
+      route: "/review",
+      features: ["Browse 730+ runs", "Auto-loaded annotations", "Type filtering", "Save corrections"]
     }
   ];
 

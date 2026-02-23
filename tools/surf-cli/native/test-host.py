@@ -7,11 +7,13 @@ import json
 with open("/tmp/pi-chrome-host.log", "a") as f:
     f.write("Python host starting...\n")
 
+
 def send_message(message):
-    encoded = json.dumps(message).encode('utf-8')
-    sys.stdout.buffer.write(struct.pack('I', len(encoded)))
+    encoded = json.dumps(message).encode("utf-8")
+    sys.stdout.buffer.write(struct.pack("I", len(encoded)))
     sys.stdout.buffer.write(encoded)
     sys.stdout.buffer.flush()
+
 
 # Send ready message
 send_message({"type": "HOST_READY"})
@@ -25,8 +27,8 @@ while True:
         length_bytes = sys.stdin.buffer.read(4)
         if len(length_bytes) == 0:
             break
-        length = struct.unpack('I', length_bytes)[0]
-        message = sys.stdin.buffer.read(length).decode('utf-8')
+        length = struct.unpack("I", length_bytes)[0]
+        message = sys.stdin.buffer.read(length).decode("utf-8")
         data = json.loads(message)
         with open("/tmp/pi-chrome-host.log", "a") as f:
             f.write(f"Received: {data}\n")

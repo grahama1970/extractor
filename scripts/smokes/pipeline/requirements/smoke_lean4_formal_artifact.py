@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import json
 import subprocess
-import sys
 from pathlib import Path
 
 import typer
@@ -31,10 +30,14 @@ def main():
         raise typer.Exit(0)
 
     items = [
-        {"requirement": "The sum of two even numbers is even.", "metadata": {"section_id": "FORM-1"}},
+        {
+            "requirement": "The sum of two even numbers is even.",
+            "metadata": {"section_id": "FORM-1"},
+        },
         {"requirement": "For all real x, x^2 + 1 > 0.", "metadata": {"section_id": "FORM-2"}},
     ]
-    tmp = Path("/tmp/lean_formal_in.json"); tmp.write_text(json.dumps(items, indent=2))
+    tmp = Path("/tmp/lean_formal_in.json")
+    tmp.write_text(json.dumps(items, indent=2))
     out = Path("/tmp/lean_formal_out.json")
 
     cmd = [
@@ -59,8 +62,9 @@ def main():
 
     data = json.loads(out.read_text())
     results = [r for r in data.get("proof_results", []) if isinstance(r, dict)]
-    proved = [r for r in results if r.get("status") == "proved" and r.get("lean_code")] 
-    artifacts = Path("scripts/artifacts"); artifacts.mkdir(parents=True, exist_ok=True)
+    proved = [r for r in results if r.get("status") == "proved" and r.get("lean_code")]
+    artifacts = Path("scripts/artifacts")
+    artifacts.mkdir(parents=True, exist_ok=True)
 
     saved = []
     for idx, r in enumerate(proved):
@@ -76,7 +80,7 @@ def main():
         "saved": saved,
         "out_json": str(out),
     }
-    (artifacts/"lean4_formal_artifact_summary.json").write_text(json.dumps(report, indent=2))
+    (artifacts / "lean4_formal_artifact_summary.json").write_text(json.dumps(report, indent=2))
     if not proved:
         typer.echo("No proved items; cannot confirm formal artifact.", err=True)
         raise typer.Exit(1)

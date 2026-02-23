@@ -45,7 +45,9 @@ def _load_flatten_function():
 
 @app.command()
 def ingest(
-    html_path: Path = typer.Argument(..., exists=True, readable=True, help="Path to the source HTML file."),
+    html_path: Path = typer.Argument(
+        ..., exists=True, readable=True, help="Path to the source HTML file."
+    ),
     output_dir: Path = typer.Option(
         Path("data/results/html_ingest"),
         "--output-dir",
@@ -103,7 +105,9 @@ def ingest(
 
 @app.command()
 def summarize(
-    unified_path: Path = typer.Argument(..., exists=True, readable=True, help="Path to a UnifiedDocument JSON."),
+    unified_path: Path = typer.Argument(
+        ..., exists=True, readable=True, help="Path to a UnifiedDocument JSON."
+    ),
 ) -> None:
     """Quick summary helper for an existing UnifiedDocument file."""
 

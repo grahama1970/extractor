@@ -36,7 +36,7 @@ def main() -> int:
     except ImportError:
         print("FAIL: PyMuPDF (fitz) not installed")
         return 1
-    
+
     # Find fixture
     pdf_path = None
     if FIXTURE_PDF.exists():
@@ -46,54 +46,51 @@ def main() -> int:
             if alt.exists():
                 pdf_path = alt
                 break
-    
+
     if not pdf_path:
-        print(f"SKIP: No fixture PDF found")
+        print("SKIP: No fixture PDF found")
         return 0
-    
+
     print(f"Testing section image rendering on: {pdf_path.name}")
-    
+
     try:
         doc = fitz.open(str(pdf_path))
         if len(doc) == 0:
             print("FAIL: PDF has no pages")
             return 1
-        
+
         page = doc[0]
-        
+
         # Define a region (top quarter of page)
         rect = fitz.Rect(
-            page.rect.x0,
-            page.rect.y0,
-            page.rect.x1,
-            page.rect.y0 + page.rect.height / 4
+            page.rect.x0, page.rect.y0, page.rect.x1, page.rect.y0 + page.rect.height / 4
         )
-        
+
         # Render to pixmap
         pix = page.get_pixmap(matrix=fitz.Matrix(2, 2), clip=rect)
-        
+
         # Save to temp file
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
             out_path = Path(f.name)
-        
+
         pix.save(str(out_path))
         doc.close()
-        
+
         # Verify
         if not out_path.exists():
             print("FAIL: PNG file not created")
             return 1
-        
+
         size = out_path.stat().st_size
         if size == 0:
             print("FAIL: PNG file is empty")
             out_path.unlink()
             return 1
-        
+
         print(f"OK: Created PNG ({size} bytes) at {out_path}")
         out_path.unlink()  # Cleanup
         return 0
-        
+
     except Exception as e:
         print(f"FAIL: {e}")
         return 1

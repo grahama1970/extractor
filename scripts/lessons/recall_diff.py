@@ -74,7 +74,10 @@ def fuse_bm25_graph(db, bm25: List[Dict[str, Any]], depth: int, k: int) -> List[
         return []
     # Normalize BM25 by reciprocal rank
     n = len(bm25)
-    scores = {r["_key"]: {"bm25": (n - idx) / max(1, n - 1), "graph": 0.0} for idx, r in enumerate(bm25, start=1)}
+    scores = {
+        r["_key"]: {"bm25": (n - idx) / max(1, n - 1), "graph": 0.0}
+        for idx, r in enumerate(bm25, start=1)
+    }
     # Graph per candidate
     depth = max(1, min(4, depth))
     for r in bm25:

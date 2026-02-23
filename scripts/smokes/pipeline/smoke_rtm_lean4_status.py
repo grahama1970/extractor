@@ -23,19 +23,39 @@ app = typer.Typer(add_completion=False)
 
 
 def _find_latest_stage10(root: Path) -> Path:
-    cands = sorted(root.rglob("10_arangodb_exporter/json_output/10_flattened_data.json"), key=lambda p: p.stat().st_mtime, reverse=True)
-    return cands[0] if cands else root / "pipeline/10_arangodb_exporter/json_output/10_flattened_data.json"
+    cands = sorted(
+        root.rglob("10_arangodb_exporter/json_output/10_flattened_data.json"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    return (
+        cands[0]
+        if cands
+        else root / "pipeline/10_arangodb_exporter/json_output/10_flattened_data.json"
+    )
 
 
 @app.command()
-def main(pdf: Path = typer.Option(Path("data/input/pipeline/BHT_CV32A65X_marked.pdf"), exists=True)):
+def main(
+    pdf: Path = typer.Option(Path("data/input/pipeline/BHT_CV32A65X_marked.pdf"), exists=True)
+):
     lean_cli = Path("/home/graham/workspace/experiments/lean4/src/lean4_prover/cli_mini.py")
     if not lean_cli.exists():
         print("SKIP: Lean4 CLI not found; skipping RTM lean4_status smoke.")
         raise typer.Exit(0)
     out_dir = Path("data/results/cli_smokes/lean4_rtm")
     out_dir.mkdir(parents=True, exist_ok=True)
-    cmd = [sys.executable, "-m", "src.cli", "extract", str(pdf), str(out_dir), "--mode", "accurate", "--prove"]
+    cmd = [
+        sys.executable,
+        "-m",
+        "src.cli",
+        "extract",
+        str(pdf),
+        str(out_dir),
+        "--mode",
+        "accurate",
+        "--prove",
+    ]
     rc = subprocess.run(cmd).returncode
     if rc != 0:
         typer.echo("CLI accurate --prove failed", err=True)
@@ -43,10 +63,18 @@ def main(pdf: Path = typer.Option(Path("data/input/pipeline/BHT_CV32A65X_marked.
     stage10 = _find_latest_stage10(out_dir)
     data = json.loads(stage10.read_text())
     total = len(data) if isinstance(data, list) else 0
-    with_status = sum(1 for o in data if isinstance(o, dict) and isinstance(o.get("rtm"), dict) and o["rtm"].get("lean4_status") is not None)
+    with_status = sum(
+        1
+        for o in data
+        if isinstance(o, dict)
+        and isinstance(o.get("rtm"), dict)
+        and o["rtm"].get("lean4_status") is not None
+    )
     report = {"stage10": str(stage10), "total": total, "with_lean4_status": with_status}
     Path("scripts/artifacts").mkdir(parents=True, exist_ok=True)
-    (Path("scripts/artifacts")/"rtm_lean4_status_summary.json").write_text(json.dumps(report, indent=2))
+    (Path("scripts/artifacts") / "rtm_lean4_status_summary.json").write_text(
+        json.dumps(report, indent=2)
+    )
     if with_status == 0:
         # Acceptable when dataset yields no extracted requirements; Stage 08 ran.
         theo = out_dir / "08_lean4_theorem_prover/json_output/08_theorems.json"

@@ -3,13 +3,14 @@ Stage 07 run orchestration extracted from 07_reflow_section.py.
 
 This module contains the run() function and CLI logic.
 """
+
 import asyncio
 import json
 import os
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from loguru import logger
 from rich.console import Console
@@ -24,9 +25,7 @@ from extractor.pipeline.utils.diagnostics import (
     start_resource_sampler,
     stop_resource_sampler,
 )
-from extractor.pipeline.utils.json_utils import parse_json_strict
 from extractor.pipeline.utils.model_select import get_vlm_model, get_text_model
-from extractor.pipeline.utils.debug_utils import ensure_logs_dir, time_block
 from extractor.pipeline.utils.unified_conversion import build_unified_document_from_reflow
 from extractor.pipeline.steps.scillm_preflight_validator import require_scillm_preflight
 
@@ -42,16 +41,32 @@ from extractor.pipeline.utils.ann_index import (
     query_ann_index,
 )
 from extractor.pipeline.utils.diagnostics import gpu_metrics_available, make_event
+from extractor.pipeline.utils.step_sanity import run_step_sanity
 from extractor.core.schema.unified_document import SourceType
 
-USE_LAYOUT_SKETCH = os.getenv("STAGE07_USE_LAYOUT_SKETCH", "true").lower() in ("1", "true", "yes", "y")
-OMIT_IMAGES_IF_CONFIDENT = os.getenv("STAGE07_OMIT_IMAGES_IF_CONFIDENT", "true").lower() in ("1", "true", "yes", "y")
+USE_LAYOUT_SKETCH = os.getenv("STAGE07_USE_LAYOUT_SKETCH", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+    "y",
+)
+OMIT_IMAGES_IF_CONFIDENT = os.getenv("STAGE07_OMIT_IMAGES_IF_CONFIDENT", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+    "y",
+)
 LAYOUT_CONF_THRESH = float(os.getenv("STAGE07_LAYOUT_CONF_THRESH", "0.75"))
 STAGE07_DEBUG = os.getenv("STAGE07_DEBUG", "0").lower() in ("1", "true", "yes", "y")
 STAGE07_VISUAL_PROOF = os.getenv("STAGE07_VISUAL_PROOF", "").lower() in ("1", "true", "yes", "y")
 STAGE07_SOURCE_PDF = os.getenv("STAGE07_SOURCE_PDF", "").strip() or None
 
 console = Console()
+
+
+def sanity() -> int:
+    return run_step_sanity("07_reflow_section")
+
 
 def run(
     sections_json: Path,
@@ -80,14 +95,12 @@ def run(
             # Choose model based on whether images are included
             LLM_MODEL = get_vlm_model() if include_images else get_text_model()
         except Exception as exc:
-            log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+            log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
             raise
-            log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+            log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
             raise
-            log_stage_error('07_reflow_section', exc, {'context': '07'})
+            log_stage_error("07_reflow_section", exc, {"context": "07"})
             raise
-            console.print(f"[red]Stage 07 model selection failed: {_e}[/red]")
-            raise RuntimeError("Stage 07 model selection failed")
         # Early sanity: paved-path preflight required when LLM is enabled
         try:
             require_scillm_preflight()
@@ -97,13 +110,12 @@ def run(
             )
             raise
         except Exception as exc:
-            log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+            log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
             raise
-            log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+            log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
             raise
-            log_stage_error('07_reflow_section', exc, {'context': '07'})
+            log_stage_error("07_reflow_section", exc, {"context": "07"})
             raise
-            raise RuntimeError(f"Stage 07 preflight error: {_e}")
     # Configure a stage-specific log file for debugging
     try:
         stage_dir = output_dir / "07_reflow_section"
@@ -118,11 +130,11 @@ def run(
             retention="14 days",
         )
     except Exception as exc:
-        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
         raise
-        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
         raise
-        log_stage_error('07_reflow_section', exc, {'context': '07'})
+        log_stage_error("07_reflow_section", exc, {"context": "07"})
         raise
         pass
 
@@ -152,11 +164,11 @@ def run(
                 )
             )
     except Exception as exc:
-        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
         raise
-        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
         raise
-        log_stage_error('07_reflow_section', exc, {'context': '07'})
+        log_stage_error("07_reflow_section", exc, {"context": "07"})
         raise
         pass
 
@@ -165,11 +177,11 @@ def run(
         if not include_images:
             os.environ.setdefault("STAGE07_MAX_IMAGES", "0")
     except Exception as exc:
-        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
         raise
-        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
         raise
-        log_stage_error('07_reflow_section', exc, {'context': '07'})
+        log_stage_error("07_reflow_section", exc, {"context": "07"})
         raise
         pass
 
@@ -186,11 +198,11 @@ def run(
             os.environ.pop("STAGE07_MINIMAL_JSON", None)
             os.environ.setdefault("STAGE07_SCHEMA_MODE", "reflow_json")
     except Exception as exc:
-        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
         raise
-        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
         raise
-        log_stage_error('07_reflow_section', exc, {'context': '07'})
+        log_stage_error("07_reflow_section", exc, {"context": "07"})
         raise
         pass
     stage_output_dir = output_dir / "07_reflow_section"
@@ -200,21 +212,30 @@ def run(
 
     # Prefer enriched tables/figures when present (06a outputs)
     try:
-        prefer_enriched = os.getenv("STAGE07_PREFER_ENRICHED", "1").lower() in ("1","true","yes","y")
+        prefer_enriched = os.getenv("STAGE07_PREFER_ENRICHED", "1").lower() in (
+            "1",
+            "true",
+            "yes",
+            "y",
+        )
         if prefer_enriched:
             base_dir = output_dir
-            enr_tables = base_dir / "06a_title_caption_enricher" / "json_output" / "05_tables.enriched.json"
-            enr_figs = base_dir / "06a_title_caption_enricher" / "json_output" / "06_figures.enriched.json"
+            enr_tables = (
+                base_dir / "06a_title_caption_enricher" / "json_output" / "05_tables.enriched.json"
+            )
+            enr_figs = (
+                base_dir / "06a_title_caption_enricher" / "json_output" / "06_figures.enriched.json"
+            )
             if enr_tables.exists():
                 tables_json = enr_tables
             if enr_figs.exists():
                 figures_json = enr_figs
     except Exception as exc:
-        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
         raise
-        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
         raise
-        log_stage_error('07_reflow_section', exc, {'context': '07'})
+        log_stage_error("07_reflow_section", exc, {"context": "07"})
         raise
         pass
 
@@ -224,7 +245,9 @@ def run(
     # Attach layout sketches if available (06b step)
     if USE_LAYOUT_SKETCH:
         try:
-            sketches_path = output_dir / "06b_layout_sketcher" / "json_output" / "06b_layout_sketch.json"
+            sketches_path = (
+                output_dir / "06b_layout_sketcher" / "json_output" / "06b_layout_sketch.json"
+            )
             if sketches_path.exists():
                 sk_map = json.loads(sketches_path.read_text()).get("sections", {})
                 sk_count = 0
@@ -246,15 +269,12 @@ def run(
                     )
                 )
         except Exception as exc:
-            log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+            log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
             raise
-            log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+            log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
             raise
-            log_stage_error('07_reflow_section', exc, {'context': '07'})
+            log_stage_error("07_reflow_section", exc, {"context": "07"})
             raise
-            diagnostics.append(
-                make_event("07_reflow_section", "warning", "layout_sketch_missing", str(_e), {})
-            )
 
     # Optional: load or build FAISS index from Stage 01 annotations for similar text lookup
     ann_index = None
@@ -289,15 +309,12 @@ def run(
                         )
                     )
     except Exception as exc:
-        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
         raise
-        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
         raise
-        log_stage_error('07_reflow_section', exc, {'context': '07'})
+        log_stage_error("07_reflow_section", exc, {"context": "07"})
         raise
-        diagnostics.append(
-            make_event("07_reflow_section", "warning", "ann_index_unavailable", str(_ie), {})
-        )
 
     # Attach top-3 similar annotations (text-only) to each section (advisory)
     if ann_index is not None:
@@ -314,11 +331,15 @@ def run(
                             if _ann_list:
                                 aid = _ann_list[i].get("id")
                         except Exception as exc:
-                            log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                            log_stage_error(
+                                "07_reflow_section", exc, {"context": "07_reflow_retry"}
+                            )
                             raise
-                            log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                            log_stage_error(
+                                "07_reflow_section", exc, {"context": "07_reflow_retry"}
+                            )
                             raise
-                            log_stage_error('07_reflow_section', exc, {'context': '07'})
+                            log_stage_error("07_reflow_section", exc, {"context": "07"})
                             raise
                             aid = None
                         ids_scores.append({"id": aid, "score": score})
@@ -334,20 +355,24 @@ def run(
                                 _maxc = int(_os.getenv("ANN_SIMILAR_SNIPPET_CHARS", "200"))
                                 ids_scores[-1]["snippet"] = _snip(_ann_list[i], _maxc)
                         except Exception as exc:
-                            log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                            log_stage_error(
+                                "07_reflow_section", exc, {"context": "07_reflow_retry"}
+                            )
                             raise
-                            log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                            log_stage_error(
+                                "07_reflow_section", exc, {"context": "07_reflow_retry"}
+                            )
                             raise
-                            log_stage_error('07_reflow_section', exc, {'context': '07'})
+                            log_stage_error("07_reflow_section", exc, {"context": "07"})
                             raise
                             pass
                     sec["similar_annotations"] = ids_scores
             except Exception as exc:
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                 raise
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                 raise
-                log_stage_error('07_reflow_section', exc, {'context': '07'})
+                log_stage_error("07_reflow_section", exc, {"context": "07"})
                 raise
                 pass
 
@@ -357,11 +382,11 @@ def run(
             tbl_payload = json.loads(Path(tables_json).read_text())
             tables = tbl_payload.get("tables") or []
         except Exception as exc:
-            log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+            log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
             raise
-            log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+            log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
             raise
-            log_stage_error('07_reflow_section', exc, {'context': '07'})
+            log_stage_error("07_reflow_section", exc, {"context": "07"})
             raise
             tables = []
         if tables:
@@ -371,29 +396,31 @@ def run(
                 try:
                     p = int(t.get("page_index", 0) or 0)
                 except Exception as exc:
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07"})
                     raise
                     p = 0
                 by_page.setdefault(p, []).append(t)
             synth: list[dict[str, Any]] = []
             for p, group in sorted(by_page.items(), key=lambda kv: kv[0]):
                 sid = f"SYNTH_P{p}"
-                synth.append({
-                    "id": sid,
-                    "title": f"Tables (page {p})",
-                    "level": 1,
-                    "page_start": p,
-                    "page_end": p,
-                    "blocks": [],
-                    "tables": group,
-                    "figures": [],
-                    "raw_text": "",
-                    "merged_text": "",
-                })
+                synth.append(
+                    {
+                        "id": sid,
+                        "title": f"Tables (page {p})",
+                        "level": 1,
+                        "page_start": p,
+                        "page_end": p,
+                        "blocks": [],
+                        "tables": group,
+                        "figures": [],
+                        "raw_text": "",
+                        "merged_text": "",
+                    }
+                )
             sections_to_process = synth
             diagnostics.append(
                 make_event(
@@ -433,7 +460,10 @@ def run(
                 use_images = include_images
                 if USE_LAYOUT_SKETCH and OMIT_IMAGES_IF_CONFIDENT:
                     try:
-                        conf = float(((s.get("layout_sketch") or {}).get("conf") or {}).get("ordering") or 0.0)
+                        conf = float(
+                            ((s.get("layout_sketch") or {}).get("conf") or {}).get("ordering")
+                            or 0.0
+                        )
                         if conf >= LAYOUT_CONF_THRESH:
                             use_images = False
                             diagnostics.append(
@@ -446,11 +476,11 @@ def run(
                                 )
                             )
                     except Exception as exc:
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                         raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                         raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07"})
                         raise
                         pass
                 tasks.append(
@@ -469,7 +499,10 @@ def run(
 
     # Consolidate sections that are obvious continuations (e.g., titles ending with '(continued)')
     try:
-        if os.getenv("STAGE07_CONSOLIDATE_CONTINUED", "1").lower() in ("1","true","yes","y") and processed_sections:
+        if (
+            os.getenv("STAGE07_CONSOLIDATE_CONTINUED", "1").lower() in ("1", "true", "yes", "y")
+            and processed_sections
+        ):
             consolidated: list[dict[str, Any]] = []
             prev: dict[str, Any] | None = None
             for sec in processed_sections:
@@ -481,19 +514,23 @@ def run(
                     pblocks = (pjson.get("blocks") or []) if isinstance(pjson, dict) else []
                     sblocks = (sjson.get("blocks") or []) if isinstance(sjson, dict) else []
                     if isinstance(prev.get("reflowed_json"), dict):
-                        prev["reflowed_json"]["blocks"] = (pblocks + sblocks)
+                        prev["reflowed_json"]["blocks"] = pblocks + sblocks
                     else:
                         prev["reflowed_json"] = {"blocks": sblocks}
                     # Optionally concatenate text placeholders
-                    if isinstance(prev.get("reflowed_text"), str) and isinstance(sec.get("reflowed_text"), str):
-                        prev["reflowed_text"] = (prev["reflowed_text"] + "\n" + sec["reflowed_text"]).strip()
+                    if isinstance(prev.get("reflowed_text"), str) and isinstance(
+                        sec.get("reflowed_text"), str
+                    ):
+                        prev["reflowed_text"] = (
+                            prev["reflowed_text"] + "\n" + sec["reflowed_text"]
+                        ).strip()
                     continue
                 consolidated.append(sec)
                 prev = sec
             processed_sections = consolidated
             logger.debug(f"processed_sections_consolidated={len(processed_sections)}")
     except Exception as exc:
-        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
         raise
 
     # ------------------------------------------------------------------
@@ -526,7 +563,11 @@ def run(
                     if start_p <= p <= end_p:
                         key = (p, tuple(t.get("bbox", [])))
                         already = any(
-                            (int(tt.get("page_index", tt.get("page", 0)) or 0), tuple(tt.get("bbox", []))) == key
+                            (
+                                int(tt.get("page_index", tt.get("page", 0)) or 0),
+                                tuple(tt.get("bbox", [])),
+                            )
+                            == key
                             for tt in sec_tables
                         )
                         if not already:
@@ -535,10 +576,13 @@ def run(
                             tbl_block["type"] = "table"
                             sec_blocks.append(tbl_block)
 
-        merged_tables_summary, merged_lookup_by_id, merged_lookup_by_sig = _compute_table_merges(tlist)
+        merged_tables_summary, merged_lookup_by_id, merged_lookup_by_sig = _compute_table_merges(
+            tlist
+        )
 
         # Propagate merge metadata into processed_sections tables/blocks
         if merged_lookup_by_id or merged_lookup_by_sig:
+
             def _sig_no_pages_local(t: dict[str, Any]) -> dict[str, Any]:
                 cols = (t.get("pandas_metrics") or {}).get("columns") or t.get("columns") or []
                 cols_norm = [str(c).strip().lower() for c in cols if str(c).strip()]
@@ -557,7 +601,12 @@ def run(
                 blocks = sec.get("blocks") or []
                 for t in tables:
                     applied = False
-                    for cand in [t.get("id"), t.get("table_id"), t.get("logical_table_id"), t.get("normalized_id")]:
+                    for cand in [
+                        t.get("id"),
+                        t.get("table_id"),
+                        t.get("logical_table_id"),
+                        t.get("normalized_id"),
+                    ]:
                         if cand and str(cand) in merged_lookup_by_id:
                             t.update(merged_lookup_by_id[str(cand)])
                             applied = True
@@ -578,7 +627,12 @@ def run(
                     if b.get("type") != "table":
                         continue
                     applied = False
-                    for cand in [b.get("id"), b.get("table_id"), b.get("logical_table_id"), b.get("normalized_id")]:
+                    for cand in [
+                        b.get("id"),
+                        b.get("table_id"),
+                        b.get("logical_table_id"),
+                        b.get("normalized_id"),
+                    ]:
                         if cand and str(cand) in merged_lookup_by_id:
                             b.update(merged_lookup_by_id[str(cand)])
                             applied = True
@@ -596,7 +650,7 @@ def run(
                             b.update(meta)
                             break
     except Exception as exc:
-        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
         raise
 
     # --- Final Output ---
@@ -606,11 +660,11 @@ def run(
         if samples:
             resources.setdefault("resource_samples", samples)
     except Exception as exc:
-        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
         raise
-        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
         raise
-        log_stage_error('07_reflow_section', exc, {'context': '07'})
+        log_stage_error("07_reflow_section", exc, {"context": "07"})
         raise
         pass
     timings = build_stage_timings(stage_start_ts, t0)
@@ -618,11 +672,11 @@ def run(
         errors_count = sum(1 for d in diagnostics if d.get("severity") == "error")
         warnings_count = sum(1 for d in diagnostics if d.get("severity") == "warning")
     except Exception as exc:
-        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
         raise
-        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
         raise
-        log_stage_error('07_reflow_section', exc, {'context': '07'})
+        log_stage_error("07_reflow_section", exc, {"context": "07"})
         raise
         pass
     source_files = {
@@ -670,6 +724,7 @@ def run(
 
     # Validate output before writing
     from extractor.pipeline.schemas.reflow_actual import validate_reflow07_output
+
     validated_output, error = validate_reflow07_output(final_output)
     if error:
         logger.error(f"Stage 07 output validation failed: {error}")
@@ -695,11 +750,11 @@ def run(
                 if isinstance(sp, str) and Path(sp).exists():
                     src_pdf = Path(sp)
             except Exception as exc:
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                 raise
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                 raise
-                log_stage_error('07_reflow_section', exc, {'context': '07'})
+                log_stage_error("07_reflow_section", exc, {"context": "07"})
                 raise
                 src_pdf = None
             if not src_pdf and STAGE07_SOURCE_PDF:
@@ -715,89 +770,117 @@ def run(
                             bid = b.get("id") or b.get("block_id")
                             bb = b.get("bbox") or []
                             try:
-                                pg = int(b.get("page") or b.get("page_idx") or sec.get("page_start") or 0)
+                                pg = int(
+                                    b.get("page") or b.get("page_idx") or sec.get("page_start") or 0
+                                )
                             except Exception as exc:
-                                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                                log_stage_error(
+                                    "07_reflow_section", exc, {"context": "07_reflow_retry"}
+                                )
                                 raise
-                                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                                log_stage_error(
+                                    "07_reflow_section", exc, {"context": "07_reflow_retry"}
+                                )
                                 raise
-                                log_stage_error('07_reflow_section', exc, {'context': '07'})
+                                log_stage_error("07_reflow_section", exc, {"context": "07"})
                                 raise
                                 pg = 0
                             if bid and isinstance(bb, list) and len(bb) == 4:
-                                blocks_index[str(bid)] = (pg, [float(bb[0]), float(bb[1]), float(bb[2]), float(bb[3])])
+                                blocks_index[str(bid)] = (
+                                    pg,
+                                    [float(bb[0]), float(bb[1]), float(bb[2]), float(bb[3])],
+                                )
             except Exception as exc:
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                 raise
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                 raise
-                log_stage_error('07_reflow_section', exc, {'context': '07'})
+                log_stage_error("07_reflow_section", exc, {"context": "07"})
                 raise
                 pass
 
             tables_index: Dict[int, Tuple[int, List[float]]] = {}
             try:
-                tj = json.loads((tables_json or Path()).read_text()) if tables_json and tables_json.exists() else {}
+                tj = (
+                    json.loads((tables_json or Path()).read_text())
+                    if tables_json and tables_json.exists()
+                    else {}
+                )
                 for t in tj.get("tables") or []:
                     try:
                         idx = int(t.get("table_index"))
                         pg = int(t.get("page_index", 0))
                         bb = t.get("bbox") or []
                         if isinstance(bb, list) and len(bb) == 4:
-                            tables_index[idx] = (pg, [float(bb[0]), float(bb[1]), float(bb[2]), float(bb[3])])
+                            tables_index[idx] = (
+                                pg,
+                                [float(bb[0]), float(bb[1]), float(bb[2]), float(bb[3])],
+                            )
                     except Exception as exc:
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                         raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                         raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07"})
                         raise
                         continue
             except Exception as exc:
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                 raise
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                 raise
-                log_stage_error('07_reflow_section', exc, {'context': '07'})
+                log_stage_error("07_reflow_section", exc, {"context": "07"})
                 raise
                 pass
 
             figures_index: Dict[str, Tuple[int, List[float]]] = {}
             try:
-                fj = json.loads((figures_json or Path()).read_text()) if figures_json and figures_json.exists() else {}
+                fj = (
+                    json.loads((figures_json or Path()).read_text())
+                    if figures_json and figures_json.exists()
+                    else {}
+                )
                 for f in fj.get("figures") or []:
                     fid = f.get("figure_id") or f.get("id") or f.get("image_path")
                     try:
                         pg = int(f.get("page") or f.get("page_idx") or f.get("page_index") or 0)
                     except Exception as exc:
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                         raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                         raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07"})
                         raise
                         pg = 0
                     bb = f.get("bbox") or []
                     if fid and isinstance(bb, list) and len(bb) == 4:
-                        figures_index[str(fid)] = (pg, [float(bb[0]), float(bb[1]), float(bb[2]), float(bb[3])])
+                        figures_index[str(fid)] = (
+                            pg,
+                            [float(bb[0]), float(bb[1]), float(bb[2]), float(bb[3])],
+                        )
             except Exception as exc:
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                 raise
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                 raise
-                log_stage_error('07_reflow_section', exc, {'context': '07'})
+                log_stage_error("07_reflow_section", exc, {"context": "07"})
                 raise
                 pass
 
             # Render overlays
             if src_pdf and processed_sections:
                 from extractor.pipeline.visual.overlay import Box, draw_overlays
+
                 stage_vis = stage_output_dir / "visual_output"
                 for sec in processed_sections:
                     sid = str(sec.get("id") or "section")
                     boxes: List[Box] = []
                     # Prefer structured JSON blocks when present
-                    rj = (sec.get("reflowed_json") or {}).get("blocks") if isinstance(sec.get("reflowed_json"), dict) else None
+                    rj = (
+                        (sec.get("reflowed_json") or {}).get("blocks")
+                        if isinstance(sec.get("reflowed_json"), dict)
+                        else None
+                    )
                     blocks_list = rj if isinstance(rj, list) else []
                     for i, b in enumerate(blocks_list):
                         typ = (b.get("type") or "").lower()
@@ -811,7 +894,18 @@ def run(
                                 key = str(bids[0])
                                 if key in blocks_index:
                                     pg, bb = blocks_index[key]
-                                    boxes.append(Box(page=int(pg), x0=bb[0], y0=bb[1], x1=bb[2], y1=bb[3], label=label, color=(0, 170, 255), width=3))
+                                    boxes.append(
+                                        Box(
+                                            page=int(pg),
+                                            x0=bb[0],
+                                            y0=bb[1],
+                                            x1=bb[2],
+                                            y1=bb[3],
+                                            label=label,
+                                            color=(0, 170, 255),
+                                            width=3,
+                                        )
+                                    )
                                     drawn = True
                         # Table → map table_indices
                         if not drawn and typ == "table":
@@ -821,23 +915,49 @@ def run(
                                 try:
                                     ti0 = int(tids[0])
                                 except Exception as exc:
-                                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                                    log_stage_error(
+                                        "07_reflow_section", exc, {"context": "07_reflow_retry"}
+                                    )
                                     raise
-                                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                                    log_stage_error(
+                                        "07_reflow_section", exc, {"context": "07_reflow_retry"}
+                                    )
                                     raise
-                                    log_stage_error('07_reflow_section', exc, {'context': '07'})
+                                    log_stage_error("07_reflow_section", exc, {"context": "07"})
                                     raise
                                     ti0 = None
                                 if ti0 is not None and ti0 in tables_index:
                                     pg, bb = tables_index[ti0]
-                                    boxes.append(Box(page=int(pg), x0=bb[0], y0=bb[1], x1=bb[2], y1=bb[3], label=label, color=(0, 200, 0), width=3))
+                                    boxes.append(
+                                        Box(
+                                            page=int(pg),
+                                            x0=bb[0],
+                                            y0=bb[1],
+                                            x1=bb[2],
+                                            y1=bb[3],
+                                            label=label,
+                                            color=(0, 200, 0),
+                                            width=3,
+                                        )
+                                    )
                                     drawn = True
                         # Figure → map by figure_id or image_ref
                         if not drawn and typ == "figure":
                             fid = b.get("figure_id") or b.get("image_ref")
                             if fid and str(fid) in figures_index:
                                 pg, bb = figures_index[str(fid)]
-                                boxes.append(Box(page=int(pg), x0=bb[0], y0=bb[1], x1=bb[2], y1=bb[3], label=label, color=(255, 128, 0), width=3))
+                                boxes.append(
+                                    Box(
+                                        page=int(pg),
+                                        x0=bb[0],
+                                        y0=bb[1],
+                                        x1=bb[2],
+                                        y1=bb[3],
+                                        label=label,
+                                        color=(255, 128, 0),
+                                        width=3,
+                                    )
+                                )
                                 drawn = True
                         # As a last resort, draw at the first page listed in source without bbox (skip to avoid misleading boxes)
                     if boxes:
@@ -845,37 +965,46 @@ def run(
                         draw_overlays(src_pdf, boxes, vout)
                         try:
                             # Attach relative paths for convenience
-                            rel = [str(p.relative_to(output_dir.parent.parent)) for p in vout.glob("*.png")]
+                            rel = [
+                                str(p.relative_to(output_dir.parent.parent))
+                                for p in vout.glob("*.png")
+                            ]
                             if rel:
                                 sec.setdefault("visual_overlays", rel)
                         except Exception as exc:
-                            log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                            log_stage_error(
+                                "07_reflow_section", exc, {"context": "07_reflow_retry"}
+                            )
                             raise
-                            log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                            log_stage_error(
+                                "07_reflow_section", exc, {"context": "07_reflow_retry"}
+                            )
                             raise
-                            log_stage_error('07_reflow_section', exc, {'context': '07'})
+                            log_stage_error("07_reflow_section", exc, {"context": "07"})
                             raise
                             pass
     except Exception as exc:
-        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
         raise
-        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
         raise
-        log_stage_error('07_reflow_section', exc, {'context': '07'})
+        log_stage_error("07_reflow_section", exc, {"context": "07"})
         raise
-        logger.warning(f"Stage 07 visual overlay generation failed: {_e}")
 
-    if os.getenv("DRY_RUN", "0").lower() not in {"1","true","yes","y"}:
+    if os.getenv("DRY_RUN", "0").lower() not in {"1", "true", "yes", "y"}:
         with open(output_path, "w") as f:
             json.dump(final_output, f, indent=2, ensure_ascii=False)
         console.print("\n[bold green]✅ Section reflow complete.[/bold green]")
         console.print(f"   - Results saved to: [cyan]{output_path}[/cyan]")
     else:
-        console.print("\n[yellow]DRY_RUN=1 → skipped writing 07_reflowed.json (logs/artifacts still recorded)[/yellow]")
+        console.print(
+            "\n[yellow]DRY_RUN=1 → skipped writing 07_reflowed.json (logs/artifacts still recorded)[/yellow]"
+        )
 
     # timings_summary.json (best-effort) under RUN_RESULTS_DIR/07_reflow_section/logs
     try:
         from pathlib import Path as _P
+
         rd = os.getenv("RUN_RESULTS_DIR")
         if rd:
             ldir = _P(rd) / "07_reflow_section" / "logs"
@@ -896,19 +1025,21 @@ def run(
                         if rec.get("latency_ms") is not None:
                             lat.append(float(rec["latency_ms"]))
                     except Exception as exc:
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                         raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                         raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07"})
                         raise
                         continue
                 lat_sorted = sorted(lat)
+
                 def _pct(p: float) -> float:
                     if not lat_sorted:
                         return 0.0
-                    idx = int(max(0, min(len(lat_sorted)-1, round(p * (len(lat_sorted)-1)))))
+                    idx = int(max(0, min(len(lat_sorted) - 1, round(p * (len(lat_sorted) - 1)))))
                     return float(lat_sorted[idx])
+
                 summary = {
                     "attempts": attempts,
                     "ok": ok,
@@ -918,11 +1049,11 @@ def run(
                 }
                 (ldir / "timings_summary.json").write_text(json.dumps(summary, indent=2))
     except Exception as exc:
-        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
         raise
-        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
         raise
-        log_stage_error('07_reflow_section', exc, {'context': '07'})
+        log_stage_error("07_reflow_section", exc, {"context": "07"})
         raise
         pass
     return output_path
@@ -935,14 +1066,15 @@ if __name__ == "__main__":
 
         load_dotenv(find_dotenv())
     except Exception as exc:
-        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
         raise
-        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
         raise
-        log_stage_error('07_reflow_section', exc, {'context': '07'})
+        log_stage_error("07_reflow_section", exc, {"context": "07"})
         raise
         pass
     import sys
+
     argv = sys.argv[1:]
     if argv and argv[0] == "sanity":
         sys.exit(sanity())
@@ -980,5 +1112,3 @@ if __name__ == "__main__":
         summary_only=summary_only,
     )
     print(str(out))
-
-

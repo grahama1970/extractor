@@ -5,7 +5,10 @@ import subprocess
 import pytest
 
 
-@pytest.mark.skipif(shutil.which("litellm-call") is None or os.getenv("LITELLM_CALL_E2E") != "1", reason="console script not installed or E2E disabled")
+@pytest.mark.skipif(
+    shutil.which("litellm-call") is None or os.getenv("LITELLM_CALL_E2E") != "1",
+    reason="console script not installed or E2E disabled",
+)
 def test_litellm_call_stdin_smoke(tmp_path):
     # Simple stdin echo-like smoke: we call 'main --stdin' and feed two lines
     cmd = ["litellm-call", "main", "--stdin", "--no-progress"]
@@ -16,7 +19,10 @@ def test_litellm_call_stdin_smoke(tmp_path):
     assert len(out_lines) == 2
 
 
-@pytest.mark.skipif(shutil.which("litellm-call") is None or os.getenv("LITELLM_CALL_E2E") != "1", reason="console script not installed or E2E disabled")
+@pytest.mark.skipif(
+    shutil.which("litellm-call") is None or os.getenv("LITELLM_CALL_E2E") != "1",
+    reason="console script not installed or E2E disabled",
+)
 def test_litellm_call_file_smoke(tmp_path):
     p = tmp_path / "prompts.txt"
     p.write_text("A\nB\n")

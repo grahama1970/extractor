@@ -33,9 +33,9 @@ def stage07_guard(compact: bool = False) -> str:
     if compact:
         return (
             "Return ONLY a JSON object (no code fences). Prefer this shape: "
-            "{\"reflowed_json\":{\"section_id\":string,\"title\":string,\"blocks\":[{\"type\":\"paragraph\",\"text\":string}]},"
-            "\"ocr_corrections\":{},\"improvements_made\":string,\"summary\":string}. "
-            "If you cannot build reflowed_json, return {\"reflowed_text\":string} instead."
+            '{"reflowed_json":{"section_id":string,"title":string,"blocks":[{"type":"paragraph","text":string}]},'
+            '"ocr_corrections":{},"improvements_made":string,"summary":string}. '
+            'If you cannot build reflowed_json, return {"reflowed_text":string} instead.'
         )
     # Full guard (trimmed from step for brevity)
     return (

@@ -43,9 +43,8 @@ def main() -> int:
     # Import provider
     try:
         from scenarios.extractors.common import import_provider
-        MarkdownProvider = import_provider(
-            "providers/markdown.py", "MarkdownProvider"
-        )
+
+        MarkdownProvider = import_provider("providers/markdown.py", "MarkdownProvider")
     except Exception as e:
         logger.warning(f"SKIP: cannot import MarkdownProvider: {e}")
         res = ScenarioResult(
@@ -74,7 +73,10 @@ def main() -> int:
     # Snapshot unified JSON for auditability
     try:
         from scenarios.extractors.common import write_unified_snapshot
-        snap_path = write_unified_snapshot("markdown", doc.id, doc.model_dump(by_alias=True, mode="json"))
+
+        snap_path = write_unified_snapshot(
+            "markdown", doc.id, doc.model_dump(by_alias=True, mode="json")
+        )
     except Exception:
         snap_path = None
     inserted = try_arango_insert(doc)

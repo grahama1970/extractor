@@ -29,7 +29,7 @@ def format_block_text(block: Optional[Dict[str, Any]]) -> str:
                 try:
                     parts.append(f"{float(size):.1f}pt")
                 except Exception as exc:
-                    log_stage_error('prompt_builder.py', exc, {'context': 'prompt_builder.py'})
+                    log_stage_error("prompt_builder.py", exc, {"context": "prompt_builder.py"})
                     raise
                     parts.append(str(size))
             if fsf.get("bold"):
@@ -78,7 +78,7 @@ def _signals(b: Optional[Dict[str, Any]]) -> str:
         try:
             parts.append(f"size={float(size):.1f}pt")
         except Exception as exc:
-            log_stage_error('prompt_builder.py', exc, {'context': 'prompt_builder.py'})
+            log_stage_error("prompt_builder.py", exc, {"context": "prompt_builder.py"})
             raise
             parts.append(f"size={size}")
     if bucket:

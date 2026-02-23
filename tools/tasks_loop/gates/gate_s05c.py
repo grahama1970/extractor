@@ -29,7 +29,7 @@ def load_contract(fixture_name: str) -> dict:
             expected="s05c.json",
             actual="missing",
             file=str(contract_path),
-            hint="Run: python utils/compile_contracts.py"
+            hint="Run: python utils/compile_contracts.py",
         )
     return json.loads(contract_path.read_text())
 
@@ -38,54 +38,56 @@ def checks(fixture_name: str):
     contract = load_contract(fixture_name)
     expected = contract.get("expected", {})
     expected_tables = expected.get("merged_table_count")
-    
+
     merged_file = JSON_DIR / "05c_merged_tables.json"
-    
+
     if not merged_file.exists():
         if expected_tables == 0:
-            print(f"✅ Merged tables: 0 (File not created, matches expected)")
+            print("✅ Merged tables: 0 (File not created, matches expected)")
             return
         raise GateError(
-            message=f"Output file not found",
+            message="Output file not found",
             expected="05c_merged_tables.json",
             actual="missing",
             file=str(merged_file),
-            hint="Did S05c fail?"
+            hint="Did S05c fail?",
         )
 
     data = load_json(merged_file, required_keys=["tables"])
-    
+
     tables = data.get("tables", [])
     actual_count = len(tables)
-    
+
     if expected_tables is not None and actual_count != expected_tables:
         raise GateError(
             message="Merged table count mismatch",
             expected=expected_tables,
             actual=actual_count,
             file=str(merged_file),
-            hint="Check table merging logic or SPEC.md"
+            hint="Check table merging logic or SPEC.md",
         )
-    
+
     # Check for empty tables
     for t in tables:
         # S05c might drop CSV to force S07 regeneration. Check pandas_df.
         df = t.get("pandas_df")
         if not df or (isinstance(df, list) and not df):
-             raise GateError(
+            raise GateError(
                 message=f"Table {t.get('id', '?')} is empty",
                 expected="non-empty pandas_df",
                 actual="empty",
                 file=str(merged_file),
-                hint="Check extraction"
+                hint="Check extraction",
             )
-            
-    print(f"✅ Merged tables: {actual_count}" + (f" == {expected_tables}" if expected_tables else ""))
+
+    print(
+        f"✅ Merged tables: {actual_count}" + (f" == {expected_tables}" if expected_tables else "")
+    )
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Gate S05c: Table Merger")
     parser.add_argument("--fixture", required=True, help="Fixture name")
     args = parser.parse_args()
-    
+
     sys.exit(run_gate("S05c: Table Merger", lambda: checks(args.fixture)))

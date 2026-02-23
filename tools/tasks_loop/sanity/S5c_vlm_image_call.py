@@ -46,24 +46,24 @@ def _create_test_image() -> str:
         import fitz
     except ImportError:
         raise RuntimeError("PyMuPDF (fitz) not installed")
-    
+
     if not FIXTURE_PDF.exists():
         raise RuntimeError(f"Fixture PDF not found: {FIXTURE_PDF}")
-    
+
     doc = fitz.open(str(FIXTURE_PDF))
     if len(doc) == 0:
         raise RuntimeError("PDF has no pages")
-    
+
     # Render first page to image
     page = doc[0]
     pix = page.get_pixmap(matrix=fitz.Matrix(1, 1))
-    
+
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
         pix.save(f.name)
         img_path = Path(f.name)
-    
+
     doc.close()
-    
+
     # Read and base64 encode
     b64 = base64.b64encode(img_path.read_bytes()).decode("utf-8")
     img_path.unlink()  # Cleanup
@@ -73,14 +73,14 @@ def _create_test_image() -> str:
 def test_curl() -> bool:
     """Test VLM call using curl (raw HTTP)."""
     print("=== Step 1: Testing VLM via curl ===")
-    
+
     api_key = _get_api_key()
     model = os.getenv("CHUTES_VLM_MODEL", "Qwen/Qwen3-VL-235B-A22B-Instruct")
     api_base = os.getenv("SCILLM_API_BASE", "https://llm.chutes.ai/v1")
-    
+
     print(f"  Model: {model}")
     print(f"  API Base: {api_base}")
-    
+
     # Create test image
     try:
         b64_image = _create_test_image()
@@ -88,7 +88,7 @@ def test_curl() -> bool:
     except Exception as e:
         print(f"FAIL: Could not create test image: {e}")
         return False
-    
+
     # Build payload
     payload = {
         "model": model,
@@ -98,59 +98,63 @@ def test_curl() -> bool:
                 "content": [
                     {
                         "type": "text",
-                        "text": "Describe this image in one sentence. Reply with only the description."
+                        "text": "Describe this image in one sentence. Reply with only the description.",
                     },
                     {
                         "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/png;base64,{b64_image}"
-                        }
-                    }
-                ]
+                        "image_url": {"url": f"data:image/png;base64,{b64_image}"},
+                    },
+                ],
             }
         ],
         "max_tokens": 100,
-        "temperature": 0.0
+        "temperature": 0.0,
     }
-    
+
     # Run curl
     cmd = [
-        "curl", "-s", "-X", "POST",
+        "curl",
+        "-s",
+        "-X",
+        "POST",
         f"{api_base}/chat/completions",
-        "-H", "Content-Type: application/json",
-        "-H", f"Authorization: Bearer {api_key}",
-        "-d", json.dumps(payload)
+        "-H",
+        "Content-Type: application/json",
+        "-H",
+        f"Authorization: Bearer {api_key}",
+        "-d",
+        json.dumps(payload),
     ]
-    
+
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
         if result.returncode != 0:
             print(f"FAIL: curl returned {result.returncode}")
             print(f"  stderr: {result.stderr[:200]}")
             return False
-        
+
         response = json.loads(result.stdout)
-        
+
         # Check for error
         if "error" in response:
             print(f"FAIL: API error: {response['error']}")
             return False
-        
+
         # Extract content
         choices = response.get("choices", [])
         if not choices:
-            print(f"FAIL: No choices in response")
+            print("FAIL: No choices in response")
             return False
-        
+
         content = choices[0].get("message", {}).get("content", "")
         if not content:
-            print(f"FAIL: No content in response")
+            print("FAIL: No content in response")
             return False
-        
+
         print(f"  Response: {content[:80]}...")
         print("✅ curl VLM call succeeded")
         return True
-        
+
     except subprocess.TimeoutExpired:
         print("FAIL: curl timed out")
         return False
@@ -165,30 +169,31 @@ def test_curl() -> bool:
 async def test_scillm() -> bool:
     """Test VLM call using scillm parallel_acompletions_iter."""
     print("\n=== Step 2: Testing VLM via scillm ===")
-    
+
     try:
         from dotenv import find_dotenv, load_dotenv
+
         load_dotenv(find_dotenv(usecwd=True), override=False)
     except ImportError:
         pass
-    
+
     try:
         from scillm.batch import parallel_acompletions_iter
     except ImportError as e:
         print(f"SKIP: scillm not installed ({e})")
         return True  # Skip, not fail
-    
+
     api_key = _get_api_key()
     model = os.getenv("CHUTES_VLM_MODEL", "Qwen/Qwen3-VL-235B-A22B-Instruct")
     api_base = os.getenv("SCILLM_API_BASE", "https://llm.chutes.ai/v1")
-    
+
     # Create test image
     try:
         b64_image = _create_test_image()
     except Exception as e:
         print(f"FAIL: Could not create test image: {e}")
         return False
-    
+
     # Build payload (OpenAI multimodal format)
     payloads = [
         {
@@ -199,51 +204,51 @@ async def test_scillm() -> bool:
                     "content": [
                         {
                             "type": "text",
-                            "text": "What type of document is this? Reply in 5 words or less."
+                            "text": "What type of document is this? Reply in 5 words or less.",
                         },
                         {
                             "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/png;base64,{b64_image}"
-                            }
-                        }
-                    ]
+                            "image_url": {"url": f"data:image/png;base64,{b64_image}"},
+                        },
+                    ],
                 }
             ],
             "max_tokens": 50,
             "temperature": 0.0,
-            "id": "vlm-sanity"
+            "id": "vlm-sanity",
         }
     ]
-    
+
     results = []
     try:
         async for result in parallel_acompletions_iter(
             payloads,
             api_base=api_base,
             api_key=api_key,
+            custom_llm_provider="openai_like",
             concurrency=1,
             timeout=60,
+            tenacious=True,  # Retry on transient failures (429, etc.)
         ):
             results.append(result)
     except Exception as e:
         print(f"FAIL: parallel_acompletions_iter raised: {e}")
         return False
-    
+
     if not results:
         print("FAIL: No results returned")
         return False
-    
+
     first = results[0]
     if first.get("ok") is False:
         print(f"FAIL: LLM error: {first.get('error')}")
         return False
-    
+
     content = first.get("content") or ""
     if not content:
-        print(f"FAIL: No content in response")
+        print("FAIL: No content in response")
         return False
-    
+
     print(f"  Response: {content[:80]}...")
     print("✅ scillm VLM call succeeded")
     return True
@@ -251,15 +256,15 @@ async def test_scillm() -> bool:
 
 def main() -> int:
     print("Testing VLM multimodal (image) calls...")
-    
+
     # Step 1: curl
     if not test_curl():
         return 1
-    
+
     # Step 2: scillm
     if not asyncio.run(test_scillm()):
         return 1
-    
+
     print("\n✅ VLM sanity check passed (both curl and scillm)")
     return 0
 

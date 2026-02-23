@@ -23,7 +23,6 @@ import json
 import os
 import re
 import subprocess
-import sys
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -90,7 +89,8 @@ def constraints_from_df(df: pd.DataFrame) -> List[str]:
         for _, row in df.iterrows():
             vname = str(row.get(varc, "x")) if varc else "x"
             try:
-                lo = str(row[minc]).strip(); hi = str(row[maxc]).strip()
+                lo = str(row[minc]).strip()
+                hi = str(row[maxc]).strip()
                 if lo and hi:
                     cons.append(f"{lo} <= {vname} <= {hi}")
             except Exception:
@@ -129,8 +129,8 @@ def extract_table_constraints(reflow_path: Path) -> List[Dict[str, Any]]:
         # Pull constraints from each table
         for t in tables:
             # pandas_df_dict preferred
-            df=None
-            for key in ("pandas_df_dict","pandas_df","df","pandas_df_raw"):
+            df = None
+            for key in ("pandas_df_dict", "pandas_df", "df", "pandas_df_raw"):
                 df = df_from_maybe_dict(t.get(key))
                 if df is not None:
                     break
@@ -146,10 +146,12 @@ def extract_table_constraints(reflow_path: Path) -> List[Dict[str, Any]]:
                         name, expr = m.group(1).strip(), m.group(2).strip()
                         cons.append(f"The parameter {name} shall satisfy: {expr}")
             for c in cons:
-                items.append({
-                    "requirement": c,
-                    "metadata": {"section_id": str(sid), "section_title": title},
-                })
+                items.append(
+                    {
+                        "requirement": c,
+                        "metadata": {"section_id": str(sid), "section_title": title},
+                    }
+                )
     return items
 
 
@@ -166,14 +168,16 @@ def main():
         raise typer.Exit(1)
 
     items = extract_table_constraints(RELF)
-    artifacts = Path("scripts/artifacts"); artifacts.mkdir(parents=True, exist_ok=True)
-    (artifacts/"merged_table_constraints.json").write_text(json.dumps(items, indent=2))
+    artifacts = Path("scripts/artifacts")
+    artifacts.mkdir(parents=True, exist_ok=True)
+    (artifacts / "merged_table_constraints.json").write_text(json.dumps(items, indent=2))
 
     if not items:
         print("SKIP: No table constraints extracted from Stage 07")
         raise typer.Exit(0)
 
-    tmp_in = Path("/tmp/lean_table_merge_in.json"); tmp_in.write_text(json.dumps(items, indent=2))
+    tmp_in = Path("/tmp/lean_table_merge_in.json")
+    tmp_in.write_text(json.dumps(items, indent=2))
     tmp_out = Path("/tmp/lean_table_merge_out.json")
 
     cmd = [
@@ -189,7 +193,8 @@ def main():
         "--max-workers",
         "1",
     ]
-    env = os.environ.copy(); env["PYTHONPATH"] = "/home/graham/workspace/experiments/lean4/src:" + env.get("PYTHONPATH", "")
+    env = os.environ.copy()
+    env["PYTHONPATH"] = "/home/graham/workspace/experiments/lean4/src:" + env.get("PYTHONPATH", "")
     rc = subprocess.run(cmd, env=env).returncode
     if rc != 0 or not tmp_out.exists():
         typer.echo("Lean4 batch failed on merged table constraints", err=True)
@@ -202,9 +207,9 @@ def main():
         "input_count": len(items),
         "proved": proved,
         "out_json": str(tmp_out),
-        "constraints_artifact": str(artifacts/"merged_table_constraints.json"),
+        "constraints_artifact": str(artifacts / "merged_table_constraints.json"),
     }
-    (artifacts/"merged_table_lean4_summary.json").write_text(json.dumps(summary, indent=2))
+    (artifacts / "merged_table_lean4_summary.json").write_text(json.dumps(summary, indent=2))
     print(json.dumps(summary, indent=2))
 
 

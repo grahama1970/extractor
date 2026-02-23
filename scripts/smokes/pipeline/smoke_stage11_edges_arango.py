@@ -8,8 +8,6 @@
 # ///
 from __future__ import annotations
 import os
-import json
-from pathlib import Path
 import typer
 
 from arango import ArangoClient  # type: ignore
@@ -71,9 +69,17 @@ def main(db_name: str = typer.Option("lean4_test", "--db")):
     dep = db.collection("depends_on")
     con = db.collection("contradicts")
     for e in edges["edges"]["depends_on"]:
-        dep.insert({"_from": f"sections/{e['from']}", "_to": f"lemmas/{e['to']}", "source": e.get("source")})
+        dep.insert(
+            {
+                "_from": f"sections/{e['from']}",
+                "_to": f"lemmas/{e['to']}",
+                "source": e.get("source"),
+            }
+        )
     for e in edges["edges"]["contradicts"]:
-        con.insert({"_from": f"sections/{e['a']}", "_to": f"sections/{e['b']}", "reason": e.get("reason")})
+        con.insert(
+            {"_from": f"sections/{e['a']}", "_to": f"sections/{e['b']}", "reason": e.get("reason")}
+        )
 
     # Verify counts
     assert db.collection("depends_on").count() >= 1
@@ -83,4 +89,3 @@ def main(db_name: str = typer.Option("lean4_test", "--db")):
 
 if __name__ == "__main__":
     app()
-

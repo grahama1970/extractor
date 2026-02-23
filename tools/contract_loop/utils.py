@@ -1,4 +1,5 @@
 """Small, portable helpers for the contract loop."""
+
 from __future__ import annotations
 
 import json

@@ -31,13 +31,23 @@ from loguru import logger
 from extractor.pipeline.utils.reliability import log_stage_error
 
 try:
-    from tqdm.asyncio import as_completed as _tqdm_as_completed  # progress-enabled as_completed
-except Exception as exc:
-    log_stage_error('deprecated_codex_call', exc, {'context': 'deprecated_codex_call'})
-    raise
-    log_stage_error('codex_call.py', exc, {'context': 'codex_call.py'})
-    raise
+    from tqdm.asyncio import tqdm_asyncio
+
+    # tqdm.asyncio doesn't have as_completed, use tqdm.gather pattern instead
+    def _tqdm_as_completed(tasks, total=None, desc: str | None = None):
+        """Fallback: wrap asyncio.as_completed with basic iteration."""
+        import asyncio
+
+        return asyncio.as_completed(tasks)
+
+except ImportError:
     import asyncio as _asyncio
+
+    log_stage_error(
+        "deprecated_codex_call",
+        ImportError("tqdm.asyncio not available"),
+        {"context": "deprecated_codex_call"},
+    )
 
     def _tqdm_as_completed(tasks, total=None, desc: str | None = None):  # type: ignore[misc]
         return _asyncio.as_completed(tasks)
@@ -263,6 +273,7 @@ async def run_codex_exec(
     Provides supervised execution, IO streaming, capture limits, and graceful
     termination. Returns ExecResult with timing/timeout flags and outputs.
     """
+    ctx = {"context": "deprecated_codex_call"}
     # Build argv
     if prepend_exec:
         args = [codex_bin, "exec", script_or_path]
@@ -367,11 +378,8 @@ async def run_codex_exec(
         logger.warning("run_codex_exec cancelled; terminating child process")
         supervisor_exc = asyncio.CancelledError()
     except Exception as exc:
-        log_stage_error('deprecated_codex_call', exc, {'context': 'deprecated_codex_call'})
+        log_stage_error("deprecated_codex_call", exc, ctx)
         raise
-        log_stage_error('codex_call.py', exc, {'context': 'supervisor_loop'})
-        logger.exception("Supervisor loop error; terminating child process")
-        supervisor_exc = exc
     finally:
         # Apply capture tail one more time
         _apply_capture_limit(stdout_buf, stdout_capture_limit)
@@ -391,11 +399,8 @@ async def run_codex_exec(
             except ProcessLookupError:
                 pass
             except Exception as exc:
-                log_stage_error('deprecated_codex_call', exc, {'context': 'deprecated_codex_call'})
+                log_stage_error("deprecated_codex_call", exc, ctx)
                 raise
-                log_stage_error('codex_call.py', exc, {'context': 'graceful_terminate'})
-                logger.exception("Error sending graceful termination")
-                supervisor_exc = supervisor_exc or exc
 
             try:
                 await asyncio.wait_for(proc.wait(), timeout=kill_grace_s)
@@ -413,18 +418,13 @@ async def run_codex_exec(
                 except ProcessLookupError:
                     pass
                 except Exception as exc:
-                    log_stage_error('deprecated_codex_call', exc, {'context': 'deprecated_codex_call'})
+                    log_stage_error("deprecated_codex_call", exc, ctx)
                     raise
-                    log_stage_error('codex_call.py', exc, {'context': 'codex_call.py'})
-                    raise
-                    logger.exception("Error during hard kill")
                 finally:
                     try:
                         await proc.wait()
                     except Exception as exc:
-                        log_stage_error('deprecated_codex_call', exc, {'context': 'deprecated_codex_call'})
-                        raise
-                        log_stage_error('codex_call.py', exc, {'context': 'codex_call.py'})
+                        log_stage_error("deprecated_codex_call", exc, ctx)
                         raise
 
         # Ensure stdin closed
@@ -432,9 +432,7 @@ async def run_codex_exec(
             try:
                 proc.stdin.close()
             except Exception as exc:
-                log_stage_error('deprecated_codex_call', exc, {'context': 'deprecated_codex_call'})
-                raise
-                log_stage_error('codex_call.py', exc, {'context': 'codex_call.py'})
+                log_stage_error("deprecated_codex_call", exc, ctx)
                 raise
 
         # Await stream tasks; let exceptions propagate (fail fast)
@@ -444,12 +442,8 @@ async def run_codex_exec(
     try:
         await asyncio.gather(*tasks)  # return_exceptions=False by default
     except Exception as exc:
-        log_stage_error('deprecated_codex_call', exc, {'context': 'deprecated_codex_call'})
+        log_stage_error("deprecated_codex_call", exc, ctx)
         raise
-        log_stage_error('codex_call.py', exc, {'context': 'gather_readers'})
-        logger.exception("Error gathering reader tasks")
-        if supervisor_exc is None:
-            supervisor_exc = exc
 
     duration = time.monotonic() - t0
 

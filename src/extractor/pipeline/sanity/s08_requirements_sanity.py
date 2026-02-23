@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Stage 08 sanity: verify parallel_acompletions_iter + JSON contract."""
+
+from __future__ import annotations
 
 import asyncio
 import json

@@ -28,9 +28,7 @@ def _load_stage06():
 
 @app.command()
 def main(
-    input_pdf: Path = typer.Option(
-        Path("data/input/pipeline/BHT_CV32A65X_marked.pdf"), exists=True
-    )
+    input_pdf: Path = typer.Option(Path("data/input/pipeline/BHT_CV32A65X_marked.pdf"), exists=True)
 ):
     try:
         load_dotenv(find_dotenv())
@@ -41,7 +39,9 @@ def main(
         out_dir = Path("data/results/pipeline/smokes/06_figure_extractor")
         out_dir.mkdir(parents=True, exist_ok=True)
         result = asyncio.run(
-            extract(input_pdf, {"page_idx": 0, "bbox": [50, 100, 200, 200]}, "fig-smoke", out_dir, True)
+            extract(
+                input_pdf, {"page_idx": 0, "bbox": [50, 100, 200, 200]}, "fig-smoke", out_dir, True
+            )
         )
         if not result:
             raise RuntimeError("No result from figure extraction")

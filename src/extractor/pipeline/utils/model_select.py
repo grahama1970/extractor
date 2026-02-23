@@ -29,4 +29,3 @@ def get_text_model() -> str:
     Policy: Only CHUTES_TEXT_MODEL is allowed. No tiered fallbacks.
     """
     return _get_env("CHUTES_TEXT_MODEL")
-

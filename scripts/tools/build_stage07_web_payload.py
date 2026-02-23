@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 from dotenv import load_dotenv, find_dotenv
 
@@ -32,11 +31,7 @@ def section_json_for_prompt(sec: dict) -> dict:
     }
     md = sec.get("metadata") or {}
     if isinstance(md, dict):
-        out["metadata"] = {
-            k: md.get(k)
-            for k in ("section_number", "section_hash")
-            if k in md
-        }
+        out["metadata"] = {k: md.get(k) for k in ("section_number", "section_hash") if k in md}
     # Keep blocks minimal: only text, first N
     blocks = sec.get("blocks") or []
     simple_blocks = []
@@ -146,14 +141,16 @@ def main() -> None:
         for f in (figures_payload.get("figures") or [])[:50]:
             if sec_id and f.get("section_id") and f.get("section_id") != sec_id:
                 continue
-            items.append({
-                "figure_id": f.get("figure_id"),
-                "page": f.get("page"),
-                "image_path": f.get("image_path"),
-                "bbox": f.get("bbox"),
-                "ai_description": f.get("ai_description"),
-                "section_id": f.get("section_id"),
-            })
+            items.append(
+                {
+                    "figure_id": f.get("figure_id"),
+                    "page": f.get("page"),
+                    "image_path": f.get("image_path"),
+                    "bbox": f.get("bbox"),
+                    "ai_description": f.get("ai_description"),
+                    "section_id": f.get("section_id"),
+                }
+            )
             if len(items) >= max_items:
                 break
         return items
@@ -213,11 +210,15 @@ def main() -> None:
                 {"type": "text", "text": user_text},
                 # Replace `{{DATA_URL}}` at runtime using the helper; do not embed base64 here
                 *(
-                    [{
-                        "type": "image_url",
-                        "image_url": {"url": "{{DATA_URL}}"},
-                        "note": f"Build with to_data_url('{str(img_path)}')"
-                    }] if img_path else []
+                    [
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": "{{DATA_URL}}"},
+                            "note": f"Build with to_data_url('{str(img_path)}')",
+                        }
+                    ]
+                    if img_path
+                    else []
                 ),
             ],
         },
@@ -234,15 +235,19 @@ def main() -> None:
 
     # Write API-style messages with placeholder
     (artifacts / "stage07_web_messages.json").write_text(
-        json.dumps({
-            "model": "gemini/gemini-2.5-flash",
-            "messages": messages,
-            "notes": {
-                "image_path": str(img_path) if img_path else None,
-                "data_url_placeholder": "{{DATA_URL}}",
-                "how_to_build": "Use to_data_url(image_path) and replace in image_url.url before sending.",
+        json.dumps(
+            {
+                "model": "gemini/gemini-2.5-flash",
+                "messages": messages,
+                "notes": {
+                    "image_path": str(img_path) if img_path else None,
+                    "data_url_placeholder": "{{DATA_URL}}",
+                    "how_to_build": "Use to_data_url(image_path) and replace in image_url.url before sending.",
+                },
             },
-        }, ensure_ascii=False, indent=2),
+            ensure_ascii=False,
+            indent=2,
+        ),
         encoding="utf-8",
     )
 

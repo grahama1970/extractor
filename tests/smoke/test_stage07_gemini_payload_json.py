@@ -1,8 +1,6 @@
-import asyncio
 import json
 from pathlib import Path
 
-from typer.testing import CliRunner
 
 
 class _Recorder:
@@ -16,7 +14,9 @@ class _Recorder:
             def __init__(self, text: str):
                 self.usage = {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
                 self._hidden_params = {"response_cost": 0.0, "cache_hit": False}
-                self.choices = [type("_C", (), {"text": None, "message": type("_M", (), {"content": text})()})()]
+                self.choices = [
+                    type("_C", (), {"text": None, "message": type("_M", (), {"content": text})()})()
+                ]
 
         minimal = {
             "reflowed_json": {
@@ -81,17 +81,23 @@ def test_stage07_gemini_json_and_multi_images(tmp_path: Path, monkeypatch):
 
     # Build messages directly using the helper without executing the full LLM call
     messages = s07.build_reflow_request_messages(
-        section, base, include_images=True, model="gemini/gemini-2.5-flash", context_text="Hello world"
+        section,
+        base,
+        include_images=True,
+        model="gemini/gemini-2.5-flash",
+        context_text="Hello world",
     )
     # Gemini shaping: single user message with JSON guard in the first text part
     assert messages[0]["role"] == "user"
     parts = messages[0].get("content")
     assert isinstance(parts, list) and parts
-    first_text = next((p for p in parts if p.get("type") in ("input_text","text")), None)
+    first_text = next((p for p in parts if p.get("type") in ("input_text", "text")), None)
     assert first_text and (
         "Return ONLY a JSON object" in first_text.get("text", "")
         or "Return exactly this JSON" in first_text.get("text", "")
     )
     # Expect at least section + table + figure + annotation images (>=3)
-    img_parts = [p for p in parts if isinstance(p, dict) and p.get("type") in ("image_url", "input_image")]
+    img_parts = [
+        p for p in parts if isinstance(p, dict) and p.get("type") in ("image_url", "input_image")
+    ]
     assert len(img_parts) >= 3, f"got {len(img_parts)} image parts"

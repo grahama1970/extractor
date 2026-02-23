@@ -31,7 +31,11 @@ def _load(path: Path) -> Dict[str, Any] | None:
 
 
 def main() -> None:
-    base = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("data/results/pipeline/07_reflow_section/logs")
+    base = (
+        Path(sys.argv[1])
+        if len(sys.argv) > 1
+        else Path("data/results/pipeline/07_reflow_section/logs")
+    )
     section = sys.argv[2] if len(sys.argv) > 2 else "section_0"
     strict_p = base / f"response_strict_{section}.json"
     compact_p = base / f"response_strict_compact_{section}.json"
@@ -50,8 +54,16 @@ def main() -> None:
         "compact_path": str(compact_p),
         "strict_blocks": _blocks(strict),
         "compact_blocks": _blocks(compact),
-        "strict_title": ((strict.get("reflowed_json") or {}).get("title") if isinstance(strict.get("reflowed_json"), dict) else None),
-        "compact_title": ((compact.get("reflowed_json") or {}).get("title") if isinstance(compact.get("reflowed_json"), dict) else None),
+        "strict_title": (
+            (strict.get("reflowed_json") or {}).get("title")
+            if isinstance(strict.get("reflowed_json"), dict)
+            else None
+        ),
+        "compact_title": (
+            (compact.get("reflowed_json") or {}).get("title")
+            if isinstance(compact.get("reflowed_json"), dict)
+            else None
+        ),
         "notes": "Counts are indicative; inspect logs for full details.",
     }
 
@@ -64,4 +76,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

@@ -37,10 +37,17 @@ def _lane_rect(page: fitz.Page, gutter_w: float) -> fitz.Rect:
 def _annot_in_rect(rect: fitz.Rect, lane: fitz.Rect) -> bool:
     # Strictly contains (allow tiny epsilon)
     eps = 0.5
-    return (rect.x0 >= lane.x0 - eps) and (rect.x1 <= lane.x1 + eps) and (rect.y0 >= lane.y0 - eps) and (rect.y1 <= lane.y1 + eps)
+    return (
+        (rect.x0 >= lane.x0 - eps)
+        and (rect.x1 <= lane.x1 + eps)
+        and (rect.y0 >= lane.y0 - eps)
+        and (rect.y1 <= lane.y1 + eps)
+    )
 
 
-def _count_dark_pixels_in_region(pix: fitz.Pixmap, x0: int, y0: int, x1: int, y1: int, dark_thresh: int = 64) -> Tuple[int, int]:
+def _count_dark_pixels_in_region(
+    pix: fitz.Pixmap, x0: int, y0: int, x1: int, y1: int, dark_thresh: int = 64
+) -> Tuple[int, int]:
     """Count pixels whose average RGB < dark_thresh in the rectangular region."""
     x0 = max(0, min(x0, pix.width))
     y0 = max(0, min(y0, pix.height))
@@ -115,7 +122,11 @@ def main() -> int:
                     rect = a.rect
                     inside = _annot_in_rect(rect, lane)
                     freetext_annots.append(
-                        {"type": str(t_name), "rect": [rect.x0, rect.y0, rect.x1, rect.y1], "inside_gutter": bool(inside)}
+                        {
+                            "type": str(t_name),
+                            "rect": [rect.x0, rect.y0, rect.x1, rect.y1],
+                            "inside_gutter": bool(inside),
+                        }
                     )
                     if inside:
                         found_freetext = True
@@ -182,7 +193,9 @@ def main() -> int:
             )
             return 1
 
-        print(f"OK: Stage 09a gutter sanity passed via {result['mode']}. Artifacts: {ART_PREVIEW_COPY} ; {ART_LOG_JSON}")
+        print(
+            f"OK: Stage 09a gutter sanity passed via {result['mode']}. Artifacts: {ART_PREVIEW_COPY} ; {ART_LOG_JSON}"
+        )
         return 0
     finally:
         try:

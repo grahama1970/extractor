@@ -33,8 +33,8 @@ const ts = () => new Date().toISOString().replace(/[:.]/g, '-');
 (async () => {
   const api = await getApiBase();
   if (!api) {
-    console.error('Smoke(tabbed_suggest_tables_ui): API not reachable');
-    process.exit(2);
+    console.log('SKIP: No API server reachable (set API_BASE or start server on 8001/8000).');
+    process.exit(3);
   }
 
   // Probe Camelot availability and suggestions

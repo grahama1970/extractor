@@ -23,7 +23,6 @@ from pathlib import Path
 from typing import List, Dict, Any
 from docx import Document
 from pptx import Presentation
-from pptx.util import Inches
 from openpyxl import Workbook
 from ebooklib import epub
 

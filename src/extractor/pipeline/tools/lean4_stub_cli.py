@@ -45,7 +45,9 @@ def run(
 
 @app.command()
 def batch(
-    input_file: Path = typer.Option(..., "--input-file", exists=True, file_okay=True, readable=True),
+    input_file: Path = typer.Option(
+        ..., "--input-file", exists=True, file_okay=True, readable=True
+    ),
     output_file: Path = typer.Option(..., "--output-file"),
     deterministic: bool = typer.Option(False, "--deterministic"),
     no_llm: bool = typer.Option(False, "--no-llm"),
@@ -55,11 +57,7 @@ def batch(
     except Exception:
         data = {}
     # Accept both single-item payloads and simple dicts
-    requirement = (
-        data.get("requirement")
-        if isinstance(data, dict)
-        else ""
-    )
+    requirement = data.get("requirement") if isinstance(data, dict) else ""
     res = _single_proof(requirement or "", deterministic, no_llm)
     output_file.parent.mkdir(parents=True, exist_ok=True)
     output_file.write_text(json.dumps(res, indent=2))
@@ -67,4 +65,3 @@ def batch(
 
 if __name__ == "__main__":
     app()
-

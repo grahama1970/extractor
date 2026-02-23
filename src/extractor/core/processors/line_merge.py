@@ -57,9 +57,11 @@ class LineMergeProcessor(BaseProcessor):
         super().__init__(config)
 
     def merge_lines(self, lines: List[Line], block: Block):
-        lines = [l for l in lines if l.polygon.width * 5 > l.polygon.height]  # Skip vertical lines
+        lines = [
+            line for line in lines if line.polygon.width * 5 > line.polygon.height
+        ]  # Skip vertical lines
         line_bboxes = [
-            l.polygon.expand(self.block_expand_threshold, 0).bbox for l in lines
+            line.polygon.expand(self.block_expand_threshold, 0).bbox for line in lines
         ]  # Expand horizontally
         intersections = matrix_intersection_area(line_bboxes, line_bboxes)
 

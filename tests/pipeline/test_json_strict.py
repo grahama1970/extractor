@@ -15,10 +15,10 @@ def test_parse_json_strict_accepts_valid_object():
 @pytest.mark.parametrize(
     "bad",
     [
-        "```json\n{\n  \"x\": 1\n}\n```",  # fenced
-        "Not JSON at all {x:1}",        # prose prefix
-        "{\"val\": NaN}",            # forbidden constant
-        "[1,2,3",                       # truncated
+        '```json\n{\n  "x": 1\n}\n```',  # fenced
+        "Not JSON at all {x:1}",  # prose prefix
+        '{"val": NaN}',  # forbidden constant
+        "[1,2,3",  # truncated
     ],
 )
 def test_parse_json_strict_rejects_non_strict(bad):
@@ -33,6 +33,6 @@ def test_strict_guard_text_present():
 
 
 def test_trim_safety_example():
-    raw = "   {\n  \"a\": 1 }\n   "
+    raw = '   {\n  "a": 1 }\n   '
     trimmed = raw.rstrip("\n ").lstrip("\n ")
     assert trimmed.startswith("{") and trimmed.endswith("}")

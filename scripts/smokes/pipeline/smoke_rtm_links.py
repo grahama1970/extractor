@@ -20,8 +20,16 @@ app = typer.Typer(add_completion=False)
 
 
 def _find_latest_stage10(root: Path) -> Path:
-    cands = sorted(root.rglob("10_arangodb_exporter/json_output/10_flattened_data.json"), key=lambda p: p.stat().st_mtime, reverse=True)
-    return cands[0] if cands else root / "pipeline/10_arangodb_exporter/json_output/10_flattened_data.json"
+    cands = sorted(
+        root.rglob("10_arangodb_exporter/json_output/10_flattened_data.json"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    return (
+        cands[0]
+        if cands
+        else root / "pipeline/10_arangodb_exporter/json_output/10_flattened_data.json"
+    )
 
 
 @app.command()
@@ -48,7 +56,8 @@ def main(stage10_root: Path = typer.Option(Path("data/results"), exists=True)):
         "with_rtm": with_rtm,
         "with_evidence": with_evidence,
     }
-    out = Path("scripts/artifacts"); out.mkdir(parents=True, exist_ok=True)
+    out = Path("scripts/artifacts")
+    out.mkdir(parents=True, exist_ok=True)
     (out / "rtm_links_summary.json").write_text(json.dumps(summary, indent=2))
     if with_rtm == 0:
         typer.echo("No RTM fields found", err=True)

@@ -295,11 +295,16 @@ def discover_files(
             args = ["ls-files", "-coi", "--exclude-standard"]
         code, out, err = _run_git(root, args)
         if code != 0:
-            print(f"Warning: git discovery failed, falling back to walk: {err.strip()}", file=sys.stderr)
+            print(
+                f"Warning: git discovery failed, falling back to walk: {err.strip()}",
+                file=sys.stderr,
+            )
         else:
             rels = [line.strip() for line in out.splitlines() if line.strip()]
             # Filter: exclude paths containing any excluded directory at any depth
-            rels = [r for r in rels if not any(part in DEFAULT_EXCLUDE_DIRS for part in r.split("/"))]
+            rels = [
+                r for r in rels if not any(part in DEFAULT_EXCLUDE_DIRS for part in r.split("/"))
+            ]
             if extra_exclude_paths:
                 rels = [r for r in rels if not _matches_any(r, extra_exclude_paths)]
             return [root / r for r in rels if (root / r).is_file()]
@@ -442,9 +447,16 @@ def write_bundle(
 
             # File header block
             file_header = f"\n\n====== BEGIN FILE: {rel} ======\n"
-            file_footer = f"\n====== END FILE ======\n"
+            file_footer = "\n====== END FILE ======\n"
 
-            block = file_header + fence_open + content + ("\n" if not content.endswith("\n") else "") + fence_close + file_footer
+            block = (
+                file_header
+                + fence_open
+                + content
+                + ("\n" if not content.endswith("\n") else "")
+                + fence_close
+                + file_footer
+            )
             block_b = block.encode(encoding, errors="replace")
 
             if total_bytes + len(block_b) > max_total_bytes:
@@ -507,9 +519,15 @@ def build_cli() -> typer.Typer:
             "--max-total-bytes",
             help="Stop writing once total bytes in output reach this threshold",
         ),
-        encoding: str = typer.Option("utf-8", "--encoding", help="Encoding used to read files and write output"),
-        list_only: bool = typer.Option(False, "--list", help="List selected files and exit (no bundle writing)"),
-        dry_run: bool = typer.Option(False, "--dry-run", help="Do not write output, only print selection summary"),
+        encoding: str = typer.Option(
+            "utf-8", "--encoding", help="Encoding used to read files and write output"
+        ),
+        list_only: bool = typer.Option(
+            False, "--list", help="List selected files and exit (no bundle writing)"
+        ),
+        dry_run: bool = typer.Option(
+            False, "--dry-run", help="Do not write output, only print selection summary"
+        ),
     ) -> None:
         """Create a bundle or list selected files."""
 
@@ -558,6 +576,7 @@ def build_cli() -> typer.Typer:
         typer.echo(f"Wrote {written} files to {output} ({total} bytes)")
 
     return app
+
 
 app = build_cli()
 

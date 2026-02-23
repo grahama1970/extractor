@@ -31,7 +31,9 @@ def _find_latest_edges(root: Path) -> Path | None:
 
 
 @app.command()
-def main(pdf: Path = typer.Option(Path("data/input/pipeline/BHT_CV32A65X_marked.pdf"), exists=True)):
+def main(
+    pdf: Path = typer.Option(Path("data/input/pipeline/BHT_CV32A65X_marked.pdf"), exists=True)
+):
     lean_cli = Path("/home/graham/workspace/experiments/lean4/src/lean4_prover/cli_mini.py")
     if not lean_cli.exists():
         print("SKIP: Lean4 CLI not found; skipping Stage 11 'proves' edges smoke.")
@@ -63,10 +65,16 @@ def main(pdf: Path = typer.Option(Path("data/input/pipeline/BHT_CV32A65X_marked.
 
     edges = json.loads(edges_path.read_text())
     total = len(edges) if isinstance(edges, list) else 0
-    proves_count = sum(1 for e in edges if isinstance(e, dict) and e.get("relationship_type") == "proves")
+    proves_count = sum(
+        1 for e in edges if isinstance(e, dict) and e.get("relationship_type") == "proves"
+    )
 
     # Inspect Stage 08 theorems to set expectation
-    theorems = sorted(out_dir.rglob("08_lean4_theorem_prover/json_output/08_theorems.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    theorems = sorted(
+        out_dir.rglob("08_lean4_theorem_prover/json_output/08_theorems.json"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
     proved_expected = 0
     if theorems:
         tdata = json.loads(theorems[0].read_text())
@@ -78,7 +86,10 @@ def main(pdf: Path = typer.Option(Path("data/input/pipeline/BHT_CV32A65X_marked.
                         status = (pr or {}).get("status")
                         item = (pr or {}).get("item") or {}
                         src = item.get("source_details") or {}
-                        if src.get("section_id") and (status is None or str(status).lower() in {"ok", "proved", "success", "true"}):
+                        if src.get("section_id") and (
+                            status is None
+                            or str(status).lower() in {"ok", "proved", "success", "true"}
+                        ):
                             proved_expected += 1
                     except Exception:
                         pass
@@ -89,7 +100,9 @@ def main(pdf: Path = typer.Option(Path("data/input/pipeline/BHT_CV32A65X_marked.
         "proved_expected": proved_expected,
     }
     Path("scripts/artifacts").mkdir(parents=True, exist_ok=True)
-    (Path("scripts/artifacts") / "stage11_offline_edges_summary.json").write_text(json.dumps(report, indent=2))
+    (Path("scripts/artifacts") / "stage11_offline_edges_summary.json").write_text(
+        json.dumps(report, indent=2)
+    )
 
     if proved_expected > 0 and proves_count == 0:
         typer.echo("No 'proves' edges found but proofs were reported", err=True)

@@ -22,19 +22,31 @@ app = typer.Typer(add_completion=False)
 
 
 @app.command()
-def main(tmp_dir: Path = typer.Option(Path("data/results/structured_parity_smoke/spreadsheet_synth"))):
+def main(
+    tmp_dir: Path = typer.Option(Path("data/results/structured_parity_smoke/spreadsheet_synth")),
+):
     tmp_dir.mkdir(parents=True, exist_ok=True)
     xlsx_path = tmp_dir / "multisheet.xlsx"
     wb = Workbook()
     ws1 = wb.active
     ws1.title = "S1"
-    ws1.append(["A", "B"]) ; ws1.append([1, 2])
+    ws1.append(["A", "B"])
+    ws1.append([1, 2])
     ws2 = wb.create_sheet(title="S2")
-    ws2.append(["C", "D"]) ; ws2.append([3, 4])
+    ws2.append(["C", "D"])
+    ws2.append([3, 4])
     wb.save(xlsx_path)
 
     meta = STRUCTURED_PIPELINES[SpreadsheetProvider]
-    artifacts = run_structured_pipeline(SpreadsheetProvider, xlsx_path, tmp_dir, stage_prefix=meta.stage_prefix, skip_export10=True, skip_embeddings10=True, fast_embeddings10=True)
+    artifacts = run_structured_pipeline(
+        SpreadsheetProvider,
+        xlsx_path,
+        tmp_dir,
+        stage_prefix=meta.stage_prefix,
+        skip_export10=True,
+        skip_embeddings10=True,
+        fast_embeddings10=True,
+    )
     flat = json.loads(Path(artifacts["stage10_flattened"]).read_text())
     sheets = set()
     for obj in flat:
@@ -52,4 +64,3 @@ def main(tmp_dir: Path = typer.Option(Path("data/results/structured_parity_smoke
 
 if __name__ == "__main__":
     app()
-

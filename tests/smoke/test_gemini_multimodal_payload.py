@@ -17,7 +17,9 @@ class _Recorder:
             def __init__(self):
                 self.usage = {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
                 self._hidden_params = {"response_cost": 0.0, "cache_hit": False}
-                self.choices = [type("_C", (), {"text": None, "message": type("_M", (), {"content": "ok"})()})()]
+                self.choices = [
+                    type("_C", (), {"text": None, "message": type("_M", (), {"content": "ok"})()})()
+                ]
 
         return _Resp()
 
@@ -60,4 +62,3 @@ def test_gemini_multimodal_payload(tmp_path: Path, monkeypatch):
     kwargs = call["kwargs"]
     for k in ("max_tokens", "max_output_tokens", "response_format"):
         assert k not in kwargs, f"Found forbidden kwarg for Gemini: {k}={kwargs.get(k)}"
-

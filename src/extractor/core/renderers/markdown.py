@@ -267,9 +267,10 @@ class Markdownify(MarkdownConverter):
                 if cell is not None:
                     col_widths[col_idx] = max(col_widths[col_idx], len(str(cell)))
 
-        add_header_line = lambda: markdown_lines.append(
-            "|" + "|".join("-" * (width + 2) for width in col_widths) + "|"
-        )
+        def add_header_line():
+            return markdown_lines.append(
+                    "|" + "|".join("-" * (width + 2) for width in col_widths) + "|"
+                )
 
         # Generate markdown rows
         added_header = False

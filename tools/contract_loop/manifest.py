@@ -2,7 +2,6 @@ import hashlib
 import json
 import os
 import subprocess
-import time
 import uuid
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
@@ -44,21 +43,20 @@ class Manifest:
         self.out_dir = out_dir
         self.out_dir.mkdir(parents=True, exist_ok=True)
         self.manifest_path = self.out_dir / "manifest.json"
-        
+
         # Capture environment info
         try:
-            git_sha = subprocess.check_output(
-                ["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL
-            ).decode().strip()
+            git_sha = (
+                subprocess.check_output(["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL)
+                .decode()
+                .strip()
+            )
         except subprocess.CalledProcessError:
             git_sha = "unknown"
 
         fixture_info = {}
         if fixture_path and fixture_path.exists():
-            fixture_info = {
-                "path": str(fixture_path),
-                "sha256": self._hash_file(fixture_path)
-            }
+            fixture_info = {"path": str(fixture_path), "sha256": self._hash_file(fixture_path)}
 
         self.data = ManifestData(
             run_id=str(uuid.uuid4()),
@@ -113,9 +111,7 @@ class Manifest:
         self._save()
 
     def record_clarification(self, step_name: str, attempt: int, rel_path: str) -> None:
-        self.data.clarifications.append(
-            {"step": step_name, "attempt": attempt, "path": rel_path}
-        )
+        self.data.clarifications.append({"step": step_name, "attempt": attempt, "path": rel_path})
         self._save()
 
     def _save(self):

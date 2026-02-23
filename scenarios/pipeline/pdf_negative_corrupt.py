@@ -19,13 +19,7 @@ ART.mkdir(parents=True, exist_ok=True)
 
 
 def ts() -> str:
-    return (
-        datetime.utcnow()
-        .isoformat(timespec="seconds")
-        .replace(":", "-")
-        .split(".")[0]
-        + "Z"
-    )
+    return datetime.utcnow().isoformat(timespec="seconds").replace(":", "-").split(".")[0] + "Z"
 
 
 def main() -> int:

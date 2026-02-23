@@ -15,7 +15,9 @@ import typer
 from dotenv import load_dotenv, find_dotenv
 
 
-app = typer.Typer(add_completion=False, help="Smoke: Stage 08 --skip-proving produces contract output")
+app = typer.Typer(
+    add_completion=False, help="Smoke: Stage 08 --skip-proving produces contract output"
+)
 
 
 @app.command()
@@ -59,4 +61,3 @@ def main(results: Path = typer.Option(Path("data/results/pipeline"), "-o")) -> N
 
 if __name__ == "__main__":
     app()
-

@@ -27,11 +27,11 @@ def _table_merge_candidates(tables: List[Dict[str, Any]]) -> List[Dict[str, Any]
     by_key: Dict[str, List[Dict[str, Any]]] = {}
     for t in tables or []:
         key = f"{t.get('logical_table_id') or ''}|{t.get('header_norm') or ''}"
-        if key.strip('|'):
+        if key.strip("|"):
             by_key.setdefault(key, []).append(t)
     for key, group in by_key.items():
         if len(group) >= 2:
-            ids = [t.get('id') or t.get('table_id') or f"tbl_{i}" for i, t in enumerate(group)]
+            ids = [t.get("id") or t.get("table_id") or f"tbl_{i}" for i, t in enumerate(group)]
             out.append({"logical": key, "parts": ids})
     return out
 
@@ -62,7 +62,9 @@ def build_prompt(base: Path, section_idx: int = 0) -> str:
     merges = _table_merge_candidates(tabs_for_sec)
     # Top summary (short)
     lines: List[str] = []
-    lines.append("You output ONLY a compact JSON object with keys: reflowed_json, ocr_corrections, improvements_made, summary. No markdown, no code fences.")
+    lines.append(
+        "You output ONLY a compact JSON object with keys: reflowed_json, ocr_corrections, improvements_made, summary. No markdown, no code fences."
+    )
     lines.append("")
     lines.append(f"Section id: {sec_id}")
     lines.append(f"Tables: {len(tabs_for_sec)} | Figures: {len(figs_for_sec)}")
@@ -75,15 +77,17 @@ def build_prompt(base: Path, section_idx: int = 0) -> str:
         objs = sketch.get("objects") or []
         mini = []
         for o in objs[:20]:
-            mini.append({
-                "id": o.get("id"),
-                "type": o.get("type"),
-                "page": o.get("page"),
-                "grid_bbox": o.get("grid_bbox"),
-                "header_norm": o.get("header_norm"),
-                "logical_table_id": o.get("logical_table_id"),
-                "summary": o.get("summary"),
-            })
+            mini.append(
+                {
+                    "id": o.get("id"),
+                    "type": o.get("type"),
+                    "page": o.get("page"),
+                    "grid_bbox": o.get("grid_bbox"),
+                    "header_norm": o.get("header_norm"),
+                    "logical_table_id": o.get("logical_table_id"),
+                    "summary": o.get("summary"),
+                }
+            )
         lines.append("")
         lines.append("Sketch (minimal):")
         lines.append(json.dumps(mini, ensure_ascii=False))
@@ -122,10 +126,11 @@ def main() -> None:
         "max_tokens": 1024,
         "temperature": 0,
     }
-    (art / "07_section0_payload_compact.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    (art / "07_section0_payload_compact.json").write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     print(str((art / "07_section0_prompt_compact.md").resolve()))
 
 
 if __name__ == "__main__":
     main()
-

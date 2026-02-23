@@ -86,7 +86,7 @@ async def a_run(
             parts = []
             for p in content:
                 if isinstance(p, dict) and isinstance(p.get("text"), str):
-                    parts.append(p["text"]) 
+                    parts.append(p["text"])
             text = "\n".join(parts) if parts else None
         if text:
             try:
@@ -103,9 +103,15 @@ app = typer.Typer(add_completion=False, help="Stage 07 Router smoke from real re
 
 @app.command()
 def run(
-    sections: Path = typer.Option(Path("data/results/pipeline/04_section_builder/json_output/04_sections.json"), exists=True),
-    tables: Path = typer.Option(Path("data/results/pipeline/05_table_extractor/json_output/05_tables.json"), exists=True),
-    figures: Path = typer.Option(Path("data/results/pipeline/06_figure_extractor/json_output/06_figures.json"), exists=True),
+    sections: Path = typer.Option(
+        Path("data/results/pipeline/04_section_builder/json_output/04_sections.json"), exists=True
+    ),
+    tables: Path = typer.Option(
+        Path("data/results/pipeline/05_table_extractor/json_output/05_tables.json"), exists=True
+    ),
+    figures: Path = typer.Option(
+        Path("data/results/pipeline/06_figure_extractor/json_output/06_figures.json"), exists=True
+    ),
     model: str = typer.Option("gemini/gemini-2.5-flash"),
     timeout: int = typer.Option(120),
     include_images: bool = typer.Option(True, "--include-images/--no-include-images"),

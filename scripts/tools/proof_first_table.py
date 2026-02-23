@@ -63,7 +63,7 @@ def main() -> int:
     page = doc[pno]
     # Convert Camelot→fitz coords
     x0, y0, x1, y1 = _rect_from_camelot(bb, page.rect.height)
-    rect = (fitz.Rect(x0, y0, x1, y1) & page.rect)
+    rect = fitz.Rect(x0, y0, x1, y1) & page.rect
     if rect.is_empty:
         raise SystemExit("Converted table rect is empty after clamping.")
 
@@ -110,4 +110,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

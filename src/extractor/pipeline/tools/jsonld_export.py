@@ -34,7 +34,7 @@ def _context() -> Dict[str, Any]:
 
 def _node_for_object(obj: Dict[str, Any]) -> Dict[str, Any]:
     key = obj.get("_key") or f"obj-{obj.get('object_index_in_doc', 0)}"
-    text = (obj.get("text_content") or "")
+    text = obj.get("text_content") or ""
     if len(text) > 200:
         text = text[:200] + "…"
     return {
@@ -89,4 +89,3 @@ if __name__ == "__main__":
         print(json.dumps(res, indent=2))
 
     app()
-

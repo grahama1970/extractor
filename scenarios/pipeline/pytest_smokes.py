@@ -33,6 +33,7 @@ def main() -> None:
     # Default to a narrow, environment-light smoke
     filt = os.getenv("SMOKE_FILTER", "tests/smoke/test_stage10_flatten_smoke.py").strip()
     import shlex
+
     extra = os.getenv("PYTEST_FLAGS", "-q").strip()
     cmd = [sys.executable, "-m", "pytest"]
     if extra:

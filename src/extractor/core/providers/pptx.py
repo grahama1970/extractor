@@ -219,7 +219,9 @@ class PPTXProvider:
 
         # Extract notes
         if slide.has_notes_slide:
-            notes_blocks = self._extract_notes(slide.notes_slide, slide_idx, parent_id=slide_block.id)
+            notes_blocks = self._extract_notes(
+                slide.notes_slide, slide_idx, parent_id=slide_block.id
+            )
             blocks.extend(notes_blocks)
 
         # Create hierarchy node for slide
@@ -327,7 +329,11 @@ class PPTXProvider:
             candidates = []
             for sh in slide.shapes:
                 if getattr(sh, "has_text_frame", False):
-                    text = sh.text_frame.text if hasattr(sh, "text_frame") else getattr(sh, "text", None)
+                    text = (
+                        sh.text_frame.text
+                        if hasattr(sh, "text_frame")
+                        else getattr(sh, "text", None)
+                    )
                     if text and str(text).strip():
                         top = int(getattr(sh, "top", 1_000_000_000))
                         left = int(getattr(sh, "left", 1_000_000_000))
@@ -339,7 +345,9 @@ class PPTXProvider:
             pass
         return None
 
-    def _extract_shape(self, shape: Any, slide_idx: int, *, parent_id: Optional[str]) -> List[BaseBlock]:
+    def _extract_shape(
+        self, shape: Any, slide_idx: int, *, parent_id: Optional[str]
+    ) -> List[BaseBlock]:
         """Extract content from a shape"""
         blocks = []
 
@@ -378,7 +386,9 @@ class PPTXProvider:
 
         return blocks
 
-    def _extract_text(self, shape: Any, slide_idx: int, *, parent_id: Optional[str]) -> List[BaseBlock]:
+    def _extract_text(
+        self, shape: Any, slide_idx: int, *, parent_id: Optional[str]
+    ) -> List[BaseBlock]:
         """Extract text content from shape"""
         blocks = []
 
@@ -415,7 +425,9 @@ class PPTXProvider:
                         }
                     )
                 if list_items:
-                    blocks.extend(self._create_list_blocks(list_items, slide_idx, parent_id=parent_id))
+                    blocks.extend(
+                        self._create_list_blocks(list_items, slide_idx, parent_id=parent_id)
+                    )
             else:
                 for _, text in all_paragraphs:
                     blocks.append(
@@ -439,8 +451,15 @@ class PPTXProvider:
                         )
                     )
             # Optional: infer plain lists for non-placeholder text frames (opt-in)
-            infer_plain = os.environ.get("SCENARIO_PPTX_INFER_PLAIN_LISTS", "").lower() in {"1", "true"}
-            if infer_plain and (not getattr(shape, "is_placeholder", False)) and len(all_paragraphs) >= 3:
+            infer_plain = os.environ.get("SCENARIO_PPTX_INFER_PLAIN_LISTS", "").lower() in {
+                "1",
+                "true",
+            }
+            if (
+                infer_plain
+                and (not getattr(shape, "is_placeholder", False))
+                and len(all_paragraphs) >= 3
+            ):
                 texts = [t for _, t in all_paragraphs]
                 bullet_like = re.compile(r"^(\u2022|[\-\*\u2013]|\d+\.|[a-zA-Z]\))\s+")
                 hits = sum(1 for t in texts if bullet_like.search(t))
@@ -461,12 +480,16 @@ class PPTXProvider:
                                 type=BlockType.LISTITEM,
                                 content=bullet_like.sub("", line).strip(),
                                 parent_id=list_parent.id,
-                                metadata=BlockMetadata(attributes={"depth": 1, "list_type": "ul"}, confidence=0.9),
+                                metadata=BlockMetadata(
+                                    attributes={"depth": 1, "list_type": "ul"}, confidence=0.9
+                                ),
                             )
                         )
         return blocks
 
-    def _create_list_blocks(self, items: List[Dict[str, Any]], slide_idx: int, *, parent_id: Optional[str]) -> List[BaseBlock]:
+    def _create_list_blocks(
+        self, items: List[Dict[str, Any]], slide_idx: int, *, parent_id: Optional[str]
+    ) -> List[BaseBlock]:
         """Create LIST + LISTITEM blocks from items."""
         list_type = "ol" if items and items[0].get("is_numbered") else "ul"
         list_block = BaseBlock(
@@ -496,14 +519,20 @@ class PPTXProvider:
                         bbox=None,
                         source_id=f"slide_{slide_idx}_li_{idx}",
                         language=None,
-                        attributes={"slide_number": slide_idx + 1, "depth": int(it.get("level", 0)) + 1, "list_type": list_type},
+                        attributes={
+                            "slide_number": slide_idx + 1,
+                            "depth": int(it.get("level", 0)) + 1,
+                            "list_type": list_type,
+                        },
                         confidence=0.95,
                     ),
                 )
             )
         return [list_block, *item_blocks]
 
-    def _extract_table(self, shape: Any, slide_idx: int, *, parent_id: Optional[str]) -> Optional[TableBlock]:
+    def _extract_table(
+        self, shape: Any, slide_idx: int, *, parent_id: Optional[str]
+    ) -> Optional[TableBlock]:
         """Extract table from shape"""
         table = shape.table
         cells = []
@@ -539,7 +568,9 @@ class PPTXProvider:
             ),
         )
 
-    def _extract_image(self, shape: Any, slide_idx: int, *, parent_id: Optional[str]) -> Optional[ImageBlock]:
+    def _extract_image(
+        self, shape: Any, slide_idx: int, *, parent_id: Optional[str]
+    ) -> Optional[ImageBlock]:
         """Extract image from shape with size protection"""
         try:
             image = shape.image
@@ -560,7 +591,7 @@ class PPTXProvider:
             alt_text_prop = getattr(shape, "alternative_text", None)
             if not alt_text_prop:
                 alt_text_prop = getattr(shape, "alt_text", None)
-            alt_text = (alt_text_prop or shape.name or f"Image from slide {slide_idx + 1}")
+            alt_text = alt_text_prop or shape.name or f"Image from slide {slide_idx + 1}"
             if ai_description:
                 alt_text = f"{alt_text}: {ai_description}"
 
@@ -620,7 +651,9 @@ class PPTXProvider:
                 return t
         return "unknown"
 
-    def _extract_chart(self, shape: Any, slide_idx: int, *, parent_id: Optional[str]) -> Optional[BaseBlock]:
+    def _extract_chart(
+        self, shape: Any, slide_idx: int, *, parent_id: Optional[str]
+    ) -> Optional[BaseBlock]:
         """Extract chart information with error protection"""
         try:
             chart = shape.chart
@@ -678,7 +711,9 @@ class PPTXProvider:
             logger.warning(f"Failed to extract chart: {e}")
             return None
 
-    def _extract_notes(self, notes_slide: Any, slide_idx: int, *, parent_id: Optional[str]) -> List[BaseBlock]:
+    def _extract_notes(
+        self, notes_slide: Any, slide_idx: int, *, parent_id: Optional[str]
+    ) -> List[BaseBlock]:
         """Extract speaker notes"""
         blocks = []
         for shape in notes_slide.shapes:

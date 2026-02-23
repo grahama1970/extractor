@@ -39,6 +39,7 @@ from dotenv import load_dotenv  # Import dotenv for environment variable loading
 # Make this module safe when litellm/redis are not installed. If missing, we no-op.
 try:  # pragma: no cover
     import litellm  # type: ignore
+
     try:
         from litellm.extras import initialize_litellm_cache as extras_init_cache  # type: ignore
     except Exception:  # pragma: no cover
@@ -95,15 +96,20 @@ def initialize_litellm_cache() -> None:
             pass
         else:
             # Optional: adjust namespace on existing cache
-            cache_namespace = os.getenv("LITELLM_CACHE_NAMESPACE") or os.getenv("LITELLM_SESSION_ID")
+            cache_namespace = os.getenv("LITELLM_CACHE_NAMESPACE") or os.getenv(
+                "LITELLM_SESSION_ID"
+            )
             if cache_namespace and getattr(litellm, "cache", None) is not None:
                 try:
                     from litellm.caching.caching import Cache as _Cache, LiteLLMCacheType as _Type  # type: ignore
+
                     cfg = getattr(litellm.cache, "__dict__", {})
                     host = cfg.get("host") or os.getenv("REDIS_HOST", "localhost")
                     port = str(cfg.get("port") or os.getenv("REDIS_PORT", "6379"))
                     pwd = cfg.get("password") or os.getenv("REDIS_PASSWORD")
-                    ttl = int(cfg.get("ttl") or os.getenv("LITELLM_CACHE_TTL", str(60 * 60 * 24 * 2)))
+                    ttl = int(
+                        cfg.get("ttl") or os.getenv("LITELLM_CACHE_TTL", str(60 * 60 * 24 * 2))
+                    )
                     litellm.cache = _Cache(  # type: ignore
                         type=_Type.REDIS,
                         host=host,
@@ -280,9 +286,7 @@ if __name__ == "__main__":
         else:
             tests_failed_count += 1
             logger.error(" Test 'cache_hit_miss': FAILED")
-            logger.error(
-                "   Expected first call cache_hit=False/None, second call cache_hit=True."
-            )
+            logger.error("   Expected first call cache_hit=False/None, second call cache_hit=True.")
             logger.error(
                 f"   Got: cache_hit1={details.get('cache_hit1')}, cache_hit2={details.get('cache_hit2')}"
             )

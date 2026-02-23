@@ -27,28 +27,50 @@ def _simulate_run_all(cmd: list[str], env: dict[str, str], results_dir: Path) ->
         )
     # Stage 02
     elif "02_marker_extractor.py" in joined:
-        _touch_json(results_dir / "02_marker_extractor" / "json_output" / "02_marker_blocks.json", {"block_count": 0})
+        _touch_json(
+            results_dir / "02_marker_extractor" / "json_output" / "02_marker_blocks.json",
+            {"block_count": 0},
+        )
     # Stage 03
     elif "03_suspicious_headers.py" in joined:
-        _touch_json(results_dir / "03_suspicious_headers" / "json_output" / "03_verified_blocks.json", {"verified_blocks": []})
+        _touch_json(
+            results_dir / "03_suspicious_headers" / "json_output" / "03_verified_blocks.json",
+            {"verified_blocks": []},
+        )
     # Stage 04
     elif "04_section_builder.py" in joined:
         _touch_json(
             results_dir / "04_section_builder" / "json_output" / "04_sections.json",
-            {"section_count": 1, "hierarchy_depth": 1, "sections": [{"title": "Intro", "level": 1}]},
+            {
+                "section_count": 1,
+                "hierarchy_depth": 1,
+                "sections": [{"title": "Intro", "level": 1}],
+            },
         )
     # Stage 05
     elif "05_table_extractor.py" in joined:
-        _touch_json(results_dir / "05_table_extractor" / "json_output" / "05_tables.json", {"table_count": 0})
+        _touch_json(
+            results_dir / "05_table_extractor" / "json_output" / "05_tables.json",
+            {"table_count": 0},
+        )
     # Stage 06
     elif "06_figure_extractor.py" in joined:
-        _touch_json(results_dir / "06_figure_extractor" / "json_output" / "06_figures.json", {"figure_count": 0, "figures": []})
+        _touch_json(
+            results_dir / "06_figure_extractor" / "json_output" / "06_figures.json",
+            {"figure_count": 0, "figures": []},
+        )
     # Stage 07
     elif "07_reflow_section.py" in joined:
-        _touch_json(results_dir / "07_reflow_section" / "json_output" / "07_reflowed.json", {"reflowed_sections": []})
+        _touch_json(
+            results_dir / "07_reflow_section" / "json_output" / "07_reflowed.json",
+            {"reflowed_sections": []},
+        )
     # Stage 08
     elif "08_lean4_theorem_prover.py" in joined:
-        _touch_json(results_dir / "08_lean4_theorem_prover" / "json_output" / "08_theorems.json", {"theorems": []})
+        _touch_json(
+            results_dir / "08_lean4_theorem_prover" / "json_output" / "08_theorems.json",
+            {"theorems": []},
+        )
     # Stage 09
     elif "09_section_summarizer.py" in joined:
         _touch_json(

@@ -55,9 +55,7 @@ def main() -> int:
     require_proved = _env_bool("LEAN4_REQUIRE_PROVED", default=False)
     require_code = _env_bool("LEAN4_REQUIRE_CODE", default=False)
 
-    items: List[Dict[str, Any]] = [
-        {"requirement_text": requirement, "id": "sanity-1"}
-    ]
+    items: List[Dict[str, Any]] = [{"requirement_text": requirement, "id": "sanity-1"}]
 
     print("=== SciLLM Certainly/Lean4 Sanity ===")
     print(f"bridge_base: {api_base}")

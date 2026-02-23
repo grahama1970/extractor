@@ -28,7 +28,14 @@ app = typer.Typer(add_completion=False)
 
 
 def _load_flatten_function():
-    module_path = Path(__file__).resolve().parents[3] / "src" / "extractor" / "pipeline" / "steps" / "10_arangodb_exporter.py"
+    module_path = (
+        Path(__file__).resolve().parents[3]
+        / "src"
+        / "extractor"
+        / "pipeline"
+        / "steps"
+        / "10_arangodb_exporter.py"
+    )
     spec = importlib.util.spec_from_file_location("pipeline_stage10", module_path)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"Unable to load Stage 10 module from {module_path}")
@@ -40,10 +47,14 @@ def _load_flatten_function():
 @app.command()
 def main(
     pdf_stage07: Path = typer.Option(
-        Path("data/results/pipeline/07_reflow_section/json_output/07_reflowed.json"), exists=True, readable=True
+        Path("data/results/pipeline/07_reflow_section/json_output/07_reflowed.json"),
+        exists=True,
+        readable=True,
     ),
     html_path: Path = typer.Option(
-        Path("data/results/pipeline/01_annotation_processor/BHT_CV32A65X_marked_clean.html"), exists=True, readable=True
+        Path("data/results/pipeline/01_annotation_processor/BHT_CV32A65X_marked_clean.html"),
+        exists=True,
+        readable=True,
     ),
     results_dir: Path = typer.Option(Path("data/results/structured_parity_smoke/html")),
     allowed_delta: int = typer.Option(5),
@@ -86,7 +97,8 @@ def main(
     for obj in html_flattened:
         html_types[obj["object_type"]] = html_types.get(obj["object_type"], 0) + 1
 
-    artifacts_dir = Path("scripts/artifacts"); artifacts_dir.mkdir(parents=True, exist_ok=True)
+    artifacts_dir = Path("scripts/artifacts")
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
     summary_path = artifacts_dir / "html_pdf_parity_summary.json"
     summary_payload = {
         "pdf": {"count": len(pdf_flattened), "types": pdf_types},
@@ -123,7 +135,7 @@ def main(
     if pdf_has_figure and not html_has_figure:
         raise typer.Exit(code=1)
     # Section presence + section-context checks
-    pdf_sections = (payload.get("reflowed_sections") or [])
+    pdf_sections = payload.get("reflowed_sections") or []
     try:
         s07 = json.loads(Path(artifacts["stage07"]).read_text())
         html_sections = s07.get("reflowed_sections") or []
@@ -131,10 +143,11 @@ def main(
         html_sections = []
     if pdf_sections and not html_sections:
         raise typer.Exit(code=1)
-    first_section_title = str((html_sections[0] or {}).get("title") if html_sections else "").strip()
+    first_section_title = str(
+        (html_sections[0] or {}).get("title") if html_sections else ""
+    ).strip()
     has_section_context = any(
-        isinstance(obj, dict)
-        and str(obj.get("section_id") or "") not in ("", "document-root")
+        isinstance(obj, dict) and str(obj.get("section_id") or "") not in ("", "document-root")
         for obj in html_flattened
     )
     if not has_section_context:
@@ -142,10 +155,13 @@ def main(
         raise typer.Exit(code=1)
     if first_section_title:
         if not any(
-            isinstance(obj, dict) and str(obj.get("section_title") or "").strip() == first_section_title
+            isinstance(obj, dict)
+            and str(obj.get("section_title") or "").strip() == first_section_title
             for obj in html_flattened
         ):
-            typer.echo("No Stage 10 object matched the first section title from Stage 07 (HTML).", err=True)
+            typer.echo(
+                "No Stage 10 object matched the first section title from Stage 07 (HTML).", err=True
+            )
             raise typer.Exit(code=1)
     typer.echo("HTML parity presence + section-context checks passed.")
     typer.echo("Parity within allowed delta.")

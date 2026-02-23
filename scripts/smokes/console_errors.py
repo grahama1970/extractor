@@ -1,10 +1,13 @@
 from __future__ import annotations
-import os, sys, pathlib, requests
+import sys
+import pathlib
+import requests
 from typing import List
 import typer
 from playwright.sync_api import sync_playwright, Page
 
 app = typer.Typer(add_completion=False)
+
 
 def discover_ws(cdp_origin: str, token: str | None) -> str:
     url = f"{cdp_origin.rstrip('/')}/json/version"
@@ -14,13 +17,16 @@ def discover_ws(cdp_origin: str, token: str | None) -> str:
     r.raise_for_status()
     return r.json()["webSocketDebuggerUrl"]
 
+
 @app.command()
 def run(
     url: str = typer.Option("http://127.0.0.1:8080/classic", help="Page to test"),
     cdp_origin: str = typer.Option("http://127.0.0.1:9222", help="CDP http origin"),
     token: str = typer.Option("", help="Browserless token (optional)"),
     timeout_s: float = typer.Option(20, help="Total time to wait for network idle"),
-    screenshot: str = typer.Option("scripts/artifacts/ui_screenshot.png", help="Path for screenshot"),
+    screenshot: str = typer.Option(
+        "scripts/artifacts/ui_screenshot.png", help="Path for screenshot"
+    ),
 ):
     artifacts_dir = pathlib.Path(screenshot).parent
     artifacts_dir.mkdir(parents=True, exist_ok=True)
@@ -34,7 +40,13 @@ def run(
         browser = p.chromium.connect_over_cdp(ws)
         page: Page = browser.new_page()
 
-        page.on("console", lambda m: (logs.append(f"[{m.type}] {m.text}"), errs.append(m.text) if m.type == "error" else None))
+        page.on(
+            "console",
+            lambda m: (
+                logs.append(f"[{m.type}] {m.text}"),
+                errs.append(m.text) if m.type == "error" else None,
+            ),
+        )
         page.on("pageerror", lambda e: errs.append(f"PAGEERROR: {e}"))
 
         page.goto(url, wait_until="domcontentloaded")
@@ -53,6 +65,6 @@ def run(
     print("✅ No runtime errors found.")
     print(f"Screenshot saved: {screenshot}")
 
+
 if __name__ == "__main__":
     app()
-

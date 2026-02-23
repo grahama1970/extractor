@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse, StreamingResponse, HTMLResponse
 
 try:
     from dotenv import load_dotenv  # type: ignore
+
     load_dotenv()
 except Exception:
     pass
@@ -50,14 +51,15 @@ def _connect_arango() -> Optional[StandardDatabase]:  # type: ignore[valid-type]
     db = client.db("_system", username=user, password=password)
     _ = db.version()
     if not db.has_database(db_name):
-        db.create_database(db_name, users=[{"username": user, "password": password, "active": True}])
+        db.create_database(
+            db_name, users=[{"username": user, "password": password, "active": True}]
+        )
     db2 = client.db(db_name, username=user, password=password)
     for col in (EVENTS_COL, EPISODES_COL, STATUS_COL, LOGS_COL):
         if not db2.has_collection(col):
             db2.create_collection(col)
     app_data["arango_db"] = db2
     return db2
-
 
 
 def _safe_path(rel: str) -> Path | None:
@@ -116,7 +118,7 @@ async def ingest_log(payload: Dict[str, Any]):
     await _broadcast({"type": "log", "data": payload})
     # Best-effort: on stderr lines, call Graph Memory for quick recall and append to run notes
     try:
-        if str(payload.get("stream","")) == "stderr":
+        if str(payload.get("stream", "")) == "stderr":
             run_id = str(payload.get("run_id") or "gamified")
             msg = str(payload.get("message") or "")[:256]
             q = " ".join([w for w in msg.split() if w and len(w) <= 64])[:200]
@@ -124,6 +126,7 @@ async def ingest_log(payload: Dict[str, Any]):
                 # Import lazily to avoid hard dep
                 try:
                     from graph_memory.api import MemoryClient  # type: ignore
+
                     client = MemoryClient(scope="gamified", k=3)
                     res = client.search(q)
                     items = res.get("items") or []
@@ -135,10 +138,14 @@ async def ingest_log(payload: Dict[str, Any]):
                             lines.append(f"- {title} ({why})")
                         # Append to notes.txt
                         from pathlib import Path
-                        notes_path = Path('workspace/runs') / run_id / 'notes.txt'
+
+                        notes_path = Path("workspace/runs") / run_id / "notes.txt"
                         notes_path.parent.mkdir(parents=True, exist_ok=True)
-                        prev = notes_path.read_text(encoding='utf-8') if notes_path.exists() else ""
-                        notes_path.write_text((prev + ("\n" if prev else "") + "\n".join(lines)).strip() + "\n", encoding='utf-8')
+                        prev = notes_path.read_text(encoding="utf-8") if notes_path.exists() else ""
+                        notes_path.write_text(
+                            (prev + ("\n" if prev else "") + "\n".join(lines)).strip() + "\n",
+                            encoding="utf-8",
+                        )
                 except Exception:
                     pass
     except Exception:
@@ -178,11 +185,16 @@ async def ingest_episode(payload: Dict[str, Any]):
         variant = str(payload.get("variant") or "")
         score = payload.get("score")
         errc = int(payload.get("error_count", 0) or 0)
-        status = 'success' if errc == 0 else 'failure'
+        status = "success" if errc == 0 else "failure"
         title = f"{run_id}/{variant} score={score}"
-        details = json.dumps({k: payload.get(k) for k in ("score","error_count","ts")}, ensure_ascii=False)
+        details = json.dumps(
+            {k: payload.get(k) for k in ("score", "error_count", "ts")}, ensure_ascii=False
+        )
         from graph_memory.api import log_episode as memory_log_episode  # type: ignore
-        memory_log_episode(status=status, title=title, scope="gamified", details=details, promote_if_novel=True)
+
+        memory_log_episode(
+            status=status, title=title, scope="gamified", details=details, promote_if_novel=True
+        )
     except Exception:
         pass
     return {"ok": True}
@@ -204,7 +216,9 @@ async def scoreboard(run_id: Optional[str] = None):
 
 
 @app.get("/episodes")
-async def list_episodes(run_id: Optional[str] = None, variant: Optional[str] = None, limit: int = 50):
+async def list_episodes(
+    run_id: Optional[str] = None, variant: Optional[str] = None, limit: int = 50
+):
     db = _connect_arango()
     if db is None:
         return JSONResponse({"ok": False, "error": "ArangoDB unavailable"}, status_code=503)
@@ -221,12 +235,20 @@ async def list_episodes(run_id: Optional[str] = None, variant: Optional[str] = N
       LIMIT @limit
       RETURN e
     """
-    rows = list(db.aql.execute(aql, bind_vars={"run_id": run_id, "variant": variant, "limit": limit}))
+    rows = list(
+        db.aql.execute(aql, bind_vars={"run_id": run_id, "variant": variant, "limit": limit})
+    )
     return {"ok": True, "items": rows}
 
 
 @app.get("/logs")
-async def list_logs(run_id: Optional[str] = None, variant: Optional[str] = None, source: Optional[str] = None, stream: Optional[str] = None, limit: int = 100):
+async def list_logs(
+    run_id: Optional[str] = None,
+    variant: Optional[str] = None,
+    source: Optional[str] = None,
+    stream: Optional[str] = None,
+    limit: int = 100,
+):
     db = _connect_arango()
     if db is None:
         return JSONResponse({"ok": False, "error": "ArangoDB unavailable"}, status_code=503)
@@ -247,11 +269,23 @@ async def list_logs(run_id: Optional[str] = None, variant: Optional[str] = None,
       LIMIT @limit
       RETURN l
     """
-    rows = list(db.aql.execute(aql, bind_vars={"run_id": run_id, "variant": variant, "source": source, "stream": stream, "limit": limit}))
+    rows = list(
+        db.aql.execute(
+            aql,
+            bind_vars={
+                "run_id": run_id,
+                "variant": variant,
+                "source": source,
+                "stream": stream,
+                "limit": limit,
+            },
+        )
+    )
     return {"ok": True, "items": rows}
 
 
 # ------------------ Memory (operator endpoints) ------------------
+
 
 @app.get("/memory/research")
 async def memory_research(scope: str = "research", limit: int = 5):
@@ -268,16 +302,18 @@ async def memory_research(scope: str = "research", limit: int = 5):
     try:
         _gm_ensure()
         db = _gm_db()
-        rows = list(db.aql.execute(
-            """
+        rows = list(
+            db.aql.execute(
+                """
             FOR d IN lessons
               FILTER d.scope==@s AND @tag IN d.tags
               SORT d.updated_at DESC
               LIMIT @n
               RETURN KEEP(d,['_key','title','chunks','pdf_url','updated_at'])
             """,
-            bind_vars={"s": scope, "tag": "arxiv", "n": max(1,int(limit))}
-        ))
+                bind_vars={"s": scope, "tag": "arxiv", "n": max(1, int(limit))},
+            )
+        )
         return {"ok": True, "items": rows}
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
@@ -291,10 +327,10 @@ async def memory_feedback(payload: Dict[str, Any]):
     except Exception:
         return JSONResponse({"ok": False, "error": "graph_memory unavailable"}, status_code=503)
     try:
-        title = str(payload.get('lesson_title') or '')
-        scope = str(payload.get('lesson_scope') or '')
-        helpful = bool(payload.get('helpful', True))
-        note = str(payload.get('note') or '')
+        title = str(payload.get("lesson_title") or "")
+        scope = str(payload.get("lesson_scope") or "")
+        helpful = bool(payload.get("helpful", True))
+        note = str(payload.get("note") or "")
         if not title:
             return JSONResponse({"ok": False, "error": "lesson_title required"}, status_code=400)
         out = _gm_feedback(lesson_title=title, lesson_scope=scope, helpful=helpful, note=note)
@@ -317,7 +353,7 @@ async def memory_explain(key: str, q: Optional[str] = None, scope: str = ""):
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
-@app.get('/memory/suggestions')
+@app.get("/memory/suggestions")
 async def memory_suggestions(run_id: Optional[str] = None, k: int = 3):
     """Compute fresh memory suggestions from the last stderr log of a run.
 
@@ -343,23 +379,26 @@ async def memory_suggestions(run_id: Optional[str] = None, k: int = 3):
         rows = list(db.aql.execute(aql, bind_vars=bind))
         if not rows:
             return {"ok": True, "items": []}
-        msg = str(rows[0].get('message') or '')[:256]
+        msg = str(rows[0].get("message") or "")[:256]
         toks = " ".join([w for w in msg.split() if w and len(w) <= 64])[:200]
         if not toks:
             return {"ok": True, "items": []}
         from graph_memory.api import MemoryClient  # type: ignore
+
         client = MemoryClient(scope="gamified", k=max(1, int(k)))
         res = client.search(toks)
-        items = res.get('items') or []
+        items = res.get("items") or []
         # shrink payload for UI
         out = []
         for it in items[: max(1, int(k))]:
-            out.append({
-                'title': it.get('title'),
-                'why': it.get('why'),
-                'scores': it.get('scores'),
-                'key': it.get('_key'),
-            })
+            out.append(
+                {
+                    "title": it.get("title"),
+                    "why": it.get("why"),
+                    "scores": it.get("scores"),
+                    "key": it.get("_key"),
+                }
+            )
         return {"ok": True, "items": out}
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
@@ -421,83 +460,102 @@ async def proto_dashboard():
 
 # ---- Minimal collaboration endpoints (Happy Path) ----
 
+
 @app.get("/spec")
 async def get_spec(path: str | None = None):
-    target = _safe_path(path) if path else _safe_path('gamified.yaml')
+    target = _safe_path(path) if path else _safe_path("gamified.yaml")
     if not target or not target.exists():
         return JSONResponse({"ok": False, "error": "spec not found"}, status_code=404)
     try:
-        return {"ok": True, "path": str(target), "content": target.read_text(encoding='utf-8')}
+        return {"ok": True, "path": str(target), "content": target.read_text(encoding="utf-8")}
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
+
 @app.put("/spec")
 async def put_spec(payload: dict):
-    path = payload.get('path') or 'gamified.yaml'
-    content = payload.get('content')
+    path = payload.get("path") or "gamified.yaml"
+    content = payload.get("content")
     target = _safe_path(path)
     if not target:
         return JSONResponse({"ok": False, "error": "invalid path"}, status_code=400)
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(str(content or ''), encoding='utf-8')
+        target.write_text(str(content or ""), encoding="utf-8")
         return {"ok": True, "path": str(target)}
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
-@app.get('/runs/{run_id}/notes')
+
+@app.get("/runs/{run_id}/notes")
 async def get_run_notes(run_id: str):
     from pathlib import Path
-    notes_path = Path('workspace/runs') / run_id / 'notes.txt'
+
+    notes_path = Path("workspace/runs") / run_id / "notes.txt"
     if not notes_path.exists():
-        return {"ok": True, "notes": ''}
+        return {"ok": True, "notes": ""}
     try:
-        return {"ok": True, "notes": notes_path.read_text(encoding='utf-8')}
+        return {"ok": True, "notes": notes_path.read_text(encoding="utf-8")}
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
-@app.post('/runs/{run_id}/notes')
+
+@app.post("/runs/{run_id}/notes")
 async def set_run_notes(run_id: str, payload: dict):
     from pathlib import Path
-    notes = str(payload.get('notes') or '')
-    notes_path = Path('workspace/runs') / run_id / 'notes.txt'
+
+    notes = str(payload.get("notes") or "")
+    notes_path = Path("workspace/runs") / run_id / "notes.txt"
     try:
         notes_path.parent.mkdir(parents=True, exist_ok=True)
-        notes_path.write_text(notes, encoding='utf-8')
+        notes_path.write_text(notes, encoding="utf-8")
         return {"ok": True}
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
-@app.post('/runs')
+
+@app.post("/runs")
 async def spawn_run(payload: dict):
     import subprocess, sys, time, os
     from pathlib import Path
-    spec_path = payload.get('spec_path')
-    spec_content = payload.get('spec_content')
-    run_id = payload.get('run_id') or time.strftime('%Y%m%d-%H%M%S')
-    fast = bool(payload.get('fast', False))
+
+    spec_path = payload.get("spec_path")
+    spec_content = payload.get("spec_content")
+    run_id = payload.get("run_id") or time.strftime("%Y%m%d-%H%M%S")
+    fast = bool(payload.get("fast", False))
     if not spec_path and not spec_content:
-        return JSONResponse({"ok": False, "error": "spec_path or spec_content is required"}, status_code=400)
+        return JSONResponse(
+            {"ok": False, "error": "spec_path or spec_content is required"}, status_code=400
+        )
     try:
         if spec_content and not spec_path:
-            spec_target = Path('workspace/specs') / f'{run_id}.yaml'
+            spec_target = Path("workspace/specs") / f"{run_id}.yaml"
             spec_target.parent.mkdir(parents=True, exist_ok=True)
-            spec_target.write_text(str(spec_content), encoding='utf-8')
+            spec_target.write_text(str(spec_content), encoding="utf-8")
             spec_path = str(spec_target)
         target = _safe_path(spec_path)
         if not target or not target.exists():
             return JSONResponse({"ok": False, "error": "spec not found"}, status_code=404)
         env = os.environ.copy()
         if fast:
-            env['GAMIFIED_FAST_BENCH'] = '1'
-        cmd = [sys.executable, '-m', 'prototypes.gamified.cli', 'run', '--spec', str(target), '--run-id', run_id]
+            env["GAMIFIED_FAST_BENCH"] = "1"
+        cmd = [
+            sys.executable,
+            "-m",
+            "prototypes.gamified.cli",
+            "run",
+            "--spec",
+            str(target),
+            "--run-id",
+            run_id,
+        ]
         subprocess.Popen(cmd, env=env)
         return {"ok": True, "run_id": run_id}
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
-@app.get('/optimize_from_spec')
+@app.get("/optimize_from_spec")
 async def optimize_from_spec(path: str | None = None):
     try:
         from prototypes.gamified.spec.v1 import load_spec, render_prompt  # type: ignore
@@ -505,19 +563,34 @@ async def optimize_from_spec(path: str | None = None):
         import yaml, difflib  # type: ignore
     except Exception as e:
         return JSONResponse({"ok": False, "error": f"optimizer unavailable: {e}"}, status_code=500)
-    target = _safe_path(path) if path else _safe_path('gamified.yaml')
+    target = _safe_path(path) if path else _safe_path("gamified.yaml")
     if not target or not target.exists():
         return JSONResponse({"ok": False, "error": "spec not found"}, status_code=404)
     try:
         spec_obj = load_spec(str(target))
         raw_prompt = render_prompt(spec_obj)
         # Load POP rules
-        rules_path = Path('prototypes/gamified/rules/prompt_optimization.yaml')
-        rules_obj = yaml.safe_load(rules_path.read_text(encoding='utf-8')) if rules_path.exists() else {}
+        rules_path = Path("prototypes/gamified/rules/prompt_optimization.yaml")
+        rules_obj = (
+            yaml.safe_load(rules_path.read_text(encoding="utf-8")) if rules_path.exists() else {}
+        )
         opt = PromptOptimizer(rules_obj)
         optimized_prompt, rep = opt.validate_and_optimize(raw_prompt)
-        diff = '
-'.join(difflib.unified_diff(raw_prompt.splitlines(), optimized_prompt.splitlines(), fromfile='raw', tofile='optimized', lineterm=''))
-        return {"ok": True, "raw": raw_prompt, "optimized": optimized_prompt, "diff": diff, "errors": [e.__dict__ for e in rep.errors]}
+        diff = "\n".join(
+            difflib.unified_diff(
+                raw_prompt.splitlines(),
+                optimized_prompt.splitlines(),
+                fromfile="raw",
+                tofile="optimized",
+                lineterm="",
+            )
+        )
+        return {
+            "ok": True,
+            "raw": raw_prompt,
+            "optimized": optimized_prompt,
+            "diff": diff,
+            "errors": [e.__dict__ for e in rep.errors],
+        }
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)

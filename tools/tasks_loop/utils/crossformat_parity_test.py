@@ -26,9 +26,8 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Any, Optional
 from dataclasses import dataclass, field
-from collections import defaultdict
 
 # Add extractor to path
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -39,6 +38,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 @dataclass
 class ExtractionResult:
     """Result from extracting a single format."""
+
     format: str
     success: bool
     error: Optional[str] = None
@@ -53,6 +53,7 @@ class ExtractionResult:
 @dataclass
 class ParityScore:
     """Parity comparison between two formats."""
+
     format_a: str
     format_b: str
     section_count_match: bool
@@ -66,7 +67,7 @@ class ParityScore:
 
 def extract_structured_format(filepath: Path, output_dir: Path) -> ExtractionResult:
     """Extract a structured format (HTML, MD, XML, RST, DOCX, etc.) using UnifiedAdapter."""
-    fmt = filepath.suffix.lstrip('.').lower()
+    fmt = filepath.suffix.lstrip(".").lower()
     result = ExtractionResult(format=fmt, success=False)
 
     try:
@@ -91,7 +92,7 @@ def extract_structured_format(filepath: Path, output_dir: Path) -> ExtractionRes
         # Step 3: Read the generated artifacts
         sections_file = output_dir / "04_section_builder/json_output/04_sections.json"
         tables_file = output_dir / "05_table_extractor/json_output/05_tables.json"
-        figures_file = output_dir / "06_figure_extractor/json_output/06_figures.json"
+        output_dir / "06_figure_extractor/json_output/06_figures.json"
 
         if sections_file.exists():
             sections_data = json.loads(sections_file.read_text())
@@ -120,6 +121,7 @@ def extract_structured_format(filepath: Path, output_dir: Path) -> ExtractionRes
 
     except Exception as e:
         import traceback
+
         result.error = f"{str(e)}\n{traceback.format_exc()}"
 
     return result
@@ -128,6 +130,7 @@ def extract_structured_format(filepath: Path, output_dir: Path) -> ExtractionRes
 def _extract_requirements_from_sections(sections: List[Dict]) -> List[Dict]:
     """Extract requirements from section blocks."""
     import re
+
     reqs = []
 
     for section in sections:
@@ -136,9 +139,9 @@ def _extract_requirements_from_sections(sections: List[Dict]) -> List[Dict]:
 
             # Check for REQ- in text content (HTML, MD, PDF, etc.)
             if text and "REQ-" in text:
-                match = re.search(r'(REQ-[\w-]+)[:\s]+(.+)', text)
-                if match and not any(r['id'] == match.group(1) for r in reqs):
-                    reqs.append({'id': match.group(1), 'text': match.group(2).strip()})
+                match = re.search(r"(REQ-[\w-]+)[:\s]+(.+)", text)
+                if match and not any(r["id"] == match.group(1) for r in reqs):
+                    reqs.append({"id": match.group(1), "text": match.group(2).strip()})
 
             # Check for REQ- in metadata attributes (XML with <requirement id="REQ-...">)
             # Structure can be: metadata.attributes.attributes.id (from UnifiedAdapter)
@@ -152,34 +155,38 @@ def _extract_requirements_from_sections(sections: List[Dict]) -> List[Dict]:
                 if not req_id and isinstance(attrs.get("attributes"), dict):
                     req_id = attrs["attributes"].get("id", "")
                 if req_id and req_id.startswith("REQ-"):
-                    if not any(r['id'] == req_id for r in reqs):
-                        reqs.append({'id': req_id, 'text': text.strip() if text else ""})
+                    if not any(r["id"] == req_id for r in reqs):
+                        reqs.append({"id": req_id, "text": text.strip() if text else ""})
 
         # Also check section title
         title = section.get("title", "")
         if "REQ-" in title:
-            match = re.search(r'(REQ-[\w-]+)[:\s]+(.+)', title)
-            if match and not any(r['id'] == match.group(1) for r in reqs):
-                reqs.append({'id': match.group(1), 'text': match.group(2).strip()})
+            match = re.search(r"(REQ-[\w-]+)[:\s]+(.+)", title)
+            if match and not any(r["id"] == match.group(1) for r in reqs):
+                reqs.append({"id": match.group(1), "text": match.group(2).strip()})
 
     return reqs
 
 
 def extract_pdf_format(filepath: Path, output_dir: Path) -> ExtractionResult:
     """Extract PDF using the full pipeline."""
-    result = ExtractionResult(format='pdf', success=False)
+    result = ExtractionResult(format="pdf", success=False)
 
     try:
         # Use specific flags instead of --offline-smoke to enable table extraction
         # Skip LLM stages but run Camelot table extraction
         cmd = [
-            sys.executable, "-m", "extractor.pipeline",
-            "--skip-proving",           # Skip Lean4 prover
-            "--skip-annotator09a",       # Skip PDF annotator
-            "--skip-fig-descriptions",   # Skip VLM figure descriptions
-            "--summary-only",            # Skip section summarization
-            "--pdf", str(filepath),
-            "--out", str(output_dir),
+            sys.executable,
+            "-m",
+            "extractor.pipeline",
+            "--skip-proving",  # Skip Lean4 prover
+            "--skip-annotator09a",  # Skip PDF annotator
+            "--skip-fig-descriptions",  # Skip VLM figure descriptions
+            "--summary-only",  # Skip section summarization
+            "--pdf",
+            str(filepath),
+            "--out",
+            str(output_dir),
         ]
 
         proc = subprocess.run(
@@ -243,13 +250,13 @@ def _sections_to_markdown(sections: List[Dict]) -> str:
     """Convert sections to markdown."""
     lines = []
     for section in sections:
-        level = section.get('level', 1)
-        title = section.get('title', section.get('display_title', ''))
+        level = section.get("level", 1)
+        title = section.get("title", section.get("display_title", ""))
         lines.append(f"{'#' * level} {title}")
         lines.append("")
 
-        for block in section.get('blocks', []):
-            text = block.get('text', '')
+        for block in section.get("blocks", []):
+            text = block.get("text", "")
             if text:
                 lines.append(text)
                 lines.append("")
@@ -265,8 +272,8 @@ def calculate_text_similarity(text_a: str, text_b: str) -> float:
         return 0.0
 
     # Normalize whitespace
-    text_a = ' '.join(text_a.split())
-    text_b = ' '.join(text_b.split())
+    text_a = " ".join(text_a.split())
+    text_b = " ".join(text_b.split())
 
     return difflib.SequenceMatcher(None, text_a, text_b).ratio()
 
@@ -296,33 +303,41 @@ def compare_results(result_a: ExtractionResult, result_b: ExtractionResult) -> P
     section_count_b = len(result_b.sections)
     section_count_match = section_count_a == section_count_b
     if not section_count_match:
-        divergences.append(f"Section count: {result_a.format}={section_count_a}, {result_b.format}={section_count_b}")
+        divergences.append(
+            f"Section count: {result_a.format}={section_count_a}, {result_b.format}={section_count_b}"
+        )
 
     # Section titles similarity
-    titles_a = [s.get('title', '') for s in result_a.sections]
-    titles_b = [s.get('title', '') for s in result_b.sections]
+    titles_a = [s.get("title", "") for s in result_a.sections]
+    titles_b = [s.get("title", "") for s in result_b.sections]
     section_titles_similarity = calculate_list_similarity(titles_a, titles_b)
     if section_titles_similarity < 0.8:
         divergences.append(f"Section titles diverge: {titles_a[:3]} vs {titles_b[:3]}")
 
     # Requirement IDs
-    req_ids_a = {r.get('id', '') for r in result_a.requirements}
-    req_ids_b = {r.get('id', '') for r in result_b.requirements}
+    req_ids_a = {r.get("id", "") for r in result_a.requirements}
+    req_ids_b = {r.get("id", "") for r in result_b.requirements}
     requirement_ids_match = req_ids_a == req_ids_b
     if not requirement_ids_match:
         missing_in_b = req_ids_a - req_ids_b
         missing_in_a = req_ids_b - req_ids_a
         if missing_in_b:
-            divergences.append(f"Requirements in {result_a.format} but not {result_b.format}: {missing_in_b}")
+            divergences.append(
+                f"Requirements in {result_a.format} but not {result_b.format}: {missing_in_b}"
+            )
         if missing_in_a:
-            divergences.append(f"Requirements in {result_b.format} but not {result_a.format}: {missing_in_a}")
+            divergences.append(
+                f"Requirements in {result_b.format} but not {result_a.format}: {missing_in_a}"
+            )
 
     # Table count
     table_count_a = len(result_a.tables)
     table_count_b = len(result_b.tables)
     table_count_match = table_count_a == table_count_b
     if not table_count_match:
-        divergences.append(f"Table count: {result_a.format}={table_count_a}, {result_b.format}={table_count_b}")
+        divergences.append(
+            f"Table count: {result_a.format}={table_count_a}, {result_b.format}={table_count_b}"
+        )
 
     # Markdown similarity
     markdown_similarity = calculate_text_similarity(result_a.markdown, result_b.markdown)
@@ -331,11 +346,11 @@ def compare_results(result_a: ExtractionResult, result_b: ExtractionResult) -> P
 
     # Overall score (weighted average)
     overall_score = (
-        (1.0 if section_count_match else 0.5) * 0.2 +
-        section_titles_similarity * 0.2 +
-        (1.0 if requirement_ids_match else 0.0) * 0.3 +
-        (1.0 if table_count_match else 0.5) * 0.1 +
-        markdown_similarity * 0.2
+        (1.0 if section_count_match else 0.5) * 0.2
+        + section_titles_similarity * 0.2
+        + (1.0 if requirement_ids_match else 0.0) * 0.3
+        + (1.0 if table_count_match else 0.5) * 0.1
+        + markdown_similarity * 0.2
     )
 
     return ParityScore(
@@ -363,22 +378,24 @@ class CrossFormatParityTester:
 
     def _log(self, msg: str, level: str = "INFO"):
         if self.verbose:
-            prefix = {"INFO": "  ", "PASS": "[PASS]", "FAIL": "[FAIL]", "WARN": "[WARN]"}.get(level, "")
+            prefix = {"INFO": "  ", "PASS": "[PASS]", "FAIL": "[FAIL]", "WARN": "[WARN]"}.get(
+                level, ""
+            )
             print(f"{prefix} {msg}")
 
     def extract_all_formats(self):
         """Extract all available format files."""
         format_extensions = {
-            'pdf': ['.pdf'],
-            'html': ['.html', '.htm'],
-            'md': ['.md', '.markdown'],
-            'xml': ['.xml'],
-            'rst': ['.rst'],
-            'docx': ['.docx'],
-            'pptx': ['.pptx'],
-            'xlsx': ['.xlsx'],
-            'epub': ['.epub'],
-            'png': ['.png', '.jpg', '.jpeg'],
+            "pdf": [".pdf"],
+            "html": [".html", ".htm"],
+            "md": [".md", ".markdown"],
+            "xml": [".xml"],
+            "rst": [".rst"],
+            "docx": [".docx"],
+            "pptx": [".pptx"],
+            "xlsx": [".xlsx"],
+            "epub": [".epub"],
+            "png": [".png", ".jpg", ".jpeg"],
         }
 
         print(f"\n{'='*60}")
@@ -396,9 +413,9 @@ class CrossFormatParityTester:
                     with tempfile.TemporaryDirectory(prefix=f"parity_{fmt}_") as tmp:
                         output_dir = Path(tmp)
 
-                        if fmt == 'pdf':
+                        if fmt == "pdf":
                             result = extract_pdf_format(filepath, output_dir)
-                        elif fmt == 'png':
+                        elif fmt == "png":
                             # Image extraction uses ImageProvider
                             result = extract_structured_format(filepath, output_dir)
                         else:
@@ -411,7 +428,7 @@ class CrossFormatParityTester:
                                 f"  -> {len(result.sections)} sections, "
                                 f"{len(result.requirements)} reqs, "
                                 f"{len(result.tables)} tables",
-                                "PASS"
+                                "PASS",
                             )
                         else:
                             self._log(f"  -> Failed: {result.error}", "FAIL")
@@ -447,24 +464,32 @@ class CrossFormatParityTester:
             print("-" * 40)
 
             for i, fmt_a in enumerate(successful_formats):
-                for fmt_b in successful_formats[i+1:]:
+                for fmt_b in successful_formats[i + 1 :]:
                     score = compare_results(self.results[fmt_a], self.results[fmt_b])
                     self.parity_scores.append(score)
                     self._report_score(score)
 
     def _report_score(self, score: ParityScore):
         """Report a single parity score."""
-        status = "PASS" if score.overall_score >= 0.8 else ("WARN" if score.overall_score >= 0.6 else "FAIL")
+        status = (
+            "PASS"
+            if score.overall_score >= 0.8
+            else ("WARN" if score.overall_score >= 0.6 else "FAIL")
+        )
 
-        print(f"\n{score.format_a.upper()} vs {score.format_b.upper()}: {score.overall_score:.1%} [{status}]")
-        print(f"  Sections: {'match' if score.section_count_match else 'DIFFER'} "
-              f"(titles: {score.section_titles_similarity:.0%})")
+        print(
+            f"\n{score.format_a.upper()} vs {score.format_b.upper()}: {score.overall_score:.1%} [{status}]"
+        )
+        print(
+            f"  Sections: {'match' if score.section_count_match else 'DIFFER'} "
+            f"(titles: {score.section_titles_similarity:.0%})"
+        )
         print(f"  Requirements: {'match' if score.requirement_ids_match else 'DIFFER'}")
         print(f"  Tables: {'match' if score.table_count_match else 'DIFFER'}")
         print(f"  Markdown: {score.markdown_similarity:.0%}")
 
         if score.divergences:
-            print(f"  Divergences:")
+            print("  Divergences:")
             for d in score.divergences[:5]:
                 print(f"    - {d}")
 
@@ -477,7 +502,11 @@ class CrossFormatParityTester:
         successful = sum(1 for r in self.results.values() if r.success)
         total = len(self.results)
 
-        avg_parity = sum(s.overall_score for s in self.parity_scores) / len(self.parity_scores) if self.parity_scores else 0
+        avg_parity = (
+            sum(s.overall_score for s in self.parity_scores) / len(self.parity_scores)
+            if self.parity_scores
+            else 0
+        )
 
         print(f"\nFormats extracted: {successful}/{total}")
         print(f"Average parity score: {avg_parity:.1%}")
@@ -491,11 +520,11 @@ class CrossFormatParityTester:
 
         # Overall verdict
         if avg_parity >= 0.8:
-            print(f"\nVERDICT: PASS - Cross-format parity is good")
+            print("\nVERDICT: PASS - Cross-format parity is good")
         elif avg_parity >= 0.6:
-            print(f"\nVERDICT: WARN - Some format divergences detected")
+            print("\nVERDICT: WARN - Some format divergences detected")
         else:
-            print(f"\nVERDICT: FAIL - Significant cross-format divergences")
+            print("\nVERDICT: FAIL - Significant cross-format divergences")
 
         return {
             "formats_tested": list(self.results.keys()),
@@ -514,10 +543,18 @@ class CrossFormatParityTester:
 
 def main():
     parser = argparse.ArgumentParser(description="Cross-Format Parity Test")
-    parser.add_argument("--fixture-dir", type=Path, required=True, help="Directory with multi-format fixtures")
-    parser.add_argument("--name", type=str, default="bht_cv32a65x", help="Base filename of fixtures")
-    parser.add_argument("--reference", type=str, default=None,
-                        help="Reference format to compare against (e.g., 'pdf')")
+    parser.add_argument(
+        "--fixture-dir", type=Path, required=True, help="Directory with multi-format fixtures"
+    )
+    parser.add_argument(
+        "--name", type=str, default="bht_cv32a65x", help="Base filename of fixtures"
+    )
+    parser.add_argument(
+        "--reference",
+        type=str,
+        default=None,
+        help="Reference format to compare against (e.g., 'pdf')",
+    )
     parser.add_argument("--json", action="store_true", help="Output results as JSON")
     parser.add_argument("--quiet", "-q", action="store_true", help="Minimal output")
 

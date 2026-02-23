@@ -2,14 +2,15 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from pathlib import Path
 
 from .assets import INDEX_TEMPLATE, ASSETS
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Copy overlay viewer assets into a stage directory.")
+    parser = argparse.ArgumentParser(
+        description="Copy overlay viewer assets into a stage directory."
+    )
     parser.add_argument(
         "--stage-dir",
         required=True,

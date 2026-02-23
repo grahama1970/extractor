@@ -57,7 +57,9 @@ def _safe_read_image_b64(path_str: str, base_dir: Path) -> Optional[str]:
                         norm = buf.getvalue()
                         return base64.b64encode(norm).decode("utf-8")
                     except Exception as exc:
-                        log_stage_error("image_io", exc, {"context": "PIL_normalize", "candidate": str(cand)})
+                        log_stage_error(
+                            "image_io", exc, {"context": "PIL_normalize", "candidate": str(cand)}
+                        )
                 # Fallback: return original bytes (may still work if valid)
                 return base64.b64encode(raw).decode("utf-8")
         return None

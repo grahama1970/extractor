@@ -169,6 +169,7 @@ async def extract_to_unified_json(
         # STEP 1: Extract annotations FIRST if configured
         annotations = None
         validation_results = {}  # Initialize validation results
+        validator = None
         if pipeline_config:
             from extractor.pipeline_config import ProcessorType
 
@@ -412,8 +413,11 @@ async def extract_to_unified_json(
                             ]
 
                 rendered = DictWrapper(rendered_dict)
-            except:
+            except Exception:
                 logger.error("Failed to parse rendered as JSON")
+
+        # Keep reference to document for raw_text calls
+        document_ref = getattr(rendered, "document", None)
 
         if hasattr(rendered, "children") and rendered.children:
             logger.info(f"Number of top-level children (pages): {len(rendered.children)}")
@@ -457,11 +461,6 @@ async def extract_to_unified_json(
         # Extract blocks from JSON output
         blocks = []
         all_blocks = []
-
-        # Keep reference to document for raw_text calls
-        document_ref = None
-        if hasattr(rendered, "document"):
-            document_ref = rendered.document
 
         def extract_blocks_recursive(node, parent_text=""):
             """Recursively extract all blocks."""
@@ -588,7 +587,7 @@ async def extract_to_unified_json(
                                             text = node.raw_text(document_ref)
                                         else:
                                             text = node.raw_text()
-                                    except:
+                                    except Exception:
                                         pass
                                 else:
                                     text = str(node.raw_text)

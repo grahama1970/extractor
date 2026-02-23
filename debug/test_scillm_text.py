@@ -3,13 +3,14 @@
 Smoke: SciLLM/Router text sanity using your .env model aliases.
 Prints a one-line JSON: {"ok": true} on success.
 """
-import os, json, sys
+import os
+import json
+import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from litellm import Router  # SciLLM provides provider glue behind this API
-from extractor.pipeline.utils.litellm_call import normalize_model_id, completion_simple
+from extractor.pipeline.utils.litellm_call import completion_simple
 
 
 def main() -> int:
@@ -31,7 +32,8 @@ def main() -> int:
     )
     content = (
         out.choices[0].message.get("content")
-        if hasattr(out, "choices") else out.get("choices", [{}])[0].get("message", {}).get("content", "")
+        if hasattr(out, "choices")
+        else out.get("choices", [{}])[0].get("message", {}).get("content", "")
     )
     try:
         data = json.loads(content)

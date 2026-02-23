@@ -1,4 +1,3 @@
-from pathlib import Path
 import json
 from types import SimpleNamespace
 
@@ -22,11 +21,13 @@ def test_download_with_fetcher_returns_blob(tmp_path, monkeypatch):
     blob.write_bytes(b"data")
     windows_file = tmp_path / "windows.jsonl"
     windows_file.write_text(json.dumps({"index": 0, "start": 0, "end": 4, "text": "abcd"}) + "\n")
-    fake_result = SimpleNamespace(metadata={
-        "blob_path": str(blob),
-        "blob_size": 4,
-        "rolling_windows_path": str(windows_file),
-    })
+    fake_result = SimpleNamespace(
+        metadata={
+            "blob_path": str(blob),
+            "blob_size": 4,
+            "rolling_windows_path": str(windows_file),
+        }
+    )
 
     fake_module = SimpleNamespace(
         fetch_url=lambda *args, **kwargs: fake_result,

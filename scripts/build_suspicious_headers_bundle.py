@@ -11,6 +11,7 @@ Usage example:
     --out data/results/pipeline/03_suspicious_headers/debug/suspicious_headers_bundle.json \
     --phrase "^\s*For any HW configuration"
 """
+
 from __future__ import annotations
 
 import argparse
@@ -22,11 +23,23 @@ from pathlib import Path
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Build suspicious-headers debug bundle for Stage 03")
-    ap.add_argument("--source-json", required=True, help="Path to Stage 02 JSON (02_marker_blocks_*.json)")
+    ap.add_argument(
+        "--source-json", required=True, help="Path to Stage 02 JSON (02_marker_blocks_*.json)"
+    )
     ap.add_argument("--clean-pdf", required=True, help="Path to the clean PDF from Stage 01")
-    ap.add_argument("--out", default="data/results/pipeline/03_suspicious_headers/debug/suspicious_headers_bundle.json", help="Output bundle JSON path")
-    ap.add_argument("--phrase", default=r"^\s*For any HW configuration", help="Regex for the text line to promote to a header candidate")
-    ap.add_argument("--add-reason", default="test_misclassification", help="Extra suspicious reason tag to add")
+    ap.add_argument(
+        "--out",
+        default="data/results/pipeline/03_suspicious_headers/debug/suspicious_headers_bundle.json",
+        help="Output bundle JSON path",
+    )
+    ap.add_argument(
+        "--phrase",
+        default=r"^\s*For any HW configuration",
+        help="Regex for the text line to promote to a header candidate",
+    )
+    ap.add_argument(
+        "--add-reason", default="test_misclassification", help="Extra suspicious reason tag to add"
+    )
     args = ap.parse_args()
 
     src = Path(args.source_json)
@@ -52,7 +65,7 @@ def main() -> int:
     if idx < 0:
         # surface nearby candidates to aid debugging
         for i, b in enumerate(blocks):
-            t = (b.get("text") or "")
+            t = b.get("text") or ""
             if "HW configuration" in t:
                 print(f"Candidate {i}: {t[:120].replace('\n',' ')}")
         raise SystemExit(f"Target phrase not found in Stage 02 JSON: {args.phrase}")
@@ -77,4 +90,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

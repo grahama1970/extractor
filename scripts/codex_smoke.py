@@ -22,8 +22,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import shlex
-from pathlib import Path
 from typing import List, Optional
 
 import typer
@@ -35,10 +33,18 @@ app = typer.Typer(help="Codex exec smoke: launch one child and wait for completi
 
 @app.command()
 def run(
-    cmd: Optional[str] = typer.Option(None, help="Shell command to run under codex (with --shell)."),
-    shell: bool = typer.Option(False, "--shell", help="Treat --cmd as a bash -lc payload (requires bash)."),
-    python_flag: bool = typer.Option(False, "--python", help="Run 'python' under codex instead of bash."),
-    args: List[str] = typer.Argument(None, help="Extra args (e.g., -c 'print(123)') when using --python."),
+    cmd: Optional[str] = typer.Option(
+        None, help="Shell command to run under codex (with --shell)."
+    ),
+    shell: bool = typer.Option(
+        False, "--shell", help="Treat --cmd as a bash -lc payload (requires bash)."
+    ),
+    python_flag: bool = typer.Option(
+        False, "--python", help="Run 'python' under codex instead of bash."
+    ),
+    args: List[str] = typer.Argument(
+        None, help="Extra args (e.g., -c 'print(123)') when using --python."
+    ),
     codex_bin: str = typer.Option("codex", help="codex CLI path"),
     yolo: bool = typer.Option(False, help="--dangerously-bypass-approvals-and-sandbox"),
 ) -> None:

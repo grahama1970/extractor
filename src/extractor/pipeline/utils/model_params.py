@@ -66,6 +66,6 @@ def build_chat_extras(model_name: str) -> Dict[str, Any]:
         if _seed is not None and str(_seed).strip() != "":
             extras["seed"] = int(str(_seed).strip())
     except Exception as exc:
-        log_stage_error('model_params.py', exc, {'context': 'model_params.py'})
+        log_stage_error("model_params.py", exc, {"context": "model_params.py"})
         raise
     return extras

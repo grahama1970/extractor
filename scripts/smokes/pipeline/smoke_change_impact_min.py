@@ -25,19 +25,31 @@ def main():
     tmp.mkdir(parents=True, exist_ok=True)
     old = tmp / "old.json"
     new = tmp / "new.json"
-    old.write_text(json.dumps([
-        {"_key": "a", "text_content": "Alpha", "section_id": "S1"},
-        {"_key": "b", "text_content": "Beta", "section_id": "S2"}
-    ], indent=2))
-    new.write_text(json.dumps([
-        {"_key": "a", "text_content": "Alpha updated", "section_id": "S1"},
-        {"_key": "c", "text_content": "Gamma", "section_id": "S3"}
-    ], indent=2))
+    old.write_text(
+        json.dumps(
+            [
+                {"_key": "a", "text_content": "Alpha", "section_id": "S1"},
+                {"_key": "b", "text_content": "Beta", "section_id": "S2"},
+            ],
+            indent=2,
+        )
+    )
+    new.write_text(
+        json.dumps(
+            [
+                {"_key": "a", "text_content": "Alpha updated", "section_id": "S1"},
+                {"_key": "c", "text_content": "Gamma", "section_id": "S3"},
+            ],
+            indent=2,
+        )
+    )
     import sys
+
     src_dir = str((Path(__file__).resolve().parents[3] / "src").resolve())
     if src_dir not in sys.path:
         sys.path.insert(0, src_dir)
     from extractor.pipeline.tools.change_impact import change_impact
+
     out = Path("scripts/artifacts/change_impact.json")
     res = change_impact(old, new, out)
     ok = res.get("ok") and len(res.get("impact_sections", [])) >= 1
@@ -49,4 +61,3 @@ def main():
 
 if __name__ == "__main__":
     app()
-

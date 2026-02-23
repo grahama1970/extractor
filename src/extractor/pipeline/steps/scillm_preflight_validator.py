@@ -14,8 +14,7 @@ import asyncio
 import aiohttp
 import logging
 from pathlib import Path
-from typing import Tuple, Optional, Dict, Any
-from urllib.parse import urljoin
+from typing import Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -46,30 +45,28 @@ async def probe_models_endpoint(base_url: str, api_key: str) -> Tuple[bool, str]
                 data = await resp.json()
                 # data is usually {"data": [{"id": ...}, ...], "object": "list"}
                 ids = [m["id"] for m in data.get("data", [])]
-        
+
         if not ids:
             return False, "No models returned"
-        
+
         text_model = os.getenv("CHUTES_TEXT_MODEL")
         if text_model and text_model not in ids:
             # warning only? or strict?
-            pass 
+            pass
         logger.info(f"SciLLM preflight: Found {len(ids)} total models")
         return True, "Models endpoint accessible"
     except Exception as e:
         return False, f"Models endpoint probe failed: {e}"
 
+
 async def probe_chat_completions_endpoint(base_url: str, api_key: str) -> Tuple[bool, str]:
     # Inline implementation to avoid scillm dependency
     url = f"{base_url}/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json"
-    }
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     payload = {
         "model": os.getenv("CHUTES_TEXT_MODEL") or "deepseek-ai/DeepSeek-R1",
         "messages": [{"role": "user", "content": "ping"}],
-        "max_tokens": 1
+        "max_tokens": 1,
     }
     try:
         async with aiohttp.ClientSession() as session:
@@ -158,14 +155,14 @@ def quick_scillm_check() -> bool:
     vlm_model = os.getenv("CHUTES_VLM_MODEL")
     base_url = os.getenv("CHUTES_API_BASE")
     api_key = os.getenv("CHUTES_API_KEY")
-    
+
     if not base_url or not api_key:
         return False
-    
+
     # At least one model should be configured for the pipeline to work
     if not text_model and not vlm_model:
         return False
-    
+
     return True
 
 

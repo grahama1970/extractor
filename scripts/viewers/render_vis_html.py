@@ -39,13 +39,17 @@ TEMPLATE = """
 
 app = typer.Typer(add_completion=False)
 
+
 @app.command()
-def main(viewer_json: Path = typer.Argument(..., exists=True, readable=True), out_html: Path = typer.Argument(Path("viewer.html"))):
+def main(
+    viewer_json: Path = typer.Argument(..., exists=True, readable=True),
+    out_html: Path = typer.Argument(Path("viewer.html")),
+):
     payload = json.loads(viewer_json.read_text())
     html = TEMPLATE.replace("__DATA__", json.dumps(payload))
     out_html.write_text(html)
     typer.secho(f"OK: wrote {out_html}", fg=typer.colors.GREEN)
 
+
 if __name__ == "__main__":
     app()
-

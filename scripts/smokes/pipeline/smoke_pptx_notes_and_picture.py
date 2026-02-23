@@ -45,7 +45,15 @@ def main(tmp_dir: Path = typer.Option(Path("data/results/structured_parity_smoke
     prs.save(pptx_path)
 
     meta = STRUCTURED_PIPELINES[PPTXProvider]
-    artifacts = run_structured_pipeline(PPTXProvider, pptx_path, tmp_dir, stage_prefix=meta.stage_prefix, skip_export10=True, skip_embeddings10=True, fast_embeddings10=True)
+    artifacts = run_structured_pipeline(
+        PPTXProvider,
+        pptx_path,
+        tmp_dir,
+        stage_prefix=meta.stage_prefix,
+        skip_export10=True,
+        skip_embeddings10=True,
+        fast_embeddings10=True,
+    )
     s07 = json.loads(Path(artifacts["stage07"]).read_text())
     secs = s07.get("reflowed_sections") or []
     assert secs, "No sections built"
@@ -62,4 +70,3 @@ def main(tmp_dir: Path = typer.Option(Path("data/results/structured_parity_smoke
 
 if __name__ == "__main__":
     app()
-

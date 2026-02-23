@@ -17,7 +17,6 @@ from __future__ import annotations
 import json
 import re
 import subprocess
-import sys
 from pathlib import Path
 
 import typer
@@ -50,11 +49,11 @@ def main():
     reqs = extract_shall_sentences(text)
 
     items = [
-        {"requirement": r, "metadata": {"section_id": f"S-{i:03d}"}}
-        for i, r in enumerate(reqs)
+        {"requirement": r, "metadata": {"section_id": f"S-{i:03d}"}} for i, r in enumerate(reqs)
     ]
 
-    tmp = Path("/tmp/lean_shall_in.json"); tmp.write_text(json.dumps(items, indent=2))
+    tmp = Path("/tmp/lean_shall_in.json")
+    tmp.write_text(json.dumps(items, indent=2))
     out = Path("/tmp/lean_shall_out.json")
 
     cmd = [
@@ -70,7 +69,9 @@ def main():
         "--max-workers",
         "1",
     ]
-    env = __import__("os").environ.copy(); env["PYTHONPATH"]="/home/graham/workspace/experiments/lean4/src:"+env.get("PYTHONPATH","" ); rc = subprocess.run(cmd, env=env).returncode
+    env = __import__("os").environ.copy()
+    env["PYTHONPATH"] = "/home/graham/workspace/experiments/lean4/src:" + env.get("PYTHONPATH", "")
+    rc = subprocess.run(cmd, env=env).returncode
     if rc != 0 or not out.exists():
         typer.echo("Lean4 batch failed", err=True)
         raise typer.Exit(1)
@@ -83,7 +84,9 @@ def main():
         "out": str(out),
     }
     Path("scripts/artifacts").mkdir(parents=True, exist_ok=True)
-    (Path("scripts/artifacts")/"req_sentence_shall_summary.json").write_text(json.dumps(summary, indent=2))
+    (Path("scripts/artifacts") / "req_sentence_shall_summary.json").write_text(
+        json.dumps(summary, indent=2)
+    )
     print(json.dumps(summary, indent=2))
 
 

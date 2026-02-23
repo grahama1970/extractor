@@ -37,7 +37,15 @@ def main(tmp_dir: Path = typer.Option(Path("data/results/structured_parity_smoke
         encoding="utf-8",
     )
     meta = STRUCTURED_PIPELINES[HTMLProvider]
-    artifacts = run_structured_pipeline(HTMLProvider, html_path, tmp_dir, stage_prefix=meta.stage_prefix, skip_export10=True, skip_embeddings10=True, fast_embeddings10=True)
+    artifacts = run_structured_pipeline(
+        HTMLProvider,
+        html_path,
+        tmp_dir,
+        stage_prefix=meta.stage_prefix,
+        skip_export10=True,
+        skip_embeddings10=True,
+        fast_embeddings10=True,
+    )
     s07 = json.loads(Path(artifacts["stage07"]).read_text())
     secs = s07.get("reflowed_sections") or []
     assert secs, "No sections built"
@@ -45,7 +53,9 @@ def main(tmp_dir: Path = typer.Option(Path("data/results/structured_parity_smoke
     assert tabs, "No tables found"
     t = tabs[0]
     if (t.get("rows", 0) < 2) or (t.get("cols", 0) < 2):
-        typer.echo(f"Unexpected small table dims rows={t.get('rows')} cols={t.get('cols')}", err=True)
+        typer.echo(
+            f"Unexpected small table dims rows={t.get('rows')} cols={t.get('cols')}", err=True
+        )
         raise typer.Exit(code=1)
     headers = t.get("headers") or []
     if 0 not in headers:
@@ -56,4 +66,3 @@ def main(tmp_dir: Path = typer.Option(Path("data/results/structured_parity_smoke
 
 if __name__ == "__main__":
     app()
-

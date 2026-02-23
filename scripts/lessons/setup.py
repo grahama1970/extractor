@@ -49,7 +49,7 @@ def ensure_collections_and_view():
                 }
             },
         )
-    
+
     # Best-effort indexes for edges
     try:
         col = db.collection("lesson_edges")
@@ -57,11 +57,13 @@ def ensure_collections_and_view():
             col.add_hash_index(["_from"])  # type: ignore[attr-defined]
             col.add_hash_index(["_to"])  # type: ignore[attr-defined]
             col.add_hash_index(["pair_id"])  # type: ignore[attr-defined]
-            col.add_hash_index(["type","approved","status"])  # type: ignore[attr-defined]
+            col.add_hash_index(["type", "approved", "status"])  # type: ignore[attr-defined]
         except Exception:
             pass
     except Exception:
         pass
+
+
 print("ArangoDB lessons setup complete")
 
 

@@ -1,21 +1,3 @@
-"""
-Module: analyze_table_merges.py
-Description: Functions for analyze table merges operations
-
-External Dependencies:
-- click: [Documentation URL]
-- marker: [Documentation URL]
-
-Sample Input:
->>> # Add specific examples based on module functionality
-
-Expected Output:
->>> # Add expected output examples
-
-Example Usage:
->>> # Add usage examples
-"""
-
 #!/usr/bin/env python3
 """
 Command-line tool to analyze tables for merging after document processing.
@@ -27,8 +9,9 @@ tables should be merged, without modifying any data.
 import json
 import sys
 from pathlib import Path
-import click
 from typing import Optional
+
+import click
 
 from extractor.core.converters.pdf import PdfConverter
 from extractor.core.models import create_model_dict

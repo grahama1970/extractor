@@ -22,14 +22,60 @@ app = typer.Typer(add_completion=False)
 
 
 FORMAT_SAMPLES = [
-    ("html", Path("data/results/pipeline/01_annotation_processor/BHT_CV32A65X_marked_clean.html"), "07_html_ingest"),
-    ("docx", Path("data/results/pipeline/01_annotation_processor/bht_formats/BHT_CV32A65X_marked_clean.docx"), "07_docx_ingest"),
-    ("pptx", Path("data/results/pipeline/01_annotation_processor/bht_formats/BHT_CV32A65X_marked_clean.pptx"), "07_pptx_ingest"),
-    ("xlsx", Path("data/results/pipeline/01_annotation_processor/bht_formats/BHT_CV32A65X_marked_clean.xlsx"), "07_spreadsheet_ingest"),
-    ("epub", Path("data/results/pipeline/01_annotation_processor/bht_formats/BHT_CV32A65X_marked_clean.epub"), "07_epub_ingest"),
-    ("rst", Path("data/results/pipeline/01_annotation_processor/bht_formats/BHT_CV32A65X_marked_clean.rst"), "07_rst_ingest"),
-    ("xml", Path("data/results/pipeline/01_annotation_processor/bht_formats/BHT_CV32A65X_marked_clean.xml"), "07_xml_ingest"),
-    ("md", Path("data/results/pipeline/01_annotation_processor/bht_formats/BHT_CV32A65X_marked_clean.md"), "07_markdown_ingest"),
+    (
+        "html",
+        Path("data/results/pipeline/01_annotation_processor/BHT_CV32A65X_marked_clean.html"),
+        "07_html_ingest",
+    ),
+    (
+        "docx",
+        Path(
+            "data/results/pipeline/01_annotation_processor/bht_formats/BHT_CV32A65X_marked_clean.docx"
+        ),
+        "07_docx_ingest",
+    ),
+    (
+        "pptx",
+        Path(
+            "data/results/pipeline/01_annotation_processor/bht_formats/BHT_CV32A65X_marked_clean.pptx"
+        ),
+        "07_pptx_ingest",
+    ),
+    (
+        "xlsx",
+        Path(
+            "data/results/pipeline/01_annotation_processor/bht_formats/BHT_CV32A65X_marked_clean.xlsx"
+        ),
+        "07_spreadsheet_ingest",
+    ),
+    (
+        "epub",
+        Path(
+            "data/results/pipeline/01_annotation_processor/bht_formats/BHT_CV32A65X_marked_clean.epub"
+        ),
+        "07_epub_ingest",
+    ),
+    (
+        "rst",
+        Path(
+            "data/results/pipeline/01_annotation_processor/bht_formats/BHT_CV32A65X_marked_clean.rst"
+        ),
+        "07_rst_ingest",
+    ),
+    (
+        "xml",
+        Path(
+            "data/results/pipeline/01_annotation_processor/bht_formats/BHT_CV32A65X_marked_clean.xml"
+        ),
+        "07_xml_ingest",
+    ),
+    (
+        "md",
+        Path(
+            "data/results/pipeline/01_annotation_processor/bht_formats/BHT_CV32A65X_marked_clean.md"
+        ),
+        "07_markdown_ingest",
+    ),
 ]
 
 
@@ -39,7 +85,8 @@ def _assert_stage_paths(root: Path, stem: str, stage07_dir: str) -> None:
     if not s07.exists() or not s10.exists():
         raise AssertionError(f"Missing Stage outputs for {stem}: {s07} or {s10}")
     # sanity parse
-    json.loads(s07.read_text()); json.loads(s10.read_text())
+    json.loads(s07.read_text())
+    json.loads(s10.read_text())
 
 
 @app.command()
@@ -65,4 +112,3 @@ def main(
 
 if __name__ == "__main__":
     app()
-

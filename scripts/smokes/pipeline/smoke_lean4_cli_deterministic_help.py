@@ -32,7 +32,7 @@ def main():
     proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     out = proc.stdout.decode("utf-8", errors="ignore")
 
-    ok = ("deterministic" in out.lower())
+    ok = "deterministic" in out.lower()
 
     artifacts = Path("scripts/artifacts")
     artifacts.mkdir(parents=True, exist_ok=True)

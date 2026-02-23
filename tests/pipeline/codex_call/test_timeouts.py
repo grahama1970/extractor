@@ -2,7 +2,6 @@ import asyncio
 import sys
 import time
 
-import pytest
 
 from extractor.pipeline.utils.deprecated_codex_call import run_codex_exec
 
@@ -35,9 +34,7 @@ def test_overall_timeout_terminates_quickly(tmp_path):
 def test_idle_timeout_triggers_without_overall_timeout(tmp_path):
     # Arrange: prints once, then sleeps 5s to trigger idle
     cmd = "-c"
-    code = (
-        "import sys, time; sys.stdout.write('start\\n'); sys.stdout.flush(); time.sleep(5)"
-    )
+    code = "import sys, time; sys.stdout.write('start\\n'); sys.stdout.flush(); time.sleep(5)"
 
     # Capture chunks to a list
     out_chunks = []

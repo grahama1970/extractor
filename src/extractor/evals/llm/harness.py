@@ -13,7 +13,6 @@ from scillm import acompletion as sc_acompletion  # type: ignore
 from scillm.extras.json_utils import clean_json_string
 from extractor.pipeline.utils.model_params import (
     build_chat_messages,
-    build_chat_extras,
 )
 
 

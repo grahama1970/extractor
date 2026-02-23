@@ -17,7 +17,9 @@ import aiohttp
 import typer
 from loguru import logger
 
-app = typer.Typer(help="General orchestrator: spawn N variants for any codebase, run episodes with plateau detection, log to ingest endpoints, and choose a champion.")
+app = typer.Typer(
+    help="General orchestrator: spawn N variants for any codebase, run episodes with plateau detection, log to ingest endpoints, and choose a champion."
+)
 
 
 def _rid(prefix: str) -> str:
@@ -47,42 +49,78 @@ def _slope(values: List[float]) -> float:
 
 @app.command()
 def run(
-    manifest: Optional[Path] = typer.Option(None, help="JSON manifest with codebase/N/ports/start-cmd/prompt and more"),
+    manifest: Optional[Path] = typer.Option(
+        None, help="JSON manifest with codebase/N/ports/start-cmd/prompt and more"
+    ),
     paper: Path = typer.Option(..., exists=True, help="PDF path (for logs only)"),
     transcript: Path = typer.Option(..., exists=True, help="Transcript JSON (for logs only)"),
     tasks: Path = typer.Option(..., exists=True, help="Tasks JSON file"),
-    targets: Optional[List[str]] = typer.Option(None, help="Variant URLs, e.g. http://localhost:5173"),
+    targets: Optional[List[str]] = typer.Option(
+        None, help="Variant URLs, e.g. http://localhost:5173"
+    ),
     variants: Optional[List[str]] = typer.Option(None, help="Variant names matching targets order"),
-    instances: Optional[int] = typer.Option(None, help="Number of variants to generate when not using manifest/variants"),
+    instances: Optional[int] = typer.Option(
+        None, help="Number of variants to generate when not using manifest/variants"
+    ),
     episodes: int = typer.Option(10, help="Number of episodes per variant (max)"),
     parallel: int = typer.Option(3, help="[DEPRECATED] Use --max-concurrency"),
-    max_concurrency: Optional[int] = typer.Option(None, help="Maximum variants to run simultaneously per episode"),
+    max_concurrency: Optional[int] = typer.Option(
+        None, help="Maximum variants to run simultaneously per episode"
+    ),
     api_base: str = typer.Option("http://localhost:8000", help="Ingest API base"),
     out: Path = typer.Option(Path("logs/orchestrator"), help="Output dir for orchestrator logs"),
     epsilon: float = typer.Option(0.15, help="Plateau slope epsilon"),
     window: int = typer.Option(5, help="Plateau window size"),
     # Codex exec options
-    use_codex: bool = typer.Option(False, "--use-codex", help="Run validator under 'codex exec' instead of plain subprocess"),
+    use_codex: bool = typer.Option(
+        False, "--use-codex", help="Run validator under 'codex exec' instead of plain subprocess"
+    ),
     codex_bin: str = typer.Option("codex", help="Codex CLI binary"),
     yolo: bool = typer.Option(False, help="codex exec --dangerously-bypass-approvals-and-sandbox"),
-    sandbox: Optional[str] = typer.Option(None, help="codex exec --sandbox value (e.g., workspace-write)"),
+    sandbox: Optional[str] = typer.Option(
+        None, help="codex exec --sandbox value (e.g., workspace-write)"
+    ),
     # Manifest-driven process launch
-    autostart: bool = typer.Option(True, help="When manifest is provided, auto-start variant servers"),
-    start_cmd: Optional[str] = typer.Option(None, help="Command template to start one server (uses {codebase},{variant},{port})"),
+    autostart: bool = typer.Option(
+        True, help="When manifest is provided, auto-start variant servers"
+    ),
+    start_cmd: Optional[str] = typer.Option(
+        None, help="Command template to start one server (uses {codebase},{variant},{port})"
+    ),
     codebase: Optional[Path] = typer.Option(None, help="Root directory of the codebase"),
-    ports: Optional[List[int]] = typer.Option(None, help="Comma-separated list of ports for instances"),
-    health_path: str = typer.Option("/classic", help="HTTP path to check for server health (when autostart is used)"),
+    ports: Optional[List[int]] = typer.Option(
+        None, help="Comma-separated list of ports for instances"
+    ),
+    health_path: str = typer.Option(
+        "/classic", help="HTTP path to check for server health (when autostart is used)"
+    ),
     health_timeout_s: float = typer.Option(60.0, help="Timeout in seconds for server healthchecks"),
     # Variant workspace + mutation
-    clone_variants: bool = typer.Option(False, help="If set, clone the original codebase into per-variant workdirs"),
-    variants_root: Path = typer.Option(Path("workspace/variants"), help="Directory where per-variant clones are created"),
-    mutate_cmd: Optional[str] = typer.Option(None, help="Optional command template to mutate a variant clone (uses {variant_dir},{variant},{rules})"),
-    rules: Optional[Path] = typer.Option(None, help="Rules file (JSON/text) passed to mutate_cmd as {rules}"),
+    clone_variants: bool = typer.Option(
+        False, help="If set, clone the original codebase into per-variant workdirs"
+    ),
+    variants_root: Path = typer.Option(
+        Path("workspace/variants"), help="Directory where per-variant clones are created"
+    ),
+    mutate_cmd: Optional[str] = typer.Option(
+        None,
+        help="Optional command template to mutate a variant clone (uses {variant_dir},{variant},{rules})",
+    ),
+    rules: Optional[Path] = typer.Option(
+        None, help="Rules file (JSON/text) passed to mutate_cmd as {rules}"
+    ),
     # Episode command override (harness agnostic)
-    episode_cmd: Optional[str] = typer.Option(None, help="If set, run this command per episode instead of validator (uses {target},{api_base},{run_id},{episode_id},{variant},{tasks},{screenshot_dir})"),
+    episode_cmd: Optional[str] = typer.Option(
+        None,
+        help="If set, run this command per episode instead of validator (uses {target},{api_base},{run_id},{episode_id},{variant},{tasks},{screenshot_dir})",
+    ),
     # Optional MCP research + code review hooks (run under Codex exec to preserve MCP)
-    research_topic: Optional[str] = typer.Option(None, help="If set, run scripts/codex_research.py with this topic before episodes"),
-    review_files: Optional[List[Path]] = typer.Option(None, help="If set, run scripts/codex_code_review.py on these files before episodes"),
+    research_topic: Optional[str] = typer.Option(
+        None, help="If set, run scripts/codex_research.py with this topic before episodes"
+    ),
+    review_files: Optional[List[Path]] = typer.Option(
+        None, help="If set, run scripts/codex_code_review.py on these files before episodes"
+    ),
 ):
     """Run orchestrated episodes across variants and stop variants that plateau."""
     out.mkdir(parents=True, exist_ok=True)
@@ -116,9 +154,9 @@ def run(
                 targets = [f"http://localhost:{p}" for p in ports]
         # Paper/transcript/tasks
         if manifest_data.get("paper"):
-            paper = Path(manifest_data["paper"]).resolve()
+            Path(manifest_data["paper"]).resolve()
         if manifest_data.get("transcript"):
-            transcript = Path(manifest_data["transcript"]).resolve()
+            Path(manifest_data["transcript"]).resolve()
         if manifest_data.get("tasks"):
             tasks = Path(manifest_data["tasks"]).resolve()
         # Health
@@ -147,7 +185,9 @@ def run(
             autostart = bool(manifest_data["autostart"])
 
     if not targets:
-        raise typer.BadParameter("No targets provided. Pass --targets or a manifest with ports/targets.")
+        raise typer.BadParameter(
+            "No targets provided. Pass --targets or a manifest with ports/targets."
+        )
     logger.info(f"Run {run_id} with {len(targets)} targets")
 
     if not variants or len(variants) != len(targets):
@@ -166,7 +206,10 @@ def run(
         base = variants_root / _rid("run")
         base.mkdir(parents=True, exist_ok=True)
         from shutil import copytree, ignore_patterns
-        ignores = ignore_patterns(".git", ".venv", "node_modules", "dist", "build", variants_root.name)
+
+        ignores = ignore_patterns(
+            ".git", ".venv", "node_modules", "dist", "build", variants_root.name
+        )
         for v in variants:
             dst = base / v
             logger.info(f"Cloning codebase to {dst}")
@@ -174,7 +217,9 @@ def run(
             variant_base_dir[v] = dst
             # Optional mutation step
             if mutate_cmd:
-                cmd_tpl = mutate_cmd.format(variant_dir=str(dst), variant=v, rules=(str(rules) if rules else ""))
+                cmd_tpl = mutate_cmd.format(
+                    variant_dir=str(dst), variant=v, rules=(str(rules) if rules else "")
+                )
                 full_cmd = cmd_tpl
                 if use_codex:
                     parts = [codex_bin, "exec"]
@@ -186,7 +231,13 @@ def run(
                     full_cmd = " ".join(shlex.quote(p) for p in parts) + " " + full_cmd
                 logger.info(f"Mutating {v}: {full_cmd}")
                 try:
-                    subprocess.run(full_cmd, shell=True, check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    subprocess.run(
+                        full_cmd,
+                        shell=True,
+                        check=False,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                    )
                 except Exception as e:
                     logger.warning(f"Mutation command failed for {v}: {e}")
     else:
@@ -285,7 +336,9 @@ def run(
 
     # If manifest autostart requested, start servers and wait for health
     if (manifest and autostart) or (autostart and start_cmd and (ports and targets is None)):
-        assert ports and len(ports) == len(variants), "ports must match number of variants when autostarting"
+        assert ports and len(ports) == len(
+            variants
+        ), "ports must match number of variants when autostarting"
         for vname, port in zip(variants, ports):
             _spawn_server(vname, port, base_dir=variant_base_dir.get(vname))
         # Wait for health for each target
@@ -302,42 +355,87 @@ def run(
         logger.info(f"Running research via Codex MCP: {research_topic}")
         if use_codex:
             from extractor.pipeline.utils.deprecated_codex_call import run_codex_exec
-            asyncio.run(run_codex_exec(
-                script_or_path="python",
-                codex_bin=codex_bin,
-                extra_args=[
-                    "scripts/codex_research.py", "run",
-                    "--topic", research_topic,
-                    "--api-base", api_base,
-                    "--run-id", run_id,
-                ],
-                bypass_approvals_and_sandbox=yolo,
-                sandbox_mode=sandbox,
-                stdout_capture_limit=512*1024,
-                stderr_capture_limit=256*1024,
-            ))
+
+            asyncio.run(
+                run_codex_exec(
+                    script_or_path="python",
+                    codex_bin=codex_bin,
+                    extra_args=[
+                        "scripts/codex_research.py",
+                        "run",
+                        "--topic",
+                        research_topic,
+                        "--api-base",
+                        api_base,
+                        "--run-id",
+                        run_id,
+                    ],
+                    bypass_approvals_and_sandbox=yolo,
+                    sandbox_mode=sandbox,
+                    stdout_capture_limit=512 * 1024,
+                    stderr_capture_limit=256 * 1024,
+                )
+            )
         else:
-            subprocess.run(["python", "scripts/codex_research.py", "run", "--topic", research_topic, "--api-base", api_base, "--run-id", run_id])
+            subprocess.run(
+                [
+                    "python",
+                    "scripts/codex_research.py",
+                    "run",
+                    "--topic",
+                    research_topic,
+                    "--api-base",
+                    api_base,
+                    "--run-id",
+                    run_id,
+                ]
+            )
 
     if review_files:
         logger.info(f"Running code review via Codex persona on {len(review_files)} files")
         file_args = [str(p) for p in review_files]
         if use_codex:
             from extractor.pipeline.utils.deprecated_codex_call import run_codex_exec
-            asyncio.run(run_codex_exec(
-                script_or_path="python",
-                codex_bin=codex_bin,
-                extra_args=["scripts/codex_code_review.py", "run", "--api-base", api_base, "--run-id", run_id] + file_args,
-                bypass_approvals_and_sandbox=yolo,
-                sandbox_mode=sandbox,
-                stdout_capture_limit=1024*1024,
-                stderr_capture_limit=256*1024,
-            ))
+
+            asyncio.run(
+                run_codex_exec(
+                    script_or_path="python",
+                    codex_bin=codex_bin,
+                    extra_args=[
+                        "scripts/codex_code_review.py",
+                        "run",
+                        "--api-base",
+                        api_base,
+                        "--run-id",
+                        run_id,
+                    ]
+                    + file_args,
+                    bypass_approvals_and_sandbox=yolo,
+                    sandbox_mode=sandbox,
+                    stdout_capture_limit=1024 * 1024,
+                    stderr_capture_limit=256 * 1024,
+                )
+            )
         else:
-            subprocess.run(["python", "scripts/codex_code_review.py", "run", "--api-base", api_base, "--run-id", run_id] + file_args)
+            subprocess.run(
+                [
+                    "python",
+                    "scripts/codex_code_review.py",
+                    "run",
+                    "--api-base",
+                    api_base,
+                    "--run-id",
+                    run_id,
+                ]
+                + file_args
+            )
 
     # Concurrency limit (pool)
-    concurrency = max_concurrency if (max_concurrency and max_concurrency > 0) else (parallel if parallel and parallel > 0 else len(variants))
+    concurrency = (
+        max_concurrency
+        if (max_concurrency and max_concurrency > 0)
+        else (parallel if parallel and parallel > 0 else len(variants))
+    )
 
     def _chunked(seq: Iterable[Any], n: int) -> Iterable[List[Any]]:
         buf: List[Any] = []
@@ -381,7 +479,9 @@ def run(
                         cmd_str = " ".join(shlex.quote(p) for p in parts) + " " + cmd_str
                     logger.info(cmd_str)
                     fp = open(tmp, "w")
-                    proc = subprocess.Popen(cmd_str, shell=True, stdout=fp, stderr=subprocess.PIPE, text=True)
+                    proc = subprocess.Popen(
+                        cmd_str, shell=True, stdout=fp, stderr=subprocess.PIPE, text=True
+                    )
                     procs.append(proc)
                     episode_tmp[proc] = fp
                 # Wait for batch
@@ -405,13 +505,20 @@ def run(
                         os.environ.get("PYTHON", "python"),
                         "scripts/validator_puppeteer.py",
                         "episode",
-                        "--target", target,
-                        "--api-base", api_base,
-                        "--run-id", run_id,
-                        "--episode-id", episode_id,
-                        "--variant", vname,
-                        "--tasks-file", str(tasks),
-                        "--screenshot-dir", str(Path("artifacts") / vname),
+                        "--target",
+                        target,
+                        "--api-base",
+                        api_base,
+                        "--run-id",
+                        run_id,
+                        "--episode-id",
+                        episode_id,
+                        "--variant",
+                        vname,
+                        "--tasks-file",
+                        str(tasks),
+                        "--screenshot-dir",
+                        str(Path("artifacts") / vname),
                     ]
                     logger.info(" ".join(cmd))
                     with open(tmp, "w") as fp:
@@ -447,13 +554,20 @@ def run(
                     args = [
                         "scripts/validator_puppeteer.py",
                         "episode",
-                        "--target", target,
-                        "--api-base", api_base,
-                        "--run-id", run_id,
-                        "--episode-id", ep_id,
-                        "--variant", vname,
-                        "--tasks-file", str(tasks),
-                        "--screenshot-dir", str(Path("artifacts") / vname),
+                        "--target",
+                        target,
+                        "--api-base",
+                        api_base,
+                        "--run-id",
+                        run_id,
+                        "--episode-id",
+                        ep_id,
+                        "--variant",
+                        vname,
+                        "--tasks-file",
+                        str(tasks),
+                        "--screenshot-dir",
+                        str(Path("artifacts") / vname),
                     ]
                     script_or_path = "python"
                 # Live log streaming to /ingest/log via callbacks
@@ -540,10 +654,13 @@ def run(
                 # Bounded concurrency
                 async def _run_all_limited(coros_in: List[Any]):
                     sem = asyncio.Semaphore(concurrency)
+
                     async def _wrap(coro):
                         async with sem:
                             return await coro
+
                     await asyncio.gather(*[_wrap(c) for c in coros_in])
+
                 asyncio.run(_run_all_limited(coros))
 
         # Collect scores and check plateaus
@@ -577,26 +694,37 @@ def run(
                     try:
                         topic = f"Variant {vname} plateaued with recent scores {hist[-window:]}. Recommend UI mutations and heuristics grounded in pdf.js/shadcn docs."
                         if use_codex:
-                            from extractor.pipeline.utils.deprecated_codex_call import run_codex_exec
+                            from extractor.pipeline.utils.deprecated_codex_call import (
+                                run_codex_exec,
+                            )
+
                             ts = int(time.time())
                             save_to = Path("data/research") / f"research_{run_id}_{vname}_{ts}.json"
                             docs_dir = Path("data/docs_summaries") / f"{run_id}_{vname}_{ts}"
-                            asyncio.run(run_codex_exec(
-                                script_or_path="python",
-                                codex_bin=codex_bin,
-                                extra_args=[
-                                    "scripts/codex_research.py", "run",
-                                    "--topic", topic,
-                                    "--api-base", api_base,
-                                    "--run-id", run_id,
-                                    "--save-to", str(save_to),
-                                    "--docs-dir", str(docs_dir),
-                                ],
-                                bypass_approvals_and_sandbox=yolo,
-                                sandbox_mode=sandbox,
-                                stdout_capture_limit=512*1024,
-                                stderr_capture_limit=256*1024,
-                            ))
+                            asyncio.run(
+                                run_codex_exec(
+                                    script_or_path="python",
+                                    codex_bin=codex_bin,
+                                    extra_args=[
+                                        "scripts/codex_research.py",
+                                        "run",
+                                        "--topic",
+                                        topic,
+                                        "--api-base",
+                                        api_base,
+                                        "--run-id",
+                                        run_id,
+                                        "--save-to",
+                                        str(save_to),
+                                        "--docs-dir",
+                                        str(docs_dir),
+                                    ],
+                                    bypass_approvals_and_sandbox=yolo,
+                                    sandbox_mode=sandbox,
+                                    stdout_capture_limit=512 * 1024,
+                                    stderr_capture_limit=256 * 1024,
+                                )
+                            )
                     except Exception as e:
                         logger.warning(f"Auto-research failed: {e}")
 
@@ -609,25 +737,34 @@ def run(
             topic = f"Investigate errors observed in {vname}: {key}. Provide fixes using pdf.js and related docs; suggest robust patterns."
             try:
                 from extractor.pipeline.utils.deprecated_codex_call import run_codex_exec
+
                 ts = int(time.time())
                 save_to = Path("data/research") / f"research_{run_id}_{vname}_errors_{ts}.json"
                 docs_dir = Path("data/docs_summaries") / f"{run_id}_{vname}_errors_{ts}"
-                asyncio.run(run_codex_exec(
-                    script_or_path="python",
-                    codex_bin=codex_bin,
-                    extra_args=[
-                        "scripts/codex_research.py", "run",
-                        "--topic", topic,
-                        "--api-base", api_base,
-                        "--run-id", run_id,
-                        "--save-to", str(save_to),
-                        "--docs-dir", str(docs_dir),
-                    ],
-                    bypass_approvals_and_sandbox=yolo,
-                    sandbox_mode=sandbox,
-                    stdout_capture_limit=512*1024,
-                    stderr_capture_limit=256*1024,
-                ))
+                asyncio.run(
+                    run_codex_exec(
+                        script_or_path="python",
+                        codex_bin=codex_bin,
+                        extra_args=[
+                            "scripts/codex_research.py",
+                            "run",
+                            "--topic",
+                            topic,
+                            "--api-base",
+                            api_base,
+                            "--run-id",
+                            run_id,
+                            "--save-to",
+                            str(save_to),
+                            "--docs-dir",
+                            str(docs_dir),
+                        ],
+                        bypass_approvals_and_sandbox=yolo,
+                        sandbox_mode=sandbox,
+                        stdout_capture_limit=512 * 1024,
+                        stderr_capture_limit=256 * 1024,
+                    )
+                )
             except Exception as e:
                 logger.warning(f"Auto-research(error-trigger) failed: {e}")
 

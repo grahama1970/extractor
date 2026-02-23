@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 import argparse
 
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--flat", type=Path, required=True)

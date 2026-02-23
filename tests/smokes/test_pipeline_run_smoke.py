@@ -40,4 +40,3 @@ def test_pipeline_run_fast_json_and_final_report():
         assert fr.exists(), "final_report.json should exist even on partial/failed runs"
         data = json.loads(fr.read_text())
         assert isinstance(data, dict) and "meta" in data and "items" in data and "errors" in data
-

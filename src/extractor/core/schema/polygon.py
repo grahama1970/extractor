@@ -42,8 +42,7 @@ class PolygonBox(BaseModel):
         # Ensure corners are clockwise from top left
         corner_error = f" .Corners are {v}"
         assert v[2][1] >= min_y, (
-            "bottom right corner should have a greater y value than top right corner"
-            + corner_error
+            "bottom right corner should have a greater y value than top right corner" + corner_error
         )
         assert v[3][1] >= min_y, (
             "bottom left corner should have a greater y value than top left corner" + corner_error

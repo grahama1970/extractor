@@ -6,7 +6,6 @@
 #   "typer>=0.12",
 # ]
 # ///
-import sys
 from pathlib import Path
 import importlib.util
 import typer

@@ -1,5 +1,4 @@
 import json
-from pathlib import Path
 
 import pytest
 
@@ -31,7 +30,8 @@ def test_single_question_flow_tui_handler(tmp_path):
         tui_handler=lambda q: {"text": "looks good"},
     )
     data = json.loads(path.read_text())
-    assert data["responses"][0]["value"] == "looks good"
+    # Response format: {"id": "q1", "text": "looks good"} - handler response is spread into saved response
+    assert data["responses"][0]["text"] == "looks good"
 
 
 def test_multi_question_flow_with_fake_runner(tmp_path):

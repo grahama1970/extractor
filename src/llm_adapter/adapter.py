@@ -13,7 +13,6 @@ except Exception:  # pragma: no cover
 from loguru import logger
 
 from extractor.pipeline.utils.response_utils import (
-    extract_content,
     normalize_json_content,
 )
 from extractor.pipeline.utils.metrics_logger import log_metric
@@ -175,6 +174,7 @@ class LLMAdapter:
         # SciLLM/Chutes paved path: OpenAI-compatible + api_key only (no manual headers)
         try:
             import os as _os
+
             ch_base = (_os.getenv("CHUTES_API_BASE") or "").strip()
             ch_key = (_os.getenv("CHUTES_API_KEY") or "").strip()
             if ch_base:

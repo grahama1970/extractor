@@ -47,13 +47,21 @@ def _prefer(a: dict[str, Any], b: dict[str, Any]) -> dict[str, Any]:
 
 @app.command()
 def main(
-    input_dir: Path = typer.Option(Path("data/results/pipeline/03_suspicious_headers/datasets"), exists=False, help="Directory with JSONL files"),
-    output_path: Path = typer.Option(Path("scripts/artifacts/suspicious_headers_merged.jsonl"), help="Output JSONL path"),
-    include_sources: str = typer.Option("human,llm,heuristic_auto", help="Comma-separated label_source whitelist"),
+    input_dir: Path = typer.Option(
+        Path("data/results/pipeline/03_suspicious_headers/datasets"),
+        exists=False,
+        help="Directory with JSONL files",
+    ),
+    output_path: Path = typer.Option(
+        Path("scripts/artifacts/suspicious_headers_merged.jsonl"), help="Output JSONL path"
+    ),
+    include_sources: str = typer.Option(
+        "human,llm,heuristic_auto", help="Comma-separated label_source whitelist"
+    ),
 ) -> None:
     input_dir.mkdir(parents=True, exist_ok=True)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    allow = {s.strip().lower() for s in include_sources.split(',') if s.strip()}
+    allow = {s.strip().lower() for s in include_sources.split(",") if s.strip()}
     merged: dict[str, dict[str, Any]] = {}
     files: list[Path] = []
     for ext in ("*.jsonl", "*.ndjson"):
@@ -83,9 +91,13 @@ def main(
     with output_path.open("w", encoding="utf-8") as out:
         for _, obj in merged.items():
             out.write(json.dumps(obj, ensure_ascii=False) + "\n")
-    typer.echo(json.dumps({"ok": True, "files": len(files), "unique": len(merged), "out": str(output_path)}, indent=2))
+    typer.echo(
+        json.dumps(
+            {"ok": True, "files": len(files), "unique": len(merged), "out": str(output_path)},
+            indent=2,
+        )
+    )
 
 
 if __name__ == "__main__":
     app()
-

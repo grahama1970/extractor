@@ -41,7 +41,12 @@ def main():
                 "reflow_status": "success",
                 "reflowed_text": "Hello world",
                 "tables": [
-                    {"title": "INFERRED: T1", "headers": ["A"], "page_index": 0, "bbox": [0, 60, 200, 120]}
+                    {
+                        "title": "INFERRED: T1",
+                        "headers": ["A"],
+                        "page_index": 0,
+                        "bbox": [0, 60, 200, 120],
+                    }
                 ],
                 "figures": [
                     {"title": "F1", "ai_description": "desc", "page": 0, "bbox": [0, 130, 100, 200]}

@@ -9,11 +9,12 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import List, Literal, Optional, Dict, Any
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, field_validator
 
 
 class BlockMetadata(BaseModel):
     """Metadata for a block in reflowed output."""
+
     font_info: Optional[Dict[str, Any]] = None
     color: Optional[str] = None
     bbox: Optional[List[float]] = None
@@ -21,6 +22,7 @@ class BlockMetadata(BaseModel):
 
 class BlockType(BaseModel):
     """Base block type with common fields."""
+
     block_type: str
     page_idx: int
     page: int
@@ -31,6 +33,7 @@ class BlockType(BaseModel):
 
 class SectionHeaderBlock(BlockType):
     """Section header block."""
+
     block_type: Literal["SectionHeader"]
     first_span_font: Dict[str, Any]
     surya_confidence: float
@@ -46,6 +49,7 @@ class SectionHeaderBlock(BlockType):
 
 class TextBlock(BlockType):
     """Regular text block."""
+
     block_type: Literal["Text"]
     spans: Optional[List[Dict[str, Any]]] = None
 
@@ -56,6 +60,7 @@ ReflowBlock = SectionHeaderBlock | TextBlock | Dict[str, Any]  # Fallback for un
 
 class Metadata(BaseModel):
     """Section metadata."""
+
     section_id: str
     hash: str
     section_titles: List[str]
@@ -67,6 +72,7 @@ class Metadata(BaseModel):
 
 class ReflowedSection(BaseModel):
     """A reflowed section with title, blocks, and metadata."""
+
     title: str
     level: int
     blocks: List[ReflowBlock]
@@ -75,6 +81,7 @@ class ReflowedSection(BaseModel):
 
 class SourceFiles(BaseModel):
     """Paths to source files used in reflow."""
+
     sections: str
     tables: Optional[str] = None
     figures: Optional[str] = None
@@ -87,6 +94,7 @@ class Reflow07Output(BaseModel):
 
     This matches the real structure produced by 07_reflow_section.py
     """
+
     timestamp: datetime
     source_files: SourceFiles
     status: Literal["Completed", "Failed"]
@@ -108,7 +116,7 @@ def validate_reflow07_output(data: dict) -> tuple[Reflow07Output | None, str | N
 
 
 # Add validation helper that handles depth coercion
-@field_validator('section_depth', mode='before')
+@field_validator("section_depth", mode="before")
 def coerce_section_depth(cls, v):
     """Handle the common issue where section_depth might be int instead of list."""
     if isinstance(v, int):

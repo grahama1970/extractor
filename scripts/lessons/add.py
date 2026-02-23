@@ -8,7 +8,8 @@
 # ///
 
 from __future__ import annotations
-import os, json, time
+import os
+import time
 import typer
 from scripts.lessons.arango_client import get_db
 
@@ -19,6 +20,7 @@ SYNONYMS = {
     "smokes": ["smoke", "ci", "tests", "playwright", "puppeteer"],
     "timeout": ["hang", "stall", "latency"],
 }
+
 
 def build_keywords(tags: list[str], scope: str) -> str:
     bag: list[str] = []
@@ -36,7 +38,9 @@ def build_keywords(tags: list[str], scope: str) -> str:
             out.append(w)
     return " ".join(out)
 
+
 app = typer.Typer(add_completion=False)
+
 
 @app.command()
 def add(
@@ -72,8 +76,10 @@ def add(
         col.insert(doc)
         print("Inserted lesson")
 
+
 def _safe(d):
-    return {k: d[k] for k in ("_key","title","scope") if k in d}
+    return {k: d[k] for k in ("_key", "title", "scope") if k in d}
+
 
 if __name__ == "__main__":
     app()

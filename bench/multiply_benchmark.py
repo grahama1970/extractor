@@ -6,11 +6,10 @@ import importlib.util
 import json
 import random
 import re
-import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict
 
 
 def _import_from(path: Path, name: str):

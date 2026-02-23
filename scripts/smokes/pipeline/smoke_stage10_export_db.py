@@ -17,7 +17,9 @@ import typer
 from dotenv import load_dotenv, find_dotenv
 
 
-app = typer.Typer(add_completion=False, help="Smoke: Stage 10 export to Arango with fast embeddings")
+app = typer.Typer(
+    add_completion=False, help="Smoke: Stage 10 export to Arango with fast embeddings"
+)
 
 
 @app.command()
@@ -109,4 +111,3 @@ def main(results: Path = typer.Option(Path("data/results/pipeline_db_smoke"), "-
 
 if __name__ == "__main__":
     app()
-

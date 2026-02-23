@@ -15,8 +15,12 @@ app = typer.Typer(add_completion=False)
 
 @app.command()
 def main(
-    source: Path = typer.Argument(..., exists=True, readable=True, help="edge_hints.json or stage11 edges.json"),
-    out_json: Path = typer.Argument(Path("graph.json"), help="Viewer-friendly graph JSON (nodes, edges)")
+    source: Path = typer.Argument(
+        ..., exists=True, readable=True, help="edge_hints.json or stage11 edges.json"
+    ),
+    out_json: Path = typer.Argument(
+        Path("graph.json"), help="Viewer-friendly graph JSON (nodes, edges)"
+    ),
 ):
     obj = json.loads(source.read_text())
     # Accept either edge_hints (nodes: sections/lemmas, edges: depends_on/contradicts/...) or edges.json with same shape
@@ -42,13 +46,15 @@ def main(
                 continue
             if k in ("depends_on",):
                 for e in arr:
-                    src = e.get("from"); dst = e.get("to")
+                    src = e.get("from")
+                    dst = e.get("to")
                     if not src or not dst:
                         continue
                     vn_edges.append({"from": f"sections/{src}", "to": f"lemmas/{dst}", "label": k})
             elif k in ("contradicts", "contradicts_candidates", "refines", "refines_candidates"):
                 for e in arr:
-                    a = e.get("a") or e.get("refiner"); b = e.get("b") or e.get("refined")
+                    a = e.get("a") or e.get("refiner")
+                    b = e.get("b") or e.get("refined")
                     if not a or not b:
                         continue
                     vn_edges.append({"from": f"sections/{a}", "to": f"sections/{b}", "label": k})
@@ -62,4 +68,3 @@ def main(
 
 if __name__ == "__main__":
     app()
-

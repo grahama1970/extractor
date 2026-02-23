@@ -11,7 +11,9 @@ This checks Stage 07 section tables list and counts non-empty caption/title fiel
 """
 from __future__ import annotations
 
-import json, os, subprocess, sys
+import json
+import os
+import subprocess
 from pathlib import Path
 import typer
 
@@ -28,7 +30,13 @@ def ensure_stage07() -> Path:
         return p07
     cmd = [
         "/home/graham/workspace/experiments/extractor/.venv/bin/python",
-        "-m", "src.cli", "extract", str(PDF), str(OUT), "--mode", "accurate"
+        "-m",
+        "src.cli",
+        "extract",
+        str(PDF),
+        str(OUT),
+        "--mode",
+        "accurate",
     ]
     if subprocess.run(cmd).returncode != 0:
         raise SystemExit("extract failed")
@@ -67,13 +75,16 @@ def main():
     titled = sum(1 for t in agg_tables if str(t.get("caption") or t.get("title") or "").strip())
     report = {"section2_tables": len(agg_tables), "titled": titled}
     Path("scripts/artifacts").mkdir(parents=True, exist_ok=True)
-    (Path("scripts/artifacts")/"tables_titles_section2_summary.json").write_text(json.dumps(report, indent=2))
-    strict = os.getenv("ACCEPT_STRICT", "").lower() in {"1","true","yes","y"}
+    (Path("scripts/artifacts") / "tables_titles_section2_summary.json").write_text(
+        json.dumps(report, indent=2)
+    )
+    strict = os.getenv("ACCEPT_STRICT", "").lower() in {"1", "true", "yes", "y"}
     if strict:
         if len(tables) != 3 or titled != 3:
             typer.echo("Section 2 tables/titles mismatch", err=True)
             raise typer.Exit(1)
     print(json.dumps(report, indent=2))
+
 
 if __name__ == "__main__":
     app()

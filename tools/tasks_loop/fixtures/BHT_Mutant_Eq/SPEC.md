@@ -1,44 +1,44 @@
 ---
 fixture: BHT_Mutant_Eq
 pdf: fixtures/BHT_Mutant_Eq/source.pdf
-generated: 2026-01-13T11:40:44.601471
+generated: 2026-01-20T22:02:44.538024
 
 steps:
   s02:
     name: Marker Blocks
     expected:
-      block_count_min: 26
+      block_count_min: 31
   s04:
     name: Section Builder
     expected:
-      section_count_min: 1 # Existence check (Schema-Based Gate)
+      section_count: 5
   s05:
     name: Table Extractor
     expected:
-      table_count_min: 1 # Existence check
+      table_count: 5
   s06:
     name: Figure Extractor
     expected:
-      figure_count_min: 0 # Can be zero
+      figure_count: 1
   s08:
     name: Requirements (LLM)
     expected:
-      requirement_count_min: 1 # Existence check
+      requirement_count: 4
   s10:
     name: Markdown Exporter
     expected:
-      section_headers_min: 1
-      requirements_min: 1
-      equations_min: 0
+      section_headers: 5
+      requirements: 4
+      equations_min: 3
 ---
 
 # BHT_Mutant_Eq Fixture Notes
 
 ## Generated Content
 
-- **Sections**: 4
-- **Tables**: 3
-- **Figures**: 0
+- **Sections**: 5
+- **Tables**: 5
+- **Figures**: 1
 - **Requirements**: 4
 - **Equations**: 3
 - **Annotations**: 0
@@ -46,6 +46,7 @@ steps:
 ## Sections
 
 - Document Start (page 0)
+- ‭4.1.5.4. BHT (Branch History Table) submodule‬ (page 0)
 - 4.1.5.4.1. REQUIREMENTS (Simulated) (page 1)
 - 4.1.6 TABLE MERGE SCENARIOS (Simulated) (page 1)
 - 4.1.5. TABLE MERGE SCENARIOS (Simulated) (page 1)

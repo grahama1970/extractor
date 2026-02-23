@@ -19,7 +19,9 @@ class Box:
     color: Tuple[int, int, int] = (0, 200, 0)
 
 
-def _to_pixels(x: float, y: float, scale: float, page_h_pts: float, y_flip: bool) -> Tuple[int, int]:
+def _to_pixels(
+    x: float, y: float, scale: float, page_h_pts: float, y_flip: bool
+) -> Tuple[int, int]:
     if y_flip:
         y = page_h_pts - y
     return int(round(x * scale)), int(round(y * scale))
@@ -77,4 +79,3 @@ def draw_overlays(
                 draw.text((bx0 + pad, by0 + pad), txt, fill=(255, 255, 255, 255), font=font)
         out = out_dir / f"page_{pidx:03d}.png"
         img.save(out)
-

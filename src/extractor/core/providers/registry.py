@@ -13,12 +13,15 @@ Example usage
 >>> doc = provider_class("report.docx").extract_document()
 """
 
+import os
+
 try:
     import filetype  # type: ignore
 except Exception:  # pragma: no cover
     filetype = None  # type: ignore
 from pathlib import Path
 from typing import Type
+from loguru import logger
 
 # --- Native providers -------------------------------------------------
 from extractor.core.providers.image import ImageProvider
@@ -31,6 +34,16 @@ from extractor.core.providers.rst import RSTProvider
 from extractor.core.providers.spreadsheet import SpreadsheetProvider
 from extractor.core.providers.markdown import MarkdownProvider
 from extractor.core.providers.xml import XMLProvider
+from extractor.core.providers.xml import XMLProvider
+from extractor.core.providers.reqif import ReqIFProvider
+from extractor.core.providers.txt import TXTProvider
+from extractor.core.providers.json import JSONProvider
+# Try to import Schematron provider — used as enhancement, NOT replacement
+try:
+    from extractor.pipeline.ingest.schematron_provider import SchematronHTMLProvider
+except ImportError as e:
+    logger.debug(f"SchematronHTMLProvider not available: {e}")
+    SchematronHTMLProvider = None
 
 # ------------------------------------------------------------------
 # Provider factory
@@ -57,15 +70,67 @@ _PROVIDER_MAP: dict[str, Type] = {
     "ppt": PPTXProvider,
     "odp": PPTXProvider,
     "epub": EPUBProvider,
+    "epub": EPUBProvider,
     "xml": XMLProvider,
-    "html": HTMLProvider,
+    "html": HTMLProvider,  # Will be overridden if Schematron is available
     "htm": HTMLProvider,
+    "rst": RSTProvider,
     "rst": RSTProvider,
     "md": MarkdownProvider,
     "markdown": MarkdownProvider,
+    "txt": TXTProvider,
+    "text": TXTProvider,  # Also support .text extension
+    "log": TXTProvider,
+    "c": TXTProvider,
+    "h": TXTProvider,
+    "cpp": TXTProvider,
+    "py": TXTProvider,
+    "java": TXTProvider,
+    "csv": SpreadsheetProvider,
+    "tsv": SpreadsheetProvider,
+    "json": JSONProvider,
+    "jsonl": JSONProvider,  # JSON Lines format
+    "reqif": ReqIFProvider,
+    "reqifz": ReqIFProvider,
     # PDF remains the fallback
     "pdf": PdfProvider,
 }
+
+# Schematron enhances HTML extraction but NEVER replaces it.
+# If Schematron fails (API down, bad output), we fall back to native HTMLProvider.
+# The registry maps to a wrapper that handles this fallback chain.
+if SchematronHTMLProvider:
+
+    class _SchematronWithFallback:
+        """Tries SchematronHTMLProvider first, falls back to native HTMLProvider.
+
+        This wrapper ensures HTML extraction NEVER fails just because
+        the SGLang API is unavailable or the model returns bad output.
+
+        Set EXTRACT_HTML_SKIP_LLM=1 to bypass Schematron entirely (e.g. batch/offline).
+        """
+
+        def __init__(self, config=None):
+            self._schematron = SchematronHTMLProvider(config=config)
+            self._fallback = HTMLProvider(config=config)
+
+        def extract_document(self, filepath):
+            if os.environ.get("EXTRACT_HTML_SKIP_LLM", "") == "1":
+                return self._fallback.extract_document(filepath)
+            try:
+                return self._schematron.extract_document(filepath)
+            except ConnectionError as e:
+                logger.warning(f"Schematron unavailable, falling back to HTMLProvider: {e}")
+                return self._fallback.extract_document(filepath)
+            except RuntimeError as e:
+                logger.warning(f"Schematron failed after retries, falling back to HTMLProvider: {e}")
+                return self._fallback.extract_document(filepath)
+            except Exception as e:
+                logger.error(f"Unexpected Schematron error ({type(e).__name__}: {e}), falling back to HTMLProvider")
+                return self._fallback.extract_document(filepath)
+
+    _PROVIDER_MAP["html"] = _SchematronWithFallback
+    _PROVIDER_MAP["htm"] = _SchematronWithFallback
 
 
 def provider_from_filepath(filepath: str) -> Type:
@@ -107,17 +172,17 @@ def provider_from_filepath(filepath: str) -> Type:
         if provider:
             return provider
 
-    # 3. HTML sniffing
-    if ext in {"html", "htm"}:
-        try:
-            with path.open("r", encoding="utf-8", errors="ignore") as f:
-                head = f.read(2048)
-            from bs4 import BeautifulSoup
+    # 3. HTML sniffing (for files without .html/.htm extension)
+    try:
+        with path.open("r", encoding="utf-8", errors="ignore") as f:
+            head = f.read(2048)
+        from bs4 import BeautifulSoup
 
-            if BeautifulSoup(head, "html.parser").find():
-                return HTMLProvider
-        except Exception:
-            pass
+        if BeautifulSoup(head, "html.parser").find():
+            # Use the fallback-wrapped provider if available, else native
+            return _PROVIDER_MAP.get("html", HTMLProvider)
+    except Exception as e:
+        logger.debug(f"HTML sniffing failed for {filepath}: {e}")
 
     # 4. Fallback
     return PdfProvider

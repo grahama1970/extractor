@@ -25,6 +25,7 @@ from .utils import (
 )
 
 from .sanity_runner import run_preflight_sanity, SanityCheckError
+
 DEFAULT_OUT = ROOT / "data" / "results" / "pipeline_contract"
 JUDGE_SCHEMA = Path(__file__).resolve().parent / "judges" / "llm_judge.schema.json"
 CLARIFY_EXIT_CODE = 4
@@ -124,9 +125,7 @@ def write_debug_summary(out: Path, entries: list[dict[str, str]]) -> None:
     ]
     for entry in entries:
         log_cell = entry.get("logs") or "n/a"
-        lines.append(
-            f"| {entry['step']} | {entry['attempt']} | {entry['status']} | {log_cell} |"
-        )
+        lines.append(f"| {entry['step']} | {entry['attempt']} | {entry['status']} | {log_cell} |")
     (out / "debug.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -351,7 +350,7 @@ def run_step(
     verify_log_dir = attempt_dir if capture_logs else None
 
     if args.verify_only:
-        start_t = time.time()
+        time.time()
         success = verify_step(
             step,
             out,
@@ -408,7 +407,7 @@ def run_contract_loop(args: argparse.Namespace, adapter: BaseAdapter) -> int:
     except SanityCheckError as exc:
         print(f"!! Sanity check failed: {exc}")
         return 5
-    
+
     # Task 1: Initialize Manifest
     manifest = Manifest(
         out,
@@ -424,9 +423,7 @@ def run_contract_loop(args: argparse.Namespace, adapter: BaseAdapter) -> int:
     bundle_warn_bytes = int(getattr(args, "bundle_warn_mb", 50) * 1024 * 1024)
     bundle_fail_bytes = int(getattr(args, "bundle_max_mb", 100) * 1024 * 1024)
 
-    def _create_bundle_or_fail(
-        step_name: str, attempt: int, artifacts: list[str]
-    ) -> Optional[str]:
+    def _create_bundle_or_fail(step_name: str, attempt: int, artifacts: list[str]) -> Optional[str]:
         if not args.debug:
             return None
         try:
@@ -520,7 +517,7 @@ def run_contract_loop(args: argparse.Namespace, adapter: BaseAdapter) -> int:
                         "logs": logs_rel,
                     }
                 )
-            
+
             if not success:
                 print(f"!! {step.name} verification failed")
                 finalize_debug(out, debug_entries, bool(args.debug))
@@ -546,7 +543,7 @@ def run_contract_loop(args: argparse.Namespace, adapter: BaseAdapter) -> int:
             for idx in range(start_idx, end_idx + 1):
                 step = enabled_steps[idx]
                 print(f"-- running {step.name}")
-                
+
                 start_t = time.time()
                 step_ok = run_step(step, out, args, env, fixture, adapter, attempt=attempt)
                 duration = time.time() - start_t
@@ -621,6 +618,8 @@ def run_contract_loop(args: argparse.Namespace, adapter: BaseAdapter) -> int:
     print("✅ Contract verification complete.")
     finalize_debug(out, debug_entries, bool(args.debug))
     return 0
+
+
 def finalize_debug(out: Path, entries: list[dict[str, str]], enabled: bool) -> None:
     if enabled:
         write_debug_summary(out, entries)

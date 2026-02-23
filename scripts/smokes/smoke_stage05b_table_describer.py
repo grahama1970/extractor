@@ -62,7 +62,9 @@ def main(
     _write_stage05_tables(stage05_json / "05_tables.json")
 
     try:
-        out_file = run_table_describer(stage_05_dir=results / "05_table_extractor", output_dir=results, skip_descriptions=True)
+        run_table_describer(
+            stage_05_dir=results / "05_table_extractor", output_dir=results, skip_descriptions=True
+        )
     except Exception as exc:  # pragma: no cover - smoke script
         typer.echo(f"Stage 05b execution failed: {exc}", err=True)
         raise typer.Exit(code=1)

@@ -13,7 +13,9 @@ from extractor.pipeline.steps import _03_suspicious_headers as stage03
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--bundle", type=Path, required=True, help="Bundle with marker_blocks + clean_pdf")
+    ap.add_argument(
+        "--bundle", type=Path, required=True, help="Bundle with marker_blocks + clean_pdf"
+    )
     ap.add_argument("--out", type=Path, required=True, help="Results root (pipeline)")
     args = ap.parse_args()
 
@@ -24,4 +26,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

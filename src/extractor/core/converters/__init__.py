@@ -28,18 +28,20 @@ from typing import Optional, List, Type
 from pydantic import BaseModel
 
 from extractor.core.processors import BaseProcessor
+
 try:
     from extractor.core.processors.llm import BaseLLMSimpleBlockProcessor  # type: ignore
     from extractor.core.processors.llm.llm_meta import LLMSimpleBlockMetaProcessor  # type: ignore
 except Exception:  # pragma: no cover - optional LLM path disabled in offline/minimal mode
+
     class BaseLLMSimpleBlockProcessor(BaseProcessor):  # type: ignore
         pass
 
     class LLMSimpleBlockMetaProcessor(BaseProcessor):  # type: ignore
-        def __init__(self, *args, **kwargs):
-            ...
-        def __call__(self, *args, **kwargs):
-            ...
+        def __init__(self, *args, **kwargs): ...
+        def __call__(self, *args, **kwargs): ...
+
+
 from extractor.core.util import assign_config, download_font
 
 
@@ -67,7 +69,7 @@ class BaseConverter:
                 resolved_kwargs[param_name] = self.config
             elif param_name == "llm_service":
                 resolved_kwargs[param_name] = self.llm_service
-            elif param_name in getattr(self, 'artifact_dict', {}):
+            elif param_name in getattr(self, "artifact_dict", {}):
                 resolved_kwargs[param_name] = self.artifact_dict[param_name]
             elif param.default != inspect.Parameter.empty:
                 resolved_kwargs[param_name] = param.default

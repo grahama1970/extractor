@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 import argparse
 
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--flat", type=Path, required=True)
@@ -25,6 +26,7 @@ def main():
             lines.append(blk.get("text") or blk.get("content") or "")
     args.out.write_text("\n\n".join(lines), encoding="utf-8")
     print(f"Wrote markdown with {len(blocks)} blocks → {args.out}")
+
 
 if __name__ == "__main__":
     main()

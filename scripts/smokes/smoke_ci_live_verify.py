@@ -30,7 +30,9 @@ def main() -> None:
     if merged < 1:
         fail("expected at least one merged table group in annotations.json")
 
-    req = json.loads((out / "07_requirements_miner" / "json_output" / "07_requirements_summary.json").read_text())
+    req = json.loads(
+        (out / "07_requirements_miner" / "json_output" / "07_requirements_summary.json").read_text()
+    )
     total = int(req.get("total_requirements", req.get("total", 0)))
     if total < 12:
         fail("expected >=12 requirements")

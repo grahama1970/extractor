@@ -58,9 +58,7 @@ def main() -> int:
     require_proved = _env_bool("LEAN4_REQUIRE_PROVED", default=False)
     require_explanation = _env_bool("LEAN4_REQUIRE_EXPLANATION", default=False)
 
-    items: List[Dict[str, Any]] = [
-        {"requirement_text": requirement, "id": "sanity-1"}
-    ]
+    items: List[Dict[str, Any]] = [{"requirement_text": requirement, "id": "sanity-1"}]
 
     print("=== SciLLM Certainly/Lean4 Simple Sanity ===")
     print(f"bridge_base: {api_base}")
@@ -96,7 +94,9 @@ def main() -> int:
 
     first = results[0] if isinstance(results, list) and results else {}
     status = first.get("status") or ""
-    success = bool(first.get("success") or first.get("proved") or first.get("ok")) or status == "proved"
+    success = (
+        bool(first.get("success") or first.get("proved") or first.get("ok")) or status == "proved"
+    )
     lean_code = first.get("lean_code") or ""
     explanation = first.get("explanation") or ""
     stdout = first.get("stdout") or ""

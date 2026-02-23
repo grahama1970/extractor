@@ -11,6 +11,7 @@ import pandas as pd
 
 def _stable_table_hash(table: Dict[str, Any]) -> str:
     import hashlib
+
     h = hashlib.sha256()
     payload = {
         "bbox": table.get("bbox"),
@@ -122,7 +123,9 @@ def has_fragmentation_improvement(existing: int, new: int) -> bool:
     return (existing - new) >= max(1, int(os.getenv("TABLE_FRAGMENTATION_MIN_IMPROVEMENT", "1")))
 
 
-def should_replace_table(existing_frag: int, new_frag: int, existing_score: float, new_score: float) -> bool:
+def should_replace_table(
+    existing_frag: int, new_frag: int, existing_score: float, new_score: float
+) -> bool:
     if has_fragmentation_improvement(existing_frag, new_frag):
         return True
     if new_frag == existing_frag and new_score > existing_score:
@@ -146,7 +149,7 @@ def coalesce_repeated_header_rows(df: pd.DataFrame, min_match: float) -> pd.Data
         if cols and not all(isinstance(c, int) for c in cols):
             header_proto = [_normalize_cell(c) for c in cols]
     except Exception as exc:
-        log_stage_error('table_extractor_utils.py', exc, {'context': 'table_extractor_utils.py'})
+        log_stage_error("table_extractor_utils.py", exc, {"context": "table_extractor_utils.py"})
         raise
         header_proto = None
     if header_proto is None:
@@ -175,6 +178,6 @@ def coalesce_repeated_header_rows(df: pd.DataFrame, min_match: float) -> pd.Data
         df2.reset_index(drop=True, inplace=True)
         return df2
     except Exception as exc:
-        log_stage_error('table_extractor_utils.py', exc, {'context': 'table_extractor_utils.py'})
+        log_stage_error("table_extractor_utils.py", exc, {"context": "table_extractor_utils.py"})
         raise
         return df

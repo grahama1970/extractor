@@ -6,7 +6,7 @@ from pathlib import Path
 try:
     import fitz  # PyMuPDF
 except Exception as e:
-    raise SystemExit("PyMuPDF not installed. pip install pymupdf\n"+str(e))
+    raise SystemExit("PyMuPDF not installed. pip install pymupdf\n" + str(e))
 
 
 def render_page(pdf: Path, page_num: int, out_path: Path, dpi: int = 96):
@@ -15,8 +15,8 @@ def render_page(pdf: Path, page_num: int, out_path: Path, dpi: int = 96):
     try:
         if page_num < 1 or page_num > len(doc):
             raise SystemExit(f"page out of range: {page_num}")
-        mat = fitz.Matrix(dpi/72.0, dpi/72.0)
-        page = doc[page_num-1]
+        mat = fitz.Matrix(dpi / 72.0, dpi / 72.0)
+        page = doc[page_num - 1]
         pix = page.get_pixmap(matrix=mat, alpha=False)
         out_path.write_bytes(pix.tobytes("png"))
     finally:
@@ -35,4 +35,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

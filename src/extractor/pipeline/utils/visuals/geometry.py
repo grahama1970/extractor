@@ -10,7 +10,6 @@ from typing import Any, Dict, List, Optional
 
 import fitz
 
-from extractor.pipeline.utils.reliability import log_stage_error
 
 STEP_NAME = "09a_pdf_annotator"
 
@@ -35,17 +34,18 @@ def rect_from_pdf_bbox(page: fitz.Page, bbox: List[float]) -> fitz.Rect:
     if rect.y1 < rect.y0:
         rect = fitz.Rect(rect.x0, rect.y1, rect.x1, rect.y0)
     if rect.width <= 0 or rect.height <= 0:
-        rect = fitz.Rect(
-            rect.x0, rect.y0,
-            rect.x0 + max(1.0, rect.width),
-            rect.y0 + max(1.0, rect.height)
-        ) & page.rect
+        rect = (
+            fitz.Rect(
+                rect.x0, rect.y0, rect.x0 + max(1.0, rect.width), rect.y0 + max(1.0, rect.height)
+            )
+            & page.rect
+        )
     return rect
 
 
 def rect_for_kind(page: fitz.Page, bbox: List[float], kind: str) -> fitz.Rect:
     """Convert bbox to page rect with per-kind origin rules.
-    
+
     - Camelot/requirements (table, table_merged, table_rejected, requirement)
       are PDF-origin bottom-left.
     - Others (section, figure, header_candidate, text_chunk, etc.) are top-left.

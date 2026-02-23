@@ -35,9 +35,7 @@ def test_aggregate_only_with_synthetic_iter(tmp_path: Path, monkeypatch):
     (beta / "iter_01.json").write_text(json.dumps(beta_iter))
 
     # Aggregate via CLI
-    cmd = (
-        f"PYTHONPATH=./src python scripts/gamified.py run --codebase . --run-id {run_id} --aggregate-only --no-autostart-backend --no-start-dashboard"
-    )
+    cmd = f"PYTHONPATH=./src python scripts/gamified.py run --codebase . --run-id {run_id} --aggregate-only --no-autostart-backend --no-start-dashboard"
     rc = os.system(cmd)
     assert rc == 0
 

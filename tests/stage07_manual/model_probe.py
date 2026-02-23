@@ -15,7 +15,12 @@ except Exception as e:
     raise SystemExit(f"litellm not available: {e}")
 
 # Optional: use our wrapper (auto-adapt + extraction)
-USE_LITELLM_CALL = os.getenv("MODEL_PROBE_USE_LITELLM_CALL", "0").lower() in ("1", "true", "yes", "y")
+USE_LITELLM_CALL = os.getenv("MODEL_PROBE_USE_LITELLM_CALL", "0").lower() in (
+    "1",
+    "true",
+    "yes",
+    "y",
+)
 AUTO_ADAPT = os.getenv("LITELLM_AUTO_ADAPT_RESPONSES", "1").lower() in ("1", "true", "yes", "y")
 RESP_KWARGS_ENV = os.getenv("MODEL_PROBE_RESPONSES_KWARGS", "").strip()
 try:
@@ -52,17 +57,23 @@ def extract_text_from_responses(resp: Any) -> str:
     if isinstance(out, list) and out:
         parts = []
         first = out[0]
-        content = getattr(first, "content", None) if not isinstance(first, dict) else first.get("content")
+        content = (
+            getattr(first, "content", None) if not isinstance(first, dict) else first.get("content")
+        )
         if isinstance(content, list):
             for item in content:
-                txt = getattr(item, "text", None) if not isinstance(item, dict) else item.get("text")
+                txt = (
+                    getattr(item, "text", None) if not isinstance(item, dict) else item.get("text")
+                )
                 if isinstance(txt, str) and txt.strip():
                     parts.append(txt)
         return "\n".join(parts)
     return ""
 
 
-async def call_responses(model: str, system: str, items: List[Dict[str, Any]], *, provider: str, variant: str) -> Tuple[str, Dict[str, Any]]:
+async def call_responses(
+    model: str, system: str, items: List[Dict[str, Any]], *, provider: str, variant: str
+) -> Tuple[str, Dict[str, Any]]:
     """Call LiteLLM Responses API with provider-aware kwargs; try multiple OpenAI JSON modes."""
     call_meta: Dict[str, Any] = {"variant": variant}
 
@@ -71,7 +82,9 @@ async def call_responses(model: str, system: str, items: List[Dict[str, Any]], *
     base = {"model": model, "input": [{"role": "user", "content": items}], "max_output_tokens": 800}
     if provider == "openai":
         # 1) json_object
-        candidates.append({**base, "response_format": {"type": "json_object"}, "instructions": system})
+        candidates.append(
+            {**base, "response_format": {"type": "json_object"}, "instructions": system}
+        )
         # 2) json_schema (simple schema to prove JSON)
         schema = {
             "type": "object",
@@ -79,32 +92,46 @@ async def call_responses(model: str, system: str, items: List[Dict[str, Any]], *
                 "reflowed_json": {"type": "object"},
                 "ocr_corrections": {"type": "object"},
                 "improvements_made": {"type": "string"},
-                "summary": {"type": "string"}
+                "summary": {"type": "string"},
             },
             "required": ["reflowed_json"],
             "additionalProperties": True,
         }
-        candidates.append({
-            **base,
-            "response_format": {"type": "json_schema", "json_schema": {"name": "reflow", "schema": schema, "strict": True}},
-            "instructions": system,
-        })
+        candidates.append(
+            {
+                **base,
+                "response_format": {
+                    "type": "json_schema",
+                    "json_schema": {"name": "reflow", "schema": schema, "strict": True},
+                },
+                "instructions": system,
+            }
+        )
     elif provider == "gemini":
-        candidates.append({**base, "response_mime_type": "application/json", "system_instruction": system})
+        candidates.append(
+            {**base, "response_mime_type": "application/json", "system_instruction": system}
+        )
     else:
         candidates.append({**base, "instructions": system})
 
     # If requested, route via our wrapper (no auto-adapt by default)
     if USE_LITELLM_CALL and litellm_call is not None:
         for kw in candidates:
-            prompts = [{
-                "model": model,
-                "messages": [{"role": "system", "content": system}, {"role": "user", "content": items}],
-                "responses_kwargs": json.loads(RESP_KWARGS_ENV) if RESP_KWARGS_ENV else {},
-                "max_tokens": 800,
-            }]
+            prompts = [
+                {
+                    "model": model,
+                    "messages": [
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": items},
+                    ],
+                    "responses_kwargs": json.loads(RESP_KWARGS_ENV) if RESP_KWARGS_ENV else {},
+                    "max_tokens": 800,
+                }
+            ]
             try:
-                out = await litellm_call(prompts, wrap_json=True, concurrency=1, desc=f"probe:{model}")
+                out = await litellm_call(
+                    prompts, wrap_json=True, concurrency=1, desc=f"probe:{model}"
+                )
                 return (out[0] or ""), {**call_meta, "via": "litellm_call"}
             except Exception as e:
                 last_err = f"{type(e).__name__}: {e}"
@@ -123,7 +150,9 @@ async def call_responses(model: str, system: str, items: List[Dict[str, Any]], *
     return "", {**call_meta, "via": "aresponses", "error": last_err or "empty"}
 
 
-async def probe_model(spec: ModelSpec, outdir: Path, text: str, section_img_b64: str) -> Dict[str, Any]:
+async def probe_model(
+    spec: ModelSpec, outdir: Path, text: str, section_img_b64: str
+) -> Dict[str, Any]:
     model = spec.name
     mslug = model.replace("/", "__")
     mdir = outdir / mslug
@@ -132,7 +161,7 @@ async def probe_model(spec: ModelSpec, outdir: Path, text: str, section_img_b64:
 
     system = (
         "Return ONLY a JSON object with keys: reflowed_json, ocr_corrections, improvements_made, summary. "
-        "reflowed_json must contain {\"section_id\",\"title\",\"blocks\":[]}. No code fences."
+        'reflowed_json must contain {"section_id","title","blocks":[]}. No code fences.'
     )
 
     # Prepare content items
@@ -157,7 +186,9 @@ async def probe_model(spec: ModelSpec, outdir: Path, text: str, section_img_b64:
     worked = False
     for variant, items in strategies:
         try:
-            content, meta = await call_responses(model, system, items, provider=spec.provider, variant=variant)
+            content, meta = await call_responses(
+                model, system, items, provider=spec.provider, variant=variant
+            )
             meta["len"] = len(content)
             (mdir / f"raw_{variant}.txt").write_text(content or "", encoding="utf-8")
             ok = False
@@ -172,13 +203,17 @@ async def probe_model(spec: ModelSpec, outdir: Path, text: str, section_img_b64:
             results["attempts"].append({"variant": variant, "ok": ok, "meta": meta})
             if ok and not worked:
                 # Persist parsed JSON for inspection
-                (mdir / f"parsed_{variant}.json").write_text(json.dumps(parsed, indent=2, ensure_ascii=False), encoding="utf-8")
+                (mdir / f"parsed_{variant}.json").write_text(
+                    json.dumps(parsed, indent=2, ensure_ascii=False), encoding="utf-8"
+                )
                 worked = True
         except Exception as e:
             results["attempts"].append({"variant": variant, "error": f"{type(e).__name__}: {e}"})
 
     results["worked"] = worked
-    (mdir / "summary.json").write_text(json.dumps(results, indent=2, ensure_ascii=False), encoding="utf-8")
+    (mdir / "summary.json").write_text(
+        json.dumps(results, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
     return results
 
 
@@ -207,7 +242,9 @@ async def main() -> None:
     for r in results:
         attempts = r.get("attempts", [])
         status = "✅" if r.get("worked") else "❌"
-        variants = ", ".join(f"{a.get('variant')}: {'ok' if a.get('ok') else 'fail'}" for a in attempts)
+        variants = ", ".join(
+            f"{a.get('variant')}: {'ok' if a.get('ok') else 'fail'}" for a in attempts
+        )
         print(f"- {r['model']} [{r['provider']}] {status} → {variants}")
     print(f"\nDetails written to: {outdir}")
 

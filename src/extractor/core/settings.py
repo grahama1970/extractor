@@ -21,12 +21,16 @@ from typing import Optional
 
 from dotenv import find_dotenv
 from pydantic import computed_field
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 import torch
 import os
 
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=find_dotenv("local.env"),
+        extra="ignore",
+    )
     # Paths
     BASE_DIR: str = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     OUTPUT_DIR: str = os.path.join(BASE_DIR, "conversion_results")
@@ -69,10 +73,6 @@ class Settings(BaseSettings):
             return torch.bfloat16
         else:
             return torch.float32
-
-    class Config:
-        env_file = find_dotenv("local.env")
-        extra = "ignore"
 
 
 settings = Settings()

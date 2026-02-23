@@ -29,22 +29,33 @@ except Exception as e:  # pragma: no cover
 try:
     from loguru import logger
 except Exception:  # pragma: no cover
+
     class _MiniLogger:
-        def info(self, *a, **k): print(*a)
-        def warning(self, *a, **k): print("WARN:", *a)
-        def error(self, *a, **k): print("ERR:", *a, file=sys.stderr)
-        def debug(self, *a, **k): print("DBG:", *a)
+        def info(self, *a, **k):
+            print(*a)
+
+        def warning(self, *a, **k):
+            print("WARN:", *a)
+
+        def error(self, *a, **k):
+            print("ERR:", *a, file=sys.stderr)
+
+        def debug(self, *a, **k):
+            print("DBG:", *a)
+
     logger = _MiniLogger()
 
 app = typer.Typer(add_completion=False, invoke_without_command=True, no_args_is_help=False)
 
 RULES_DEFAULT = Path("prototypes/gamified/rules/prompt_optimization.yaml")
 
+
 @dataclass
 class LintIssue:
-    level: str   # "error" | "warning" | "info"
+    level: str  # "error" | "warning" | "info"
     code: str
     message: str
+
 
 @dataclass
 class OptimizationReport:
@@ -57,8 +68,10 @@ class OptimizationReport:
     warnings: List[LintIssue] = field(default_factory=list)
     errors: List[LintIssue] = field(default_factory=list)
 
+
 _HEADING_RE = re.compile(r"^(#{1,3})\s+(.+)$", re.M)
 _CODEBLOCK_RE = re.compile(r"```(\w+)?\n(.*?)\n```", re.S)
+
 
 def _snake(s: str) -> str:
     s = s.strip()
@@ -67,8 +80,10 @@ def _snake(s: str) -> str:
     s = re.sub(r"_+", "_", s).lower()
     return s
 
+
 def _sum_weights(weights: Dict[str, float]) -> float:
     return float(sum(float(v) for v in weights.values()))
+
 
 def _load_rules(path: Path) -> Dict[str, Any]:
     if not path.exists():
@@ -77,6 +92,7 @@ def _load_rules(path: Path) -> Dict[str, Any]:
         raise RuntimeError("PyYAML is required. Install with: pip install pyyaml")
     with path.open("r", encoding="utf-8") as f:
         return yaml.safe_load(f)
+
 
 def _extract_sections(md: str) -> Dict[str, str]:
     sections: Dict[str, str] = {}
@@ -90,12 +106,14 @@ def _extract_sections(md: str) -> Dict[str, str]:
         sections[title] = md[start:end].strip()
     return sections
 
+
 def _get_code_block(md: str, language: str) -> Optional[str]:
     for m in _CODEBLOCK_RE.finditer(md):
         lang = (m.group(1) or "").lower()
         if lang == language.lower():
             return m.group(2)
     return None
+
 
 def _ensure_order(keys: List[str], desired: List[str]) -> List[str]:
     seen = set()
@@ -105,15 +123,18 @@ def _ensure_order(keys: List[str], desired: List[str]) -> List[str]:
             ordered.append(k)
     return ordered
 
+
 def _yaml_load_block(text: str) -> Any:
     if yaml is None:
         raise RuntimeError("PyYAML required to parse YAML blocks. pip install pyyaml")
     return yaml.safe_load(text)
 
+
 def _yaml_dump(obj: Any) -> str:
     if yaml is None:
         raise RuntimeError("PyYAML required to dump YAML. pip install pyyaml")
     return yaml.safe_dump(obj, sort_keys=False)
+
 
 class PromptOptimizer:
     def __init__(self, rules: Dict[str, Any]):
@@ -166,10 +187,18 @@ class PromptOptimizer:
         if not sec.get("tasks"):
             rep.added_tasks = True
             pre_tasks = [
-                {"type": "run_python", "name": "log_context", "scope": "pre",
-                 "code": "print('Tokamak approaches: fueling_mpc, edge_stability_mhd, heat_extraction_adaptive')"},
-                {"type": "run_python", "name": "emit_references", "scope": "pre",
-                 "code": "print('Key refs in References section')"},
+                {
+                    "type": "run_python",
+                    "name": "log_context",
+                    "scope": "pre",
+                    "code": "print('Tokamak approaches: fueling_mpc, edge_stability_mhd, heat_extraction_adaptive')",
+                },
+                {
+                    "type": "run_python",
+                    "name": "emit_references",
+                    "scope": "pre",
+                    "code": "print('Key refs in References section')",
+                },
             ]
             sec["tasks"] = "```json\n" + json.dumps(pre_tasks, indent=2) + "\n```"
 
@@ -188,7 +217,7 @@ class PromptOptimizer:
             r"(## Approaches\s*\n\n).*?(?=## |\Z)",
             r"\1```yaml\n" + approaches_yaml_out + "```\n\n",
             optimized_md,
-            flags=re.S
+            flags=re.S,
         )
 
         return optimized_md, rep
@@ -227,7 +256,9 @@ class PromptOptimizer:
         try:
             data = _yaml_load_block(yaml_text)
         except Exception as e:
-            rep.errors.append(LintIssue("error", "yaml_parse", f"Failed to parse approaches YAML: {e}"))
+            rep.errors.append(
+                LintIssue("error", "yaml_parse", f"Failed to parse approaches YAML: {e}")
+            )
             data = [{"name": "placeholder"}]
         if not isinstance(data, list):
             data = [data]
@@ -237,7 +268,9 @@ class PromptOptimizer:
             name_raw = str(item.get("name", "placeholder"))
             name_snake = _snake(name_raw)
             pref = rules.get("canonical_prefix") or ""
-            new_name = name_snake if not pref or name_snake.startswith(pref) else f"{pref}{name_snake}"
+            new_name = (
+                name_snake if not pref or name_snake.startswith(pref) else f"{pref}{name_snake}"
+            )
             if new_name != name_raw:
                 rep.renamed_approaches.append((name_raw, new_name))
             item["name"] = new_name[:40]
@@ -252,14 +285,22 @@ class PromptOptimizer:
             out.append(item)
         return out
 
-    def _enforce_approach_counts(self, approaches: List[Dict[str, Any]], rep: OptimizationReport) -> None:
+    def _enforce_approach_counts(
+        self, approaches: List[Dict[str, Any]], rep: OptimizationReport
+    ) -> None:
         rules = self.rules["approach"]
         n = len(approaches)
         min_c, max_c = rules["min_count"], rules["max_count"]
         if n < min_c:
-            rep.errors.append(LintIssue("error", "approach_count", f"Need at least {min_c} approaches; found {n}."))
+            rep.errors.append(
+                LintIssue(
+                    "error", "approach_count", f"Need at least {min_c} approaches; found {n}."
+                )
+            )
         if n > max_c:
-            rep.errors.append(LintIssue("error", "approach_count", f"At most {max_c} approaches; found {n}."))
+            rep.errors.append(
+                LintIssue("error", "approach_count", f"At most {max_c} approaches; found {n}.")
+            )
 
     def _extract_scoring_yaml(self, scoring_md: str) -> Dict[str, Any]:
         block = _get_code_block(scoring_md, "yaml")
@@ -307,7 +348,13 @@ class PromptOptimizer:
         if not block:
             defaults = r["defaults"]
             out = self._render_yaml_section("constraints", defaults)
-            rep.errors.append(LintIssue("error", "constraints_missing", "Constraints injected with placeholders; define required globals."))
+            rep.errors.append(
+                LintIssue(
+                    "error",
+                    "constraints_missing",
+                    "Constraints injected with placeholders; define required globals.",
+                )
+            )
             return out
         try:
             data = _yaml_load_block(block) or {}
@@ -315,20 +362,25 @@ class PromptOptimizer:
             for k in r["global_keys"]:
                 v = data.get(k)
                 if v in (None, "", "define"):
-                    rep.errors.append(LintIssue("error", "constraint_undefined", f"Constraint '{k}' is undefined"))
+                    rep.errors.append(
+                        LintIssue("error", "constraint_undefined", f"Constraint '{k}' is undefined")
+                    )
         except Exception as e:
-            rep.errors.append(LintIssue("error", "constraints_parse", f"Failed to parse constraints: {e}"))
+            rep.errors.append(
+                LintIssue("error", "constraints_parse", f"Failed to parse constraints: {e}")
+            )
         return constraints_md
 
-    def _build_evidence(self, evidence_md: str, approaches: List[Dict[str, Any]], rep: OptimizationReport) -> str:
+    def _build_evidence(
+        self, evidence_md: str, approaches: List[Dict[str, Any]], rep: OptimizationReport
+    ) -> str:
         schema = self.rules["evidence_schema"]
         keys = schema["required"]
         checklist = []
         for a in approaches:
-            checklist.append({
-                "approach": a["name"],
-                "expected": [{k["key"]: f"({k['type']})"} for k in keys]
-            })
+            checklist.append(
+                {"approach": a["name"], "expected": [{k["key"]: f"({k['type']})"} for k in keys]}
+            )
         rep.built_evidence_checklists = True
         return "```yaml\n" + _yaml_dump(checklist) + "```"
 
@@ -337,23 +389,33 @@ class PromptOptimizer:
         forbid = style.get("forbid_words", [])
         for w in forbid:
             if re.search(rf"\b{re.escape(w)}\b", raw_md, flags=re.I):
-                rep.warnings.append(LintIssue("warning", "forbidden_word", f"Found discouraged word: '{w}'"))
+                rep.warnings.append(
+                    LintIssue("warning", "forbidden_word", f"Found discouraged word: '{w}'")
+                )
         summaries = re.findall(r"summary:\s*(.+)", raw_md)
         max_chars = style.get("max_summary_chars", 10**6)
         for s in summaries:
             if len(s.strip()) > max_chars:
-                rep.warnings.append(LintIssue("warning", "summary_length", f"Summary exceeds {max_chars} chars."))
+                rep.warnings.append(
+                    LintIssue("warning", "summary_length", f"Summary exceeds {max_chars} chars.")
+                )
+
 
 def _load_text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
+
 
 def _write_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
+
 def _show_diff(a: str, b: str) -> str:
-    diff = difflib.unified_diff(a.splitlines(), b.splitlines(), fromfile="raw", tofile="optimized", lineterm="")
+    diff = difflib.unified_diff(
+        a.splitlines(), b.splitlines(), fromfile="raw", tofile="optimized", lineterm=""
+    )
     return "\n".join(diff)
+
 
 def _print_report(rep: OptimizationReport) -> None:
     if rep.added_sections:
@@ -373,6 +435,7 @@ def _print_report(rep: OptimizationReport) -> None:
         logger.warning(f"[{w.code}] {w.message}")
     for e in rep.errors:
         logger.error(f"[{e.code}] {e.message}")
+
 
 @app.callback(invoke_without_command=True)
 def _default(ctx: typer.Context):
@@ -397,6 +460,7 @@ weights: { correctness: 35, speed: 25, robustness: 25, brevity: 15 }
     print("\n--- Optimized Markdown ---\n")
     print(optimized)
 
+
 @app.command()
 def print_rules(
     rules_path: Path = typer.Option(RULES_DEFAULT, "--rules", "-r", help="Path to rules YAML")
@@ -407,11 +471,12 @@ def print_rules(
     else:
         print(_yaml_dump(rules))
 
+
 @app.command()
 def validate(
     prompt_path: Path = typer.Argument(..., help="Path to raw prompt (Markdown)"),
     rules_path: Path = typer.Option(RULES_DEFAULT, "--rules", "-r"),
-    strict: bool = typer.Option(False, "--strict", help="Treat warnings as errors")
+    strict: bool = typer.Option(False, "--strict", help="Treat warnings as errors"),
 ):
     raw = _load_text(prompt_path)
     rules = _load_rules(rules_path)
@@ -421,12 +486,15 @@ def validate(
     failed = len(rep.errors) > 0 or (strict and len(rep.warnings) > 0)
     raise typer.Exit(code=1 if failed else 0)
 
+
 @app.command()
 def optimize(
     prompt_path: Path = typer.Argument(..., help="Path to raw prompt (Markdown)"),
-    out_path: Optional[Path] = typer.Option(None, "--out", "-o", help="Write optimized prompt here"),
+    out_path: Optional[Path] = typer.Option(
+        None, "--out", "-o", help="Write optimized prompt here"
+    ),
     rules_path: Path = typer.Option(RULES_DEFAULT, "--rules", "-r"),
-    show_diff: bool = typer.Option(False, "--show-diff", help="Print unified diff")
+    show_diff: bool = typer.Option(False, "--show-diff", help="Print unified diff"),
 ):
     raw = _load_text(prompt_path)
     rules = _load_rules(rules_path)
@@ -443,10 +511,11 @@ def optimize(
         print("\n--- Optimized Markdown ---\n")
         print(optimized)
 
+
 @app.command()
 def lint(
     prompt_path: Path = typer.Argument(..., help="Path to raw prompt (Markdown)"),
-    rules_path: Path = typer.Option(RULES_DEFAULT, "--rules", "-r")
+    rules_path: Path = typer.Option(RULES_DEFAULT, "--rules", "-r"),
 ):
     raw = _load_text(prompt_path)
     rules = _load_rules(rules_path)
@@ -454,6 +523,6 @@ def lint(
     _, rep = opt.validate_and_optimize(raw)
     _print_report(rep)
 
+
 if __name__ == "__main__":
     app()
-

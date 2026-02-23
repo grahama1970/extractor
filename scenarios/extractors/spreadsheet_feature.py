@@ -28,6 +28,7 @@ def main() -> int:
         # Synthesize a tiny XLSX sheet if none present
         try:
             from openpyxl import Workbook  # type: ignore
+
             tmp = Path(tempfile.gettempdir()) / "scenario_sample.xlsx"
             wb = Workbook()
             ws = wb.active
@@ -57,6 +58,7 @@ def main() -> int:
 
     try:
         from scenarios.extractors.common import import_provider
+
         SpreadsheetProvider = import_provider("providers/spreadsheet.py", "SpreadsheetProvider")
     except Exception as e:
         logger.warning(f"SKIP: cannot import SpreadsheetProvider: {e}")
@@ -82,7 +84,10 @@ def main() -> int:
     counts, heads = summarise_unified(doc)
     try:
         from scenarios.extractors.common import write_unified_snapshot
-        snap_path = write_unified_snapshot("spreadsheet", doc.id, doc.model_dump(by_alias=True, mode="json"))
+
+        snap_path = write_unified_snapshot(
+            "spreadsheet", doc.id, doc.model_dump(by_alias=True, mode="json")
+        )
     except Exception:
         snap_path = None
     inserted = try_arango_insert(doc)

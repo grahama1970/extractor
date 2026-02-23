@@ -149,7 +149,12 @@ def write_xml(out: Path, sections, pages):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("pdf", type=Path, nargs="?", default=Path("data/input/pipeline/BHT_CV32A65X_with_requirements_noannots.pdf"))
+    ap.add_argument(
+        "pdf",
+        type=Path,
+        nargs="?",
+        default=Path("data/input/pipeline/BHT_CV32A65X_with_requirements_noannots.pdf"),
+    )
     ap.add_argument("--out", type=Path, default=Path("data/input/parity_gen"))
     args = ap.parse_args()
 

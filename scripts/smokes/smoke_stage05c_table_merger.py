@@ -63,10 +63,14 @@ def main(
     stage05_dir = stage_root / "05_table_extractor" / "json_output"
     stage05_dir.mkdir(parents=True, exist_ok=True)
     payload = _tables_payload()
-    stage05_dir.joinpath("05_tables.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    stage05_dir.joinpath("05_tables.json").write_text(
+        json.dumps(payload, indent=2), encoding="utf-8"
+    )
     stage05b_dir = stage_root / "05b_table_describer" / "json_output"
     stage05b_dir.mkdir(parents=True, exist_ok=True)
-    stage05b_dir.joinpath("05b_tables.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    stage05b_dir.joinpath("05b_tables.json").write_text(
+        json.dumps(payload, indent=2), encoding="utf-8"
+    )
 
     try:
         out_file = run_table_merger(input_dir=stage_root, output_dir=stage_root)

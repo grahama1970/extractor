@@ -4,25 +4,22 @@ Module: test.py
 Provides commands for testing and validation with enhanced reporting.
 """
 
+import json
+import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
+from typing import List, Optional
+
+import typer
+from loguru import logger
+
+from .base import CommandGroup, validate_file_path, format_output
 
 # Add src to path for imports
 src_path = Path(__file__).parent.parent / "src"
 if src_path.exists() and str(src_path) not in sys.path:
     sys.path.insert(0, str(src_path))
-
-
-from pathlib import Path
-from typing import Optional, List
-import typer
-from loguru import logger
-import json
-import subprocess
-import sys
-from datetime import datetime
-
-from .base import CommandGroup, validate_file_path, format_output
 
 
 class TestCommands(CommandGroup):
@@ -285,6 +282,7 @@ class TestCommands(CommandGroup):
                 "all", help="Type of validation (all, structure, content, format)"
             ),
             strict: bool = typer.Option(False, help="Strict validation mode"),
+            verbose: bool = typer.Option(False, help="Verbose output"),
             report_path: Optional[str] = typer.Option(None, help="Save validation report"),
         ):
             """Validate marker extraction output."""

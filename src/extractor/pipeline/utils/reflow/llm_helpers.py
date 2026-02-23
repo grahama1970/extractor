@@ -16,7 +16,7 @@ from extractor.pipeline.utils.json_utils import clean_json_string, parse_json_st
 
 def extract_router_content(resp: Any) -> Optional[str]:
     """Extract message content from router responses (object or dict).
-    
+
     Handles both OpenAI-style response objects and dict responses.
     """
     try:
@@ -25,26 +25,26 @@ def extract_router_content(resp: Any) -> Optional[str]:
             choices = resp.get("choices")
         if not choices:
             return None
-        
+
         first = choices[0]
         if isinstance(first, dict):
             message = first.get("message")
         else:
             message = getattr(first, "message", None)
-        
+
         if message is None:
             return None
-        
+
         if isinstance(message, dict):
             return message.get("content")
-        
+
         content = getattr(message, "content", None)
         if content is None and hasattr(message, "get"):
             try:
                 content = message.get("content")
             except Exception:
                 content = None
-        
+
         return content
     except Exception:
         return None
@@ -78,7 +78,7 @@ async def direct_scillm_json(
     timeout: int = 60,
 ) -> Optional[str]:
     """Call scillm.acompletion directly as a last-resort JSON fetch.
-    
+
     Uses environment variables for model configuration:
     - CHUTES_TEXT_MODEL
     - CHUTES_API_BASE
@@ -88,7 +88,7 @@ async def direct_scillm_json(
         from scillm import acompletion as _sc_acompletion  # type: ignore
     except ImportError:
         return None
-    
+
     try:
         t0 = time.monotonic()
         success = False

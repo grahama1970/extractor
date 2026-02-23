@@ -32,19 +32,25 @@ from typing import Annotated, Dict, List, Optional, Set
 import pypdfium2 as pdfium
 import pypdfium2.raw as pdfium_c
 from ftfy import fix_text
+
 try:
     from pdftext.extraction import dictionary_output  # type: ignore
     from pdftext.schema import Reference  # type: ignore
     from pdftext.pdf.utils import flatten as flatten_pdf_page  # type: ignore
+
     _PDFTEXT_OK = True
 except Exception:  # pragma: no cover - optional dependency in minimal/offline mode
     _PDFTEXT_OK = False
+
     class Reference:  # type: ignore
         ...
+
     def dictionary_output(*args, **kwargs):  # type: ignore
         return []
+
     def flatten_pdf_page(*args, **kwargs):  # type: ignore
         return None
+
 
 from PIL import Image
 from pypdfium2 import PdfiumError, PdfDocument
@@ -56,12 +62,12 @@ from extractor.core.schema.polygon import PolygonBox
 from extractor.core.schema.registry import get_block_class
 from extractor.core.schema.text.line import Line
 from extractor.core.schema.text.span import Span
+from extractor.core.schema.unified_document import UnifiedDocument
 
 
 # # Ignore pypdfium2 warning about form flattening
 logging.getLogger("pypdfium2").setLevel(logging.ERROR)
-
-from extractor.core.schema.unified_document import UnifiedDocument
+logger = logging.getLogger(__name__)
 
 
 class PdfProvider(BaseProvider):
@@ -129,48 +135,42 @@ class PdfProvider(BaseProvider):
 
     def extract_document(self, filepath: str) -> UnifiedDocument:
         """Extract PDF content using the standard pipeline.
-        
-        This implementation runs the S01-S06 pipeline and reconstructs 
+
+        This implementation runs the S01-S06 pipeline and reconstructs
         a UnifiedDocument from the resulting artifacts.
         """
         from extractor.pipeline.run_pipeline import main as run_pipeline_main
         import tempfile
         from pathlib import Path
-        import shutil
-        import sys
-        
+
         filepath_str = str(Path(filepath).resolve())
-        
+
         with tempfile.TemporaryDirectory() as tmp_dir:
             out_dir = Path(tmp_dir)
-            
+
             # Prepare arguments for run_pipeline.py
             # Note: We skip proving by default for general extraction
-            argv = [
-                "--pdf", filepath_str,
-                "--out", str(out_dir),
-                "--skip-proving"
-            ]
-            
-            # Optional: Add --fast if requested via some config? 
+            argv = ["--pdf", filepath_str, "--out", str(out_dir), "--skip-proving"]
+
+            # Optional: Add --fast if requested via some config?
             # For now, we use standard calibrated run if twins exist.
-            
+
             logger.info(f"PdfProvider: Running extraction pipeline for {filepath_str}")
-            
+
             # The pipeline main returns 0 on success
             # We need to catch sys.exit or just trust main returns int
             try:
                 ret = run_pipeline_main(argv)
             except SystemExit as se:
                 ret = se.code
-            
+
             if ret != 0:
                 raise RuntimeError(f"Extraction pipeline failed for {filepath_str} (code {ret})")
-                
+
             # Reconstruct UnifiedDocument from artifacts
             doc = UnifiedDocument.from_artifacts(out_dir)
             doc.source_path = filepath_str
-            
+
             return doc
 
     def validate_pdf_path(self, file_path: str) -> Path:
@@ -198,7 +198,7 @@ class PdfProvider(BaseProvider):
             allowed_dirs.extend([Path(d) for d in self.allowed_directories])
         if not allowed_dirs:
             # Default allowed directories (workspace + /tmp)
-            allowed_dirs = [ Path.cwd(), Path("/tmp"), Path.home() / ".marker" / "cache" ]
+            allowed_dirs = [Path.cwd(), Path("/tmp"), Path.home() / ".marker" / "cache"]
 
         # Check for path traversal
         if ".." in str(file_path):
@@ -237,17 +237,27 @@ class PdfProvider(BaseProvider):
                 max(self.page_range) < len(doc) and min(self.page_range) >= 0
             ), f"Invalid page range, values must be between 0 and {len(doc) - 1}.  Min of provided page range is {min(self.page_range)} and max is {max(self.page_range)}."
 
+            # Always initialize page_bboxes first (fallback from pymupdf)
+            # This ensures it's set even if pdftext fails
+            self.page_bboxes = {i: list(doc[i].get_bbox()) for i in self.page_range}
+
             if self.force_ocr:
-                # Manually assign page bboxes, since we can't get them from pdftext
-                self.page_bboxes = {i: doc[i].get_bbox() for i in self.page_range}
+                # Already have page_bboxes from above, nothing else needed
+                pass
             else:
                 # Use pdftext when available; otherwise leave lines empty (figures can still emit)
                 try:
                     if _PDFTEXT_OK:
                         self.page_lines = self.pdftext_extraction(doc)
+                        # pdftext_extraction will update page_bboxes with more accurate values
                     else:
                         self.page_lines = {i: [] for i in self.page_range}
-                except Exception:
+                except Exception as exc:
+                    import traceback
+                    logger.warning(f"pdftext extraction failed for {self.filepath}")
+                    logger.warning(f"  Error: {type(exc).__name__}: {exc}")
+                    logger.warning(f"  Page count: {self.page_count}, Page range: {len(self.page_range)} pages")
+                    logger.debug(f"  Traceback:\n{traceback.format_exc()}")
                     self.page_lines = {i: [] for i in self.page_range}
 
     @contextlib.contextmanager
@@ -268,7 +278,9 @@ class PdfProvider(BaseProvider):
     def __len__(self) -> int:
         return self.page_count
 
-    def get_embedded_image_rects(self, page_index: int) -> _t.List[_t.Tuple[float, float, float, float]]:
+    def get_embedded_image_rects(
+        self, page_index: int
+    ) -> _t.List[_t.Tuple[float, float, float, float]]:
         """Return rectangles for embedded images on the given page.
 
         Coordinates are returned as (x0, y0, x1, y1) in the provider's page space.

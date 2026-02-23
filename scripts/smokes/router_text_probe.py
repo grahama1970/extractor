@@ -58,9 +58,7 @@ def main() -> None:
     resp_path = artifacts_dir / f"router_text_probe.response.{ts}.json"
     meta_path = artifacts_dir / f"router_text_probe.meta.{ts}.json"
 
-    messages = [
-        {"role": "user", "content": "Return only {\"ok\": true} as JSON."}
-    ]
+    messages = [{"role": "user", "content": 'Return only {"ok": true} as JSON.'}]
     request_dump = {
         "model_group": "chutes/text",
         "messages": messages,
@@ -104,4 +102,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

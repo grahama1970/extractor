@@ -337,6 +337,51 @@ temp_check.json
 scanner_debug/
 mimic_spec_test.json
 
+# Root-level scratch/temp files
+tmp_*.py
+scratch*.md
+scratch*.txt
+scratch_*.txt
+
+# Iteration/sample artifacts
+iteration_*.json
+iteration_*.md
+stratified_sample*.txt
+stratified_sample*.json
+estimates_sample.txt
+quality_signals_sample.txt
+old_sample.txt
+high_confidence.txt
+medium_confidence.txt
+low_confidence.txt
+success_pdfs.txt
+all_pdfs.txt
+global_assessment_report.md
+audit_history.jsonl
+review_request.md
+
+# Test output directories
+test_output/
+test_output_stress/
+test_corpus/
+test_corpus_12tb
+
+# External agent config dirs (not ours)
+.codex/
+.gemini/
+.kilocode
+.pi/
+
+# Docker local
+docker/
+
+# Marker upstream fork
+marker_upstream/
+
+# Run output directories
+run/
+sanity/
+
 # External agent/skill directories (symlinks)
 .agents/
 .skills

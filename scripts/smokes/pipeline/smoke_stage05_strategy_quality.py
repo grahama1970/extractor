@@ -68,10 +68,7 @@ def run_smoke(results: Path) -> None:
                 }
             )
 
-    fallback_metrics = (
-        (tables_data.get("metrics") or {})
-        .get("quality_fallback", {})
-    )
+    fallback_metrics = (tables_data.get("metrics") or {}).get("quality_fallback", {})
 
     art_dir = Path("scripts/artifacts")
     art_dir.mkdir(parents=True, exist_ok=True)

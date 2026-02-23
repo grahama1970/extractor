@@ -18,8 +18,9 @@ import hashlib
 import base64
 import mimetypes
 import os
+import re
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Union
+from typing import List, Dict, Any, Optional, Union, Tuple
 
 from openpyxl import load_workbook
 from openpyxl.cell import Cell as OpxCell
@@ -62,14 +63,25 @@ class SpreadsheetProvider:
         suffix = filepath.suffix.lower()
 
         if suffix in {".xlsx", ".xlsm", ".xls"}:
-            # Parity note: XLSX is treated as structure-first; we do not force PDF-like block parity.
-            # `XLSX_SIMPLE_MODE` keeps one table per sheet and skips paragraph flattening.
-            if os.environ.get("XLSX_SIMPLE_MODE", "").lower() in {"1", "true", "yes"}:
+            # Default: Use semantic extraction for better document structure
+            # XLSX_SIMPLE_MODE: One table per sheet, no semantic parsing
+            # XLSX_RAW_MODE: Original openpyxl extraction without semantic parsing
+            mode = os.environ.get("XLSX_MODE", "semantic").lower()
+            if mode == "simple" or os.environ.get("XLSX_SIMPLE_MODE", "").lower() in {
+                "1",
+                "true",
+                "yes",
+            }:
                 blocks, metadata = self._extract_openpyxl_simple(filepath)
-            else:
+            elif mode == "raw":
                 blocks, metadata = self._extract_openpyxl(filepath)
+            else:
+                # Default: semantic extraction for better document structure
+                blocks, metadata = self._extract_semantic_blocks(filepath)
         elif suffix == ".ods":
             blocks, metadata = self._extract_ods(filepath)
+        elif suffix in {".csv", ".tsv"}:
+            blocks, metadata = self._extract_csv(filepath, delimiter="\t" if suffix == ".tsv" else ",")
         else:
             raise ValueError(f"Unsupported spreadsheet format: {suffix}")
 
@@ -101,6 +113,155 @@ class SpreadsheetProvider:
     def _generate_block_id(self) -> str:
         self.block_counter += 1
         return f"xls-block-{self.block_counter}"
+
+    # ------------------------------------------------------------------
+    # Semantic Structure Detection
+    # ------------------------------------------------------------------
+    def _is_heading_cell(self, text: str) -> Tuple[bool, int]:
+        """Detect if a cell contains a heading and return (is_heading, level).
+
+        Handles:
+        - Numbered headings: "4. Architecture", "4.1 Core", "4.1.5.4. BHT"
+        - Indented headings: "  4.1 Core" (2 spaces = level 2)
+        - Document title row: "Document Title" label
+        """
+        if not text:
+            return False, 0
+
+        text = text.strip()
+
+        # Numbered heading pattern: "4.", "4.1", "4.1.5", "4.1.5.4."
+        numbered = re.match(r"^(\d+\.(?:\d+\.?)*)(.+)$", text)
+        if numbered:
+            num_part = numbered.group(1)
+            level = num_part.count(".") if num_part.endswith(".") else num_part.count(".") + 1
+            return True, min(level, 6)
+
+        return False, 0
+
+    def _is_requirement_text(self, text: str) -> Optional[str]:
+        """Extract requirement ID if text contains a requirement pattern."""
+        if not text:
+            return None
+        match = re.search(r"(REQ-[\w-]+)", text, re.IGNORECASE)
+        return match.group(1).upper() if match else None
+
+    def _extract_semantic_blocks(self, filepath: Path) -> Tuple[List[BaseBlock], DocumentMetadata]:
+        """Extract semantic structure from XLSX: headings, paragraphs, tables, requirements."""
+        wb = load_workbook(filepath, data_only=True, keep_links=False)
+        blocks: List[BaseBlock] = []
+        doc_title = filepath.stem
+
+        for ws in wb.worksheets:
+            sheet_name = ws.title.lower()
+
+            # Overview/Content sheets: parse for document structure
+            if any(kw in sheet_name for kw in ["overview", "content", "summary", "toc", "index"]):
+                blocks.extend(self._parse_overview_sheet(ws, doc_title))
+            # Table sheets: extract as tables
+            elif any(kw in sheet_name for kw in ["table", "data", "signal", "param"]):
+                table_block = self._openpyxl_sheet_to_table(ws)
+                if table_block:
+                    blocks.append(table_block)
+            else:
+                # Default: try semantic parsing first, fall back to table
+                semantic_blocks = self._parse_overview_sheet(ws, doc_title)
+                if semantic_blocks:
+                    blocks.extend(semantic_blocks)
+                else:
+                    table_block = self._openpyxl_sheet_to_table(ws)
+                    if table_block:
+                        blocks.append(table_block)
+
+        metadata = DocumentMetadata(
+            title=doc_title,
+            format_metadata={
+                "file_type": "xlsx",
+                "creator": wb.properties.creator or "",
+                "created": wb.properties.created,
+                "modified": wb.properties.modified,
+                "sheet_names": wb.sheetnames,
+                "file_size": filepath.stat().st_size,
+                "semantic_extraction": True,
+            },
+        )
+        return blocks, metadata
+
+    def _parse_overview_sheet(self, ws, doc_title: str) -> List[BaseBlock]:
+        """Parse an overview/content sheet extracting headings, paragraphs, requirements."""
+        blocks: List[BaseBlock] = []
+        current_paragraph_lines: List[str] = []
+
+        def flush_paragraph():
+            nonlocal current_paragraph_lines
+            if current_paragraph_lines:
+                text = "\n".join(current_paragraph_lines)
+                req_id = self._is_requirement_text(text)
+                blocks.append(
+                    BaseBlock(
+                        id=self._generate_block_id(),
+                        type=BlockType.PARAGRAPH,
+                        content=text,
+                        metadata=BlockMetadata(
+                            attributes=(
+                                {"sheet": ws.title, "req_id": req_id}
+                                if req_id
+                                else {"sheet": ws.title}
+                            ),
+                            confidence=1.0,
+                        ),
+                    )
+                )
+                current_paragraph_lines = []
+
+        for row in ws.iter_rows(values_only=True):
+            # Get first non-empty cell content
+            text = None
+            for cell_val in row:
+                if cell_val is not None and str(cell_val).strip():
+                    text = str(cell_val).strip()
+                    break
+
+            if not text:
+                flush_paragraph()
+                continue
+
+            # Check for document title row
+            if row[0] == "Document Title" and len(row) > 1 and row[1]:
+                doc_title = str(row[1])
+                blocks.append(
+                    BaseBlock(
+                        id=self._generate_block_id(),
+                        type=BlockType.HEADING,
+                        content=doc_title,
+                        metadata=BlockMetadata(
+                            attributes={"level": 1, "sheet": ws.title}, confidence=1.0
+                        ),
+                    )
+                )
+                continue
+
+            # Check for heading
+            is_heading, level = self._is_heading_cell(text)
+            if is_heading:
+                flush_paragraph()
+                blocks.append(
+                    BaseBlock(
+                        id=self._generate_block_id(),
+                        type=BlockType.HEADING,
+                        content=text,
+                        metadata=BlockMetadata(
+                            attributes={"level": level, "sheet": ws.title}, confidence=1.0
+                        ),
+                    )
+                )
+                continue
+
+            # Regular content - accumulate
+            current_paragraph_lines.append(text)
+
+        flush_paragraph()
+        return blocks
 
     # ------------------------------------------------------------------
     # Excel (openpyxl)
@@ -227,7 +388,9 @@ class SpreadsheetProvider:
                     cols=max_col,
                     cells=cells,
                     headers=[0] if max_row > 0 else [],
-                    metadata=BlockMetadata(attributes={"sheet": ws.title, "source": "openpyxl_simple"}),
+                    metadata=BlockMetadata(
+                        attributes={"sheet": ws.title, "source": "openpyxl_simple"}
+                    ),
                 )
             )
 
@@ -305,6 +468,109 @@ class SpreadsheetProvider:
                 attributes={"sheet": table.getAttribute("name") or "Sheet"}, confidence=1.0
             ),
         )
+
+    # ------------------------------------------------------------------
+    # CSV (native csv)
+    # ------------------------------------------------------------------
+    def _extract_csv(self, filepath: Path, delimiter: str = ",") -> tuple[List[BaseBlock], DocumentMetadata]:
+        import csv
+        blocks: List[BaseBlock] = []
+        
+        # Safety: Check file size. If > 200MB, warn and maybe cap?
+        # But 'streaming' means we iterate. The issue is UnifiedDocument stores ALL blocks in memory.
+        # We can at least avoid the intermediate 'rows' list double-allocation.
+        file_size = filepath.stat().st_size
+        if file_size > 200 * 1024 * 1024:
+            logger.warning(f"Large CSV detected ({file_size / 1024 / 1024:.1f} MB). memory usage will be high.")
+
+        cells: List[TableCell] = []
+        max_col = 0
+        row_count = 0
+
+        def _process_reader(reader_obj):
+            nonlocal max_col, row_count
+            for r_idx, row in enumerate(reader_obj):
+                row_count += 1
+                if not row: continue
+                # Update max_col
+                if len(row) > max_col:
+                    max_col = len(row)
+                
+                # Create TableCells immediately, do not store raw row in list
+                for c_idx, val in enumerate(row):
+                    # Only store non-empty cells to save some memory? 
+                    # UnifiedDocument schema expects dense matrix or sparse?
+                    # TableCell has row/col, so sparse is fine.
+                    # Text usually strips.
+                    val_str = str(val).strip()
+                    if val_str:
+                        cells.append(
+                            TableCell(
+                                row=r_idx,
+                                col=c_idx,
+                                content=val_str,
+                                rowspan=1,
+                                colspan=1,
+                            )
+                        )
+
+        try:
+            # Try sniffing format with a small sample
+            with filepath.open(newline='', encoding='utf-8') as f:
+                sample = f.read(2048)
+                f.seek(0)
+                try:
+                    dialect = csv.Sniffer().sniff(sample)
+                    has_header = csv.Sniffer().has_header(sample)
+                except Exception:
+                    dialect = None
+                
+                reader = csv.reader(f, dialect) if dialect else csv.reader(f, delimiter=delimiter)
+                _process_reader(reader)
+
+        except Exception:
+            # Fallback (different encoding, etc)
+            logger.warning("CSV utf-8 read failed, trying latin-1")
+            cells = [] # Reset
+            row_count = 0
+            max_col = 0
+            try:
+                 with filepath.open(newline='', encoding='latin-1') as f:
+                    reader = csv.reader(f)
+                    _process_reader(reader)
+            except Exception as e:
+                logger.error(f"Failed to read CSV: {e}")
+                return [], DocumentMetadata(format_metadata={"file_type": "csv", "error": str(e)})
+
+        if not cells and row_count == 0:
+             return [], DocumentMetadata(format_metadata={"file_type": "csv", "rows": 0})
+
+        # Create the TableBlock
+        # Note: We still create one giant TableBlock. 
+        # For true streaming support, UnifiedDocument would need to accept an iterator or we'd need multiple blocks.
+        # But this removes the intermediate `rows` list copy, saving ~50% memory.
+        table_block = TableBlock(
+            id=self._generate_block_id(),
+            type=BlockType.TABLE,
+            content={},
+            rows=row_count,
+            cols=max_col,
+            cells=cells,
+            headers=[0], 
+            metadata=BlockMetadata(
+                attributes={"sheet": "CSV", "source": "csv_module", "streaming": True}, confidence=1.0
+            ),
+        )
+        blocks.append(table_block)
+
+        metadata = DocumentMetadata(
+            format_metadata={
+                "file_type": "csv",
+                "rows": row_count,
+                "file_size": file_size,
+            }
+        )
+        return blocks, metadata
 
     # ------------------------------------------------------------------
     # Hierarchy

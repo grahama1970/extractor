@@ -81,8 +81,7 @@ def main() -> int:
                 ts = spans["title"].get("start")
                 te = spans["title"].get("end")
             page = b.get("page", b.get("page_idx", ""))
-            print(
-                f"{page}\t{bi}\t{res.get('title') or line}\t{ns}\t{ne}\t{ts}\t{te}")
+            print(f"{page}\t{bi}\t{res.get('title') or line}\t{ns}\t{ne}\t{ts}\t{te}")
             out_count += 1
             if out_count >= args.limit:
                 return 0
@@ -93,4 +92,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

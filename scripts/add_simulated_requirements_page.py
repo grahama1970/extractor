@@ -10,6 +10,7 @@ Usage (from repo root):
 
 Requires: PyMuPDF (pip install pymupdf)
 """
+
 from __future__ import annotations
 
 import argparse
@@ -89,7 +90,9 @@ def infer_body_text_style(doc: "fitz.Document", header_style: dict) -> dict:
             for line in block.get("lines", []):
                 text_line = "".join(span.get("text", "") for span in line.get("spans", []))
                 # skip header lines similar to the section header
-                if ("4.1.5.4" in text_line and "BHT" in text_line) or text_line.strip().lower().startswith("section header"):
+                if (
+                    "4.1.5.4" in text_line and "BHT" in text_line
+                ) or text_line.strip().lower().startswith("section header"):
                     continue
                 for sp in line.get("spans", []):
                     fn = sp.get("font") or style["fontname"]
@@ -124,6 +127,7 @@ def infer_body_text_style(doc: "fitz.Document", header_style: dict) -> dict:
     else:
         style["leading"] = 1.28
     return style
+
 
 def build_requirements_text() -> str:
     # Exact section title as requested, include (Simulated)
@@ -181,9 +185,7 @@ def build_requirements_text() -> str:
         ),
     ]
 
-    disclaimer = (
-        "Note: This page is simulated test content to validate PDF processing and does not alter the authoritative hardware specification."
-    )
+    disclaimer = "Note: This page is simulated test content to validate PDF processing and does not alter the authoritative hardware specification."
 
     # Build single text block with ASCII hyphens to ensure robust extraction
     # Also include the title at the top of the body so text extractors capture it.
@@ -236,7 +238,9 @@ def add_page_3(input_pdf: Path, output_pdf: Path) -> None:
         # Manual text layout for robust extraction and to avoid overflow issues
         body_text = text.split("\n", 1)[1] if "\n" in text else ""
 
-        def wrap_lines(para: str, max_width: float, fontname: str, fontsize: float, indent: float = 0.0) -> list[str]:
+        def wrap_lines(
+            para: str, max_width: float, fontname: str, fontsize: float, indent: float = 0.0
+        ) -> list[str]:
             if not para:
                 return [""]
             words = para.split(" ")
@@ -291,7 +295,9 @@ def add_page_3(input_pdf: Path, output_pdf: Path) -> None:
             is_bullet = p.strip().startswith("-")
             indent_x = 14.0 if is_bullet else 0.0
             ptext = p[1:].strip() if is_bullet else p
-            wrapped = wrap_lines(ptext, max_width - indent_x, body_style["fontname"], fontsize, indent=indent_x)
+            wrapped = wrap_lines(
+                ptext, max_width - indent_x, body_style["fontname"], fontsize, indent=indent_x
+            )
             for line in wrapped:
                 if y + fontsize > body_rect.y1:
                     break
@@ -315,7 +321,9 @@ def add_page_3(input_pdf: Path, output_pdf: Path) -> None:
         doc.close()
 
 
-def add_simulated_tables_section(doc: "fitz.Document", header_style: dict, body_style: dict) -> None:
+def add_simulated_tables_section(
+    doc: "fitz.Document", header_style: dict, body_style: dict
+) -> None:
     """Append a new '(Simulated)' section 4.1.6 including tables that
     demonstrate merge vs. non-merge scenarios. Creates one or more pages at end.
     """
@@ -362,7 +370,9 @@ def add_simulated_tables_section(doc: "fitz.Document", header_style: dict, body_
             lines.append(" ".join(cur))
         return lines or [""]
 
-    def draw_paragraph(p: "fitz.Page", rect: fitz.Rect, text: str, fontsize: float | None = None) -> float:
+    def draw_paragraph(
+        p: "fitz.Page", rect: fitz.Rect, text: str, fontsize: float | None = None
+    ) -> float:
         max_width = rect.x1 - rect.x0
         y = rect.y0
         fontsize = fontsize or body_style["fontsize"]
@@ -386,9 +396,16 @@ def add_simulated_tables_section(doc: "fitz.Document", header_style: dict, body_
             y += fontsize * 0.3  # paragraph spacing
         return y
 
-    def draw_table(p: "fitz.Page", x0: float, y0: float, col_widths: list[float], row_heights: list[float],
-                   cells: list[list[str]], caption: str | None = None, fontsize: float | None = None) -> float:
-        x = x0
+    def draw_table(
+        p: "fitz.Page",
+        x0: float,
+        y0: float,
+        col_widths: list[float],
+        row_heights: list[float],
+        cells: list[list[str]],
+        caption: str | None = None,
+        fontsize: float | None = None,
+    ) -> float:
         y = y0
         fontsize = fontsize or max(9.0, body_style["fontsize"] - 0.5)
         # caption above table
@@ -406,7 +423,9 @@ def add_simulated_tables_section(doc: "fitz.Document", header_style: dict, body_
         total_width = sum(col_widths)
         total_height = sum(row_heights)
         # outer border
-        p.draw_rect(fitz.Rect(x0, y, x0 + total_width, y + total_height), color=(0, 0, 0), width=0.7)
+        p.draw_rect(
+            fitz.Rect(x0, y, x0 + total_width, y + total_height), color=(0, 0, 0), width=0.7
+        )
         # vertical lines
         cx = x0
         for w in col_widths[:-1]:
@@ -607,11 +626,17 @@ def add_simulated_tables_section(doc: "fitz.Document", header_style: dict, body_
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Insert simulated hardware requirements as page 3 of a PDF")
+    parser = argparse.ArgumentParser(
+        description="Insert simulated hardware requirements as page 3 of a PDF"
+    )
     parser.add_argument("--input", required=True, help="Path to input PDF")
     parser.add_argument("--output", required=True, help="Path to output PDF")
-    parser.add_argument("--header-font-file", help="Optional path to header font (TTF/OTF) to embed", default=None)
-    parser.add_argument("--body-font-file", help="Optional path to body font (TTF/OTF) to embed", default=None)
+    parser.add_argument(
+        "--header-font-file", help="Optional path to header font (TTF/OTF) to embed", default=None
+    )
+    parser.add_argument(
+        "--body-font-file", help="Optional path to body font (TTF/OTF) to embed", default=None
+    )
     args = parser.parse_args(argv)
 
     input_pdf = Path(args.input).resolve()

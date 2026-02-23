@@ -15,7 +15,9 @@ import typer
 from dotenv import load_dotenv, find_dotenv
 
 
-app = typer.Typer(add_completion=False, help="Smoke: Stage 11 skip-graph-creation with no embeddings")
+app = typer.Typer(
+    add_completion=False, help="Smoke: Stage 11 skip-graph-creation with no embeddings"
+)
 
 
 @app.command()
@@ -70,4 +72,3 @@ def main(results: Path = typer.Option(Path("data/results/pipeline"), "-o")) -> N
 
 if __name__ == "__main__":
     app()
-

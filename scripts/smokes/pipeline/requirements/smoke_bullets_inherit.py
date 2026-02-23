@@ -13,7 +13,6 @@ from __future__ import annotations
 import json
 import re
 import subprocess
-import sys
 from pathlib import Path
 
 import typer
@@ -30,7 +29,7 @@ def extract_bullets_inherit(text: str) -> list[str]:
         if m:
             modal = m.group(1)
             continue
-        if ln.startswith(('- ', '* ', '• ')) and modal:
+        if ln.startswith(("- ", "* ", "• ")) and modal:
             core = ln[2:].strip()
             out.append(f"The system {modal} {core}")
     return out
@@ -52,7 +51,8 @@ def main():
     reqs = extract_bullets_inherit(text)
     items = [{"requirement": r, "metadata": {"section_id": f"BLT-{i}"}} for i, r in enumerate(reqs)]
 
-    tmp = Path("/tmp/lean_bullets_in.json"); tmp.write_text(json.dumps(items, indent=2))
+    tmp = Path("/tmp/lean_bullets_in.json")
+    tmp.write_text(json.dumps(items, indent=2))
     out = Path("/tmp/lean_bullets_out.json")
 
     cmd = [
@@ -68,7 +68,9 @@ def main():
         "--max-workers",
         "1",
     ]
-    env = __import__("os").environ.copy(); env["PYTHONPATH"]="/home/graham/workspace/experiments/lean4/src:"+env.get("PYTHONPATH","" ); rc = subprocess.run(cmd, env=env).returncode
+    env = __import__("os").environ.copy()
+    env["PYTHONPATH"] = "/home/graham/workspace/experiments/lean4/src:" + env.get("PYTHONPATH", "")
+    rc = subprocess.run(cmd, env=env).returncode
     if rc != 0 or not out.exists():
         typer.echo("Lean4 batch failed", err=True)
         raise typer.Exit(1)
@@ -80,7 +82,9 @@ def main():
         "out": str(out),
     }
     Path("scripts/artifacts").mkdir(parents=True, exist_ok=True)
-    (Path("scripts/artifacts")/"req_bullets_inherit_summary.json").write_text(json.dumps(summary, indent=2))
+    (Path("scripts/artifacts") / "req_bullets_inherit_summary.json").write_text(
+        json.dumps(summary, indent=2)
+    )
     print(json.dumps(summary, indent=2))
 
 

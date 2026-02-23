@@ -23,7 +23,6 @@ Examples:
   ./scripts/gamified_cli_uv.py status --run-id 20250101-120000
 """
 
-import os
 import sys
 from pathlib import Path
 

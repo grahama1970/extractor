@@ -17,7 +17,6 @@ VLM description/title inference is performed by Stage 06b (figure_describer).
 from __future__ import annotations
 
 import asyncio
-import base64
 import json
 import os
 import time
@@ -30,7 +29,6 @@ from dotenv import find_dotenv, load_dotenv
 from loguru import logger
 from extractor.pipeline.utils.reliability import log_stage_error
 from rich.console import Console
-from extractor.pipeline.utils.debug_utils import ensure_logs_dir, log_llm_call, time_block
 
 from extractor.pipeline.utils.figure_extractor_utils import (
     _estimate_bbox,
@@ -88,6 +86,18 @@ async def _process_one(
         page = doc[page_num]
 
         bbox0 = block.get("bbox") or _estimate_bbox(page, block)
+
+        # Filtering
+        area = _bbox_area(bbox0)
+        if area < FIGURE_MIN_AREA:
+            return None
+
+        # Max area: e.g. 90% of page? or explicit pixels?
+        # Using env var if present, else fairly permissive (e.g. 4M pixels ~ 2k*2k)
+        max_area = int(os.getenv("FIGURE_MAX_AREA_PX", "0"))
+        if max_area > 0 and area > max_area:
+            return None
+
         expanded_bbox = _expand_bbox(bbox0, page.rect.height, VERTICAL_PADDING_RATIO)
 
         image_data = _render_region(page, expanded_bbox)
@@ -96,8 +106,8 @@ async def _process_one(
         # Context gathering (for 06b)
         above_text, below_text = _band_texts(page, bbox0)
         nearby_text = _nearby_text(page, expanded_bbox)
-        
-        # NOTE: Stage 06 is now purely deterministic. 
+
+        # NOTE: Stage 06 is now purely deterministic.
         # Description/Title will provide nulls/empties, populated by 06b_figure_describer (VLM).
         description: Optional[str] = None
         figure_title: Optional[str] = None
@@ -128,7 +138,7 @@ async def _process_one(
         res["context_nearby"] = nearby_text
         return res
     except Exception as exc:
-        log_stage_error('06_figure_extractor', exc, {'context': '06', 'figure_id': figure_id})
+        log_stage_error("06_figure_extractor", exc, {"context": "06", "figure_id": figure_id})
         raise
 
 
@@ -140,7 +150,7 @@ async def _process_all(
 ) -> list[dict[str, Any]]:
     sem = asyncio.Semaphore(max(1, CONCURRENCY))
     # Note: No router needed here anymore; purely deterministic.
-    
+
     async def runner(i: int, blk: dict[str, Any]) -> dict[str, Any] | None:
         async with sem:
             return await _process_one(
@@ -202,11 +212,10 @@ def run(
     preset_config: Optional[dict[str, Any]] = None,
 ) -> Path:
     """Extract figures, deterministically (image + band texts), write JSON."""
-    import time
 
     t0 = time.monotonic()
     # Note: No SciLLM preflight needed here.
-    
+
     # Load inputs
     if bundle is not None:
         data = json.loads(Path(bundle).read_text())
@@ -230,7 +239,11 @@ def run(
             raise FileNotFoundError("No '*_clean.pdf' found in pdf_dir")
         label = stage_02_json.name
 
-    blocks = [b for b in stage_02_data.get("blocks", []) if b.get("block_type") in ("Figure", "Image")]
+    blocks = [
+        b
+        for b in stage_02_data.get("blocks", [])
+        if b.get("block_type") in ("Figure", "Image", "Picture")
+    ]
 
     # Output dirs
     stage_dir = output_dir / "06_figure_extractor"
@@ -252,7 +265,7 @@ def run(
             retention="14 days",
         )
     except Exception as exc:
-        log_stage_error('06_figure_extractor', exc, {'context': '06', 'step': 'logger_setup'})
+        log_stage_error("06_figure_extractor", exc, {"context": "06", "step": "logger_setup"})
         raise
 
     figures: list[dict[str, Any]] = []
@@ -282,7 +295,7 @@ def run(
             # accept page or page_idx
             _ = f.get("page_idx") if "page_idx" in f else f.get("page")
     except Exception as exc:
-        log_stage_error('06_figure_extractor', exc, {'context': '06', 'step': 'schema_validation'})
+        log_stage_error("06_figure_extractor", exc, {"context": "06", "step": "schema_validation"})
         raise
 
     out_path.write_text(json.dumps(result, indent=2))
@@ -297,37 +310,41 @@ def run(
 if __name__ == "__main__":
     import argparse
     import sys
-    
+
     parser = argparse.ArgumentParser(description="Stage 06: Figure Extractor")
-    parser.add_argument("--pipeline-dir", type=Path, required=True, help="Path to pipeline results root")
+    parser.add_argument(
+        "--pipeline-dir", type=Path, required=True, help="Path to pipeline results root"
+    )
     parser.add_argument("--pdf-dir", type=Path, help="Dir containing input PDF")
     args = parser.parse_args()
-    
+
     pipeline_dir = args.pipeline_dir
-    
+
     try:
         logger.info("Running Stage 06...")
         stage_02 = pipeline_dir / "02_marker_extractor/json_output/02_marker_blocks.json"
         stage_04 = pipeline_dir / "04_section_builder/json_output/04_sections.json"
-        
+
         if not stage_02.exists() or not stage_04.exists():
             logger.error("Missing input dependencies (S02 or S04)")
             sys.exit(1)
-        
+
         # Locate PDF
         # If --pdf-dir is provided, use it. Otherwise, look in S01.
         pdf_dir = args.pdf_dir
         if not pdf_dir:
-             s01_dir = pipeline_dir / "01_annotation_processor"
-             if s01_dir.exists():
-                 pdf_dir = s01_dir
-        
-        if not pdf_dir:
-             logger.error("--pdf-dir required for execution (or S01 output must exist)")
-             sys.exit(1)
+            s01_dir = pipeline_dir / "01_annotation_processor"
+            if s01_dir.exists():
+                pdf_dir = s01_dir
 
-        run(stage_02_json=stage_02, stage_04_json=stage_04, pdf_dir=pdf_dir, output_dir=pipeline_dir)
-        
+        if not pdf_dir:
+            logger.error("--pdf-dir required for execution (or S01 output must exist)")
+            sys.exit(1)
+
+        run(
+            stage_02_json=stage_02, stage_04_json=stage_04, pdf_dir=pdf_dir, output_dir=pipeline_dir
+        )
+
     except Exception as e:
         logger.error(f"Execution failed: {e}")
         sys.exit(1)

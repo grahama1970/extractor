@@ -18,8 +18,14 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def find_latest() -> Path | None:
-    candidates = list(ROOT.glob("data/results/pipeline/**/10_arangodb_exporter/json_output/10_flattened_data.json"))
-    candidates += list(ROOT.glob("out_fast/**/10_arangodb_exporter/json_output/10_flattened_data.json"))
+    candidates = list(
+        ROOT.glob(
+            "data/results/pipeline/**/10_arangodb_exporter/json_output/10_flattened_data.json"
+        )
+    )
+    candidates += list(
+        ROOT.glob("out_fast/**/10_arangodb_exporter/json_output/10_flattened_data.json")
+    )
     if not candidates:
         return None
     return max(candidates, key=lambda p: p.stat().st_mtime)

@@ -32,6 +32,7 @@ app = typer.Typer(add_completion=False, help="Smoke: Stage 07 medium (one image)
 
 def _load_stage07():
     import importlib.util
+
     p = Path("src/extractor/pipeline/steps/07_reflow_section.py").resolve()
     spec = importlib.util.spec_from_file_location("stage07", str(p))
     if not spec or not spec.loader:
@@ -48,6 +49,7 @@ def run_smoke(results: Path) -> None:
     sys.path.insert(0, os.path.abspath("src"))
     # Ensure upstream artifacts via CLI
     import subprocess
+
     pdf_path = Path("data/input/pipeline/BHT_CV32A65X_marked.pdf")
     cmd = [
         sys.executable,
@@ -72,12 +74,16 @@ def run_smoke(results: Path) -> None:
         raise SystemExit("No sections to reflow")
 
     async def run_once():
-        return await reflow_section_with_llm(sections[0], results, include_images=True, allow_fallback=False)
+        return await reflow_section_with_llm(
+            sections[0], results, include_images=True, allow_fallback=False
+        )
 
     out = asyncio.run(run_once())
     ok = isinstance(out, dict) and isinstance(out.get("reflowed_json"), dict)
     Path("scripts/artifacts").mkdir(parents=True, exist_ok=True)
-    Path("scripts/artifacts/stage07_medium.json").write_text(json.dumps(out, ensure_ascii=False, indent=2))
+    Path("scripts/artifacts/stage07_medium.json").write_text(
+        json.dumps(out, ensure_ascii=False, indent=2)
+    )
     if not ok:
         raise SystemExit("Stage 07 medium strict JSON failed")
     typer.echo("OK: Stage 07 medium strict JSON returned")

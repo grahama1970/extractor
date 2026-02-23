@@ -21,11 +21,24 @@ app = typer.Typer(add_completion=False)
 
 @app.command()
 def main(
-    xml_path: Path = typer.Option(Path("data/results/pipeline/01_annotation_processor/bht_formats/BHT_CV32A65X_marked_clean.xml"), exists=True),
+    xml_path: Path = typer.Option(
+        Path(
+            "data/results/pipeline/01_annotation_processor/bht_formats/BHT_CV32A65X_marked_clean.xml"
+        ),
+        exists=True,
+    ),
     results_dir: Path = typer.Option(Path("data/results/structured_parity_smoke/xml_checks")),
 ):
     meta = STRUCTURED_PIPELINES[XMLProvider]
-    artifacts = run_structured_pipeline(XMLProvider, xml_path, results_dir, stage_prefix=meta.stage_prefix, skip_export10=True, skip_embeddings10=True, fast_embeddings10=True)
+    artifacts = run_structured_pipeline(
+        XMLProvider,
+        xml_path,
+        results_dir,
+        stage_prefix=meta.stage_prefix,
+        skip_export10=True,
+        skip_embeddings10=True,
+        fast_embeddings10=True,
+    )
     s07 = json.loads(Path(artifacts["stage07"]).read_text())
     unified = s07.get("unified_document") or {}
     fmt = (unified.get("metadata") or {}).get("format_metadata") or {}
@@ -37,4 +50,3 @@ def main(
 
 if __name__ == "__main__":
     app()
-

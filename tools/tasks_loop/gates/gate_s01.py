@@ -30,7 +30,7 @@ def load_contract(fixture_name: str) -> dict:
             expected="s01.json",
             actual="missing",
             file=str(contract_path),
-            hint="Run: python utils/compile_contracts.py"
+            hint="Run: python utils/compile_contracts.py",
         )
     return json.loads(contract_path.read_text())
 
@@ -40,28 +40,30 @@ def checks(fixture_name: str):
     contract = load_contract(fixture_name)
     expected = contract.get("expected", {})
     expected_count = expected.get("annotation_count")
-    
+
     annotations_file = JSON_DIR / "01_annotations.json"
     data = load_json(annotations_file, required_keys=["annotations"])
-    
+
     annotations = data.get("annotations", [])
     actual_count = len(annotations)
-    
+
     if expected_count is not None and actual_count != expected_count:
         raise GateError(
             message="Annotation count mismatch",
             expected=expected_count,
             actual=actual_count,
             file=str(annotations_file),
-            hint="Check PDF annotations or SPEC.md"
+            hint="Check PDF annotations or SPEC.md",
         )
-    
-    print(f"✅ Annotation count: {actual_count}" + (f" == {expected_count}" if expected_count else ""))
+
+    print(
+        f"✅ Annotation count: {actual_count}" + (f" == {expected_count}" if expected_count else "")
+    )
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Gate S01: Annotation Processor")
     parser.add_argument("--fixture", required=True, help="Fixture name")
     args = parser.parse_args()
-    
+
     sys.exit(run_gate("S01: Annotation Processor", lambda: checks(args.fixture)))

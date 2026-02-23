@@ -22,10 +22,17 @@ def _load_stage11():
     # Provide minimal faiss stub if not installed
     if "faiss" not in sys.modules:
         faiss_stub = types.ModuleType("faiss")
+
         class IndexFlatIP:  # noqa: N801
-            def __init__(self, d): self.ntotal = 0
-            def add(self, arr): self.ntotal += len(arr)
-        def normalize_L2(x): return x
+            def __init__(self, d):
+                self.ntotal = 0
+
+            def add(self, arr):
+                self.ntotal += len(arr)
+
+        def normalize_L2(x):
+            return x
+
         faiss_stub.IndexFlatIP = IndexFlatIP  # type: ignore[attr-defined]
         faiss_stub.normalize_L2 = normalize_L2  # type: ignore[attr-defined]
         sys.modules["faiss"] = faiss_stub

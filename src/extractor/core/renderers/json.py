@@ -180,9 +180,7 @@ class JSONRenderer(BaseRenderer):
             children = page_dict.get("children")
             if isinstance(children, list) and children:
                 try:
-                    page_dict["children"] = sorted(
-                        children, key=_canonical_json_block_order_key
-                    )
+                    page_dict["children"] = sorted(children, key=_canonical_json_block_order_key)
                 except Exception:
                     pass
             json_output.append(page_dict)

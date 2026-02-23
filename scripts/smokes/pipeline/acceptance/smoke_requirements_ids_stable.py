@@ -32,28 +32,46 @@ def ids_from(out: Path) -> set[str]:
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     # First run
-    rc = subprocess.run([
-        "/home/graham/workspace/experiments/extractor/.venv/bin/python",
-        "-m", "src.cli", "extract", str(PDF), str(OUT), "--mode", "accurate",
-    ]).returncode
+    rc = subprocess.run(
+        [
+            "/home/graham/workspace/experiments/extractor/.venv/bin/python",
+            "-m",
+            "src.cli",
+            "extract",
+            str(PDF),
+            str(OUT),
+            "--mode",
+            "accurate",
+        ]
+    ).returncode
     if rc != 0:
         raise SystemExit(rc)
     ids1 = ids_from(OUT)
     # Resume run (should skip miner and preserve IDs)
-    rc = subprocess.run([
-        "/home/graham/workspace/experiments/extractor/.venv/bin/python",
-        "-m", "extractor.pipeline.run_all",
-        "--pdf", str(PDF), "--results", str(OUT), "--resume",
-    ]).returncode
+    rc = subprocess.run(
+        [
+            "/home/graham/workspace/experiments/extractor/.venv/bin/python",
+            "-m",
+            "extractor.pipeline.run_all",
+            "--pdf",
+            str(PDF),
+            "--results",
+            str(OUT),
+            "--resume",
+        ]
+    ).returncode
     if rc != 0:
         raise SystemExit(rc)
     ids2 = ids_from(OUT)
     ok = ids1 == ids2 and len(ids1) > 0
     Path("scripts/artifacts").mkdir(parents=True, exist_ok=True)
-    (Path("scripts/artifacts")/"req_ids_stability.json").write_text(json.dumps({"ok": ok, "n": len(ids1)}, indent=2))
+    (Path("scripts/artifacts") / "req_ids_stability.json").write_text(
+        json.dumps({"ok": ok, "n": len(ids1)}, indent=2)
+    )
     if not ok:
         raise SystemExit(1)
     print(json.dumps({"ok": ok}, indent=2))
+
 
 if __name__ == "__main__":
     app()

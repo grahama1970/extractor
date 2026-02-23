@@ -86,17 +86,13 @@ def run_smoke(timeout: int, model: str) -> None:
             "You are a strict JSON reflow engine. Return ONLY JSON: "
             '{"reflowed_json":{"blocks":[{"type":"paragraph","text":string}]},'  # minimal sketch
             '"ocr_corrections":{},"improvements_made":string}. '
-            "If not possible, return {\"reflowed_text\":string}. No code fences."
+            'If not possible, return {"reflowed_text":string}. No code fences.'
         )
         context = "Section: Minimal test section."
 
         # Compose messages with image part
         is_gemini = "gemini" in (model or "").lower()
-        img_part = (
-            {"type": "image_url", "image_url": {"url": data_url}}
-            if data_url
-            else None
-        )
+        img_part = {"type": "image_url", "image_url": {"url": data_url}} if data_url else None
         if is_gemini:
             parts = [{"type": "text", "text": f"{guard}\n\n{context}"}]
             if img_part:
@@ -140,7 +136,11 @@ def run_smoke(timeout: int, model: str) -> None:
                 "kwargs": getattr(getattr(r0, "request", object()), "kwargs", None),
             },
             "content_head": (getattr(r0, "content", "") or "")[:240],
-            "error": None if getattr(r0, "exception", None) is None else str(getattr(r0, "exception", None)),
+            "error": (
+                None
+                if getattr(r0, "exception", None) is None
+                else str(getattr(r0, "exception", None))
+            ),
         }
         out = _artifact_path(root)
         out.write_text(json.dumps(artifact, ensure_ascii=False, indent=2), encoding="utf-8")

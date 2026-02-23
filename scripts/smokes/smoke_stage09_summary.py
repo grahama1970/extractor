@@ -36,13 +36,17 @@ def main(
         text = "This section explains the Branch History Table (BHT) component and its behavior."
         messages = [{"role": "user", "content": [{"type": "text", "text": text}]}]
         import asyncio
+
         adapter = LLMAdapter()
         res = asyncio.run(
             adapter.summarize_section(
                 model=model,
                 messages=messages,
                 prompt_version=prompt_version,
-                doc_id="doc", section_id="s0", request_id="smoke09", timeout=timeout,
+                doc_id="doc",
+                section_id="s0",
+                request_id="smoke09",
+                timeout=timeout,
             )
         )
         sj = res.summary_json

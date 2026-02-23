@@ -10,7 +10,7 @@ try:
 
     _HAS_PIL = True
 except Exception as exc:
-    log_stage_error('vision.py', exc, {'context': 'vision.py'})
+    log_stage_error("vision.py", exc, {"context": "vision.py"})
     raise
     _HAS_PIL = False
 
@@ -74,7 +74,7 @@ async def preflight_vision_support(model: str, timeout_sec: int = 10) -> bool:
             try:
                 size = int(os.getenv("VISION_PREFLIGHT_SIZE", "256"))
             except Exception as exc:
-                log_stage_error('vision.py', exc, {'context': 'vision.py'})
+                log_stage_error("vision.py", exc, {"context": "vision.py"})
                 raise
                 size = 256
             if _HAS_PIL and size >= 1:
@@ -89,7 +89,7 @@ async def preflight_vision_support(model: str, timeout_sec: int = 10) -> bool:
                         "image_url": {"url": f"data:image/png;base64,{b64}"},
                     }
                 except Exception as exc:
-                    log_stage_error('vision.py', exc, {'context': 'vision.py'})
+                    log_stage_error("vision.py", exc, {"context": "vision.py"})
                     raise
                     image_part = {
                         "type": "image_url",
@@ -135,7 +135,7 @@ async def preflight_vision_support(model: str, timeout_sec: int = 10) -> bool:
         set_cached_vision_support(model, True)
         return True
     except Exception as exc:
-        log_stage_error('vision.py', exc, {'context': 'vision.py'})
+        log_stage_error("vision.py", exc, {"context": "vision.py"})
         raise
         set_cached_vision_support(model, False)
         return False

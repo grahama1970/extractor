@@ -9,7 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 import pandas as pd
 
@@ -17,6 +17,7 @@ import pandas as pd
 # -----------------------------------------------------------------------------
 # Cell sanitization
 # -----------------------------------------------------------------------------
+
 
 def normalize_table_text(val: Any) -> str:
     """Normalize table cell text: collapse whitespace, convert None to ''."""
@@ -33,7 +34,7 @@ def sanitize_table_cell(val: Any) -> str:
         return ""
     text = str(val).replace("\u00a0", " ").replace("\n", " ")
     text = re.sub(r"\s+", " ", text).strip()
-    
+
     # Fix common OCR split-word errors
     replacements = {
         "Subsyste m": "Subsystem",
@@ -47,7 +48,7 @@ def sanitize_table_cell(val: Any) -> str:
     }
     for old, new in replacements.items():
         text = text.replace(old, new)
-    
+
     # Fix split in/out tokens
     tokens = text.split()
     if tokens and all(tok.lower() in {"in", "out", "ou", "t"} for tok in tokens):
@@ -66,7 +67,7 @@ def sanitize_table_cell(val: Any) -> str:
                 merged.append(tok)
             i += 1
         text = "/".join(merged)
-    
+
     return text
 
 
@@ -82,6 +83,7 @@ def df_map(df: pd.DataFrame, func) -> pd.DataFrame:
 # Table confidence heuristics
 # -----------------------------------------------------------------------------
 
+
 def compute_table_confidence(t: dict[str, Any]) -> float:
     """Compute a table confidence score (0.0–1.0) from pandas/camelot metrics."""
     try:
@@ -92,7 +94,7 @@ def compute_table_confidence(t: dict[str, Any]) -> float:
         camel = t.get("camelot_metrics") or {}
         acc = float(camel.get("accuracy") or 0.0)
         white = float(camel.get("whitespace") or 0.0)
-        
+
         score = 0.0
         score += 0.2 if rows >= 3 else 0.0
         score += min(max(density, 0.0), 1.0) * 0.4
@@ -107,11 +109,16 @@ def compute_table_confidence(t: dict[str, Any]) -> float:
 # Table merge logic
 # -----------------------------------------------------------------------------
 
+
 def compute_table_merges(
     tables: list[dict[str, Any]],
-) -> Tuple[list[dict[str, Any]], dict[str, dict[str, Any]], dict[Tuple[str, Tuple[int, ...]], dict[str, Any]]]:
+) -> Tuple[
+    list[dict[str, Any]],
+    dict[str, dict[str, Any]],
+    dict[Tuple[str, Tuple[int, ...]], dict[str, Any]],
+]:
     """Derive merge metadata from Stage 05 tables using a deterministic signature.
-    
+
     Returns:
         merged_tables_summary: list of merge group summaries
         merged_lookup_by_id: map of table ids -> merge meta
@@ -165,14 +172,23 @@ def compute_table_merges(
         signature = {**base_sig, "title": rep_title or "", "pages": pages}
         logical_key = _logical_key(signature)
         meta = {"merged_table": True, "logical_table_key": logical_key, "merged_pages": pages}
-        merged_tables_summary.append({
-            "logical_table_key": logical_key,
-            "merged_pages": pages,
-            "count": len(items),
-        })
-        merged_lookup_by_sig[(json.dumps(base_sig, sort_keys=True, ensure_ascii=False), tuple(pages))] = meta
+        merged_tables_summary.append(
+            {
+                "logical_table_key": logical_key,
+                "merged_pages": pages,
+                "count": len(items),
+            }
+        )
+        merged_lookup_by_sig[
+            (json.dumps(base_sig, sort_keys=True, ensure_ascii=False), tuple(pages))
+        ] = meta
         for it in items:
-            for cand in [it.get("id"), it.get("table_id"), it.get("logical_table_id"), it.get("normalized_id")]:
+            for cand in [
+                it.get("id"),
+                it.get("table_id"),
+                it.get("logical_table_id"),
+                it.get("normalized_id"),
+            ]:
                 if cand:
                     merged_lookup_by_id[str(cand)] = meta
             it.update(meta)
@@ -201,6 +217,7 @@ def compute_table_merges(
 # Block builders
 # -----------------------------------------------------------------------------
 
+
 def build_table_block_from_stage05(table: dict[str, Any]) -> dict[str, Any] | None:
     """Return a canonical table block derived from Stage 05 output."""
     pm = table.get("pandas_metrics") or {}
@@ -217,18 +234,17 @@ def build_table_block_from_stage05(table: dict[str, Any]) -> dict[str, Any] | No
     if display_cols and isinstance(rows_raw, list):
         for row in rows_raw:
             if isinstance(row, dict):
-                rows.append([
-                    sanitize_table_cell(row.get(k, ""))
-                    for k in orig_keys[: len(display_cols)]
-                ])
+                rows.append(
+                    [sanitize_table_cell(row.get(k, "")) for k in orig_keys[: len(display_cols)]]
+                )
             elif isinstance(row, list):
                 padded = [sanitize_table_cell(v) for v in list(row)[: len(display_cols)]]
                 if len(padded) < len(display_cols):
                     padded.extend([None] * (len(display_cols) - len(padded)))
                 rows.append(padded)
-    
+
     rows = [["" if cell is None else cell for cell in r] for r in rows]
-    
+
     if not display_cols and not rows:
         return None
 
@@ -244,11 +260,10 @@ def build_table_block_from_stage05(table: dict[str, Any]) -> dict[str, Any] | No
     def _norm_hdr(h: str) -> str:
         s = " ".join(str(h or "").strip().lower().split())
         return s.replace(" ", "_")
-    
+
     header_norm = "|".join([_norm_hdr(h) for h in display_cols]) if display_cols else ""
     logical_table_id = (
-        f"lt_{hashlib.sha1(header_norm.encode('utf-8')).hexdigest()[:10]}"
-        if header_norm else None
+        f"lt_{hashlib.sha1(header_norm.encode('utf-8')).hexdigest()[:10]}" if header_norm else None
     )
 
     return {
@@ -263,8 +278,12 @@ def build_table_block_from_stage05(table: dict[str, Any]) -> dict[str, Any] | No
         "header_norm": header_norm,
         "logical_table_id": logical_table_id,
         "source": {
-            "table_indices": [table.get("table_index")] if table.get("table_index") is not None else [],
-            "page_indices": [table.get("page_index")] if table.get("page_index") is not None else [],
+            "table_indices": (
+                [table.get("table_index")] if table.get("table_index") is not None else []
+            ),
+            "page_indices": (
+                [table.get("page_index")] if table.get("page_index") is not None else []
+            ),
         },
     }
 

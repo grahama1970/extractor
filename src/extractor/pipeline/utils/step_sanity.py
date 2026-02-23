@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Registry + runners for extractor pipeline per-step sanity checks."""
+
+from __future__ import annotations
 
 import json
 import os

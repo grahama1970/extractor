@@ -22,9 +22,7 @@ from scenarios.extractors.common import (
 
 
 def _synth_sample() -> Path:
-    content = (
-        "Sample RST\n==========\n\nSection A\n---------\n\nParagraph text.\n\nSection B\n---------\n\n- Item 1\n- Item 2\n"
-    )
+    content = "Sample RST\n==========\n\nSection A\n---------\n\nParagraph text.\n\nSection B\n---------\n\n- Item 1\n- Item 2\n"
     fp = Path(tempfile.gettempdir()) / "scenario_sample.rst"
     fp.write_text(content, encoding="utf-8")
     return fp
@@ -36,6 +34,7 @@ def main() -> int:
 
     try:
         from scenarios.extractors.common import import_provider
+
         RSTProvider = import_provider("providers/rst.py", "RSTProvider")
     except Exception as e:
         logger.warning(f"SKIP: cannot import RSTProvider: {e}")
@@ -61,7 +60,10 @@ def main() -> int:
     counts, heads = summarise_unified(doc)
     try:
         from scenarios.extractors.common import write_unified_snapshot
-        snap_path = write_unified_snapshot("rst", doc.id, doc.model_dump(by_alias=True, mode="json"))
+
+        snap_path = write_unified_snapshot(
+            "rst", doc.id, doc.model_dump(by_alias=True, mode="json")
+        )
     except Exception:
         snap_path = None
     inserted = try_arango_insert(doc)

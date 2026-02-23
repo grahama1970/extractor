@@ -33,7 +33,7 @@ def load_contract(fixture_name: str) -> dict:
             expected="s08.json",
             actual="missing",
             file=str(contract_path),
-            hint="Run: python utils/compile_contracts.py"
+            hint="Run: python utils/compile_contracts.py",
         )
     return json.loads(contract_path.read_text())
 
@@ -42,7 +42,7 @@ def checks(fixture_name: str):
     contract = load_contract(fixture_name)
     expected = contract.get("expected", {})
     expected_req_count = expected.get("requirement_count")
-    
+
     # Find database
     db_path = PIPELINE_DIR / "pipeline.duckdb"
     if not db_path.exists():
@@ -53,11 +53,11 @@ def checks(fixture_name: str):
             expected="pipeline.duckdb",
             actual="missing",
             file=str(PIPELINE_DIR),
-            hint="Run S07 first"
+            hint="Run S07 first",
         )
-    
+
     con = duckdb.connect(str(db_path), read_only=True)
-    
+
     # Check requirements table exists
     try:
         result = con.execute("SELECT COUNT(*) FROM requirements").fetchone()
@@ -68,19 +68,22 @@ def checks(fixture_name: str):
             expected="requirements table exists",
             actual=str(e),
             file=str(db_path),
-            hint="Run S08"
+            hint="Run S08",
         )
-    
+
     if expected_req_count is not None and actual_count != expected_req_count:
         raise GateError(
             message="Requirement count mismatch",
             expected=expected_req_count,
             actual=actual_count,
             file=str(db_path),
-            hint="Check S08 extraction or SPEC.md"
+            hint="Check S08 extraction or SPEC.md",
         )
-    
-    print(f"✅ Requirements: {actual_count}" + (f" == {expected_req_count}" if expected_req_count else ""))
+
+    print(
+        f"✅ Requirements: {actual_count}"
+        + (f" == {expected_req_count}" if expected_req_count else "")
+    )
     con.close()
 
 
@@ -88,5 +91,5 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Gate S08: Requirements Extraction")
     parser.add_argument("--fixture", required=True, help="Fixture name")
     args = parser.parse_args()
-    
+
     sys.exit(run_gate("S08: Requirements Extraction", lambda: checks(args.fixture)))

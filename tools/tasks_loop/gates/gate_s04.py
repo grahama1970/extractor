@@ -29,7 +29,7 @@ def load_contract(fixture_name: str) -> dict:
             expected="s04.json",
             actual="missing",
             file=str(contract_path),
-            hint="Run: python utils/compile_contracts.py"
+            hint="Run: python utils/compile_contracts.py",
         )
     return json.loads(contract_path.read_text())
 
@@ -38,13 +38,13 @@ def checks(fixture_name: str):
     contract = load_contract(fixture_name)
     expected = contract.get("expected", {})
     expected_section_count = expected.get("section_count")
-    
+
     sections_file = JSON_DIR / "04_sections.json"
     data = load_json(sections_file, required_keys=["sections"])
-    
+
     sections = data.get("sections", [])
     actual_count = len(sections)
-    
+
     # Relaxed matching (min/max/exact)
     min_count = expected.get("section_count_min")
     max_count = expected.get("section_count_max")
@@ -55,27 +55,27 @@ def checks(fixture_name: str):
             expected=expected_section_count,
             actual=actual_count,
             file=str(sections_file),
-            hint="Check S04 or update SPEC.md"
+            hint="Check S04 or update SPEC.md",
         )
-    
+
     if min_count is not None and actual_count < min_count:
         raise GateError(
             message="Section count below minimum",
             expected=f">={min_count}",
             actual=actual_count,
             file=str(sections_file),
-            hint="Check S04 or update SPEC.md"
+            hint="Check S04 or update SPEC.md",
         )
-        
+
     if max_count is not None and actual_count > max_count:
         raise GateError(
             message="Section count above maximum",
             expected=f"<={max_count}",
             actual=actual_count,
             file=str(sections_file),
-            hint="Check S04 or update SPEC.md"
+            hint="Check S04 or update SPEC.md",
         )
-    
+
     print(f"✅ Section count: {actual_count} == {expected_section_count}")
 
 
@@ -83,5 +83,5 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Gate S04: Section Builder")
     parser.add_argument("--fixture", required=True, help="Fixture name")
     args = parser.parse_args()
-    
+
     sys.exit(run_gate("S04: Section Builder", lambda: checks(args.fixture)))

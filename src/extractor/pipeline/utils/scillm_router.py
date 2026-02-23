@@ -1,12 +1,17 @@
 from __future__ import annotations
 
-from extractor.pipeline.utils.reliability import log_stage_error
-import os
-from typing import Any, Dict, List
-
 import asyncio
 import logging
+import os
 import types
+from typing import TYPE_CHECKING, Any, Dict, List
+
+from extractor.pipeline.utils.reliability import log_stage_error
+
+if TYPE_CHECKING:
+    from scillm import Router
+else:
+    Router = Any  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +52,7 @@ def _import_router_cls():
 
         return _Router
     except Exception as exc:
-        log_stage_error('scillm_router.py', exc, {'context': 'scillm_router.py'})
+        log_stage_error("scillm_router.py", exc, {"context": "scillm_router.py"})
         raise ImportError(
             "SciLLM Router unavailable; ensure sibling 'litellm/scillm' is present or install scillm."
         ) from exc
@@ -58,13 +63,15 @@ def get_text_router():
     if _TEXT_ROUTER is not None:
         return _TEXT_ROUTER
     # Optional auto-discovery from /v1/models when SCILLM_AUTO_ROUTER=1
-    auto = os.getenv("SCILLM_AUTO_ROUTER", "0").lower() in {"1","true","yes","y"}
+    auto = os.getenv("SCILLM_AUTO_ROUTER", "0").lower() in {"1", "true", "yes", "y"}
     primary = os.environ.get("CHUTES_TEXT_MODEL", "")
     # Alternates supported: ALT1/ALT2 if provided; discovery remains disabled by default
     alt1 = os.environ.get("CHUTES_TEXT_MODEL_ALT1", "").strip()
     alt2 = os.environ.get("CHUTES_TEXT_MODEL_ALT2", "").strip()
     if auto:
-        raise RuntimeError("SCILLM_AUTO_ROUTER is disabled by default. Provide CHUTES_TEXT_MODEL (and optional ALT1/ALT2).")
+        raise RuntimeError(
+            "SCILLM_AUTO_ROUTER is disabled by default. Provide CHUTES_TEXT_MODEL (and optional ALT1/ALT2)."
+        )
     model_list: List[Dict[str, Any]] = []
     if primary:
         model_list.append(_model_entry(primary))
@@ -75,7 +82,9 @@ def get_text_router():
     else:
         raise RuntimeError("CHUTES_TEXT_MODEL is required (alternates optional).")
     if not model_list and not auto:
-        raise RuntimeError("No CHUTES_TEXT_MODEL pins provided and SCILLM_AUTO_ROUTER is disabled. Set CHUTES_TEXT_MODEL or enable SCILLM_AUTO_ROUTER=1 for dev triage.")
+        raise RuntimeError(
+            "No CHUTES_TEXT_MODEL pins provided and SCILLM_AUTO_ROUTER is disabled. Set CHUTES_TEXT_MODEL or enable SCILLM_AUTO_ROUTER=1 for dev triage."
+        )
     # Router now handles transient retries natively; avoid layering retries here
     # to prevent duplicate backoffs. Use Router defaults.
     Router = _import_router_cls()
@@ -90,12 +99,14 @@ def get_vlm_router():
     global _VLM_ROUTER
     if _VLM_ROUTER is not None:
         return _VLM_ROUTER
-    auto = os.getenv("SCILLM_AUTO_ROUTER", "0").lower() in {"1","true","yes","y"}
+    auto = os.getenv("SCILLM_AUTO_ROUTER", "0").lower() in {"1", "true", "yes", "y"}
     primary = os.environ.get("CHUTES_VLM_MODEL", "")
     alt1 = os.environ.get("CHUTES_VLM_MODEL_ALT1", "").strip()
     alt2 = os.environ.get("CHUTES_VLM_MODEL_ALT2", "").strip()
     if auto:
-        raise RuntimeError("SCILLM_AUTO_ROUTER is disabled by default. Provide CHUTES_VLM_MODEL (and optional ALT1/ALT2).")
+        raise RuntimeError(
+            "SCILLM_AUTO_ROUTER is disabled by default. Provide CHUTES_VLM_MODEL (and optional ALT1/ALT2)."
+        )
     model_list: List[Dict[str, Any]] = []
     if primary:
         model_list.append(_model_entry_vlm(primary))
@@ -106,14 +117,15 @@ def get_vlm_router():
     else:
         raise RuntimeError("CHUTES_VLM_MODEL is required (alternates optional).")
     if not model_list and not auto:
-        raise RuntimeError("No CHUTES_VLM_MODEL pins provided and SCILLM_AUTO_ROUTER is disabled. Set CHUTES_VLM_MODEL or enable SCILLM_AUTO_ROUTER=1 for dev triage.")
+        raise RuntimeError(
+            "No CHUTES_VLM_MODEL pins provided and SCILLM_AUTO_ROUTER is disabled. Set CHUTES_VLM_MODEL or enable SCILLM_AUTO_ROUTER=1 for dev triage."
+        )
     Router = _import_router_cls()
     router = Router(
         model_list=model_list or [{}],
     )
     _VLM_ROUTER = _wrap_router_with_fallback(router, fallback_model=primary)
     return _VLM_ROUTER
-
 
 
 def _safe_async_close(obj) -> None:
@@ -130,10 +142,10 @@ def _safe_async_close(obj) -> None:
                         loop = asyncio.get_event_loop()
                         loop.create_task(res)  # fire and forget
                     except Exception as exc:
-                        log_stage_error('scillm_router.py', exc, {'context': 'scillm_router.py'})
+                        log_stage_error("scillm_router.py", exc, {"context": "scillm_router.py"})
                         raise
     except Exception as exc:
-        log_stage_error('scillm_router.py', exc, {'context': 'scillm_router.py'})
+        log_stage_error("scillm_router.py", exc, {"context": "scillm_router.py"})
         raise
 
 
@@ -146,7 +158,7 @@ def close_text_router() -> None:
             try:
                 _TEXT_ROUTER.close()
             except Exception as exc:
-                log_stage_error('scillm_router.py', exc, {'context': 'scillm_router.py'})
+                log_stage_error("scillm_router.py", exc, {"context": "scillm_router.py"})
                 raise
     finally:
         _TEXT_ROUTER = None
@@ -160,7 +172,7 @@ def close_vlm_router() -> None:
             try:
                 _VLM_ROUTER.close()
             except Exception as exc:
-                log_stage_error('scillm_router.py', exc, {'context': 'scillm_router.py'})
+                log_stage_error("scillm_router.py", exc, {"context": "scillm_router.py"})
                 raise
     finally:
         _VLM_ROUTER = None
@@ -177,7 +189,7 @@ def _extract_choice_content(resp: Any) -> Any:
         if choices is None and isinstance(resp, dict):
             choices = resp.get("choices")
     except Exception as exc:
-        log_stage_error('scillm_router.py', exc, {'context': 'scillm_router.py'})
+        log_stage_error("scillm_router.py", exc, {"context": "scillm_router.py"})
         raise
         choices = None
     if not choices:
@@ -196,7 +208,7 @@ def _extract_choice_content(resp: Any) -> Any:
         try:
             return message.get("content")
         except Exception as exc:
-            log_stage_error('scillm_router.py', exc, {'context': 'scillm_router.py'})
+            log_stage_error("scillm_router.py", exc, {"context": "scillm_router.py"})
             raise
             return None
     return content
@@ -224,15 +236,16 @@ def _wrap_router_with_fallback(router: Any, *, fallback_model: str) -> Any:
         if not _response_content_empty(resp):
             return resp
         fallback_kwargs = dict(kwargs)
-        fallback_kwargs.setdefault("custom_llm_provider", kwargs.get("custom_llm_provider", "openai_like"))
+        fallback_kwargs.setdefault(
+            "custom_llm_provider", kwargs.get("custom_llm_provider", "openai_like")
+        )
         fallback_kwargs["model"] = fallback_model
         fallback_kwargs.update(_auth_params())
         try:
             from scillm import acompletion as _acompletion  # type: ignore
         except Exception as exc:
-            log_stage_error('scillm_router.py', exc, {'context': 'scillm_router.py'})
+            log_stage_error("scillm_router.py", exc, {"context": "scillm_router.py"})
             raise
-            return resp
         try:
             logger.warning(
                 "SciLLM router returned empty content; retrying direct completion for model '%s'",
@@ -240,8 +253,8 @@ def _wrap_router_with_fallback(router: Any, *, fallback_model: str) -> Any:
             )
             return await _acompletion(**fallback_kwargs)
         except Exception as exc:
-            log_stage_error('scillm_router.py', exc, {'context': 'scillm_router.py'})
-            raise
+            fallback_error = str(exc)
+            log_stage_error("scillm_router.py", exc, {"context": "scillm_router.py"})
             logger.warning(
                 "Direct SciLLM fallback for model '%s' failed: %s",
                 fallback_model,

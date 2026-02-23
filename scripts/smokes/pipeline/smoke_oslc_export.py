@@ -20,8 +20,16 @@ app = typer.Typer(add_completion=False)
 
 
 def _find_latest_stage10(root: Path) -> Path:
-    cands = sorted(root.rglob("10_arangodb_exporter/json_output/10_flattened_data.json"), key=lambda p: p.stat().st_mtime, reverse=True)
-    return cands[0] if cands else root / "pipeline/10_arangodb_exporter/json_output/10_flattened_data.json"
+    cands = sorted(
+        root.rglob("10_arangodb_exporter/json_output/10_flattened_data.json"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    return (
+        cands[0]
+        if cands
+        else root / "pipeline/10_arangodb_exporter/json_output/10_flattened_data.json"
+    )
 
 
 @app.command()
@@ -31,16 +39,24 @@ def main(root: Path = typer.Option(Path("data/results"), exists=True)):
         print("SKIP: no Stage 10 flattened JSON found")
         raise typer.Exit(0)
     import sys
+
     src_dir = str((Path(__file__).resolve().parents[3] / "src").resolve())
     if src_dir not in sys.path:
         sys.path.insert(0, src_dir)
     from extractor.pipeline.tools.oslc_export import export_oslc
+
     out = Path("scripts/artifacts/oslc_links.json")
     res = export_oslc(stage10, out)
     data = json.loads(out.read_text())
-    ok = isinstance(data, dict) and isinstance(data.get("oslc:resources"), list) and len(data["oslc:resources"]) >= 1
+    ok = (
+        isinstance(data, dict)
+        and isinstance(data.get("oslc:resources"), list)
+        and len(data["oslc:resources"]) >= 1
+    )
     Path("scripts/artifacts").mkdir(parents=True, exist_ok=True)
-    (Path("scripts/artifacts")/"oslc_export_report.json").write_text(json.dumps({"ok": ok, **res}, indent=2))
+    (Path("scripts/artifacts") / "oslc_export_report.json").write_text(
+        json.dumps({"ok": ok, **res}, indent=2)
+    )
     if not ok:
         typer.echo("OSLC export invalid", err=True)
         raise typer.Exit(1)
@@ -49,4 +65,3 @@ def main(root: Path = typer.Option(Path("data/results"), exists=True)):
 
 if __name__ == "__main__":
     app()
-

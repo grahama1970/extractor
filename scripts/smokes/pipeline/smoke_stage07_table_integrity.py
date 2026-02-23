@@ -75,11 +75,15 @@ def run_smoke(results: Path) -> None:
         blocks = (sec.get("reflowed_json") or {}).get("blocks")
         if isinstance(blocks, list):
             for b in blocks:
-                if isinstance(b, dict) and b.get("type") == "table" and isinstance(b.get("rows"), list):
+                if (
+                    isinstance(b, dict)
+                    and b.get("type") == "table"
+                    and isinstance(b.get("rows"), list)
+                ):
                     found_structured = True
                     sid = sec.get("id") or sec.get("section_id")
                     canonical = None
-                    for candidate in (sec.get("tables") or []):
+                    for candidate in sec.get("tables") or []:
                         canonical = step07._build_table_block_from_stage05(candidate)
                         if canonical:
                             break

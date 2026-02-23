@@ -22,6 +22,15 @@ from typing import Dict
 import click
 
 from extractor.core.config.crawler import crawler
+from extractor.core.converters.pdf import PdfConverter
+from extractor.core.renderers.arangodb_json import ArangoDBRenderer
+from extractor.core.renderers.hierarchical_json import HierarchicalJSONRenderer
+from extractor.core.renderers.html import HTMLRenderer
+from extractor.core.renderers.json import JSONRenderer
+from extractor.core.renderers.markdown import MarkdownRenderer
+from extractor.core.schema import BlockTypes
+from extractor.core.settings import settings
+from extractor.core.util import classes_to_strings, parse_range_str, strings_to_classes
 
 # from extractor.core.config.table_parser import parse_table_config, table_options  # TODO: Fix this import
 
@@ -36,17 +45,6 @@ def table_options(fn):
     """Add table-specific CLI options."""
     # For now, just return the function as-is
     return fn
-
-
-from extractor.core.converters.pdf import PdfConverter
-from extractor.core.renderers.html import HTMLRenderer
-from extractor.core.renderers.json import JSONRenderer
-from extractor.core.renderers.markdown import MarkdownRenderer
-from extractor.core.renderers.hierarchical_json import HierarchicalJSONRenderer
-from extractor.core.renderers.arangodb_json import ArangoDBRenderer
-from extractor.core.settings import settings
-from extractor.core.util import classes_to_strings, parse_range_str, strings_to_classes
-from extractor.core.schema import BlockTypes
 
 
 class ConfigParser:

@@ -48,7 +48,9 @@ def _setup_fixture(root: Path) -> Path:
         ],
         "status": "Completed",
     }
-    json_dir.joinpath("06_figures.json").write_text(json.dumps(figures_payload, indent=2), encoding="utf-8")
+    json_dir.joinpath("06_figures.json").write_text(
+        json.dumps(figures_payload, indent=2), encoding="utf-8"
+    )
     return figures_dir
 
 
@@ -66,7 +68,9 @@ def main(
     stage06_dir = _setup_fixture(results)
 
     try:
-        out_path = run_figure_describer(stage_06_dir=stage06_dir, output_dir=results, skip_descriptions=True)
+        out_path = run_figure_describer(
+            stage_06_dir=stage06_dir, output_dir=results, skip_descriptions=True
+        )
     except Exception as exc:  # pragma: no cover - smoke script
         typer.echo(f"Stage 06b execution failed: {exc}", err=True)
         raise typer.Exit(code=1)

@@ -1,13 +1,11 @@
 import os
 from litellm import Router
-import json
 import base64
 from pathlib import Path
 from extractor.pipeline.utils.litellm_image_utils import (
     compress_image_cached,
     fetch_remote_image_cached,
 )
-from extractor.pipeline.utils.litellm_response_utils import extract_content
 import asyncio
 from dotenv import load_dotenv, find_dotenv
 from extractor.pipeline.utils.litellm_cache import initialize_litellm_cache
@@ -20,27 +18,28 @@ model_list = [
         "model_name": "gemini-2.5-flash",
         "litellm_params": {
             "model": "gemini/gemini-2.5-flash",
-            "api_key": os.getenv("GEMINI_API_KEY")
+            "api_key": os.getenv("GEMINI_API_KEY"),
         },
     },
     {
         "model_name": "kimi-k2-turbo-preview",
         "litellm_params": {
             "model": "moonshot/kimi-k2-turbo-preview",
-            "api_key": os.getenv("MOONSHOT_API_KEY")
-        }
+            "api_key": os.getenv("MOONSHOT_API_KEY"),
+        },
     },
     {
         "model_name": "kimi-latest",
         "litellm_params": {
             "model": "moonshot/kimi-k2-turbo-preview",
-            "api_key": os.getenv("MOONSHOT_API_KEY")
-        }
-    }
+            "api_key": os.getenv("MOONSHOT_API_KEY"),
+        },
+    },
 ]
 
 os.environ.setdefault("LITELLM_LOG", "DEBUG")
 router = Router(model_list=model_list)
+
 
 def _print_resp(label: str, resp):
     print(f"\n=== {label} ===")
@@ -100,8 +99,6 @@ def input_image(prompt: str, url: str):
     ]
 
 
-
-
 def data_url_for_path(p: str) -> str:
     path = Path(p)
     if not path.exists():
@@ -151,7 +148,7 @@ async def main():
     # 1) Gemini text-only sanity
     await try_case(
         model="gemini-2.5-flash",
-        messages=text_only("Return only {\"ok\":true} as JSON"),
+        messages=text_only('Return only {"ok":true} as JSON'),
         label="gemini text-only JSON sanity",
     )
 
@@ -172,10 +169,10 @@ async def main():
     # 3c) Gemini image with Stage‑07 compact JSON guard
     s07_guard = (
         "Return ONLY a JSON object (no code fences). Prefer this shape: "
-        "{\"reflowed_json\":{\"section_id\":\"string\",\"title\":\"string\","
-        "\"blocks\":[{\"type\":\"paragraph\",\"text\":\"string\"}]},"
-        "\"ocr_corrections\":{},\"improvements_made\":\"string\",\"summary\":\"string\"}. "
-        "If you cannot build reflowed_json, return { \"reflowed_text\": \"string\" } instead."
+        '{"reflowed_json":{"section_id":"string","title":"string",'
+        '"blocks":[{"type":"paragraph","text":"string"}]},'
+        '"ocr_corrections":{},"improvements_made":"string","summary":"string"}. '
+        'If you cannot build reflowed_json, return { "reflowed_text": "string" } instead.'
     )
     await try_case(
         model="gemini-2.5-flash",
@@ -190,10 +187,7 @@ async def main():
                 "role": "user",
                 "content": (
                     [{"type": "input_text", "text": "Describe these images."}]
-                    + [
-                        {"type": "input_image", "image_url": {"url": d}}
-                        for d in local_list
-                    ]
+                    + [{"type": "input_image", "image_url": {"url": d}} for d in local_list]
                 ),
             }
         ]
@@ -208,9 +202,10 @@ async def main():
     # 4) Kimi (text only — not multimodal)
     await try_case(
         model="kimi-k2-turbo-preview",
-        messages=text_only("Return only {\"ok\":true} as JSON"),
+        messages=text_only('Return only {"ok":true} as JSON'),
         label="kimi text-only JSON sanity",
     )
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     asyncio.run(main())

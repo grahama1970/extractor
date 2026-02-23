@@ -37,6 +37,7 @@ def run_smoke(results: Path) -> None:
 
     # Ensure upstream artifacts via CLI
     import subprocess
+
     pdf_path = Path("data/input/pipeline/BHT_CV32A65X_marked.pdf")
     cmd_prep = [
         sys.executable,
@@ -80,7 +81,9 @@ def run_smoke(results: Path) -> None:
     ok = False
     if isinstance(data, dict) and isinstance(data.get("reflowed_sections"), list):
         for x in data["reflowed_sections"]:
-            if isinstance(x, dict) and (isinstance(x.get("reflowed_json"), dict) or isinstance(x.get("reflowed_text"), str)):
+            if isinstance(x, dict) and (
+                isinstance(x.get("reflowed_json"), dict) or isinstance(x.get("reflowed_text"), str)
+            ):
                 ok = True
                 break
     if not ok:

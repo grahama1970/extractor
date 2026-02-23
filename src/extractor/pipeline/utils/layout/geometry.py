@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import math
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List
 
 
 def norm(v: float, a: float, b: float) -> float:
@@ -21,30 +21,30 @@ def norm(v: float, a: float, b: float) -> float:
 
 def grid_bbox(bbox: List[float], page: List[float], grid: int) -> Dict[str, int]:
     """Map page bbox → grid cells using half-open contract [x0,x1), [y0,y1).
-    
+
     - floor for starts, ceil for ends
     - clamp to [0, grid]
     - ensure non-degenerate (at least 1x1 cell)
     """
     x0, y0, x1, y1 = bbox
     px0, py0, px1, py1 = page
-    
+
     nx0 = norm(x0, px0, px1)
     ny0 = norm(y0, py0, py1)
     nx1 = norm(x1, px0, px1)
     ny1 = norm(y1, py0, py1)
-    
+
     gx0 = max(0, min(grid, int(math.floor(nx0 * grid))))
     gy0 = max(0, min(grid, int(math.floor(ny0 * grid))))
     gx1 = max(0, min(grid, int(math.ceil(nx1 * grid))))
     gy1 = max(0, min(grid, int(math.ceil(ny1 * grid))))
-    
+
     # Ensure non-degenerate
     if gx1 <= gx0:
         gx1 = min(grid, gx0 + 1)
     if gy1 <= gy0:
         gy1 = min(grid, gy0 + 1)
-    
+
     return {"x0": gx0, "y0": gy0, "x1": gx1, "y1": gy1}
 
 

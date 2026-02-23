@@ -128,18 +128,32 @@ def normalize_json_content(resp: Any) -> _Tuple[str, _Optional[_Dict[str, _Any]]
                 if isinstance(parsed, dict):
                     json_obj = parsed
             except Exception as exc:
-                log_stage_error("response_utils.normalize_json_content", exc, {"context": "loads_raw_text"})
+                log_stage_error(
+                    "response_utils.normalize_json_content", exc, {"context": "loads_raw_text"}
+                )
                 repaired = clean_json_string(raw_text, return_dict=True)
                 if isinstance(repaired, dict):
                     json_obj = repaired
         else:
             # Try direct access if extract_content couldn't resolve
-            choices = getattr(resp, "choices", None) if not isinstance(resp, dict) else resp.get("choices")
+            choices = (
+                getattr(resp, "choices", None)
+                if not isinstance(resp, dict)
+                else resp.get("choices")
+            )
             if choices:
                 first = choices[0]
-                message = getattr(first, "message", None) if not isinstance(first, dict) else first.get("message")
+                message = (
+                    getattr(first, "message", None)
+                    if not isinstance(first, dict)
+                    else first.get("message")
+                )
                 if message is not None:
-                    content = getattr(message, "content", None) if not isinstance(message, dict) else message.get("content")
+                    content = (
+                        getattr(message, "content", None)
+                        if not isinstance(message, dict)
+                        else message.get("content")
+                    )
                     if isinstance(content, dict):
                         json_obj = content
                         raw_text = _json.dumps(content, ensure_ascii=False)
@@ -150,7 +164,11 @@ def normalize_json_content(resp: Any) -> _Tuple[str, _Optional[_Dict[str, _Any]]
                             if isinstance(parsed, dict):
                                 json_obj = parsed
                         except Exception as exc:
-                            log_stage_error("response_utils.normalize_json_content", exc, {"context": "loads_content_str"})
+                            log_stage_error(
+                                "response_utils.normalize_json_content",
+                                exc,
+                                {"context": "loads_content_str"},
+                            )
                             repaired = clean_json_string(raw_text, return_dict=True)
                             if isinstance(repaired, dict):
                                 json_obj = repaired

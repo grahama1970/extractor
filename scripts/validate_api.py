@@ -5,13 +5,15 @@ import asyncio
 import json
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List
 
 import typer
 from loguru import logger
 import aiohttp
 
-app = typer.Typer(help="Validate an HTTP API against a tasks JSON; emit score and post /ingest/episode.")
+app = typer.Typer(
+    help="Validate an HTTP API against a tasks JSON; emit score and post /ingest/episode."
+)
 
 
 async def _post_json(url: str, payload: Dict[str, Any]) -> None:
@@ -69,7 +71,9 @@ async def _run_episode(
             t0 = time.monotonic()
             ok = False
             try:
-                async with session.request(method, url, headers=headers, json=json_body, data=data, timeout=30) as resp:
+                async with session.request(
+                    method, url, headers=headers, json=json_body, data=data, timeout=30
+                ) as resp:
                     status = int(resp.status)
                     text = await resp.text()
                     dt_ms = (time.monotonic() - t0) * 1000.0
@@ -144,7 +148,9 @@ def run(
     run_id: str = typer.Option("run-api", help="Run identifier"),
     episode_id: str = typer.Option("e-0001", help="Episode identifier"),
     variant: str = typer.Option("variant", help="Variant name"),
-    tasks_file: Path = typer.Option(..., exists=True, readable=True, help="Tasks JSON file (list or object with 'tasks')"),
+    tasks_file: Path = typer.Option(
+        ..., exists=True, readable=True, help="Tasks JSON file (list or object with 'tasks')"
+    ),
 ):
     tasks = json.loads(Path(tasks_file).read_text())
     if isinstance(tasks, dict) and "tasks" in tasks:
@@ -157,6 +163,7 @@ def run(
 if __name__ == "__main__":
     # Allow both styles: `python validate_api.py --opts` and `python validate_api.py run --opts`
     import sys
+
     if len(sys.argv) > 1 and sys.argv[1] == "run":
         sys.argv.pop(1)
     app()

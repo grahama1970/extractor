@@ -20,10 +20,13 @@ import os
 import sys
 import time
 from pathlib import Path
+
 try:
     from ._eval_utils import summarize, structure_diff, shorten
 except Exception:
-    import sys, os
+    import sys
+    import os
+
     sys.path.insert(0, os.path.dirname(__file__))
     from _eval_utils import summarize, structure_diff, shorten
 
@@ -38,7 +41,11 @@ OUT_LOGS.mkdir(parents=True, exist_ok=True)
 
 
 def _find_latest_step10() -> Path | None:
-    cands = list(ROOT.glob("data/results/pipeline/**/10_arangodb_exporter/json_output/10_flattened_data.json"))
+    cands = list(
+        ROOT.glob(
+            "data/results/pipeline/**/10_arangodb_exporter/json_output/10_flattened_data.json"
+        )
+    )
     cands += list(ROOT.glob("out_fast/**/10_arangodb_exporter/json_output/10_flattened_data.json"))
     return max(cands, key=lambda p: p.stat().st_mtime) if cands else None
 
@@ -51,7 +58,7 @@ def _prompt(candidate_snip: str, gold_snip: str, diff_snip: str) -> str:
     return (
         "You are a rigorous evaluator. Compare the CANDIDATE JSON to the GOLD JSON and return ONLY a compact JSON object "
         "that follows this schema (no extra text):\n"
-        "{\n  \"overall\": number (0..1),\n  \"structure_parity\": number (0..1),\n  \"entity_coverage\": number (0..1),\n  \"semantic_alignment\": number (0..1),\n  \"critical_issues\": string[],\n  \"non_critical_notes\": string[]\n}\n"
+        '{\n  "overall": number (0..1),\n  "structure_parity": number (0..1),\n  "entity_coverage": number (0..1),\n  "semantic_alignment": number (0..1),\n  "critical_issues": string[],\n  "non_critical_notes": string[]\n}\n'
         "Instructions:\n"
         "- structure_parity: similarity of keys/shape (not exact order).\n"
         "- entity_coverage: presence of key items (sections/nodes/tables) implied by GOLD.\n"
@@ -65,22 +72,24 @@ def _prompt(candidate_snip: str, gold_snip: str, diff_snip: str) -> str:
 
 def _call_router(model: str, content: str) -> dict | None:
     try:
-        sys.path.insert(0, str(ROOT / 'src'))
+        sys.path.insert(0, str(ROOT / "src"))
         from scillm import acompletion as sc_acompletion  # type: ignore
         import asyncio as _asyncio
+
         async def _run():
             resp = await sc_acompletion(
                 model=model,
-                api_base=os.environ.get('CHUTES_API_BASE','').strip() or None,
-                api_key=os.environ.get('CHUTES_API_KEY','').strip() or None,
-                custom_llm_provider='openai',
-                messages=[{"role":"user","content": content}],
-                response_format={"type":"json_object"},
+                api_base=os.environ.get("CHUTES_API_BASE", "").strip() or None,
+                api_key=os.environ.get("CHUTES_API_KEY", "").strip() or None,
+                custom_llm_provider="openai",
+                messages=[{"role": "user", "content": content}],
+                response_format={"type": "json_object"},
                 temperature=0,
                 max_tokens=512,
                 timeout=60,
             )
-            return (resp.get('choices') or [{}])[0].get('message',{}).get('content','')
+            return (resp.get("choices") or [{}])[0].get("message", {}).get("content", "")
+
         payload = _asyncio.run(_run())
         if isinstance(payload, dict):
             return payload
@@ -137,7 +146,7 @@ def main() -> None:
     t_struct = float(os.getenv("EVAL_T_STRUCT", "0.75"))
     t_cover = float(os.getenv("EVAL_T_COVER", "0.75"))
     t_sem = float(os.getenv("EVAL_T_SEM", "0.70"))
-    enforce = (os.getenv("EVAL_ENFORCE", "0").lower() in {"1", "true", "yes"})
+    enforce = os.getenv("EVAL_ENFORCE", "0").lower() in {"1", "true", "yes"}
 
     def _get(k: str) -> float:
         try:

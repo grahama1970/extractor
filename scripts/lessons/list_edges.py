@@ -14,6 +14,7 @@ from scripts.lessons.arango_client import get_db
 
 app = typer.Typer(add_completion=False)
 
+
 @app.command()
 def list_edges(
     title: str = typer.Option("", help="Seed by title (optional)"),
@@ -28,15 +29,19 @@ def list_edges(
     bind = {"type": etype, "limit": max(1, limit)}
     filters = ["e.type==@type"]
     if approved.strip():
-        if approved.lower() in ("true","1","yes"): bind["approved"] = True; filters.append("e.approved==@approved")
-        if approved.lower() in ("false","0","no"): bind["approved"] = False; filters.append("e.approved==@approved")
+        if approved.lower() in ("true", "1", "yes"):
+            bind["approved"] = True
+            filters.append("e.approved==@approved")
+        if approved.lower() in ("false", "0", "no"):
+            bind["approved"] = False
+            filters.append("e.approved==@approved")
     if status.strip():
         bind["status"] = status
         filters.append("e.status==@status")
     seed_filter = ""
     if title:
         q = "FOR d IN lessons FILTER d.title==@t AND (@s=='' OR d.scope==@s) LIMIT 1 RETURN d._id"
-        sid = list(db.aql.execute(q, bind_vars={"t":title, "s":scope or ''}))
+        sid = list(db.aql.execute(q, bind_vars={"t": title, "s": scope or ""}))
         if not sid:
             print("seed not found")
             raise typer.Exit(2)
@@ -58,9 +63,12 @@ def list_edges(
         print(json.dumps(res, ensure_ascii=False))
     else:
         for r in res:
-            e=r['edge']; n=r['neighbor']
-            print(f"{e['_id']}  {e['type']}  w={e.get('weight',0):.2f}  appr={e.get('approved')}  {n.get('title')} ({n.get('scope')})")
+            e = r["edge"]
+            n = r["neighbor"]
+            print(
+                f"{e['_id']}  {e['type']}  w={e.get('weight',0):.2f}  appr={e.get('approved')}  {n.get('title')} ({n.get('scope')})"
+            )
+
 
 if __name__ == "__main__":
     app()
-

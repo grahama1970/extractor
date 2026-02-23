@@ -8,6 +8,7 @@ PROMPT_NAMES = [
     "09_section_summarizer",
 ]
 
+
 @pytest.mark.parametrize("name", PROMPT_NAMES)
 def test_prompt_loads_and_has_required_fields(name):
     data = load_prompt(name)

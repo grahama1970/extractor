@@ -75,4 +75,3 @@ def main(tmp_dir: Path = typer.Option(Path("data/results/structured_parity_smoke
 
 if __name__ == "__main__":
     app()
-

@@ -125,14 +125,21 @@ def get_taxonomy_tags(texts_by_key: dict) -> dict:
     return results
 
 
+_collections_ensured: set = set()
+
+
 def ensure_datalake_collections(db):
     """Ensure datalake and codebase collections exist for unified search."""
+    db_name = getattr(db, "name", "memory")
+    if db_name in _collections_ensured:
+        return
+    _collections_ensured.add(db_name)
     for col in ["datalake_docs", "datalake_chunks", "codebase_docs", "codebase_chunks"]:
         if not db.has_collection(col):
             db.create_collection(col)
 
     for edge_col in ["datalake_edges", "codebase_edges"]:
-        if not db.has_collection(edge_col, edge=True):
+        if not db.has_collection(edge_col):
             db.create_collection(edge_col, edge=True)
 
 
@@ -142,12 +149,19 @@ def ensure_sparta_collections(db):
         if not db.has_collection(col):
             db.create_collection(col)
     for edge_col in ["sparta_edges"]:
-        if not db.has_collection(edge_col, edge=True):
+        if not db.has_collection(edge_col):
             db.create_collection(edge_col, edge=True)
+
+
+_views_ensured: set = set()
 
 
 def ensure_unified_memory_view(db):
     """Initialize or update a unified ArangoSearch view for all memory data sources."""
+    db_name = getattr(db, "name", "memory")
+    if db_name in _views_ensured:
+        return
+    _views_ensured.add(db_name)
     view_name = "memory_unified_search"
     
     datalake_link = {
@@ -214,9 +228,9 @@ def ensure_unified_memory_view(db):
         }
     }
 
-    if db.has_view(view_name):
-        view = db.view(view_name)
-        view.update_properties(properties)
+    existing_views = {v["name"] for v in db.views()}
+    if view_name in existing_views:
+        db.update_arangosearch_view(view_name, properties)
         logger.info(f"Updated ArangoSearch view: {view_name} (Priority: Horus > Datalake > Codebase)")
     else:
         db.create_arangosearch_view(name=view_name, properties=properties)
@@ -225,8 +239,8 @@ def ensure_unified_memory_view(db):
     # Dedicated datalake_chunks_search view for recall source
     dl_view_name = "datalake_chunks_search"
     dl_props = {"links": {"datalake_chunks": datalake_link}}
-    if db.has_view(dl_view_name):
-        db.view(dl_view_name).update_properties(dl_props)
+    if dl_view_name in existing_views:
+        db.update_arangosearch_view(dl_view_name, dl_props)
         logger.info(f"Updated ArangoSearch view: {dl_view_name}")
     else:
         db.create_arangosearch_view(name=dl_view_name, properties=dl_props)

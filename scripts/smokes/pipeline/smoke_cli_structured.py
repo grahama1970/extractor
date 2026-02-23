@@ -24,12 +24,16 @@ def _assert_stage_paths(root: Path, stem: str, stage07_dir: str) -> None:
     if not s07.exists() or not s10.exists():
         raise AssertionError(f"Missing Stage outputs: {s07} or {s10}")
     # sanity load
-    json.loads(s07.read_text()); json.loads(s10.read_text())
+    json.loads(s07.read_text())
+    json.loads(s10.read_text())
 
 
 @app.command()
 def main(
-    html_path: Path = typer.Option(Path("data/results/pipeline/01_annotation_processor/BHT_CV32A65X_marked_clean.html"), exists=True),
+    html_path: Path = typer.Option(
+        Path("data/results/pipeline/01_annotation_processor/BHT_CV32A65X_marked_clean.html"),
+        exists=True,
+    ),
     output_dir: Path = typer.Option(Path("data/results/cli_smokes/structured")),
 ):
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -44,4 +48,3 @@ def main(
 
 if __name__ == "__main__":
     app()
-

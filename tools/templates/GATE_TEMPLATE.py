@@ -10,8 +10,6 @@ A gate should:
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
 
 CLARIFY_EXIT = 42
 

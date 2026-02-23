@@ -1,4 +1,3 @@
-import json
 from pathlib import Path
 
 from extractor.pipeline.steps import s04_section_builder as stage04

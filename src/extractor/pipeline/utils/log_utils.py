@@ -1,4 +1,3 @@
-from extractor.pipeline.utils.reliability import log_stage_error
 """
 Module: log_utils.py
 Description: Utility functions and helpers for log utils
@@ -18,7 +17,9 @@ Example Usage:
 
 import logging
 import re
-from typing import List, Any, Dict, Optional
+from typing import Any, Dict, List, Optional
+
+from extractor.pipeline.utils.reliability import log_stage_error
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -222,7 +223,7 @@ def sanitize_data_url(value: Any, mode: str = "redact", max_str_len: int = 48) -
             approx = int(len(data) * 3 / 4)
             return f"<data-url sha256={sha} bytes≈{approx}>"
         except Exception as exc:
-            log_stage_error('log_utils.py', exc, {'context': 'log_utils.py'})
+            log_stage_error("log_utils.py", exc, {"context": "log_utils.py"})
             raise
             return "<data-url sha256=error>"
     if mode_l == "truncate":
@@ -231,7 +232,9 @@ def sanitize_data_url(value: Any, mode: str = "redact", max_str_len: int = 48) -
     return header + "<redacted>"
 
 
-def sanitize_messages_for_return(messages: List[Dict[str, Any]], mode: str = "redact", max_str_len: int = 48) -> List[Dict[str, Any]]:
+def sanitize_messages_for_return(
+    messages: List[Dict[str, Any]], mode: str = "redact", max_str_len: int = 48
+) -> List[Dict[str, Any]]:
     """Return a sanitized shallow copy of OpenAI-style messages.
 
     Only image_url parts are sanitized; other parts are kept as-is.
@@ -322,9 +325,8 @@ if __name__ == "__main__":
     except TypeError as e:
         print(f" Successfully caught expected error: {e}")
     except Exception as exc:
-        log_stage_error('log_utils.py', exc, {'context': 'log_utils.py'})
+        log_stage_error("log_utils.py", exc, {"context": "log_utils.py"})
         raise
-        print(f" Caught unexpected error: {e}")
 
     # Test Case 2: Input is a list, but contains non-dict elements
     invalid_input_2 = [{"a": 1}, "string_element", {"c": 3}]  # List with a string
@@ -334,9 +336,8 @@ if __name__ == "__main__":
     except TypeError as e:
         print(f" Successfully caught expected error: {e}")
     except Exception as exc:
-        log_stage_error('log_utils.py', exc, {'context': 'log_utils.py'})
+        log_stage_error("log_utils.py", exc, {"context": "log_utils.py"})
         raise
-        print(f" Caught unexpected error: {e}")
 
     # Test Case 3: Input is a list of simple types
     invalid_input_3 = [1, 2, 3, 4]  # List of integers
@@ -346,9 +347,8 @@ if __name__ == "__main__":
     except TypeError as e:
         print(f" Successfully caught expected error: {e}")
     except Exception as exc:
-        log_stage_error('log_utils.py', exc, {'context': 'log_utils.py'})
+        log_stage_error("log_utils.py", exc, {"context": "log_utils.py"})
         raise
-        print(f" Caught unexpected error: {e}")
 
     # Test Case 4: Input is None
     invalid_input_4 = None
@@ -358,9 +358,8 @@ if __name__ == "__main__":
     except TypeError as e:
         print(f" Successfully caught expected error: {e}")
     except Exception as exc:
-        log_stage_error('log_utils.py', exc, {'context': 'log_utils.py'})
+        log_stage_error("log_utils.py", exc, {"context": "log_utils.py"})
         raise
-        print(f" Caught unexpected error: {e}")
 
     # Test Case 5: Empty list (should be valid)
     valid_input_empty = []
@@ -372,9 +371,8 @@ if __name__ == "__main__":
         else:
             print(f" Processing empty list resulted in unexpected output: {result}")
     except Exception as exc:
-        log_stage_error('log_utils.py', exc, {'context': 'log_utils.py'})
+        log_stage_error("log_utils.py", exc, {"context": "log_utils.py"})
         raise
-        print(f" Caught unexpected error processing empty list: {e}")
 
     # Test API logging functions
     print("\n--- Testing API Logging Functions ---")
@@ -384,6 +382,5 @@ if __name__ == "__main__":
         log_api_error("TestService", Exception("Test error"), {"model": "test-model"})
         print(" API logging functions executed successfully.")
     except Exception as exc:
-        log_stage_error('log_utils.py', exc, {'context': 'log_utils.py'})
+        log_stage_error("log_utils.py", exc, {"context": "log_utils.py"})
         raise
-        print(f" Error testing API logging functions: {e}")

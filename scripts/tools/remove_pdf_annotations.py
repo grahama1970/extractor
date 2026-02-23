@@ -8,18 +8,25 @@
 # ///
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 import typer
 
-app = typer.Typer(add_completion=False, help="Remove all annotations from a PDF (writes a new file)")
+app = typer.Typer(
+    add_completion=False, help="Remove all annotations from a PDF (writes a new file)"
+)
 
 
 @app.command()
 def main(
-    src: Path = typer.Argument(..., exists=True, dir_okay=False, readable=True, help="Input PDF with annotations"),
-    out: Path | None = typer.Option(None, "--out", "-o", help="Output PDF (default: <stem>_noannots.pdf beside input)"),
-    remove_links: bool = typer.Option(False, "--remove-links/--keep-links", help="Also remove link annotations (URIs)")
+    src: Path = typer.Argument(
+        ..., exists=True, dir_okay=False, readable=True, help="Input PDF with annotations"
+    ),
+    out: Path | None = typer.Option(
+        None, "--out", "-o", help="Output PDF (default: <stem>_noannots.pdf beside input)"
+    ),
+    remove_links: bool = typer.Option(
+        False, "--remove-links/--keep-links", help="Also remove link annotations (URIs)"
+    ),
 ):
     try:
         import fitz  # PyMuPDF
@@ -29,7 +36,9 @@ def main(
 
     dst = out or src.with_name(f"{src.stem}_noannots.pdf")
     if dst.resolve() == src.resolve():
-        typer.secho("Refusing to overwrite the source file; choose a different --out.", fg=typer.colors.RED)
+        typer.secho(
+            "Refusing to overwrite the source file; choose a different --out.", fg=typer.colors.RED
+        )
         raise typer.Exit(3)
 
     doc = fitz.open(str(src))
@@ -60,4 +69,3 @@ def main(
 
 if __name__ == "__main__":
     app()
-

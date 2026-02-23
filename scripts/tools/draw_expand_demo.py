@@ -23,7 +23,7 @@ def expand_rect(rect: "fitz.Rect", page_rect: "fitz.Rect", scale: float) -> "fit
     cy = (rect.y0 + rect.y1) / 2.0
     w = rect.width * (1.0 + scale)
     h = rect.height * (1.0 + scale)
-    r = fitz.Rect(cx - w/2.0, cy - h/2.0, cx + w/2.0, cy + h/2.0) & page_rect
+    r = fitz.Rect(cx - w / 2.0, cy - h / 2.0, cx + w / 2.0, cy + h / 2.0) & page_rect
     return r
 
 
@@ -42,7 +42,7 @@ def draw(
     b: float = typer.Option(0.40, help="box color B 0..1"),
 ):
     doc = fitz.open(pdf.as_posix())
-    pno = max(0, min(len(doc)-1, page-1))
+    pno = max(0, min(len(doc) - 1, page - 1))
     pg = doc[pno]
     base = fitz.Rect(x0, y0, x1, y1) & pg.rect
     if base.is_empty:
@@ -54,7 +54,14 @@ def draw(
     try:
         sh = pg.new_shape()
         sh.draw_rect(expanded)
-        sh.finish(color=color, fill=color, closePath=True, width=1.2, fill_opacity=0.06, stroke_opacity=1.0)
+        sh.finish(
+            color=color,
+            fill=color,
+            closePath=True,
+            width=1.2,
+            fill_opacity=0.06,
+            stroke_opacity=1.0,
+        )
         sh.commit()
     except Exception:
         pg.draw_rect(expanded, color=color, width=1.2, fill=color)
@@ -82,4 +89,3 @@ def draw(
 
 if __name__ == "__main__":
     app()
-

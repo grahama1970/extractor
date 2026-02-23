@@ -4,7 +4,7 @@ This module intentionally has no heavy dependencies so it can be imported by
 all providers. Utility functions here help enforce cross‑format parity.
 """
 
-from typing import Any, Dict, List, Tuple
+from typing import Any, List, Tuple
 
 from extractor.core.schema.unified_document import (
     BaseBlock,

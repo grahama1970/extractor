@@ -27,9 +27,7 @@ def build_latest_status(log_root: Path) -> dict:
         if not runs:
             continue
         latest = runs[-1]
-        artifacts = sorted(
-            str(path) for path in latest.rglob("*") if path.is_file()
-        )
+        artifacts = sorted(str(path) for path in latest.rglob("*") if path.is_file())
         status["tasks"][task_dir.name] = {
             "latest_run_dir": str(latest),
             "artifacts": artifacts,

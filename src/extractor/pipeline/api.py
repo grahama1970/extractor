@@ -77,7 +77,14 @@ def extract_sections(
     output_files: List[str] = []
 
     def _log(status: str, step: str, details: str = "") -> None:
-        execution_log.append({"timestamp": datetime.utcnow().isoformat(timespec="seconds") + "Z", "status": status, "step": step, "details": details})
+        execution_log.append(
+            {
+                "timestamp": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+                "status": status,
+                "step": step,
+                "details": details,
+            }
+        )
 
     steps_dir = Path(__file__).resolve().parent / "steps"
 
@@ -87,7 +94,7 @@ def extract_sections(
     try:
         cmd = [
             "python",
-            os.fspath(steps_dir / "01_annotation_processor.py"),
+            os.fspath(steps_dir / "s01_annotation_processor.py"),
             "run",
             os.fspath(pdf_path),
             "-o",
@@ -106,21 +113,26 @@ def extract_sections(
 
     clean_pdf = _find_clean_pdf(p.anno_dir)
 
-    # Stage 02
+    # Stage 02 - Select extractor based on environment variable
+    extractor_mode = os.getenv("STAGE02_EXTRACTOR", "pymupdf").lower()
+    extractor_script = "s02_pymupdf_extractor.py" if extractor_mode != "marker" else "s02_marker_extractor.py"
     _log("started", "02_marker_extractor", os.fspath(clean_pdf))
     t0 = time.time()
     try:
         cmd = [
             "python",
-            os.fspath(steps_dir / "02_marker_extractor.py"),
-            "run",
+            os.fspath(steps_dir / extractor_script),
             os.fspath(clean_pdf),
             "-o",
             os.fspath(out),
         ]
         _run(cmd)
         took = time.time() - t0
-        results["02_marker_extractor"] = {"success": True, "duration": took, "output": os.fspath(p.blocks_json)}
+        results["02_marker_extractor"] = {
+            "success": True,
+            "duration": took,
+            "output": os.fspath(p.blocks_json),
+        }
         output_files.append(os.fspath(p.blocks_json))
         _log("completed", "02_marker_extractor", f"wrote {p.blocks_json.name} in {took:.3f}s")
     except Exception as e:
@@ -136,7 +148,7 @@ def extract_sections(
     try:
         cmd = [
             "python",
-            os.fspath(steps_dir / "03_suspicious_headers.py"),
+            os.fspath(steps_dir / "s03_suspicious_headers.py"),
             "run",
             os.fspath(p.blocks_json),
             os.fspath(p.anno_dir),
@@ -145,7 +157,11 @@ def extract_sections(
         ]
         _run(cmd)
         took = time.time() - t0
-        results["03_suspicious_headers"] = {"success": True, "duration": took, "output": os.fspath(p.verified_json)}
+        results["03_suspicious_headers"] = {
+            "success": True,
+            "duration": took,
+            "output": os.fspath(p.verified_json),
+        }
         output_files.append(os.fspath(p.verified_json))
         _log("completed", "03_suspicious_headers", f"wrote {p.verified_json.name} in {took:.3f}s")
     except Exception as e:
@@ -161,7 +177,7 @@ def extract_sections(
     try:
         cmd = [
             "python",
-            os.fspath(steps_dir / "04_section_builder.py"),
+            os.fspath(steps_dir / "s04_section_builder.py"),
             "run",
             os.fspath(p.verified_json),
             os.fspath(p.anno_dir),
@@ -170,7 +186,11 @@ def extract_sections(
         ]
         _run(cmd)
         took = time.time() - t0
-        results["04_section_builder"] = {"success": True, "duration": took, "output": os.fspath(p.sections_json)}
+        results["04_section_builder"] = {
+            "success": True,
+            "duration": took,
+            "output": os.fspath(p.sections_json),
+        }
         output_files.append(os.fspath(p.sections_json))
         _log("completed", "04_section_builder", f"wrote {p.sections_json.name} in {took:.3f}s")
     except Exception as e:
@@ -189,7 +209,14 @@ def extract_sections(
     return sections, p.sections_json
 
 
-def _write_summary(pdf_path: Path, out: Path, t_start: float, execution_log: List[Dict[str, Any]], results: Dict[str, Dict[str, Any]], output_files: List[str]) -> None:
+def _write_summary(
+    pdf_path: Path,
+    out: Path,
+    t_start: float,
+    execution_log: List[Dict[str, Any]],
+    results: Dict[str, Dict[str, Any]],
+    output_files: List[str],
+) -> None:
     """Best-effort write of a minimal pipeline summary."""
     try:
         successes = sum(1 for r in results.values() if r.get("success"))
@@ -197,7 +224,11 @@ def _write_summary(pdf_path: Path, out: Path, t_start: float, execution_log: Lis
             "pipeline_status": "completed" if successes == len(results) else "failed",
             "pdf_path": os.fspath(pdf_path),
             "total_duration": round(time.time() - t_start, 3),
-            "processors": {"total": len(results), "successful": successes, "failed": max(0, len(results) - successes)},
+            "processors": {
+                "total": len(results),
+                "successful": successes,
+                "failed": max(0, len(results) - successes),
+            },
             "results": results,
             "execution_log": execution_log,
             "output_files": output_files,

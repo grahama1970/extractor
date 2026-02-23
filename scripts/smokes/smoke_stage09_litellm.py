@@ -9,14 +9,14 @@
 from __future__ import annotations
 
 import os
-import sys
 import json
-import asyncio
 import typer
 from dotenv import load_dotenv, find_dotenv
 
 
-app = typer.Typer(add_completion=False, help="Smoke: Stage 09 summarizer (SciLLM-only; litellm path deprecated)")
+app = typer.Typer(
+    add_completion=False, help="Smoke: Stage 09 summarizer (SciLLM-only; litellm path deprecated)"
+)
 
 
 @app.command()
@@ -29,7 +29,9 @@ def main(
     outdir = os.path.join("scripts", "artifacts")
     os.makedirs(outdir, exist_ok=True)
     with open(os.path.join(outdir, "stage09_litellm.json"), "w", encoding="utf-8") as f:
-        json.dump({"skip": True, "reason": "SciLLM-only; litellm smoke deprecated"}, f, ensure_ascii=False)
+        json.dump(
+            {"skip": True, "reason": "SciLLM-only; litellm smoke deprecated"}, f, ensure_ascii=False
+        )
     typer.echo("SKIP: Stage 09 litellm smoke deprecated (SciLLM-only)")
 
 

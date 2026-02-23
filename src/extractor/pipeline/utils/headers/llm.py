@@ -13,11 +13,11 @@ from typing import Any, Dict, List
 
 from loguru import logger
 
-from extractor.pipeline.utils.debug_utils import log_llm_call, log_timing
+from extractor.pipeline.utils.debug_utils import log_llm_call
 from extractor.pipeline.utils.model_params import build_chat_extras
 from extractor.pipeline.utils.prompt_loader import load_prompt
-from extractor.pipeline.utils.reliability import log_stage_error
 from extractor.pipeline.utils.scillm_router import get_text_router, get_vlm_router
+
 # from extractor.pipeline.steps.scillm_preflight_validator import quick_scillm_check (Moved inside function)
 
 
@@ -29,7 +29,7 @@ def normalize_model_alias(model: str | None) -> str:
     """Normalize model name, stripping provider prefixes."""
     m = (model or "").strip()
     if m.lower().startswith("openai/"):
-        m = m[len("openai/"):]
+        m = m[len("openai/") :]
     return m
 
 
@@ -48,12 +48,14 @@ async def verify_header_with_llm(
     """
     model_norm = normalize_model_alias(model)
     extras = build_chat_extras(model_norm)
-    
+
     try:
-        logger.info(f"stage03.verify_header: effective_model={model_norm} extras_keys={list(extras.keys())}")
+        logger.info(
+            f"stage03.verify_header: effective_model={model_norm} extras_keys={list(extras.keys())}"
+        )
     except Exception:
         pass
-    
+
     # Trim context text
     try:
         trim_chars = int(os.getenv("STAGE03_VERIFY_TRIM_CHARS", "800"))
@@ -66,56 +68,60 @@ async def verify_header_with_llm(
     text_only = os.getenv("STAGE03_TEXT_ONLY", "1").lower() in ("1", "true", "yes", "y")
     user_content: List[Any] = [{"type": "text", "text": context_text}]
     if not text_only and image_b64:
-        user_content.append({
-            "type": "image_url",
-            "image_url": {"url": f"data:image/png;base64,{image_b64}"}
-        })
-    
+        user_content.append(
+            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_b64}"}}
+        )
+
     messages = [
         {"role": "system", "content": PROMPT["system"]},
         {"role": "user", "content": user_content},
     ]
-    
+
     # Max tokens
     try:
         max_tokens = int(os.getenv("STAGE03_VERIFY_MAX_TOKENS", "256"))
     except Exception:
         max_tokens = 256
-    
+
     # Timeout override
     try:
         item_timeout = int(os.getenv("SC_TIMEOUT_STAGE_03", str(item_timeout)))
     except Exception:
         pass
-    
+
     # AGENTS.md compliance: validate SciLLM environment
     from extractor.pipeline.steps.scillm_preflight_validator import quick_scillm_check
+
     if not quick_scillm_check():
-        raise RuntimeError("SciLLM environment not configured; header verification requires Chutes.")
-    
-    router = get_text_router() if text_only else get_vlm_router()
+        raise RuntimeError(
+            "SciLLM environment not configured; header verification requires Chutes."
+        )
+
+    get_text_router() if text_only else get_vlm_router()
     route_model = "chutes/text" if text_only else "chutes/vlm"
-    
+
     # Timed SciLLM Router call
     t0 = time.monotonic()
     resp = None
     try:
         from scillm.batch import parallel_acompletions_iter
-        
+
         # Prepare single request batch
-        reqs = [{
-            "model": route_model,
-            "messages": messages,
-            "response_format": {"type": "json_object"},
-            "max_tokens": max_tokens,
-            "temperature": 0,
-            "timeout": item_timeout,
-            "index": 0
-        }]
-        
+        reqs = [
+            {
+                "model": route_model,
+                "messages": messages,
+                "response_format": {"type": "json_object"},
+                "max_tokens": max_tokens,
+                "temperature": 0,
+                "timeout": item_timeout,
+                "index": 0,
+            }
+        ]
+
         api_key = os.getenv("CHUTES_API_KEY")
         api_base = os.getenv("CHUTES_API_BASE", "https://llm.chutes.ai/v1")
-        
+
         async for r in parallel_acompletions_iter(
             reqs,
             api_base=api_base,
@@ -126,36 +132,36 @@ async def verify_header_with_llm(
             wall_time_s=120,  # 2 min max
             tenacious=False,  # Fail fast
             response_format={"type": "json_object"},
-            repair_invalid_json=True
+            repair_invalid_json=True,
         ):
             if r.get("ok"):
                 # Reconstruct a mock response object or just use the parsed content?
                 # The downstream logic expects a 'resp' object with attributes or dict.
                 # parallel_acompletions_iter yields a dict with 'parsed', 'content', 'usage'.
                 # We need to adapt it to what the subsequent code expects (dict with 'model', 'usage', 'choices').
-                
+
                 content = r.get("content")
-                parsed = r.get("parsed")
-                
+                r.get("parsed")
+
                 # If parsed is available, dump it back to string for the downstream parser?
                 # Or just construct the choices dict.
-                
+
                 # Downstream code:
                 # if isinstance(resp, dict): choices = resp.get("choices") ...
                 # msg = (choices[0]...).get("content") -> answer
                 # payload = json.loads(answer)
-                
+
                 # So we can construct a compatible dict
                 resp = {
                     "model": r.get("model", route_model),
                     "usage": r.get("usage"),
-                    "choices": [{"message": {"content": content}}]
+                    "choices": [{"message": {"content": content}}],
                 }
             else:
                 raise RuntimeError(f"SciLLM Error: {r.get('error')}")
-                
+
         elapsed_ms = int((time.monotonic() - t0) * 1000)
-        
+
     except Exception as e:
         elapsed_ms = int((time.monotonic() - t0) * 1000)
         log_llm_call(
@@ -169,11 +175,11 @@ async def verify_header_with_llm(
             raw_preview=str(e),
         )
         raise
-    
+
     # Log success metrics
     try:
         usage = resp.get("usage") or {}
-        
+
         log_llm_call(
             stage_key="03_suspicious_headers",
             task_kind="verify_header",
@@ -186,7 +192,7 @@ async def verify_header_with_llm(
         )
     except Exception:
         pass
-    
+
     # Parse response
     if isinstance(resp, dict):
         choices = resp.get("choices") or [{}]
@@ -194,7 +200,7 @@ async def verify_header_with_llm(
         choices = getattr(resp, "choices", [{}])
     msg = (choices or [{}])[0].get("message", {}) if isinstance(choices, list) else {}
     answer = (msg or {}).get("content", "")
-    
+
     try:
         if isinstance(answer, dict):
             payload = answer
@@ -220,7 +226,7 @@ async def verify_header_with_llm(
         reasons_str = "; ".join(str(r) for r in reasons if r is not None)
     else:
         reasons_str = str(payload.get("reasoning", ""))
-    
+
     conf = payload.get("confidence")
     try:
         confidence = float(conf) if conf is not None else 0.0

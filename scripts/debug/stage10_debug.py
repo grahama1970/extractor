@@ -9,7 +9,7 @@ Usage (example):
 """
 import argparse
 from pathlib import Path
-from extractor.pipeline.steps import 10_arangodb_exporter as s10
+from extractor.pipeline.steps import s10_arangodb_exporter as s10
 
 
 def main():

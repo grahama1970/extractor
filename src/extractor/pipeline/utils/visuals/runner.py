@@ -3,26 +3,88 @@ Stage 09a PDF annotation runner.
 
 Extracted from 09a_pdf_annotator.py.
 """
-import asyncio
-import json
-import os
-import sys
-from datetime import datetime
-from pathlib import Path
-from typing import Any, Dict, List, Optional
 
+import json
+import sys
+import time
+from collections import defaultdict
+from pathlib import Path
+from typing import Any, Dict
+
+import fitz  # PyMuPDF
 from loguru import logger
 
 from extractor.pipeline.utils.reliability import log_stage_error
-from extractor.pipeline.utils.diagnostics import (
-    get_run_id,
-    iso_now,
-    make_event,
-    snapshot_resources,
-    start_resource_sampler,
-    stop_resource_sampler,
+from extractor.pipeline.utils.visuals import (
+    COLORS,
+    HUMAN_KIND,
+    coerce_page as _coerce_page,
+    color_for_kind as _color_for_kind,
+    format_label as _format_label,
+    rect_for_kind as _rect_for_kind,
+    safe_get_bbox as _safe_get_bbox,
+    stable_overlay_id as _stable_overlay_id,
+    style_for_kind as _style_for_kind,
+    table_payload_from_obj as _table_payload_from_obj,
 )
-from extractor.pipeline.steps.scillm_preflight_validator import quick_scillm_check
+from extractor.pipeline.utils.visuals import drawing as draw
+from extractor.pipeline.utils.visuals import layout
+from extractor.pipeline.utils.visuals.colors import PREVIEW_DPI
+from extractor.pipeline.utils.visuals.drawing import (
+    draw_section_title_plaque as _draw_section_title_plaque,
+    draw_t_endcaps as _draw_t_endcaps,
+    draw_table_metrics as _draw_table_metrics,
+    draw_table_preview_box as _draw_table_preview_box,
+)
+
+
+def _append_timing(logs_dir: Path, record: dict[str, Any]) -> None:
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    path = logs_dir / "timings.jsonl"
+    with path.open("a", encoding="utf-8") as fp:
+        fp.write(json.dumps(record) + "\n")
+
+
+def _summarize_timings(logs_dir: Path) -> None:
+    timings_path = logs_dir / "timings.jsonl"
+    if not timings_path.exists():
+        return
+    calls = 0
+    latency_sum = 0
+    by_event: dict[str, int] = {}
+    with timings_path.open("r", encoding="utf-8") as fp:
+        for line in fp:
+            if not line.strip():
+                continue
+            rec = json.loads(line)
+            calls += 1
+            latency = int(rec.get("latency_ms") or 0)
+            latency_sum += latency
+            event = str(rec.get("event") or "unknown")
+            by_event[event] = by_event.get(event, 0) + latency
+    summary = {
+        "calls": calls,
+        "latency_ms_total": latency_sum,
+        "latency_ms_avg": (latency_sum // calls) if calls else 0,
+        "by_event_latency_ms": by_event,
+    }
+    (logs_dir / "timings_summary.json").write_text(json.dumps(summary, indent=2))
+
+
+def _write_artifacts_index(stage_dir: Path) -> None:
+    artifacts = []
+    for path in stage_dir.rglob("*"):
+        if path.is_file():
+            artifacts.append(str(path.relative_to(stage_dir)))
+    artifacts.sort()
+    (stage_dir / "artifacts_index.json").write_text(
+        json.dumps({"artifacts": artifacts}, indent=2)
+    )
+
+
+def sanity() -> int:
+    return 0
+
 
 def run(
     pdf_path: Path,
@@ -64,7 +126,7 @@ def run(
     draw_figure_watermark: bool = False,
     draw_table_callouts: bool = True,
     labels_verbose: bool = False,
-    mode: str = "all",            # "structure" | "tables" | "reflow" | "all"
+    mode: str = "all",  # "structure" | "tables" | "reflow" | "all"
     max_text_overlays_per_page: int = 64,
 ) -> Path:
     # Decide stage directory name. Prefer running after 07/08/09 when reflowed_json is available.
@@ -92,17 +154,16 @@ def run(
             retention=5,
         )
     except Exception as exc:
-        log_stage_error('09a_pdf_annotator', exc, {'context': '09a'})
+        log_stage_error("09a_pdf_annotator", exc, {"context": "09a"})
         raise
-        sink_id = None
 
     t0 = time.time()
     logger.info(f"09a_pdf_annotator: start → {pdf_path}")
 
     # Load inputs
-    sections = (json.loads(sections_json.read_text(encoding="utf-8")).get("sections") or [])
-    tables = (json.loads(tables_json.read_text(encoding="utf-8")).get("tables") or [])
-    figures = (json.loads(figures_json.read_text(encoding="utf-8")).get("figures") or [])
+    sections = json.loads(sections_json.read_text(encoding="utf-8")).get("sections") or []
+    tables = json.loads(tables_json.read_text(encoding="utf-8")).get("tables") or []
+    figures = json.loads(figures_json.read_text(encoding="utf-8")).get("figures") or []
     # Map figure_id -> ai_description (if present)
     fig_desc: dict[str, str] = {}
     for f in figures:
@@ -112,18 +173,16 @@ def run(
             if fid and isinstance(desc, str) and desc.strip():
                 fig_desc[fid] = desc.strip()
         except Exception as exc:
-            log_stage_error('09a_pdf_annotator', exc, {'context': '09a'})
+            log_stage_error("09a_pdf_annotator", exc, {"context": "09a"})
             raise
-            continue
     reflowed_sections = []
     if reflowed_json is not None:
         try:
             rj = json.loads(reflowed_json.read_text(encoding="utf-8"))
             reflowed_sections = rj.get("reflowed_sections") or rj.get("sections") or []
         except Exception as exc:
-            log_stage_error('09a_pdf_annotator', exc, {'context': '09a'})
+            log_stage_error("09a_pdf_annotator", exc, {"context": "09a"})
             raise
-            logger.warning(f"Failed to read reflowed JSON: {e}")
     # Build block lookup for Stage 02 blocks: id -> (page, bbox)
     block_lookup = {}
     if blocks02_json is not None:
@@ -136,15 +195,16 @@ def run(
                     bb = _safe_get_bbox(b)
                     pg = b.get("page") if b.get("page") is not None else b.get("page_idx")
                     if bid is not None and bb is not None and pg is not None:
-                        block_lookup[str(bid)] = (int(pg), [float(bb[0]), float(bb[1]), float(bb[2]), float(bb[3])])
+                        block_lookup[str(bid)] = (
+                            int(pg),
+                            [float(bb[0]), float(bb[1]), float(bb[2]), float(bb[3])],
+                        )
                 except Exception as exc:
-                    log_stage_error('09a_pdf_annotator', exc, {'context': '09a'})
+                    log_stage_error("09a_pdf_annotator", exc, {"context": "09a"})
                     raise
-                    continue
         except Exception as exc:
-            log_stage_error('09a_pdf_annotator', exc, {'context': '09a'})
+            log_stage_error("09a_pdf_annotator", exc, {"context": "09a"})
             raise
-            logger.warning(f"Failed to read blocks02 JSON: {e}")
 
     section_header_blocks: dict[str, dict[str, Any]] = {}
     for sec in sections:
@@ -170,9 +230,8 @@ def run(
             h03 = json.loads(Path(headers03_json).read_text(encoding="utf-8"))
             headers03 = h03.get("blocks") or []
         except Exception as exc:
-            log_stage_error('09a_pdf_annotator', exc, {'context': '09a'})
+            log_stage_error("09a_pdf_annotator", exc, {"context": "09a"})
             raise
-            logger.warning(f"Failed to read headers03 JSON: {e}")
 
     # Stage 06b layout sketch (optional)
     layout06b: dict[str, Any] | None = None
@@ -184,9 +243,8 @@ def run(
         try:
             layout06b = json.loads(Path(layout06b_json).read_text(encoding="utf-8"))
         except Exception as exc:
-            log_stage_error('09a_pdf_annotator', exc, {'context': '09a'})
+            log_stage_error("09a_pdf_annotator", exc, {"context": "09a"})
             raise
-            logger.warning(f"Failed to read layout06b JSON: {e}")
 
     # Optional: requirements overlays (Stage 07 requirements miner)
     requirements: list[dict[str, Any]] = []
@@ -196,14 +254,15 @@ def run(
             req_obj = json.loads(req_p.read_text(encoding="utf-8"))
             requirements = req_obj.get("requirements") or []
     except Exception as exc:
-        log_stage_error('09a_pdf_annotator', exc, {'context': '09a'})
+        log_stage_error("09a_pdf_annotator", exc, {"context": "09a"})
         raise
-        requirements = []
 
     # Annotate
     # Safety: do not allow overwriting PDFs under data/input/ or external input paths
     if overwrite_pdf and str(pdf_path).startswith("data/input/"):
-        raise ValueError("Refusing to overwrite a source PDF under data/input/. Use a copy or disable --overwrite-pdf.")
+        raise ValueError(
+            "Refusing to overwrite a source PDF under data/input/. Use a copy or disable --overwrite-pdf."
+        )
     doc = fitz.open(str(pdf_path))
 
     lane_left_by_page: dict[int, fitz.Rect] = {}
@@ -214,17 +273,15 @@ def run(
                 try:
                     page = doc[pidx]
                 except Exception as exc:
-                    log_stage_error('09a_pdf_annotator', exc, {'context': '09a'})
+                    log_stage_error("09a_pdf_annotator", exc, {"context": "09a"})
                     raise
-                    continue
                 if gutter_left_tags:
                     lane_left_by_page[pidx] = draw.draw_page_gutter(page, "left")
                 if gutter_right_section_caps:
                     lane_right_by_page[pidx] = draw.draw_page_gutter(page, "right")
         except Exception as exc:
-            log_stage_error('09a_pdf_annotator', exc, {'context': '09a'})
+            log_stage_error("09a_pdf_annotator", exc, {"context": "09a"})
             raise
-            logger.warning(f"Failed to prepare gutter lanes: {e}")
 
     # Optional: mode presets (cheap switch for QA)
     try:
@@ -233,16 +290,19 @@ def run(
             draw_text_chunks = False
             draw_headers03 = False
         elif m == "tables":
-            draw_sections = False; draw_figures = False
-            draw_text_chunks = False; draw_headers03 = False
+            draw_sections = False
+            draw_figures = False
+            draw_text_chunks = False
+            draw_headers03 = False
         elif m == "reflow":
-            draw_sections = False; draw_tables = False; draw_figures = False
+            draw_sections = False
+            draw_tables = False
+            draw_figures = False
         elif m == "all":
             pass
     except Exception as exc:
-        log_stage_error('09a_pdf_annotator', exc, {'context': '09a'})
+        log_stage_error("09a_pdf_annotator", exc, {"context": "09a"})
         raise
-        pass
 
     # Queue of gutter plaques to render in a final pass (after overlays/grid)
     # {_pg -> [ { "rect": fitz.Rect, "label": str, "color": (r,g,b) }, ... ]}
@@ -261,7 +321,6 @@ def run(
         if _pg < 0 or _pg >= len(doc):
             return None
         return _pg
-
 
     def _add(
         page_idx: int,
@@ -286,7 +345,7 @@ def run(
         try:
             x0, y0, x1, y1 = [float(v) for v in bbox]
         except Exception as exc:
-            log_stage_error('09a_pdf_annotator', exc, {'context': '09a'})
+            log_stage_error("09a_pdf_annotator", exc, {"context": "09a"})
             raise
             logger.warning(f"Skipping overlay (kind={kind}): non-numeric bbox {bbox}")
             return
@@ -302,35 +361,43 @@ def run(
                 try:
                     annot.set_border(width=max(2.5, float(stroke_width)))
                 except Exception as exc:
-                    log_stage_error('09a_pdf_annotator', exc, {'context': 'set_border'})
+                    log_stage_error("09a_pdf_annotator", exc, {"context": "set_border"})
                 try:
                     annot.set_opacity(1.0)
                 except Exception as exc:
-                    log_stage_error('09a_pdf_annotator', exc, {'context': 'set_opacity'})
+                    log_stage_error("09a_pdf_annotator", exc, {"context": "set_opacity"})
                 try:
                     info = {}
                     if label:
                         info["title"] = str(label)[:120]
                     annot.set_info(info)
                 except Exception as exc:
-                    log_stage_error('09a_pdf_annotator', exc, {'context': 'set_info'})
+                    log_stage_error("09a_pdf_annotator", exc, {"context": "set_info"})
                 # Store compact JSON payload in comment for quick inspection (best-effort)
                 try:
-                    compact = json.dumps({k: v for k, v in payload.items() if k not in {"bbox"}}, ensure_ascii=False)
+                    compact = json.dumps(
+                        {k: v for k, v in payload.items() if k not in {"bbox"}}, ensure_ascii=False
+                    )
                     if hasattr(annot, "set_contents"):
                         annot.set_contents(compact[:2000])
                 except Exception as exc:
-                    log_stage_error('09a_pdf_annotator', exc, {'context': 'set_contents'})
+                    log_stage_error("09a_pdf_annotator", exc, {"context": "set_contents"})
                 annot.update()
                 drew = True
             except Exception as exc:
-                log_stage_error('09a_pdf_annotator', exc, {'context': 'add_rect_annot'})
+                log_stage_error("09a_pdf_annotator", exc, {"context": "add_rect_annot"})
                 drew = False
         if not drew:
             try:
-                page.draw_rect(rect, color=stroke_color, width=max(2.5, float(stroke_width)), fill=None, overlay=True)
+                page.draw_rect(
+                    rect,
+                    color=stroke_color,
+                    width=max(2.5, float(stroke_width)),
+                    fill=None,
+                    overlay=True,
+                )
             except Exception as exc:
-                log_stage_error('09a_pdf_annotator', exc, {'context': '09a'})
+                log_stage_error("09a_pdf_annotator", exc, {"context": "09a"})
                 raise
                 pass
         try:
@@ -338,12 +405,23 @@ def run(
                 gutter_label = (label or HUMAN_KIND.get(kind) or "").strip()
                 if gutter_left_tags and gutter_label and rect and lane_left_by_page.get(_pg):
                     pending_left_tags[_pg].append(
-                        {"rect": rect, "label": gutter_label, "color": (0.12, 0.12, 0.12), "font": 9.0}
+                        {
+                            "rect": rect,
+                            "label": gutter_label,
+                            "color": (0.12, 0.12, 0.12),
+                            "font": 9.0,
+                        }
                     )
                 if gutter_right_section_caps and kind == "section" and rect:
                     pending_right_tags[_pg].append((rect.y0, rect.y1))
             if kind == "section" and draw_section_plaques:
-                _draw_section_title_plaque(page, rect, payload.get("title") or label, stroke=COLORS.get("table", (0.86, 0.25, 0.2)), font=11.0)
+                _draw_section_title_plaque(
+                    page,
+                    rect,
+                    payload.get("title") or label,
+                    stroke=COLORS.get("table", (0.86, 0.25, 0.2)),
+                    font=11.0,
+                )
             if kind == "figure":
                 # Keep only the overlay; captions/watermarks are shown in the data pane.
                 pass
@@ -358,9 +436,8 @@ def run(
                 )
                 _draw_table_preview_box(page, rect, payload.get("rows_preview") or [])
         except Exception as exc:
-            log_stage_error('09a_pdf_annotator', exc, {'context': '09a'})
+            log_stage_error("09a_pdf_annotator", exc, {"context": "09a"})
             raise
-            pass
         if labels and labels_verbose and label:
             draw.draw_label(page, rect, label, stroke_color, float(label_font_size))
         payload_copy = dict(payload)
@@ -435,7 +512,7 @@ def run(
                     btype = (blk.get("type") or blk.get("block_type") or "").lower()
                     if btype == "figure":
                         continue
-                    bids = ((blk.get("source") or {}).get("block_ids") or [])
+                    bids = (blk.get("source") or {}).get("block_ids") or []
                     for bid in bids:
                         lookup = block_lookup.get(str(bid))
                         if not lookup:
@@ -445,8 +522,10 @@ def run(
                 for pg, bbs in per_page.items():
                     if not bbs:
                         continue
-                    x0 = min(bb[0] for bb in bbs); y0 = min(bb[1] for bb in bbs)
-                    x1 = max(bb[2] for bb in bbs); y1 = max(bb[3] for bb in bbs)
+                    x0 = min(bb[0] for bb in bbs)
+                    y0 = min(bb[1] for bb in bbs)
+                    x1 = max(bb[2] for bb in bbs)
+                    y1 = max(bb[3] for bb in bbs)
                     payload = {"id": sid_str, "title": s.get("title"), "continuation": True}
                     _add(
                         pg,
@@ -458,8 +537,17 @@ def run(
                     )
                     drew += 1
         if drew == 0:
-            logger.warning("09a: no section overlays drawn (check section headers in Stage 04 output)")
-        _append_timing(logs_dir, {"stage": "09a_pdf_annotator", "event": "draw_sections", "latency_ms": int((time.monotonic()-t_s)*1000)})
+            logger.warning(
+                "09a: no section overlays drawn (check section headers in Stage 04 output)"
+            )
+        _append_timing(
+            logs_dir,
+            {
+                "stage": "09a_pdf_annotator",
+                "event": "draw_sections",
+                "latency_ms": int((time.monotonic() - t_s) * 1000),
+            },
+        )
 
     # Tables (prefer logical merged tables from reflow when available)
     if draw_tables:
@@ -470,10 +558,13 @@ def run(
             groups: dict[str, list[tuple[dict[str, Any], dict[str, Any]]]] = {}
             for sec in reflowed_sections:
                 sid = sec.get("id") or sec.get("section_id")
-                for tbl in (sec.get("tables") or []):
+                for tbl in sec.get("tables") or []:
                     lid = tbl.get("normalized_id") or tbl.get("logical_table_id")
                     title = (tbl.get("title") or tbl.get("caption") or "").strip().lower()
-                    key = lid or f"section:{sid}::table:{tbl.get('table_index') or title or len(groups)}"
+                    key = (
+                        lid
+                        or f"section:{sid}::table:{tbl.get('table_index') or title or len(groups)}"
+                    )
                     groups.setdefault(key, []).append((sec, tbl))
             for gkey, entries in groups.items():
                 if not entries:
@@ -491,7 +582,9 @@ def run(
                 if not page_list:
                     continue
                 sorted_pages = sorted(set(page_list))
-                is_contiguous = len(sorted_pages) > 1 and sorted_pages == list(range(sorted_pages[0], sorted_pages[-1] + 1))
+                is_contiguous = len(sorted_pages) > 1 and sorted_pages == list(
+                    range(sorted_pages[0], sorted_pages[-1] + 1)
+                )
                 kind = "table_merged" if is_contiguous else "table"
                 if kind == "table_merged":
                     merged_groups += 1
@@ -548,13 +641,19 @@ def run(
             # Fallback (also applicable in addition to raw table overlays):
             # use 06b sketch_v2 logical_table_id groups to draw merged overlays
             try:
-                layout_dir = Path(layout06b_json).parent if isinstance(layout06b_json, Path) else None
-                v2_path = (layout_dir / "06b_layout_sketch_v2.json") if (layout_dir and (layout_dir / "06b_layout_sketch_v2.json").exists()) else None
+                layout_dir = (
+                    Path(layout06b_json).parent if isinstance(layout06b_json, Path) else None
+                )
+                v2_path = (
+                    (layout_dir / "06b_layout_sketch_v2.json")
+                    if (layout_dir and (layout_dir / "06b_layout_sketch_v2.json").exists())
+                    else None
+                )
                 tables_v2 = []
                 if v2_path:
                     v2 = json.loads(v2_path.read_text(encoding="utf-8"))
                     for _sid, sv2 in (v2.get("sections") or {}).items():
-                        for obj in (sv2.get("objects") or []):
+                        for obj in sv2.get("objects") or []:
                             if obj.get("type") == "table":
                                 tables_v2.append(obj)
                 else:
@@ -562,7 +661,7 @@ def run(
                     secs = (layout06b.get("sections") or {}) if isinstance(layout06b, dict) else {}
                     for _sid, _sk in secs.items():
                         sv2 = (_sk.get("sketch_v2") or {}) if isinstance(_sk, dict) else {}
-                        for obj in (sv2.get("objects") or []):
+                        for obj in sv2.get("objects") or []:
                             if obj.get("type") == "table":
                                 tables_v2.append(obj)
                 # group by lid
@@ -573,18 +672,32 @@ def run(
                         continue
                     by_lid.setdefault(lid, []).append(o)
                 for lid, items in by_lid.items():
-                    pages = sorted({p for p in (_coerce_page(i.get("page_index"), i.get("page")) for i in items) if p is not None})
+                    pages = sorted(
+                        {
+                            p
+                            for p in (
+                                _coerce_page(i.get("page_index"), i.get("page")) for i in items
+                            )
+                            if p is not None
+                        }
+                    )
                     if len(pages) <= 1:
                         continue
                     if pages != list(range(pages[0], pages[-1] + 1)):
                         continue
                     for p in pages:
-                        bbs = [i.get("bbox") for i in items if _coerce_page(i.get("page_index"), i.get("page")) == p]
-                        bbs = [bb for bb in bbs if isinstance(bb, (list,tuple)) and len(bb)==4]
+                        bbs = [
+                            i.get("bbox")
+                            for i in items
+                            if _coerce_page(i.get("page_index"), i.get("page")) == p
+                        ]
+                        bbs = [bb for bb in bbs if isinstance(bb, (list, tuple)) and len(bb) == 4]
                         if not bbs:
                             continue
-                        x0=min(bb[0] for bb in bbs); y0=min(bb[1] for bb in bbs)
-                        x1=max(bb[2] for bb in bbs); y1=max(bb[3] for bb in bbs)
+                        x0 = min(bb[0] for bb in bbs)
+                        y0 = min(bb[1] for bb in bbs)
+                        x1 = max(bb[2] for bb in bbs)
+                        y1 = max(bb[3] for bb in bbs)
                         payload = {
                             "logical_table_key": lid,
                             "pages_in_group": [pp + 1 for pp in pages],
@@ -600,7 +713,18 @@ def run(
                             source_ids=source_ids,
                         )
                         drew += 1
-                merged_groups = sum(1 for lid, arr in by_lid.items() if len({p for p in (_coerce_page(i.get("page_index"), i.get("page")) for i in arr) if p is not None})>1)
+                merged_groups = sum(
+                    1
+                    for lid, arr in by_lid.items()
+                    if len(
+                        {
+                            p
+                            for p in (_coerce_page(i.get("page_index"), i.get("page")) for i in arr)
+                            if p is not None
+                        }
+                    )
+                    > 1
+                )
                 # If still no groups, derive header→body by header_norm non-digit + same cols and horizontal alignment
                 if merged_groups == 0 and tables_v2:
                     # index by page
@@ -608,34 +732,43 @@ def run(
                     for o in tables_v2:
                         p = _coerce_page(o.get("page_index"), o.get("page"))
                         by_page.setdefault(p, []).append(o)
+
                     def _is_generic(h: str) -> bool:
-                        return bool(h) and all(tok.isdigit() for tok in h.split('|'))
+                        return bool(h) and all(tok.isdigit() for tok in h.split("|"))
+
                     def _h_iou(a, b):
                         try:
-                            ax0,_,ax1,_ = a; bx0,_,bx1,_ = b
-                            inter = max(0.0, min(ax1,bx1)-max(ax0,bx0))
-                            uni = max(ax1,bx1)-min(ax0,bx0)
-                            return float(inter/uni) if uni>0 else 0.0
+                            ax0, _, ax1, _ = a
+                            bx0, _, bx1, _ = b
+                            inter = max(0.0, min(ax1, bx1) - max(ax0, bx0))
+                            uni = max(ax1, bx1) - min(ax0, bx0)
+                            return float(inter / uni) if uni > 0 else 0.0
                         except Exception as exc:
-                            log_stage_error('09a_pdf_annotator', exc, {'context': '09a'})
+                            log_stage_error("09a_pdf_annotator", exc, {"context": "09a"})
                             raise
                             return 0.0
+
                     for p, hdrs in by_page.items():
-                        nxt = by_page.get(p+1) or []
+                        nxt = by_page.get(p + 1) or []
                         for h in hdrs:
-                            hn = (h.get('header_norm') or '').strip()
+                            hn = (h.get("header_norm") or "").strip()
                             if not hn or _is_generic(hn):
                                 continue
-                            cols_h = int(h.get('cols') or 0)
+                            cols_h = int(h.get("cols") or 0)
                             for b in nxt:
-                                cols_b = int(b.get('cols') or 0)
+                                cols_b = int(b.get("cols") or 0)
                                 if cols_b != cols_h:
                                     continue
-                                if _h_iou(h.get('bbox') or [0,0,0,0], b.get('bbox') or [0,0,0,0]) < 0.2:
+                                if (
+                                    _h_iou(
+                                        h.get("bbox") or [0, 0, 0, 0], b.get("bbox") or [0, 0, 0, 0]
+                                    )
+                                    < 0.2
+                                ):
                                     continue
                                 # draw merged on both pages
-                                for pp, oset in ((p,[h]), (p+1,[b])):
-                                    bbx = (oset[0].get('bbox') or [0,0,0,0])
+                                for pp, oset in ((p, [h]), (p + 1, [b])):
+                                    bbx = oset[0].get("bbox") or [0, 0, 0, 0]
                                     payload = {
                                         "logical_table_key": f"hn::{hn}",
                                         "pages_in_group": [p + 1, p + 2],
@@ -653,12 +786,19 @@ def run(
                                     drew += 1
                                 merged_groups = max(merged_groups, 1)
             except Exception as exc:
-                log_stage_error('09a_pdf_annotator', exc, {'context': '09a'})
+                log_stage_error("09a_pdf_annotator", exc, {"context": "09a"})
                 raise
                 pass
         if drew == 0 and merged_groups == 0:
             logger.warning("09a: no table overlays drawn (check reflow/table JSON and block ids)")
-        _append_timing(logs_dir, {"stage": "09a_pdf_annotator", "event": "draw_tables", "latency_ms": int((time.monotonic()-t_s)*1000)})
+        _append_timing(
+            logs_dir,
+            {
+                "stage": "09a_pdf_annotator",
+                "event": "draw_tables",
+                "latency_ms": int((time.monotonic() - t_s) * 1000),
+            },
+        )
 
     # Tabs (sections + merged tables)
     # Figures
@@ -687,17 +827,28 @@ def run(
                 )
                 figs_drawn += 1
             else:
-                logger.warning(f"09a: skipping figure overlay (page/bbox invalid) fid={f.get('figure_id')} page={f.get('page')}")
+                logger.warning(
+                    f"09a: skipping figure overlay (page/bbox invalid) fid={f.get('figure_id')} page={f.get('page')}"
+                )
         if figs_drawn == 0 and isinstance(figures, list) and len(figures) > 0:
-            logger.warning("09a: figures were present but none were drawn — investigate page indices and bboxes")
-        _append_timing(logs_dir, {"stage": "09a_pdf_annotator", "event": "draw_figures", "latency_ms": int((time.monotonic()-t_s)*1000)})
+            logger.warning(
+                "09a: figures were present but none were drawn — investigate page indices and bboxes"
+            )
+        _append_timing(
+            logs_dir,
+            {
+                "stage": "09a_pdf_annotator",
+                "event": "draw_figures",
+                "latency_ms": int((time.monotonic() - t_s) * 1000),
+            },
+        )
 
     # Knowledge chunks from Stage 07 reflowed sections
     if draw_text_chunks and reflowed_sections and block_lookup:
         t_s = time.monotonic()
         _text_budget: Dict[int, int] = {}
         for sec in reflowed_sections:
-            blocks = (sec.get("reflowed_json", {}).get("blocks") or [])
+            blocks = sec.get("reflowed_json", {}).get("blocks") or []
             for idx, blk in enumerate(blocks):
                 try:
                     src = blk.get("source") or {}
@@ -706,17 +857,23 @@ def run(
                         continue
                     btype = str((blk.get("type") or "").lower())
                     if btype == "paragraph":
-                        kind = "reflow_paragraph"; pref = "PAR"
+                        kind = "reflow_paragraph"
+                        pref = "PAR"
                     elif btype == "list":
-                        kind = "reflow_list"; pref = "LST"
+                        kind = "reflow_list"
+                        pref = "LST"
                     elif btype == "heading":
-                        kind = "reflow_heading"; pref = "HDG"
+                        kind = "reflow_heading"
+                        pref = "HDG"
                     elif btype == "table":
-                        kind = "reflow_table"; pref = "TBLB"
+                        kind = "reflow_table"
+                        pref = "TBLB"
                     elif btype == "figure":
-                        kind = "reflow_figure"; pref = "FIGB"
+                        kind = "reflow_figure"
+                        pref = "FIGB"
                     else:
-                        kind = "text_chunk"; pref = "TXT"
+                        kind = "text_chunk"
+                        pref = "TXT"
                     per_page: dict[int, list[list[float]]] = {}
                     for bid in bids:
                         t = block_lookup.get(str(bid))
@@ -749,10 +906,17 @@ def run(
                             label_text=f"{pref} {idx}",
                         )
                 except Exception as exc:
-                    log_stage_error('09a_pdf_annotator', exc, {'context': '09a'})
+                    log_stage_error("09a_pdf_annotator", exc, {"context": "09a"})
                     raise
                     continue
-        _append_timing(logs_dir, {"stage": "09a_pdf_annotator", "event": "draw_text_chunks", "latency_ms": int((time.monotonic()-t_s)*1000)})
+        _append_timing(
+            logs_dir,
+            {
+                "stage": "09a_pdf_annotator",
+                "event": "draw_text_chunks",
+                "latency_ms": int((time.monotonic() - t_s) * 1000),
+            },
+        )
 
     # Requirements overlays
     if requirements:
@@ -780,7 +944,11 @@ def run(
                 pg_int = _coerce_page(pg)
                 if pg_int is None:
                     continue
-                is_cond = bool(r.get("is_conditional")) or ("conditional" in str(r.get("category", "")).lower()) or bool(r.get("condition"))
+                is_cond = (
+                    bool(r.get("is_conditional"))
+                    or ("conditional" in str(r.get("category", "")).lower())
+                    or bool(r.get("condition"))
+                )
                 payload = {
                     "requirement_id": r.get("id"),
                     "title": r.get("title"),
@@ -802,20 +970,37 @@ def run(
                 )
                 req_drawn += 1
             except Exception as exc:
-                log_stage_error('09a_pdf_annotator', exc, {'context': '09a'})
+                log_stage_error("09a_pdf_annotator", exc, {"context": "09a"})
                 raise
                 continue
         if req_drawn == 0 and isinstance(requirements, list) and len(requirements) > 0:
-            logger.warning("09a: requirements present but none were drawn — check anchors/section fallbacks")
-        _append_timing(logs_dir, {"stage": "09a_pdf_annotator", "event": "draw_requirements", "latency_ms": int((time.monotonic()-t_s)*1000)})
+            logger.warning(
+                "09a: requirements present but none were drawn — check anchors/section fallbacks"
+            )
+        _append_timing(
+            logs_dir,
+            {
+                "stage": "09a_pdf_annotator",
+                "event": "draw_requirements",
+                "latency_ms": int((time.monotonic() - t_s) * 1000),
+            },
+        )
 
     # Fallback merged-table detection using Stage 05 when reflow lacks linkage
     if prefer_reflow_tables and draw_tables and reflowed_sections and merged_groups == 0:
         try:
             # Identify header on page 0 from 05 tables
-            t05 = json.loads(Path(tables_json).read_text(encoding="utf-8")) if isinstance(tables_json, (str, Path)) and Path(tables_json).exists() else {"tables": []}
+            t05 = (
+                json.loads(Path(tables_json).read_text(encoding="utf-8"))
+                if isinstance(tables_json, (str, Path)) and Path(tables_json).exists()
+                else {"tables": []}
+            )
             tabs05 = t05.get("tables", [])
-            page0_tabs = [t for t in tabs05 if _coerce_page(t.get("page_index"), t.get("page_idx"), t.get("page")) == 0]
+            page0_tabs = [
+                t
+                for t in tabs05
+                if _coerce_page(t.get("page_index"), t.get("page_idx"), t.get("page")) == 0
+            ]
             if page0_tabs:
                 hdr0 = None
                 try:
@@ -827,26 +1012,33 @@ def run(
                         elif isinstance(row0, list):
                             hdr0 = row0
                 except Exception as exc:
-                    log_stage_error('09a_pdf_annotator', exc, {'context': '09a'})
+                    log_stage_error("09a_pdf_annotator", exc, {"context": "09a"})
                     raise
-                    hdr0 = None
                 # Find a best match on page 1 with same column count
                 if isinstance(hdr0, list) and hdr0:
                     c0 = len(hdr0)
-                    page1_tabs = [t for t in tabs05 if _coerce_page(t.get("page_index"), t.get("page_idx"), t.get("page")) == 1]
+                    page1_tabs = [
+                        t
+                        for t in tabs05
+                        if _coerce_page(t.get("page_index"), t.get("page_idx"), t.get("page")) == 1
+                    ]
                     match = None
                     for t in page1_tabs:
                         try:
                             df = t.get("pandas_df_raw") or t.get("pandas_df")
                             if isinstance(df, list) and df:
                                 r0 = df[0]
-                                cols = list(r0.keys()) if isinstance(r0, dict) else (r0 if isinstance(r0, list) else [])
+                                cols = (
+                                    list(r0.keys())
+                                    if isinstance(r0, dict)
+                                    else (r0 if isinstance(r0, list) else [])
+                                )
                                 if len(cols) == c0:
-                                    match = t; break
+                                    match = t
+                                    break
                         except Exception as exc:
-                            log_stage_error('09a_pdf_annotator', exc, {'context': '09a'})
+                            log_stage_error("09a_pdf_annotator", exc, {"context": "09a"})
                             raise
-                            continue
                     if match:
                         # Draw merged boxes on both pages
                         for t in (page0_tabs[0], match):
@@ -864,7 +1056,7 @@ def run(
                                 )
                                 merged_groups = 1
         except Exception as exc:
-            log_stage_error('09a_pdf_annotator', exc, {'context': '09a'})
+            log_stage_error("09a_pdf_annotator", exc, {"context": "09a"})
             raise
             pass
 
@@ -878,10 +1070,8 @@ def run(
         tabs_summary = layout.draw_vertical_tabs(doc, tabs)
         logger.debug(f"09a tabs summary: {tabs_summary}")
     except Exception as exc:
-        log_stage_error('09a_pdf_annotator', exc, {'context': '09a'})
+        log_stage_error("09a_pdf_annotator", exc, {"context": "09a"})
         raise
-        logger.warning(f"Failed to draw tabs gutter: {e}")
-        tabs_summary = {"mode": "error", "error": str(e)}
 
     # Stage 03 overlays
     if draw_headers03 and headers03:
@@ -908,10 +1098,17 @@ def run(
                         label_text=lbl,
                     )
             except Exception as exc:
-                log_stage_error('09a_pdf_annotator', exc, {'context': '09a'})
+                log_stage_error("09a_pdf_annotator", exc, {"context": "09a"})
                 raise
                 continue
-        _append_timing(logs_dir, {"stage": "09a_pdf_annotator", "event": "draw_headers03", "latency_ms": int((time.monotonic()-t_s)*1000)})
+        _append_timing(
+            logs_dir,
+            {
+                "stage": "09a_pdf_annotator",
+                "event": "draw_headers03",
+                "latency_ms": int((time.monotonic() - t_s) * 1000),
+            },
+        )
 
     # Stage 06b columns
     if draw_columns06b and layout06b and isinstance(layout06b, dict):
@@ -927,7 +1124,8 @@ def run(
                         r = page.rect
                         for c in cols:
                             try:
-                                gx0 = int(c.get("x0", 0)); gx1 = int(c.get("x1", 0))
+                                gx0 = int(c.get("x0", 0))
+                                gx1 = int(c.get("x1", 0))
                                 x0 = r.x0 + (r.width) * (gx0 / grid_n)
                                 x1 = r.x0 + (r.width) * (gx1 / grid_n)
                                 band = fitz.Rect(min(x0, x1), r.y0, max(x0, x1), r.y1)
@@ -938,16 +1136,30 @@ def run(
                                         try:
                                             annot.set_opacity(0.2)
                                         except Exception as exc:
-                                            log_stage_error('09a_pdf_annotator', exc, {'context': '09a'})
+                                            log_stage_error(
+                                                "09a_pdf_annotator", exc, {"context": "09a"}
+                                            )
                                             raise
                                             pass
                                         annot.update()
                                     else:
-                                        page.draw_rect(band, color=_color_for_kind("columns"), width=0.2, fill=None, overlay=True)
+                                        page.draw_rect(
+                                            band,
+                                            color=_color_for_kind("columns"),
+                                            width=0.2,
+                                            fill=None,
+                                            overlay=True,
+                                        )
                                 except Exception as exc:
-                                    log_stage_error('09a_pdf_annotator', exc, {'context': '09a'})
+                                    log_stage_error("09a_pdf_annotator", exc, {"context": "09a"})
                                     raise
-                                    page.draw_rect(band, color=_color_for_kind("columns"), width=0.2, fill=None, overlay=True)
+                                    page.draw_rect(
+                                        band,
+                                        color=_color_for_kind("columns"),
+                                        width=0.2,
+                                        fill=None,
+                                        overlay=True,
+                                    )
                                 if labels:
                                     page.insert_text(
                                         (band.x0 + 2, band.y0 + max(6, int(label_font_size))),
@@ -957,20 +1169,31 @@ def run(
                                     )
                                 pages_touched.add(pidx)
                             except Exception as exc:
-                                log_stage_error('09a_pdf_annotator', exc, {'context': '09a'})
+                                log_stage_error("09a_pdf_annotator", exc, {"context": "09a"})
                                 raise
                                 continue
         except Exception as exc:
-            log_stage_error('09a_pdf_annotator', exc, {'context': '09a'})
+            log_stage_error("09a_pdf_annotator", exc, {"context": "09a"})
             raise
             pass
-        _append_timing(logs_dir, {"stage": "09a_pdf_annotator", "event": "draw_columns06b", "latency_ms": int((time.monotonic()-t_s)*1000)})
+        _append_timing(
+            logs_dir,
+            {
+                "stage": "09a_pdf_annotator",
+                "event": "draw_columns06b",
+                "latency_ms": int((time.monotonic() - t_s) * 1000),
+            },
+        )
 
     # Stage 05 demoted (table -> text) markers
     try:
-        t05 = json.loads(Path(tables_json).read_text(encoding="utf-8")) if isinstance(tables_json, (str, Path)) and Path(tables_json).exists() else {}
+        t05 = (
+            json.loads(Path(tables_json).read_text(encoding="utf-8"))
+            if isinstance(tables_json, (str, Path)) and Path(tables_json).exists()
+            else {}
+        )
     except Exception as exc:
-        log_stage_error('09a_pdf_annotator', exc, {'context': '09a'})
+        log_stage_error("09a_pdf_annotator", exc, {"context": "09a"})
         raise
         t05 = {}
     demoted_blocks = (t05.get("demoted_text_blocks") or []) if isinstance(t05, dict) else []
@@ -980,7 +1203,7 @@ def run(
             try:
                 pg = int(b.get("page_idx") if b.get("page_idx") is not None else -1)
                 bb = _safe_get_bbox(b)
-                reason = (b.get("reason") or "demoted").upper()
+                (b.get("reason") or "demoted").upper()
                 if bb is not None and pg >= 0:
                     payload = {"reason": b.get("reason"), "text": (b.get("text") or "")[:80]}
                     source_ids = []
@@ -995,10 +1218,17 @@ def run(
                         source_ids=source_ids,
                     )
             except Exception as exc:
-                log_stage_error('09a_pdf_annotator', exc, {'context': '09a'})
+                log_stage_error("09a_pdf_annotator", exc, {"context": "09a"})
                 raise
                 continue
-        _append_timing(logs_dir, {"stage": "09a_pdf_annotator", "event": "draw_demoted05", "latency_ms": int((time.monotonic()-t_s)*1000)})
+        _append_timing(
+            logs_dir,
+            {
+                "stage": "09a_pdf_annotator",
+                "event": "draw_demoted05",
+                "latency_ms": int((time.monotonic() - t_s) * 1000),
+            },
+        )
 
     # Optional grid
     if draw_grid and isinstance(grid, int) and grid and grid > 1:
@@ -1017,10 +1247,17 @@ def run(
                     page.draw_line(fitz.Point(r.x0, y), fitz.Point(r.x1, y), color=color, width=0.3)
                 pages_touched.add(pidx)
         except Exception as exc:
-            log_stage_error('09a_pdf_annotator', exc, {'context': '09a'})
+            log_stage_error("09a_pdf_annotator", exc, {"context": "09a"})
             raise
             pass
-        _append_timing(logs_dir, {"stage": "09a_pdf_annotator", "event": "draw_grid", "latency_ms": int((time.monotonic()-t_s)*1000)})
+        _append_timing(
+            logs_dir,
+            {
+                "stage": "09a_pdf_annotator",
+                "event": "draw_grid",
+                "latency_ms": int((time.monotonic() - t_s) * 1000),
+            },
+        )
 
     # Final gutter pass: draw plaques last so they sit above lanes/overlays
     if draw_gutter:
@@ -1035,7 +1272,7 @@ def run(
                 try:
                     page = doc[_pg]
                 except Exception as exc:
-                    log_stage_error('09a_pdf_annotator', exc, {'context': '09a'})
+                    log_stage_error("09a_pdf_annotator", exc, {"context": "09a"})
                     raise
                     continue
                 for it in items:
@@ -1053,9 +1290,8 @@ def run(
                             font=float(it.get("font", 9.0)),
                         )
                     except Exception as exc:
-                        log_stage_error('09a_pdf_annotator', exc, {'context': '09a'})
+                        log_stage_error("09a_pdf_annotator", exc, {"context": "09a"})
                         raise
-                        continue
             for _pg, caps in sorted(pending_right_tags.items()):
                 if not caps:
                     continue
@@ -1065,20 +1301,18 @@ def run(
                 try:
                     page = doc[_pg]
                 except Exception as exc:
-                    log_stage_error('09a_pdf_annotator', exc, {'context': '09a'})
+                    log_stage_error("09a_pdf_annotator", exc, {"context": "09a"})
                     raise
                     continue
-                for (y0, y1) in caps:
+                for y0, y1 in caps:
                     try:
                         _draw_t_endcaps(page, lane, y0, y1)
                     except Exception as exc:
-                        log_stage_error('09a_pdf_annotator', exc, {'context': '09a'})
+                        log_stage_error("09a_pdf_annotator", exc, {"context": "09a"})
                         raise
-                        continue
         except Exception as exc:
-            log_stage_error('09a_pdf_annotator', exc, {'context': '09a'})
+            log_stage_error("09a_pdf_annotator", exc, {"context": "09a"})
             raise
-            logger.warning(f"Gutter final pass failed: {e}")
 
     # Save outputs (annotated PDF first)
     annotated_pdf = stage_dir / "annotated.pdf"
@@ -1103,24 +1337,29 @@ def run(
                         out_png = vis_dir / f"page_{pidx+1:04d}.png"
                         pix.save(str(out_png))
                     except Exception as exc:
-                        log_stage_error('09a_pdf_annotator', exc, {'context': '09a'})
+                        log_stage_error("09a_pdf_annotator", exc, {"context": "09a"})
                         raise
                         continue
             finally:
                 src.close()
         except Exception as exc:
-            log_stage_error('09a_pdf_annotator', exc, {'context': '09a'})
+            log_stage_error("09a_pdf_annotator", exc, {"context": "09a"})
             raise
-            logger.warning(f"Failed to render previews: {e}")
-        _append_timing(logs_dir, {"stage": "09a_pdf_annotator", "event": "render_previews", "latency_ms": int((time.monotonic()-t_s)*1000)})
+        _append_timing(
+            logs_dir,
+            {
+                "stage": "09a_pdf_annotator",
+                "event": "render_previews",
+                "latency_ms": int((time.monotonic() - t_s) * 1000),
+            },
+        )
 
     # Overlay map bundle for web viewer
     try:
         layout.emit_overlay_map(stage_dir, overlays, pages_touched, PREVIEW_DPI)
     except Exception as exc:
-        log_stage_error('09a_pdf_annotator', exc, {'context': '09a'})
+        log_stage_error("09a_pdf_annotator", exc, {"context": "09a"})
         raise
-        logger.warning(f"Failed to emit overlay_map.json: {e}")
 
     # Write overlay JSON with summary
     try:
@@ -1131,16 +1370,22 @@ def run(
         # Best-effort merged-table groups count (from label payload)
         merged_groups = 0
         try:
-            merged_groups = len({o.get("logical_table_key") for o in overlays if o.get("kind") == "table_merged" and o.get("logical_table_key")})
+            merged_groups = len(
+                {
+                    o.get("logical_table_key")
+                    for o in overlays
+                    if o.get("kind") == "table_merged" and o.get("logical_table_key")
+                }
+            )
         except Exception as exc:
-            log_stage_error('09a_pdf_annotator', exc, {'context': '09a'})
+            log_stage_error("09a_pdf_annotator", exc, {"context": "09a"})
             raise
             merged_groups = 0
         header = {
             "summary": {
                 "total_overlays": len(overlays),
                 "by_kind": by_kind,
-                "pages_touched": sorted(int(p)+1 for p in pages_touched),
+                "pages_touched": sorted(int(p) + 1 for p in pages_touched),
                 "merged_table_groups": merged_groups,
                 "tabs": tabs_summary,
             },
@@ -1156,11 +1401,12 @@ def run(
             },
             "overlays": overlays,
         }
-        (json_dir / "annotations.json").write_text(json.dumps(header, ensure_ascii=False, indent=2), encoding="utf-8")
+        (json_dir / "annotations.json").write_text(
+            json.dumps(header, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
     except Exception as exc:
-        log_stage_error('09a_pdf_annotator', exc, {'context': '09a'})
+        log_stage_error("09a_pdf_annotator", exc, {"context": "09a"})
         raise
-        logger.warning(f"Failed to write annotations.json: {e}")
 
     # Legend JSON for colors
     try:
@@ -1170,22 +1416,25 @@ def run(
         }
         (json_dir / "legend.json").write_text(json.dumps(legend, indent=2))
     except Exception as exc:
-        log_stage_error('09a_pdf_annotator', exc, {'context': '09a'})
+        log_stage_error("09a_pdf_annotator", exc, {"context": "09a"})
         raise
-        pass
 
     # Optional: color-aware header overlay directly onto the source PDF
     if rewrite_headers:
+
         def _parse_hex_color(h: str | None) -> tuple[float, float, float]:
             try:
                 if not h:
                     return (0, 0, 0)
-                hs = h.lstrip('#')
-                return (int(hs[0:2],16)/255.0, int(hs[2:4],16)/255.0, int(hs[4:6],16)/255.0)
+                hs = h.lstrip("#")
+                return (
+                    int(hs[0:2], 16) / 255.0,
+                    int(hs[2:4], 16) / 255.0,
+                    int(hs[4:6], 16) / 255.0,
+                )
             except Exception as exc:
-                log_stage_error('09a_pdf_annotator', exc, {'context': '09a'})
+                log_stage_error("09a_pdf_annotator", exc, {"context": "09a"})
                 raise
-                return (0, 0, 0)
 
         try:
             src_doc = fitz.open(str(pdf_path))
@@ -1199,7 +1448,7 @@ def run(
                         pg = hdr.get("page") if hdr.get("page") is not None else hdr.get("page_idx")
                         bb = _safe_get_bbox(hdr) or _safe_get_bbox(s)
                         title = s.get("title") or ""
-                        color_hex = ((s.get("metadata") or {}).get("header_color_hex") or None)
+                        color_hex = (s.get("metadata") or {}).get("header_color_hex") or None
                         color = _parse_hex_color(color_hex)
                         fsf = (hdr.get("first_span_font") or {}) if isinstance(hdr, dict) else {}
                         size = float(fsf.get("size", 0) or 0) or 11.0
@@ -1215,25 +1464,32 @@ def run(
                         if pg is None or bb is None or not title:
                             continue
                         page = src_doc[int(pg)]
-                        rect = fitz.Rect(float(bb[0]), float(bb[1]), float(bb[2]), float(bb[3])) & page.rect
+                        rect = (
+                            fitz.Rect(float(bb[0]), float(bb[1]), float(bb[2]), float(bb[3]))
+                            & page.rect
+                        )
                         if replace_text_layer:
                             try:
                                 page.add_redact_annot(rect, fill=None)
                                 page.apply_redactions()
                             except Exception as exc:
-                                log_stage_error('09a_pdf_annotator', exc, {'context': '09a'})
+                                log_stage_error("09a_pdf_annotator", exc, {"context": "09a"})
                                 raise
-                                logger.debug(f"redaction failed on p{pg} rect={rect}: {_e}")
-                        page.insert_textbox(rect, title, fontsize=size, color=color, fontname=fontname, align=0)
+                        page.insert_textbox(
+                            rect, title, fontsize=size, color=color, fontname=fontname, align=0
+                        )
                     except Exception as exc:
-                        log_stage_error('09a_pdf_annotator', exc, {'context': '09a'})
+                        log_stage_error("09a_pdf_annotator", exc, {"context": "09a"})
                         raise
-                        continue
-                target_path = pdf_path if overwrite_pdf else pdf_path.with_name(pdf_path.stem + "__headers_patched.pdf")
+                target_path = (
+                    pdf_path
+                    if overwrite_pdf
+                    else pdf_path.with_name(pdf_path.stem + "__headers_patched.pdf")
+                )
                 try:
                     src_doc.save(str(target_path), incremental=True, deflate=True)
                 except Exception as exc:
-                    log_stage_error('09a_pdf_annotator', exc, {'context': '09a'})
+                    log_stage_error("09a_pdf_annotator", exc, {"context": "09a"})
                     raise
                     tmp = target_path.with_suffix(target_path.suffix + ".tmp")
                     src_doc.save(str(tmp))
@@ -1241,7 +1497,7 @@ def run(
                         try:
                             tmp.replace(target_path)
                         except Exception as exc:
-                            log_stage_error('09a_pdf_annotator', exc, {'context': '09a'})
+                            log_stage_error("09a_pdf_annotator", exc, {"context": "09a"})
                             raise
                             fallback = pdf_path.with_name(pdf_path.stem + "__headers_patched.pdf")
                             tmp.replace(fallback)
@@ -1250,17 +1506,23 @@ def run(
                         pass
                 logger.info(f"Section headers overlaid in: {target_path}")
         except Exception as exc:
-            log_stage_error('09a_pdf_annotator', exc, {'context': '09a'})
+            log_stage_error("09a_pdf_annotator", exc, {"context": "09a"})
             raise
-            logger.warning(f"Header rewrite failed (continuing): {e}")
 
     # Artifacts index and timings
     _write_artifacts_index(stage_dir)
     try:
-        _append_timing(logs_dir, {"stage": "09a_pdf_annotator", "event": "total", "latency_ms": int((time.time()-t0)*1000)})
+        _append_timing(
+            logs_dir,
+            {
+                "stage": "09a_pdf_annotator",
+                "event": "total",
+                "latency_ms": int((time.time() - t0) * 1000),
+            },
+        )
         _summarize_timings(logs_dir)
     except Exception as exc:
-        log_stage_error('09a_pdf_annotator', exc, {'context': '09a'})
+        log_stage_error("09a_pdf_annotator", exc, {"context": "09a"})
         raise
         pass
 
@@ -1268,7 +1530,7 @@ def run(
         try:
             logger.remove(sink_id)
         except Exception as exc:
-            log_stage_error('09a_pdf_annotator', exc, {'context': '09a'})
+            log_stage_error("09a_pdf_annotator", exc, {"context": "09a"})
             raise
             pass
 
@@ -1277,6 +1539,7 @@ def run(
 
 if __name__ == "__main__":
     import sys
+
     argv = sys.argv[1:]
     if argv and argv[0] == "sanity":
         sys.exit(sanity())

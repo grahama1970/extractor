@@ -22,6 +22,7 @@ app = typer.Typer(add_completion=False)
 @app.command()
 def main():
     import sys
+
     repo_src = (Path(__file__).resolve().parents[3] / "src").resolve()
     if str(repo_src) not in sys.path:
         sys.path.insert(0, str(repo_src))
@@ -41,16 +42,33 @@ def main():
 
     # Minimal edges
     edges = tmp / "11_edges.json"
-    edges.write_text(json.dumps([
-        {"_from": "pdf_objects/o1", "_to": "pdf_objects/o2", "relationship_type": "semantic_similarity", "weight": 0.9}
-    ], indent=2))
+    edges.write_text(
+        json.dumps(
+            [
+                {
+                    "_from": "pdf_objects/o1",
+                    "_to": "pdf_objects/o2",
+                    "relationship_type": "semantic_similarity",
+                    "weight": 0.9,
+                }
+            ],
+            indent=2,
+        )
+    )
 
     out = out_dir / "graph.jsonld"
     res = export_jsonld(stage10, edges, out)
     data = json.loads(out.read_text())
-    ok = isinstance(data, dict) and "@context" in data and isinstance(data.get("@graph"), list) and len(data["@graph"]) >= 3
+    ok = (
+        isinstance(data, dict)
+        and "@context" in data
+        and isinstance(data.get("@graph"), list)
+        and len(data["@graph"]) >= 3
+    )
     Path("scripts/artifacts").mkdir(parents=True, exist_ok=True)
-    (Path("scripts/artifacts")/"jsonld_export_report.json").write_text(json.dumps({"ok": ok, **res}, indent=2))
+    (Path("scripts/artifacts") / "jsonld_export_report.json").write_text(
+        json.dumps({"ok": ok, **res}, indent=2)
+    )
     if not ok:
         typer.echo("JSON‑LD export invalid", err=True)
         raise typer.Exit(1)

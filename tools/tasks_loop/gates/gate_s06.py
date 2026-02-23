@@ -29,7 +29,7 @@ def load_contract(fixture_name: str) -> dict:
             expected="s06.json",
             actual="missing",
             file=str(contract_path),
-            hint="Run: python utils/compile_contracts.py"
+            hint="Run: python utils/compile_contracts.py",
         )
     return json.loads(contract_path.read_text())
 
@@ -38,22 +38,22 @@ def checks(fixture_name: str):
     contract = load_contract(fixture_name)
     expected = contract.get("expected", {})
     expected_figure_count = expected.get("figure_count")
-    
+
     figures_file = JSON_DIR / "06_figures.json"
     data = load_json(figures_file, required_keys=["figures"])
-    
+
     figures = data.get("figures", [])
     actual_count = len(figures)
-    
+
     if expected_figure_count is not None and actual_count != expected_figure_count:
         raise GateError(
             message="Figure count mismatch",
             expected=expected_figure_count,
             actual=actual_count,
             file=str(figures_file),
-            hint="Check figure extraction or SPEC.md"
+            hint="Check figure extraction or SPEC.md",
         )
-    
+
     # Verify image files exist
     for fig in figures:
         img_path = fig.get("image_path")
@@ -65,16 +65,19 @@ def checks(fixture_name: str):
                     expected="image file exists",
                     actual="missing",
                     file=str(full_path),
-                    hint="Check figure extraction"
+                    hint="Check figure extraction",
                 )
-    
-    print(f"✅ Figure count: {actual_count}" + (f" == {expected_figure_count}" if expected_figure_count else ""))
-    print(f"✅ All figure images exist")
+
+    print(
+        f"✅ Figure count: {actual_count}"
+        + (f" == {expected_figure_count}" if expected_figure_count else "")
+    )
+    print("✅ All figure images exist")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Gate S06: Figure Extractor")
     parser.add_argument("--fixture", required=True, help="Fixture name")
     args = parser.parse_args()
-    
+
     sys.exit(run_gate("S06: Figure Extractor", lambda: checks(args.fixture)))

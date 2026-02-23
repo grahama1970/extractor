@@ -61,10 +61,7 @@ def _prompts(n: int) -> List[str]:
 
 
 def _reqs(prompts: List[str], model_id: str) -> List[Dict[str, Any]]:
-    return [
-        {"model": model_id, "messages": [{"role": "user", "content": p}]}
-        for p in prompts
-    ]
+    return [{"model": model_id, "messages": [{"role": "user", "content": p}]} for p in prompts]
 
 
 def _content_json(resp: Dict[str, Any]) -> Dict[str, Any]:

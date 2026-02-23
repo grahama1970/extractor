@@ -20,7 +20,9 @@ import typer
 from dotenv import load_dotenv, find_dotenv
 
 
-app = typer.Typer(add_completion=False, help="Smoke: chat/query returns an answer for current PDF after upsert")
+app = typer.Typer(
+    add_completion=False, help="Smoke: chat/query returns an answer for current PDF after upsert"
+)
 
 
 def _wait_http(url: str, timeout: float = 18.0) -> None:
@@ -42,23 +44,26 @@ def main(
     load_dotenv(find_dotenv() or None)
     env = os.environ.copy()
 
-    server = subprocess.Popen([
-        os.environ.get("PYTHON", os.sys.executable),
-        "-m",
-        "uvicorn",
-        "prototypes.tabbed.api.server:app",
-        f"--port={port}",
-        "--host=127.0.0.1",
-        "--log-level=error",
-    ], env=env)
+    server = subprocess.Popen(
+        [
+            os.environ.get("PYTHON", os.sys.executable),
+            "-m",
+            "uvicorn",
+            "prototypes.tabbed.api.server:app",
+            f"--port={port}",
+            "--host=127.0.0.1",
+            "--log-level=error",
+        ],
+        env=env,
+    )
     try:
         _wait_http(f"http://127.0.0.1:{port}/openapi.json")
         # Extract first
         payload = {
             "pdf_path": str(pdf),
             "boxes_by_page": {
-                1: [ {"id": "t1", "type": "Table", "x": 0.15, "y": 0.40, "w": 0.70, "h": 0.40} ]
-            }
+                1: [{"id": "t1", "type": "Table", "x": 0.15, "y": 0.40, "w": 0.70, "h": 0.40}]
+            },
         }
         data = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(
@@ -73,7 +78,9 @@ def main(
             raise SystemExit("run-external returned not ok")
 
         # Upsert
-        up = json.dumps({ "results_dir": j.get("results_dir"), "fast_embeddings": True }).encode("utf-8")
+        up = json.dumps({"results_dir": j.get("results_dir"), "fast_embeddings": True}).encode(
+            "utf-8"
+        )
         req2 = urllib.request.Request(
             f"http://127.0.0.1:{port}/api/pipeline/upsert",
             data=up,
@@ -86,7 +93,7 @@ def main(
             raise SystemExit("upsert endpoint returned not ok")
 
         # Chat
-        cq = json.dumps({ "q": "What is BHT?", "pdf": pdf.name }).encode("utf-8")
+        cq = json.dumps({"q": "What is BHT?", "pdf": pdf.name}).encode("utf-8")
         req3 = urllib.request.Request(
             f"http://127.0.0.1:{port}/api/chat/query",
             data=cq,
@@ -98,9 +105,14 @@ def main(
         if not (j3.get("ok") and (j3.get("answer") or "")):
             raise SystemExit("chat query returned empty answer")
 
-        artifacts = Path("scripts/artifacts"); artifacts.mkdir(parents=True, exist_ok=True)
+        artifacts = Path("scripts/artifacts")
+        artifacts.mkdir(parents=True, exist_ok=True)
         out = artifacts / f"smoke_api_chat_{int(time.time())}.log"
-        out.write_text(json.dumps({"ok": True, "answer": j3.get("answer"), "citations": j3.get("citations")}, indent=2))
+        out.write_text(
+            json.dumps(
+                {"ok": True, "answer": j3.get("answer"), "citations": j3.get("citations")}, indent=2
+            )
+        )
         typer.echo(f"OK: chat smoke passed → {out}")
     finally:
         try:
@@ -115,4 +127,3 @@ def main(
 
 if __name__ == "__main__":
     app()
-

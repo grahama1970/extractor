@@ -35,15 +35,29 @@ def main(tmp_dir: Path = typer.Option(Path("data/results/structured_parity_smoke
     x, y, cx, cy = Inches(1), Inches(1), Inches(3), Inches(1)
     table_shape = slide.shapes.add_table(2, 2, x, y, cx, cy)
     table = table_shape.table
-    table.cell(0, 0).text = "A"; table.cell(0, 1).text = "B"
-    table.cell(1, 0).text = "1"; table.cell(1, 1).text = "2"
+    table.cell(0, 0).text = "A"
+    table.cell(0, 1).text = "B"
+    table.cell(1, 0).text = "1"
+    table.cell(1, 1).text = "2"
     # Add chart
-    chart_data = ChartData(); chart_data.categories = ['Q1', 'Q2']; chart_data.add_series('S1', (1, 2))
-    slide.shapes.add_chart(XL_CHART_TYPE.COLUMN_CLUSTERED, Inches(1), Inches(3), Inches(4), Inches(3), chart_data)
+    chart_data = ChartData()
+    chart_data.categories = ["Q1", "Q2"]
+    chart_data.add_series("S1", (1, 2))
+    slide.shapes.add_chart(
+        XL_CHART_TYPE.COLUMN_CLUSTERED, Inches(1), Inches(3), Inches(4), Inches(3), chart_data
+    )
     prs.save(pptx_path)
 
     meta = STRUCTURED_PIPELINES[PPTXProvider]
-    artifacts = run_structured_pipeline(PPTXProvider, pptx_path, tmp_dir, stage_prefix=meta.stage_prefix, skip_export10=True, skip_embeddings10=True, fast_embeddings10=True)
+    artifacts = run_structured_pipeline(
+        PPTXProvider,
+        pptx_path,
+        tmp_dir,
+        stage_prefix=meta.stage_prefix,
+        skip_export10=True,
+        skip_embeddings10=True,
+        fast_embeddings10=True,
+    )
     s07 = json.loads(Path(artifacts["stage07"]).read_text())
     sections = s07.get("reflowed_sections") or []
     if not sections:
@@ -63,4 +77,3 @@ def main(tmp_dir: Path = typer.Option(Path("data/results/structured_parity_smoke
 
 if __name__ == "__main__":
     app()
-

@@ -22,6 +22,7 @@ def clean_pdf(input_path: str, output_path: str, remove_annotations: bool = True
     Returns:
         Dict with success status and annotation count
     """
+    ctx = {"input": input_path, "output": output_path}
     try:
         # Open the PDF
         pdf_doc = fitz.open(input_path)
@@ -51,7 +52,7 @@ def clean_pdf(input_path: str, output_path: str, remove_annotations: bool = True
         }
 
     except Exception as e:
-        log_stage_error("pdf_utils.clean_pdf", e, {"input": input_path, "output": output_path})
+        log_stage_error("pdf_utils.clean_pdf", e, ctx)
         raise
 
 
@@ -69,6 +70,7 @@ def extract_image_from_bbox(
     Returns:
         PNG image bytes or None
     """
+    ctx = {"pdf": str(pdf_path), "page": page_num}
     try:
         pdf_doc = fitz.open(str(pdf_path))
 
@@ -92,7 +94,7 @@ def extract_image_from_bbox(
         return img_data
 
     except Exception as e:
-        log_stage_error("pdf_utils.extract_image_from_bbox", e, {"pdf": str(pdf_path), "page": page_num})
+        log_stage_error("pdf_utils.extract_image_from_bbox", e, ctx)
         raise
 
 
@@ -175,7 +177,9 @@ def patch_bht_reqs_table_merge_headers(pdf_path: Path) -> None:
                             if not bbox:
                                 continue
                             rect = fitz.Rect(bbox)
-                            color_int = int(span.get("color", 0)) if span.get("color") is not None else 0
+                            color_int = (
+                                int(span.get("color", 0)) if span.get("color") is not None else 0
+                            )
                             color = _rgb_from_int(color_int) if color_int else (0, 0, 0)
                             fontname = span.get("font") or "Helvetica"
                             fontsize = float(span.get("size") or 12.0)

@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 import os
-import shlex
 import subprocess
 import time
 from pathlib import Path
@@ -11,7 +10,6 @@ from typing import Any, Dict, List, Optional
 import sys
 
 import typer
-from loguru import logger
 import aiohttp
 import asyncio
 
@@ -31,12 +29,27 @@ def _clamp01(x: float) -> float:
     return max(0.0, min(1.0, x))
 
 
-def _run_one(cmd: str, cwd: Optional[Path], env: Optional[Dict[str, str]], timeout_s: float) -> Dict[str, Any]:
+def _run_one(
+    cmd: str, cwd: Optional[Path], env: Optional[Dict[str, str]], timeout_s: float
+) -> Dict[str, Any]:
     t0 = time.monotonic()
     try:
-        proc = subprocess.run(cmd, shell=True, cwd=str(cwd) if cwd else None, env=env, capture_output=True, text=True, timeout=timeout_s)
+        proc = subprocess.run(
+            cmd,
+            shell=True,
+            cwd=str(cwd) if cwd else None,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=timeout_s,
+        )
         dt_ms = (time.monotonic() - t0) * 1000.0
-        return {"rc": proc.returncode, "stdout": proc.stdout or "", "stderr": proc.stderr or "", "ms": dt_ms}
+        return {
+            "rc": proc.returncode,
+            "stdout": proc.stdout or "",
+            "stderr": proc.stderr or "",
+            "ms": dt_ms,
+        }
     except subprocess.TimeoutExpired:
         dt_ms = (time.monotonic() - t0) * 1000.0
         return {"rc": 124, "stdout": "", "stderr": "timeout", "ms": dt_ms}
@@ -72,7 +85,7 @@ async def _run_episode(
             env[str(k)] = str(v)
 
         res = _run_one(cmd, cwd=cwd, env=env, timeout_s=timeout_s)
-        timings.append(res["ms"]) 
+        timings.append(res["ms"])
 
         ok = True
         exp_rc = int(t.get("expect_exit", 0))
@@ -100,14 +113,16 @@ async def _run_episode(
                     errors_sample.append("stderr forbidden item")
                     break
 
-        outputs.append({
-            "cmd": cmd,
-            "rc": res["rc"],
-            "ms": round(res["ms"], 1),
-            "stdout_sample": (res["stdout"][:2000]),
-            "stderr_sample": (res["stderr"][:500]),
-            "ok": ok,
-        })
+        outputs.append(
+            {
+                "cmd": cmd,
+                "rc": res["rc"],
+                "ms": round(res["ms"], 1),
+                "stdout_sample": (res["stdout"][:2000]),
+                "stderr_sample": (res["stderr"][:500]),
+                "ok": ok,
+            }
+        )
         if ok:
             successes += 1
 
@@ -153,7 +168,9 @@ def run(
     run_id: str = typer.Option("run-cli", help="Run identifier"),
     episode_id: str = typer.Option("e-0001", help="Episode identifier"),
     variant: str = typer.Option("variant", help="Variant name"),
-    tasks_file: Path = typer.Option(..., exists=True, readable=True, help="Tasks JSON file (list or object with 'tasks')"),
+    tasks_file: Path = typer.Option(
+        ..., exists=True, readable=True, help="Tasks JSON file (list or object with 'tasks')"
+    ),
     cwd: Optional[Path] = typer.Option(None, help="Working directory for commands"),
 ):
     tasks = json.loads(Path(tasks_file).read_text())
@@ -167,13 +184,16 @@ def run(
         # Ensure sample tasks can invoke the active Python interpreter
         "python": sys.executable or "python3",
     }
-    res = asyncio.run(_run_episode(api_base, run_id, episode_id, variant, tasks, substitutions, cwd))
+    res = asyncio.run(
+        _run_episode(api_base, run_id, episode_id, variant, tasks, substitutions, cwd)
+    )
     print(json.dumps(res, ensure_ascii=False))
 
 
 if __name__ == "__main__":
     # Allow both styles: `python validate_cli.py --opts` and `python validate_cli.py run --opts`
     import sys
+
     if len(sys.argv) > 1 and sys.argv[1] == "run":
         sys.argv.pop(1)
     app()

@@ -67,6 +67,7 @@ def _build_min_section(sec: dict) -> dict:
 
 def _load_stage07():
     import importlib.util
+
     p = Path("src/extractor/pipeline/steps/07_reflow_section.py").resolve()
     spec = importlib.util.spec_from_file_location("stage07", str(p))
     if not spec or not spec.loader:
@@ -102,7 +103,9 @@ async def main_async() -> None:
     section_min = _build_min_section(sec)
 
     results_dir = ROOT / "data/results/pipeline"
-    out = await reflow_section_with_llm(section_min, results_dir, include_images=True, allow_fallback=False)
+    out = await reflow_section_with_llm(
+        section_min, results_dir, include_images=True, allow_fallback=False
+    )
     ok = isinstance(out, dict) and (
         isinstance(out.get("reflowed_json"), dict) or isinstance(out.get("reflowed_text"), str)
     )
@@ -111,7 +114,9 @@ async def main_async() -> None:
 
     art = Path("scripts/artifacts")
     art.mkdir(parents=True, exist_ok=True)
-    (art / "stage07_stage_call_image.json").write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
+    (art / "stage07_stage_call_image.json").write_text(
+        json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     print("OK: Stage07 function (with image) returned JSON")
 
 

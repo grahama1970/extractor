@@ -29,15 +29,14 @@ import json
 import yaml
 import fitz  # PyMuPDF
 from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any
 from dataclasses import dataclass, field
 from datetime import datetime
 
 # Optional imports for DOCX
 try:
     from docx import Document as DocxDocument
-    from docx.shared import Pt, Inches
-    from docx.enum.text import WD_ALIGN_PARAGRAPH
+
     HAS_DOCX = True
 except ImportError:
     HAS_DOCX = False
@@ -45,8 +44,7 @@ except ImportError:
 # Optional imports for PPTX
 try:
     from pptx import Presentation
-    from pptx.util import Inches as PptxInches, Pt as PptxPt
-    from pptx.enum.text import PP_ALIGN
+
     HAS_PPTX = True
 except ImportError:
     HAS_PPTX = False
@@ -54,7 +52,8 @@ except ImportError:
 # Optional imports for XLSX
 try:
     from openpyxl import Workbook
-    from openpyxl.styles import Font, Alignment
+    from openpyxl.styles import Font
+
     HAS_XLSX = True
 except ImportError:
     HAS_XLSX = False
@@ -62,6 +61,7 @@ except ImportError:
 # Optional imports for EPUB
 try:
     from ebooklib import epub
+
     HAS_EPUB = True
 except ImportError:
     HAS_EPUB = False
@@ -70,6 +70,7 @@ except ImportError:
 @dataclass
 class ContentBlock:
     """Represents a single content block that can be rendered to any format."""
+
     block_type: str  # "heading", "paragraph", "table", "list", "requirement", "figure_placeholder"
     level: int = 1  # For headings: 1-6
     text: str = ""
@@ -83,6 +84,7 @@ class ContentBlock:
 @dataclass
 class DocumentSpec:
     """Specification for a multi-format document."""
+
     title: str
     blocks: List[ContentBlock]
     metadata: Dict[str, Any] = field(default_factory=dict)
@@ -97,45 +99,42 @@ def parse_spec(config_path: Path) -> DocumentSpec:
         block_type = item.get("type", "paragraph")
 
         if block_type == "heading":
-            blocks.append(ContentBlock(
-                block_type="heading",
-                level=item.get("level", 1),
-                text=item.get("text", "")
-            ))
+            blocks.append(
+                ContentBlock(
+                    block_type="heading", level=item.get("level", 1), text=item.get("text", "")
+                )
+            )
         elif block_type == "paragraph":
-            blocks.append(ContentBlock(
-                block_type="paragraph",
-                text=item.get("text", "")
-            ))
+            blocks.append(ContentBlock(block_type="paragraph", text=item.get("text", "")))
         elif block_type == "requirement":
-            blocks.append(ContentBlock(
-                block_type="requirement",
-                req_id=item.get("id", ""),
-                text=item.get("text", ""),
-                metadata={"strict": item.get("strict", True)}
-            ))
+            blocks.append(
+                ContentBlock(
+                    block_type="requirement",
+                    req_id=item.get("id", ""),
+                    text=item.get("text", ""),
+                    metadata={"strict": item.get("strict", True)},
+                )
+            )
         elif block_type == "list":
-            blocks.append(ContentBlock(
-                block_type="list",
-                items=item.get("items", [])
-            ))
+            blocks.append(ContentBlock(block_type="list", items=item.get("items", [])))
         elif block_type == "table":
-            blocks.append(ContentBlock(
-                block_type="table",
-                columns=item.get("columns", []),
-                rows=item.get("rows", []),
-                text=item.get("caption", "")
-            ))
+            blocks.append(
+                ContentBlock(
+                    block_type="table",
+                    columns=item.get("columns", []),
+                    rows=item.get("rows", []),
+                    text=item.get("caption", ""),
+                )
+            )
         elif block_type == "figure":
-            blocks.append(ContentBlock(
-                block_type="figure_placeholder",
-                text=item.get("caption", "Figure placeholder")
-            ))
+            blocks.append(
+                ContentBlock(
+                    block_type="figure_placeholder", text=item.get("caption", "Figure placeholder")
+                )
+            )
 
     return DocumentSpec(
-        title=config.get("title", "Untitled"),
-        blocks=blocks,
-        metadata=config.get("metadata", {})
+        title=config.get("title", "Untitled"), blocks=blocks, metadata=config.get("metadata", {})
     )
 
 
@@ -150,7 +149,19 @@ class MultiFormatGenerator:
         """Generate all requested formats."""
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        all_formats = ["pdf", "html", "md", "xml", "rst", "docx", "pptx", "xlsx", "epub", "png", "json"]
+        all_formats = [
+            "pdf",
+            "html",
+            "md",
+            "xml",
+            "rst",
+            "docx",
+            "pptx",
+            "xlsx",
+            "epub",
+            "png",
+            "json",
+        ]
         formats = formats or all_formats
 
         results = {}
@@ -236,12 +247,14 @@ class MultiFormatGenerator:
                 req_text = f"{block.req_id}: {block.text}"
                 page.insert_text((50, y), req_text, fontsize=11)
                 y += 20
-                self.ground_truth.append({
-                    "id": block.req_id,
-                    "type": "Requirement",
-                    "text": block.text,
-                    "strict_verification": block.metadata.get("strict", True)
-                })
+                self.ground_truth.append(
+                    {
+                        "id": block.req_id,
+                        "type": "Requirement",
+                        "text": block.text,
+                        "strict_verification": block.metadata.get("strict", True),
+                    }
+                )
 
             elif block.block_type == "list":
                 for item in block.items:
@@ -265,49 +278,79 @@ class MultiFormatGenerator:
                 table_bottom = y + row_height * num_rows
 
                 # Draw outer border (thick line for better detection)
-                page.draw_rect(fitz.Rect(table_left, table_top, table_right, table_bottom),
-                              color=(0, 0, 0), width=1.5)
+                page.draw_rect(
+                    fitz.Rect(table_left, table_top, table_right, table_bottom),
+                    color=(0, 0, 0),
+                    width=1.5,
+                )
 
                 # Draw horizontal lines for all rows
                 for row_idx in range(num_rows + 1):
                     row_y = table_top + row_idx * row_height
-                    page.draw_line((table_left, row_y), (table_right, row_y), color=(0, 0, 0), width=1)
+                    page.draw_line(
+                        (table_left, row_y), (table_right, row_y), color=(0, 0, 0), width=1
+                    )
 
                 # Draw vertical lines for all columns
                 for col_idx in range(num_cols + 1):
                     col_x = table_left + col_idx * col_width
-                    page.draw_line((col_x, table_top), (col_x, table_bottom), color=(0, 0, 0), width=1)
+                    page.draw_line(
+                        (col_x, table_top), (col_x, table_bottom), color=(0, 0, 0), width=1
+                    )
 
                 # Header row background
-                page.draw_rect(fitz.Rect(table_left, table_top, table_right, table_top + row_height),
-                              color=(0.85, 0.85, 0.85), fill=(0.85, 0.85, 0.85))
+                page.draw_rect(
+                    fitz.Rect(table_left, table_top, table_right, table_top + row_height),
+                    color=(0.85, 0.85, 0.85),
+                    fill=(0.85, 0.85, 0.85),
+                )
                 # Re-draw header borders on top of fill
-                page.draw_line((table_left, table_top), (table_right, table_top), color=(0, 0, 0), width=1)
-                page.draw_line((table_left, table_top + row_height), (table_right, table_top + row_height), color=(0, 0, 0), width=1)
+                page.draw_line(
+                    (table_left, table_top), (table_right, table_top), color=(0, 0, 0), width=1
+                )
+                page.draw_line(
+                    (table_left, table_top + row_height),
+                    (table_right, table_top + row_height),
+                    color=(0, 0, 0),
+                    width=1,
+                )
 
                 # Header text
                 for i, col in enumerate(block.columns):
-                    page.insert_text((table_left + 5 + i * col_width, table_top + 14), col, fontsize=10, fontname="Helvetica-Bold")
+                    page.insert_text(
+                        (table_left + 5 + i * col_width, table_top + 14),
+                        col,
+                        fontsize=10,
+                        fontname="Helvetica-Bold",
+                    )
 
                 # Data rows
                 for row_idx, row in enumerate(block.rows):
                     row_y = table_top + (row_idx + 1) * row_height
                     for i, col in enumerate(block.columns):
-                        page.insert_text((table_left + 5 + i * col_width, row_y + 14), str(row.get(col, "")), fontsize=10)
+                        page.insert_text(
+                            (table_left + 5 + i * col_width, row_y + 14),
+                            str(row.get(col, "")),
+                            fontsize=10,
+                        )
 
                 y = table_bottom + 10
 
-                self.ground_truth.append({
-                    "id": f"TBL-{len([g for g in self.ground_truth if g['type'] == 'Table']) + 1:03d}",
-                    "type": "Table",
-                    "caption": block.text,
-                    "columns": block.columns,
-                    "rows": block.rows
-                })
+                self.ground_truth.append(
+                    {
+                        "id": f"TBL-{len([g for g in self.ground_truth if g['type'] == 'Table']) + 1:03d}",
+                        "type": "Table",
+                        "caption": block.text,
+                        "columns": block.columns,
+                        "rows": block.rows,
+                    }
+                )
 
             elif block.block_type == "figure_placeholder":
                 page.draw_rect(fitz.Rect(50, y, 300, y + 100), color=(0.7, 0.7, 0.7))
-                page.insert_text((60, y + 50), f"[{block.text}]", fontsize=10, fontname="Helvetica-Oblique")
+                page.insert_text(
+                    (60, y + 50), f"[{block.text}]", fontsize=10, fontname="Helvetica-Oblique"
+                )
                 y += 120
 
         doc.save(path)
@@ -317,98 +360,98 @@ class MultiFormatGenerator:
     def _generate_html(self, path: Path) -> Path:
         """Generate HTML document."""
         lines = [
-            '<!DOCTYPE html>',
-            '<html>',
-            '<head>',
-            f'    <title>{self.spec.title}</title>',
+            "<!DOCTYPE html>",
+            "<html>",
+            "<head>",
+            f"    <title>{self.spec.title}</title>",
             '    <meta charset="UTF-8">',
-            '</head>',
-            '<body>',
-            f'<h1>{self.spec.title}</h1>',
+            "</head>",
+            "<body>",
+            f"<h1>{self.spec.title}</h1>",
         ]
 
         for block in self.spec.blocks:
             if block.block_type == "heading":
-                lines.append(f'<h{block.level}>{block.text}</h{block.level}>')
+                lines.append(f"<h{block.level}>{block.text}</h{block.level}>")
 
             elif block.block_type == "paragraph":
-                lines.append(f'<p>{block.text}</p>')
+                lines.append(f"<p>{block.text}</p>")
 
             elif block.block_type == "requirement":
-                lines.append(f'<p><strong>{block.req_id}</strong>: {block.text}</p>')
+                lines.append(f"<p><strong>{block.req_id}</strong>: {block.text}</p>")
 
             elif block.block_type == "list":
-                lines.append('<ul>')
+                lines.append("<ul>")
                 for item in block.items:
-                    lines.append(f'    <li>{item}</li>')
-                lines.append('</ul>')
+                    lines.append(f"    <li>{item}</li>")
+                lines.append("</ul>")
 
             elif block.block_type == "table":
                 if block.text:
-                    lines.append(f'<p><em>{block.text}</em></p>')
+                    lines.append(f"<p><em>{block.text}</em></p>")
                 lines.append('<table border="1">')
-                lines.append('    <thead><tr>')
+                lines.append("    <thead><tr>")
                 for col in block.columns:
-                    lines.append(f'        <th>{col}</th>')
-                lines.append('    </tr></thead>')
-                lines.append('    <tbody>')
+                    lines.append(f"        <th>{col}</th>")
+                lines.append("    </tr></thead>")
+                lines.append("    <tbody>")
                 for row in block.rows:
-                    lines.append('        <tr>')
+                    lines.append("        <tr>")
                     for col in block.columns:
                         lines.append(f'            <td>{row.get(col, "")}</td>')
-                    lines.append('        </tr>')
-                lines.append('    </tbody>')
-                lines.append('</table>')
+                    lines.append("        </tr>")
+                lines.append("    </tbody>")
+                lines.append("</table>")
 
             elif block.block_type == "figure_placeholder":
-                lines.append(f'<p><em>[{block.text}]</em></p>')
+                lines.append(f"<p><em>[{block.text}]</em></p>")
 
-        lines.extend(['</body>', '</html>'])
-        path.write_text('\n'.join(lines))
+        lines.extend(["</body>", "</html>"])
+        path.write_text("\n".join(lines))
         print(f"Generated HTML: {path}")
         return path
 
     def _generate_markdown(self, path: Path) -> Path:
         """Generate Markdown document."""
-        lines = [f'# {self.spec.title}', '']
+        lines = [f"# {self.spec.title}", ""]
 
         for block in self.spec.blocks:
             if block.block_type == "heading":
-                prefix = '#' * (block.level + 1)  # +1 because title is H1
-                lines.append(f'{prefix} {block.text}')
-                lines.append('')
+                prefix = "#" * (block.level + 1)  # +1 because title is H1
+                lines.append(f"{prefix} {block.text}")
+                lines.append("")
 
             elif block.block_type == "paragraph":
                 lines.append(block.text)
-                lines.append('')
+                lines.append("")
 
             elif block.block_type == "requirement":
-                lines.append(f'**{block.req_id}**: {block.text}')
-                lines.append('')
+                lines.append(f"**{block.req_id}**: {block.text}")
+                lines.append("")
 
             elif block.block_type == "list":
                 for item in block.items:
-                    lines.append(f'- {item}')
-                lines.append('')
+                    lines.append(f"- {item}")
+                lines.append("")
 
             elif block.block_type == "table":
                 if block.text:
-                    lines.append(f'*{block.text}*')
-                    lines.append('')
+                    lines.append(f"*{block.text}*")
+                    lines.append("")
                 # Header
-                lines.append('| ' + ' | '.join(block.columns) + ' |')
-                lines.append('|' + '|'.join(['---'] * len(block.columns)) + '|')
+                lines.append("| " + " | ".join(block.columns) + " |")
+                lines.append("|" + "|".join(["---"] * len(block.columns)) + "|")
                 # Rows
                 for row in block.rows:
-                    cells = [str(row.get(col, '')) for col in block.columns]
-                    lines.append('| ' + ' | '.join(cells) + ' |')
-                lines.append('')
+                    cells = [str(row.get(col, "")) for col in block.columns]
+                    lines.append("| " + " | ".join(cells) + " |")
+                lines.append("")
 
             elif block.block_type == "figure_placeholder":
-                lines.append(f'*[{block.text}]*')
-                lines.append('')
+                lines.append(f"*[{block.text}]*")
+                lines.append("")
 
-        path.write_text('\n'.join(lines))
+        path.write_text("\n".join(lines))
         print(f"Generated Markdown: {path}")
         return path
 
@@ -416,49 +459,49 @@ class MultiFormatGenerator:
         """Generate XML document."""
         lines = [
             '<?xml version="1.0" encoding="UTF-8"?>',
-            '<document>',
-            f'    <title>{self.spec.title}</title>',
-            '    <metadata>',
-            f'        <generated>{datetime.now().isoformat()}</generated>',
-            '    </metadata>',
-            '    <content>',
+            "<document>",
+            f"    <title>{self.spec.title}</title>",
+            "    <metadata>",
+            f"        <generated>{datetime.now().isoformat()}</generated>",
+            "    </metadata>",
+            "    <content>",
         ]
 
         for block in self.spec.blocks:
             if block.block_type == "heading":
                 lines.append(f'        <section level="{block.level}" title="{block.text}">')
-                lines.append('        </section>')
+                lines.append("        </section>")
 
             elif block.block_type == "paragraph":
-                lines.append(f'        <paragraph>{block.text}</paragraph>')
+                lines.append(f"        <paragraph>{block.text}</paragraph>")
 
             elif block.block_type == "requirement":
                 lines.append(f'        <requirement id="{block.req_id}">{block.text}</requirement>')
 
             elif block.block_type == "list":
-                lines.append('        <list>')
+                lines.append("        <list>")
                 for item in block.items:
-                    lines.append(f'            <item>{item}</item>')
-                lines.append('        </list>')
+                    lines.append(f"            <item>{item}</item>")
+                lines.append("        </list>")
 
             elif block.block_type == "table":
                 lines.append(f'        <table caption="{block.text}">')
-                lines.append('            <header>')
+                lines.append("            <header>")
                 for col in block.columns:
-                    lines.append(f'                <column>{col}</column>')
-                lines.append('            </header>')
+                    lines.append(f"                <column>{col}</column>")
+                lines.append("            </header>")
                 for row in block.rows:
-                    lines.append('            <row>')
+                    lines.append("            <row>")
                     for col in block.columns:
                         lines.append(f'                <cell>{row.get(col, "")}</cell>')
-                    lines.append('            </row>')
-                lines.append('        </table>')
+                    lines.append("            </row>")
+                lines.append("        </table>")
 
             elif block.block_type == "figure_placeholder":
                 lines.append(f'        <figure caption="{block.text}"/>')
 
-        lines.extend(['    </content>', '</document>'])
-        path.write_text('\n'.join(lines))
+        lines.extend(["    </content>", "</document>"])
+        path.write_text("\n".join(lines))
         print(f"Generated XML: {path}")
         return path
 
@@ -467,55 +510,55 @@ class MultiFormatGenerator:
         lines = []
 
         # Title with overline
-        title_line = '=' * len(self.spec.title)
-        lines.extend([title_line, self.spec.title, title_line, ''])
+        title_line = "=" * len(self.spec.title)
+        lines.extend([title_line, self.spec.title, title_line, ""])
 
         for block in self.spec.blocks:
             if block.block_type == "heading":
-                underline_chars = {1: '=', 2: '-', 3: '~', 4: '^', 5: '"', 6: "'"}
-                char = underline_chars.get(block.level, '-')
+                underline_chars = {1: "=", 2: "-", 3: "~", 4: "^", 5: '"', 6: "'"}
+                char = underline_chars.get(block.level, "-")
                 lines.append(block.text)
                 lines.append(char * len(block.text))
-                lines.append('')
+                lines.append("")
 
             elif block.block_type == "paragraph":
                 lines.append(block.text)
-                lines.append('')
+                lines.append("")
 
             elif block.block_type == "requirement":
-                lines.append(f'**{block.req_id}**: {block.text}')
-                lines.append('')
+                lines.append(f"**{block.req_id}**: {block.text}")
+                lines.append("")
 
             elif block.block_type == "list":
                 for item in block.items:
-                    lines.append(f'* {item}')
-                lines.append('')
+                    lines.append(f"* {item}")
+                lines.append("")
 
             elif block.block_type == "table":
                 if block.text:
-                    lines.append(f'*{block.text}*')
-                    lines.append('')
+                    lines.append(f"*{block.text}*")
+                    lines.append("")
 
                 # RST list-table directive
-                lines.append('.. list-table::')
-                lines.append('   :header-rows: 1')
-                lines.append('')
+                lines.append(".. list-table::")
+                lines.append("   :header-rows: 1")
+                lines.append("")
 
                 # Header row
-                lines.append('   * - ' + '\n     - '.join(block.columns))
+                lines.append("   * - " + "\n     - ".join(block.columns))
 
                 # Data rows
                 for row in block.rows:
-                    cells = [str(row.get(col, '')) for col in block.columns]
-                    lines.append('   * - ' + '\n     - '.join(cells))
+                    cells = [str(row.get(col, "")) for col in block.columns]
+                    lines.append("   * - " + "\n     - ".join(cells))
 
-                lines.append('')
+                lines.append("")
 
             elif block.block_type == "figure_placeholder":
-                lines.append(f'*[{block.text}]*')
-                lines.append('')
+                lines.append(f"*[{block.text}]*")
+                lines.append("")
 
-        path.write_text('\n'.join(lines))
+        path.write_text("\n".join(lines))
         print(f"Generated RST: {path}")
         return path
 
@@ -527,7 +570,7 @@ class MultiFormatGenerator:
         doc = DocxDocument()
 
         # Title
-        title_para = doc.add_heading(self.spec.title, level=0)
+        doc.add_heading(self.spec.title, level=0)
 
         for block in self.spec.blocks:
             if block.block_type == "heading":
@@ -543,7 +586,7 @@ class MultiFormatGenerator:
 
             elif block.block_type == "list":
                 for item in block.items:
-                    doc.add_paragraph(item, style='List Bullet')
+                    doc.add_paragraph(item, style="List Bullet")
 
             elif block.block_type == "table":
                 if block.text:
@@ -552,7 +595,7 @@ class MultiFormatGenerator:
 
                 # Create table
                 table = doc.add_table(rows=1, cols=len(block.columns))
-                table.style = 'Table Grid'
+                table.style = "Table Grid"
 
                 # Header
                 header_cells = table.rows[0].cells
@@ -563,7 +606,7 @@ class MultiFormatGenerator:
                 for row_data in block.rows:
                     row = table.add_row().cells
                     for i, col in enumerate(block.columns):
-                        row[i].text = str(row_data.get(col, ''))
+                        row[i].text = str(row_data.get(col, ""))
 
                 doc.add_paragraph()  # Spacing
 
@@ -641,6 +684,7 @@ class MultiFormatGenerator:
 
                     # Add table shape
                     from pptx.util import Inches as PptxInches
+
                     rows = len(block.rows) + 1  # +1 for header
                     cols = len(block.columns)
                     left = PptxInches(0.5)
@@ -648,7 +692,9 @@ class MultiFormatGenerator:
                     width = PptxInches(9)
                     height = PptxInches(0.5 * rows)
 
-                    table_shape = current_slide.shapes.add_table(rows, cols, left, top, width, height)
+                    table_shape = current_slide.shapes.add_table(
+                        rows, cols, left, top, width, height
+                    )
                     tbl = table_shape.table
 
                     # Header row
@@ -685,28 +731,28 @@ class MultiFormatGenerator:
         # Document overview sheet
         ws = wb.active
         ws.title = "Overview"
-        ws['A1'] = "Document Title"
-        ws['B1'] = self.spec.title
-        ws['A1'].font = Font(bold=True)
+        ws["A1"] = "Document Title"
+        ws["B1"] = self.spec.title
+        ws["A1"].font = Font(bold=True)
 
         row = 3
-        ws[f'A{row}'] = "Content Summary"
-        ws[f'A{row}'].font = Font(bold=True)
+        ws[f"A{row}"] = "Content Summary"
+        ws[f"A{row}"].font = Font(bold=True)
         row += 1
 
         for block in self.spec.blocks:
             if block.block_type == "heading":
-                ws[f'A{row}'] = f"{'  ' * (block.level - 1)}{block.text}"
-                ws[f'A{row}'].font = Font(bold=True)
+                ws[f"A{row}"] = f"{'  ' * (block.level - 1)}{block.text}"
+                ws[f"A{row}"].font = Font(bold=True)
             elif block.block_type == "paragraph":
-                ws[f'A{row}'] = block.text[:100] + ("..." if len(block.text) > 100 else "")
+                ws[f"A{row}"] = block.text[:100] + ("..." if len(block.text) > 100 else "")
             elif block.block_type == "requirement":
-                ws[f'A{row}'] = block.req_id
-                ws[f'B{row}'] = block.text
-                ws[f'A{row}'].font = Font(bold=True)
+                ws[f"A{row}"] = block.req_id
+                ws[f"B{row}"] = block.text
+                ws[f"A{row}"].font = Font(bold=True)
             elif block.block_type == "list":
                 for item in block.items:
-                    ws[f'A{row}'] = f"  - {item}"
+                    ws[f"A{row}"] = f"  - {item}"
                     row += 1
                 row -= 1  # Adjust for the extra increment
             row += 1
@@ -720,8 +766,8 @@ class MultiFormatGenerator:
 
                 # Caption
                 if block.text:
-                    ws_table['A1'] = block.text
-                    ws_table['A1'].font = Font(italic=True)
+                    ws_table["A1"] = block.text
+                    ws_table["A1"].font = Font(italic=True)
                     start_row = 3
                 else:
                     start_row = 1
@@ -750,43 +796,49 @@ class MultiFormatGenerator:
         # Metadata
         book.set_identifier(f'id-{datetime.now().strftime("%Y%m%d%H%M%S")}')
         book.set_title(self.spec.title)
-        book.set_language('en')
-        book.add_author('Fixture Generator')
+        book.set_language("en")
+        book.add_author("Fixture Generator")
 
         # Build HTML content
-        html_content = [f'<h1>{self.spec.title}</h1>']
+        html_content = [f"<h1>{self.spec.title}</h1>"]
 
         for block in self.spec.blocks:
             if block.block_type == "heading":
-                html_content.append(f'<h{block.level + 1}>{block.text}</h{block.level + 1}>')
+                html_content.append(f"<h{block.level + 1}>{block.text}</h{block.level + 1}>")
             elif block.block_type == "paragraph":
-                html_content.append(f'<p>{block.text}</p>')
+                html_content.append(f"<p>{block.text}</p>")
             elif block.block_type == "requirement":
-                html_content.append(f'<p><strong>{block.req_id}</strong>: {block.text}</p>')
+                html_content.append(f"<p><strong>{block.req_id}</strong>: {block.text}</p>")
             elif block.block_type == "list":
-                html_content.append('<ul>')
+                html_content.append("<ul>")
                 for item in block.items:
-                    html_content.append(f'<li>{item}</li>')
-                html_content.append('</ul>')
+                    html_content.append(f"<li>{item}</li>")
+                html_content.append("</ul>")
             elif block.block_type == "table":
                 if block.text:
-                    html_content.append(f'<p><em>{block.text}</em></p>')
+                    html_content.append(f"<p><em>{block.text}</em></p>")
                 html_content.append('<table border="1">')
-                html_content.append('<tr>' + ''.join(f'<th>{c}</th>' for c in block.columns) + '</tr>')
+                html_content.append(
+                    "<tr>" + "".join(f"<th>{c}</th>" for c in block.columns) + "</tr>"
+                )
                 for row in block.rows:
-                    html_content.append('<tr>' + ''.join(f'<td>{row.get(c, "")}</td>' for c in block.columns) + '</tr>')
-                html_content.append('</table>')
+                    html_content.append(
+                        "<tr>"
+                        + "".join(f'<td>{row.get(c, "")}</td>' for c in block.columns)
+                        + "</tr>"
+                    )
+                html_content.append("</table>")
 
         # Create chapter
-        chapter = epub.EpubHtml(title=self.spec.title, file_name='content.xhtml', lang='en')
-        chapter.content = '\n'.join(html_content)
+        chapter = epub.EpubHtml(title=self.spec.title, file_name="content.xhtml", lang="en")
+        chapter.content = "\n".join(html_content)
         book.add_item(chapter)
 
         # Add navigation
-        book.toc = [epub.Link('content.xhtml', self.spec.title, 'content')]
+        book.toc = [epub.Link("content.xhtml", self.spec.title, "content")]
         book.add_item(epub.EpubNcx())
         book.add_item(epub.EpubNav())
-        book.spine = ['nav', chapter]
+        book.spine = ["nav", chapter]
 
         epub.write_epub(path, book, {})
         print(f"Generated EPUB: {path}")
@@ -811,14 +863,27 @@ class MultiFormatGenerator:
             "metadata": {
                 "title": self.spec.title,
                 "generated": datetime.now().isoformat(),
-                "formats": ["pdf", "html", "md", "xml", "rst", "docx", "pptx", "xlsx", "epub", "png"]
+                "formats": [
+                    "pdf",
+                    "html",
+                    "md",
+                    "xml",
+                    "rst",
+                    "docx",
+                    "pptx",
+                    "xlsx",
+                    "epub",
+                    "png",
+                ],
             },
             "metrics": {
-                "requirement_count": len([g for g in self.ground_truth if g["type"] == "Requirement"]),
+                "requirement_count": len(
+                    [g for g in self.ground_truth if g["type"] == "Requirement"]
+                ),
                 "table_count": len([g for g in self.ground_truth if g["type"] == "Table"]),
-                "total_items": len(self.ground_truth)
+                "total_items": len(self.ground_truth),
             },
-            "ground_truth": self.ground_truth
+            "ground_truth": self.ground_truth,
         }
 
         path.write_text(json.dumps(output, indent=2))
@@ -831,8 +896,12 @@ def main():
     parser.add_argument("--config", type=Path, required=True, help="YAML spec file")
     parser.add_argument("--output-dir", type=Path, required=True, help="Output directory")
     parser.add_argument("--name", type=str, default="fixture", help="Base filename")
-    parser.add_argument("--formats", type=str, default="all",
-                        help="Comma-separated formats: pdf,html,md,xml,rst,docx,pptx,xlsx,epub,png,json or 'all'")
+    parser.add_argument(
+        "--formats",
+        type=str,
+        default="all",
+        help="Comma-separated formats: pdf,html,md,xml,rst,docx,pptx,xlsx,epub,png,json or 'all'",
+    )
 
     args = parser.parse_args()
 

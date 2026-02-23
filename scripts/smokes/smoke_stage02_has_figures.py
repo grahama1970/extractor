@@ -28,7 +28,9 @@ from typing import Iterable, Optional
 
 
 def _latest_stage02_json(run_dir: Path) -> Optional[Path]:
-    candidates = list((run_dir / "02_marker_extractor" / "json_output").glob("02_marker_blocks*.json"))
+    candidates = list(
+        (run_dir / "02_marker_extractor" / "json_output").glob("02_marker_blocks*.json")
+    )
     if not candidates:
         return None
     candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
@@ -59,16 +61,29 @@ def _block_type(b: dict) -> str:
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description="Fail if Stage 02 has zero figure-like blocks.")
     ap.add_argument("--json", dest="json_path", type=Path, help="Path to 02_marker_blocks*.json")
-    ap.add_argument("--run-dir", dest="run_dir", type=Path, help="Pipeline run directory (contains 02_marker_extractor/...)" )
-    ap.add_argument("--types", default="Figure,Image,Picture", help="Comma-separated set of figure-like types to count")
-    ap.add_argument("--min", dest="min_count", type=int, default=1, help="Minimum required count to pass")
+    ap.add_argument(
+        "--run-dir",
+        dest="run_dir",
+        type=Path,
+        help="Pipeline run directory (contains 02_marker_extractor/...)",
+    )
+    ap.add_argument(
+        "--types",
+        default="Figure,Image,Picture",
+        help="Comma-separated set of figure-like types to count",
+    )
+    ap.add_argument(
+        "--min", dest="min_count", type=int, default=1, help="Minimum required count to pass"
+    )
     args = ap.parse_args(argv)
 
     json_path: Optional[Path] = args.json_path
     if json_path is None and args.run_dir is not None:
         json_path = _latest_stage02_json(args.run_dir)
     if not json_path:
-        print("ERROR: Could not resolve Stage 02 JSON. Provide --json or --run-dir.", file=sys.stderr)
+        print(
+            "ERROR: Could not resolve Stage 02 JSON. Provide --json or --run-dir.", file=sys.stderr
+        )
         return 2
     if not json_path.exists():
         print(f"ERROR: JSON not found: {json_path}", file=sys.stderr)
@@ -80,18 +95,22 @@ def main(argv: list[str]) -> int:
     total = len(blocks)
     hits = [b for b in blocks if _block_type(b).strip().lower() in wanted]
     count = len(hits)
-    print(json.dumps({
-        "json": str(json_path),
-        "total_blocks": total,
-        "types": sorted(list(wanted)),
-        "figure_like_count": count,
-        "min_required": args.min_count,
-        "ok": count >= args.min_count,
-    }, indent=2))
+    print(
+        json.dumps(
+            {
+                "json": str(json_path),
+                "total_blocks": total,
+                "types": sorted(list(wanted)),
+                "figure_like_count": count,
+                "min_required": args.min_count,
+                "ok": count >= args.min_count,
+            },
+            indent=2,
+        )
+    )
 
     return 0 if count >= args.min_count else 1
 
 
 if __name__ == "__main__":
     raise SystemExit(main(sys.argv[1:]))
-

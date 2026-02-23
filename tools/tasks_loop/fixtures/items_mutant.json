@@ -16,18 +16,19 @@
         100
       ],
       "page": 0,
+      "content": []
+    },
+    {
+      "title": "\u202d4.1.5.4. BHT (Branch History Table) submodule\u202c",
+      "level": 2,
+      "bbox": [
+        72.0,
+        82.37848663330078,
+        316.1101989746094,
+        95.22335052490234
+      ],
+      "page": 0,
       "content": [
-        {
-          "type": "text",
-          "text": "Lorem ipsum dolor sit amet, consectetur adipisc",
-          "bbox": [
-            72.0,
-            82.37848663330078,
-            316.1101989746094,
-            95.22335052490234
-          ],
-          "page": 0
-        },
         {
           "type": "text",
           "text": "Lorem ipsum dolor sit amet, ",

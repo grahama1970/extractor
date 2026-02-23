@@ -6,13 +6,13 @@ from pathlib import Path
 try:
     import fitz  # PyMuPDF
 except Exception as e:
-    raise SystemExit("PyMuPDF not installed. pip install pymupdf\n"+str(e))
+    raise SystemExit("PyMuPDF not installed. pip install pymupdf\n" + str(e))
 
 
 def render(pdf: Path, out_dir: Path, dpi: int = 300):
     out_dir.mkdir(parents=True, exist_ok=True)
     doc = fitz.open(pdf)
-    mat = fitz.Matrix(dpi/72.0, dpi/72.0)
+    mat = fitz.Matrix(dpi / 72.0, dpi / 72.0)
     for i in range(len(doc)):
         page = doc[i]
         pix = page.get_pixmap(matrix=mat, alpha=False)
@@ -31,4 +31,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

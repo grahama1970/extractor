@@ -21,7 +21,9 @@ def test_sanity_ok_exit_zero(monkeypatch, runner: CliRunner):
     res = runner.invoke(app, ["sanity", "--wrap-json"])  # model default
     assert res.exit_code == 0
     data = json.loads(res.stdout.strip())
-    assert data.get("ok") is True or (isinstance(data.get("content"), dict) and data["content"].get("ok") is True)
+    assert data.get("ok") is True or (
+        isinstance(data.get("content"), dict) and data["content"].get("ok") is True
+    )
 
 
 def test_main_multiple_prompts_args(monkeypatch, runner: CliRunner):
@@ -35,4 +37,3 @@ def test_main_multiple_prompts_args(monkeypatch, runner: CliRunner):
     assert res.exit_code == 0
     lines = [line for line in res.stdout.splitlines() if line.strip()]
     assert lines == ["ans0", "ans1"]
-

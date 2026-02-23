@@ -6,24 +6,24 @@ Centralizes color definitions and style functions.
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 # Stroke colors (0..1 RGB) chosen for readability & CVD safety.
 COLORS: Dict[str, Tuple[float, float, float]] = {
-    "section": (0.051, 0.580, 0.533),       # teal-600
+    "section": (0.051, 0.580, 0.533),  # teal-600
     "section_frame": (0.051, 0.580, 0.533),
-    "text_chunk": (0.392, 0.455, 0.545),    # slate-500
+    "text_chunk": (0.392, 0.455, 0.545),  # slate-500
     "reflow_paragraph": (0.392, 0.455, 0.545),
     "reflow_list": (0.392, 0.455, 0.545),
     "reflow_heading": (0.051, 0.580, 0.533),
-    "figure": (0.145, 0.388, 0.922),        # blue-600
+    "figure": (0.145, 0.388, 0.922),  # blue-600
     "reflow_figure": (0.145, 0.388, 0.922),
-    "table": (0.863, 0.149, 0.149),         # red-600
+    "table": (0.863, 0.149, 0.149),  # red-600
     "reflow_table": (0.730, 0.100, 0.100),
     "table_merged": (0.730, 0.100, 0.100),
-    "requirement": (0.851, 0.467, 0.024),   # amber-600
-    "grid": (0.612, 0.639, 0.686),          # slate-400
-    "columns": (0.055, 0.647, 0.655),       # teal-ish
+    "requirement": (0.851, 0.467, 0.024),  # amber-600
+    "grid": (0.612, 0.639, 0.686),  # slate-400
+    "columns": (0.055, 0.647, 0.655),  # teal-ish
     "header_candidate": (0.851, 0.024, 0.851),
     "table_rejected": (0.35, 0.35, 0.35),
 }
@@ -78,13 +78,11 @@ def lighten(rgb: Tuple[float, float, float], f: float = 0.98) -> Tuple[float, fl
     return (1 - (1 - r) * f, 1 - (1 - g) * f, 1 - (1 - b) * f)
 
 
-def style_for_kind(kind: str) -> Tuple[
-    Tuple[float, float, float],
-    Optional[Tuple[float, float, float]],
-    float
-]:
+def style_for_kind(
+    kind: str,
+) -> Tuple[Tuple[float, float, float], Optional[Tuple[float, float, float]], float]:
     """Get stroke, fill, and opacity for an overlay kind.
-    
+
     Returns:
         (stroke_color, fill_color, opacity)
     """

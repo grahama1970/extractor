@@ -17,7 +17,7 @@ def rect_overlap_ratio(block_bbox: List[float], annot_rect: List[float]) -> floa
         barea = max(0.0, (bx1 - bx0) * (by1 - by0))
         return (inter / barea) if barea > 0 else 0.0
     except Exception as exc:
-        log_stage_error('annotations.py', exc, {'context': 'annotations.py'})
+        log_stage_error("annotations.py", exc, {"context": "annotations.py"})
         raise
         return 0.0
 
@@ -36,7 +36,7 @@ def cue_from_annotation(a: Dict[str, Any]) -> Tuple[int, float, str]:
         if isinstance(interp.get("labels"), list):
             labels = [str(x).lower() for x in interp.get("labels")]
     except Exception as exc:
-        log_stage_error('annotations.py', exc, {'context': 'annotations.py'})
+        log_stage_error("annotations.py", exc, {"context": "annotations.py"})
         raise
         labels = []
 
@@ -137,7 +137,7 @@ def load_relevant_rules() -> Dict[str, Any]:
             with open(here, "r") as f:
                 return cast(Dict[str, Any], json.load(f))
     except Exception as exc:
-        log_stage_error('annotations.py', exc, {'context': 'annotations.py'})
+        log_stage_error("annotations.py", exc, {"context": "annotations.py"})
         raise
     return {
         "boost_relevant_weight_for_stage": {"03": 1.25},

@@ -77,4 +77,3 @@ __all__ = [
     "merge_section_tables",
     "consolidate_data",
 ]
-

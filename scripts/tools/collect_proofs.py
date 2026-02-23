@@ -31,4 +31,3 @@ if __name__ == "__main__":
     dest = Path(sys.argv[2] if len(sys.argv) > 2 else "scripts/artifacts/pipeline")
     collect(out, dest)
     print(f"Collected proofs from {out} → {dest}")
-

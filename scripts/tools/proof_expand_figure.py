@@ -41,11 +41,19 @@ def _latest_run_dir(root: Path) -> Optional[Path]:
     return cand[0]
 
 
-def _resolve_inputs(run_dir: Optional[Path], pdf: Optional[Path], fig_json: Optional[Path], out: Optional[Path], expand: float) -> Inputs:
+def _resolve_inputs(
+    run_dir: Optional[Path],
+    pdf: Optional[Path],
+    fig_json: Optional[Path],
+    out: Optional[Path],
+    expand: float,
+) -> Inputs:
     if run_dir is None:
         lr = _latest_run_dir(Path.cwd())
         if lr is None:
-            raise SystemExit("Could not find a pipeline run directory; provide --run-dir and/or --fig-json/--pdf")
+            raise SystemExit(
+                "Could not find a pipeline run directory; provide --run-dir and/or --fig-json/--pdf"
+            )
         run_dir = lr
 
     if fig_json is None:
@@ -70,7 +78,9 @@ def _resolve_inputs(run_dir: Optional[Path], pdf: Optional[Path], fig_json: Opti
     return Inputs(pdf=pdf, fig_json=fig_json, out=out, expand=expand)
 
 
-def _expand_and_clamp(rect: Tuple[float, float, float, float], page_w: float, page_h: float, ratio: float) -> Tuple[float, float, float, float]:
+def _expand_and_clamp(
+    rect: Tuple[float, float, float, float], page_w: float, page_h: float, ratio: float
+) -> Tuple[float, float, float, float]:
     x0, y0, x1, y1 = rect
     w = max(0.0, x1 - x0)
     h = max(0.0, y1 - y0)
@@ -85,12 +95,17 @@ def _expand_and_clamp(rect: Tuple[float, float, float, float], page_w: float, pa
 
 def main(argv: list[str]) -> int:
     import argparse
-    ap = argparse.ArgumentParser(description="Write a proof PDF with an expanded box over p1's first figure.")
+
+    ap = argparse.ArgumentParser(
+        description="Write a proof PDF with an expanded box over p1's first figure."
+    )
     ap.add_argument("--run-dir", type=Path)
     ap.add_argument("--pdf", type=Path)
     ap.add_argument("--fig-json", type=Path)
     ap.add_argument("--out", type=Path)
-    ap.add_argument("--expand", type=float, default=0.20, help="Expansion ratio (e.g., 0.20 for +20%)")
+    ap.add_argument(
+        "--expand", type=float, default=0.20, help="Expansion ratio (e.g., 0.20 for +20%)"
+    )
     args = ap.parse_args(argv)
 
     ins = _resolve_inputs(args.run_dir, args.pdf, args.fig_json, args.out, args.expand)
@@ -199,7 +214,9 @@ def main(argv: list[str]) -> int:
         except Exception:
             pass
         try:
-            fta.set_info(content="figure"); fta.set_info(subject="figure"); fta.set_info(title="figure")
+            fta.set_info(content="figure")
+            fta.set_info(subject="figure")
+            fta.set_info(title="figure")
         except Exception:
             pass
         try:
@@ -211,14 +228,19 @@ def main(argv: list[str]) -> int:
 
     ins.out.parent.mkdir(parents=True, exist_ok=True)
     doc.save(str(ins.out))
-    print(json.dumps({
-        "pdf": str(ins.pdf),
-        "fig_json": str(ins.fig_json),
-        "page_idx": page_idx,
-        "orig_bbox": bbox,
-        "expanded_rect": [rect.x0, rect.y0, rect.x1, rect.y1],
-        "out": str(ins.out),
-    }, indent=2))
+    print(
+        json.dumps(
+            {
+                "pdf": str(ins.pdf),
+                "fig_json": str(ins.fig_json),
+                "page_idx": page_idx,
+                "orig_bbox": bbox,
+                "expanded_rect": [rect.x0, rect.y0, rect.x1, rect.y1],
+                "out": str(ins.out),
+            },
+            indent=2,
+        )
+    )
 
     return 0
 

@@ -1,5 +1,4 @@
 import importlib.util
-import os
 import pytest
 
 
@@ -21,4 +20,3 @@ def test_stage12_imports_and_has_cli():
     except Exception as e:
         pytest.skip(f"Stage 12 requires python-arango; skipping. ({e})")
     assert hasattr(mod, "run"), "Stage 12 lacks CLI 'run' function"
-

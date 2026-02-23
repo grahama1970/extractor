@@ -31,42 +31,42 @@ def load_contract(fixture_name: str) -> dict:
             expected="s02.json",
             actual="missing",
             file=str(contract_path),
-            hint="Run: python utils/compile_contracts.py"
+            hint="Run: python utils/compile_contracts.py",
         )
     return json.loads(contract_path.read_text())
 
 
 def checks(fixture_name: str):
     """Run all gate checks. Raises GateError on failure."""
-    
+
     # Load expected from contract
     contract = load_contract(fixture_name)
     expected = contract.get("expected", {})
     expected_block_count = expected.get("block_count")
-    
+
     if expected_block_count is None and expected.get("block_count_min") is None:
         # If neither is specified, maybe it's a pass?
         # But we prefer explicit contracts.
         # Check if contract is default/empty
         if not expected:
-             print("⚠️ WARNING: No expectations in contract (defaulting to pass)")
-             return
+            print("⚠️ WARNING: No expectations in contract (defaulting to pass)")
+            return
 
         raise GateError(
             message="Contract missing block_count or block_count_min",
             expected="block_count or block_count_min",
             actual="missing",
             file=str(TASKS_LOOP_DIR / "fixtures" / fixture_name / "contracts" / "s02.json"),
-            hint="Add block_count to expected in SPEC.md"
+            hint="Add block_count to expected in SPEC.md",
         )
-    
+
     # Load actual results
     blocks_file = JSON_DIR / "02_marker_blocks.json"
     data = load_json(blocks_file, required_keys=["blocks"])
-    
+
     blocks = data.get("blocks", [])
     actual_count = len(blocks)
-    
+
     # Exact check
     if expected_block_count is not None and actual_count != expected_block_count:
         raise GateError(
@@ -74,9 +74,9 @@ def checks(fixture_name: str):
             expected=expected_block_count,
             actual=actual_count,
             file=str(blocks_file),
-            hint="Check S02 execution logs for extraction errors"
+            hint="Check S02 execution logs for extraction errors",
         )
-        
+
     # Minimum check
     min_count = expected.get("block_count_min")
     if min_count is not None and actual_count < min_count:
@@ -85,9 +85,9 @@ def checks(fixture_name: str):
             expected=f">={min_count}",
             actual=actual_count,
             file=str(blocks_file),
-            hint="Check if pages were skipped or OCR failed"
+            hint="Check if pages were skipped or OCR failed",
         )
-    
+
     msg = f"✅ Block count: {actual_count}"
     if expected_block_count:
         msg += f" == {expected_block_count}"
@@ -100,5 +100,5 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Gate S02: Marker Blocks")
     parser.add_argument("--fixture", required=True, help="Fixture name (e.g., BHT_CV32A65X_test)")
     args = parser.parse_args()
-    
+
     sys.exit(run_gate("S02: Marker Blocks", lambda: checks(args.fixture)))

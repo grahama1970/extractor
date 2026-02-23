@@ -28,8 +28,10 @@ from pydantic import BaseModel
 try:
     from pdftext.schema import Reference  # type: ignore
 except Exception:  # pragma: no cover - optional dependency in minimal/offline mode
+
     class Reference:  # type: ignore
         ...
+
 
 from extractor.core.logger import configure_logging
 from extractor.core.schema.polygon import PolygonBox

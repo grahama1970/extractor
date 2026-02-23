@@ -66,7 +66,9 @@ def _find_section_image(sec: dict) -> Path | None:
     ]
     sid = sec.get("id")
     if isinstance(sid, str) and sid:
-        candidates.append(ROOT / f"data/results/pipeline/04_section_builder/visual_output/{sid}.png")
+        candidates.append(
+            ROOT / f"data/results/pipeline/04_section_builder/visual_output/{sid}.png"
+        )
     for cand in candidates:
         if cand.exists():
             return cand
@@ -80,7 +82,8 @@ async def main_async() -> None:
     # Environment and module path
     load_dotenv(find_dotenv(usecwd=True) or None)
     sys.path.insert(0, os.path.abspath("src"))
-from scillm import completion
+    from scillm import completion
+
     if not (os.getenv("CHUTES_API_BASE") and os.getenv("CHUTES_API_KEY")):
         print("CHUTES_API_BASE/CHUTES_API_KEY not set")
         raise SystemExit(1)
@@ -144,8 +147,8 @@ from scillm import completion
     res = completion(
         model=model,
         custom_llm_provider="openai_like",
-        api_base=os.getenv("CHUTES_API_BASE",""),
-        api_key=os.getenv("CHUTES_API_KEY",""),
+        api_base=os.getenv("CHUTES_API_BASE", ""),
+        api_key=os.getenv("CHUTES_API_KEY", ""),
         messages=messages,
         response_format={"type": "json_schema", "json_schema": {"schema": schema}},
         temperature=0,

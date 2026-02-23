@@ -47,7 +47,10 @@ def _to_data_url(p: Path) -> str:
 @app.command()
 def run(
     image: Path = typer.Option(..., exists=True, dir_okay=False, help="Path to any image file"),
-    model: str = typer.Option(os.getenv("LITELLM_LARGE_VLLM_MODEL", "Qwen/Qwen3-VL-235B-A22B-Instruct"), help="VL model id"),
+    model: str = typer.Option(
+        os.getenv("LITELLM_LARGE_VLLM_MODEL", "Qwen/Qwen3-VL-235B-A22B-Instruct"),
+        help="VL model id",
+    ),
     timeout: int = typer.Option(30, min=5, max=120),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ):
@@ -98,7 +101,10 @@ def run(
         {
             "role": "user",
             "content": [
-                {"type": "text", "text": 'Describe the image in <=25 words. Return {"desc": string} as JSON.'},
+                {
+                    "type": "text",
+                    "text": 'Describe the image in <=25 words. Return {"desc": string} as JSON.',
+                },
                 {"type": "image_url", "image_url": {"url": du}},
             ],
         }
@@ -109,7 +115,9 @@ def run(
         print("Desc JSON:", c2)
     try:
         j2 = json.loads(c2)
-        assert isinstance(j2, dict) and isinstance(j2.get("desc", ""), str) and j2.get("desc").strip(), "missing desc"
+        assert (
+            isinstance(j2, dict) and isinstance(j2.get("desc", ""), str) and j2.get("desc").strip()
+        ), "missing desc"
     except Exception as e:  # pragma: no cover
         print(f"[FAIL] Desc JSON check: {e}\nRaw: {c2[:200]}", file=sys.stderr)
         raise typer.Exit(1)

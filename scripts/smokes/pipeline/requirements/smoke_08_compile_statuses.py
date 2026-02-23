@@ -29,7 +29,14 @@ def main():
     OUT.mkdir(parents=True, exist_ok=True)
     cmd = [
         "/home/graham/workspace/experiments/extractor/.venv/bin/python",
-        "-m", "src.cli", "extract", str(PDF), str(OUT), "--mode", "accurate", "--prove",
+        "-m",
+        "src.cli",
+        "extract",
+        str(PDF),
+        str(OUT),
+        "--mode",
+        "accurate",
+        "--prove",
     ]
     # Even if proving is skipped by offline guards, run_all synthesizes enriched JSON
     rc = subprocess.run(cmd).returncode
@@ -45,9 +52,9 @@ def main():
         by_status[s] = by_status.get(s, 0) + 1
     report = {"by_status": by_status, "total": sum(by_status.values())}
     Path("scripts/artifacts").mkdir(parents=True, exist_ok=True)
-    (Path("scripts/artifacts")/"req_compile_status.json").write_text(json.dumps(report, indent=2))
+    (Path("scripts/artifacts") / "req_compile_status.json").write_text(json.dumps(report, indent=2))
     print(json.dumps(report, indent=2))
+
 
 if __name__ == "__main__":
     app()
-

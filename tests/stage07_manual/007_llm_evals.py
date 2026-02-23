@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -29,10 +28,11 @@ def strip_fences_and_crop(s: str) -> str:
         if s2.endswith("```"):
             s2 = s2[:-3]
     s2 = s2.strip()
-    if s2 and (s2[0] != '{' or s2[-1] != '}'):
-        a = s2.find('{'); b = s2.rfind('}')
+    if s2 and (s2[0] != "{" or s2[-1] != "}"):
+        a = s2.find("{")
+        b = s2.rfind("}")
         if a != -1 and b != -1 and b > a:
-            s2 = s2[a:b+1]
+            s2 = s2[a : b + 1]
     return s2
 
 
@@ -55,40 +55,48 @@ def image_file_to_data_url(path: Path) -> str:
     }.get(path.suffix.lower(), "application/octet-stream")
     data = path.read_bytes()
     import base64
+
     b64 = base64.b64encode(data).decode("ascii")
     return f"data:{mime};base64,{b64}"
 
 
-async def call_model(model: str, system_text: str, user_text: str, image_url: str) -> Tuple[str, Dict[str, Any]]:
+async def call_model(
+    model: str, system_text: str, user_text: str, image_url: str
+) -> Tuple[str, Dict[str, Any]]:
     messages = [
         {"role": "system", "content": system_text},
-        {"role": "user", "content": [
-            {"type": "text", "text": user_text},
-            {"type": "image_url", "image_url": {"url": image_url}}
-        ]},
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": user_text},
+                {"type": "image_url", "image_url": {"url": image_url}},
+            ],
+        },
     ]
     extras: Dict[str, Any] = {}
     if model.startswith("openai/"):
         extras["response_format"] = {"type": "json_object"}
     resp = await acompletion(model=model, messages=messages, **extras)
-    content = getattr(resp.choices[0].message, 'content', None) or getattr(resp, 'text', None) or ''
-    usage = getattr(resp, 'usage', None)
+    content = getattr(resp.choices[0].message, "content", None) or getattr(resp, "text", None) or ""
+    usage = getattr(resp, "usage", None)
     # Prefer provider-reported cost when available
-    hidden = getattr(resp, '_hidden_params', {}) or {}
+    hidden = getattr(resp, "_hidden_params", {}) or {}
     response_cost = None
     if isinstance(hidden, dict):
-        response_cost = hidden.get('response_cost')
-    return content or '', {
+        response_cost = hidden.get("response_cost")
+    return content or "", {
         "usage": {
-            "prompt_tokens": getattr(usage, 'prompt_tokens', None) if usage else None,
-            "completion_tokens": getattr(usage, 'completion_tokens', None) if usage else None,
-            "total_tokens": getattr(usage, 'total_tokens', None) if usage else None,
+            "prompt_tokens": getattr(usage, "prompt_tokens", None) if usage else None,
+            "completion_tokens": getattr(usage, "completion_tokens", None) if usage else None,
+            "total_tokens": getattr(usage, "total_tokens", None) if usage else None,
         },
         "response_cost": response_cost,
     }
 
 
-def estimate_cost(model: str, usage: Dict[str, Any], response_cost: Optional[float]) -> Optional[float]:
+def estimate_cost(
+    model: str, usage: Dict[str, Any], response_cost: Optional[float]
+) -> Optional[float]:
     # Use provider-reported cost if present
     if isinstance(response_cost, (int, float)):
         return float(response_cost)
@@ -106,7 +114,7 @@ def estimate_cost(model: str, usage: Dict[str, Any], response_cost: Optional[flo
         return None
     pt = usage.get("prompt_tokens") or 0
     ct = usage.get("completion_tokens") or 0
-    return (pt/1000.0)*(inp or 0) + (ct/1000.0)*(out or 0)
+    return (pt / 1000.0) * (inp or 0) + (ct / 1000.0) * (out or 0)
 
 
 def evaluate_structure(parsed: Dict[str, Any], tables_path: Optional[Path]) -> Dict[str, Any]:
@@ -149,7 +157,7 @@ def evaluate_structure(parsed: Dict[str, Any], tables_path: Optional[Path]) -> D
                 tdata = json.loads(tables_path.read_text())
                 tlist = tdata.get("tables") or []
                 if tlist:
-                    pm = (tlist[0].get("pandas_metrics") or {})
+                    pm = tlist[0].get("pandas_metrics") or {}
                     shape = pm.get("shape") or []
                     rows = len((t0.get("content") or {}).get("rows") or t0.get("rows") or [])
                     cols = len((t0.get("content") or {}).get("columns") or t0.get("columns") or [])
@@ -170,7 +178,12 @@ def evaluate_structure(parsed: Dict[str, Any], tables_path: Optional[Path]) -> D
     def _get_text_content(b: Dict[str, Any]) -> str:
         t = b.get("text") if isinstance(b.get("text"), str) else b.get("content")
         return t if isinstance(t, str) else ""
-    text_blocks = [b for b in blocks if isinstance(b, dict) and b.get("type") == "text" and isinstance(_get_text_content(b), str)]
+
+    text_blocks = [
+        b
+        for b in blocks
+        if isinstance(b, dict) and b.get("type") == "text" and isinstance(_get_text_content(b), str)
+    ]
     out["has_good_text"] = any(len(_get_text_content(b).strip()) >= 150 for b in text_blocks)
     return out
 
@@ -193,7 +206,7 @@ async def main() -> None:
             tdata = json.loads(tables_path.read_text())
             tlist = tdata.get("tables") or []
             if tlist:
-                pm = (tlist[0].get("pandas_metrics") or {})
+                pm = tlist[0].get("pandas_metrics") or {}
                 hint_shape = pm.get("shape") or None
                 hint_cols = [str(c) for c in (pm.get("columns") or [])]
         except Exception:
@@ -235,9 +248,11 @@ async def main() -> None:
         usage = meta.get("usage", {})
         cost = estimate_cost(model, usage, meta.get("response_cost")) or None
         mslug = model.replace("/", "__")
-        (outdir/f"{mslug}__raw.txt").write_text(content or "", encoding="utf-8")
+        (outdir / f"{mslug}__raw.txt").write_text(content or "", encoding="utf-8")
         if parsed:
-            (outdir/f"{mslug}__parsed.json").write_text(json.dumps(parsed, indent=2, ensure_ascii=False), encoding="utf-8")
+            (outdir / f"{mslug}__parsed.json").write_text(
+                json.dumps(parsed, indent=2, ensure_ascii=False), encoding="utf-8"
+            )
         r = {"model": model, "ok": ok, "usage": usage, "est_cost_usd": cost, "structure": struct}
         results.append(r)
         print(json.dumps(r, indent=2))
@@ -245,11 +260,17 @@ async def main() -> None:
     # pick recommendation: OK first, then lowest cost
     candidates = [r for r in results if r["ok"]]
     if candidates:
-        best = sorted(candidates, key=lambda r: (r["est_cost_usd"] if r["est_cost_usd"] is not None else 1e9))[0]
+        best = sorted(
+            candidates, key=lambda r: (r["est_cost_usd"] if r["est_cost_usd"] is not None else 1e9)
+        )[0]
     else:
-        best = sorted(results, key=lambda r: (r["est_cost_usd"] if r["est_cost_usd"] is not None else 1e9))[0]
+        best = sorted(
+            results, key=lambda r: (r["est_cost_usd"] if r["est_cost_usd"] is not None else 1e9)
+        )[0]
     summary = {"results": results, "recommendation": best}
-    (outdir/"summary.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
+    (outdir / "summary.json").write_text(
+        json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
     print("\nRecommendation:")
     print(json.dumps(best, indent=2))
 

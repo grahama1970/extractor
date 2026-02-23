@@ -16,7 +16,7 @@ import os
 from pathlib import Path
 import base64
 import mimetypes
-from typing import List, Any, Dict
+from typing import List, Any
 
 from dotenv import load_dotenv, find_dotenv
 from litellm import Router
@@ -27,8 +27,10 @@ from textwrap import dedent
 try:
     from extractor.pipeline.utils.litellm_cache import initialize_litellm_cache  # type: ignore
 except Exception:
+
     def initialize_litellm_cache() -> None:  # type: ignore
         return None
+
 
 try:
     from extractor.pipeline.utils.litellm_image_utils import compress_image_cached  # type: ignore
@@ -39,7 +41,7 @@ except Exception:
 def build_guard(compact: bool) -> str:
     if compact:
         return dedent(
-            '''
+            """
             Return ONLY a JSON object (no code fences). Prefer this shape:
             {
               "reflowed_json": {
@@ -52,14 +54,14 @@ def build_guard(compact: bool) -> str:
               "summary": "string"
             }
             If you cannot build reflowed_json, return { "reflowed_text": "string" } instead.
-            '''
+            """
         ).strip()
     return dedent(
-        '''
+        """
         You are a strict JSON reflow engine. Return ONLY a JSON object with keys:
         reflowed_json, ocr_corrections, improvements_made, summary. No code fences.
         Keep table cell text intact; include a figure block with caption when present.
-        '''
+        """
     ).strip()
 
 
@@ -115,7 +117,14 @@ async def amain(images: List[Path], timeout: int, compact: bool, model: str, con
         typer.secho("GEMINI_API_KEY not set", fg="red", err=True)
         raise typer.Exit(code=2)
 
-    router = Router(model_list=[{"model_name": model.split("/")[-1], "litellm_params": {"model": model, "api_key": os.getenv("GEMINI_API_KEY")}}])
+    router = Router(
+        model_list=[
+            {
+                "model_name": model.split("/")[-1],
+                "litellm_params": {"model": model, "api_key": os.getenv("GEMINI_API_KEY")},
+            }
+        ]
+    )
 
     if not images:
         images = [Path("tests/stage07_manual/images/smoke/panda.png")]
@@ -130,7 +139,9 @@ async def amain(images: List[Path], timeout: int, compact: bool, model: str, con
     messages = build_messages(guard, context, data_urls)
 
     try:
-        resp = await router.acompletion(model=model.split("/")[-1], messages=messages, timeout=timeout)
+        resp = await router.acompletion(
+            model=model.split("/")[-1], messages=messages, timeout=timeout
+        )
         # Print minimal surface: token usage and first content chunk
         usage = getattr(resp, "usage", None) if not isinstance(resp, dict) else resp.get("usage")
         print("usage:", usage)
@@ -145,10 +156,14 @@ app = typer.Typer(add_completion=False, help="Minimal Stage‑07 Gemini smoke (T
 
 @app.command()
 def run(
-    image: List[Path] = typer.Option([], "--image", "-i", help="Local image path(s) (PNG/JPG). Repeatable."),
+    image: List[Path] = typer.Option(
+        [], "--image", "-i", help="Local image path(s) (PNG/JPG). Repeatable."
+    ),
     timeout: int = typer.Option(45, help="Request timeout (s)"),
     compact: bool = typer.Option(True, help="Use compact JSON guard"),
-    model: str = typer.Option("gemini/gemini-2.5-flash", help="LiteLLM model id (e.g., gemini/gemini-2.5-flash)"),
+    model: str = typer.Option(
+        "gemini/gemini-2.5-flash", help="LiteLLM model id (e.g., gemini/gemini-2.5-flash)"
+    ),
     context: str = typer.Option(
         "Section: Example Submodule (level 2) pages 1–2\nParagraphs: raw text and one figure.",
         help="Minimal context text",

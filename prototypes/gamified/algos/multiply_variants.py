@@ -37,7 +37,7 @@ def mul_chunked(a: int, b: int) -> int:
     if x == 0 or y == 0:
         return 0
     BASE_EXP = 4
-    base = 10 ** BASE_EXP
+    base = 10**BASE_EXP
     ax, ay = [], []
     while x:
         ax.append(x % base)
@@ -63,4 +63,3 @@ def mul_chunked(a: int, b: int) -> int:
     for d in reversed(out):
         res = res * base + d
     return res * sign
-

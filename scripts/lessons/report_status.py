@@ -8,7 +8,6 @@
 
 from __future__ import annotations
 import json
-import os
 from pathlib import Path
 import typer
 
@@ -25,7 +24,9 @@ def read_json_report(path: Path) -> dict | None:
 @app.command()
 def generate(
     report: str = typer.Option("test-results.json", help="Path to pytest JSON report"),
-    out_md: str = typer.Option("scripts/artifacts/lessons_status_report.md", help="Output Markdown path"),
+    out_md: str = typer.Option(
+        "scripts/artifacts/lessons_status_report.md", help="Output Markdown path"
+    ),
 ):
     """Generate a Markdown status summary from pytest JSON report without touching curated docs."""
     report_path = Path(report)
@@ -83,4 +84,3 @@ def generate(
 
 if __name__ == "__main__":
     app()
-

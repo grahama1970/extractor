@@ -113,7 +113,9 @@ class XMLProvider:
                     else:
                         root = self.parser.fromstring(wrapped)
                     self._wrapped_root = True
-                    logger.warning("XML parse fallback succeeded after wrapping with <document> root")
+                    logger.warning(
+                        "XML parse fallback succeeded after wrapping with <document> root"
+                    )
                 except Exception as e2:
                     raise ValueError(f"Invalid XML syntax: {e}") from e2
             elif isinstance(e, FileNotFoundError):
@@ -224,12 +226,12 @@ class XMLProvider:
                 elif tag == "created":
                     try:
                         metadata.created_date = datetime.fromisoformat(elements[0].text.strip())
-                    except:
+                    except Exception:
                         pass
                 elif tag == "modified":
                     try:
                         metadata.modified_date = datetime.fromisoformat(elements[0].text.strip())
-                    except:
+                    except Exception:
                         pass
                 elif tag == "description":
                     format_metadata["description"] = elements[0].text.strip()
@@ -255,6 +257,18 @@ class XMLProvider:
         if tag_lower == "section" and not text_content:
             attribs = {k.lower(): v for k, v in element.attrib.items()}
             text_content = attribs.get("title", attribs.get("name", ""))
+
+        # Extract text-bearing attributes (e.g. ReqIF THE-VALUE, LONG-NAME)
+        if not text_content and self.extract_attributes and element.attrib:
+            attr_texts = []
+            for attr_name, attr_val in element.attrib.items():
+                local = attr_name.rsplit("}", 1)[-1] if "}" in attr_name else attr_name
+                if len(attr_val) > 5 and local.upper() not in (
+                    "IDENTIFIER", "XMLNS", "ID", "REF",
+                ):
+                    attr_texts.append(attr_val)
+            if attr_texts:
+                text_content = " ".join(attr_texts)
 
         if text_content:
             block_type = self._determine_block_type(element)

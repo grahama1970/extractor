@@ -7,37 +7,23 @@
 #   "pandas>=1.5",
 #   "rapidfuzz>=3.0",
 # ]
-///
-#!/usr/bin/env -S uv run --script
-# /// script
-# requires-python = ">=3.10"
-# dependencies = [
-#   "typer>=0.12",
-#   "python-dotenv",
-#   "pandas>=1.5",
-#   "rapidfuzz>=3.0",
-# ]
 # ///
 """Comprehensive HTML vs PDF parity test for engineering documents."""
 
 from __future__ import annotations
 
 import json
-import importlib.util
 from pathlib import Path
-from typing import Dict, List, Tuple, Optional
-import re
+from typing import List
 import pandas as pd
 from rapidfuzz import fuzz
 
 import typer
 
 from extractor.pipeline.structured_pipeline import (
-    STRUCTURED_PIPELINES,
     run_structured_pipeline,
 )
 from extractor.core.providers.html import HTMLProvider
-from extractor.pipeline.utils.unified_conversion import build_unified_document_from_reflow
 
 app = typer.Typer(add_completion=False)
 
@@ -80,7 +66,7 @@ def extract_figures_metadata(blocks: List[dict]) -> List[dict]:
             fig_data = {
                 "id": block.get("id"),
                 "page": block.get("page_index", 0),
-                "bbox": block.get("bbox") or [0,0,0,0],
+                "bbox": block.get("bbox") or [0, 0, 0, 0],
                 "has_description": bool(block.get("ai_description") or block.get("description")),
             }
             figures.append(fig_data)
@@ -91,8 +77,8 @@ def validate_encoding_preservation(text: str, original_encoding: str = None) -> 
     """Check if text can be encoded back to original encoding."""
     try:
         # Test round-trip encoding
-        encoded = text.encode('utf-8')
-        decoded = encoded.decode('utf-8')
+        encoded = text.encode("utf-8")
+        decoded = encoded.decode("utf-8")
         return decoded == text
     except (UnicodeEncodeError, UnicodeDecodeError):
         return False
@@ -117,7 +103,9 @@ def compare_section_structure(pdf_sections: List[dict], html_sections: List[dict
     html_by_title = {s.get("title", "").lower(): s for s in html_sections}
 
     common_titles = set(pdf_by_title.keys()) & set(html_by_title.keys())
-    results["section_title_overlap"] = len(common_titles) / max(len(pdf_by_title), len(html_by_title), 1)
+    results["section_title_overlap"] = len(common_titles) / max(
+        len(pdf_by_title), len(html_by_title), 1
+    )
 
     # Find sections only in PDF or only in HTML
     pdf_only = set(pdf_by_title.keys()) - set(html_by_title.keys())
@@ -161,7 +149,11 @@ def compare_content_similarity(pdf_text: str, html_text: str, min_similarity: fl
     # Also check token overlap for better insight
     pdf_tokens = set(pdf_text.lower().split())
     html_tokens = set(html_text.lower().split())
-    token_overlap = len(pdf_tokens & html_tokens) / len(pdf_tokens | html_tokens) if pdf_tokens or html_tokens else 0
+    token_overlap = (
+        len(pdf_tokens & html_tokens) / len(pdf_tokens | html_tokens)
+        if pdf_tokens or html_tokens
+        else 0
+    )
 
     # Check character-level overlap within sections
     char_overlap = fuzz.partial_ratio(pdf_text, html_text) / 100.0
@@ -185,7 +177,7 @@ def compare_content_similarity(pdf_text: str, html_text: str, min_similarity: fl
             results["length_difference"] = {
                 "pdf": pdf_length,
                 "html": html_length,
-                "ratio": html_length / pdf_length if pdf_length > 0 else 0
+                "ratio": html_length / pdf_length if pdf_length > 0 else 0,
             }
 
         # Check for encoding issues
@@ -221,11 +213,10 @@ def main(
         Path("data/input/pipeline/BHT_CV32A65X_with_requirements_noannots.pdf"),
         exists=True,
         readable=True,
-        help="PDF file to test"
+        help="PDF file to test",
     ),
     html_input: Path = typer.Option(
-        Path("data/input/pipeline/indexed/test_document.html"),
-        help="HTML version of same document"
+        Path("data/input/pipeline/indexed/test_document.html"), help="HTML version of same document"
     ),
     output_dir: Path = typer.Option(Path("data/results/parity_test_html")),
     strict_mode: bool = typer.Option(False, help="Fail on any content deviation"),
@@ -237,7 +228,7 @@ def main(
         0: Pass - HTML and PDF extraction are acceptably similar
         1: Fail - Issues found that need attention
     """
-    typer.echo(f"=== HTML vs PDF Extraction Parity Test ===")
+    typer.echo("=== HTML vs PDF Extraction Parity Test ===")
 
     # Create output directory
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -283,8 +274,12 @@ def main(
     pdf_tables = []
     html_tables = []
     try:
-        s05_pdf_path = next((p for p in Path(pdf_results["stage5"]).parent.rglob("05_tables.json")), None)
-        s05_html_path = next((p for p in Path(html_results["stage5"]).parent.rglob("05_tables.json")), None)
+        s05_pdf_path = next(
+            (p for p in Path(pdf_results["stage5"]).parent.rglob("05_tables.json")), None
+        )
+        s05_html_path = next(
+            (p for p in Path(html_results["stage5"]).parent.rglob("05_tables.json")), None
+        )
         if s05_pdf_path and s05_html_path:
             pdf_tables_data = json.loads(s05_pdf_path.read_text())
             html_tables_data = json.loads(s05_html_path.read_text())
@@ -301,22 +296,25 @@ def main(
         "content_comparison": compare_content_similarity(
             extract_text_from_sections(pdf_sections),
             extract_text_from_sections(html_sections),
-            min_similarity=content_threshold
+            min_similarity=content_threshold,
         ),
-        "table_comparison": compare_tables({
-            "pdf_tables": pdf_tables,
-            "html_tables": html_tables
-        }),
+        "table_comparison": compare_tables({"pdf_tables": pdf_tables, "html_tables": html_tables}),
         "test_mode": "strict" if strict_mode else "loose",
     }
 
     # Determine overall pass/fail
-    overall_pass = all([
-        results["structure_comparison"]["section_count_acceptable"],
-        results["structure_comparison"]["section_title_overlap"] >= 0.8,
-        results["content_comparison"]["content_preserved"] if not strict_mode else results["content_comparison"]["pass_threshold"],
-        results["table_comparison"]["count_acceptable"],
-    ])
+    overall_pass = all(
+        [
+            results["structure_comparison"]["section_count_acceptable"],
+            results["structure_comparison"]["section_title_overlap"] >= 0.8,
+            (
+                results["content_comparison"]["content_preserved"]
+                if not strict_mode
+                else results["content_comparison"]["pass_threshold"]
+            ),
+            results["table_comparison"]["count_acceptable"],
+        ]
+    )
 
     results["overall_pass"] = overall_pass
 
@@ -326,8 +324,12 @@ def main(
 
     # Print summary
     typer.echo("\n=== Parity Test Results ===")
-    typer.echo(f"Section structure: {'✅ PASS' if results['structure_comparison']['section_count_acceptable'] else '❌ FAIL'}")
-    typer.echo(f"Section title overlap: {results['structure_comparison']['section_title_overlap']:.1%}")
+    typer.echo(
+        f"Section structure: {'✅ PASS' if results['structure_comparison']['section_count_acceptable'] else '❌ FAIL'}"
+    )
+    typer.echo(
+        f"Section title overlap: {results['structure_comparison']['section_title_overlap']:.1%}"
+    )
     typer.echo(f"Content similarity: {results['content_comparison']['similarity_score']:.1%}")
     typer.echo(f"Table count: PDF={len(pdf_tables)}, HTML={len(html_tables)}")
 
@@ -338,9 +340,13 @@ def main(
 
         # Show specific failures
         if results["structure_comparison"]["missing_sections"]:
-            typer.echo(f"Missing sections in HTML: {results['structure_comparison']['missing_sections'][:3]}")
+            typer.echo(
+                f"Missing sections in HTML: {results['structure_comparison']['missing_sections'][:3]}"
+            )
         if results["content_comparison"]["similarity_score"] < content_threshold:
-            typer.echo("Content similarity below threshold - check character encoding and structure")
+            typer.echo(
+                "Content similarity below threshold - check character encoding and structure"
+            )
 
     return 0 if overall_pass else 1
 

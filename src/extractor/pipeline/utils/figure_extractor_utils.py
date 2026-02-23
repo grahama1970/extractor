@@ -49,7 +49,9 @@ def _save_image_bytes(dst_dir: Path, figure_id: str, data: bytes) -> Path:
 def _nearby_text(page: "fitz.Page", bbox: Iterable[float]) -> str:
     rect = fitz.Rect(*bbox)
     blocks = page.get_text("blocks")
-    lines = [b[4].strip() for b in blocks if fitz.Rect(b[:4]).intersects(rect) and (b[4] or "").strip()]
+    lines = [
+        b[4].strip() for b in blocks if fitz.Rect(b[:4]).intersects(rect) and (b[4] or "").strip()
+    ]
     return " ".join(lines)
 
 
@@ -58,13 +60,14 @@ def _bbox_area(bbox: Iterable[float]) -> int:
     try:
         return int((x1 - x0) * (y1 - y0))
     except Exception as exc:
-        log_stage_error('figure_extractor_utils.py', exc, {'context': 'figure_extractor_utils.py'})
+        log_stage_error("figure_extractor_utils.py", exc, {"context": "figure_extractor_utils.py"})
         raise
         return 0
 
 
 def _normalize_title(title: Optional[str]) -> Tuple[Optional[str], Optional[str], Optional[str]]:
     import re as _re
+
     if not title:
         return None, None, None
     m = _re.match(r"\s*(?:Figure|Fig\.)\s*([A-Za-z0-9\-\.]+)?[\.:]?\s*(.*)$", title, _re.IGNORECASE)
@@ -75,6 +78,7 @@ def _normalize_title(title: Optional[str]) -> Tuple[Optional[str], Optional[str]
         normalized_id = f"figure-{number}"
     elif base_title:
         import hashlib as _hash
+
         slug = "".join(ch.lower() if ch.isalnum() else "-" for ch in base_title).strip("-")
         normalized_id = f"figure-{slug or _hash.sha1(base_title.encode('utf-8')).hexdigest()[:8]}"
     return number, base_title, normalized_id
@@ -134,18 +138,23 @@ def detect_title_local(
     Side‑effect free; opens the PDF for the page, reads text blocks, and closes it.
     """
     import re as _re
+
     try:
         with fitz.open(str(pdf_path)) as _doc:
             page = _doc[page_idx]
             rr = fitz.Rect(*bbox)
             # Below band
-            band_below = fitz.Rect(rr.x0, rr.y1, rr.x1, min(page.rect.height, rr.y1 + band_below_px))
+            band_below = fitz.Rect(
+                rr.x0, rr.y1, rr.x1, min(page.rect.height, rr.y1 + band_below_px)
+            )
             blks = page.get_text("blocks", clip=band_below)
             for b in sorted(blks, key=lambda x: x[1]):
                 txt = (b[4] or "").strip()
                 if not txt:
                     continue
-                if _re.match(r"^\s*(Figure|Fig\.)\s*([A-Za-z0-9\-\.]+)?[\.:]?\s*(.*)$", txt, _re.IGNORECASE):
+                if _re.match(
+                    r"^\s*(Figure|Fig\.)\s*([A-Za-z0-9\-\.]+)?[\.:]?\s*(.*)$", txt, _re.IGNORECASE
+                ):
                     return txt, "below"
             # Above band
             band_above = fitz.Rect(rr.x0, max(0, rr.y0 - band_above_px), rr.x1, rr.y0)
@@ -154,10 +163,12 @@ def detect_title_local(
                 txt = (b[4] or "").strip()
                 if not txt:
                     continue
-                if _re.match(r"^\s*(Figure|Fig\.)\s*([A-Za-z0-9\-\.]+)?[\.:]?\s*(.*)$", txt, _re.IGNORECASE):
+                if _re.match(
+                    r"^\s*(Figure|Fig\.)\s*([A-Za-z0-9\-\.]+)?[\.:]?\s*(.*)$", txt, _re.IGNORECASE
+                ):
                     return txt, "above"
     except Exception as exc:
-        log_stage_error('figure_extractor_utils.py', exc, {'context': 'figure_extractor_utils.py'})
+        log_stage_error("figure_extractor_utils.py", exc, {"context": "figure_extractor_utils.py"})
         raise
     return None, None
 
@@ -185,6 +196,8 @@ def intersect_sections(figures: list[dict], sections: list[dict]) -> None:
                         figure["section_id"] = s.get("id", "unknown")
                         break
         except Exception as exc:
-            log_stage_error('figure_extractor_utils.py', exc, {'context': 'figure_extractor_utils.py'})
+            log_stage_error(
+                "figure_extractor_utils.py", exc, {"context": "figure_extractor_utils.py"}
+            )
             raise
             continue

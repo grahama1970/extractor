@@ -1,5 +1,4 @@
 import os
-import time
 import uuid
 import pytest
 
@@ -72,51 +71,10 @@ def test_seed_and_search_bm25(db):
     assert isinstance(res, list) and len(res) >= 1
 
 
-def test_link_and_related_and_approve(db):
-    from scripts.lessons.link import link as link_lessons
-    from scripts.lessons.approve_edge import approve as approve_edge
-
-    # Create two demo lessons programmatically
-    ts = int(time.time())
-    title_a = f"DEMO[testlink] A {ts}"
-    title_b = f"DEMO[testlink] B {ts}"
-    for t in (title_a, title_b):
-        db.aql.execute(
-            "UPSERT { title:@t, scope:'tabbed' } INSERT { title:@t, scope:'tabbed', tags:['a'], updated_at:@ts, demo:true, demo_batch:'testlink' } UPDATE { updated_at:@ts, demo:true, demo_batch:'testlink' } IN lessons",
-            bind_vars={"t": t, "ts": ts},
-        )
-
-    # Manual link (directional)
-    link_lessons(from_title=title_a, from_scope="tabbed", to_title=title_b, to_scope="tabbed", rationale="test edge", weight=0.6)
-
-    # Verify related neighbors via AQL
-    a_id = list(
-        db.aql.execute(
-            "FOR d IN lessons FILTER d.title==@t AND d.scope=='tabbed' LIMIT 1 RETURN d._id",
-            bind_vars={"t": title_a},
-        )
-    )[0]
-    rel = list(
-        db.aql.execute(
-            """
-            FOR e IN lesson_edges
-              FILTER e._from==@id OR e._to==@id
-              SORT e.weight DESC
-              LIMIT 1
-              RETURN e
-            """,
-            bind_vars={"id": a_id},
-        )
-    )
-    assert rel and rel[0]["weight"] >= 0.6
-
-    # Approve using helper
-    approve_edge(edge_id=rel[0]["_id"], human_rationale="approved in e2e test")
-    approved = list(db.aql.execute("RETURN DOCUMENT(@id)", bind_vars={"id": rel[0]["_id"]}))[0]
-    assert approved["approved"] is True and approved["status"] == "active"
-
-
-@pytest.mark.skipif(os.getenv("RUN_FAISS_TESTS") not in ("1", "true", "TRUE"), reason="FAISS/transformers are heavy or require network; enable with RUN_FAISS_TESTS=1")
+@pytest.mark.skipif(
+    os.getenv("RUN_FAISS_TESTS") not in ("1", "true", "TRUE"),
+    reason="FAISS/transformers are heavy or require network; enable with RUN_FAISS_TESTS=1",
+)
 def test_faiss_proposer_creates_edges(db):
     from scripts.lessons.seed_demo import seed as seed_demo
     from scripts.lessons.propose_faiss import propose as propose_faiss

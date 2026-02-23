@@ -42,7 +42,15 @@ def main(tmp_dir: Path = typer.Option(Path("data/results/structured_parity_smoke
         encoding="utf-8",
     )
     meta = STRUCTURED_PIPELINES[MarkdownProvider]
-    artifacts = run_structured_pipeline(MarkdownProvider, md_path, tmp_dir, stage_prefix=meta.stage_prefix, skip_export10=True, skip_embeddings10=True, fast_embeddings10=True)
+    artifacts = run_structured_pipeline(
+        MarkdownProvider,
+        md_path,
+        tmp_dir,
+        stage_prefix=meta.stage_prefix,
+        skip_export10=True,
+        skip_embeddings10=True,
+        fast_embeddings10=True,
+    )
     s07 = json.loads(Path(artifacts["stage07"]).read_text())
     secs = s07.get("reflowed_sections") or []
     if not secs:
@@ -58,4 +66,3 @@ def main(tmp_dir: Path = typer.Option(Path("data/results/structured_parity_smoke
 
 if __name__ == "__main__":
     app()
-

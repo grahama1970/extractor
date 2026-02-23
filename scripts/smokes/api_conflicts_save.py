@@ -31,7 +31,13 @@ def main() -> int:
     payload = {
         "doc_id": doc_id,
         "items": [
-            {"id": "c1", "type": "duplicate", "groupId": "tbl-001", "resolved": False, "notes": "demo"}
+            {
+                "id": "c1",
+                "type": "duplicate",
+                "groupId": "tbl-001",
+                "resolved": False,
+                "notes": "demo",
+            }
         ],
     }
     r = httpx.post(f"{BASE}/api/conflicts/save", json=payload, timeout=5)
@@ -46,4 +52,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-

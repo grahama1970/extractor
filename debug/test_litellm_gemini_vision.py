@@ -47,7 +47,10 @@ def tiny_png_b64() -> str:
 def main() -> int:
     model = env("LITELLM_VLM_MODEL") or env("LITELLM_DEFAULT_MODEL")
     if not model:
-        print("Set LITELLM_VLM_MODEL or LITELLM_DEFAULT_MODEL to a Gemini vision model.", file=sys.stderr)
+        print(
+            "Set LITELLM_VLM_MODEL or LITELLM_DEFAULT_MODEL to a Gemini vision model.",
+            file=sys.stderr,
+        )
         return 3
     if not (env("GEMINI_API_KEY") or env("GOOGLE_API_KEY")):
         print("Set GEMINI_API_KEY or GOOGLE_API_KEY.", file=sys.stderr)
@@ -78,4 +81,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-

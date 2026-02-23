@@ -23,9 +23,7 @@ def _fetch_json(url: str) -> dict[str, Any]:
 
 def main() -> int:
     if not DIST_DIR.exists():
-        raise SystemExit(
-            f"Clarify UI dist missing at {DIST_DIR}. Run the build step first."
-        )
+        raise SystemExit(f"Clarify UI dist missing at {DIST_DIR}. Run the build step first.")
 
     q = ClarifyQuestion(
         id="sanity-question",

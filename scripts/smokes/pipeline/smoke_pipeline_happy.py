@@ -20,9 +20,7 @@ app = typer.Typer(add_completion=False, help="Smoke: happy-path pipeline run wit
 
 @app.command()
 def main(
-    pdf: Path = typer.Option(
-        Path("data/input/pipeline/BHT_CV32A65X_marked.pdf"), exists=True
-    ),
+    pdf: Path = typer.Option(Path("data/input/pipeline/BHT_CV32A65X_marked.pdf"), exists=True),
     results: Path = typer.Option(Path("data/results/pipeline_happy_smoke"), "-o"),
     arango_db: str = typer.Option("pdf_knowledge_base_test"),
 ):

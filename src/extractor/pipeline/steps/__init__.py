@@ -13,11 +13,12 @@ from . import (
     s05_table_extractor,
     s06_figure_extractor,
     s06b_figure_describer,
-    s07_duckdb_ingest,
+    s07_json_assembler,
     s08_extract_requirements,
     s08_lean4_theorem_prover,
     s09_section_summarizer,
     s10_markdown_exporter,
+    s11_json_exporter,
     s14_report_generator,
 )
 
@@ -31,10 +32,11 @@ __all__ = [
     "s05_table_extractor",
     "s06_figure_extractor",
     "s06b_figure_describer",
-    "s07_duckdb_ingest",
+    "s07_json_assembler",
     "s08_extract_requirements",
     "s08_lean4_theorem_prover",
     "s09_section_summarizer",
     "s10_markdown_exporter",
+    "s11_json_exporter",
     "s14_report_generator",
 ]

@@ -7,7 +7,7 @@ Usage:
 """
 import argparse
 from pathlib import Path
-from extractor.pipeline.steps import 14_report_generator as s14
+from extractor.pipeline.steps import s14_report_generator as s14
 
 
 def main():
@@ -29,4 +29,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

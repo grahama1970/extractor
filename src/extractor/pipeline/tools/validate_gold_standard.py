@@ -23,8 +23,10 @@ import typer
 try:
     from rapidfuzz.fuzz import token_set_ratio as _token_set_ratio  # type: ignore
 except Exception:  # pragma: no cover
+
     def _token_set_ratio(a: str, b: str) -> float:  # type: ignore
         return 0.0
+
 
 try:
     from jsonpath_ng.ext import parse as _jp_parse  # type: ignore
@@ -291,10 +293,6 @@ def _stage_name_for_print(sid: str) -> str:
         "14": "14_report_generator",
     }
     return mapping.get(sid, sid)
-
-
- 
-
 
 
 @app.command()
@@ -661,6 +659,7 @@ def compare_against_gs_invariants(
     # word count percentage delta
     def _wc(s: str) -> int:
         return len((s or "").split())
+
     for spec in invariants.get("word_count_pct_delta_max", []) or []:
         path = spec.get("path") or ""
         spath = spec.get("sample_path") or ""

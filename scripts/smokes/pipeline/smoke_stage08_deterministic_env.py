@@ -23,6 +23,7 @@ app = typer.Typer(add_completion=False)
 @app.command()
 def main():
     import sys
+
     repo_src = (Path(__file__).resolve().parents[3] / "src").resolve()
     if str(repo_src) not in sys.path:
         sys.path.insert(0, str(repo_src))
@@ -44,7 +45,7 @@ def main():
     )
 
     cmd = env.get("LEAN4_CLI_CMD", "")
-    ok = ("--deterministic" in cmd)
+    ok = "--deterministic" in cmd
 
     report = {"ok": ok, "LEAN4_CLI_CMD": cmd}
     artifacts_dir = Path("scripts/artifacts")

@@ -14,6 +14,7 @@ from extractor.pipeline.utils.debug_utils import log_llm_call
 from extractor.pipeline.utils.scillm_router import get_text_router
 from extractor.pipeline.steps.scillm_preflight_validator import quick_scillm_check
 
+
 async def call_reflow_llm(
     stage_key: str,
     task_kind: str,
@@ -40,7 +41,7 @@ async def call_reflow_llm(
     if not quick_scillm_check():
         raise RuntimeError("SciLLM environment not configured; reflow requires Chutes.")
 
-    router = get_text_router()
+    get_text_router()
     model_name = "chutes/text"
 
     t0 = time.monotonic()
@@ -50,17 +51,19 @@ async def call_reflow_llm(
 
     try:
         from scillm.batch import parallel_acompletions_iter
-        
-        reqs = [{
-            "model": model_name,
-            "messages": messages,
-            "response_format": {"type": "json_object"},
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-            "timeout": timeout,
-            "index": 0
-        }]
-        
+
+        reqs = [
+            {
+                "model": model_name,
+                "messages": messages,
+                "response_format": {"type": "json_object"},
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+                "timeout": timeout,
+                "index": 0,
+            }
+        ]
+
         api_key = os.getenv("CHUTES_API_KEY")
         api_base = os.getenv("CHUTES_API_BASE", "https://llm.chutes.ai/v1")
 
@@ -73,24 +76,24 @@ async def call_reflow_llm(
             timeout=timeout,
             wall_time_s=180,  # 3 min max
             tenacious=False,  # Fail fast
-            response_format={"type": "json_object"}
+            response_format={"type": "json_object"},
         ):
             if r.get("ok"):
                 # Adapt to expected response format (dict or object)
                 # The original code handled both dict and object.
                 # parallel_acompletions_iter returns a dict.
-                # We can just return a dict mimicking the OpenAI structure for compatibility 
+                # We can just return a dict mimicking the OpenAI structure for compatibility
                 # or just return the scillm result if the caller handles it.
                 # Looking at usage in call_reflow_llm, it extracts 'usage' and 'model'.
-                
+
                 content = r.get("content")
-                
+
                 resp = {
                     "model": r.get("model", model_name),
                     "usage": r.get("usage"),
                     "choices": [{"message": {"content": content}}],
                     # Scillm might put parsed json in 'parsed'
-                    "parsed": r.get("parsed")
+                    "parsed": r.get("parsed"),
                 }
                 success = True
             else:

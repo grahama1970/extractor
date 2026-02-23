@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 
 class SectionHeaderBlock(BaseModel):
     """Section header block with metadata."""
+
     block_type: Literal["SectionHeader"]
     page_idx: int
     page: int
@@ -34,6 +35,7 @@ class SectionHeaderBlock(BaseModel):
 
 class TextBlock(BaseModel):
     """Regular text block."""
+
     block_type: Literal["Text", "Formula", "Title"]
     page_idx: int
     page: int
@@ -49,6 +51,7 @@ SectionBlock = SectionHeaderBlock | TextBlock | Dict[str, Any]
 
 class Metadata(BaseModel):
     """Section metadata with hierarchy and visual information."""
+
     section_number: str
     section_depth: List[int]
     section_hash: str
@@ -72,6 +75,7 @@ class Metadata(BaseModel):
 
 class Section(BaseModel):
     """A document section with title, blocks, and metadata."""
+
     title: str
     level: int
     display_title: str
@@ -89,6 +93,7 @@ class Section(BaseModel):
 
 class SuspiciousHeaderAnalysis(BaseModel):
     """Analysis of suspicious headers validation."""
+
     validation_method: str
     total_sections: int
     validated_sections: int
@@ -101,6 +106,7 @@ class SectionBuilder04Output(BaseModel):
     """
     Complete Stage 04 actual output schema.
     """
+
     success: bool
     timestamp: datetime
     source_json: str
@@ -117,7 +123,9 @@ class SectionBuilder04Output(BaseModel):
     diagnostics: Dict[str, Any] = Field(default_factory=dict)
 
 
-def validate_sectionbuilder04_output(data: dict) -> tuple[SectionBuilder04Output | None, str | None]:
+def validate_sectionbuilder04_output(
+    data: dict,
+) -> tuple[SectionBuilder04Output | None, str | None]:
     """
     Validate Stage 04 section builder output against actual schema.
     """

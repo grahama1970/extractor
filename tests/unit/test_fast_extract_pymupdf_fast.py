@@ -24,6 +24,7 @@ def _make_pdf(tmpdir: Path) -> Path:
 
 def test_extract_fast_text_basic():
     from extractor.fast_extract.pymupdf_fast import extract_fast_text
+
     with tempfile.TemporaryDirectory() as td:
         tmpdir = Path(td)
         pdf = _make_pdf(tmpdir)
@@ -36,6 +37,7 @@ def test_extract_fast_text_basic():
 
 def test_extract_fast_text_pages_slice():
     from extractor.fast_extract.pymupdf_fast import extract_fast_text
+
     with tempfile.TemporaryDirectory() as td:
         tmpdir = Path(td)
         pdf = _make_pdf(tmpdir)

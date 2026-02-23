@@ -1,14 +1,20 @@
 """Stage 08 Lean4 theorem prover runner."""
-import asyncio, json, os, sys, time
+
+import asyncio
+import hashlib
+import json
+import os
+import sys
+import time
 from dataclasses import dataclass
-from pathlib import Path
 from datetime import datetime
-from typing import Any, Dict, List
+from pathlib import Path
+from typing import Any, List, cast
 from loguru import logger
 from rich.console import Console
-from extractor.pipeline.utils.reliability import log_stage_error
 from extractor.pipeline.steps.scillm_preflight_validator import require_scillm_preflight
 from extractor.pipeline.utils.diagnostics import (
+    build_stage_timings,
     iso_now,
     snapshot_resources,
     start_resource_sampler,
@@ -17,30 +23,30 @@ from extractor.pipeline.utils.diagnostics import (
     gpu_metrics_available,
     get_run_id,
 )
-import shlex
 import textwrap
 from tqdm.asyncio import tqdm
 from extractor.pipeline.utils.json_utils import clean_json_string
 from extractor.pipeline.utils.json_mode import JSON_SYSTEM_GUARD
-from extractor.pipeline.utils.scillm_router import get_text_router
 from extractor.pipeline.utils.debug_utils import log_llm_call
+from extractor.pipeline.utils.step_sanity import run_step_sanity
 from extractor.pipeline.utils.prover.execution import (
-    ProofResult as _ProofResult,
     prove_via_cli as _prove_via_cli,
     prove_batch_via_cli as _prove_batch_via_cli,
     execute_lean_code_docker as _execute_lean_code_docker,
-    get_cli_cmd,
 )
 
 try:
     from scillm.extras.providers import certainly_prove  # type: ignore
 except Exception:
+
     def certainly_prove(*args, **kwargs):
         raise RuntimeError("SciLLM extras/providers unavailable in this environment")
+
 
 try:
     from lean4_prover.core.prove_requirement import ProofResult, generate_lean_code
 except Exception:
+
     @dataclass
     class ProofResult:
         success: bool
@@ -58,6 +64,7 @@ except Exception:
             f"-- strategy: {getattr(strategy, 'validation_approach', 'unknown')}\n"
         )
 
+
 # LLM Configuration
 LEAN4_MODEL = os.getenv("LEAN4_MODEL", "chutes/text")
 LEAN4_PROVER_MODEL = os.getenv("LEAN4_PROVER_MODEL", os.getenv("LEAN4_MODEL", "certainly/lean4"))
@@ -66,6 +73,11 @@ MAX_CONCURRENT_LEAN4 = int(os.getenv("MAX_CONCURRENT_LEAN4_CALLS", 1))
 LEAN4_CLI_CMD = os.getenv("LEAN4_CLI_CMD", "").strip()
 
 console = Console(stderr=True)
+
+
+def sanity() -> int:
+    return run_step_sanity("08_lean4_theorem_prover")
+
 
 def run(
     input_json: Path,
@@ -114,7 +126,9 @@ def run(
             console.print(f"[red]Stage 08 SciLLM preflight failed: {exc}[/red]")
             raise
         except Exception as exc:
-            console.print(f"[red]Stage 08 SciLLM preflight raised: {type(exc).__name__}: {exc}[/red]")
+            console.print(
+                f"[red]Stage 08 SciLLM preflight raised: {type(exc).__name__}: {exc}[/red]"
+            )
             raise
 
     # Minimal diagnostics to align with other stages
@@ -146,7 +160,9 @@ def run(
 
     with open(input_json) as f:
         pipeline_data = json.load(f)
-    console.print(f"[cyan]Sections to process: {len(pipeline_data.get('reflowed_sections') or [])}[/cyan]")
+    console.print(
+        f"[cyan]Sections to process: {len(pipeline_data.get('reflowed_sections') or [])}[/cyan]"
+    )
     if not pipeline_data.get("reflowed_sections"):
         console.print("[yellow]No sections found; exiting.[/yellow]")
         return None
@@ -220,18 +236,20 @@ def run(
     # Emit a simple traceability index for auditing: requirement_id/text_sha1 → proof status
     try:
         trace = {"items": []}
-        for pr in (result.get("proof_results") or []):
+        for pr in result.get("proof_results") or []:
             it = pr.get("item") or {}
-            trace["items"].append({
-                "requirement_id": it.get("requirement_id"),
-                "text_sha1": it.get("text_sha1"),
-                "status": "proved" if pr.get("success") else "unproved",
-                "section": (it.get("source") or {}).get("section_id"),
-                "section_title": (it.get("source") or {}).get("section_title"),
-                "heading_path": (it.get("source") or {}).get("heading_path"),
-                "section_path": (it.get("source") or {}).get("section_path"),
-                "page_num": (it.get("source") or {}).get("page_num"),
-            })
+            trace["items"].append(
+                {
+                    "requirement_id": it.get("requirement_id"),
+                    "text_sha1": it.get("text_sha1"),
+                    "status": "proved" if pr.get("success") else "unproved",
+                    "section": (it.get("source") or {}).get("section_id"),
+                    "section_title": (it.get("source") or {}).get("section_title"),
+                    "heading_path": (it.get("source") or {}).get("heading_path"),
+                    "section_path": (it.get("source") or {}).get("section_path"),
+                    "page_num": (it.get("source") or {}).get("page_num"),
+                }
+            )
         (json_output_dir / "08_trace_index.json").write_text(json.dumps(trace, indent=2))
     except Exception:
         pass
@@ -246,8 +264,12 @@ def run(
             # Map proof results by normalized text if available
             by_text = {}
             try:
-                for r in (result.get("proof_results") or []):
-                    txt = (r.get("item") or {}).get("requirement_text") or (r.get("item") or {}).get("text_canonical") or ""
+                for r in result.get("proof_results") or []:
+                    txt = (
+                        (r.get("item") or {}).get("requirement_text")
+                        or (r.get("item") or {}).get("text_canonical")
+                        or ""
+                    )
                     key = str(txt).strip().lower()
                     by_text.setdefault(key, []).append(r)
             except Exception:
@@ -256,14 +278,30 @@ def run(
                 txt = str(r.get("text_canonical") or r.get("text_raw") or "").strip()
                 key = txt.lower()
                 pr = (by_text.get(key) or [None])[0]
-                status = "proved" if (pr and pr.get("success")) else ("unproved" if not skip_proving else "new")
-                enriched["requirements"].append({
-                    **r,
-                    "status": status,
-                    "compile_log": (pr or {}).get("stderr", "") if pr else "",
-                    "formalization": {"lean_code": (pr or {}).get("lean_code", "")} if pr else None,
-                    "diagnostics": ([] if not pr else ([{"kind":"proof","message": pr.get("error","")}] if not pr.get("success") else [])),
-                })
+                status = (
+                    "proved"
+                    if (pr and pr.get("success"))
+                    else ("unproved" if not skip_proving else "new")
+                )
+                enriched["requirements"].append(
+                    {
+                        **r,
+                        "status": status,
+                        "compile_log": (pr or {}).get("stderr", "") if pr else "",
+                        "formalization": (
+                            {"lean_code": (pr or {}).get("lean_code", "")} if pr else None
+                        ),
+                        "diagnostics": (
+                            []
+                            if not pr
+                            else (
+                                [{"kind": "proof", "message": pr.get("error", "")}]
+                                if not pr.get("success")
+                                else []
+                            )
+                        ),
+                    }
+                )
             enr_out.write_text(json.dumps(enriched, indent=2))
     except Exception as e:
         try:
@@ -393,6 +431,8 @@ def _cli() -> int:
 
 if __name__ == "__main__":
     sys.exit(_cli())
+
+
 async def identify_requirements_in_section(
     section: dict[str, Any], semaphore: asyncio.Semaphore
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -477,48 +517,56 @@ async def identify_requirements_in_section(
             # SciLLM Router call (paved path, no manual headers)
             async def _do_scillm():
                 logger.info(
-                    "req_extract.call", extra={
+                    "req_extract.call",
+                    extra={
                         "model": LEAN4_MODEL,
                         "timeout": 120,
                         "section_id": section.get("id"),
                         "title": section.get("title"),
                         "text_len": len(reflowed_text or ""),
                         "tables": len(tables or []),
-                    }
+                    },
                 )
-                
+
                 from scillm import parallel_acompletions_iter
                 import os
-                
+
                 _t0 = time.time()
                 try:
-                    reqs = [{
-                        "model": "chutes/text",
-                        "messages": [
-                            {"role": "system", "content": JSON_SYSTEM_GUARD},
-                            {"role": "user", "content": prompt},
-                        ],
-                        "response_format": {"type": "json_object"},
-                        "timeout": 120,
-                        "temperature": 0,
-                        "index": 0
-                    }]
-                    
+                    reqs = [
+                        {
+                            "model": "chutes/text",
+                            "messages": [
+                                {"role": "system", "content": JSON_SYSTEM_GUARD},
+                                {"role": "user", "content": prompt},
+                            ],
+                            "response_format": {"type": "json_object"},
+                            "timeout": 120,
+                            "temperature": 0,
+                            "index": 0,
+                        }
+                    ]
+
                     api_key = os.getenv("CHUTES_API_KEY")
                     api_base = os.getenv("CHUTES_API_BASE", "https://llm.chutes.ai/v1")
-                    
+
                     async for r in parallel_acompletions_iter(
-                        reqs, api_base=api_base, api_key=api_key,
+                        reqs,
+                        api_base=api_base,
+                        api_key=api_key,
                         custom_llm_provider="openai_like",  # Required per SCILLM_PAVED_PATH_CONTRACT
-                        concurrency=1, timeout=120, wall_time_s=300, tenacious=False,
-                        response_format={"type": "json_object"}
+                        concurrency=1,
+                        timeout=120,
+                        wall_time_s=300,
+                        tenacious=False,
+                        response_format={"type": "json_object"},
                     ):
                         if r.get("ok"):
                             resp = {
                                 "model": r.get("model", "chutes/text"),
                                 "usage": r.get("usage"),
                                 "choices": [{"message": {"content": r.get("content")}}],
-                                "id": r.get("id")
+                                "id": r.get("id"),
                             }
                         else:
                             raise RuntimeError(f"SciLLM Error: {r.get('error')}")
@@ -545,6 +593,7 @@ async def identify_requirements_in_section(
                         raw_preview=str(e),
                     )
                     raise
+
             resp_obj = await _do_scillm()
             logger.info("req_extract.done")
             response = resp_obj
@@ -615,13 +664,17 @@ async def identify_requirements_in_section(
             logger.error(
                 f"Failed to extract requirements from section '{section.get('title', 'Unknown')}': {e}"
             )
-            snippet = (section.get("reflowed_text") or section.get("merged_text") or section.get("raw_text") or "")[:200]
+            snippet = (
+                section.get("reflowed_text")
+                or section.get("merged_text")
+                or section.get("raw_text")
+                or ""
+            )[:200]
             logger.debug(f"Section content: {snippet}...")
             raise
 
 
 # --- Theorem Proving with Feedback ---
-
 
 
 # --- Certainly/Lean4 bridge (paved path) ---
@@ -637,6 +690,7 @@ def _certainly_health(api_base: str, timeout: float = 3.0) -> bool:
         if not url:
             return False
         import httpx
+
         r = httpx.get(url, timeout=timeout)
         if r.status_code != 200:
             return False
@@ -647,6 +701,8 @@ def _certainly_health(api_base: str, timeout: float = 3.0) -> bool:
         return schema.startswith("canonical+lean4@")
     except Exception:
         return False
+
+
 def prove_with_certainly_batch(
     requirements: list[str],
     api_base: str | None = None,
@@ -668,8 +724,6 @@ def prove_with_certainly_batch(
         max_seconds=max_seconds,
         require_proved=require_proved,
     )
-
-
 
 
 async def prove_requirement(requirement: str, strategy: Any):
@@ -699,15 +753,24 @@ async def prove_requirement(requirement: str, strategy: Any):
         if os.getenv("LEAN4_REMOTE", "1").lower() in ("1", "true", "yes", "y"):
             ch_base = os.getenv("CHUTES_API_BASE", "").strip()
             ch_key = os.getenv("CHUTES_API_KEY", "").strip()
+
             async def _do_scillm_prover():
                 from scillm import parallel_acompletions_iter
+
                 _t0 = time.time()
                 try:
-                    reqs = [{
-                        "model": "chutes/text",
-                        "messages": [
-                            {"role": "system", "content": "You are a Lean 4 theorem prover service. Return STRICT JSON with keys: success(bool), lean_code(string), stdout(string), stderr(string), proof_output(string|null)."},
-                            {"role": "user", "content": textwrap.dedent(f"""
+                    reqs = [
+                        {
+                            "model": "chutes/text",
+                            "messages": [
+                                {
+                                    "role": "system",
+                                    "content": "You are a Lean 4 theorem prover service. Return STRICT JSON with keys: success(bool), lean_code(string), stdout(string), stderr(string), proof_output(string|null).",
+                                },
+                                {
+                                    "role": "user",
+                                    "content": textwrap.dedent(
+                                        f"""
                                 Prove the following requirement. Return STRICT JSON only.
 
                                 Requirement:
@@ -715,26 +778,34 @@ async def prove_requirement(requirement: str, strategy: Any):
 
                                 Strategy:
                                 {getattr(strategy, '__dict__', strategy)}
-                            """)},
-                        ],
-                        "response_format": {"type": "json_object"},
-                        "timeout": 300,
-                        "temperature": 0,
-                        "index": 0
-                    }]
-                    
+                            """
+                                    ),
+                                },
+                            ],
+                            "response_format": {"type": "json_object"},
+                            "timeout": 300,
+                            "temperature": 0,
+                            "index": 0,
+                        }
+                    ]
+
                     async for r in parallel_acompletions_iter(
-                        reqs, api_base=ch_base, api_key=ch_key,
+                        reqs,
+                        api_base=ch_base,
+                        api_key=ch_key,
                         custom_llm_provider="openai_like",  # Required per SCILLM_PAVED_PATH_CONTRACT
-                        concurrency=1, timeout=300, wall_time_s=600, tenacious=False,
-                        response_format={"type": "json_object"}
+                        concurrency=1,
+                        timeout=300,
+                        wall_time_s=600,
+                        tenacious=False,
+                        response_format={"type": "json_object"},
                     ):
                         if r.get("ok"):
                             resp = {
                                 "model": r.get("model", "chutes/text"),
                                 "usage": r.get("usage"),
                                 "choices": [{"message": {"content": r.get("content")}}],
-                                "id": r.get("id")
+                                "id": r.get("id"),
                             }
                         else:
                             raise RuntimeError(f"SciLLM Prover Error: {r.get('error')}")
@@ -761,6 +832,7 @@ async def prove_requirement(requirement: str, strategy: Any):
                         raw_preview=str(e),
                     )
                     raise
+
             resp = await _do_scillm_prover()
             content = (resp.get("choices") or [{}])[0].get("message", {}).get("content", "")
             try:
@@ -768,6 +840,7 @@ async def prove_requirement(requirement: str, strategy: Any):
             except Exception:
                 obj = {}
             from types import SimpleNamespace
+
             return SimpleNamespace(
                 success=bool(obj.get("success", False)),
                 lean_code=str(obj.get("lean_code", "")),
@@ -976,6 +1049,7 @@ async def process_reflowed_sections(
     if miner_path:
         try:
             from pathlib import Path as _P
+
             print(f"MINER_PATH_DEBUG {miner_path} exists={_P(miner_path).exists()}")
         except Exception:
             pass
@@ -996,12 +1070,14 @@ async def process_reflowed_sections(
                     )
                     if not txt:
                         continue
-                    all_requirements.append({
-                        "requirement_text": str(txt),
-                        "source": m.get("source") or {},
-                        "modality": m.get("modality"),
-                        "condition": m.get("condition"),
-                    })
+                    all_requirements.append(
+                        {
+                            "requirement_text": str(txt),
+                            "source": m.get("source") or {},
+                            "modality": m.get("modality"),
+                            "condition": m.get("condition"),
+                        }
+                    )
                     added += 1
                 logger.info(f"Merged {added} requirements from miner: {miner_path}")
         except Exception as e:
@@ -1022,12 +1098,14 @@ async def process_reflowed_sections(
                 )
                 if not txt:
                     continue
-                all_requirements.append({
-                    "requirement_text": str(txt),
-                    "source": m.get("source") or {},
-                    "modality": m.get("modality"),
-                    "condition": m.get("condition"),
-                })
+                all_requirements.append(
+                    {
+                        "requirement_text": str(txt),
+                        "source": m.get("source") or {},
+                        "modality": m.get("modality"),
+                        "condition": m.get("condition"),
+                    }
+                )
                 added += 1
             logger.info(f"Merged {added} injected miner requirements from pipeline_data")
     except Exception:
@@ -1059,6 +1137,7 @@ async def process_reflowed_sections(
         # Build requirement texts (ignore constraints for the bridge v1)
         def _is_high_quality(text: str) -> bool:
             import re as _re
+
             t = (text or "").strip()
             if len(t) < 40:
                 return False
@@ -1086,7 +1165,8 @@ async def process_reflowed_sections(
                 meta = {
                     "requirement_text": str(txt),
                     "requirement_id": r.get("requirement_id"),
-                    "text_sha1": r.get("text_sha1") or hashlib.sha1(str(txt).encode("utf-8")).hexdigest(),
+                    "text_sha1": r.get("text_sha1")
+                    or hashlib.sha1(str(txt).encode("utf-8")).hexdigest(),
                     "source": r.get("source") or {},
                     "from": r.get("from"),
                 }
@@ -1097,7 +1177,8 @@ async def process_reflowed_sections(
         dropped = len(raw_req_texts) - len(req_texts)
         if dropped:
             logger.info(
-                "req_filter.drop", extra={"total": len(raw_req_texts), "kept": len(req_texts), "dropped": dropped}
+                "req_filter.drop",
+                extra={"total": len(raw_req_texts), "kept": len(req_texts), "dropped": dropped},
             )
         if req_texts:
             base = (
@@ -1156,13 +1237,15 @@ async def process_reflowed_sections(
                     },
                 )
                 all_proofs.append({"meta": meta, "content": content})
-                certainly_meta.append({
-                    "idx": i,
-                    "size": len(chunk),
-                    "proved": proofs_proved,
-                    "items_total": items_total,
-                    "statistics": meta.get("statistics", {}),
-                })
+                certainly_meta.append(
+                    {
+                        "idx": i,
+                        "size": len(chunk),
+                        "proved": proofs_proved,
+                        "items_total": items_total,
+                        "statistics": meta.get("statistics", {}),
+                    }
+                )
                 proved_total += proofs_proved
             # Build per-item results from meta when available (partial success allowed)
             proof_results: list[dict[str, Any]] = []
@@ -1170,7 +1253,11 @@ async def process_reflowed_sections(
                 # Flatten results across chunks if provided
                 flat = []
                 for ap in all_proofs:
-                    res = (ap.get("meta") or {}).get("results") or (ap.get("meta") or {}).get("proof_results") or []
+                    res = (
+                        (ap.get("meta") or {}).get("results")
+                        or (ap.get("meta") or {}).get("proof_results")
+                        or []
+                    )
                     if isinstance(res, list):
                         flat.extend(res)
                 if flat:
@@ -1178,43 +1265,47 @@ async def process_reflowed_sections(
                         txt = r.get("requirement_text", "")
                         sha = hashlib.sha1(str(txt).encode("utf-8")).hexdigest()
                         meta = sha_to_meta.get(sha, {})
-                        proof_results.append({
-                            "success": bool(r.get("ok") is True),
+                        proof_results.append(
+                            {
+                                "success": bool(r.get("ok") is True),
+                                "item": {
+                                    "requirement_text": txt,
+                                    "requirement_id": meta.get("requirement_id"),
+                                    "text_sha1": meta.get("text_sha1", sha),
+                                    "source": meta.get("source"),
+                                },
+                                "item_type": "requirement",
+                                "lean_code": "",
+                                "proof": "proved" if r.get("ok") else "unproved",
+                                "tactics_used": [],
+                                "assumptions": [],
+                                "duration_seconds": 0.0,
+                                "timestamp": datetime.now().isoformat(),
+                            }
+                        )
+            except Exception:
+                # Fallback: mark all as proved if summary said so
+                for t in req_texts:
+                    sha = hashlib.sha1(str(t).encode("utf-8")).hexdigest()
+                    meta = sha_to_meta.get(sha, {})
+                    proof_results.append(
+                        {
+                            "success": True,
                             "item": {
-                                "requirement_text": txt,
+                                "requirement_text": t,
                                 "requirement_id": meta.get("requirement_id"),
                                 "text_sha1": meta.get("text_sha1", sha),
                                 "source": meta.get("source"),
                             },
                             "item_type": "requirement",
                             "lean_code": "",
-                            "proof": "proved" if r.get("ok") else "unproved",
+                            "proof": "proved",
                             "tactics_used": [],
                             "assumptions": [],
                             "duration_seconds": 0.0,
                             "timestamp": datetime.now().isoformat(),
-                        })
-            except Exception:
-                # Fallback: mark all as proved if summary said so
-                for t in req_texts:
-                    sha = hashlib.sha1(str(t).encode("utf-8")).hexdigest()
-                    meta = sha_to_meta.get(sha, {})
-                    proof_results.append({
-                        "success": True,
-                        "item": {
-                            "requirement_text": t,
-                            "requirement_id": meta.get("requirement_id"),
-                            "text_sha1": meta.get("text_sha1", sha),
-                            "source": meta.get("source"),
-                        },
-                        "item_type": "requirement",
-                        "lean_code": "",
-                        "proof": "proved",
-                        "tactics_used": [],
-                        "assumptions": [],
-                        "duration_seconds": 0.0,
-                        "timestamp": datetime.now().isoformat(),
-                    })
+                        }
+                    )
             stats = {
                 "total_requirements_found": len(all_requirements),
                 "total_constraints_found": len(all_constraints),
@@ -1333,5 +1424,3 @@ async def process_reflowed_sections(
 
 
 # --- Main Command ---
-
-

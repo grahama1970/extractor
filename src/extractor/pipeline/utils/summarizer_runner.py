@@ -1,10 +1,113 @@
 """Stage 09 section summarizer runner."""
-import json, os, asyncio
-from pathlib import Path
+
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import time
 from datetime import datetime
+from pathlib import Path
+from textwrap import dedent
 from typing import Any, Dict, List, Optional
+
 from loguru import logger
+from rich.console import Console
+from tqdm.asyncio import tqdm
+
+from extractor.pipeline.steps.scillm_preflight_validator import require_scillm_preflight
+from extractor.pipeline.utils.debug_utils import log_llm_call
+from extractor.pipeline.utils.json_mode import JSON_SYSTEM_GUARD
+from extractor.pipeline.utils.json_utils import clean_json_string, restrict_top_level_keys
+from extractor.pipeline.utils.model_select import get_text_model
+from extractor.pipeline.utils.prompt_loader import load_prompt
 from extractor.pipeline.utils.reliability import log_stage_error
+from extractor.pipeline.utils.scillm_router import get_text_router
+from extractor.pipeline.utils.step_sanity import run_step_sanity
+
+PROMPT = load_prompt("09_section_summarizer")
+STEP_NAME = "09_section_summarizer"
+
+console = Console()
+
+
+def sanity() -> int:
+    return run_step_sanity(STEP_NAME)
+
+
+def _choice_content(resp: Any) -> Optional[str]:
+    """Extract content from an OpenAI-compatible response object or dict."""
+    try:
+        choices = getattr(resp, "choices", None)
+        if choices is None and isinstance(resp, dict):
+            choices = resp.get("choices")
+        if not choices:
+            return None
+        first = choices[0]
+        if isinstance(first, dict):
+            message = first.get("message")
+        else:
+            message = getattr(first, "message", None)
+        if not message:
+            return None
+        if isinstance(message, dict):
+            return message.get("content")
+        return getattr(message, "content", None)
+    except Exception as exc:
+        log_stage_error(STEP_NAME, exc, {"context": "choice_content"})
+        raise
+
+
+def _extract_usage(resp: Any) -> Dict[str, Any]:
+    usage_obj = getattr(resp, "usage", None)
+    if usage_obj is None and isinstance(resp, dict):
+        usage_obj = resp.get("usage")
+    if isinstance(usage_obj, dict):
+        return usage_obj
+    if usage_obj is None:
+        return {}
+    return {
+        "prompt_tokens": getattr(usage_obj, "prompt_tokens", None),
+        "completion_tokens": getattr(usage_obj, "completion_tokens", None),
+        "total_tokens": getattr(usage_obj, "total_tokens", None),
+    }
+
+
+def _served_model(resp: Any, fallback: str) -> str:
+    if isinstance(resp, dict):
+        return resp.get("model") or resp.get("id") or fallback
+    return getattr(resp, "model", None) or getattr(resp, "id", None) or fallback
+
+
+async def _direct_scillm_summary_call(
+    messages: List[Dict[str, Any]],
+    *,
+    response_format: Optional[Dict[str, Any]] = None,
+    timeout: int,
+) -> Optional[str]:
+    """Fallback: Direct call to SciLLM client if Router returns empty/null."""
+    try:
+        from scillm import acompletion as _sc_acompletion  # type: ignore
+    except Exception as exc:
+        log_stage_error(STEP_NAME, exc, {"context": "import_scillm"})
+        raise
+    try:
+        resp = await _sc_acompletion(
+            model=os.environ.get("CHUTES_TEXT_MODEL", ""),
+            api_base=os.environ.get("CHUTES_API_BASE", ""),
+            api_key=os.environ.get("CHUTES_API_KEY", ""),
+            custom_llm_provider="openai_like",
+            messages=messages,
+            response_format=response_format or {"type": "json_object"},
+            temperature=0.0,
+            timeout=timeout,
+        )
+        return _choice_content(resp)
+    except Exception as exc:
+        logger.warning("stage09.direct_scillm_retry_failed error=%s", exc)
+        return None
+
+
 async def summarize_section(
     section: Dict[str, Any],
     semaphore: asyncio.Semaphore,
@@ -18,7 +121,7 @@ async def summarize_section(
     """Generate a summary for a single section using SciLLM (Router), with optional rolling context."""
     prev = previous_summaries or []
     async with semaphore:
-        prev_text = "\\n".join(
+        prev_text = "\n".join(
             f"- {p.get('section_title', 'Untitled')}: {p.get('summary_data',{}).get('summary','')}"
             for p in prev
             if p.get("success")
@@ -36,61 +139,33 @@ async def summarize_section(
             section_level=section.get("level", 0),
             section_text=base_text,
         )
-
-        system_json_guard = PROMPT["system"]
+        system_guard = PROMPT["system"]
         model_name = get_text_model()
         is_gpt5 = "gpt-5" in (model_name or "").lower()
         router = get_text_router()
 
-        t0 = asyncio.get_event_loop().time()
+        t0 = time.monotonic()
         error: Optional[str] = None
+        error_class: Optional[str] = None
         served_model: Optional[str] = None
-        usage: Dict[str, Any] = {}
         content_preview: Optional[str] = None
+        usage: Dict[str, Any] = {}
+        messages_payload = [
+            {"role": "system", "content": system_guard},
+            {"role": "user", "content": prompt},
+        ]
+        resp: Any = None
 
         try:
-            from scillm.batch import parallel_acompletions_iter
-            import os
-            
-            reqs = [{
-                "model": "chutes/text",
-                "messages": messages_payload,
-                "response_format": {"type": "json_object"} if strict_json else None,
-                "temperature": 0.0 if is_gpt5 else 0.0,
-                "timeout": request_timeout,
-                "index": 0
-            }]
-            
-            api_key = os.getenv("CHUTES_API_KEY")
-            api_base = os.getenv("CHUTES_API_BASE", "https://llm.chutes.ai/v1")
-            
-            resp = None
-            async for r in parallel_acompletions_iter(
-                reqs, api_base=api_base, api_key=api_key,
-                custom_llm_provider="openai_like",  # Required per SCILLM_PAVED_PATH_CONTRACT
-                concurrency=1, timeout=request_timeout, wall_time_s=180, tenacious=False,
-                response_format={"type": "json_object"} if strict_json else None
-            ):
-                if r.get("ok"):
-                    resp = {
-                        "model": r.get("model", "chutes/text"),
-                        "usage": r.get("usage"),
-                        "choices": [{"message": {"content": r.get("content")}}],
-                        "id": r.get("id")
-                    }
-                else:
-                    raise RuntimeError(f"SciLLM Summarizer Error: {r.get('error')}")
-
-            log_llm_call(
-                stage_key="09_summarizer",
-                task_kind="summarize_section",
-                route_name="chutes/text",
+            resp = await router.acompletion(
                 model="chutes/text",
-                success=True,
-                latency_ms=(asyncio.get_event_loop().time() - t0) * 1000,
-                raw_response=resp,
+                messages=messages_payload,
+                response_format={"type": "json_object"} if strict_json else None,
+                temperature=0.0 if is_gpt5 else 0.0,
+                timeout=request_timeout,
             )
-            served_model = getattr(resp, "model", None) or getattr(resp, "id", None) or "chutes/text"
+            served_model = _served_model(resp, "chutes/text")
+            usage = _extract_usage(resp)
             content = _choice_content(resp)
 
             if content is None or (isinstance(content, str) and not content.strip()):
@@ -107,16 +182,6 @@ async def summarize_section(
                 content = resp_direct if resp_direct else ""
 
             content_preview = str(content)[:400] if content is not None else None
-
-            usage_obj = getattr(resp, "usage", None) or {}
-            if isinstance(usage_obj, dict):
-                usage = usage_obj
-            else:
-                usage = {
-                    "prompt_tokens": getattr(usage_obj, "prompt_tokens", None),
-                    "completion_tokens": getattr(usage_obj, "completion_tokens", None),
-                    "total_tokens": getattr(usage_obj, "total_tokens", None),
-                }
 
             result = clean_json_string(content, return_dict=True)
             if isinstance(result, dict):
@@ -151,7 +216,8 @@ async def summarize_section(
                 "success": True,
             }
         except Exception as exc:
-            error = f"{type(exc).__name__}: {exc}"
+            error_class = type(exc).__name__
+            error = f"{error_class}: {exc}"
             logger.error(
                 "stage09.summarize_section_error section_id=%s title=%s error=%s",
                 section.get("id"),
@@ -169,16 +235,43 @@ async def summarize_section(
                 "success": False,
             }
         finally:
-            if error:
-                 log_llm_call(
+            latency_ms = int((time.monotonic() - t0) * 1000)
+            tokens_in = usage.get("prompt_tokens") if usage else None
+            tokens_out = usage.get("completion_tokens") if usage else None
+            stage_dir = timings_path.parent if timings_path else None
+            if timings_lock:
+                async with timings_lock:
+                    log_llm_call(
+                        stage_key="09_summarizer",
+                        task_kind="summarize_section",
+                        route="chutes/text",
+                        model=served_model or "chutes/text",
+                        success=error is None,
+                        section_id=section.get("id"),
+                        error_class=error_class,
+                        latency_ms=latency_ms,
+                        tokens_in=tokens_in,
+                        tokens_out=tokens_out,
+                        raw_preview=error,
+                        stage_dir=stage_dir,
+                    )
+            else:
+                log_llm_call(
                     stage_key="09_summarizer",
-                    task_kind="summarize_section_logic",
-                    route_name="chutes/text",
-                    model="chutes/text",
-                    success=False,
-                    error_class="LogicError",
+                    task_kind="summarize_section",
+                    route="chutes/text",
+                    model=served_model or "chutes/text",
+                    success=error is None,
+                    section_id=section.get("id"),
+                    error_class=error_class,
+                    latency_ms=latency_ms,
+                    tokens_in=tokens_in,
+                    tokens_out=tokens_out,
                     raw_preview=error,
+                    stage_dir=stage_dir,
                 )
+
+
 async def create_checkpoint_summary(
     summaries: List[Dict[str, Any]],
     checkpoint_name: str = "Chapter",
@@ -234,67 +327,52 @@ async def create_checkpoint_summary(
     system_guard = JSON_SYSTEM_GUARD
 
     async def _call_once_async():
-        t0 = time.time()
+        t0 = time.monotonic()
+        error: Optional[str] = None
+        error_class: Optional[str] = None
+        resp: Any = None
+        usage: Dict[str, Any] = {}
+        served_model = model_name
         try:
-            reqs = [{
-                "model": "chutes/text",
-                "messages": [
+            router = get_text_router()
+            resp = await router.acompletion(
+                model="chutes/text",
+                messages=[
                     {"role": "system", "content": system_guard},
                     {"role": "user", "content": prompt},
                 ],
-                "response_format": {"type":"json_object"},
-                "temperature": 0.0,
-                "timeout": request_timeout,
-                "index": 0
-            }]
-            
-            api_key = os.getenv("CHUTES_API_KEY")
-            api_base = os.getenv("CHUTES_API_BASE", "https://llm.chutes.ai/v1")
-            
-            resp = None
-            async for r in parallel_acompletions_iter(
-                reqs, api_base=api_base, api_key=api_key,
-                custom_llm_provider="openai_like",  # Required per SCILLM_PAVED_PATH_CONTRACT
-                concurrency=1, timeout=request_timeout, wall_time_s=180, tenacious=False,
-                response_format={"type": "json_object"}
-            ):
-                if r.get("ok"):
-                    resp = {
-                        "model": r.get("model", "chutes/text"),
-                        "usage": r.get("usage"),
-                        "choices": [{"message": {"content": r.get("content")}}],
-                        "id": r.get("id")
-                    }
-                else:
-                    raise RuntimeError(f"SciLLM Checkpoint Error: {r.get('error')}")
-
-            log_llm_call(
-                stage_key="09_summarizer",
-                task_kind="checkpoint_summary",
-                route_name="chutes/text",
-                model="chutes/text",
-                success=True,
-                latency_ms=int((time.time() - t0) * 1000),
-                raw_response=resp,
+                response_format={"type": "json_object"},
+                temperature=0.0,
+                timeout=request_timeout,
             )
+            served_model = _served_model(resp, model_name)
+            usage = _extract_usage(resp)
             return resp
         except Exception as exc:
+            error_class = type(exc).__name__
+            error = f"{error_class}: {exc}"
+            raise
+        finally:
+            latency_ms = int((time.monotonic() - t0) * 1000)
+            tokens_in = usage.get("prompt_tokens") if usage else None
+            tokens_out = usage.get("completion_tokens") if usage else None
+            stage_dir = timings_path.parent if timings_path else None
             log_llm_call(
                 stage_key="09_summarizer",
                 task_kind="checkpoint_summary",
-                route_name="chutes/text",
-                model="chutes/text",
-                success=False,
-                latency_ms=int((time.time() - t0) * 1000),
-                error_class=type(exc).__name__,
-                raw_preview=str(exc),
+                route="chutes/text",
+                model=served_model or "chutes/text",
+                success=error is None,
+                error_class=error_class,
+                latency_ms=latency_ms,
+                tokens_in=tokens_in,
+                tokens_out=tokens_out,
+                raw_preview=error,
+                stage_dir=stage_dir,
             )
-            raise
 
     # Try up to 3 attempts total, honoring capacity signals; helper/client handle Retry-After internally
     attempts = 0
-    served_model: Optional[str] = None
-    usage: Dict[str, Any] = {}
 
     while True:
         try:
@@ -307,17 +385,19 @@ async def create_checkpoint_summary(
             if attempts >= 3:
                 logger.error(f"Failed to create checkpoint summary (attempts={attempts}): {exc}")
                 # If capacity-related, emit a skip marker so downstream can record it deterministically
-                if any(t in msg for t in ("429", "Too Many Requests", "capacity", "maximum capacity")):
-                     log_llm_call(
-                         stage_key="09_summarizer",
-                         task_kind="checkpoint_skip_capacity",
-                         route_name="chutes/text",
-                         model="chutes/text",
-                         success=False,
-                         error_class="CapacityError",
-                         raw_preview=msg,
+                if any(
+                    t in msg for t in ("429", "Too Many Requests", "capacity", "maximum capacity")
+                ):
+                    log_llm_call(
+                        stage_key="09_summarizer",
+                        task_kind="checkpoint_skip_capacity",
+                        route_name="chutes/text",
+                        model="chutes/text",
+                        success=False,
+                        error_class="CapacityError",
+                        raw_preview=msg,
                     )
-                     return {
+                    return {
                         "type": "checkpoint",
                         "name": checkpoint_name,
                         "sections_covered": len(successful_summaries),
@@ -326,16 +406,16 @@ async def create_checkpoint_summary(
                         "reason": "capacity",
                     }
                 if ("401" in msg) or ("Unauthorized" in msg):
-                     log_llm_call(
-                          stage_key="09_summarizer",
-                          task_kind="checkpoint_skip_auth",
-                          route_name="chutes/text",
-                          model="chutes/text",
-                          success=False,
-                          error_class="AuthError",
-                          raw_preview=msg,
-                     )
-                     return {
+                    log_llm_call(
+                        stage_key="09_summarizer",
+                        task_kind="checkpoint_skip_auth",
+                        route_name="chutes/text",
+                        model="chutes/text",
+                        success=False,
+                        error_class="AuthError",
+                        raw_preview=msg,
+                    )
+                    return {
                         "type": "checkpoint",
                         "name": checkpoint_name,
                         "sections_covered": len(successful_summaries),
@@ -359,24 +439,14 @@ async def create_checkpoint_summary(
             logger.error(f"Failed to create checkpoint summary: {exc}")
             return None
 
-    content = (getattr(resp, "choices", [{}])[0].get("message", {}).get("content", ""))
+    content = _choice_content(resp) or ""
     if not content:
         logger.error("checkpoint_summary.empty_content")
         return None
     try:
-        served_model = getattr(resp, "model", None) or getattr(resp, "id", None) or "chutes/text"
-        usage_obj = getattr(resp, "usage", None) or {}
-        if isinstance(usage_obj, dict):
-            usage = usage_obj
-        else:
-            usage = {
-                "prompt_tokens": getattr(usage_obj, "prompt_tokens", None),
-                "completion_tokens": getattr(usage_obj, "completion_tokens", None),
-                "total_tokens": getattr(usage_obj, "total_tokens", None),
-            }
         result = clean_json_string(content, return_dict=True)
     except Exception as exc:
-        log_stage_error(STEP_NAME, exc, {'context': '09'})
+        log_stage_error(STEP_NAME, exc, {"context": "09"})
         return None
 
     # Telemetry handled internally
@@ -438,12 +508,11 @@ async def batch_summarize_sections_rolling(
     if timings_dir is not None:
         timings_dir.mkdir(parents=True, exist_ok=True)
         try:
-            timings_path = (timings_dir / "timings.jsonl")
+            timings_path = timings_dir / "timings.jsonl"
             timings_path.touch(exist_ok=True)
         except Exception as exc:
-            log_stage_error(STEP_NAME, exc, {'context': '09'})
+            log_stage_error(STEP_NAME, exc, {"context": "09"})
             raise
-            timings_path = None
 
     # Process in batches to balance order and concurrency
     batch_size = max_concurrent
@@ -556,9 +625,8 @@ async def batch_summarize_sections_rolling(
                     try:
                         rec = json.loads(line)
                     except Exception as exc:
-                        log_stage_error(STEP_NAME, exc, {'context': '09'})
+                        log_stage_error(STEP_NAME, exc, {"context": "09"})
                         raise
-                        continue
                     calls += 1
                     if rec.get("outcome") == "success":
                         success += 1
@@ -587,9 +655,8 @@ async def batch_summarize_sections_rolling(
                         indent=2,
                     )
         except Exception as exc:
-            log_stage_error(STEP_NAME, exc, {'context': '09'})
+            log_stage_error(STEP_NAME, exc, {"context": "09"})
             raise
-            pass
     return all_summaries
 
 
@@ -658,6 +725,7 @@ def _cmd_run(
 
     # Validate output before writing
     from extractor.pipeline.schemas.summarizer_actual import validate_summarizer09_output
+
     validated_output, error = validate_summarizer09_output(final_output)
     if error:
         logger.error(f"Stage 09 output validation failed: {error}")
@@ -700,10 +768,8 @@ def _cmd_debug_bundle(
         if not isinstance(sections, list) or not sections:
             raise ValueError("Bundle must include non-empty 'reflowed_sections' list")
     except Exception as exc:
-        log_stage_error(STEP_NAME, exc, {'context': '09'})
+        log_stage_error(STEP_NAME, exc, {"context": "09"})
         raise
-        print(f"Failed to load bundle: {e}")
-        raise ValueError(f"Failed to load bundle: {e}")
 
     timings_dir = stage_output_dir
     try:
@@ -777,10 +843,10 @@ if __name__ == "__main__":
 
         load_dotenv(find_dotenv())
     except Exception as exc:
-        log_stage_error(STEP_NAME, exc, {'context': '09'})
+        log_stage_error(STEP_NAME, exc, {"context": "09"})
         raise
-        pass
     import sys
+
     argv = sys.argv[1:]
     if argv and argv[0] == "sanity":
         sys.exit(sanity())

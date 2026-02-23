@@ -7,7 +7,9 @@ from typing import Any, Dict, Optional
 from loguru import logger
 
 
-def log_stage_error(stage: str, exc: BaseException, context: Optional[Dict[str, Any]] = None) -> None:
+def log_stage_error(
+    stage: str, exc: BaseException, context: Optional[Dict[str, Any]] = None
+) -> None:
     """Consistent structured error logging for pipeline stages."""
     payload: Dict[str, Any] = {
         "stage": stage,
@@ -32,4 +34,3 @@ def write_json_strict(path: Path, obj: Any, stage: str = "", ensure_ascii: bool 
         path.write_text(json.dumps(obj, indent=2, ensure_ascii=ensure_ascii), encoding="utf-8")
     except Exception as exc:
         log_and_raise(stage or "write_json_strict", exc, {"path": str(path)})
-

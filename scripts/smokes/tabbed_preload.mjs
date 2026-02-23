@@ -33,8 +33,8 @@ const ts = () => new Date().toISOString().replace(/[:.]/g, '-');
 (async () => {
   const apiBase = await getApiBase();
   if (!apiBase) {
-    console.error('Smoke(tabbed_preload): API not reachable on 8001/8000');
-    process.exit(2);
+    console.log('SKIP: No API server reachable (set API_BASE or start server on 8001/8000).');
+    process.exit(3);
   }
 
   // Check list for BHT file

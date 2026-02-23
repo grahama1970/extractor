@@ -37,4 +37,3 @@ def normalized_json(path: Path):
     data = _strip_volatile(load_json(path))
     # Stable string for comparisons
     return json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-

@@ -35,14 +35,7 @@ def _collect_step_commands(
 def _load_project_sanity(
     adapter_name: str,
 ) -> tuple[List[SanityCommand], dict[str, list[SanityCommand]]]:
-    config_path = (
-        ROOT
-        / "tools"
-        / "contract_loop"
-        / "adapters"
-        / adapter_name
-        / "sanity_config.py"
-    )
+    config_path = ROOT / "tools" / "contract_loop" / "adapters" / adapter_name / "sanity_config.py"
     if not config_path.exists():
         raise SanityCheckError(
             f"Missing project sanity config at {config_path}. "
@@ -65,9 +58,7 @@ def _load_project_sanity(
     return project_commands, step_commands
 
 
-def run_preflight_sanity(
-    step_names: Iterable[str] | None = None, *, adapter_name: str
-) -> None:
+def run_preflight_sanity(step_names: Iterable[str] | None = None, *, adapter_name: str) -> None:
     """Run global + per-step sanity scripts before starting the contract loop."""
 
     normalized_steps = set(step_names or [])
@@ -81,13 +72,14 @@ def run_preflight_sanity(
         return
 
     import shlex
+
     for command in commands:
         print(f"[sanity] {command.name}: {_format_cmd(command.cmd)}")
-        
+
         # Wrap command to run inside the virtual environment
         cmd_str = shlex.join(command.cmd)
         wrapped_cmd = f"source .venv/bin/activate && {cmd_str}"
-        
+
         result = subprocess.run(
             ["bash", "-c", wrapped_cmd],
             cwd=ROOT,

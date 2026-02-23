@@ -2,8 +2,6 @@
 Search and debug functionality for Marker document models.
 """
 
-Module: search.py
-
 import json
 from typing import Dict, List, Optional, Any, Union
 from pathlib import Path

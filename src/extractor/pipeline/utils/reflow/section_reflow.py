@@ -3,11 +3,13 @@ Core section reflow logic extracted from 07_reflow_section.py.
 
 This module contains the main reflow_section_with_llm function and related helpers.
 """
-import asyncio
+
 import json
 import os
+import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from textwrap import dedent
+from typing import Any, Optional
 
 from loguru import logger
 
@@ -16,6 +18,7 @@ from extractor.pipeline.utils.diagnostics import (
     classify_llm_error,
     iso_now,
     make_event,
+    get_run_id,
 )
 from extractor.pipeline.utils.image_io import (
     get_annotation_image_b64,
@@ -31,32 +34,31 @@ from extractor.pipeline.utils.json_utils import (
     parse_json_strict,
     restrict_top_level_keys,
 )
-from extractor.pipeline.utils.model_select import get_vlm_model, get_text_model
-from extractor.pipeline.utils.debug_utils import ensure_logs_dir, time_block, summarize_messages, log_timing
-from extractor.pipeline.utils.scillm_router import get_text_router
-from extractor.pipeline.utils.text_utils import sanitize_text
+from extractor.pipeline.utils.model_select import get_text_model
+from extractor.pipeline.utils.metrics_logger import log_metric
+from extractor.pipeline.utils.prompt_loader import load_prompt
+from extractor.pipeline.utils.debug_utils import (
+    ensure_logs_dir,
+    time_block,
+    summarize_messages,
+    log_timing,
+)
 from extractor.pipeline.utils.log_utils import sanitize_messages_for_return
 from extractor.pipeline.utils.model_params import build_chat_extras
+from extractor.pipeline.utils.scillm_router import get_text_router
+from extractor.pipeline.utils.vision import preflight_vision_support
 
 from extractor.pipeline.utils.reflow import (
-    sanitize_table_cell as _sanitize_table_cell,
     compute_table_confidence as _table_confidence,
-    compute_table_merges as _compute_table_merges,
     build_table_block_from_stage05 as _build_table_block_from_stage05,
-    df_map as _df_map,
     normalize_table_text as _normalize_table_text,
-    iou_rect as _iou_rect,
-    horizontal_iou as _h_iou,
     build_figure_block_from_stage06 as _build_figure_block_from_stage06,
-    apply_layout_ordering as _apply_layout_ordering,
     extract_router_content as _router_content,
     content_to_json_dict as _content_to_json_dict,
     direct_scillm_json as _direct_scillm_json,
     get_usage_field as _usage_get,
-    build_reflow_prompt,
     build_compact_prompt as _build_compact_prompt,
     build_compact_prompt_simple as _build_compact_prompt_simple,
-    merge_section_tables as _merge_section_tables,
 )
 
 # Module-level configuration (set by caller)
@@ -65,6 +67,84 @@ USE_LAYOUT_SKETCH = True
 OMIT_IMAGES_IF_CONFIDENT = True
 LAYOUT_CONF_THRESH = 0.8
 STAGE07_MAX_TOKENS = 4096
+TABLE_CONF_THRESHOLD = float(os.getenv("STAGE07_TABLE_CONF_THRESHOLD", "0.75"))
+INCLUDE_FIGURE_IMAGES = os.getenv("STAGE07_INCLUDE_FIGURE_IMAGES", "1").lower() in (
+    "1",
+    "true",
+    "yes",
+    "y",
+)
+MAX_ANNOTATION_IMAGES = int(os.getenv("STAGE07_MAX_ANNOTATION_IMAGES", "2"))
+SCHEMA_MODE = os.getenv("STAGE07_SCHEMA_MODE", "reflow_json")
+ROUTER_ONLY = os.getenv("STAGE07_ROUTER_ONLY", "0").lower() in ("1", "true", "yes", "y")
+STAGE07_DEBUG = os.getenv("STAGE07_DEBUG", "0").lower() in ("1", "true", "yes", "y")
+PROMPT_REFLOW = load_prompt("07_reflow_section")
+
+
+def build_section_context_text(section_data: dict[str, Any]) -> str:
+    """Build the primary text context for Stage 07 prompts."""
+    parts: list[str] = []
+    title = section_data.get("title") or "Untitled"
+    parts.append(f'Section title: "{title}"')
+    pg0 = section_data.get("page_start")
+    pg1 = section_data.get("page_end")
+    if pg0 is not None or pg1 is not None:
+        parts.append(f"Pages: {pg0}–{pg1}")
+    parts.append(
+        f"Tables: {len(section_data.get('tables') or [])} | Figures: {len(section_data.get('figures') or [])}"
+    )
+
+    layout = section_data.get("layout_sketch") or {}
+    if isinstance(layout, dict) and layout:
+        prior = {
+            "ordering_conf": ((layout.get("conf") or {}).get("ordering") if isinstance(layout, dict) else None),
+            "columns": layout.get("columns") or [],
+            "dsl": (layout.get("flow_stream") or "")[:1200],
+        }
+        parts.append("Layout Prior (from 06b):")
+        parts.append(json.dumps(prior, ensure_ascii=False))
+
+    text = (
+        section_data.get("reflowed_text")
+        or section_data.get("merged_text")
+        or section_data.get("raw_text")
+        or ""
+    )
+    if text:
+        parts.append("Section text:\n" + text)
+    return "\n\n".join([p for p in parts if p]).strip()
+
+
+def _build_text_router():
+    return get_text_router()
+
+
+async def _direct_compact_fallback(
+    section_data: dict[str, Any],
+    *,
+    results_base_dir: Path,
+    timeout: int = 60,
+) -> Optional[dict[str, Any]]:
+    """Fallback compact JSON fetch via direct SciLLM helper."""
+    try:
+        prompt = _build_compact_prompt_simple(section_data)
+        messages = [
+            {"role": "system", "content": STRICT_JSON_GUARD},
+            {"role": "user", "content": prompt},
+        ]
+        content = await _direct_scillm_json(
+            messages,
+            response_format={"type": "json_object"},
+            timeout=timeout,
+            max_tokens=min(STAGE07_MAX_TOKENS, 2048),
+        )
+        if not content:
+            return None
+        return _content_to_json_dict(content)
+    except Exception as exc:
+        log_stage_error("07_reflow_section", exc, {"context": "07_direct_compact_fallback"})
+        return None
+
 
 async def reflow_section_with_llm(
     section_data: dict[str, Any],
@@ -83,11 +163,11 @@ async def reflow_section_with_llm(
     try:
         LLM_MODEL = get_text_model()
     except Exception as exc:
-        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
         raise
-        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
         raise
-        log_stage_error('07_reflow_section', exc, {'context': '07'})
+        log_stage_error("07_reflow_section", exc, {"context": "07"})
         raise
         pass
     try:
@@ -114,7 +194,10 @@ async def reflow_section_with_llm(
         # Layout-based gating: omit images when we have a confident layout prior
         try:
             if include_images and USE_LAYOUT_SKETCH and OMIT_IMAGES_IF_CONFIDENT:
-                conf = float(((section_data.get("layout_sketch") or {}).get("conf") or {}).get("ordering") or 0.0)
+                conf = float(
+                    ((section_data.get("layout_sketch") or {}).get("conf") or {}).get("ordering")
+                    or 0.0
+                )
                 if conf >= LAYOUT_CONF_THRESH:
                     include_images = False
                     try:
@@ -128,19 +211,19 @@ async def reflow_section_with_llm(
                             )
                         )
                     except Exception as exc:
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                         raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                         raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07"})
                         raise
                         pass
         except Exception as exc:
-            log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+            log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
             raise
-            log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+            log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
             raise
-            log_stage_error('07_reflow_section', exc, {'context': '07'})
+            log_stage_error("07_reflow_section", exc, {"context": "07"})
             raise
             pass
 
@@ -154,11 +237,11 @@ async def reflow_section_with_llm(
                 if n > 0:
                     context_text = context_text[:n]
         except Exception as exc:
-            log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+            log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
             raise
-            log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+            log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
             raise
-            log_stage_error('07_reflow_section', exc, {'context': '07'})
+            log_stage_error("07_reflow_section", exc, {"context": "07"})
             raise
             pass
         # Enforce vision requirement before constructing images
@@ -175,11 +258,11 @@ async def reflow_section_with_llm(
                 else:
                     supports_vision = False
             except Exception as exc:
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                 raise
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                 raise
-                log_stage_error('07_reflow_section', exc, {'context': '07'})
+                log_stage_error("07_reflow_section", exc, {"context": "07"})
                 raise
                 pass
         sec_b64 = None
@@ -203,11 +286,11 @@ async def reflow_section_with_llm(
                         )
                     )
                 except Exception as exc:
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07"})
                     raise
                     pass
 
@@ -228,11 +311,15 @@ async def reflow_section_with_llm(
                                 )
                             )
                         except Exception as exc:
-                            log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                            log_stage_error(
+                                "07_reflow_section", exc, {"context": "07_reflow_retry"}
+                            )
                             raise
-                            log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                            log_stage_error(
+                                "07_reflow_section", exc, {"context": "07_reflow_retry"}
+                            )
                             raise
-                            log_stage_error('07_reflow_section', exc, {'context': '07'})
+                            log_stage_error("07_reflow_section", exc, {"context": "07"})
                             raise
                             pass
                         image_blocks.append(
@@ -257,11 +344,15 @@ async def reflow_section_with_llm(
                                 )
                             )
                         except Exception as exc:
-                            log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                            log_stage_error(
+                                "07_reflow_section", exc, {"context": "07_reflow_retry"}
+                            )
                             raise
-                            log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                            log_stage_error(
+                                "07_reflow_section", exc, {"context": "07_reflow_retry"}
+                            )
                             raise
-                            log_stage_error('07_reflow_section', exc, {'context': '07'})
+                            log_stage_error("07_reflow_section", exc, {"context": "07"})
                             raise
                             pass
                         image_blocks.append(
@@ -276,11 +367,11 @@ async def reflow_section_with_llm(
                 try:
                     sim = float(a.get("similarity") or 0.0)
                 except Exception as exc:
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07"})
                     raise
                     sim = 0.0
                 inside_len = 0
@@ -290,11 +381,11 @@ async def reflow_section_with_llm(
                             for sp in ln.get("spans", []) or []:
                                 inside_len += len((sp.get("text") or "").strip())
                 except Exception as exc:
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07"})
                     raise
                     pass
                 return sim + 0.001 * min(inside_len, 2000)
@@ -326,11 +417,11 @@ async def reflow_section_with_llm(
                     )
                 )
             except Exception as exc:
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                 raise
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                 raise
-                log_stage_error('07_reflow_section', exc, {'context': '07'})
+                log_stage_error("07_reflow_section", exc, {"context": "07"})
                 raise
                 pass
             user_content = [{"type": "text", "text": context_text}] + image_blocks
@@ -440,11 +531,11 @@ async def reflow_section_with_llm(
                             )
                         )
                     except Exception as exc:
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                         raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                         raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07"})
                         raise
                         pass
                     attached += 1
@@ -479,13 +570,17 @@ async def reflow_section_with_llm(
         # Simple prompt path (text-only). When images are NOT included, we can
         # ask only for: reflow text + merge tables. This reduces provider
         # variance and avoids empty responses.
-        SIMPLE = (os.getenv("STAGE07_SIMPLE_PROMPT", "1").lower() in ("1", "true", "yes", "y")) and (not include_images)
+        SIMPLE = (
+            os.getenv("STAGE07_SIMPLE_PROMPT", "1").lower() in ("1", "true", "yes", "y")
+        ) and (not include_images)
         if SIMPLE:
             try:
                 logs_dir = ensure_logs_dir(results_base_dir, "07_reflow_section")
 
                 # Build compact user prompt with Top Summary + Layout DSL + minimal inputs
-                compact_user = _build_compact_prompt_simple(section_data, text_char_cap=int(os.getenv("STAGE07_CONTEXT_CHARS", "1200")))
+                compact_user = _build_compact_prompt_simple(
+                    section_data, text_char_cap=int(os.getenv("STAGE07_CONTEXT_CHARS", "1200"))
+                )
 
                 # Save artifacts for this section for review (prompt + sketch)
                 try:
@@ -502,45 +597,51 @@ async def reflow_section_with_llm(
                             json.dumps(sv, ensure_ascii=False, indent=2, default=str)
                         )
                     except Exception as exc:
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                         raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                         raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07"})
                         raise
                         pass
                 except Exception as exc:
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07"})
                     raise
                     pass
 
                 messages_simple = [
-                    {"role": "system", "content": "You respond with JSON only — no code fences, no prose."},
+                    {
+                        "role": "system",
+                        "content": "You respond with JSON only — no code fences, no prose.",
+                    },
                     {"role": "user", "content": compact_user},
                 ]
 
                 try:
                     import time as _t
                     from scillm.batch import parallel_acompletions_iter
+
                     _t0 = _t.monotonic()
-                    
-                    reqs = [{
-                        "model": "chutes/text",
-                        "messages": messages_simple,
-                        "response_format": {"type": "json_object"},
-                        "temperature": 0,
-                        "max_tokens": min(STAGE07_MAX_TOKENS, 1024),
-                        "timeout": max(30, int(os.getenv("STAGE07_TIMEOUT","90"))),
-                        "index": 0
-                    }]
-                    
+
+                    reqs = [
+                        {
+                            "model": "chutes/text",
+                            "messages": messages_simple,
+                            "response_format": {"type": "json_object"},
+                            "temperature": 0,
+                            "max_tokens": min(STAGE07_MAX_TOKENS, 1024),
+                            "timeout": max(30, int(os.getenv("STAGE07_TIMEOUT", "90"))),
+                            "index": 0,
+                        }
+                    ]
+
                     api_key = os.getenv("CHUTES_API_KEY")
                     api_base = os.getenv("CHUTES_API_BASE", "https://llm.chutes.ai/v1")
-                    
+
                     _r_s = None
                     async for r in parallel_acompletions_iter(
                         reqs,
@@ -548,10 +649,10 @@ async def reflow_section_with_llm(
                         api_key=api_key,
                         custom_llm_provider="openai_like",  # Required per SCILLM_PAVED_PATH_CONTRACT
                         concurrency=1,
-                        timeout=max(30, int(os.getenv("STAGE07_TIMEOUT","90"))),
+                        timeout=max(30, int(os.getenv("STAGE07_TIMEOUT", "90"))),
                         wall_time_s=180,
                         tenacious=False,
-                        response_format={"type": "json_object"}
+                        response_format={"type": "json_object"},
                     ):
                         if r.get("ok"):
                             # Adapt scillm result to object-like structure expected by rest of function
@@ -562,7 +663,7 @@ async def reflow_section_with_llm(
                                 "model": r.get("model", "chutes/text"),
                                 "usage": r.get("usage"),
                                 "choices": [{"message": {"content": r.get("content")}}],
-                                "id": r.get("id")
+                                "id": r.get("id"),
                             }
                         else:
                             raise RuntimeError(f"SciLLM Reflow Error: {r.get('error')}")
@@ -570,7 +671,7 @@ async def reflow_section_with_llm(
                     _elapsed_ms = int((_t.monotonic() - _t0) * 1000)
                     _usage = _r_s.get("usage") or {}
                     _model_served = _r_s.get("model")
-                    
+
                     # Persist the exact request/response payloads in logs
                     try:
                         logs_dir = ensure_logs_dir(results_base_dir, "07_reflow_section")
@@ -580,7 +681,7 @@ async def reflow_section_with_llm(
                             "response_format": {"type": "json_object"},
                             "temperature": 0,
                             "max_tokens": min(STAGE07_MAX_TOKENS, 1024),
-                            "timeout": max(30, int(os.getenv("STAGE07_TIMEOUT","90"))),
+                            "timeout": max(30, int(os.getenv("STAGE07_TIMEOUT", "90"))),
                         }
                         (logs_dir / f"request_payload_compact_section_{sid_str}.json").write_text(
                             json.dumps(req, ensure_ascii=False, indent=2, default=str)
@@ -593,7 +694,7 @@ async def reflow_section_with_llm(
                             else str(resp_content)
                         )
                     except Exception as exc:
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                         raise
                     log_timing(
                         "07_reflow_section",
@@ -603,14 +704,14 @@ async def reflow_section_with_llm(
                             "route_name": "chutes/text",
                             "model": _model_served,
                             "latency_ms": _elapsed_ms,
-                            "timeout_s": int(os.getenv("STAGE07_TIMEOUT","90")),
+                            "timeout_s": int(os.getenv("STAGE07_TIMEOUT", "90")),
                             "tokens_in": _usage_get(_usage, "prompt_tokens"),
                             "tokens_out": _usage_get(_usage, "completion_tokens"),
                         },
                     )
                     content_simple = _router_content(_r_s)
                 except Exception as exc:
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
                     try:
                         log_timing(
@@ -625,12 +726,14 @@ async def reflow_section_with_llm(
                             },
                         )
                     except Exception as exc:
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                         raise
                     content_simple = None
 
                 result: dict[str, Any] | None = None
-                if (isinstance(content_simple, (str, dict)) and str(content_simple).strip()) or isinstance(content_simple, dict):
+                if (
+                    isinstance(content_simple, (str, dict)) and str(content_simple).strip()
+                ) or isinstance(content_simple, dict):
                     # Accept dict-or-string
                     if isinstance(content_simple, dict):
                         result = content_simple
@@ -638,7 +741,9 @@ async def reflow_section_with_llm(
                         try:
                             result = parse_json_strict(str(content_simple))
                         except Exception as exc:
-                            log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                            log_stage_error(
+                                "07_reflow_section", exc, {"context": "07_reflow_retry"}
+                            )
                             raise
                             # Retry with control-char strip + cleaning
                             cleaned_raw = re.sub(r"[\\x00-\\x1F]", " ", str(content_simple))
@@ -646,7 +751,9 @@ async def reflow_section_with_llm(
                             if cleaned:
                                 result = cleaned
                             else:
-                                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                                log_stage_error(
+                                    "07_reflow_section", exc, {"context": "07_reflow_retry"}
+                                )
                                 raise
                 if result is None:
                     try:
@@ -662,7 +769,9 @@ async def reflow_section_with_llm(
                             try:
                                 result = parse_json_strict(direct_content)
                             except Exception as exc:
-                                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                                log_stage_error(
+                                    "07_reflow_section", exc, {"context": "07_reflow_retry"}
+                                )
                                 raise
                                 cleaned_raw = re.sub(r"[\\x00-\\x1F]", " ", direct_content)
                                 cleaned = clean_json_string(cleaned_raw, return_dict=True)
@@ -672,15 +781,19 @@ async def reflow_section_with_llm(
                                     raise
                         try:
                             (logs_dir / f"response_compact_direct_{sid_str}.json").write_text(
-                                json.dumps(direct_content, ensure_ascii=False, indent=2, default=str)
+                                json.dumps(
+                                    direct_content, ensure_ascii=False, indent=2, default=str
+                                )
                                 if isinstance(direct_content, (dict, list))
                                 else str(direct_content)
                             )
                         except Exception as exc:
-                            log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                            log_stage_error(
+                                "07_reflow_section", exc, {"context": "07_reflow_retry"}
+                            )
                             raise
                     except Exception as exc:
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                         raise
                         result = None
 
@@ -692,7 +805,9 @@ async def reflow_section_with_llm(
                     entry = {
                         "section_id": section_data.get("id"),
                         "transport": ("sdk" if result is not None else "none"),
-                        "ok": bool(result and isinstance(result, dict) and result.get("reflowed_json")),
+                        "ok": bool(
+                            result and isinstance(result, dict) and result.get("reflowed_json")
+                        ),
                         "timestamp": iso_now(),
                     }
                     try:
@@ -700,13 +815,13 @@ async def reflow_section_with_llm(
                         if not isinstance(prev, list):
                             prev = []
                     except Exception as exc:
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                         raise
                         prev = []
                     prev.append(entry)
                     summary_path.write_text(json.dumps(prev, indent=2))
                 except Exception as exc:
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
                     pass
 
@@ -714,17 +829,24 @@ async def reflow_section_with_llm(
                     return {**section_data, **result, "reflow_status": "success"}
                 # If compact path failed to produce JSON, fall through to existing strict/relaxed branches
             except Exception as exc:
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                 raise
                 pass
 
         # Minimal forced path for smokes: bypass complex strict/compact branches for Gemini
-        _force_minimal = os.getenv("STAGE07_FORCE_MINIMAL_CALL", "").lower() in ("1", "true", "yes", "y")
+        _force_minimal = os.getenv("STAGE07_FORCE_MINIMAL_CALL", "").lower() in (
+            "1",
+            "true",
+            "yes",
+            "y",
+        )
         if _force_minimal:
             try:
                 logs_dir = results_base_dir / "07_reflow_section" / "logs"
                 logs_dir.mkdir(parents=True, exist_ok=True)
-                minimal_guard = "Return ONLY a JSON object. No prose, no code fences. Keep it short."
+                minimal_guard = (
+                    "Return ONLY a JSON object. No prose, no code fences. Keep it short."
+                )
                 minimal_user = f"{minimal_guard}\n\n{context_text[:1200]}"
                 messages_min = [
                     {"role": "system", "content": "You output ONLY compact JSON."},
@@ -740,32 +862,53 @@ async def reflow_section_with_llm(
                 }
                 # Log minimal payload (sanitized)
                 try:
-                    sanitized_min = sanitize_messages_for_return(messages_min, mode="truncate", max_str_len=48)
-                    (logs_dir / f"request_payload_forced_min_{section_data.get('id','section')}.json").write_text(
-                        json.dumps({"model": LLM_MODEL, "messages": sanitized_min, "kwargs": {k: v for k, v in params_min.items() if k not in ("model","messages")}}, ensure_ascii=False, indent=2, default=str)
+                    sanitized_min = sanitize_messages_for_return(
+                        messages_min, mode="truncate", max_str_len=48
+                    )
+                    (
+                        logs_dir
+                        / f"request_payload_forced_min_{section_data.get('id','section')}.json"
+                    ).write_text(
+                        json.dumps(
+                            {
+                                "model": LLM_MODEL,
+                                "messages": sanitized_min,
+                                "kwargs": {
+                                    k: v
+                                    for k, v in params_min.items()
+                                    if k not in ("model", "messages")
+                                },
+                            },
+                            ensure_ascii=False,
+                            indent=2,
+                            default=str,
+                        )
                     )
                 except Exception as exc:
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
                     pass
                 try:
                     import time as _t
                     from scillm.batch import parallel_acompletions_iter
+
                     _t0 = _t.monotonic()
-                    
-                    reqs_min = [{
-                        "model": "chutes/text",
-                        "messages": messages_min,
-                        "response_format": {"type": "json_object"},
-                        "temperature": 0,
-                        "max_tokens": min(STAGE07_MAX_TOKENS, 512),
-                        "timeout": llm_timeout,
-                        "index": 0
-                    }]
-                    
+
+                    reqs_min = [
+                        {
+                            "model": "chutes/text",
+                            "messages": messages_min,
+                            "response_format": {"type": "json_object"},
+                            "temperature": 0,
+                            "max_tokens": min(STAGE07_MAX_TOKENS, 512),
+                            "timeout": llm_timeout,
+                            "index": 0,
+                        }
+                    ]
+
                     api_key = os.getenv("CHUTES_API_KEY")
                     api_base = os.getenv("CHUTES_API_BASE", "https://llm.chutes.ai/v1")
-                    
+
                     _r_min = None
                     async for r in parallel_acompletions_iter(
                         reqs_min,
@@ -776,14 +919,14 @@ async def reflow_section_with_llm(
                         timeout=llm_timeout,
                         wall_time_s=180,
                         tenacious=False,
-                        response_format={"type": "json_object"}
+                        response_format={"type": "json_object"},
                     ):
                         if r.get("ok"):
                             _r_min = {
                                 "model": r.get("model", "chutes/text"),
                                 "usage": r.get("usage"),
                                 "choices": [{"message": {"content": r.get("content")}}],
-                                "id": r.get("id")
+                                "id": r.get("id"),
                             }
                         else:
                             raise RuntimeError(f"SciLLM Reflow Min Error: {r.get('error')}")
@@ -806,7 +949,7 @@ async def reflow_section_with_llm(
                     )
                     content_min = _router_content(_r_min)
                 except Exception as exc:
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
                     try:
                         log_timing(
@@ -821,19 +964,23 @@ async def reflow_section_with_llm(
                             },
                         )
                     except Exception as exc:
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                         raise
                     content_min = None
                 try:
-                    (logs_dir / f"response_forced_min_{section_data.get('id','section')}.json").write_text(
-                        json.dumps(content_min, ensure_ascii=False, indent=2, default=str) if isinstance(content_min, (dict, list)) else str(content_min)
+                    (
+                        logs_dir / f"response_forced_min_{section_data.get('id','section')}.json"
+                    ).write_text(
+                        json.dumps(content_min, ensure_ascii=False, indent=2, default=str)
+                        if isinstance(content_min, (dict, list))
+                        else str(content_min)
                     )
                 except Exception as exc:
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07"})
                     raise
                     pass
                 if isinstance(content_min, str) and content_min.strip():
@@ -842,11 +989,11 @@ async def reflow_section_with_llm(
                     try:
                         parsed = clean_json_string(content, return_dict=True)
                     except Exception as exc:
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                         raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                         raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07"})
                         raise
                         parsed = {}
                     if SCHEMA_MODE == "reflow_json":
@@ -856,7 +1003,13 @@ async def reflow_section_with_llm(
                             {
                                 "reflowed_json": {
                                     "title": section_data.get("title") or "Untitled",
-                                    "blocks": [json.dumps(parsed, ensure_ascii=False) if isinstance(parsed, (dict, list)) else (parsed if isinstance(parsed, str) else content)],
+                                    "blocks": [
+                                        (
+                                            json.dumps(parsed, ensure_ascii=False)
+                                            if isinstance(parsed, (dict, list))
+                                            else (parsed if isinstance(parsed, str) else content)
+                                        )
+                                    ],
                                 },
                                 "ocr_corrections": parsed.get("ocr_corrections", {}),
                                 "improvements_made": parsed.get("improvements_made", ""),
@@ -884,22 +1037,27 @@ async def reflow_section_with_llm(
                         )
                         return out
             except Exception as exc:
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                 raise
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                 raise
-                log_stage_error('07_reflow_section', exc, {'context': '07'})
+                log_stage_error("07_reflow_section", exc, {"context": "07"})
                 raise
                 pass
             # Fallback: try native Google client without schema, JSON mime only
             try:
                 if ("gemini" in (LLM_MODEL or "").lower()) and (not ROUTER_ONLY):
                     from google import genai as _genai
+
                     logs_dir = results_base_dir / "07_reflow_section" / "logs"
                     logs_dir.mkdir(parents=True, exist_ok=True)
-                    _client = _genai.Client(api_key=os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY"))
+                    _client = _genai.Client(
+                        api_key=os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+                    )
                     resp = _client.models.generate_content(
-                        model=(LLM_MODEL.split("/", 1)[1] if "/" in (LLM_MODEL or "") else LLM_MODEL),
+                        model=(
+                            LLM_MODEL.split("/", 1)[1] if "/" in (LLM_MODEL or "") else LLM_MODEL
+                        ),
                         contents=[minimal_user],
                         config={"temperature": 0, "response_mime_type": "application/json"},
                     )
@@ -914,34 +1072,39 @@ async def reflow_section_with_llm(
                                     text_out = t
                                     break
                     except Exception as exc:
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                         raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                         raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07"})
                         raise
                         text_out = None
                     try:
-                        (logs_dir / f"response_forced_min_native_{section_data.get('id','section')}.json").write_text(
-                            json.dumps({"text": text_out}, ensure_ascii=False, indent=2)
-                        )
+                        (
+                            logs_dir
+                            / f"response_forced_min_native_{section_data.get('id','section')}.json"
+                        ).write_text(json.dumps({"text": text_out}, ensure_ascii=False, indent=2))
                     except Exception as exc:
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                         raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                         raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07"})
                         raise
                         pass
                     if isinstance(text_out, str) and text_out.strip():
                         try:
                             parsed = clean_json_string(text_out, return_dict=True)
                         except Exception as exc:
-                            log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                            log_stage_error(
+                                "07_reflow_section", exc, {"context": "07_reflow_retry"}
+                            )
                             raise
-                            log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                            log_stage_error(
+                                "07_reflow_section", exc, {"context": "07_reflow_retry"}
+                            )
                             raise
-                            log_stage_error('07_reflow_section', exc, {'context': '07'})
+                            log_stage_error("07_reflow_section", exc, {"context": "07"})
                             raise
                             parsed = text_out
                         out = {**section_data}
@@ -950,7 +1113,15 @@ async def reflow_section_with_llm(
                                 {
                                     "reflowed_json": {
                                         "title": section_data.get("title") or "Untitled",
-                                        "blocks": [json.dumps(parsed, ensure_ascii=False) if isinstance(parsed, (dict, list)) else (parsed if isinstance(parsed, str) else text_out)],
+                                        "blocks": [
+                                            (
+                                                json.dumps(parsed, ensure_ascii=False)
+                                                if isinstance(parsed, (dict, list))
+                                                else (
+                                                    parsed if isinstance(parsed, str) else text_out
+                                                )
+                                            )
+                                        ],
                                     },
                                     "ocr_corrections": {},
                                     "improvements_made": "",
@@ -961,7 +1132,11 @@ async def reflow_section_with_llm(
                         else:
                             out.update(
                                 {
-                                    "reflowed_text": json.dumps(parsed, ensure_ascii=False) if isinstance(parsed, (dict, list)) else (parsed if isinstance(parsed, str) else text_out),
+                                    "reflowed_text": (
+                                        json.dumps(parsed, ensure_ascii=False)
+                                        if isinstance(parsed, (dict, list))
+                                        else (parsed if isinstance(parsed, str) else text_out)
+                                    ),
                                     "ocr_corrections": {},
                                     "improvements_made": "",
                                     "reflow_status": "success",
@@ -969,11 +1144,11 @@ async def reflow_section_with_llm(
                             )
                         return out
             except Exception as exc:
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                 raise
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                 raise
-                log_stage_error('07_reflow_section', exc, {'context': '07'})
+                log_stage_error("07_reflow_section", exc, {"context": "07"})
                 raise
                 pass
         # Attempt 1: Chat Completions with standardized messages (system + user text + image_url data URL)
@@ -985,11 +1160,11 @@ async def reflow_section_with_llm(
                 if sec_b64:
                     _image_data_url = f"data:image/png;base64,{sec_b64}"
             except Exception as exc:
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                 raise
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                 raise
-                log_stage_error('07_reflow_section', exc, {'context': '07'})
+                log_stage_error("07_reflow_section", exc, {"context": "07"})
                 raise
                 _image_data_url = None
             # Prompt: compact vs full. Compact can help providers that stall on overly prescriptive prompts.
@@ -1005,9 +1180,9 @@ async def reflow_section_with_llm(
             _converted = list(image_blocks)
 
             # Build messages with a system role; inline a minimal schema hint
-            user_text = PROMPT_REFLOW.get("user", "Return ONLY valid JSON.\n\n{context_text}").format(
-                context_text=context_text
-            )
+            user_text = PROMPT_REFLOW.get(
+                "user", "Return ONLY valid JSON.\n\n{context_text}"
+            ).format(context_text=context_text)
             user_parts = [{"type": "text", "text": user_text}]
             if include_images and supports_vision and _converted:
                 user_parts.extend(_converted)
@@ -1023,11 +1198,11 @@ async def reflow_section_with_llm(
                 if ("gemini" in (LLM_MODEL or "").lower()) and (not ROUTER_ONLY):
                     extras.pop("generation_config", None)
             except Exception as exc:
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                 raise
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                 raise
-                log_stage_error('07_reflow_section', exc, {'context': '07'})
+                log_stage_error("07_reflow_section", exc, {"context": "07"})
                 raise
                 pass
             # JSON schema for strict structured output
@@ -1049,7 +1224,7 @@ async def reflow_section_with_llm(
                                                 "type": {"type": "string"},
                                                 "title": {"type": "string"},
                                                 "caption": {"type": "string"},
-                                                "image_ref": {"type": "string"}
+                                                "image_ref": {"type": "string"},
                                             },
                                             "required": ["type"],
                                             "additionalProperties": True,
@@ -1058,15 +1233,23 @@ async def reflow_section_with_llm(
                                             "type": "object",
                                             "properties": {
                                                 "type": {"type": "string"},
-                                                "columns": {"type": "array", "items": {"type": "string"}},
+                                                "columns": {
+                                                    "type": "array",
+                                                    "items": {"type": "string"},
+                                                },
                                                 "rows": {
                                                     "type": "array",
-                                                    "items": {"type": "array", "items": {"type": ["string", "number", "null"]}}
-                                                }
+                                                    "items": {
+                                                        "type": "array",
+                                                        "items": {
+                                                            "type": ["string", "number", "null"]
+                                                        },
+                                                    },
+                                                },
                                             },
                                             "required": ["type", "columns", "rows"],
-                                            "additionalProperties": True
-                                        }
+                                            "additionalProperties": True,
+                                        },
                                     ]
                                 },
                             },
@@ -1099,41 +1282,48 @@ async def reflow_section_with_llm(
                 if "gemini" not in (LLM_MODEL or "").lower():
                     call_params["max_tokens"] = STAGE07_MAX_TOKENS
             except Exception as exc:
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                 raise
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                 raise
-                log_stage_error('07_reflow_section', exc, {'context': '07'})
+                log_stage_error("07_reflow_section", exc, {"context": "07"})
                 raise
                 pass
             # If images are included on Attempt 1 (non-Gemini), clamp tokens to image cap after generic max is set
             try:
                 if include_images and supports_vision and "gemini" not in (LLM_MODEL or "").lower():
-                    _img_cap = int(os.getenv("STAGE07_IMAGE_PROMPT_MAX_TOKENS", str(MAX_TOKENS_IMAGE)))
+                    _img_cap = int(
+                        os.getenv("STAGE07_IMAGE_PROMPT_MAX_TOKENS", str(MAX_TOKENS_IMAGE))
+                    )
                     prior_max = int(call_params.get("max_tokens") or STAGE07_MAX_TOKENS)
                     call_params["max_tokens"] = min(prior_max, _img_cap)
             except Exception as exc:
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                 raise
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                 raise
-                log_stage_error('07_reflow_section', exc, {'context': '07'})
+                log_stage_error("07_reflow_section", exc, {"context": "07"})
                 raise
                 pass
             # Disable cache for strict JSON passes to avoid stale empties
             call_params["cache"] = {"no-cache": True}
             # Enforce JSON-only responses; allow minimal mode for Gemini via env
-            _minimal_json = os.getenv("STAGE07_MINIMAL_JSON", "").lower() in ("1", "true", "yes", "y")
+            _minimal_json = os.getenv("STAGE07_MINIMAL_JSON", "").lower() in (
+                "1",
+                "true",
+                "yes",
+                "y",
+            )
             if "gemini" in (LLM_MODEL or "").lower():
                 try:
                     extras.pop("generation_config", None)
                     call_params.pop("generation_config", None)
                 except Exception as exc:
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07"})
                     raise
                     pass
                 if _minimal_json:
@@ -1163,11 +1353,11 @@ async def reflow_section_with_llm(
                         b64 = url.split(",", 1)[1]
                         return int(len(b64) * 3 / 4)
                     except Exception as exc:
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                         raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                         raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07"})
                         raise
                         return 0
 
@@ -1178,11 +1368,11 @@ async def reflow_section_with_llm(
                         if isinstance(m, dict) and isinstance(m.get("content"), list):
                             user_parts_all.extend([p for p in m["content"] if isinstance(p, dict)])
                 except Exception as exc:
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07"})
                     raise
                     pass
 
@@ -1191,7 +1381,9 @@ async def reflow_section_with_llm(
                     "context_length": len(context_text),
                     "images_count": sum(1 for p in user_parts_all if p.get("type") == "image_url"),
                     "image_bytes": [
-                        _image_bytes_from_part(p) for p in user_parts_all if p.get("type") == "image_url"
+                        _image_bytes_from_part(p)
+                        for p in user_parts_all
+                        if p.get("type") == "image_url"
                     ],
                     "session_id": sid,
                 }
@@ -1200,29 +1392,35 @@ async def reflow_section_with_llm(
                 )
                 # Also log a sanitized snapshot of the final request payload to confirm parameter mapping
                 try:
-                    sanitized_messages = sanitize_messages_for_return(messages, mode="truncate", max_str_len=48)
+                    sanitized_messages = sanitize_messages_for_return(
+                        messages, mode="truncate", max_str_len=48
+                    )
                     payload_dump = {
                         "model": LLM_MODEL,
                         "messages": sanitized_messages,
-                        "kwargs": {k: v for k, v in call_params.items() if k not in ("model", "messages")},
+                        "kwargs": {
+                            k: v for k, v in call_params.items() if k not in ("model", "messages")
+                        },
                     }
-                    (logs_dir / f"request_payload_strict_{section_data.get('id','section')}.json").write_text(
+                    (
+                        logs_dir / f"request_payload_strict_{section_data.get('id','section')}.json"
+                    ).write_text(
                         json.dumps(payload_dump, ensure_ascii=False, indent=2, default=str)
                     )
                 except Exception as exc:
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07"})
                     raise
                     pass
             except Exception as exc:
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                 raise
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                 raise
-                log_stage_error('07_reflow_section', exc, {'context': '07'})
+                log_stage_error("07_reflow_section", exc, {"context": "07"})
                 raise
                 pass
 
@@ -1230,21 +1428,26 @@ async def reflow_section_with_llm(
             try:
                 import time as _t
                 from scillm import parallel_acompletions_iter
+
                 _t0 = _t.monotonic()
-                
-                reqs = [{
-                    "model": "chutes/text",
-                    "messages": messages,
-                    "response_format": call_params.get("response_format", {"type": "json_object"}),
-                    "temperature": 0,
-                    "max_tokens": int(call_params.get("max_tokens") or 1024),
-                    "timeout": llm_timeout,
-                    "index": 0
-                }]
-                
+
+                reqs = [
+                    {
+                        "model": "chutes/text",
+                        "messages": messages,
+                        "response_format": call_params.get(
+                            "response_format", {"type": "json_object"}
+                        ),
+                        "temperature": 0,
+                        "max_tokens": int(call_params.get("max_tokens") or 1024),
+                        "timeout": llm_timeout,
+                        "index": 0,
+                    }
+                ]
+
                 api_key = os.getenv("CHUTES_API_KEY")
                 api_base = os.getenv("CHUTES_API_BASE", "https://llm.chutes.ai/v1")
-                
+
                 _r = None
                 async for r in parallel_acompletions_iter(
                     reqs,
@@ -1255,21 +1458,26 @@ async def reflow_section_with_llm(
                     timeout=llm_timeout,
                     wall_time_s=180,
                     tenacious=False,
-                    response_format=call_params.get("response_format", {"type": "json_object"})
+                    response_format=call_params.get("response_format", {"type": "json_object"}),
                 ):
                     if r.get("ok"):
                         _r = {
                             "model": r.get("model", "chutes/text"),
                             "usage": r.get("usage"),
                             "choices": [{"message": {"content": r.get("content")}}],
-                            "id": r.get("id")
+                            "id": r.get("id"),
                         }
                     else:
                         raise RuntimeError(f"SciLLM Strict Reflow Error: {r.get('error')}")
 
-                with time_block(logs_dir, "attempt_strict", section_id=str(section_data.get("id","section")), **summarize_messages(messages)):
-                    pass # Timing handled by wrapper but logic moved inside try block
-                
+                with time_block(
+                    logs_dir,
+                    "attempt_strict",
+                    section_id=str(section_data.get("id", "section")),
+                    **summarize_messages(messages),
+                ):
+                    pass  # Timing handled by wrapper but logic moved inside try block
+
                 content_obj = _router_content(_r)
                 try:
                     _elapsed_ms = int((_t.monotonic() - _t0) * 1000)
@@ -1289,19 +1497,19 @@ async def reflow_section_with_llm(
                         },
                     )
                 except Exception as exc:
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07"})
                     raise
                     pass
             except Exception as exc:
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                 raise
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                 raise
-                log_stage_error('07_reflow_section', exc, {'context': '07'})
+                log_stage_error("07_reflow_section", exc, {"context": "07"})
                 raise
                 try:
                     log_timing(
@@ -1311,56 +1519,56 @@ async def reflow_section_with_llm(
                             "outcome": "exception",
                             "route_name": "chutes/text",
                             "served_model": None,
-                            "error": str(_ex)[:200],
+                            "error": str(exc)[:200],
                             "raw_preview": None,
                         },
                     )
                 except Exception as exc:
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07"})
                     raise
                     pass
                 content_obj = None
             try:
                 from loguru import logger as _logger
+
                 _ok = True if (content_obj is not None) else False
                 _logger.info(f"reflow_strict: model={LLM_MODEL} ok={_ok}")
             except Exception as exc:
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                 raise
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                 raise
-                log_stage_error('07_reflow_section', exc, {'context': '07'})
+                log_stage_error("07_reflow_section", exc, {"context": "07"})
                 raise
                 pass
             resp = content_obj or ""
             try:
                 (logs_dir / f"response_strict_{section_data.get('id','section')}.json").write_text(
-                    json.dumps(resp, default=str, indent=2)
-                    if isinstance(resp, dict)
-                    else str(resp)
+                    json.dumps(resp, default=str, indent=2) if isinstance(resp, dict) else str(resp)
                 )
             except Exception as exc:
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                 raise
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                 raise
-                log_stage_error('07_reflow_section', exc, {'context': '07'})
+                log_stage_error("07_reflow_section", exc, {"context": "07"})
                 raise
                 pass
         except Exception as exc:
-            log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+            log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
             raise
-            log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+            log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
             raise
-            log_stage_error('07_reflow_section', exc, {'context': '07'})
+            log_stage_error("07_reflow_section", exc, {"context": "07"})
             raise
             resp = ""
         # Normalize (accept dict or string) using shared helper
         from extractor.pipeline.utils.response_utils import normalize_json_content
+
         raw_text, json_obj = normalize_json_content(resp) if resp is not None else ("", None)
         content = raw_text if isinstance(raw_text, str) else ""
         if not isinstance(content, str) or not content.strip():
@@ -1371,20 +1579,34 @@ async def reflow_section_with_llm(
                     "Return ONLY a minified JSON object with keys: reflowed_json, ocr_corrections, improvements_made, summary. "
                     "No markdown, no code fences, no trailing commas. reflowed_json.blocks must be valid and _ordered."
                 )
-                use_compact = os.getenv("STAGE07_USE_COMPACT", "").lower() in ("1","true","yes","y")
+                use_compact = os.getenv("STAGE07_USE_COMPACT", "").lower() in (
+                    "1",
+                    "true",
+                    "yes",
+                    "y",
+                )
                 compact_user = f"{compact_guard}\n\n{context_text[:1500]}"
                 if use_compact:
                     # Load sketch_v2 once
                     try:
-                        skv2_path = results_base_dir / "06b_layout_sketcher" / "json_output" / "06b_layout_sketch_v2.json"
-                        skv2 = json.loads(skv2_path.read_text()) if skv2_path.exists() else {"sections": {}}
+                        skv2_path = (
+                            results_base_dir
+                            / "06b_layout_sketcher"
+                            / "json_output"
+                            / "06b_layout_sketch_v2.json"
+                        )
+                        skv2 = (
+                            json.loads(skv2_path.read_text())
+                            if skv2_path.exists()
+                            else {"sections": {}}
+                        )
                         sk_by_sec = skv2.get("sections") or {}
                     except Exception as exc:
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                         raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                         raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07"})
                         raise
                         sk_by_sec = {}
                     compact_user = _build_compact_prompt(
@@ -1398,13 +1620,15 @@ async def reflow_section_with_llm(
                     try:
                         art = Path("scripts/artifacts")
                         art.mkdir(parents=True, exist_ok=True)
-                        (art / f"07_{section_data.get('id','section')}_prompt_compact.md").write_text(compact_user, encoding="utf-8")
+                        (
+                            art / f"07_{section_data.get('id','section')}_prompt_compact.md"
+                        ).write_text(compact_user, encoding="utf-8")
                     except Exception as exc:
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                         raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                         raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07"})
                         raise
                         pass
                 # Use plain string content for text-only reliability
@@ -1417,66 +1641,107 @@ async def reflow_section_with_llm(
                 # Optional: include the section image (multimodal) if requested
                 user_content: Any = compact_user
                 try:
-                    include_image = os.getenv("STAGE07_INCLUDE_SECTION_IMAGE", "").lower() in ("1","true","yes","y")
+                    include_image = os.getenv("STAGE07_INCLUDE_SECTION_IMAGE", "").lower() in (
+                        "1",
+                        "true",
+                        "yes",
+                        "y",
+                    )
                     if include_image:
                         # Resolve a section image; prefer 04's visual_path on the section, else any 06b visual_path
                         vrel: Optional[str] = None
                         try:
                             vrel = str(section_data.get("visual_path") or "") or None
                         except Exception as exc:
-                            log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                            log_stage_error(
+                                "07_reflow_section", exc, {"context": "07_reflow_retry"}
+                            )
                             raise
-                            log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                            log_stage_error(
+                                "07_reflow_section", exc, {"context": "07_reflow_retry"}
+                            )
                             raise
-                            log_stage_error('07_reflow_section', exc, {'context': '07'})
+                            log_stage_error("07_reflow_section", exc, {"context": "07"})
                             raise
                             vrel = None
                         if not vrel:
                             try:
-                                skv2_path = results_base_dir / "06b_layout_sketcher" / "json_output" / "06b_layout_sketch_v2.json"
-                                skv2 = json.loads(skv2_path.read_text()) if skv2_path.exists() else {"sections": {}}
+                                skv2_path = (
+                                    results_base_dir
+                                    / "06b_layout_sketcher"
+                                    / "json_output"
+                                    / "06b_layout_sketch_v2.json"
+                                )
+                                skv2 = (
+                                    json.loads(skv2_path.read_text())
+                                    if skv2_path.exists()
+                                    else {"sections": {}}
+                                )
                                 sid = str(section_data.get("id"))
-                                vrel = str(((skv2.get("sections") or {}).get(sid) or {}).get("visual_path") or "") or None
+                                vrel = (
+                                    str(
+                                        ((skv2.get("sections") or {}).get(sid) or {}).get(
+                                            "visual_path"
+                                        )
+                                        or ""
+                                    )
+                                    or None
+                                )
                             except Exception as exc:
-                                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                                log_stage_error(
+                                    "07_reflow_section", exc, {"context": "07_reflow_retry"}
+                                )
                                 raise
-                                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                                log_stage_error(
+                                    "07_reflow_section", exc, {"context": "07_reflow_retry"}
+                                )
                                 raise
-                                log_stage_error('07_reflow_section', exc, {'context': '07'})
+                                log_stage_error("07_reflow_section", exc, {"context": "07"})
                                 raise
                                 vrel = None
                         if vrel:
-                            from extractor.pipeline.utils.model_params import image_file_to_data_url as _img_to_data
+                            from extractor.pipeline.utils.model_params import (
+                                image_file_to_data_url as _img_to_data,
+                            )
+
                             vpath = (results_base_dir / vrel).resolve()
                             if vpath.exists():
                                 user_content = [
                                     {"type": "text", "text": compact_user},
-                                    {"type": "image_url", "image_url": {"url": _img_to_data(vpath)}},
+                                    {
+                                        "type": "image_url",
+                                        "image_url": {"url": _img_to_data(vpath)},
+                                    },
                                 ]
                 except Exception as exc:
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07"})
                     raise
                     pass
                 messages2 = [
                     {"role": "system", "content": sys_msg},
                     {"role": "user", "content": user_content},
                 ]
-                call_params2 = {"model": LLM_MODEL, "messages": messages2, "timeout": llm_timeout, **extras}
+                call_params2 = {
+                    "model": LLM_MODEL,
+                    "messages": messages2,
+                    "timeout": llm_timeout,
+                    **extras,
+                }
                 call_params2["temperature"] = 0
                 # Important: Do NOT set max_output_tokens for Gemini (can cause empty responses)
                 try:
                     if "gemini" not in (LLM_MODEL or "").lower():
                         call_params2["max_tokens"] = STAGE07_MAX_TOKENS
                 except Exception as exc:
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07"})
                     raise
                     pass
                 call_params2["cache"] = {"no-cache": True}
@@ -1484,11 +1749,11 @@ async def reflow_section_with_llm(
                     try:
                         call_params2.pop("generation_config", None)
                     except Exception as exc:
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                         raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                         raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07"})
                         raise
                         pass
                     if _minimal_json:
@@ -1505,33 +1770,48 @@ async def reflow_section_with_llm(
                 # Log sanitized compact request for debugging
                 try:
                     logs_dir = ensure_logs_dir(results_base_dir, "07_reflow_section")
-                    sanitized_messages2 = sanitize_messages_for_return(messages2, mode="truncate", max_str_len=48)
+                    sanitized_messages2 = sanitize_messages_for_return(
+                        messages2, mode="truncate", max_str_len=48
+                    )
                     payload_dump2 = {
                         "model": LLM_MODEL,
                         "messages": sanitized_messages2,
-                        "kwargs": {k: v for k, v in call_params2.items() if k not in ("model", "messages")},
+                        "kwargs": {
+                            k: v for k, v in call_params2.items() if k not in ("model", "messages")
+                        },
                     }
-                    (logs_dir / f"request_payload_compact_{section_data.get('id','section')}.json").write_text(
+                    (
+                        logs_dir
+                        / f"request_payload_compact_{section_data.get('id','section')}.json"
+                    ).write_text(
                         json.dumps(payload_dump2, ensure_ascii=False, indent=2, default=str)
                     )
                 except Exception as exc:
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07"})
                     raise
                     pass
                 # Compact strict pass via Router (JSON mode)
                 try:
                     _router2 = _build_text_router()
                     import time as _t
+
                     _t0 = _t.monotonic()
-                    with time_block(logs_dir, "attempt_compact", section_id=str(section_data.get("id","section")), **summarize_messages(messages2)):
+                    with time_block(
+                        logs_dir,
+                        "attempt_compact",
+                        section_id=str(section_data.get("id", "section")),
+                        **summarize_messages(messages2),
+                    ):
                         _r2 = await _router2.acompletion(
                             model="chutes/text",
                             messages=messages2,
-                            response_format=call_params2.get("response_format", {"type": "json_object"}),
+                            response_format=call_params2.get(
+                                "response_format", {"type": "json_object"}
+                            ),
                             temperature=0,
                             max_tokens=int(call_params2.get("max_tokens") or 1024),
                             timeout=llm_timeout,
@@ -1555,19 +1835,19 @@ async def reflow_section_with_llm(
                             },
                         )
                     except Exception as exc:
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                         raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                         raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07"})
                         raise
                         pass
                 except Exception as exc:
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07"})
                     raise
                     try:
                         log_timing(
@@ -1577,63 +1857,69 @@ async def reflow_section_with_llm(
                                 "outcome": "exception",
                                 "route_name": "chutes/text",
                                 "served_model": None,
-                                "error": str(_ex)[:200],
+                                "error": str(exc)[:200],
                                 "raw_preview": None,
                             },
                         )
                     except Exception as exc:
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                         raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                         raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07"})
                         raise
                         pass
                     content_obj2 = None
                 try:
                     from loguru import logger as _logger
+
                     _ok2 = True if (content_obj2 is not None) else False
                     _logger.info(f"reflow_strict_compact: model={LLM_MODEL} ok={_ok2}")
                 except Exception as exc:
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07"})
                     raise
                     pass
                 resp2 = content_obj2 or ""
                 try:
-                    (logs_dir / f"response_strict_compact_{section_data.get('id','section')}.json").write_text(
-                        json.dumps(resp2, default=str, indent=2) if isinstance(resp2, dict) else str(resp2)
+                    (
+                        logs_dir
+                        / f"response_strict_compact_{section_data.get('id','section')}.json"
+                    ).write_text(
+                        json.dumps(resp2, default=str, indent=2)
+                        if isinstance(resp2, dict)
+                        else str(resp2)
                     )
                 except Exception as exc:
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07"})
                     raise
                     pass
                 if isinstance(resp2, dict):
                     try:
                         content = json.dumps(resp2, ensure_ascii=False)
                     except Exception as exc:
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                         raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                         raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07"})
                         raise
                         content = None
                 else:
                     content = resp2 if isinstance(resp2, str) else None
             except Exception as exc:
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                 raise
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                 raise
-                log_stage_error('07_reflow_section', exc, {'context': '07'})
+                log_stage_error("07_reflow_section", exc, {"context": "07"})
                 raise
                 content = None
         if not isinstance(content, str) or not content.strip():
@@ -1642,6 +1928,7 @@ async def reflow_section_with_llm(
                 if "gemini" in (LLM_MODEL or "").lower():
                     from google import genai as _genai
                     from google.genai import types as _gtypes
+
                     logs_dir = results_base_dir / "07_reflow_section" / "logs"
                     logs_dir.mkdir(parents=True, exist_ok=True)
                     # Build Google contents from our messages (text + data URLs)
@@ -1658,28 +1945,55 @@ async def reflow_section_with_llm(
                                     elif isinstance(p, dict) and p.get("type") == "image_url":
                                         img = p.get("image_url") or {}
                                         url = img.get("url")
-                                        if isinstance(url, str) and url.startswith("data:") and ";base64," in url:
+                                        if (
+                                            isinstance(url, str)
+                                            and url.startswith("data:")
+                                            and ";base64," in url
+                                        ):
                                             header, b64 = url.split(";base64,", 1)
-                                            mime = header.split(":", 1)[1] if ":" in header else "image/png"
+                                            mime = (
+                                                header.split(":", 1)[1]
+                                                if ":" in header
+                                                else "image/png"
+                                            )
                                             import base64 as _b64
+
                                             try:
-                                                g_parts.append(_gtypes.Part.from_bytes(data=_b64.b64decode(b64), mime_type=mime))
+                                                g_parts.append(
+                                                    _gtypes.Part.from_bytes(
+                                                        data=_b64.b64decode(b64), mime_type=mime
+                                                    )
+                                                )
                                             except Exception as exc:
-                                                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                                                log_stage_error(
+                                                    "07_reflow_section",
+                                                    exc,
+                                                    {"context": "07_reflow_retry"},
+                                                )
                                                 raise
-                                                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                                                log_stage_error(
+                                                    "07_reflow_section",
+                                                    exc,
+                                                    {"context": "07_reflow_retry"},
+                                                )
                                                 raise
-                                                log_stage_error('07_reflow_section', exc, {'context': '07'})
+                                                log_stage_error(
+                                                    "07_reflow_section", exc, {"context": "07"}
+                                                )
                                                 raise
                                                 pass
                             elif isinstance(cont, str) and cont.strip():
                                 g_parts.append(cont)
                         except Exception as exc:
-                            log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                            log_stage_error(
+                                "07_reflow_section", exc, {"context": "07_reflow_retry"}
+                            )
                             raise
-                            log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                            log_stage_error(
+                                "07_reflow_section", exc, {"context": "07_reflow_retry"}
+                            )
                             raise
-                            log_stage_error('07_reflow_section', exc, {'context': '07'})
+                            log_stage_error("07_reflow_section", exc, {"context": "07"})
                             raise
                             continue
 
@@ -1696,9 +2010,14 @@ async def reflow_section_with_llm(
                         additionalProperties=False,
                     )
                     # Client and call
-                    _client = _genai.Client(api_key=os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY"), http_options={"timeout": llm_timeout * 1000})
+                    _client = _genai.Client(
+                        api_key=os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY"),
+                        http_options={"timeout": llm_timeout * 1000},
+                    )
                     resp = _client.models.generate_content(
-                        model=(LLM_MODEL.split("/", 1)[1] if "/" in (LLM_MODEL or "") else LLM_MODEL),
+                        model=(
+                            LLM_MODEL.split("/", 1)[1] if "/" in (LLM_MODEL or "") else LLM_MODEL
+                        ),
                         contents=g_parts or [context_text[:1500]],
                         config={
                             "temperature": 0,
@@ -1717,35 +2036,43 @@ async def reflow_section_with_llm(
                                     content = t
                                     break
                     except Exception as exc:
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                         raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                         raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07"})
                         raise
                         pass
                     # Log shim response
                     try:
-                        (logs_dir / f"response_gemini_native_{section_data.get('id','section')}.json").write_text(
-                            json.dumps({
-                                "raw": getattr(resp, "to_dict", lambda: str(resp))(),
-                                "text": content,
-                            }, ensure_ascii=False, indent=2, default=str)
+                        (
+                            logs_dir
+                            / f"response_gemini_native_{section_data.get('id','section')}.json"
+                        ).write_text(
+                            json.dumps(
+                                {
+                                    "raw": getattr(resp, "to_dict", lambda: str(resp))(),
+                                    "text": content,
+                                },
+                                ensure_ascii=False,
+                                indent=2,
+                                default=str,
+                            )
                         )
                     except Exception as exc:
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                         raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                         raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07"})
                         raise
                         pass
             except Exception as exc:
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                 raise
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                 raise
-                log_stage_error('07_reflow_section', exc, {'context': '07'})
+                log_stage_error("07_reflow_section", exc, {"context": "07"})
                 raise
                 pass
         if not isinstance(content, str) or not content.strip():
@@ -1775,11 +2102,11 @@ async def reflow_section_with_llm(
                             msg = choices[0].get("message") or {}
                             content = msg.get("content")
                 except Exception as exc:
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07"})
                     raise
                     content = None
             else:
@@ -1795,11 +2122,11 @@ async def reflow_section_with_llm(
                             )
                         )
                     except Exception as exc:
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                         raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                         raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07"})
                         raise
                         pass
                 ch = getattr(resp, "choices", None)
@@ -1814,11 +2141,11 @@ async def reflow_section_with_llm(
                             if isinstance(txt, str):
                                 content = txt
                     except Exception as exc:
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                         raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                         raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07"})
                         raise
                         content = None
 
@@ -1827,15 +2154,16 @@ async def reflow_section_with_llm(
             try:
                 result = content  # treat as already-parsed JSON
                 try:
-                    (logs_dir / f"response_strict_compact_{section_data.get('id','section')}.json").write_text(
-                        json.dumps(result, indent=2)
-                    )
+                    (
+                        logs_dir
+                        / f"response_strict_compact_{section_data.get('id','section')}.json"
+                    ).write_text(json.dumps(result, indent=2))
                 except Exception as exc:
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07"})
                     raise
                     pass
                 # short-circuit to final assembly for this section
@@ -1843,11 +2171,11 @@ async def reflow_section_with_llm(
                 # jump to downstream merge logic by setting a sentinel
                 content = json.dumps(result)
             except Exception as exc:
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                 raise
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                 raise
-                log_stage_error('07_reflow_section', exc, {'context': '07'})
+                log_stage_error("07_reflow_section", exc, {"context": "07"})
                 raise
                 content = None
 
@@ -1857,11 +2185,11 @@ async def reflow_section_with_llm(
                 try:
                     _trim2 = int(os.getenv("STAGE07_RETRY1_TRIM_CHARS", "900"))
                 except Exception as exc:
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07"})
                     raise
                     _trim2 = 900
                 _guard2 = (
@@ -1886,11 +2214,11 @@ async def reflow_section_with_llm(
                     )
                     content2 = _router_content(_r3)
                 except Exception as exc:
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07"})
                     raise
                     try:
                         log_timing(
@@ -1900,16 +2228,16 @@ async def reflow_section_with_llm(
                                 "outcome": "exception",
                                 "route_name": "chutes/text",
                                 "served_model": None,
-                                "error": str(_ex)[:200],
+                                "error": str(exc)[:200],
                                 "raw_preview": None,
                             },
                         )
                     except Exception as exc:
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                         raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                         raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07"})
                         raise
                         pass
                     content2 = None
@@ -1918,35 +2246,38 @@ async def reflow_section_with_llm(
                     try:
                         content = json.dumps(content2, ensure_ascii=False)
                     except Exception as exc:
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                         raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                         raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07"})
                         raise
                         content = None
                 elif isinstance(content2, str) and content2.strip():
                     content = content2
                 try:
-                    (logs_dir / f"response_strict_compact_{section_data.get('id','section')}.json").write_text(
+                    (
+                        logs_dir
+                        / f"response_strict_compact_{section_data.get('id','section')}.json"
+                    ).write_text(
                         json.dumps(content2, ensure_ascii=False, indent=2, default=str)
                         if isinstance(content2, dict)
                         else str(content2)
                     )
                 except Exception as exc:
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07"})
                     raise
                     pass
             except Exception as exc:
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                 raise
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                 raise
-                log_stage_error('07_reflow_section', exc, {'context': '07'})
+                log_stage_error("07_reflow_section", exc, {"context": "07"})
                 raise
                 pass
 
@@ -1958,11 +2289,11 @@ async def reflow_section_with_llm(
                 try:
                     _trim = int(os.getenv("STAGE07_RETRY2_TRIM_CHARS", "1200"))
                 except Exception as exc:
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07"})
                     raise
                     _trim = 1200
                 _guard3 = (
@@ -1976,7 +2307,12 @@ async def reflow_section_with_llm(
                     {"role": "user", "content": user_parts3},
                 ]
 
-                call_params = {"model": LLM_MODEL, "messages": messages3, "timeout": llm_timeout, **extras}
+                call_params = {
+                    "model": LLM_MODEL,
+                    "messages": messages3,
+                    "timeout": llm_timeout,
+                    **extras,
+                }
                 # lower temperature and cap tokens when supported
                 call_params["temperature"] = 0
                 call_params["cache"] = {"no-cache": True}
@@ -1984,32 +2320,34 @@ async def reflow_section_with_llm(
                     if "gemini" not in (LLM_MODEL or "").lower():
                         call_params["stop"] = STOP_FENCES
                 except Exception as exc:
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07"})
                     raise
                     pass
                 try:
                     _retry2_cap = int(os.getenv("STAGE07_RETRY2_MAX_TOKENS", "1536"))
                 except Exception as exc:
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07"})
                     raise
                     _retry2_cap = 1536
                 try:
                     if "gemini" not in (LLM_MODEL or "").lower():
-                        call_params["max_tokens"] = min(int(call_params.get("max_tokens") or STAGE07_MAX_TOKENS), _retry2_cap)
+                        call_params["max_tokens"] = min(
+                            int(call_params.get("max_tokens") or STAGE07_MAX_TOKENS), _retry2_cap
+                        )
                 except Exception as exc:
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07"})
                     raise
                     pass
 
@@ -2017,6 +2355,7 @@ async def reflow_section_with_llm(
                 try:
                     _router4 = _build_text_router()
                     import time as _t
+
                     _t0 = _t.monotonic()
                     _r4 = await _router4.acompletion(
                         model="chutes/text",
@@ -2024,7 +2363,7 @@ async def reflow_section_with_llm(
                         response_format={"type": "json_object"},
                         temperature=0,
                         max_tokens=int(call_params.get("max_tokens") or 1024),
-                        timeout=max(30, int(os.getenv("STAGE07_TIMEOUT","90"))),
+                        timeout=max(30, int(os.getenv("STAGE07_TIMEOUT", "90"))),
                     )
                     resp2 = _router_content(_r4)
                     try:
@@ -2039,25 +2378,25 @@ async def reflow_section_with_llm(
                                 "route_name": "chutes/text",
                                 "served_model": _model_served,
                                 "latency_ms": _elapsed_ms,
-                                "timeout_s": max(30, int(os.getenv("STAGE07_TIMEOUT","90"))),
+                                "timeout_s": max(30, int(os.getenv("STAGE07_TIMEOUT", "90"))),
                                 "tokens_in": _usage_get(_usage, "prompt_tokens"),
                                 "tokens_out": _usage_get(_usage, "completion_tokens"),
                             },
                         )
                     except Exception as exc:
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                         raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                         raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07"})
                         raise
                         pass
                 except Exception as exc:
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07"})
                     raise
                     try:
                         log_timing(
@@ -2067,78 +2406,86 @@ async def reflow_section_with_llm(
                                 "outcome": "exception",
                                 "route_name": "chutes/text",
                                 "served_model": None,
-                                "error": str(_ex)[:200],
+                                "error": str(exc)[:200],
                                 "raw_preview": None,
                             },
                         )
                     except Exception as exc:
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                         raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                         raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07"})
                         raise
                         pass
                     resp2 = None
                 try:
                     from loguru import logger as _logger
+
                     _ok3 = True if (resp2 is not None) else False
                     _logger.info(f"reflow_relaxed: model={LLM_MODEL} ok={_ok3}")
                 except Exception as exc:
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07"})
                     raise
                     pass
                 try:
-                    (logs_dir / f"response_relaxed_{section_data.get('id','section')}.json").write_text(
+                    (
+                        logs_dir / f"response_relaxed_{section_data.get('id','section')}.json"
+                    ).write_text(
                         json.dumps(resp2, default=str, indent=2)
                         if isinstance(resp2, dict)
                         else str(resp2)
                     )
                 except Exception as exc:
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07"})
                     raise
                     pass
             except Exception as exc:
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                 raise
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                 raise
-                log_stage_error('07_reflow_section', exc, {'context': '07'})
+                log_stage_error("07_reflow_section", exc, {"context": "07"})
                 raise
                 resp2 = ""
             # Normalize relaxed response (dict-or-string) before emptiness checks
             try:
                 from extractor.pipeline.utils.response_utils import normalize_json_content as _nz
+
                 _raw2, _obj2 = _nz(resp2)
                 if isinstance(_obj2, dict):
                     content = json.dumps(_obj2, ensure_ascii=False)
                 else:
-                    content = _raw2 if isinstance(_raw2, str) and _raw2.strip() else (resp2 if isinstance(resp2, str) else None)
+                    content = (
+                        _raw2
+                        if isinstance(_raw2, str) and _raw2.strip()
+                        else (resp2 if isinstance(resp2, str) else None)
+                    )
             except Exception as exc:
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                 raise
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                 raise
-                log_stage_error('07_reflow_section', exc, {'context': '07'})
+                log_stage_error("07_reflow_section", exc, {"context": "07"})
                 raise
                 # Fallback: previous behavior
                 if isinstance(resp2, dict):
                     try:
                         content = json.dumps(resp2, ensure_ascii=False)
                     except Exception as exc:
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                         raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                         raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07"})
                         raise
                         content = None
                 else:
@@ -2153,11 +2500,11 @@ async def reflow_section_with_llm(
                 try:
                     content = json.dumps(fallback_json, ensure_ascii=False)
                 except Exception as exc:
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07"})
                     raise
                     content = str(fallback_json)
             elif isinstance(fallback_json, str) and fallback_json.strip():
@@ -2173,40 +2520,47 @@ async def reflow_section_with_llm(
             parsed = _content_to_json_dict(content)
             result = parsed
         except Exception as exc:
-            log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+            log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
             raise
-            log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+            log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
             raise
-            log_stage_error('07_reflow_section', exc, {'context': '07'})
+            log_stage_error("07_reflow_section", exc, {"context": "07"})
             raise
             # Parse JSON: strict first (no repair). Optionally relax if allowed.
             try:
                 parsed = parse_json_strict(content)
                 result = parsed
             except Exception as exc:
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                 raise
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                 raise
-                log_stage_error('07_reflow_section', exc, {'context': '07'})
+                log_stage_error("07_reflow_section", exc, {"context": "07"})
                 raise
                 if os.getenv("STAGE07_STRICT_PARSE_ONLY", "0").lower() in ("1", "true", "yes", "y"):
-                    logger.warning(f"Strict JSON parse failed (no repair allowed): {_strict_err}")
+                    logger.warning(f"Strict JSON parse failed (no repair allowed): {exc}")
                     raise
-                logger.warning(f"Strict JSON parse failed; attempting relaxed repair: {_strict_err}")
+                logger.warning(
+                    f"Strict JSON parse failed; attempting relaxed repair: {exc}"
+                )
                 # Prefer project cleaner to handle stray fences/trailing commas, etc.
                 parsed = clean_json_string(content, return_dict=True)
             # Optional: prune unexpected top-level keys for strictness (default ON)
             try:
-                if os.getenv("STAGE07_PRUNE_TOPLEVEL_KEYS", "1").lower() in ("1", "true", "yes", "y"):
+                if os.getenv("STAGE07_PRUNE_TOPLEVEL_KEYS", "1").lower() in (
+                    "1",
+                    "true",
+                    "yes",
+                    "y",
+                ):
                     _allowed = {"reflowed_json", "ocr_corrections", "improvements_made", "summary"}
                     parsed = restrict_top_level_keys(parsed, _allowed)
             except Exception as exc:
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                 raise
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                 raise
-                log_stage_error('07_reflow_section', exc, {'context': '07'})
+                log_stage_error("07_reflow_section", exc, {"context": "07"})
                 raise
                 pass
             if isinstance(parsed, dict):
@@ -2224,11 +2578,11 @@ async def reflow_section_with_llm(
             else:
                 result = {"reflowed_text": content}
         except Exception as exc:
-            log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+            log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
             raise
-            log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+            log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
             raise
-            log_stage_error('07_reflow_section', exc, {'context': '07'})
+            log_stage_error("07_reflow_section", exc, {"context": "07"})
             raise
             logger.warning("Invalid JSON from LLM; failing per policy (no fallback)")
             try:
@@ -2242,11 +2596,11 @@ async def reflow_section_with_llm(
                     )
                 )
             except Exception as exc:
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                 raise
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                 raise
-                log_stage_error('07_reflow_section', exc, {'context': '07'})
+                log_stage_error("07_reflow_section", exc, {"context": "07"})
                 raise
                 pass
             raise ValueError(
@@ -2259,11 +2613,11 @@ async def reflow_section_with_llm(
             if isinstance(result, dict):
                 result = restrict_top_level_keys(result, _allowed)
         except Exception as exc:
-            log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+            log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
             raise
-            log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+            log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
             raise
-            log_stage_error('07_reflow_section', exc, {'context': '07'})
+            log_stage_error("07_reflow_section", exc, {"context": "07"})
             raise
             pass
         # Enforce schema presence; do not accept wrappers or missing keys
@@ -2287,7 +2641,9 @@ async def reflow_section_with_llm(
                 figs = section_data.get("figures") or []
                 rj = out.get("reflowed_json") or {}
                 blocks = rj.get("blocks") or []
-                has_fig_block = any(isinstance(b, dict) and b.get("type") == "figure" for b in blocks)
+                has_fig_block = any(
+                    isinstance(b, dict) and b.get("type") == "figure" for b in blocks
+                )
                 if figs and not has_fig_block:
                     f0 = figs[0]
                     cap = (f0.get("ai_description") or "").strip() or None
@@ -2318,19 +2674,19 @@ async def reflow_section_with_llm(
                             )
                         )
                     except Exception as exc:
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                         raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                         raise
-                        log_stage_error('07_reflow_section', exc, {'context': '07'})
+                        log_stage_error("07_reflow_section", exc, {"context": "07"})
                         raise
                         pass
             except Exception as exc:
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                 raise
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                 raise
-                log_stage_error('07_reflow_section', exc, {'context': '07'})
+                log_stage_error("07_reflow_section", exc, {"context": "07"})
                 raise
                 pass
             # Normalize figure blocks emitted by the model to Stage 06 canonical structure
@@ -2348,7 +2704,10 @@ async def reflow_section_with_llm(
                     changed = False
                     for blk in blocks:
                         replaced = False
-                        if isinstance(blk, dict) and blk.get("type") in {"figure", "figure_reference"}:
+                        if isinstance(blk, dict) and blk.get("type") in {
+                            "figure",
+                            "figure_reference",
+                        }:
                             fid = blk.get("figure_id")
                             canon = canon_map.get(fid)
                             if not canon and figs:
@@ -2367,11 +2726,11 @@ async def reflow_section_with_llm(
                         rj["blocks"] = updated
                         out["reflowed_json"] = rj
             except Exception as exc:
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                 raise
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                 raise
-                log_stage_error('07_reflow_section', exc, {'context': '07'})
+                log_stage_error("07_reflow_section", exc, {"context": "07"})
                 raise
                 pass
             # Ensure at least one table block is present when tables exist
@@ -2379,7 +2738,9 @@ async def reflow_section_with_llm(
                 tabs = section_data.get("tables") or []
                 rj = out.get("reflowed_json") or {}
                 blocks = rj.get("blocks") or []
-                has_tbl_block = any(isinstance(b, dict) and b.get("type") == "table" for b in blocks)
+                has_tbl_block = any(
+                    isinstance(b, dict) and b.get("type") == "table" for b in blocks
+                )
                 if tabs and not has_tbl_block:
                     t0 = tabs[0]
                     tbl_block = _build_table_block_from_stage05(t0)
@@ -2388,17 +2749,21 @@ async def reflow_section_with_llm(
                         rj["blocks"] = blocks
                         out["reflowed_json"] = rj
             except Exception as exc:
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                 raise
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                 raise
-                log_stage_error('07_reflow_section', exc, {'context': '07'})
+                log_stage_error("07_reflow_section", exc, {"context": "07"})
                 raise
                 pass
             # Replace table blocks with canonical data only when the model produced invalid structures
             try:
                 canonical_tables = [
-                    b for b in (_build_table_block_from_stage05(t) for t in section_data.get("tables", [])) if b
+                    b
+                    for b in (
+                        _build_table_block_from_stage05(t) for t in section_data.get("tables", [])
+                    )
+                    if b
                 ]
                 if canonical_tables:
                     rj = out.get("reflowed_json") or {}
@@ -2409,7 +2774,7 @@ async def reflow_section_with_llm(
                         if isinstance(blk, dict) and blk.get("type") == "table"
                     ]
                     # remove any extra table blocks beyond the canonical set
-                    for extra_idx in sorted(table_indices[len(canonical_tables):], reverse=True):
+                    for extra_idx in sorted(table_indices[len(canonical_tables) :], reverse=True):
                         blocks.pop(extra_idx)
 
                     # ensure at least canonical count slots exist and replace with sanitized data
@@ -2424,26 +2789,40 @@ async def reflow_section_with_llm(
                             merged["title"] = existing.get("title")
                         differences: list[dict[str, Any]] = []
                         try:
-                            existing_rows = existing.get("rows") if isinstance(existing, dict) else None
+                            existing_rows = (
+                                existing.get("rows") if isinstance(existing, dict) else None
+                            )
                             if isinstance(existing_rows, list):
                                 canon_cols = merged.get("columns") or []
-                                for r_idx, (canon_row, existing_row) in enumerate(zip(merged.get("rows", []), existing_rows)):
-                                    for c_idx, (canon_cell, existing_cell) in enumerate(zip(canon_row, existing_row)):
+                                for r_idx, (canon_row, existing_row) in enumerate(
+                                    zip(merged.get("rows", []), existing_rows)
+                                ):
+                                    for c_idx, (canon_cell, existing_cell) in enumerate(
+                                        zip(canon_row, existing_row)
+                                    ):
                                         if _normalize_table_text(existing_cell) != canon_cell:
                                             differences.append(
                                                 {
                                                     "row": r_idx,
-                                                    "column": canon_cols[c_idx] if c_idx < len(canon_cols) else c_idx,
+                                                    "column": (
+                                                        canon_cols[c_idx]
+                                                        if c_idx < len(canon_cols)
+                                                        else c_idx
+                                                    ),
                                                     "original": existing_cell,
                                                     "sanitized": canon_cell,
                                                 }
                                             )
                         except Exception as exc:
-                            log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                            log_stage_error(
+                                "07_reflow_section", exc, {"context": "07_reflow_retry"}
+                            )
                             raise
-                            log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                            log_stage_error(
+                                "07_reflow_section", exc, {"context": "07_reflow_retry"}
+                            )
                             raise
-                            log_stage_error('07_reflow_section', exc, {'context': '07'})
+                            log_stage_error("07_reflow_section", exc, {"context": "07"})
                             raise
                             pass
                         blocks[idx] = merged
@@ -2459,21 +2838,25 @@ async def reflow_section_with_llm(
                                     )
                                 )
                             except Exception as exc:
-                                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                                log_stage_error(
+                                    "07_reflow_section", exc, {"context": "07_reflow_retry"}
+                                )
                                 raise
-                                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                                log_stage_error(
+                                    "07_reflow_section", exc, {"context": "07_reflow_retry"}
+                                )
                                 raise
-                                log_stage_error('07_reflow_section', exc, {'context': '07'})
+                                log_stage_error("07_reflow_section", exc, {"context": "07"})
                                 raise
                                 pass
                     rj["blocks"] = blocks
                     out["reflowed_json"] = rj
             except Exception as exc:
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                 raise
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                 raise
-                log_stage_error('07_reflow_section', exc, {'context': '07'})
+                log_stage_error("07_reflow_section", exc, {"context": "07"})
                 raise
                 pass
         else:
@@ -2499,39 +2882,39 @@ async def reflow_section_with_llm(
             md = out.setdefault("metadata", {})
             md.setdefault("diagnostics", []).extend(sec_diags)
         except Exception as exc:
-            log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+            log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
             raise
-            log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+            log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
             raise
-            log_stage_error('07_reflow_section', exc, {'context': '07'})
+            log_stage_error("07_reflow_section", exc, {"context": "07"})
             raise
             pass
         return out
     except Exception as exc:
-        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
         raise
-        log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+        log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
         raise
-        log_stage_error('07_reflow_section', exc, {'context': '07'})
+        log_stage_error("07_reflow_section", exc, {"context": "07"})
         raise
         # Always fail (no fallback)
         try:
-            info = classify_llm_error(e)
+            info = classify_llm_error(exc)
             sec_diags.append(
                 make_event(
                     "07_reflow_section",
                     "error",
                     info.get("code", "llm_error"),
-                    info.get("message", str(e)),
+                    info.get("message", str(exc)),
                     {},
                 )
             )
         except Exception as exc:
-            log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+            log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
             raise
-            log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+            log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
             raise
-            log_stage_error('07_reflow_section', exc, {'context': '07'})
+            log_stage_error("07_reflow_section", exc, {"context": "07"})
             raise
             pass
         if allow_fallback:
@@ -2577,11 +2960,11 @@ async def reflow_section_with_llm(
                     md = out.setdefault("metadata", {})
                     md.setdefault("diagnostics", []).extend(sec_diags)
                 except Exception as exc:
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07"})
                     raise
                     pass
                 try:
@@ -2599,25 +2982,24 @@ async def reflow_section_with_llm(
                         },
                     )
                 except Exception as exc:
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                     raise
-                    log_stage_error('07_reflow_section', exc, {'context': '07'})
+                    log_stage_error("07_reflow_section", exc, {"context": "07"})
                     raise
                     pass
                 logger.warning("Stage 07: Falling back to merged text (no LLM)")
                 return out
             except Exception as exc:
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                 raise
-                log_stage_error('07_reflow_section', exc, {'context': '07_reflow_retry'})
+                log_stage_error("07_reflow_section", exc, {"context": "07_reflow_retry"})
                 raise
-                log_stage_error('07_reflow_section', exc, {'context': '07'})
+                log_stage_error("07_reflow_section", exc, {"context": "07"})
                 raise
                 pass
-        logger.error(f"Stage 07: LLM call failed: {e}")
+        logger.error(f"Stage 07: LLM call failed: {exc}")
         raise RuntimeError(
             "Stage 07 failed: LLM call did not return usable JSON. Check 07_reflow_section/logs, verify API keys, and confirm the configured Chat model is reachable."
         )
-

@@ -13,7 +13,9 @@ import typer
 from dotenv import load_dotenv, find_dotenv
 
 
-app = typer.Typer(add_completion=False, help="Smoke: Stage 03 header verify (text-only via adapter)")
+app = typer.Typer(
+    add_completion=False, help="Smoke: Stage 03 header verify (text-only via adapter)"
+)
 
 
 @app.command()
@@ -53,6 +55,7 @@ def main(
         ]
 
         import asyncio
+
         adapter = LLMAdapter(logs_root=Path("logs"))
         res = asyncio.run(
             adapter.verify_header(

@@ -19,8 +19,12 @@ def load(p: Path):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--refs", type=Path, required=True, nargs="+", help="Reference flattened json(s)")
-    ap.add_argument("--candidates", type=Path, required=True, nargs="+", help="Candidate flattened json(s)")
+    ap.add_argument(
+        "--refs", type=Path, required=True, nargs="+", help="Reference flattened json(s)"
+    )
+    ap.add_argument(
+        "--candidates", type=Path, required=True, nargs="+", help="Candidate flattened json(s)"
+    )
     args = ap.parse_args()
 
     ref_counts = {p: len(load(p)) for p in args.refs}

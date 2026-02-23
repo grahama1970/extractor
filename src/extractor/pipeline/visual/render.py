@@ -21,7 +21,15 @@ def boxes_from_stage02(path: Path) -> Iterable[Box]:
         if not bbox or len(bbox) != 4:
             continue
         t = b.get("block_type") or b.get("type") or "block"
-        yield Box(page=int(page), x0=bbox[0], y0=bbox[1], x1=bbox[2], y1=bbox[3], label=f"{t}:{i}", color=(0, 170, 255))
+        yield Box(
+            page=int(page),
+            x0=bbox[0],
+            y0=bbox[1],
+            x1=bbox[2],
+            y1=bbox[3],
+            label=f"{t}:{i}",
+            color=(0, 170, 255),
+        )
 
 
 def boxes_from_stage05(path: Path) -> Iterable[Box]:
@@ -32,7 +40,15 @@ def boxes_from_stage05(path: Path) -> Iterable[Box]:
         title = t.get("title") or "table"
         if not bbox:
             continue
-        yield Box(page=int(page), x0=bbox[0], y0=bbox[1], x1=bbox[2], y1=bbox[3], label=f"T{i}:{title}", color=(0, 200, 0))
+        yield Box(
+            page=int(page),
+            x0=bbox[0],
+            y0=bbox[1],
+            x1=bbox[2],
+            y1=bbox[3],
+            label=f"T{i}:{title}",
+            color=(0, 200, 0),
+        )
 
 
 def boxes_from_stage06(path: Path) -> Iterable[Box]:
@@ -43,7 +59,15 @@ def boxes_from_stage06(path: Path) -> Iterable[Box]:
         title = f.get("title") or f.get("inferred_title") or "figure"
         if not bbox:
             continue
-        yield Box(page=int(page), x0=bbox[0], y0=bbox[1], x1=bbox[2], y1=bbox[3], label=f"F{i}:{title}", color=(255, 128, 0))
+        yield Box(
+            page=int(page),
+            x0=bbox[0],
+            y0=bbox[1],
+            x1=bbox[2],
+            y1=bbox[3],
+            label=f"F{i}:{title}",
+            color=(255, 128, 0),
+        )
 
 
 STEP_MAP = {
@@ -60,9 +84,13 @@ STEP_DIR = {
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Render visual overlays for selected steps (package entry)")
+    ap = argparse.ArgumentParser(
+        description="Render visual overlays for selected steps (package entry)"
+    )
     ap.add_argument("--pdf", required=True, type=Path)
-    ap.add_argument("--out", required=True, type=Path, help="pipeline results root (data/results/pipeline)")
+    ap.add_argument(
+        "--out", required=True, type=Path, help="pipeline results root (data/results/pipeline)"
+    )
     ap.add_argument("--viz-out", type=Path, default=Path("data/results/pipeline"))
     ap.add_argument("--steps", default="02,05,06")
     ap.add_argument("--dpi", type=int, default=144)

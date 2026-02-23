@@ -1,8 +1,8 @@
 from scillm import completion
-import os, json
+import os
 
 base = os.environ["CHUTES_API_BASE"]  # must end with /v1
-key  = os.environ["CHUTES_API_KEY"]
+key = os.environ["CHUTES_API_KEY"]
 _mid = open("scripts/artifacts/chutes_models_ids.txt", "r", encoding="utf-8").read().splitlines()[0]
 model = _mid if _mid.startswith("openai/") else f"openai/{_mid}"
 

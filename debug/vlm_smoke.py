@@ -6,7 +6,10 @@
 #   "pillow>=10.1.0",
 # ]
 # ///
-import base64, json, os, sys
+import base64
+import json
+import os
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -16,8 +19,10 @@ import litellm
 
 app = typer.Typer(help="Minimal VLM chat.completions smoke with image_url content")
 
+
 def _b64(p: Path) -> str:
-    return base64.b64encode(p.read_bytes()).decode('utf-8')
+    return base64.b64encode(p.read_bytes()).decode("utf-8")
+
 
 @app.command()
 def run(
@@ -26,9 +31,19 @@ def run(
     model: Optional[str] = typer.Option(None, "--model", help="Overrides env VLM"),
 ):
     require_scillm_env()
-    raw_model = (model or os.getenv('LITELLM_VLM_MODEL') or os.getenv('LITELLM_MED_VLM_MODEL') or '').strip()
+    raw_model = (
+        model or os.getenv("LITELLM_VLM_MODEL") or os.getenv("LITELLM_MED_VLM_MODEL") or ""
+    ).strip()
     if not raw_model:
-        print(json.dumps({"ok": False, "error": "No VLM model configured (set LITELLM_VLM_MODEL or LITELLM_MED_VLM_MODEL)"}, indent=2))
+        print(
+            json.dumps(
+                {
+                    "ok": False,
+                    "error": "No VLM model configured (set LITELLM_VLM_MODEL or LITELLM_MED_VLM_MODEL)",
+                },
+                indent=2,
+            )
+        )
         sys.exit(2)
     mdl = normalize_model_alias(raw_model)
     b64 = _b64(image_path)
@@ -40,7 +55,10 @@ def run(
         resp = litellm.completion(
             model=mdl,
             messages=[
-                {"role": "system", "content": "You write concise technical figure descriptions (2–3 sentences)."},
+                {
+                    "role": "system",
+                    "content": "You write concise technical figure descriptions (2–3 sentences).",
+                },
                 {"role": "user", "content": user_content},
             ],
             timeout=25,
@@ -51,15 +69,20 @@ def run(
         # Normalize output
         content = None
         if isinstance(resp, dict):
-            content = resp.get('choices', [{}])[0].get('message', {}).get('content')
+            content = resp.get("choices", [{}])[0].get("message", {}).get("content")
         else:
-            content = getattr(getattr(resp, 'choices', [None])[0], 'message', {}).get('content') if hasattr(resp, 'choices') else None
-        ok = bool((content or '').strip())
-        print(json.dumps({"ok": ok, "model": mdl, "content": (content or '')[:400]}, indent=2))
+            content = (
+                getattr(getattr(resp, "choices", [None])[0], "message", {}).get("content")
+                if hasattr(resp, "choices")
+                else None
+            )
+        ok = bool((content or "").strip())
+        print(json.dumps({"ok": ok, "model": mdl, "content": (content or "")[:400]}, indent=2))
         sys.exit(0 if ok else 3)
     except Exception as e:
         print(json.dumps({"ok": False, "error": str(e), "model": mdl}, indent=2))
         sys.exit(4)
+
 
 if __name__ == "__main__":
     app()

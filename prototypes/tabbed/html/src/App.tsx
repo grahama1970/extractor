@@ -4,6 +4,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import React, { useEffect, useState } from "react";
+import { Loader2 } from "lucide-react";
 import { isDev } from "@/lib/env";
 import Index from "./pages/Index";
 import ClassicLayout from "./pages/ClassicLayout";
@@ -12,6 +13,7 @@ import DashboardLayout from "./pages/DashboardLayout";
 import NotFound from "./pages/NotFound";
 import ExtractPage from "./pages/ExtractPage";
 import AskPage from "./pages/AskPage";
+const ReviewLayout = React.lazy(() => import("./pages/ReviewLayout"));
 
 const queryClient = new QueryClient();
 
@@ -52,6 +54,11 @@ const App = () => (
           <Route path="/dashboard" element={<DashboardLayout />} />
           <Route path="/extract" element={<ExtractPage />} />
           <Route path="/ask" element={<AskPage />} />
+          <Route path="/review" element={
+            <React.Suspense fallback={<div className="flex items-center justify-center h-screen"><Loader2 className="h-8 w-8 animate-spin" /></div>}>
+              <ReviewLayout />
+            </React.Suspense>
+          } />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>

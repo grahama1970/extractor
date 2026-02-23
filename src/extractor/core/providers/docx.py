@@ -27,7 +27,11 @@ from docx2python import docx2python
 from docx2python.iterators import iter_at_depth, iter_tables
 from docx import Document as PythonDocxDocument
 from loguru import logger
-from extractor.core.providers.utils import emit_list_blocks, normalize_heading_level, ensure_hierarchy
+from extractor.core.providers.utils import (
+    emit_list_blocks,
+    normalize_heading_level,
+    ensure_hierarchy,
+)
 from extractor.core.providers.fetcher_bridge import ensure_local_source, attach_fetcher_metadata
 
 from extractor.core.schema.unified_document import (
@@ -61,7 +65,7 @@ class DOCXProvider:
             "Subtitle": 1,
         }
         # Regex for detecting numbered section patterns (e.g., "1.", "1.1", "1.1.1")
-        self._section_number_re = re.compile(r'^(\d+\.)+\s*\S')
+        self._section_number_re = re.compile(r"^(\d+\.)+\s*\S")
         # Numbering depth map (optional) used during list extraction
         self._numbering_map: Dict[str, List[int]] = {}
 
@@ -82,7 +86,15 @@ class DOCXProvider:
             props = doc.core_properties
             if props.creator:
                 creator_lower = props.creator.lower()
-                pdf_converters = ['adobe', 'pdf', 'acrobat', 'nitro', 'smallpdf', 'ilovepdf', 'zamzar']
+                pdf_converters = [
+                    "adobe",
+                    "pdf",
+                    "acrobat",
+                    "nitro",
+                    "smallpdf",
+                    "ilovepdf",
+                    "zamzar",
+                ]
                 if any(conv in creator_lower for conv in pdf_converters):
                     return True
 
@@ -120,7 +132,7 @@ class DOCXProvider:
         # Check for numbered section patterns: "1.", "1.1", "1.1.1", etc.
         if self._section_number_re.match(text):
             # Count dots to estimate level
-            dots = text.split()[0].count('.')
+            dots = text.split()[0].count(".")
             return min(dots, 6)
 
         # Check formatting via paragraph runs
@@ -137,7 +149,9 @@ class DOCXProvider:
             for run in runs:
                 if run.font and run.font.size:
                     # Size is in EMUs (914400 EMUs = 1 inch, 72 points = 1 inch)
-                    pt_size = run.font.size.pt if hasattr(run.font.size, 'pt') else run.font.size / 12700
+                    pt_size = (
+                        run.font.size.pt if hasattr(run.font.size, "pt") else run.font.size / 12700
+                    )
                     font_sizes.append(pt_size)
 
             avg_size = sum(font_sizes) / len(font_sizes) if font_sizes else 0
@@ -291,7 +305,8 @@ class DOCXProvider:
                     "pdf_imported": is_pdf_imported,
                     "pdf_import_warning": (
                         "This DOCX was likely converted from PDF. Styles and tables may be unreliable."
-                        if is_pdf_imported else None
+                        if is_pdf_imported
+                        else None
                     ),
                 },
             ),
@@ -333,13 +348,15 @@ class DOCXProvider:
                         if re.match(r"^\d+(?:\.\d+)*\.[\s\u00A0]+", t):
                             b.type = BlockType.HEADING
                             try:
-                                dots = t.count('.')
+                                dots = t.count(".")
                                 b.metadata.attributes["level"] = max(1, min(dots + 1, 6))
                             except Exception:
                                 b.metadata.attributes["level"] = 2
                             promoted += 1
                 if promoted:
-                    logger.debug(f"Promoted {promoted} DOCX paragraphs to headings by numbering heuristic")
+                    logger.debug(
+                        f"Promoted {promoted} DOCX paragraphs to headings by numbering heuristic"
+                    )
             except Exception:
                 pass
 
@@ -494,6 +511,7 @@ class DOCXProvider:
                 blocks.extend(li_blocks)
                 pending_items = []
                 current_list_type = None
+
         for par_idx, par in enumerate(iter_at_depth(docx_content.document_pars, 4)):
             # Check if this is a Par object (from docx2python v3)
             if hasattr(par, "style") and hasattr(par, "runs"):
@@ -571,10 +589,16 @@ class DOCXProvider:
                         # count spaces before text (docx2python may not preserve indent reliably; keep 1)
                         depth = 1
                         text = text[m.end() :]
-                    list_t = "ol" if (m and m.group('bullet') and m.group('bullet')[0].isdigit()) else "ul"
+                    list_t = (
+                        "ol"
+                        if (m and m.group("bullet") and m.group("bullet")[0].isdigit())
+                        else "ul"
+                    )
                     # v2 opt-in: derive depth from python-docx numbering map when available
                     if self._numbering_map:
-                        ilvls = self._numbering_map.get(text) or self._numbering_map.get(text.strip())
+                        ilvls = self._numbering_map.get(text) or self._numbering_map.get(
+                            text.strip()
+                        )
                         if ilvls:
                             try:
                                 depth = int(ilvls.pop(0)) + 1
@@ -625,7 +649,11 @@ class DOCXProvider:
             try:
                 pPr = p._p.pPr if getattr(p, "_p", None) is not None else None  # type: ignore[attr-defined]
                 numPr = pPr.numPr if pPr is not None else None
-                ilvl = numPr.ilvl.val if (numPr is not None and getattr(numPr, "ilvl", None) is not None) else None
+                ilvl = (
+                    numPr.ilvl.val
+                    if (numPr is not None and getattr(numPr, "ilvl", None) is not None)
+                    else None
+                )
                 if ilvl is not None:
                     mapping.setdefault(txt, []).append(int(ilvl))
             except Exception:

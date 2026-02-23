@@ -28,7 +28,14 @@ app = typer.Typer(add_completion=False)
 
 
 def _load_flatten_function():
-    module_path = Path(__file__).resolve().parents[3] / "src" / "extractor" / "pipeline" / "steps" / "10_arangodb_exporter.py"
+    module_path = (
+        Path(__file__).resolve().parents[3]
+        / "src"
+        / "extractor"
+        / "pipeline"
+        / "steps"
+        / "10_arangodb_exporter.py"
+    )
     spec = importlib.util.spec_from_file_location("pipeline_stage10", module_path)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"Unable to load Stage 10 module from {module_path}")
@@ -40,7 +47,10 @@ def _load_flatten_function():
 @app.command()
 def main(
     pdf_stage07: Path = typer.Argument(
-        ..., exists=True, readable=True, help="Stage 07 reflowed JSON produced from the PDF pipeline"
+        ...,
+        exists=True,
+        readable=True,
+        help="Stage 07 reflowed JSON produced from the PDF pipeline",
     ),
     structured_path: Path = typer.Argument(
         ..., exists=True, readable=True, help="Structured rendition of the same document"
@@ -137,9 +147,7 @@ def main(
     summary_path.write_text(json.dumps(summary_payload, indent=2))
 
     typer.echo(f"PDF objects: {len(pdf_flattened)} -> {pdf_types}")
-    typer.echo(
-        f"{format_name.upper()} objects: {len(structured_flattened)} -> {structured_types}"
-    )
+    typer.echo(f"{format_name.upper()} objects: {len(structured_flattened)} -> {structured_types}")
     typer.echo(f"Summary written to {summary_path}")
 
     diff = abs(len(pdf_flattened) - len(structured_flattened))

@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -38,10 +37,11 @@ def strip_fences_and_crop(s: str) -> str:
         if s2.endswith("```"):
             s2 = s2[:-3]
     s2 = s2.strip()
-    if s2 and (s2[0] != '{' or s2[-1] != '}'):
-        a = s2.find('{'); b = s2.rfind('}')
+    if s2 and (s2[0] != "{" or s2[-1] != "}"):
+        a = s2.find("{")
+        b = s2.rfind("}")
         if a != -1 and b != -1 and b > a:
-            s2 = s2[a:b+1]
+            s2 = s2[a : b + 1]
     return s2
 
 
@@ -56,18 +56,18 @@ async def try_chat(model: str, messages: List[Dict[str, Any]], **extra) -> str:
     resp = await acompletion(model=model, messages=messages, **extra)
     # 1) Standard path
     try:
-        choices = getattr(resp, 'choices', [])
+        choices = getattr(resp, "choices", [])
         if choices:
-            msg = getattr(choices[0], 'message', None)
+            msg = getattr(choices[0], "message", None)
             if msg is not None:
-                content = getattr(msg, 'content', None)
+                content = getattr(msg, "content", None)
                 if isinstance(content, str) and content.strip():
                     return content
     except Exception:
         pass
     # 2) Some providers expose .text
     try:
-        txt = getattr(resp, 'text', None)
+        txt = getattr(resp, "text", None)
         if isinstance(txt, str) and txt.strip():
             return txt
     except Exception:
@@ -75,10 +75,10 @@ async def try_chat(model: str, messages: List[Dict[str, Any]], **extra) -> str:
     # 3) Dict-like fallback
     if isinstance(resp, dict):
         try:
-            ch = resp.get('choices') or []
+            ch = resp.get("choices") or []
             if ch:
-                msg = ch[0].get('message') or {}
-                content = msg.get('content')
+                msg = ch[0].get("message") or {}
+                content = msg.get("content")
                 if isinstance(content, str) and content.strip():
                     return content
         except Exception:
@@ -100,16 +100,24 @@ async def try_chat(model: str, messages: List[Dict[str, Any]], **extra) -> str:
 async def run_openai(model: str, outdir: Path) -> Tuple[bool, str]:
     # Use the working pattern from gpt5_acompletion.py
     def _guess_mime(path: Path) -> str:
-        ext = path.suffix.lower().lstrip('.')
+        ext = path.suffix.lower().lstrip(".")
         return {
-            'png': 'image/png', 'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'webp': 'image/webp',
-            'gif': 'image/gif', 'bmp': 'image/bmp', 'tiff': 'image/tiff'
-        }.get(ext, 'application/octet-stream')
+            "png": "image/png",
+            "jpg": "image/jpeg",
+            "jpeg": "image/jpeg",
+            "webp": "image/webp",
+            "gif": "image/gif",
+            "bmp": "image/bmp",
+            "tiff": "image/tiff",
+        }.get(ext, "application/octet-stream")
+
     def _file_to_data_uri_tail(path: Path) -> str:
         import base64
+
         data = path.read_bytes()
-        b64 = base64.b64encode(data).decode('ascii')
+        b64 = base64.b64encode(data).decode("ascii")
         return f"{_guess_mime(path)};base64,{b64}"
+
     def images_to_mm_content(prompt_text: str, images: List[str]) -> List[Dict[str, Any]]:
         parts: List[Dict[str, Any]] = [{"type": "text", "text": prompt_text}]
         for p in images:
@@ -146,12 +154,16 @@ async def run_openai(model: str, outdir: Path) -> Tuple[bool, str]:
             response_format={"type": "json_object"},
         )
         # Try both message.content and text
-        content = getattr(resp.choices[0].message, 'content', None) or getattr(resp, 'text', None) or ''
+        content = (
+            getattr(resp.choices[0].message, "content", None) or getattr(resp, "text", None) or ""
+        )
         if isinstance(content, str) and content.strip():
-            (outdir/"openai_image_raw.txt").write_text(content, encoding="utf-8")
+            (outdir / "openai_image_raw.txt").write_text(content, encoding="utf-8")
             parsed = parse_json(content)
             if isinstance(parsed, (dict, list)):
-                (outdir/"openai_image_parsed.json").write_text(json.dumps(parsed, indent=2, ensure_ascii=False), encoding="utf-8")
+                (outdir / "openai_image_parsed.json").write_text(
+                    json.dumps(parsed, indent=2, ensure_ascii=False), encoding="utf-8"
+                )
                 return True, content
     except Exception:
         pass
@@ -161,16 +173,24 @@ async def run_openai(model: str, outdir: Path) -> Tuple[bool, str]:
 async def run_gemini(model: str, outdir: Path) -> Tuple[bool, str]:
     # Use the same standardized chat settings as OpenAI, BUT do NOT send response_format for Gemini Chat.
     def _guess_mime(path: Path) -> str:
-        ext = path.suffix.lower().lstrip('.')
+        ext = path.suffix.lower().lstrip(".")
         return {
-            'png': 'image/png', 'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'webp': 'image/webp',
-            'gif': 'image/gif', 'bmp': 'image/bmp', 'tiff': 'image/tiff'
-        }.get(ext, 'application/octet-stream')
+            "png": "image/png",
+            "jpg": "image/jpeg",
+            "jpeg": "image/jpeg",
+            "webp": "image/webp",
+            "gif": "image/gif",
+            "bmp": "image/bmp",
+            "tiff": "image/tiff",
+        }.get(ext, "application/octet-stream")
+
     def _file_to_data_uri_tail(path: Path) -> str:
         import base64
+
         data = path.read_bytes()
-        b64 = base64.b64encode(data).decode('ascii')
+        b64 = base64.b64encode(data).decode("ascii")
         return f"{_guess_mime(path)};base64,{b64}"
+
     def images_to_mm_content(prompt_text: str, images: List[str]) -> List[Dict[str, Any]]:
         parts: List[Dict[str, Any]] = [{"type": "text", "text": prompt_text}]
         for p in images:
@@ -180,6 +200,7 @@ async def run_gemini(model: str, outdir: Path) -> Tuple[bool, str]:
             tail = _file_to_data_uri_tail(path)
             parts.append({"type": "image_url", "image_url": {"url": f"data:{tail}"}})
         return parts
+
     images = [
         "tests/stage07_manual/images/smoke/panda.png",
         "tests/stage07_manual/images/smoke/parrot.png",
@@ -187,15 +208,19 @@ async def run_gemini(model: str, outdir: Path) -> Tuple[bool, str]:
     # 1) Minimal text-only JSON first (prove JSON-only path)
     messages_min = [
         {"role": "system", "content": "Return ONLY a JSON object. No code fences."},
-        {"role": "user", "content": "Return ONLY {\"ok\": true, \"model\": \"%s\"}." % model},
+        {"role": "user", "content": 'Return ONLY {"ok": true, "model": "%s"}.' % model},
     ]
     try:
         resp = await acompletion(model=model, messages=messages_min)
-        content = getattr(resp.choices[0].message, 'content', None) or getattr(resp, 'text', None) or ''
+        content = (
+            getattr(resp.choices[0].message, "content", None) or getattr(resp, "text", None) or ""
+        )
         parsed = parse_json(content)
         if isinstance(parsed, dict) and ("ok" in parsed or "reflowed_json" in parsed):
-            (outdir/"gemini_min_raw.txt").write_text(content, encoding="utf-8")
-            (outdir/"gemini_min_parsed.json").write_text(json.dumps(parsed, indent=2, ensure_ascii=False), encoding="utf-8")
+            (outdir / "gemini_min_raw.txt").write_text(content, encoding="utf-8")
+            (outdir / "gemini_min_parsed.json").write_text(
+                json.dumps(parsed, indent=2, ensure_ascii=False), encoding="utf-8"
+            )
             # continue to image JSON
         else:
             # If minimal fails, stop here
@@ -205,17 +230,27 @@ async def run_gemini(model: str, outdir: Path) -> Tuple[bool, str]:
 
     # 2) Image + JSON (no response_format)
     messages_img = [
-        {"role": "system", "content": "Return ONLY a JSON object: {descriptions:[{description:string},...]}. No code fences."},
-        {"role": "user", "content": images_to_mm_content("Describe the content of each image.", images)},
+        {
+            "role": "system",
+            "content": "Return ONLY a JSON object: {descriptions:[{description:string},...]}. No code fences.",
+        },
+        {
+            "role": "user",
+            "content": images_to_mm_content("Describe the content of each image.", images),
+        },
     ]
     try:
         resp = await acompletion(model=model, messages=messages_img)
-        content = getattr(resp.choices[0].message, 'content', None) or getattr(resp, 'text', None) or ''
+        content = (
+            getattr(resp.choices[0].message, "content", None) or getattr(resp, "text", None) or ""
+        )
         if isinstance(content, str) and content.strip():
-            (outdir/"gemini_image_raw.txt").write_text(content, encoding="utf-8")
+            (outdir / "gemini_image_raw.txt").write_text(content, encoding="utf-8")
             parsed = parse_json(content)
             if isinstance(parsed, (dict, list)):
-                (outdir/"gemini_image_parsed.json").write_text(json.dumps(parsed, indent=2, ensure_ascii=False), encoding="utf-8")
+                (outdir / "gemini_image_parsed.json").write_text(
+                    json.dumps(parsed, indent=2, ensure_ascii=False), encoding="utf-8"
+                )
                 return True, content
     except Exception as e:
         return False, f"{type(e).__name__}: {e}"
@@ -225,16 +260,24 @@ async def run_gemini(model: str, outdir: Path) -> Tuple[bool, str]:
 async def run_moonshot(model: str, outdir: Path) -> Tuple[bool, str]:
     # Same standardized chat settings as others
     def _guess_mime(path: Path) -> str:
-        ext = path.suffix.lower().lstrip('.')
+        ext = path.suffix.lower().lstrip(".")
         return {
-            'png': 'image/png', 'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'webp': 'image/webp',
-            'gif': 'image/gif', 'bmp': 'image/bmp', 'tiff': 'image/tiff'
-        }.get(ext, 'application/octet-stream')
+            "png": "image/png",
+            "jpg": "image/jpeg",
+            "jpeg": "image/jpeg",
+            "webp": "image/webp",
+            "gif": "image/gif",
+            "bmp": "image/bmp",
+            "tiff": "image/tiff",
+        }.get(ext, "application/octet-stream")
+
     def _file_to_data_uri_tail(path: Path) -> str:
         import base64
+
         data = path.read_bytes()
-        b64 = base64.b64encode(data).decode('ascii')
+        b64 = base64.b64encode(data).decode("ascii")
         return f"{_guess_mime(path)};base64,{b64}"
+
     def images_to_mm_content(prompt_text: str, images: List[str]) -> List[Dict[str, Any]]:
         parts: List[Dict[str, Any]] = [{"type": "text", "text": prompt_text}]
         for p in images:
@@ -244,22 +287,32 @@ async def run_moonshot(model: str, outdir: Path) -> Tuple[bool, str]:
             tail = _file_to_data_uri_tail(path)
             parts.append({"type": "image_url", "image_url": {"url": f"data:{tail}"}})
         return parts
+
     images = [
         "tests/stage07_manual/images/smoke/panda.png",
         "tests/stage07_manual/images/smoke/parrot.png",
     ]
     messages = [
         {"role": "system", "content": "Return ONLY a JSON object. No code fences."},
-        {"role": "user", "content": images_to_mm_content("Describe the content of each image.", images)},
+        {
+            "role": "user",
+            "content": images_to_mm_content("Describe the content of each image.", images),
+        },
     ]
     try:
-        resp = await acompletion(model=model, messages=messages, response_format={"type": "json_object"})
-        content = getattr(resp.choices[0].message, 'content', None) or getattr(resp, 'text', None) or ''
+        resp = await acompletion(
+            model=model, messages=messages, response_format={"type": "json_object"}
+        )
+        content = (
+            getattr(resp.choices[0].message, "content", None) or getattr(resp, "text", None) or ""
+        )
         if isinstance(content, str) and content.strip():
-            (outdir/"moonshot_image_raw.txt").write_text(content, encoding="utf-8")
+            (outdir / "moonshot_image_raw.txt").write_text(content, encoding="utf-8")
             parsed = parse_json(content)
             if isinstance(parsed, (dict, list)):
-                (outdir/"moonshot_image_parsed.json").write_text(json.dumps(parsed, indent=2, ensure_ascii=False), encoding="utf-8")
+                (outdir / "moonshot_image_parsed.json").write_text(
+                    json.dumps(parsed, indent=2, ensure_ascii=False), encoding="utf-8"
+                )
                 return True, content
     except Exception:
         pass
@@ -292,9 +345,11 @@ async def main() -> None:
             print("ok=", ok, "len=", len(text))
             if ok:
                 parsed = parse_json(text)
-                (mdir/"parsed.json").write_text(json.dumps(parsed, indent=2, ensure_ascii=False), encoding="utf-8")
+                (mdir / "parsed.json").write_text(
+                    json.dumps(parsed, indent=2, ensure_ascii=False), encoding="utf-8"
+                )
             else:
-                (mdir/"raw.txt").write_text(text or "", encoding="utf-8")
+                (mdir / "raw.txt").write_text(text or "", encoding="utf-8")
         except Exception as e:
             print("error:", type(e).__name__, e)
 

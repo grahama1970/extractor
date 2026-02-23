@@ -43,7 +43,7 @@ def main() -> int:
     ap.add_argument("--threshold", type=int, default=10)
     args = ap.parse_args()
 
-    steps = [s.strip() for s in args.steps.split(',') if s.strip()]
+    steps = [s.strip() for s in args.steps.split(",") if s.strip()]
     failures = 0
     for s in steps:
         step_dir = STEP_DIR.get(s, s)
@@ -52,7 +52,7 @@ def main() -> int:
         if not exp_dir.exists() or not act_dir.exists():
             print(f"WARN: missing visual dir for step {s}")
             continue
-        for img in sorted(exp_dir.glob('*.png')):
+        for img in sorted(exp_dir.glob("*.png")):
             other = act_dir / img.name
             if not other.exists():
                 print(f"{s}: missing actual image {other}")

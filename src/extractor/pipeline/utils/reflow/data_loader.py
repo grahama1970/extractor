@@ -20,7 +20,7 @@ from extractor.pipeline.utils.reflow.layout import horizontal_iou
 
 def merge_text_blocks(blocks: list[dict[str, Any]]) -> str:
     """Minimal normalization: join non-empty lines into paragraphs.
-    
+
     LLM handles full reflow; this is only for pass-through when needed.
     """
     parts: list[str] = []
@@ -66,13 +66,13 @@ def compute_metrics_for_df(df: pd.DataFrame) -> dict[str, Any]:
 
 def merge_section_tables(section: dict[str, Any]) -> None:
     """Merge tables within a section when they represent continued parts across pages.
-    
+
     Modifies section in place.
     """
     tabs = list(section.get("tables") or [])
     if len(tabs) <= 1:
         return
-    
+
     # Sort by page then by table_index
     try:
         tabs.sort(
@@ -83,22 +83,17 @@ def merge_section_tables(section: dict[str, Any]) -> None:
         )
     except Exception:
         pass
-    
+
     merged: list[dict[str, Any]] = tabs[:]
     i = 0
     while i < len(merged) - 1:
         t1, t2 = merged[i], merged[i + 1]
         r1, c1 = get_rows_cols(t1)
         r2, c2 = get_rows_cols(t2)
-        
-        if (
-            c1 > 0
-            and c1 == c2
-            and (t2.get("page_index", 0) <= (t1.get("page_index", 0) or 0) + 1)
-        ):
+
+        if c1 > 0 and c1 == c2 and (t2.get("page_index", 0) <= (t1.get("page_index", 0) or 0) + 1):
             iou = horizontal_iou(
-                t1.get("bbox", []) or [0, 0, 0, 0],
-                t2.get("bbox", []) or [0, 0, 0, 0]
+                t1.get("bbox", []) or [0, 0, 0, 0], t2.get("bbox", []) or [0, 0, 0, 0]
             )
             if iou >= 0.2:
                 # Case A: header (1 row) + body (>=2 rows)
@@ -106,13 +101,13 @@ def merge_section_tables(section: dict[str, Any]) -> None:
                     try:
                         hdr = pd.DataFrame(t1.get("pandas_df") or [])
                         body = pd.DataFrame(t2.get("pandas_df") or [])
-                        
+
                         def _collapse_ws(df: pd.DataFrame) -> pd.DataFrame:
                             return df_map(
                                 df,
                                 lambda v: sanitize_table_cell(v) if not pd.isna(v) else "",
                             )
-                        
+
                         if len(body.columns) == len(hdr.columns):
                             _hdr_clean = _collapse_ws(hdr)
                             body = _collapse_ws(body)
@@ -123,26 +118,26 @@ def merge_section_tables(section: dict[str, Any]) -> None:
                             body.columns = new_cols
                         else:
                             body = _collapse_ws(body)
-                        
+
                         t2["pandas_df"] = body.to_dict("records")
                         t2["pandas_metrics"] = compute_metrics_for_df(body)
                         merged.pop(i)
                         continue
                     except Exception:
                         pass
-                
+
                 # Case B: both bodies with same columns -> concatenate
                 if r1 >= 2 and r2 >= 2:
                     try:
                         df1 = pd.DataFrame(t1.get("pandas_df") or [])
                         df2 = pd.DataFrame(t2.get("pandas_df") or [])
-                        
+
                         def _collapse(df: pd.DataFrame) -> pd.DataFrame:
                             return df_map(
                                 df,
                                 lambda v: sanitize_table_cell(v) if not pd.isna(v) else "",
                             )
-                        
+
                         if len(df1.columns) == len(df2.columns):
                             out = pd.concat([_collapse(df1), _collapse(df2)], ignore_index=True)
                             t1["pandas_df"] = out.to_dict("records")
@@ -152,16 +147,17 @@ def merge_section_tables(section: dict[str, Any]) -> None:
                     except Exception:
                         pass
         i += 1
-    
+
     # If multiple remain, keep the densest
     if len(merged) > 1:
+
         def _density(t: dict[str, Any]) -> float:
             m = t.get("pandas_metrics") or {}
             try:
                 return float(m.get("data_density") or 0.0)
             except Exception:
                 return 0.0
-        
+
         keep = max(merged, key=_density)
         section["tables"] = [keep]
     else:
@@ -178,7 +174,7 @@ def consolidate_data(
     debug: bool = False,
 ) -> list[dict[str, Any]]:
     """Reads and merges data from previous stages (sections, tables, figures, annotations).
-    
+
     Args:
         sections_path: Path to sections JSON from Stage 04
         tables_path: Path to tables JSON from Stage 05
@@ -186,7 +182,7 @@ def consolidate_data(
         annotations_path: Optional path to annotations JSON
         embedder: Optional sentence embedder for semantic ranking
         debug: Enable debug output
-    
+
     Returns:
         List of section dicts with tables, figures, and annotations attached.
     """
@@ -253,9 +249,9 @@ def consolidate_data(
         candidates: list[dict[str, Any]] = []
         for p in range(page_start, page_end + 1):
             candidates.extend(annotations_by_page.get(p, []))
-        
+
         selected: list[dict[str, Any]] = list(candidates)
-        
+
         # Optionally rank by semantic similarity
         if candidates and embedder is not None:
             try:
@@ -288,9 +284,9 @@ def consolidate_data(
                     candidates[i]["similarity"] = float(sims[i])
             except Exception as e:
                 logger.warning(f"Annotation semantic ranking failed: {e}")
-        
+
         section["annotations"] = selected
-        
+
         if debug:
             section["hybrid_status"] = {
                 "page": page_start,

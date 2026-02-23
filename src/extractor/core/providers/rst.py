@@ -35,7 +35,11 @@ from extractor.core.schema.unified_document import (
     HierarchyNode,
     TableCell,
 )
-from extractor.core.providers.utils import emit_list_blocks, normalize_heading_level, ensure_hierarchy
+from extractor.core.providers.utils import (
+    emit_list_blocks,
+    normalize_heading_level,
+    ensure_hierarchy,
+)
 from extractor.core.providers.fetcher_bridge import ensure_local_source, attach_fetcher_metadata
 
 
@@ -187,7 +191,11 @@ class RSTProvider:
                 items.append((text, 1))
             if items:
                 lst, children = emit_list_blocks(
-                    items=items, list_type=list_type, parent_id=self._last_heading_id or "", id_prefix="rst-list", start_index=self.block_counter
+                    items=items,
+                    list_type=list_type,
+                    parent_id=self._last_heading_id or "",
+                    id_prefix="rst-list",
+                    start_index=self.block_counter,
                 )
                 blocks.append(lst)
                 blocks.extend(children)

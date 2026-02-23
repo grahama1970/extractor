@@ -29,8 +29,18 @@ def _make_results_tree(root: Path) -> Path:
     flat_dir = root / "10_arangodb_exporter" / "json_output"
     flat_dir.mkdir(parents=True, exist_ok=True)
     data = [
-        {"_key": "obj-0001", "doc_id": "doc-synth", "section_id": "sec-1", "text_content": "Requirement A"},
-        {"_key": "obj-0002", "doc_id": "doc-synth", "section_id": "sec-2", "text_content": "Requirement B"},
+        {
+            "_key": "obj-0001",
+            "doc_id": "doc-synth",
+            "section_id": "sec-1",
+            "text_content": "Requirement A",
+        },
+        {
+            "_key": "obj-0002",
+            "doc_id": "doc-synth",
+            "section_id": "sec-2",
+            "text_content": "Requirement B",
+        },
     ]
     flat_path = flat_dir / "10_flattened_data.json"
     flat_path.write_text(json.dumps(data, indent=2))
@@ -51,7 +61,11 @@ def main(out_dir: Path = Path("scripts/artifacts/rtm_smoke")):
     proc = subprocess.run(cmd)
     rtm_path = out_dir / "rtm_v0.json"
     ok = (proc.returncode == 0) and rtm_path.exists() and rtm_path.stat().st_size > 10
-    summary = {"ok": ok, "rtm": str(rtm_path), "size": rtm_path.stat().st_size if rtm_path.exists() else 0}
+    summary = {
+        "ok": ok,
+        "rtm": str(rtm_path),
+        "size": rtm_path.stat().st_size if rtm_path.exists() else 0,
+    }
     Path("scripts/artifacts/rtm_v0_smoke.json").write_text(json.dumps(summary, indent=2))
     print(json.dumps(summary))
     sys.exit(0 if ok else 2)
@@ -59,4 +73,3 @@ def main(out_dir: Path = Path("scripts/artifacts/rtm_smoke")):
 
 if __name__ == "__main__":
     app()
-

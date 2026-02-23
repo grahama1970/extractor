@@ -53,4 +53,3 @@ def main(model: str = typer.Option(os.getenv("LITELLM_MODEL", "openai/gpt-4o-min
 
 if __name__ == "__main__":
     app()
-

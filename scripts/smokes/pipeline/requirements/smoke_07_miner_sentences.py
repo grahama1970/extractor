@@ -31,7 +31,13 @@ def ensure_pipeline() -> Path:
         return req_json
     cmd = [
         "/home/graham/workspace/experiments/extractor/.venv/bin/python",
-        "-m", "src.cli", "extract", str(PDF), str(OUT), "--mode", "accurate",
+        "-m",
+        "src.cli",
+        "extract",
+        str(PDF),
+        str(OUT),
+        "--mode",
+        "accurate",
     ]
     if subprocess.run(cmd).returncode != 0:
         raise SystemExit("pipeline extract failed")
@@ -45,11 +51,13 @@ def main():
     reqs = data.get("requirements") or []
     report = {"total": len(reqs)}
     Path("scripts/artifacts").mkdir(parents=True, exist_ok=True)
-    (Path("scripts/artifacts")/"req_miner_sentences.json").write_text(json.dumps(report, indent=2))
+    (Path("scripts/artifacts") / "req_miner_sentences.json").write_text(
+        json.dumps(report, indent=2)
+    )
     if len(reqs) < 1:
         raise SystemExit(1)
     print(json.dumps(report, indent=2))
 
+
 if __name__ == "__main__":
     app()
-

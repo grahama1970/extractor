@@ -7,7 +7,7 @@ import json
 try:
     import faiss  # type: ignore
 except Exception as exc:
-    log_stage_error('ann_index.py', exc, {'context': 'ann_index.py'})
+    log_stage_error("ann_index.py", exc, {"context": "ann_index.py"})
     raise
     faiss = None  # type: ignore
 

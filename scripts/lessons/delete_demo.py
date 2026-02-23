@@ -13,6 +13,7 @@ from scripts.lessons.arango_client import get_db
 
 app = typer.Typer(add_completion=False)
 
+
 @app.command()
 def delete(demo_batch: str = typer.Option("", help="Optional demo batch id to narrow deletion")):
     db = get_db()
@@ -25,6 +26,6 @@ def delete(demo_batch: str = typer.Option("", help="Optional demo batch id to na
     removed = list(cur)
     print(f"Deleted {len(removed)} demo lessons" + (f" (batch={demo_batch})" if demo_batch else ""))
 
+
 if __name__ == "__main__":
     app()
-

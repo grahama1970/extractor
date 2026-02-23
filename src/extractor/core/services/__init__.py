@@ -52,6 +52,7 @@ class BaseService:
 try:
     from extractor.core.services.litellm import LiteLLMService  # type: ignore
 except Exception:  # pragma: no cover
+
     class LiteLLMService:  # type: ignore
         def __init__(self, *args, **kwargs):  # minimal stub if litellm stack absent
             raise ImportError("LiteLLM stack not available; use SciLLM paths instead.")

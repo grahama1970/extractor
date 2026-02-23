@@ -31,7 +31,7 @@ def load_contract(fixture_name: str) -> dict:
             expected="s00.json",
             actual="missing",
             file=str(contract_path),
-            hint="Run: python utils/compile_contracts.py --fixture " + fixture_name
+            hint="Run: python utils/compile_contracts.py --fixture " + fixture_name,
         )
     return json.loads(contract_path.read_text())
 
@@ -40,11 +40,11 @@ def checks(fixture_name: str):
     """Run all gate checks for Step 00."""
     contract = load_contract(fixture_name)
     expected = contract.get("expected", {})
-    
+
     # Load Step 00 output
     profile_file = RESULTS_DIR / "profile.json"
     profile = load_json(profile_file, required_keys=["domain"])
-    
+
     # Check domain
     expected_domain = expected.get("domain")
     if expected_domain:
@@ -55,10 +55,10 @@ def checks(fixture_name: str):
                 expected=expected_domain,
                 actual=actual,
                 file=str(profile_file),
-                hint="Check s00_profile_detector domain inference"
+                hint="Check s00_profile_detector domain inference",
             )
         print(f"✅ Domain: {actual}")
-    
+
     # Check layout
     expected_layout = expected.get("layout", {})
     if expected_layout:
@@ -71,10 +71,10 @@ def checks(fixture_name: str):
                 expected=exp_cols,
                 actual=act_cols,
                 file=str(profile_file),
-                hint="Check pymupdf4llm multi-column detection"
+                hint="Check pymupdf4llm multi-column detection",
             )
         print(f"✅ Layout: {actual_layout.get('columns')}-column")
-    
+
     # Check route
     expected_route = expected.get("route")
     if expected_route:
@@ -85,10 +85,10 @@ def checks(fixture_name: str):
                 expected=expected_route,
                 actual=actual_route,
                 file=str(profile_file),
-                hint="Check complexity thresholds in presets.py"
+                hint="Check complexity thresholds in presets.py",
             )
         print(f"✅ Route: {actual_route}")
-    
+
     # Check elements
     expected_elements = expected.get("elements", {})
     if expected_elements:
@@ -101,10 +101,10 @@ def checks(fixture_name: str):
                     expected=exp_val,
                     actual=act_val,
                     file=str(profile_file),
-                    hint=f"Check {key} detection in s00_profile_detector"
+                    hint=f"Check {key} detection in s00_profile_detector",
                 )
         print(f"✅ Elements: {actual_elements}")
-    
+
     # Summary
     print(f"\n✅ Step 00 Profile validated for fixture '{fixture_name}'")
 
@@ -113,5 +113,5 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Gate S00: Profile Detector")
     parser.add_argument("--fixture", required=True, help="Fixture name")
     args = parser.parse_args()
-    
+
     sys.exit(run_gate("S00: Profile Detector", lambda: checks(args.fixture)))

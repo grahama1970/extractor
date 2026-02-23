@@ -26,8 +26,10 @@ def apply_step02(data: dict, corr: dict):
             dy = corr.get("dy", 0) * scale
             dw = corr.get("dw", 0) * scale
             dh = corr.get("dh", 0) * scale
-            bb[0] += dx; bb[2] += dx + dw
-            bb[1] += dy; bb[3] += dy + dh
+            bb[0] += dx
+            bb[2] += dx + dw
+            bb[1] += dy
+            bb[3] += dy + dh
 
 
 def apply_step05(data: dict, corr: dict):
@@ -44,8 +46,10 @@ def apply_step05(data: dict, corr: dict):
             dy = corr.get("dy", 0) * scale
             dw = corr.get("dw", 0) * scale
             dh = corr.get("dh", 0) * scale
-            bb[0] += dx; bb[2] += dx + dw
-            bb[1] += dy; bb[3] += dy + dh
+            bb[0] += dx
+            bb[2] += dx + dw
+            bb[1] += dy
+            bb[3] += dy + dh
 
 
 def apply_step06(data: dict, corr: dict):
@@ -62,8 +66,10 @@ def apply_step06(data: dict, corr: dict):
             dy = corr.get("dy", 0) * scale
             dw = corr.get("dw", 0) * scale
             dh = corr.get("dh", 0) * scale
-            bb[0] += dx; bb[2] += dx + dw
-            bb[1] += dy; bb[3] += dy + dh
+            bb[0] += dx
+            bb[2] += dx + dw
+            bb[1] += dy
+            bb[3] += dy + dh
 
 
 APPLIERS = {
@@ -74,14 +80,16 @@ APPLIERS = {
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Apply visual review corrections to pipeline JSON outputs")
+    ap = argparse.ArgumentParser(
+        description="Apply visual review corrections to pipeline JSON outputs"
+    )
     ap.add_argument("--corrections", required=True, type=Path)
     ap.add_argument("--out-root", required=True, type=Path, help="pipeline results root")
     args = ap.parse_args()
 
     data = json.loads(args.corrections.read_text())
     step = data["step"]
-    pdf = Path(data["pdf"]).stem
+    Path(data["pdf"]).stem
     corrs = data.get("corrections", [])
 
     if step == "02":
@@ -104,4 +112,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

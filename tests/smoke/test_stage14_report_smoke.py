@@ -1,5 +1,4 @@
 import json
-from pathlib import Path
 import importlib.util
 
 
@@ -38,7 +37,11 @@ def test_report_load_and_stats(tmp_path):
     )
     dump(
         base / "04_section_builder" / "json_output" / "04_sections.json",
-        {"section_count": 1, "hierarchy_depth": 1, "suspicious_header_analysis": {"categories": {"false_positives": []}}},
+        {
+            "section_count": 1,
+            "hierarchy_depth": 1,
+            "suspicious_header_analysis": {"categories": {"false_positives": []}},
+        },
     )
     dump(
         base / "05_table_extractor" / "json_output" / "05_tables.json",
@@ -61,4 +64,3 @@ def test_report_load_and_stats(tmp_path):
     stats = mod.calculate_pipeline_statistics(results)
     assert stats["total_stages_run"] >= 5
     assert "overall_quality_score" in stats
-

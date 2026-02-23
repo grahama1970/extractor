@@ -36,6 +36,7 @@ from pathlib import Path
 from typing import Optional
 from pydantic import BaseModel, Field
 from typing import Dict, List
+
 try:
     from extractor.pipeline.utils.embeddings import ensure_embedder  # type: ignore
 except Exception:
@@ -70,6 +71,7 @@ def _ensure_pdf_objects_view(db) -> str:
     except Exception:
         return ""
 
+
 # Optional ArangoDB (lessons/incidents + search)
 try:
     from arango import ArangoClient  # type: ignore
@@ -97,18 +99,20 @@ SERVER_PDFS_ROOT = os.getenv("SERVER_PDFS_ROOT", _default_pdfs_root())
 HERE = Path(__file__).resolve()
 REPO_ROOT = HERE.parents[3]
 try:
-    if str(REPO_ROOT / 'src') not in sys.path:
-        sys.path.insert(0, str(REPO_ROOT / 'src'))
+    if str(REPO_ROOT / "src") not in sys.path:
+        sys.path.insert(0, str(REPO_ROOT / "src"))
 except Exception:
     pass
+
 
 # Artifacts root for listing/downloading server-generated files (e.g., COCO exports)
 def _default_artifacts_root() -> str:
     here = os.path.abspath(os.path.dirname(__file__))
     # repo_root/scripts/artifacts
-    return os.path.abspath(os.path.join(here, '..', '..', '..', 'scripts', 'artifacts'))
+    return os.path.abspath(os.path.join(here, "..", "..", "..", "scripts", "artifacts"))
 
-ARTIFACTS_ROOT = os.getenv('ARTIFACTS_ROOT', _default_artifacts_root())
+
+ARTIFACTS_ROOT = os.getenv("ARTIFACTS_ROOT", _default_artifacts_root())
 
 app = FastAPI()
 
@@ -160,7 +164,7 @@ def _chat_fallback_from_latest(q: str, top_k: int = 8) -> Dict[str, Any]:
         scored.sort(key=lambda x: x[0], reverse=True)
         top = [it for _, it in scored[: max(1, int(top_k))]]
         answer = (top[0].get("text_content") or "").strip() if top else "No relevant content found."
-        cits = [{"page": it.get("page_num"), "type": it.get("object_type") } for it in top[:3]]
+        cits = [{"page": it.get("page_num"), "type": it.get("object_type")} for it in top[:3]]
         return {"ok": True, "answer": answer, "citations": cits, "count": len(scored)}
     except Exception:
         return {"ok": True, "answer": "No relevant content found.", "citations": [], "count": 0}
@@ -202,7 +206,9 @@ async def no_store_headers(request, call_next):
 
 @app.get("/")
 async def root():
-    return HTMLResponse("<h3>Tabbed Prototype API</h3><ul><li>/api/list</li><li>/api/pdf?rel=...</li><li>/api/ux/generate</li></ul>")
+    return HTMLResponse(
+        "<h3>Tabbed Prototype API</h3><ul><li>/api/list</li><li>/api/pdf?rel=...</li><li>/api/ux/generate</li></ul>"
+    )
 
 
 def _git_sha() -> str:
@@ -210,6 +216,7 @@ def _git_sha() -> str:
         return subprocess.check_output(["git", "rev-parse", "--short", "HEAD"]).decode().strip()
     except Exception:
         return "unknown"
+
 
 _BUILD_INFO = {
     "git": _git_sha(),
@@ -386,6 +393,7 @@ async def api_lessons_add(payload: Dict[str, Any]):
             return JSONResponse({"ok": False, "error": "missing_title"}, status_code=400)
         ts = int(time.time())
         user = os.getenv("USER", "unknown")
+
         # Add keywords field for improved BM25 recall: tags + synonyms + scope
         def build_keywords(tags_list: list[str], scope_val: str) -> str:
             syn = {
@@ -513,19 +521,23 @@ def _abs_pdf_path(rel: str) -> str:
         raise FileNotFoundError("not_found")
     return fp
 
+
 # -----------------------------
 # ArangoDB: documents/pages/chunks/annotations schema
 # -----------------------------
+
 
 def _ensure_docs_schema(db):
     try:
         if not db:
             return False
-        cols = [c['name'] for c in db.collections()]
+        cols = [c["name"] for c in db.collections()]
+
         def ensure_col(name):
             if name not in cols:
                 db.create_collection(name)
-        for c in ("docs","pages","chunks","annotations","answers","feedback"):
+
+        for c in ("docs", "pages", "chunks", "annotations", "answers", "feedback"):
             ensure_col(c)
         # ArangoSearch view for chunks (BM25/TFIDF on text)
         view_name = "chunks_search"
@@ -557,6 +569,7 @@ def _ensure_docs_schema(db):
 # -----------------------------
 # Artifacts: simple browse/download helpers
 # -----------------------------
+
 
 def _is_within_artifacts(path: str) -> bool:
     try:
@@ -593,7 +606,6 @@ async def api_artifacts_download(path: str):
     if not _is_within_artifacts(fp) or not os.path.isfile(fp):
         return JSONResponse({"ok": False, "error": "not_found"}, status_code=404)
     return FileResponse(fp, filename=os.path.basename(fp))
-
 
 
 @app.post("/api/export/json")
@@ -650,7 +662,9 @@ async def api_export_pdf(payload: Dict[str, Any], tasks: BackgroundTasks):
                         color = (0.5, 0.3, 0.9)
                     else:
                         color = (0.1, 0.7, 0.5)
-                    page.draw_rect(rect, color=color, fill=(color[0], color[1], color[2], 0.08), width=1.2)
+                    page.draw_rect(
+                        rect, color=color, fill=(color[0], color[1], color[2], 0.08), width=1.2
+                    )
                     label = f"{b.get('type') or ''} · {b.get('instance_id') or ''}"
                     page.insert_text((rect.x0 + 4, rect.y0 - 8), label, fontsize=8, color=color)
             # Write to temp file
@@ -681,7 +695,9 @@ async def api_export_zip(payload: Dict[str, Any], tasks: BackgroundTasks):
         os.close(fd)
         with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
             # annotations.json
-            zf.writestr("annotations.json", json.dumps({"rel": rel, "boxes_by_page": boxes}, indent=2))
+            zf.writestr(
+                "annotations.json", json.dumps({"rel": rel, "boxes_by_page": boxes}, indent=2)
+            )
             # annotated pdf (optional)
             if fitz is not None and rel:
                 try:
@@ -709,9 +725,16 @@ async def api_export_zip(payload: Dict[str, Any], tasks: BackgroundTasks):
                                     color = (0.5, 0.3, 0.9)
                                 else:
                                     color = (0.1, 0.7, 0.5)
-                                page.draw_rect(rect, color=color, fill=(color[0], color[1], color[2], 0.08), width=1.2)
+                                page.draw_rect(
+                                    rect,
+                                    color=color,
+                                    fill=(color[0], color[1], color[2], 0.08),
+                                    width=1.2,
+                                )
                                 label = f"{b.get('type') or ''} · {b.get('instance_id') or ''}"
-                                page.insert_text((rect.x0 + 4, rect.y0 - 8), label, fontsize=8, color=color)
+                                page.insert_text(
+                                    (rect.x0 + 4, rect.y0 - 8), label, fontsize=8, color=color
+                                )
                         # write annotated to temp and add to zip
                         fd2, tmp_pdf = tempfile.mkstemp(suffix=".pdf")
                         os.close(fd2)
@@ -739,8 +762,10 @@ try:
     from extractor.pipeline.utils.litellm_cache import initialize_litellm_cache  # type: ignore
 except Exception:  # pragma: no cover
     litellm_call = None  # type: ignore
+
     def initialize_litellm_cache():  # type: ignore
         return None
+
 
 # Initialize cache best-effort
 try:
@@ -749,14 +774,15 @@ except Exception:
     pass
 
 
-
 # -----------------------------
 # Annotations & Status (Collaboration)
 # -----------------------------
 
+
 class AnnotationPayload(BaseModel):
     rel: str
     boxes_by_page: Dict[str, List[Dict[str, Any]]]
+
 
 @app.get("/api/annotations")
 async def api_get_annotations(rel: str):
@@ -766,12 +792,13 @@ async def api_get_annotations(rel: str):
         # Sidecar file: .annotations.json
         sidecar = Path(fp).parent / f".{Path(fp).name}.annotations.json"
         if not sidecar.exists():
-             # Fallback to old name style or return empty
-             return {"ok": True, "boxes_by_page": {}}
+            # Fallback to old name style or return empty
+            return {"ok": True, "boxes_by_page": {}}
         data = json.loads(sidecar.read_text())
         return {"ok": True, "boxes_by_page": data.get("boxes_by_page", {})}
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
 
 @app.post("/api/annotations")
 async def api_save_annotations(payload: AnnotationPayload):
@@ -798,11 +825,12 @@ async def api_save_annotations(payload: AnnotationPayload):
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
+
 @app.post("/api/annotations/save-to-db")
 async def api_save_annotations_to_db(payload: Dict[str, Any]):
     """
     Save final reviewed annotations to ArangoDB.
-    
+
     Payload: {
         rel: "file.pdf",
         boxes_by_page: { "1": [ {type, instanceId, x, y, w, h, ...} ] },
@@ -813,22 +841,22 @@ async def api_save_annotations_to_db(payload: Dict[str, Any]):
         db = _arango_connect()
         if not db:
             return JSONResponse({"ok": False, "error": "ArangoDB unavailable"}, status_code=503)
-        
+
         rel = payload.get("rel")
         if not rel:
             return JSONResponse({"ok": False, "error": "Missing 'rel' field"}, status_code=400)
-        
+
         boxes_by_page = payload.get("boxes_by_page", {})
         metadata = payload.get("metadata", {})
-        
+
         # Ensure annotations collection exists
         try:
-            collections = [c['name'] for c in db.collections()]
+            collections = [c["name"] for c in db.collections()]
             if "pdf_annotations" not in collections:
                 db.create_collection("pdf_annotations")
         except Exception:
             pass  # Collection might already exist
-        
+
         # Create document
         total_annotations = sum(len(boxes) for boxes in boxes_by_page.values())
         doc = {
@@ -840,16 +868,17 @@ async def api_save_annotations_to_db(payload: Dict[str, Any]):
             "document_status": metadata.get("document_status", ""),
             "total_pages": metadata.get("total_pages", 0),
             "metadata": metadata,
-            "_key": f"{Path(rel).stem}_{int(time.time())}"
+            "_key": f"{Path(rel).stem}_{int(time.time())}",
         }
-        
+
         col = db.collection("pdf_annotations")
         result = col.insert(doc)
-        
+
         return {"ok": True, "_key": result.get("_key"), "_id": result.get("_id")}
-        
+
     except Exception as e:
         import traceback
+
         traceback.print_exc()
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
@@ -858,6 +887,7 @@ class StatusPayload(BaseModel):
     rel: str
     status: str
     assignee: Optional[str] = None
+
 
 @app.get("/api/doc/status")
 async def api_get_status(rel: str):
@@ -868,9 +898,14 @@ async def api_get_status(rel: str):
         if not sidecar.exists():
             return {"ok": True, "status": "Unassigned", "assignee": ""}
         data = json.loads(sidecar.read_text())
-        return {"ok": True, "status": data.get("status", "Unassigned"), "assignee": data.get("assignee", "")}
+        return {
+            "ok": True,
+            "status": data.get("status", "Unassigned"),
+            "assignee": data.get("assignee", ""),
+        }
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
 
 @app.post("/api/doc/status")
 async def api_set_status(payload: StatusPayload):
@@ -890,9 +925,11 @@ async def api_set_status(payload: StatusPayload):
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
+
 # -----------------------------
 # Pipeline Trigger (Merged from pipeline_server.py)
 # -----------------------------
+
 
 class RunPipelineRequest(BaseModel):
     rel: str
@@ -904,12 +941,13 @@ DETERMINISTIC_FLAGS = [
     "--offline-smoke",  # Most aggressive flag: skips LLM/VLM/DB/Lean4/annotator/tables
 ]
 
+
 def _to_pipeline_annotations(pdf: Path, boxes_by_page: Dict[str, List[Dict[str, Any]]]) -> Dict:
     # Re-implement or import logic. For simplicity, we'll implement a basic version here
     # relying on the fact that we have fitz.
     if not fitz:
         raise RuntimeError("PyMuPDF not available")
-    
+
     doc = fitz.open(str(pdf))
     annotations: List[Dict] = []
     for page_key, boxes in boxes_by_page.items():
@@ -918,43 +956,52 @@ def _to_pipeline_annotations(pdf: Path, boxes_by_page: Dict[str, List[Dict[str, 
         except:
             continue
         zero_based = max(0, page_index - 1)
-        if zero_based >= len(doc): continue
+        if zero_based >= len(doc):
+            continue
         page = doc[zero_based]
         w, h = page.rect.width, page.rect.height
-        
+
         for b in boxes:
             # b is {x,y,w,h, type, ...} normalized 0..1
-            bx, by, bw, bh = b.get('x',0), b.get('y',0), b.get('w',0), b.get('h',0)
+            bx, by, bw, bh = b.get("x", 0), b.get("y", 0), b.get("w", 0), b.get("h", 0)
             x0, y0 = bx * w, by * h
             x1, y1 = (bx + bw) * w, (by + bh) * h
-            
+
             # Expand 10%
             pad_x = 0.1 * (x1 - x0)
             pad_y = 0.1 * (y1 - y0)
             ex0, ey0 = max(0, x0 - pad_x), max(0, y0 - pad_y)
             ex1, ey1 = min(w, x1 + pad_x), min(h, y1 + pad_y)
 
-            typ = (b.get('type') or "").strip().lower()
-            a_type = "section_header" if typ == "section" else \
-                     "table_region" if typ == "table" else \
-                     "figure_region" if typ == "figure" else \
-                     typ or "region"
+            typ = (b.get("type") or "").strip().lower()
+            a_type = (
+                "section_header"
+                if typ == "section"
+                else (
+                    "table_region"
+                    if typ == "table"
+                    else "figure_region" if typ == "figure" else typ or "region"
+                )
+            )
 
-            annotations.append({
-                "id": b.get('instanceId') or b.get('id') or f"anno_{len(annotations)+1}",
-                "page": zero_based,
-                "type": a_type,
-                "original_rect": [x0, y0, x1, y1],
-                "expanded_rect": [ex0, ey0, ex1, ey1]
-            })
+            annotations.append(
+                {
+                    "id": b.get("instanceId") or b.get("id") or f"anno_{len(annotations)+1}",
+                    "page": zero_based,
+                    "type": a_type,
+                    "original_rect": [x0, y0, x1, y1],
+                    "expanded_rect": [ex0, ey0, ex1, ey1],
+                }
+            )
     doc.close()
     return {
         "timestamp": datetime.datetime.now().isoformat(),
         "source_pdf": str(pdf),
         "status": "Completed",
         "annotation_count": len(annotations),
-        "annotations": annotations
+        "annotations": annotations,
     }
+
 
 @app.post("/api/pipeline/run")
 async def api_run_pipeline(payload: RunPipelineRequest, tasks: BackgroundTasks):
@@ -969,7 +1016,7 @@ async def api_run_pipeline(payload: RunPipelineRequest, tasks: BackgroundTasks):
                 "rel": payload.rel,
                 "boxes_by_page": payload.boxes_by_page,
                 "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                "updated_by": "pipeline_trigger"
+                "updated_by": "pipeline_trigger",
             }
             sidecar.write_text(json.dumps(data, indent=2))
 
@@ -983,51 +1030,60 @@ async def api_run_pipeline(payload: RunPipelineRequest, tasks: BackgroundTasks):
         deterministic = mode in {"deterministic", "offline", "heuristic", "skip"}
 
         cmd = [
-            sys.executable, "-m", "extractor.pipeline",
-            "--pdf", str(pdf_path),
-            "--out", str(results_dir),
-            "--stop-on-fail"
+            sys.executable,
+            "-m",
+            "extractor.pipeline",
+            "--pdf",
+            str(pdf_path),
+            "--out",
+            str(results_dir),
+            "--stop-on-fail",
         ]
         if deterministic:
             cmd.extend(DETERMINISTIC_FLAGS)
 
         # 4. Run (async/background)
         job_file = results_dir / "job.json"
-        job_file.write_text(json.dumps({
-            "id": run_id, 
-            "status": "running", 
-            "start_time": time.time(), 
-            "source_pdf": str(pdf_path),
-            "mode": mode,
-        }))
+        job_file.write_text(
+            json.dumps(
+                {
+                    "id": run_id,
+                    "status": "running",
+                    "start_time": time.time(),
+                    "source_pdf": str(pdf_path),
+                    "mode": mode,
+                }
+            )
+        )
 
         def run_proc():
             try:
                 logger_cmd = " ".join(cmd)
                 print(f"Starting pipeline job {run_id}: {logger_cmd}")
                 subprocess.run(cmd, check=True, cwd=str(REPO_ROOT))
-                job_file.write_text(json.dumps({
-                    "id": run_id, 
-                    "status": "done", 
-                    "end_time": time.time(), 
-                    "out_dir": str(results_dir), 
-                    "source_pdf": str(pdf_path),
-                    "mode": mode,
-                }))
+                job_file.write_text(
+                    json.dumps(
+                        {
+                            "id": run_id,
+                            "status": "done",
+                            "end_time": time.time(),
+                            "out_dir": str(results_dir),
+                            "source_pdf": str(pdf_path),
+                            "mode": mode,
+                        }
+                    )
+                )
             except Exception as e:
                 print(f"Pipeline job {run_id} failed: {e}")
-                job_file.write_text(json.dumps({
-                    "id": run_id, 
-                    "status": "error", 
-                    "error": str(e)
-                }))
+                job_file.write_text(json.dumps({"id": run_id, "status": "error", "error": str(e)}))
 
         tasks.add_task(run_proc)
-        
+
         return {"ok": True, "job_id": run_id}
 
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
 
 @app.get("/api/pipeline/status")
 async def api_pipeline_status(job_id: str):
@@ -1041,10 +1097,12 @@ async def api_pipeline_status(job_id: str):
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
+
 @app.get("/api/pipeline/result")
 async def api_pipeline_result(job_id: str):
     # Same as status but maybe with more details
     return await api_pipeline_status(job_id)
+
 
 @app.get("/api/pipeline/annotations")
 async def api_pipeline_annotations(job_id: str):
@@ -1077,6 +1135,7 @@ async def api_pipeline_annotations(job_id: str):
             return {"ok": False, "error": "Source PDF not found"}
 
         import fitz
+
         doc = fitz.open(str(pdf_path))
 
         boxes_by_page: Dict[str, List[Dict[str, Any]]] = {}
@@ -1101,18 +1160,22 @@ async def api_pipeline_annotations(job_id: str):
             w = max(0.0, min(1.0, w))
             h = max(0.0, min(1.0, h))
             page_key = str(page_num)
-            boxes_by_page.setdefault(page_key, []).append({
-                "type": box.get("type", "Region"),
-                "instanceId": box.get("instanceId") or box.get("id") or f"pipeline-{len(boxes_by_page[page_key])}",
-                "x": max(0, min(1, x)),
-                "y": max(0, min(1, y)),
-                "w": max(0, min(1, w)),
-                "h": max(0, min(1, h)),
-                "confidence": box.get("confidence", 0.0),
-                "source": "pipeline",
-                "stage": box.get("stage"),
-                "title": box.get("title", ""),
-            })
+            boxes_by_page.setdefault(page_key, []).append(
+                {
+                    "type": box.get("type", "Region"),
+                    "instanceId": box.get("instanceId")
+                    or box.get("id")
+                    or f"pipeline-{len(boxes_by_page[page_key])}",
+                    "x": max(0, min(1, x)),
+                    "y": max(0, min(1, y)),
+                    "w": max(0, min(1, w)),
+                    "h": max(0, min(1, h)),
+                    "confidence": box.get("confidence", 0.0),
+                    "source": "pipeline",
+                    "stage": box.get("stage"),
+                    "title": box.get("title", ""),
+                }
+            )
 
         # Prefer 09a overlays if present (final reconciled view)
         annotations_path = run_dir / "09a_pdf_annotator" / "json_output" / "annotations.json"
@@ -1136,16 +1199,25 @@ async def api_pipeline_annotations(job_id: str):
                         typ = "Requirement"
                     else:
                         typ = kind.title() if kind else "Region"
-                    title = ov.get("title") or ov.get("_label") or ov.get("label") or ov.get("logical_table_key") or ""
+                    title = (
+                        ov.get("title")
+                        or ov.get("_label")
+                        or ov.get("label")
+                        or ov.get("logical_table_key")
+                        or ""
+                    )
                     conf = ov.get("probability") or ov.get("score") or ov.get("confidence") or 0.0
-                    _add_box(page_idx, {
-                        "bbox": bbox,
-                        "type": typ,
-                        "instanceId": ov.get("stable_id") or ov.get("overlay_id"),
-                        "confidence": conf,
-                        "stage": "09a",
-                        "title": title,
-                    })
+                    _add_box(
+                        page_idx,
+                        {
+                            "bbox": bbox,
+                            "type": typ,
+                            "instanceId": ov.get("stable_id") or ov.get("overlay_id"),
+                            "confidence": conf,
+                            "stage": "09a",
+                            "title": title,
+                        },
+                    )
                 if boxes_by_page:
                     doc.close()
                     return {"ok": True, "boxes_by_page": boxes_by_page, "job_id": job_id}
@@ -1165,13 +1237,16 @@ async def api_pipeline_annotations(job_id: str):
                 conf = 0.0
                 if table.get("camelot_metrics"):
                     conf = table.get("camelot_metrics", {}).get("accuracy", 0.0)
-                _add_box(page_idx, {
-                    "bbox": bbox,
-                    "type": "Table",
-                    "instanceId": f"pipeline-table-{page_idx}-{len(boxes_by_page.get(str(page_idx+1), []))}",
-                    "confidence": conf,
-                    "stage": "05",
-                })
+                _add_box(
+                    page_idx,
+                    {
+                        "bbox": bbox,
+                        "type": "Table",
+                        "instanceId": f"pipeline-table-{page_idx}-{len(boxes_by_page.get(str(page_idx+1), []))}",
+                        "confidence": conf,
+                        "stage": "05",
+                    },
+                )
 
         # Extract figures from Stage 06
         figures_file = run_dir / "06_figure_extractor" / "json_output" / "06_figures.json"
@@ -1182,13 +1257,16 @@ async def api_pipeline_annotations(job_id: str):
                 bbox = figure.get("bbox", figure.get("bbox0"))
                 if not bbox or len(bbox) != 4:
                     continue
-                _add_box(page_idx, {
-                    "bbox": bbox,
-                    "type": "Figure",
-                    "instanceId": f"pipeline-figure-{page_idx}-{len(boxes_by_page.get(str(page_idx+1), []))}",
-                    "stage": "06",
-                    "title": figure.get("title", ""),
-                })
+                _add_box(
+                    page_idx,
+                    {
+                        "bbox": bbox,
+                        "type": "Figure",
+                        "instanceId": f"pipeline-figure-{page_idx}-{len(boxes_by_page.get(str(page_idx+1), []))}",
+                        "stage": "06",
+                        "title": figure.get("title", ""),
+                    },
+                )
 
         # Sections (Stage 04) – allow structural verification when 09a overlays are unavailable
         sections_file = run_dir / "04_section_builder" / "json_output" / "04_sections.json"
@@ -1202,14 +1280,17 @@ async def api_pipeline_annotations(job_id: str):
                         continue
                     title = section.get("title") or ""
                     conf = section.get("quality_score") or section.get("surya_confidence") or 0.0
-                    _add_box(int(page_idx), {
-                        "bbox": bbox,
-                        "type": "Section",
-                        "instanceId": section.get("id"),
-                        "confidence": conf,
-                        "stage": "04",
-                        "title": title,
-                    })
+                    _add_box(
+                        int(page_idx),
+                        {
+                            "bbox": bbox,
+                            "type": "Section",
+                            "instanceId": section.get("id"),
+                            "confidence": conf,
+                            "stage": "04",
+                            "title": title,
+                        },
+                    )
             except Exception:
                 pass
 
@@ -1219,6 +1300,7 @@ async def api_pipeline_annotations(job_id: str):
 
     except Exception as e:
         import traceback
+
         traceback.print_exc()
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
@@ -1250,6 +1332,7 @@ async def http_generate(payload: Dict[str, Any]):
             # Support data URLs by writing to a temporary file
             if isinstance(image, str) and image.startswith("data:image/") and "," in image:
                 import base64, tempfile
+
                 header, b64 = image.split(",", 1)
                 ext = "png"
                 try:
@@ -1392,17 +1475,19 @@ async def api_health_llm(model: str | None = None, timeout: float = 20.0):
             status_code=500,
         )
 
+
 # ---- Lessons Graph Helpers & Endpoints (appended) ----
+
 
 def _ensure_graph_bits(db):
     try:
-        if not db.has_collection('lesson_edges'):
-            db.create_collection('lesson_edges', edge=True)
+        if not db.has_collection("lesson_edges"):
+            db.create_collection("lesson_edges", edge=True)
     except Exception:
         pass
     try:
-        if not db.has_collection('rejected_pairs'):
-            db.create_collection('rejected_pairs')
+        if not db.has_collection("rejected_pairs"):
+            db.create_collection("rejected_pairs")
     except Exception:
         pass
 
@@ -1410,17 +1495,20 @@ def _ensure_graph_bits(db):
 def _pair_id(a_id: str, b_id: str) -> str:
     a, b = (a_id, b_id) if a_id <= b_id else (b_id, a_id)
     import hashlib as _hl
+
     m = _hl.sha1()
-    m.update((a + '|' + b).encode('utf-8'))
+    m.update((a + "|" + b).encode("utf-8"))
     return m.hexdigest()
 
 
-def _resolve_lesson_id(db, key: Optional[str], title: Optional[str], scope: Optional[str]) -> Optional[str]:
+def _resolve_lesson_id(
+    db, key: Optional[str], title: Optional[str], scope: Optional[str]
+) -> Optional[str]:
     if key:
         return f"lessons/{key}"
     if title:
         try:
-            cur = db.collection('lessons').find({ 'title': title, 'scope': scope or 'tabbed' })
+            cur = db.collection("lessons").find({"title": title, "scope": scope or "tabbed"})
             arr = list(cur) if cur else []
             if arr:
                 return f"lessons/{arr[0]['_key']}"
@@ -1437,36 +1525,44 @@ async def api_edge_related(payload: Dict[str, Any]):
     _ensure_lessons_schema(db)
     _ensure_graph_bits(db)
     try:
-        fk = _resolve_lesson_id(db, payload.get('from_key'), payload.get('from_title'), payload.get('from_scope'))
-        tk = _resolve_lesson_id(db, payload.get('to_key'), payload.get('to_title'), payload.get('to_scope'))
+        fk = _resolve_lesson_id(
+            db, payload.get("from_key"), payload.get("from_title"), payload.get("from_scope")
+        )
+        tk = _resolve_lesson_id(
+            db, payload.get("to_key"), payload.get("to_title"), payload.get("to_scope")
+        )
         if not fk or not tk or fk == tk:
             return JSONResponse({"ok": False, "error": "invalid_from_to"}, status_code=400)
         ts = int(time.time())
         pair = _pair_id(fk, tk)
-        weight = float(payload.get('weight') or 0.0)
-        raw_sim = payload.get('raw_sim'); raw_sim = float(raw_sim) if raw_sim is not None else None
-        confidence = payload.get('confidence'); confidence = float(confidence) if confidence is not None else None
-        approved = bool(payload.get('approved') or False)
-        rationale = (payload.get('rationale') or '').strip()
-        evidence_refs = payload.get('evidence_refs') if isinstance(payload.get('evidence_refs'), list) else []
-        src = (payload.get('source') or 'faiss').strip() or 'faiss'
-        status = 'active' if approved else 'pending'
+        weight = float(payload.get("weight") or 0.0)
+        raw_sim = payload.get("raw_sim")
+        raw_sim = float(raw_sim) if raw_sim is not None else None
+        confidence = payload.get("confidence")
+        confidence = float(confidence) if confidence is not None else None
+        approved = bool(payload.get("approved") or False)
+        rationale = (payload.get("rationale") or "").strip()
+        evidence_refs = (
+            payload.get("evidence_refs") if isinstance(payload.get("evidence_refs"), list) else []
+        )
+        src = (payload.get("source") or "faiss").strip() or "faiss"
+        status = "active" if approved else "pending"
         doc_base = {
-            'type': 'related',
-            'source': src,
-            'weight': max(0.0, min(1.0, weight)),
-            'raw_sim': raw_sim,
-            'confidence': confidence,
-            'approved': approved,
-            'rationale': rationale,
-            'rationales': [{ 'by': 'agent', 'text': rationale, 'at': ts }] if rationale else [],
-            'evidence_refs': evidence_refs,
-            'status': status,
-            'created_at': ts,
-            'updated_at': ts,
-            'last_verified_at': ts,
-            'pair_id': pair,
-            'decay_policy': 'standard',
+            "type": "related",
+            "source": src,
+            "weight": max(0.0, min(1.0, weight)),
+            "raw_sim": raw_sim,
+            "confidence": confidence,
+            "approved": approved,
+            "rationale": rationale,
+            "rationales": [{"by": "agent", "text": rationale, "at": ts}] if rationale else [],
+            "evidence_refs": evidence_refs,
+            "status": status,
+            "created_at": ts,
+            "updated_at": ts,
+            "last_verified_at": ts,
+            "pair_id": pair,
+            "decay_policy": "standard",
         }
         out = []
         for frm, to in ((fk, tk), (tk, fk)):
@@ -1475,9 +1571,9 @@ async def api_edge_related(payload: Dict[str, Any]):
                 "INSERT MERGE({ _from: @from, _to: @to }, @doc) "
                 "UPDATE MERGE(OLD, @doc, { created_at: OLD.created_at }) IN lesson_edges RETURN NEW"
             )
-            cur = db.aql.execute(aql, bind_vars={ 'from': frm, 'to': to, 'doc': doc_base })
+            cur = db.aql.execute(aql, bind_vars={"from": frm, "to": to, "doc": doc_base})
             out.append(list(cur)[0])
-        return { 'ok': True, 'edges': out }
+        return {"ok": True, "edges": out}
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
@@ -1490,20 +1586,24 @@ async def api_edge_reject(payload: Dict[str, Any]):
     _ensure_lessons_schema(db)
     _ensure_graph_bits(db)
     try:
-        fk = _resolve_lesson_id(db, payload.get('from_key'), payload.get('from_title'), payload.get('from_scope'))
-        tk = _resolve_lesson_id(db, payload.get('to_key'), payload.get('to_title'), payload.get('to_scope'))
+        fk = _resolve_lesson_id(
+            db, payload.get("from_key"), payload.get("from_title"), payload.get("from_scope")
+        )
+        tk = _resolve_lesson_id(
+            db, payload.get("to_key"), payload.get("to_title"), payload.get("to_scope")
+        )
         if not fk or not tk or fk == tk:
             return JSONResponse({"ok": False, "error": "invalid_from_to"}, status_code=400)
         pid = _pair_id(fk, tk)
-        reason = (payload.get('reason') or '').strip() or 'rejected_by_agent'
+        reason = (payload.get("reason") or "").strip() or "rejected_by_agent"
         ts = int(time.time())
         aql = (
             "UPSERT { _key: @pid } "
             "INSERT { _key: @pid, pair_id: @pid, reason: @reason, last_checked_at: @ts, attempts: 1 } "
             "UPDATE { reason: @reason, last_checked_at: @ts, attempts: OLD.attempts + 1 } IN rejected_pairs RETURN NEW"
         )
-        cur = db.aql.execute(aql, bind_vars={ 'pid': pid, 'reason': reason, 'ts': ts })
-        return { 'ok': True, 'rejected': list(cur)[0] }
+        cur = db.aql.execute(aql, bind_vars={"pid": pid, "reason": reason, "ts": ts})
+        return {"ok": True, "rejected": list(cur)[0]}
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
@@ -1516,34 +1616,46 @@ async def api_edge_approve(payload: Dict[str, Any]):
     _ensure_lessons_schema(db)
     _ensure_graph_bits(db)
     try:
-        edge_id = payload.get('edge_id')
-        human_rationale = (payload.get('rationale') or '').strip()
+        edge_id = payload.get("edge_id")
+        human_rationale = (payload.get("rationale") or "").strip()
         ts = int(time.time())
         if not edge_id:
-            fk = _resolve_lesson_id(db, payload.get('from_key'), payload.get('from_title'), payload.get('from_scope'))
-            tk = _resolve_lesson_id(db, payload.get('to_key'), payload.get('to_title'), payload.get('to_scope'))
+            fk = _resolve_lesson_id(
+                db, payload.get("from_key"), payload.get("from_title"), payload.get("from_scope")
+            )
+            tk = _resolve_lesson_id(
+                db, payload.get("to_key"), payload.get("to_title"), payload.get("to_scope")
+            )
             if not fk or not tk or fk == tk:
-                return JSONResponse({"ok": False, "error": "edge_id_or_from_to_required"}, status_code=400)
+                return JSONResponse(
+                    {"ok": False, "error": "edge_id_or_from_to_required"}, status_code=400
+                )
             q = "FOR e IN lesson_edges FILTER e._from==@from AND e._to==@to AND e.type=='related' LIMIT 1 RETURN e"
-            cur = db.aql.execute(q, bind_vars={ 'from': fk, 'to': tk })
+            cur = db.aql.execute(q, bind_vars={"from": fk, "to": tk})
             arr = list(cur)
             if not arr:
                 return JSONResponse({"ok": False, "error": "edge_not_found"}, status_code=404)
-            edge_id = arr[0]['_id']
+            edge_id = arr[0]["_id"]
         aql = (
             "LET e = DOCUMENT(@eid) "
             "UPDATE e WITH { approved: true, status: 'active', rationale: @hr, "
             "  rationales: APPEND(e.rationales ? e.rationales : [], { by: 'human', text: @hr, at: @ts }), "
             "  last_verified_at: @ts, updated_at: @ts } IN lesson_edges RETURN NEW"
         )
-        cur2 = db.aql.execute(aql, bind_vars={ 'eid': edge_id, 'hr': human_rationale, 'ts': ts })
-        return { 'ok': True, 'edge': list(cur2)[0] }
+        cur2 = db.aql.execute(aql, bind_vars={"eid": edge_id, "hr": human_rationale, "ts": ts})
+        return {"ok": True, "edge": list(cur2)[0]}
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
 @app.get("/api/lessons/related")
-async def api_lessons_related(key: Optional[str] = None, title: Optional[str] = None, scope: Optional[str] = None, direction: str = 'both', k: int = 10):
+async def api_lessons_related(
+    key: Optional[str] = None,
+    title: Optional[str] = None,
+    scope: Optional[str] = None,
+    direction: str = "both",
+    k: int = 10,
+):
     db = _arango_connect()
     if not db:
         return JSONResponse({"ok": False, "error": "arango_unavailable"}, status_code=503)
@@ -1553,35 +1665,66 @@ async def api_lessons_related(key: Optional[str] = None, title: Optional[str] = 
         seed = _resolve_lesson_id(db, key, title, scope)
         if not seed:
             return JSONResponse({"ok": False, "error": "seed_not_found"}, status_code=404)
-        edges = db.collection('lesson_edges')
+        edges = db.collection("lesson_edges")
         res = []
-        if direction in ('out','both'):
-            for e in edges.find({ '_from': seed, 'type': 'related' }) or []:
+        if direction in ("out", "both"):
+            for e in edges.find({"_from": seed, "type": "related"}) or []:
                 res.append(e)
-        if direction in ('in','both'):
-            for e in edges.find({ '_to': seed, 'type': 'related' }) or []:
+        if direction in ("in", "both"):
+            for e in edges.find({"_to": seed, "type": "related"}) or []:
                 res.append(e)
         acc = {}
         for e in res:
-            nid = e['_to'] if e.get('_from') == seed else e.get('_from')
+            nid = e["_to"] if e.get("_from") == seed else e.get("_from")
             if not nid:
                 continue
-            if (nid not in acc) or float(e.get('weight', 0)) > float(acc[nid].get('weight', 0)):
+            if (nid not in acc) or float(e.get("weight", 0)) > float(acc[nid].get("weight", 0)):
                 acc[nid] = e
         items = []
         for nid, e in acc.items():
-            key2 = nid.split('/',1)[1]
-            ldoc = db.collection('lessons').get(key2)
-            if not ldoc: continue
-            items.append({ 'neighbor': { '_key': key2, 'title': ldoc.get('title'), 'scope': ldoc.get('scope'), 'tags': ldoc.get('tags', []) }, 'edge': { k: e.get(k) for k in ('weight','rationale','approved','status','confidence','raw_sim','created_at','updated_at','last_verified_at') } })
-        items.sort(key=lambda x: float(x['edge'].get('weight',0)), reverse=True)
-        return { 'ok': True, 'items': items[: max(1,int(k))] }
+            key2 = nid.split("/", 1)[1]
+            ldoc = db.collection("lessons").get(key2)
+            if not ldoc:
+                continue
+            items.append(
+                {
+                    "neighbor": {
+                        "_key": key2,
+                        "title": ldoc.get("title"),
+                        "scope": ldoc.get("scope"),
+                        "tags": ldoc.get("tags", []),
+                    },
+                    "edge": {
+                        k: e.get(k)
+                        for k in (
+                            "weight",
+                            "rationale",
+                            "approved",
+                            "status",
+                            "confidence",
+                            "raw_sim",
+                            "created_at",
+                            "updated_at",
+                            "last_verified_at",
+                        )
+                    },
+                }
+            )
+        items.sort(key=lambda x: float(x["edge"].get("weight", 0)), reverse=True)
+        return {"ok": True, "items": items[: max(1, int(k))]}
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
 @app.get("/api/lessons/multihop")
-async def api_lessons_multihop(key: Optional[str] = None, title: Optional[str] = None, scope: Optional[str] = None, depth: int = 2, direction: str = 'ANY', limit: int = 10):
+async def api_lessons_multihop(
+    key: Optional[str] = None,
+    title: Optional[str] = None,
+    scope: Optional[str] = None,
+    depth: int = 2,
+    direction: str = "ANY",
+    limit: int = 10,
+):
     db = _arango_connect()
     if not db:
         return JSONResponse({"ok": False, "error": "arango_unavailable"}, status_code=503)
@@ -1593,8 +1736,8 @@ async def api_lessons_multihop(key: Optional[str] = None, title: Optional[str] =
             return JSONResponse({"ok": False, "error": "seed_not_found"}, status_code=404)
         depth = max(1, min(4, int(depth)))
         dir_kw = direction.upper()
-        if dir_kw not in ('OUTBOUND','INBOUND','ANY'):
-            dir_kw = 'ANY'
+        if dir_kw not in ("OUTBOUND", "INBOUND", "ANY"):
+            dir_kw = "ANY"
         aql = f"""
         FOR v, e, p IN 1..@depth {dir_kw} @seed lesson_edges
           OPTIONS {{ bfs: true, uniqueVertices: 'path' }}
@@ -1602,10 +1745,13 @@ async def api_lessons_multihop(key: Optional[str] = None, title: Optional[str] =
           LIMIT @limit
           RETURN {{ target: v, edges: p.edges }}
         """
-        cur = db.aql.execute(aql, bind_vars={ 'seed': seed, 'depth': depth, 'limit': max(1,int(limit)) })
-        return { 'ok': True, 'items': list(cur) }
+        cur = db.aql.execute(
+            aql, bind_vars={"seed": seed, "depth": depth, "limit": max(1, int(limit))}
+        )
+        return {"ok": True, "items": list(cur)}
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
 
 # -----------------------------
 # COCO Export (images + annotations)
@@ -1653,16 +1799,18 @@ async def api_coco_export(payload: Dict[str, Any]):
                 img_path = os.path.join(images_out, img_name)
                 pix.save(img_path)
                 width, height = pix.width, pix.height
-                coco["images"].append({"id": img_id, "file_name": img_name, "width": width, "height": height})
-                for b in (boxes or []):
+                coco["images"].append(
+                    {"id": img_id, "file_name": img_name, "width": width, "height": height}
+                )
+                for b in boxes or []:
                     # Accept either {x,y,w,h,type} or {bounding_box:[x,y,w,h], type}
-                    if all(k in b for k in ("x","y","w","h")):
+                    if all(k in b for k in ("x", "y", "w", "h")):
                         bx = float(b.get("x", 0))
                         by = float(b.get("y", 0))
                         bw = float(b.get("w", 0))
                         bh = float(b.get("h", 0))
                     else:
-                        bb = b.get("bounding_box") or b.get("bbox") or [0,0,0,0]
+                        bb = b.get("bounding_box") or b.get("bbox") or [0, 0, 0, 0]
                         bx, by, bw, bh = [float(v) for v in bb]
                     typ = str(b.get("type", "Box"))
                     if typ not in seen_types:
@@ -1672,14 +1820,16 @@ async def api_coco_export(payload: Dict[str, Any]):
                     y_px = max(0, min(height, int(by * height)))
                     w_px = max(1, min(width - x_px, int(bw * width)))
                     h_px = max(1, min(height - y_px, int(bh * height)))
-                    coco["annotations"].append({
-                        "id": ann_id,
-                        "image_id": img_id,
-                        "category_id": cat_id,
-                        "bbox": [x_px, y_px, w_px, h_px],
-                        "iscrowd": 0,
-                        "area": w_px * h_px,
-                    })
+                    coco["annotations"].append(
+                        {
+                            "id": ann_id,
+                            "image_id": img_id,
+                            "category_id": cat_id,
+                            "bbox": [x_px, y_px, w_px, h_px],
+                            "iscrowd": 0,
+                            "area": w_px * h_px,
+                        }
+                    )
                     ann_id += 1
                 img_id += 1
         for name, cid in seen_types.items():
@@ -1751,7 +1901,7 @@ async def api_arango_insert(payload: dict):
         return JSONResponse({"ok": False, "error": "arango_unavailable"}, status_code=503)
     _ensure_docs_schema(db)
     try:
-        doc = (payload.get("doc") or {})
+        doc = payload.get("doc") or {}
         chunks = payload.get("chunks") or []
         if not isinstance(chunks, list):
             return JSONResponse({"ok": False, "error": "invalid_chunks"}, status_code=400)
@@ -1761,7 +1911,9 @@ async def api_arango_insert(payload: dict):
         if existing:
             dkey = existing[0].get("_key")
         else:
-            ins = dcol.insert({"rel": rel, "name": doc.get("name") or rel, "added_at": int(time.time())})
+            ins = dcol.insert(
+                {"rel": rel, "name": doc.get("name") or rel, "added_at": int(time.time())}
+            )
             dkey = ins.get("_key")
         ccol = db.collection("chunks")
         inserted = 0
@@ -1774,7 +1926,8 @@ async def api_arango_insert(payload: dict):
                 "page": int(c.get("page") or 1),
                 "type": c.get("type") or "text",
                 "text": text,
-                "bbox": c.get("bbox") or {"x": c.get("x"), "y": c.get("y"), "w": c.get("w"), "h": c.get("h")},
+                "bbox": c.get("bbox")
+                or {"x": c.get("x"), "y": c.get("y"), "w": c.get("w"), "h": c.get("h")},
                 "ts": int(time.time()),
             }
             ccol.insert(rec)
@@ -1782,6 +1935,7 @@ async def api_arango_insert(payload: dict):
         return {"ok": True, "doc_key": dkey, "inserted": inserted}
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
 
 # -----------------------------
 # Search and Chat (minimal scaffolds)
@@ -1804,22 +1958,27 @@ async def api_search(payload: dict):
         cur = db.aql.execute(aql, bind_vars={"q": q})
         items = []
         for d in list(cur):
-            items.append({
-                "doc_key": d.get("doc_key"),
-                "page": d.get("page"),
-                "type": d.get("type"),
-                "text": d.get("text"),
-                "bbox": d.get("bbox"),
-            })
+            items.append(
+                {
+                    "doc_key": d.get("doc_key"),
+                    "page": d.get("page"),
+                    "type": d.get("type"),
+                    "text": d.get("text"),
+                    "bbox": d.get("bbox"),
+                }
+            )
         return {"ok": True, "items": items}
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
 
 @app.post("/api/chat/query")
 async def api_chat_query(payload: dict):
     session_id = payload.get("session_id") or f"s-{int(time.time())}"
     q = (payload.get("q") or "").strip()
-    pdf_hint = (payload.get("pdf") or payload.get("pdf_rel") or payload.get("pdf_name") or "").strip()
+    pdf_hint = (
+        payload.get("pdf") or payload.get("pdf_rel") or payload.get("pdf_name") or ""
+    ).strip()
     doc_ids = payload.get("doc_ids") or []
     top_k = int(payload.get("top_k") or 8)
     alpha = float(payload.get("alpha") or 0.5)
@@ -1860,6 +2019,7 @@ async def api_chat_query(payload: dict):
             # Hybrid re-ranking: normalize BM25, add cosine(sim)
             try:
                 import numpy as _np
+
                 embed = ensure_embedder()
                 if rows and embed is not None:
                     qv = embed.encode(q, normalize_embeddings=True)
@@ -1881,11 +2041,23 @@ async def api_chat_query(payload: dict):
                 pass
             items = rows[: max(1, top_k)]
             answer = (items[0].get("text") or "").strip() if items else "No relevant content found."
-            cits = [{"page": it.get("page"), "type": it.get("type") } for it in items[:3]]
-            return {"ok": True, "session_id": session_id, "answer": answer, "citations": cits, "count": len(rows)}
+            cits = [{"page": it.get("page"), "type": it.get("type")} for it in items[:3]]
+            return {
+                "ok": True,
+                "session_id": session_id,
+                "answer": answer,
+                "citations": cits,
+                "count": len(rows),
+            }
         # Fallback: read latest Stage 10 flattened JSON when DB is unavailable
         fb = _chat_fallback_from_latest(q, top_k=top_k)
-        return {"ok": True, "session_id": session_id, "answer": fb.get("answer", "No relevant content found."), "citations": fb.get("citations", []), "count": fb.get("count", 0)}
+        return {
+            "ok": True,
+            "session_id": session_id,
+            "answer": fb.get("answer", "No relevant content found."),
+            "citations": fb.get("citations", []),
+            "count": fb.get("count", 0),
+        }
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
@@ -1941,6 +2113,7 @@ def api_pipeline_doc_id(pdf_rel: Optional[str] = None, pdf_path: Optional[str] =
     try:
         pdf = _resolve_pdf_for_ui(pdf_path, pdf_rel)
         import hashlib
+
         h = hashlib.sha256()
         try:
             with open(pdf, "rb") as f:
@@ -1956,9 +2129,12 @@ def api_pipeline_doc_id(pdf_rel: Optional[str] = None, pdf_path: Optional[str] =
         return JSONResponse({"ok": False, "error": e.detail}, status_code=e.status_code)
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
 # -----------------------------
 # Pipeline bridge (run-external) — integrates happy-path pipeline
 # -----------------------------
+
 
 class _Box(BaseModel):
     id: Optional[str] = None
@@ -1990,16 +2166,20 @@ class _UpsertReq(BaseModel):
     results_dir: str
     fast_embeddings: bool = True
 
+
 class _ReqListReq(BaseModel):
     results_dir: str
+
 
 class _ReqEdit(BaseModel):
     id: str
     text_canonical: str
 
+
 class _ReqSaveReq(BaseModel):
     results_dir: str
     edits: List[_ReqEdit]
+
 
 class _ReqRerunReq(BaseModel):
     results_dir: str
@@ -2009,6 +2189,7 @@ class _ReqRerunReq(BaseModel):
 # -----------------------------
 # Conflicts artifact (MVP persistence)
 # -----------------------------
+
 
 class _ConflictItem(BaseModel):
     id: str
@@ -2056,9 +2237,11 @@ def api_conflicts_list(doc_id: str):
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
+
 # -----------------------------
 # OSLC (very small offline stubs)
 # -----------------------------
+
 
 @app.get("/api/oslc/service")
 def api_oslc_service():
@@ -2066,7 +2249,11 @@ def api_oslc_service():
         return {
             "ok": True,
             "resources": [
-                {"@type": "oslc:ServiceProvider", "title": "Extractor OSLC Stub", "links": {"links": "/api/oslc/links"}},
+                {
+                    "@type": "oslc:ServiceProvider",
+                    "title": "Extractor OSLC Stub",
+                    "links": {"links": "/api/oslc/links"},
+                },
             ],
         }
     except Exception as e:
@@ -2112,7 +2299,14 @@ def api_oslc_link(link: _OslcLink):
                     existing = raw.get("links") or raw.get("oslc:links") or []
             except Exception:
                 existing = []
-        existing.append({"source": link.source, "target": link.target, "type": link.type, "saved_at": datetime.datetime.now(datetime.timezone.utc).isoformat()})
+        existing.append(
+            {
+                "source": link.source,
+                "target": link.target,
+                "type": link.type,
+                "saved_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            }
+        )
         out.write_text(json.dumps(existing, indent=2))
         return {"ok": True, "count": len(existing), "path": str(out)}
     except Exception as e:
@@ -2139,7 +2333,9 @@ def _resolve_pdf_for_ui(pdf_path: Optional[str], pdf_rel: Optional[str]) -> Path
     raise HTTPException(400, "Either pdf_path or pdf_rel must be provided")
 
 
-def _ui_boxes_to_pipeline_annotations(pdf: Path, boxes_by_page: Dict[int, List[_Box]]) -> Dict[str, Any]:
+def _ui_boxes_to_pipeline_annotations(
+    pdf: Path, boxes_by_page: Dict[int, List[_Box]]
+) -> Dict[str, Any]:
     if fitz is None:
         raise HTTPException(503, "fitz_unavailable")
     doc = fitz.open(str(pdf))
@@ -2156,30 +2352,41 @@ def _ui_boxes_to_pipeline_annotations(pdf: Path, boxes_by_page: Dict[int, List[_
         w = float(p.rect.width)
         h = float(p.rect.height)
         for b in boxes or []:
-            x0 = max(0.0, min(w, b.x * w)); y0 = max(0.0, min(h, b.y * h))
-            x1 = max(0.0, min(w, (b.x + b.w) * w)); y1 = max(0.0, min(h, (b.y + b.h) * h))
-            pad_x = 0.1 * (x1 - x0); pad_y = 0.1 * (y1 - y0)
-            ex0 = max(0.0, x0 - pad_x); ey0 = max(0.0, y0 - pad_y)
-            ex1 = min(w, x1 + pad_x); ey1 = min(h, y1 + pad_y)
-            t = (b.type or '').strip().lower()
-            if t == 'section': a_type = 'section_header'
-            elif t == 'table': a_type = 'table_region'
-            elif t == 'figure': a_type = 'figure_region'
-            else: a_type = t or 'region'
-            out.append({
-                'id': b.instanceId or b.id or f"anno_{len(out)+1:04d}",
-                'page': zero_based,
-                'type': a_type,
-                'original_rect': [x0, y0, x1, y1],
-                'expanded_rect': [ex0, ey0, ex1, ey1],
-            })
+            x0 = max(0.0, min(w, b.x * w))
+            y0 = max(0.0, min(h, b.y * h))
+            x1 = max(0.0, min(w, (b.x + b.w) * w))
+            y1 = max(0.0, min(h, (b.y + b.h) * h))
+            pad_x = 0.1 * (x1 - x0)
+            pad_y = 0.1 * (y1 - y0)
+            ex0 = max(0.0, x0 - pad_x)
+            ey0 = max(0.0, y0 - pad_y)
+            ex1 = min(w, x1 + pad_x)
+            ey1 = min(h, y1 + pad_y)
+            t = (b.type or "").strip().lower()
+            if t == "section":
+                a_type = "section_header"
+            elif t == "table":
+                a_type = "table_region"
+            elif t == "figure":
+                a_type = "figure_region"
+            else:
+                a_type = t or "region"
+            out.append(
+                {
+                    "id": b.instanceId or b.id or f"anno_{len(out)+1:04d}",
+                    "page": zero_based,
+                    "type": a_type,
+                    "original_rect": [x0, y0, x1, y1],
+                    "expanded_rect": [ex0, ey0, ex1, ey1],
+                }
+            )
     doc.close()
     return {
-        'timestamp': datetime.datetime.now(datetime.timezone.utc).isoformat(),
-        'source_pdf': str(pdf),
-        'status': 'Completed',
-        'annotation_count': len(out),
-        'annotations': out,
+        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "source_pdf": str(pdf),
+        "status": "Completed",
+        "annotation_count": len(out),
+        "annotations": out,
     }
 
 
@@ -2193,12 +2400,23 @@ def api_pipeline_run_external(req: _RunExternalReq):
     anno_ext = results / "01_annotations_external.json"
     anno_ext.write_text(json.dumps(anno, indent=2))
     # Simple cleaner (Phase 1): copy original to a temp clean path (run_all will stage it)
-    clean_path = results / f"{pdf.stem}_clean_tmp.pdf"; shutil.copyfile(str(pdf), str(clean_path))
+    clean_path = results / f"{pdf.stem}_clean_tmp.pdf"
+    shutil.copyfile(str(pdf), str(clean_path))
     # Invoke run_all with skip-01
-    env = os.environ.copy(); env["PYTHONPATH"] = str(REPO_ROOT / "src")
-    cmd = [ sys.executable, "-m", "extractor.pipeline.run_all",
-        "--pdf", str(pdf), "--results", str(results),
-        "--annotations-json", str(anno_ext), "--clean-pdf", str(clean_path),
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(REPO_ROOT / "src")
+    cmd = [
+        sys.executable,
+        "-m",
+        "extractor.pipeline.run_all",
+        "--pdf",
+        str(pdf),
+        "--results",
+        str(results),
+        "--annotations-json",
+        str(anno_ext),
+        "--clean-pdf",
+        str(clean_path),
     ]
     mode = (req.mode or "live").lower().strip()
     deterministic = mode in {"deterministic", "offline", "heuristic", "skip"}
@@ -2207,17 +2425,22 @@ def api_pipeline_run_external(req: _RunExternalReq):
     proc = subprocess.run(cmd, env=env)
     ok = proc.returncode == 0
     summary = Path("scripts/artifacts/run_summary_happy.json")
-    final_json = results / "final_report.json"; final_md = results / "final_report.md"
+    final_json = results / "final_report.json"
+    final_md = results / "final_report.md"
     # Write latest pointer for the UI (for quick load without passing dirs)
     try:
         pointer = Path(ARTIFACTS_ROOT) / "latest_results.json"
         pointer.write_text(json.dumps({"results_dir": str(results)}, indent=2))
     except Exception:
         pass
-    return { 'ok': ok, 'mode': mode, 'results_dir': str(results),
-             'summary_path': str(summary) if summary.exists() else None,
-             'final_report_json': str(final_json) if final_json.exists() else None,
-             'final_report_md': str(final_md) if final_md.exists() else None }
+    return {
+        "ok": ok,
+        "mode": mode,
+        "results_dir": str(results),
+        "summary_path": str(summary) if summary.exists() else None,
+        "final_report_json": str(final_json) if final_json.exists() else None,
+        "final_report_md": str(final_md) if final_md.exists() else None,
+    }
 
 
 @app.get("/api/artifacts/file")
@@ -2238,6 +2461,7 @@ def api_artifact_file(path: str):
 # Save consolidated annotations (UI normalized + Stage-01 canonical)
 # -----------------------------
 
+
 @app.post("/api/annotations/save")
 def api_annotations_save(req: _SaveAnnotationsReq):
     try:
@@ -2250,7 +2474,11 @@ def api_annotations_save(req: _SaveAnnotationsReq):
             "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             "source_pdf": str(pdf),
             "normalized": True,
-            "boxes_by_page": json.loads(json.dumps(req.boxes_by_page, default=lambda o: o.dict() if hasattr(o, 'dict') else o)),
+            "boxes_by_page": json.loads(
+                json.dumps(
+                    req.boxes_by_page, default=lambda o: o.dict() if hasattr(o, "dict") else o
+                )
+            ),
         }
         norm_path = results / "annotations.json"
         norm_path.write_text(json.dumps(ui_payload, indent=2))
@@ -2279,6 +2507,7 @@ def api_annotations_save(req: _SaveAnnotationsReq):
 # Upsert to ArangoDB (Stage 10 → 11 only)
 # -----------------------------
 
+
 @app.post("/api/pipeline/upsert")
 def api_pipeline_upsert(req: _UpsertReq):
     try:
@@ -2299,9 +2528,12 @@ def api_pipeline_upsert(req: _UpsertReq):
             sys.executable,
             "src/extractor/pipeline/steps/10_arangodb_exporter.py",
             "run",
-            "--reflowed", str(reflow_json),
-            "--summaries", str(summaries_json),
-            "-o", str(results),
+            "--reflowed",
+            str(reflow_json),
+            "--summaries",
+            str(summaries_json),
+            "-o",
+            str(results),
         ] + (["--fast-embeddings"] if req.fast_embeddings else [])
         p10 = subprocess.run(cmd10, env=env)
         if p10.returncode != 0:
@@ -2318,13 +2550,16 @@ def api_pipeline_upsert(req: _UpsertReq):
             "src/extractor/pipeline/steps/11_arango_create_graph.py",
             "run",
             str(flat_json),
-            "-o", str(results),
+            "-o",
+            str(results),
         ]
         p11 = subprocess.run(cmd11, env=env)
         if p11.returncode != 0:
             return JSONResponse({"ok": False, "error": "stage11_failed"}, status_code=500)
 
-        confirm11 = results / "11_arango_create_graph" / "json_output" / "11_graph_confirmation.json"
+        confirm11 = (
+            results / "11_arango_create_graph" / "json_output" / "11_graph_confirmation.json"
+        )
         return {
             "ok": True,
             "results_dir": str(results),
@@ -2334,16 +2569,20 @@ def api_pipeline_upsert(req: _UpsertReq):
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
+
 # -----------------------------
 # Requirements API (miner/enrichment UX support)
 # -----------------------------
+
 
 @app.get("/api/requirements/list")
 def api_requirements_list(results_dir: str):
     try:
         results = Path(results_dir).resolve()
         req07 = results / "07_requirements_miner" / "json_output" / "07_requirements.json"
-        req08 = results / "08_lean4_theorem_prover" / "json_output" / "08_requirements_enriched.json"
+        req08 = (
+            results / "08_lean4_theorem_prover" / "json_output" / "08_requirements_enriched.json"
+        )
         if not req07.exists():
             return JSONResponse({"ok": False, "error": "requirements_not_found"}, status_code=404)
         base = json.loads(req07.read_text())
@@ -2361,13 +2600,15 @@ def api_requirements_list(results_dir: str):
         # Build light list for UI
         out = []
         for r in by_id.values():
-            out.append({
-                "id": r.get("id"),
-                "text_canonical": r.get("text_canonical") or r.get("text_raw"),
-                "status": r.get("status", "new"),
-                "confidence": r.get("confidence", 0.0),
-                "source": r.get("source", {}),
-            })
+            out.append(
+                {
+                    "id": r.get("id"),
+                    "text_canonical": r.get("text_canonical") or r.get("text_raw"),
+                    "status": r.get("status", "new"),
+                    "confidence": r.get("confidence", 0.0),
+                    "source": r.get("source", {}),
+                }
+            )
         return {"ok": True, "results_dir": str(results), "requirements": out}
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
@@ -2429,13 +2670,15 @@ def api_requirements_rerun(req: _ReqRerunReq):
         reflow_json = results / "07_reflow_section" / "json_output" / "07_reflowed.json"
         if not reflow_json.exists():
             return JSONResponse({"ok": False, "error": "missing_reflowed"}, status_code=400)
-        env = os.environ.copy(); env["PYTHONPATH"] = str(REPO_ROOT / "src")
+        env = os.environ.copy()
+        env["PYTHONPATH"] = str(REPO_ROOT / "src")
         # Prefer native Stage 08 run; FORCE_PROVE08 can be set by operator to override offline
         cmd = [
             sys.executable,
             "src/extractor/pipeline/steps/08_lean4_theorem_prover.py",
             str(reflow_json),
-            "-o", str(results),
+            "-o",
+            str(results),
         ]
         p = subprocess.run(cmd, env=env)
         ok = p.returncode == 0
@@ -2444,9 +2687,11 @@ def api_requirements_rerun(req: _ReqRerunReq):
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
+
 # -----------------------------
 # Latest results pointer (UI convenience)
 # -----------------------------
+
 
 @app.get("/api/pipeline/latest")
 def api_pipeline_latest():

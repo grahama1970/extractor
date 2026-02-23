@@ -27,14 +27,43 @@ def main():
     out_dir = Path("data/results/cli_smokes/run_summary").resolve()
     stage11 = out_dir / "11_arango_create_graph/json_output"
     stage11.mkdir(parents=True, exist_ok=True)
-    (stage11 / "11_graph_summary.json").write_text(json.dumps({"schema_version": "edge_v1", "counts_by_type": {"semantic_similarity": 1}, "violations_count": 0}, indent=2))
-    (stage11 / "11_graph_edges.json").write_text(json.dumps([{"_from": "pdf_objects/a", "_to": "pdf_objects/b", "relationship_type": "semantic_similarity", "weight": 0.9}], indent=2))
-    (stage11 / "11_graph_confirmation.json").write_text(json.dumps({"status": "Completed"}, indent=2))
+    (stage11 / "11_graph_summary.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "edge_v1",
+                "counts_by_type": {"semantic_similarity": 1},
+                "violations_count": 0,
+            },
+            indent=2,
+        )
+    )
+    (stage11 / "11_graph_edges.json").write_text(
+        json.dumps(
+            [
+                {
+                    "_from": "pdf_objects/a",
+                    "_to": "pdf_objects/b",
+                    "relationship_type": "semantic_similarity",
+                    "weight": 0.9,
+                }
+            ],
+            indent=2,
+        )
+    )
+    (stage11 / "11_graph_confirmation.json").write_text(
+        json.dumps({"status": "Completed"}, indent=2)
+    )
 
     env = dict(**os.environ)
     src_dir = str((Path(__file__).resolve().parents[3] / "src").resolve())
     env["PYTHONPATH"] = f"{src_dir}:{env.get('PYTHONPATH','')}"
-    cmd = [sys.executable, "-m", "extractor.pipeline.steps.14_report_generator", "run", str(out_dir)]
+    cmd = [
+        sys.executable,
+        "-m",
+        "extractor.pipeline.steps.14_report_generator",
+        "run",
+        str(out_dir),
+    ]
     if subprocess.run(cmd, env=env).returncode != 0:
         typer.echo("Stage 14 run failed", err=True)
         raise typer.Exit(1)
@@ -43,7 +72,11 @@ def main():
         typer.echo("run_summary.json missing", err=True)
         raise typer.Exit(1)
     data = json.loads(rs.read_text())
-    ok = isinstance(data.get("graph"), dict) and "edge_counts_by_type" in data.get("graph", {}) and isinstance(data.get("exporters"), dict)
+    ok = (
+        isinstance(data.get("graph"), dict)
+        and "edge_counts_by_type" in data.get("graph", {})
+        and isinstance(data.get("exporters"), dict)
+    )
     if not ok:
         typer.echo("run_summary.json invalid", err=True)
         raise typer.Exit(1)
@@ -52,4 +85,3 @@ def main():
 
 if __name__ == "__main__":
     app()
-

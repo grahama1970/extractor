@@ -20,10 +20,24 @@ from .expected_common import STEP_FILES
 def main() -> int:
     p = argparse.ArgumentParser(description="Bless current pipeline outputs as expected (golden)")
     p.add_argument("--pdf", required=True, type=Path)
-    p.add_argument("--out", required=True, type=Path, help="Path used for current outputs (data/results/pipeline)")
-    p.add_argument("--expected-root", required=True, type=Path, help="Root expected dir (data/expected/pipeline)")
+    p.add_argument(
+        "--out",
+        required=True,
+        type=Path,
+        help="Path used for current outputs (data/results/pipeline)",
+    )
+    p.add_argument(
+        "--expected-root",
+        required=True,
+        type=Path,
+        help="Root expected dir (data/expected/pipeline)",
+    )
     p.add_argument("--steps", default="01,02,04,05,06,07,09")
-    p.add_argument("--visual-dir", type=Path, help="Optional: copy rendered visuals from here (expects subdirs per step)")
+    p.add_argument(
+        "--visual-dir",
+        type=Path,
+        help="Optional: copy rendered visuals from here (expects subdirs per step)",
+    )
     args = p.parse_args()
 
     try:

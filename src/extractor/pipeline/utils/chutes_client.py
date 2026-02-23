@@ -5,10 +5,6 @@ Deprecated shim. Use `scillm.acompletion` with `api_key=` and
 """
 from __future__ import annotations
 
-import json
-import os
-import urllib.request
-import urllib.error
 from typing import Any, Dict, List, Optional
 
 
@@ -34,6 +30,7 @@ def chat_completion(
 ) -> Dict[str, Any]:
     """Paved call via SciLLM; returns OpenAI-shaped dict."""
     from scillm import completion  # type: ignore
+
     payload: Dict[str, Any] = {
         "model": model,
         "messages": messages,

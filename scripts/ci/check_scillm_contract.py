@@ -19,7 +19,9 @@ STEPS = ROOT / "src/extractor/pipeline/steps"
 
 ALLOWLIST = {
     (STEPS / "scillm_preflight_validator.py").resolve(),
-    (STEPS / "08_lean4_theorem_prover.py").resolve(),  # allowed to use httpx for Certainly health/bridge
+    (
+        STEPS / "08_lean4_theorem_prover.py"
+    ).resolve(),  # allowed to use httpx for Certainly health/bridge
 }
 
 PAT_HTTP = re.compile(r"/chat/completions|Authorization:\s*Bearer", re.IGNORECASE)

@@ -1,5 +1,4 @@
 import json
-import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -37,4 +36,3 @@ def test_codex_prompt_smoke_optional(tmp_path: Path):
     else:
         # When failing, ensure diagnostics are present
         assert data.get("ok") is False or "codex" in (proc.stderr or "")
-

@@ -22,7 +22,6 @@ Usage:
 from __future__ import annotations
 
 import json
-import os
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -176,8 +175,12 @@ def _collect_row(run_dir: Path) -> Dict[str, Any]:
 
 @app.command()
 def main(
-    results_root: Path = typer.Option("data/results", "--results-root", exists=True, help="Root folder to scan"),
-    out: Path = typer.Option("scripts/artifacts/sparta_ingestion.xlsx", "--out", help="Output Excel path"),
+    results_root: Path = typer.Option(
+        "data/results", "--results-root", exists=True, help="Root folder to scan"
+    ),
+    out: Path = typer.Option(
+        "scripts/artifacts/sparta_ingestion.xlsx", "--out", help="Output Excel path"
+    ),
 ) -> None:
     runs: List[Path] = []
     # Prefer pipeline_iter/* runs; fall back to pipeline/*
@@ -201,4 +204,3 @@ def main(
 
 if __name__ == "__main__":
     app()
-

@@ -185,9 +185,7 @@ def call_codex(prompt: str, session_id: str, output_path: Path) -> None:
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.communicate()
-            raise RuntimeError(
-                f"Codex CLI timed out after {timeout_s}s. Log: {log_path}"
-            )
+            raise RuntimeError(f"Codex CLI timed out after {timeout_s}s. Log: {log_path}")
     if proc.returncode != 0:
         tail = tail_file(log_path)
         msg = f"Codex CLI failed (exit {proc.returncode}). Log: {log_path}"

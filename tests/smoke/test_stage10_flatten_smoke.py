@@ -6,9 +6,11 @@ pytest.skip(
     allow_module_level=True,
 )
 
+
 def test_flatten_document_minimal():
     # dynamic import due to filename starting with digits
     import importlib.util
+
     spec = importlib.util.spec_from_file_location(
         "stage10", "src/extractor/pipeline/steps/10_arangodb_exporter.py"
     )
@@ -29,7 +31,12 @@ def test_flatten_document_minimal():
                 "reflow_status": "success",
                 "reflowed_text": "Hello world",
                 "tables": [
-                    {"title": "INFERRED: T1", "headers": ["A"], "page_index": 0, "bbox": [0, 60, 200, 120]}
+                    {
+                        "title": "INFERRED: T1",
+                        "headers": ["A"],
+                        "page_index": 0,
+                        "bbox": [0, 60, 200, 120],
+                    }
                 ],
                 "figures": [
                     {"title": "F1", "ai_description": "desc", "page": 0, "bbox": [0, 130, 100, 200]}

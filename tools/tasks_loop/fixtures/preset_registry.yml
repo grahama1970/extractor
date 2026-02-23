@@ -30,6 +30,12 @@ presets:
     category: Financial
     id_patterns: ["INV-", "PO-"]
 
+  stress_test:
+    description: "Stress test configuration with all optional errors enabled for robustness verification"
+    fixture: sparta_stress_test
+    category: Engineering
+    id_patterns: ["CRIT-"]
+
 # Detection Rules (fallback regex matching)
 # Used when Step 00 profile detection is unavailable.
 detection_rules:

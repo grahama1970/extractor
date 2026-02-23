@@ -21,7 +21,6 @@ import base64
 import io
 import json
 import os
-from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -34,6 +33,7 @@ from PIL import Image
 
 print("SKIP: generate_json_vs_camelot smoke deprecated (SciLLM-only)")
 raise SystemExit(0)
+
 
 # Optional synthetic PDF generator (reportlab). If unavailable, skip.
 def _maybe_generate_synthetic_pdf(path: Path, rows: int = 6, cols: int = 5) -> bool:
@@ -62,21 +62,23 @@ def _maybe_generate_synthetic_pdf(path: Path, rows: int = 6, cols: int = 5) -> b
     c.setFont("Helvetica-Bold", 10)
     for i in range(cols):
         tx = margin + i * cell_w + 5
-        ty = margin + table_h - cell_h + cell_h/2 - 4
+        ty = margin + table_h - cell_h + cell_h / 2 - 4
         c.drawString(tx, ty, f"Col {i+1}")
     # data
     c.setFont("Helvetica", 10)
     for r in range(1, rows):
         for i in range(cols):
             tx = margin + i * cell_w + 5
-            ty = margin + table_h - (r+1) * cell_h + cell_h/2 - 4
+            ty = margin + table_h - (r + 1) * cell_h + cell_h / 2 - 4
             c.drawString(tx, ty, f"R{r}C{i+1}")
     c.showPage()
     c.save()
     return True
 
 
-def _expand_bbox(bbox: tuple[float, float, float, float], factor: float, page_w: float, page_h: float) -> tuple[float, float, float, float]:
+def _expand_bbox(
+    bbox: tuple[float, float, float, float], factor: float, page_w: float, page_h: float
+) -> tuple[float, float, float, float]:
     x1, y1, x2, y2 = bbox
     cx = (x1 + x2) / 2
     cy = (y1 + y2) / 2
@@ -102,15 +104,15 @@ def _crop_pixmap_to_pil(pix: fitz.Pixmap, rect: fitz.Rect) -> Image.Image:
 async def run() -> Dict[str, Any]:
     load_dotenv(find_dotenv())
 
-    synthetic = Path('tests/fixtures/synthetic_table.pdf')
+    synthetic = Path("tests/fixtures/synthetic_table.pdf")
     if not synthetic.exists():
         _maybe_generate_synthetic_pdf(synthetic)
     candidates = [
         synthetic,
-        Path('data/input/pipeline/BHT_CV32A65X_marked.pdf'),
-        Path('data/input/pipeline/BHT_CV32A65X_marked_with_requirements.pdf'),
-        Path('data/input/pipeline/qb50_system_requirements_and_recommendations_marked.pdf'),
-        Path('data/input/pipeline/qb50_1_14.pdf'),
+        Path("data/input/pipeline/BHT_CV32A65X_marked.pdf"),
+        Path("data/input/pipeline/BHT_CV32A65X_marked_with_requirements.pdf"),
+        Path("data/input/pipeline/qb50_system_requirements_and_recommendations_marked.pdf"),
+        Path("data/input/pipeline/qb50_1_14.pdf"),
     ]
 
     found: Optional[Dict[str, Any]] = None
@@ -133,8 +135,8 @@ async def run() -> Dict[str, Any]:
                 continue
             pick = None
             for t in tables:
-                df = getattr(t, 'df', None)
-                bbox = getattr(t, '_bbox', None) or getattr(t, 'bbox', None)
+                df = getattr(t, "df", None)
+                bbox = getattr(t, "_bbox", None) or getattr(t, "bbox", None)
                 if df is None or bbox is None:
                     continue
                 rows, cols = int(df.shape[0]), int(df.shape[1])
@@ -144,7 +146,7 @@ async def run() -> Dict[str, Any]:
                     pick = (df, bbox)
                     break
             if pick:
-                found = {'page': page, 'df': pick[0], 'bbox': pick[1]}
+                found = {"page": page, "df": pick[0], "bbox": pick[1]}
                 pdf_path = cp
                 break
         if found:
@@ -175,11 +177,11 @@ async def run() -> Dict[str, Any]:
     pix = page.get_pixmap(matrix=mat)
     # Scale bbox to pixel space
     rect_px = fitz.Rect(left * zoom, top * zoom, right * zoom, bottom * zoom)
-    crop_img = _crop_pixmap_to_pil(pix, rect_px).convert('RGBA')
-    artifacts = Path('scripts/artifacts')
+    crop_img = _crop_pixmap_to_pil(pix, rect_px).convert("RGBA")
+    artifacts = Path("scripts/artifacts")
     artifacts.mkdir(parents=True, exist_ok=True)
-    ts_img = datetime.utcnow().isoformat().replace(':','-').replace('.','-')
-    crop_path = artifacts / f'camelot_llm_crop_{ts_img}.png'
+    ts_img = datetime.utcnow().isoformat().replace(":", "-").replace(".", "-")
+    crop_path = artifacts / f"camelot_llm_crop_{ts_img}.png"
     crop_img.save(crop_path)
     buf = io.BytesIO()
     crop_img.save(buf, format="PNG")
@@ -190,14 +192,26 @@ async def run() -> Dict[str, Any]:
     prompt = (
         "You are an expert table extractor. Given an image of a table from a PDF, return ONLY a strict JSON object with EXACT keys and types:\n\n"
         "{\n"
-        "  \"title\": string,            // concise title; if inferred, prefix with INFERRED_\n"
-        "  \"columns\": string[],        // header cells as strings\n"
-        "  \"data\": string[][]          // row-major 2D array of cell text\n"
+        '  "title": string,            // concise title; if inferred, prefix with INFERRED_\n'
+        '  "columns": string[],        // header cells as strings\n'
+        '  "data": string[][]          // row-major 2D array of cell text\n'
         "}\n\n"
         "Rules:\n- Respond with a single JSON object only (no markdown, no code fences, no commentary).\n- Do not include any extra keys.\n- Normalize whitespace; keep cell contents as plain strings.\n- Extract all visible rows beneath the header; do NOT return an empty data array if rows are present."
     )
-    params = {"model": os.getenv("LITELLM_DEFAULT_MODEL", "gemini/gemini-2.5-flash"), "text": prompt, "image": data_url}
-    results = await litellm_call([params], wrap_json=True, response_format="json_object", desc="LLM vs Camelot", show_progress=False, concurrency=1, request_timeout=45)
+    params = {
+        "model": os.getenv("LITELLM_DEFAULT_MODEL", "gemini/gemini-2.5-flash"),
+        "text": prompt,
+        "image": data_url,
+    }
+    results = await litellm_call(
+        [params],
+        wrap_json=True,
+        response_format="json_object",
+        desc="LLM vs Camelot",
+        show_progress=False,
+        concurrency=1,
+        request_timeout=45,
+    )
     out = results[0] if results else ""
 
     if isinstance(out, str):
@@ -211,14 +225,18 @@ async def run() -> Dict[str, Any]:
             try:
                 obj = json.loads(content)
             except Exception as e:
-                return {"ok": False, "error": f"non_json_output: {e}", "raw": (content or "")[:1000]}
+                return {
+                    "ok": False,
+                    "error": f"non_json_output: {e}",
+                    "raw": (content or "")[:1000],
+                }
         else:
             return {"ok": False, "error": "empty_output"}
 
     # Basic comparison: column count and shape
     try:
-        cols_llm = obj.get('columns') or []
-        data_llm = obj.get('data') or []
+        cols_llm = obj.get("columns") or []
+        data_llm = obj.get("data") or []
         cols_cam = list(df.iloc[0]) if len(df) > 0 else []
         # Basic checks
         ok_cols = isinstance(cols_llm, list) and (len(cols_llm) >= 1)
@@ -229,7 +247,14 @@ async def run() -> Dict[str, Any]:
         ok = ok_cols and ok_data and similar_cols
         return {
             "ok": bool(ok),
-            "camelot": {"pdf": str(pdf_path), "page": page_num, "bbox": bbox, "columns_inferred": cols_cam[:10], "rows": int(df.shape[0]), "cols": int(df.shape[1])},
+            "camelot": {
+                "pdf": str(pdf_path),
+                "page": page_num,
+                "bbox": bbox,
+                "columns_inferred": cols_cam[:10],
+                "rows": int(df.shape[0]),
+                "cols": int(df.shape[1]),
+            },
             "llm": obj,
             "crop": str(crop_path),
         }

@@ -9,7 +9,6 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 
 import typer
@@ -48,6 +47,7 @@ def main(
     fake_pdf.write_bytes(b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n")
 
     import importlib.util
+
     p = Path("src/extractor/pipeline/steps/03_suspicious_headers.py").resolve()
     spec = importlib.util.spec_from_file_location("stage03", str(p))
     if not spec or not spec.loader:
@@ -87,4 +87,3 @@ def main(
 
 if __name__ == "__main__":
     app()
-

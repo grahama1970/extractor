@@ -1,11 +1,11 @@
 import duckdb
 import sys
-from pathlib import Path
+
 
 def inspect(db_path):
     con = duckdb.connect(str(db_path), read_only=True)
     print("Tables in DB:", con.execute("SHOW TABLES").fetchall())
-    
+
     try:
         reqs = con.execute("SELECT req_id, text, type FROM requirements").fetchall()
         print(f"\nRequirements ({len(reqs)}):")
@@ -25,6 +25,7 @@ def inspect(db_path):
             print(t)
     except Exception as e:
         print(f"Error querying tables: {e}")
+
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:

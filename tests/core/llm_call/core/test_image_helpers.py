@@ -1,4 +1,3 @@
-import base64
 from pathlib import Path
 
 import pytest
@@ -24,18 +23,21 @@ def test_extract_images_local_and_remote(tmp_path: Path):
 
 
 def test_fetch_remote_image_cached_failure(monkeypatch):
-    class _Resp:
-        def raise_for_status(self):
-            raise RuntimeError("404")
+    """Test that fetch_remote_image_cached raises on network failures per exception handling policy."""
 
-    def fake_get(url, timeout):
+    def fake_get(url, **kwargs):
         raise RuntimeError("network fail")
 
-    import extractor.pipeline.utils.litellm_image_utils as image_helpers
+    # Patch the httpx module where it's actually imported (in image_helpers)
+    import extractor.pipeline.utils.image_helpers as actual_helpers
 
-    monkeypatch.setattr(image_helpers.httpx, "get", fake_get)
-    out = ih.fetch_remote_image_cached("http://does-not-exist.example/foo.jpg", timeout=1)
-    assert out is None
+    monkeypatch.setattr(
+        actual_helpers, "httpx", type("FakeHttp", (), {"get": staticmethod(fake_get)})()
+    )
+
+    # The function raises exceptions per the explicit error handling policy
+    with pytest.raises(RuntimeError, match="network fail"):
+        ih.fetch_remote_image_cached("http://does-not-exist.example/foo.jpg", timeout=1)
 
 
 def test_compress_image_cached_returns_data_uri(tmp_path: Path):

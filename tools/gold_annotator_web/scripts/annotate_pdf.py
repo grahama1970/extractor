@@ -16,7 +16,10 @@ def annotate(pdf: Path, boxes_json: Path, out_pdf: Path):
     for b in boxes:
         try:
             page_index = int(b.get("page", 1)) - 1
-            x = float(b["x"]); y = float(b["y"]); w = float(b["w"]); h = float(b["h"])  # normalized
+            x = float(b["x"])
+            y = float(b["y"])
+            w = float(b["w"])
+            h = float(b["h"])  # normalized
             pid = str(b.get("id", ""))
         except Exception:
             continue
@@ -27,7 +30,9 @@ def annotate(pdf: Path, boxes_json: Path, out_pdf: Path):
         rect = fitz.Rect(x * r.width, y * r.height, (x + w) * r.width, (y + h) * r.height)
         page.draw_rect(rect, color=(1, 0, 0), width=1.2)
         if pid:
-            page.insert_text(fitz.Point(rect.x0, max(0, rect.y0 - 8)), pid, fontsize=8, color=(1, 0, 0))
+            page.insert_text(
+                fitz.Point(rect.x0, max(0, rect.y0 - 8)), pid, fontsize=8, color=(1, 0, 0)
+            )
     out_pdf.parent.mkdir(parents=True, exist_ok=True)
     doc.save(out_pdf)
     doc.close()
@@ -44,4 +49,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

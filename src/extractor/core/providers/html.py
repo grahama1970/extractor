@@ -87,9 +87,40 @@ class HTMLProvider:
             else:
                 return self._blocks_from_trafilatura(traf_result, filepath)
 
-        # Legacy path
+        # Extract metadata from raw HTML
         metadata = self._extract_metadata(soup)
         attach_fetcher_metadata(metadata, fetch_download)
+
+        # Try rolling windows first for JS-rendered content (SPAs like MITRE ATT&CK)
+        # Rolling windows contain pre-extracted text from Playwright browser rendering
+        if fetch_download and fetch_download.windows:
+            total_window_chars = sum(len(w.text) for w in fetch_download.windows)
+            # Use rolling windows if they have substantial content (>1KB)
+            if total_window_chars > 1000:
+                logger.info(
+                    "Using rolling windows ({} windows, {} chars) for JS-rendered content",
+                    len(fetch_download.windows),
+                    total_window_chars,
+                )
+                blocks = self._blocks_from_rolling_windows(fetch_download.windows, soup)
+                if blocks:  # Only use if we got blocks from windows
+                    hierarchy = self._build_hierarchy(blocks)
+                    doc = UnifiedDocument(
+                        id=self._generate_doc_id(filepath),
+                        source_type=SourceType.HTML,
+                        source_path=str(filepath),
+                        blocks=blocks,
+                        hierarchy=hierarchy,
+                        metadata=metadata,
+                        full_text=self._extract_full_text(blocks),
+                        keywords=self._extract_keywords(soup),
+                    )
+                    logger.info("Extracted {count} blocks from rolling windows", count=len(blocks))
+                    return ensure_hierarchy(doc, default_title=filepath.stem)
+                else:
+                    logger.warning("Rolling windows failed to produce blocks, falling back to BeautifulSoup")
+
+        # Legacy path - parse HTML directly
         blocks = self._extract_blocks(soup)
         hierarchy = self._build_hierarchy(blocks)
 
@@ -104,14 +135,94 @@ class HTMLProvider:
             keywords=self._extract_keywords(soup),
         )
 
-        if fetch_download and fetch_download.windows:
-            logger.info("HTML provider ingested {count} rolling windows", count=len(fetch_download.windows))
         logger.info("Extracted {count} blocks from HTML", count=len(blocks))
         return ensure_hierarchy(doc, default_title=filepath.stem)
 
     def _generate_doc_id(self, filepath: Path) -> str:
         """Generate unique document ID"""
         return hashlib.md5(str(filepath).encode()).hexdigest()
+
+    def _blocks_from_rolling_windows(
+        self, windows: List[Any], soup: BeautifulSoup
+    ) -> List[BaseBlock]:
+        """Extract blocks from fetcher's rolling windows (pre-extracted text).
+
+        This handles JavaScript SPAs where the raw HTML is mostly JS code
+        but the fetcher has already rendered and extracted the text content
+        via Playwright browser automation.
+
+        Args:
+            windows: List of RollingWindow objects from fetcher
+            soup: BeautifulSoup of raw HTML (for metadata/structure hints)
+
+        Returns:
+            List of BaseBlock objects created from window text
+        """
+        blocks: List[BaseBlock] = []
+        self.block_counter = 0
+
+        # Combine all window text, handling overlaps
+        seen_text = set()
+        combined_paragraphs: List[str] = []
+
+        for window in windows:
+            text = window.text.strip()
+            if not text:
+                continue
+
+            # Split into paragraphs and dedupe
+            paragraphs = [p.strip() for p in text.split('\n\n') if p.strip()]
+            for para in paragraphs:
+                # Use first 200 chars as dedup key to handle slight variations
+                key = para[:200] if len(para) > 200 else para
+                if key not in seen_text:
+                    seen_text.add(key)
+                    combined_paragraphs.append(para)
+
+        if not combined_paragraphs:
+            logger.warning("Rolling windows contained no usable text")
+            return []
+
+        # Create blocks from combined paragraphs
+        for para in combined_paragraphs:
+            # Skip very short fragments (likely navigation/UI elements)
+            if len(para) < 20:
+                continue
+
+            self.block_counter += 1
+
+            # Detect if paragraph looks like a heading
+            is_heading = (
+                len(para) < 100
+                and not para.endswith('.')
+                and para == para.strip()
+                and '\n' not in para
+            )
+
+            block_type = BlockType.HEADING if is_heading else BlockType.PARAGRAPH
+
+            blocks.append(
+                BaseBlock(
+                    id=f"rolling-{self.block_counter:04d}",
+                    type=block_type,
+                    content=para,
+                    metadata=BlockMetadata(
+                        page_number=0,
+                        bbox=[0, 0, 100, 100],
+                        attributes={
+                            "source": "rolling_window",
+                            "char_count": len(para),
+                        }
+                    )
+                )
+            )
+
+        logger.info(
+            "Created {} blocks from {} rolling window paragraphs",
+            len(blocks),
+            len(combined_paragraphs),
+        )
+        return blocks
 
     def _extract_metadata(self, soup: BeautifulSoup) -> DocumentMetadata:
         """Extract document metadata from HTML"""
@@ -189,6 +300,24 @@ class HTMLProvider:
         text = re.sub(r"\s+", " ", text)
         text = re.sub(r"(\*\*|__)(.*?)\1", r"\2", text)
         return text.replace("*", "").replace("__", "").strip()
+
+    @staticmethod
+    def _strip_residual_html(text: str) -> str:
+        """Strip any residual HTML tags that slipped through extraction.
+        
+        This handles edge cases where trafilatura or BeautifulSoup
+        leave behind <div>, <script>, <style>, etc. in the output.
+        """
+        if not text:
+            return ""
+        # Remove script and style content entirely
+        text = re.sub(r'<script[^>]*>.*?</script>', '', text, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(r'<style[^>]*>.*?</style>', '', text, flags=re.DOTALL | re.IGNORECASE)
+        # Strip all remaining HTML tags
+        text = re.sub(r'<[^>]+>', ' ', text)
+        # Clean up whitespace
+        text = re.sub(r'\s+', ' ', text)
+        return text.strip()
 
     def _process_element(
         self,
@@ -275,7 +404,9 @@ class HTMLProvider:
                     type=BlockType.FIGURE,
                     content={"title": None, "caption": caption_text, "src": src},
                     parent_id=parent_id,
-                    metadata=BlockMetadata(attributes={"tag": "img", "caption_window": 1}, confidence=1.0),
+                    metadata=BlockMetadata(
+                        attributes={"tag": "img", "caption_window": 1}, confidence=1.0
+                    ),
                 )
                 blocks.append(fig_block)
             else:
@@ -321,6 +452,8 @@ class HTMLProvider:
         """Process heading element"""
         level = int(element.name[1])  # h1 -> 1, h2 -> 2, etc.
         text = element.get_text(strip=True)
+        # Strip any residual HTML tags
+        text = self._strip_residual_html(text)
 
         if not text:
             return None
@@ -378,6 +511,8 @@ class HTMLProvider:
                 )
 
         text = self._clean_inline_text(text)
+        # Strip any residual HTML tags (handles edge cases from JS-heavy pages)
+        text = self._strip_residual_html(text)
 
         if not text:
             return None
@@ -480,13 +615,19 @@ class HTMLProvider:
             type=BlockType.LIST,
             content={"type": list_type},
             parent_id=parent_id,
-            metadata=BlockMetadata(attributes={"tag": element.name, "list_type": list_type}, confidence=1.0),
+            metadata=BlockMetadata(
+                attributes={"tag": element.name, "list_type": list_type}, confidence=1.0
+            ),
         )
         blocks.append(list_block)
 
         # Optional nested depth from DOM
         import os as _os
-        use_nested_depths = _os.environ.get("EXTRACT_NESTED_LIST_DEPTHS", "").lower() in {"1", "true"}
+
+        use_nested_depths = _os.environ.get("EXTRACT_NESTED_LIST_DEPTHS", "").lower() in {
+            "1",
+            "true",
+        }
 
         def _li_depth(li_el: Tag) -> int:
             if not use_nested_depths:
@@ -510,7 +651,8 @@ class HTMLProvider:
                     item_text = md(str(li), strip=["li"])
                 except Exception as e:
                     logger.warning(
-                        "Markdownify failed for list item: {error}, falling back to plain text", error=e
+                        "Markdownify failed for list item: {error}, falling back to plain text",
+                        error=e,
                     )
                     item_text = li.get_text(strip=True)
 
@@ -522,7 +664,12 @@ class HTMLProvider:
                         content=item_text.strip(),
                         parent_id=list_block.id,
                         metadata=BlockMetadata(
-                            attributes={"index": idx, "list_type": list_type, "depth": _li_depth(li)}, confidence=1.0
+                            attributes={
+                                "index": idx,
+                                "list_type": list_type,
+                                "depth": _li_depth(li),
+                            },
+                            confidence=1.0,
                         ),
                     )
                 )
@@ -617,7 +764,9 @@ class HTMLProvider:
         try:
             quote_text = md(str(element), strip=["blockquote"])
         except Exception as e:
-            logger.warning("Markdownify failed for blockquote: {error}, falling back to plain text", error=e)
+            logger.warning(
+                "Markdownify failed for blockquote: {error}, falling back to plain text", error=e
+            )
             quote_text = element.get_text(strip=True)
 
         if quote_text.strip():

@@ -31,7 +31,14 @@ app = typer.Typer(add_completion=False)
 
 
 def _load_flatten_function():
-    module_path = Path(__file__).resolve().parents[3] / "src" / "extractor" / "pipeline" / "steps" / "10_arangodb_exporter.py"
+    module_path = (
+        Path(__file__).resolve().parents[3]
+        / "src"
+        / "extractor"
+        / "pipeline"
+        / "steps"
+        / "10_arangodb_exporter.py"
+    )
     spec = importlib.util.spec_from_file_location("pipeline_stage10", module_path)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"Unable to load Stage 10 module from {module_path}")
@@ -49,7 +56,9 @@ def main(
         help="PDF Stage 07 reflowed JSON",
     ),
     docx_path: Path = typer.Option(
-        Path("data/results/pipeline/01_annotation_processor/bht_formats/BHT_CV32A65X_marked_clean.docx"),
+        Path(
+            "data/results/pipeline/01_annotation_processor/bht_formats/BHT_CV32A65X_marked_clean.docx"
+        ),
         exists=True,
         readable=True,
         help="DOCX rendition of the document",
@@ -102,7 +111,8 @@ def main(
     for obj in docx_flattened:
         docx_types[obj["object_type"]] = docx_types.get(obj["object_type"], 0) + 1
 
-    artifacts_dir = Path("scripts/artifacts"); artifacts_dir.mkdir(parents=True, exist_ok=True)
+    artifacts_dir = Path("scripts/artifacts")
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
     summary_path = artifacts_dir / "docx_pdf_parity_summary.json"
     summary_payload = {
         "pdf": {"count": len(pdf_flattened), "types": pdf_types},
@@ -125,7 +135,7 @@ def main(
     docx_has_figure = any(o["object_type"] == "Figure" for o in docx_flattened)
 
     # Read structured Stage 07 for diagnostics/presence
-    pdf_sections = (payload.get("reflowed_sections") or [])
+    pdf_sections = payload.get("reflowed_sections") or []
     try:
         s07 = json.loads(Path(artifacts["stage07"]).read_text())
         docx_sections = s07.get("reflowed_sections") or []
@@ -135,7 +145,11 @@ def main(
         diags = []
     mangled_flag = False
     for d in diags:
-        if isinstance(d, dict) and d.get("structured_pipeline") == "docx_mangled_check" and d.get("mangled_docx"):
+        if (
+            isinstance(d, dict)
+            and d.get("structured_pipeline") == "docx_mangled_check"
+            and d.get("mangled_docx")
+        ):
             mangled_flag = True
             break
 
@@ -150,11 +164,12 @@ def main(
         typer.echo("Missing sections in DOCX parity.", err=True)
         raise typer.Exit(code=1)
     # Section-context checks in Stage 10
-    first_section_title = str((docx_sections[0] or {}).get("title") if docx_sections else "").strip()
+    str(
+        (docx_sections[0] or {}).get("title") if docx_sections else ""
+    ).strip()
     all_section_titles = [str((s or {}).get("title") or "").strip() for s in docx_sections]
     has_section_context = any(
-        isinstance(obj, dict)
-        and str(obj.get("section_id") or "") not in ("", "document-root")
+        isinstance(obj, dict) and str(obj.get("section_id") or "") not in ("", "document-root")
         for obj in docx_flattened
     )
     if not has_section_context:
@@ -162,11 +177,15 @@ def main(
         raise typer.Exit(code=1)
     # Allow any Stage 07 title to appear in Stage 10 section_title
     present_titles = set(
-        str(obj.get("section_title") or "").strip() for obj in docx_flattened if isinstance(obj, dict)
+        str(obj.get("section_title") or "").strip()
+        for obj in docx_flattened
+        if isinstance(obj, dict)
     )
     if all_section_titles:
         if not any(t for t in all_section_titles if t and t in present_titles):
-            typer.echo("No Stage 10 object matched any section title from Stage 07 (DOCX).", err=True)
+            typer.echo(
+                "No Stage 10 object matched any section title from Stage 07 (DOCX).", err=True
+            )
             raise typer.Exit(code=1)
 
     typer.echo("DOCX parity presence + section-context checks passed.")

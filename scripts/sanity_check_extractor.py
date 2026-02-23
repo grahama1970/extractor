@@ -19,7 +19,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List
 
 # Add extractor to path
 EXTRACTOR_ROOT = Path(__file__).parent.parent
@@ -245,7 +245,10 @@ class SanityChecker:
             result["filepath"] = str(filepath)
 
             if result["success"]:
-                self._log(f"{format_name.upper()}: {blocks} blocks in {duration}ms ({result['fixture']})", "PASS")
+                self._log(
+                    f"{format_name.upper()}: {blocks} blocks in {duration}ms ({result['fixture']})",
+                    "PASS",
+                )
             else:
                 result["error"] = f"Expected at least {expected_min} blocks, got {blocks}"
                 self._log(f"{format_name.upper()}: {result['error']}", "FAIL")
@@ -283,10 +286,14 @@ class SanityChecker:
             out_dir.mkdir(exist_ok=True)
 
             cmd = [
-                sys.executable, "-m", "extractor.pipeline",
+                sys.executable,
+                "-m",
+                "extractor.pipeline",
                 "--offline-smoke",
-                "--pdf", str(self.test_pdf),
-                "--out", str(out_dir),
+                "--pdf",
+                str(self.test_pdf),
+                "--out",
+                str(out_dir),
             ]
 
             t0 = time.monotonic()
@@ -317,13 +324,16 @@ class SanityChecker:
                         profile = json.loads(profile_file.read_text())
                         result["preset"] = profile.get("preset_name")
 
-                    self._log(f"PDF fast: {sections} sections in {duration}ms (preset={result['preset']})", "PASS")
+                    self._log(
+                        f"PDF fast: {sections} sections in {duration}ms (preset={result['preset']})",
+                        "PASS",
+                    )
                 else:
                     result["error"] = "Sections file not found"
                     self._log(f"PDF fast: {result['error']}", "FAIL")
             else:
                 result["error"] = proc.stderr[:500] if proc.stderr else "Pipeline failed"
-                self._log(f"PDF fast: Pipeline failed", "FAIL")
+                self._log("PDF fast: Pipeline failed", "FAIL")
 
         except subprocess.TimeoutExpired:
             result["error"] = "Timeout (120s)"
@@ -368,11 +378,15 @@ class SanityChecker:
             out_dir.mkdir(exist_ok=True)
 
             cmd = [
-                sys.executable, "-m", "extractor.pipeline",
+                sys.executable,
+                "-m",
+                "extractor.pipeline",
                 "--use-llm",
                 "--skip-proving",  # Skip Lean4 proving (requires separate container)
-                "--pdf", str(self.test_pdf),
-                "--out", str(out_dir),
+                "--pdf",
+                str(self.test_pdf),
+                "--out",
+                str(out_dir),
             ]
 
             t0 = time.monotonic()
@@ -400,8 +414,7 @@ class SanityChecker:
                     if figures_file.exists():
                         fig_data = json.loads(figures_file.read_text())
                         result["figures_described"] = sum(
-                            1 for f in fig_data.get("figures", [])
-                            if f.get("ai_description")
+                            1 for f in fig_data.get("figures", []) if f.get("ai_description")
                         )
 
                     self._log(f"PDF accurate: {sections} sections in {duration}ms", "PASS")
@@ -410,7 +423,7 @@ class SanityChecker:
                     self._log(f"PDF accurate: {result['error']}", "FAIL")
             else:
                 result["error"] = proc.stderr[:500] if proc.stderr else "Pipeline failed"
-                self._log(f"PDF accurate: Pipeline failed", "FAIL")
+                self._log("PDF accurate: Pipeline failed", "FAIL")
 
         except subprocess.TimeoutExpired:
             result["error"] = "Timeout (120s)"
@@ -436,13 +449,25 @@ class SanityChecker:
         }
 
         steps = [
-            's00_profile_detector', 's01_annotation_processor', 's02_marker_extractor',
-            's03_suspicious_headers', 's04_section_builder', 's04a_layout_audit',
-            's05_table_extractor', 's05b_table_describer', 's05c_table_merger',
-            's06_figure_extractor', 's06b_figure_describer', 's07_duckdb_ingest',
-            's07b_text_cleaner', 's08_extract_requirements', 's08_lean4_theorem_prover',
-            's09_section_summarizer', 's10_markdown_exporter', 's10_arangodb_exporter',
-            's14_report_generator',
+            "s00_profile_detector",
+            "s01_annotation_processor",
+            "s02_marker_extractor",
+            "s03_suspicious_headers",
+            "s04_section_builder",
+            "s04a_layout_audit",
+            "s05_table_extractor",
+            "s05b_table_describer",
+            "s05c_table_merger",
+            "s06_figure_extractor",
+            "s06b_figure_describer",
+            "s07_duckdb_ingest",
+            "s07b_text_cleaner",
+            "s08_extract_requirements",
+            "s08_lean4_theorem_prover",
+            "s09_section_summarizer",
+            "s10_markdown_exporter",
+            "s10_arangodb_exporter",
+            "s14_report_generator",
         ]
 
         ok = 0
@@ -450,18 +475,18 @@ class SanityChecker:
 
         for step in steps:
             try:
-                mod = __import__(f'extractor.pipeline.steps.{step}', fromlist=[step])
-                has_sanity = hasattr(mod, 'sanity') and callable(getattr(mod, 'sanity'))
-                has_run = hasattr(mod, 'run') and callable(getattr(mod, 'run'))
+                mod = __import__(f"extractor.pipeline.steps.{step}", fromlist=[step])
+                has_sanity = hasattr(mod, "sanity") and callable(getattr(mod, "sanity"))
+                has_run = hasattr(mod, "run") and callable(getattr(mod, "run"))
 
                 if has_sanity and has_run:
                     ok += 1
                 else:
                     missing = []
                     if not has_run:
-                        missing.append('run()')
+                        missing.append("run()")
                     if not has_sanity:
-                        missing.append('sanity()')
+                        missing.append("sanity()")
                     issues.append(f"{step}: missing {' and '.join(missing)}")
             except Exception as e:
                 issues.append(f"{step}: import error - {e}")
@@ -542,18 +567,26 @@ class SanityChecker:
 def main():
     parser = argparse.ArgumentParser(description="Extractor Skill Sanity Check")
     parser.add_argument("--fast-only", action="store_true", help="Skip VLM/accurate tests")
-    parser.add_argument("--format", choices=["pdf", "html", "markdown", "xml", "rst", "all"],
-                        default="all", help="Test specific format")
+    parser.add_argument(
+        "--format",
+        choices=["pdf", "html", "markdown", "xml", "rst", "all"],
+        default="all",
+        help="Test specific format",
+    )
     parser.add_argument("--output", "-o", type=Path, help="Output directory for test artifacts")
     parser.add_argument("--json", action="store_true", help="Output results as JSON")
     parser.add_argument("--quiet", "-q", action="store_true", help="Minimal output")
-    parser.add_argument("--no-fixtures", action="store_true",
-                        help="Use generated test files instead of BHT CV32A65X fixtures")
+    parser.add_argument(
+        "--no-fixtures",
+        action="store_true",
+        help="Use generated test files instead of BHT CV32A65X fixtures",
+    )
 
     args = parser.parse_args()
 
     # Load .env
     from dotenv import load_dotenv, find_dotenv
+
     load_dotenv(find_dotenv(usecwd=True))
 
     formats = None if args.format == "all" else [args.format]

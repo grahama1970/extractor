@@ -22,7 +22,6 @@ from pathlib import Path
 from typing import Dict, List, Optional
 import urllib.request
 
-import typer
 from dotenv import load_dotenv, find_dotenv
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -49,7 +48,9 @@ def _env_ok() -> bool:
         load_dotenv(find_dotenv(usecwd=True) or None)
     except Exception:
         pass
-    base = os.getenv("CHUTES_API_BASE") or os.getenv("OPENAI_BASE_URL") or os.getenv("OPENAI_API_BASE")
+    base = (
+        os.getenv("CHUTES_API_BASE") or os.getenv("OPENAI_BASE_URL") or os.getenv("OPENAI_API_BASE")
+    )
     key = os.getenv("CHUTES_API_KEY") or os.getenv("OPENAI_API_KEY")
     return bool(base and key)
 
@@ -64,31 +65,44 @@ def _scan_text(p: Path) -> tuple[bool, bool]:
 def _sanity_call() -> bool:
     # OpenAI-compatible HTTP path (no litellm dependency)
     try:
-        base = os.getenv("CHUTES_API_BASE") or os.getenv("OPENAI_BASE_URL") or os.getenv("OPENAI_API_BASE")
+        base = (
+            os.getenv("CHUTES_API_BASE")
+            or os.getenv("OPENAI_BASE_URL")
+            or os.getenv("OPENAI_API_BASE")
+        )
         key = os.getenv("CHUTES_API_KEY") or os.getenv("OPENAI_API_KEY")
         if not base or not key:
             return False
-        model = os.getenv("CHUTES_MODEL") or os.getenv("LITELLM_DEFAULT_MODEL") or "openai/gpt-4o-mini"
+        model = (
+            os.getenv("CHUTES_MODEL") or os.getenv("LITELLM_DEFAULT_MODEL") or "openai/gpt-4o-mini"
+        )
         req = urllib.request.Request(
             f"{base.rstrip('/')}/chat/completions",
-            data=json.dumps({
-                "model": model,
-                "messages": [{"role": "user", "content": 'Return only {"ok": true} as JSON.'}],
-                "response_format": {"type": "json_object"},
-                "temperature": 0,
-            }).encode("utf-8"),
+            data=json.dumps(
+                {
+                    "model": model,
+                    "messages": [{"role": "user", "content": 'Return only {"ok": true} as JSON.'}],
+                    "response_format": {"type": "json_object"},
+                    "temperature": 0,
+                }
+            ).encode("utf-8"),
             headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
         )
         with urllib.request.urlopen(req, timeout=15) as resp:
             data = json.loads(resp.read().decode("utf-8"))
-        content = (((data or {}).get("choices") or [{}])[0].get("message") or {}).get("content") or ""
+        content = (((data or {}).get("choices") or [{}])[0].get("message") or {}).get(
+            "content"
+        ) or ""
         obj = json.loads((content or "").strip())
         return bool(isinstance(obj, dict) and obj.get("ok") is True)
     except Exception:
         return False
 
 
-def main(output_json: Path = ART_DIR / "steps_chutes_report.json", output_md: Path = ART_DIR / "steps_chutes_report.md") -> int:
+def main(
+    output_json: Path = ART_DIR / "steps_chutes_report.json",
+    output_md: Path = ART_DIR / "steps_chutes_report.md",
+) -> int:
     steps: List[StepRecord] = []
     env_ok = _env_ok()
 

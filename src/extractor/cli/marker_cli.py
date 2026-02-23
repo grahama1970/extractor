@@ -1,35 +1,14 @@
-"""
-Module: marker_cli.py
-Description: Functions for marker cli operations
-
-External Dependencies:
-- click: [Documentation URL]
-- marker: [Documentation URL]
-- loguru: [Documentation URL]
-- traceback: [Documentation URL]
-
-Sample Input:
->>> # Add specific examples based on module functionality
-
-Expected Output:
->>> # Add expected output examples
-
-Example Usage:
->>> # Add usage examples
-"""
-
 #!/usr/bin/env python3
-"""Main marker CLI entry point that matches README examples.
+"""Main marker CLI entry point that matches README examples."""
 
-This provides the main 'marker' command as shown in the README.
-"""
+import json
+import sys
+from pathlib import Path
 
 import click
-from pathlib import Path
-from extractor import convert_pdf
-import json
 from loguru import logger
-import sys
+
+from extractor import convert_pdf
 
 
 @click.command()

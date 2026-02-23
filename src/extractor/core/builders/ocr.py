@@ -20,6 +20,7 @@ import copy
 from typing import Annotated, List, Optional, Any
 
 from ftfy import fix_text
+
 try:
     from surya.recognition import RecognitionPredictor  # type: ignore
 except Exception:  # pragma: no cover

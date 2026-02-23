@@ -1,7 +1,5 @@
-
 import fitz
 import json
-import sys
 import html
 import argparse
 from pathlib import Path
@@ -47,7 +45,6 @@ def _find_label_targets(page, labels):
     return targets
 
 
-
 def generate_enhanced_walkthrough(pdf_path: Path, output_dir: Path, run_dir: Path):
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -65,42 +62,52 @@ def generate_enhanced_walkthrough(pdf_path: Path, output_dir: Path, run_dir: Pat
     tables_enriched = run_dir / "06a_title_caption_enricher/json_output/05_tables.enriched.json"
     figures_enriched = run_dir / "06a_title_caption_enricher/json_output/06_figures.enriched.json"
     layout06b_path = run_dir / "06b_layout_sketcher/json_output/06b_layout_sketch.json"
-    
+
     if tables_enriched.exists():
         tables = json.loads(tables_enriched.read_text()).get("tables", [])
     elif tables_path.exists():
         tables = json.loads(tables_path.read_text()).get("tables", [])
     else:
         tables = []
-        
+
     if figures_enriched.exists():
         figures = json.loads(figures_enriched.read_text()).get("figures", [])
     elif figures_path.exists():
         figures = json.loads(figures_path.read_text()).get("figures", [])
     else:
         figures = []
-        
-    sections = json.loads(sections_path.read_text()).get("sections", []) if sections_path.exists() else []
+
+    sections = (
+        json.loads(sections_path.read_text()).get("sections", []) if sections_path.exists() else []
+    )
     section_ranges = []
     for s in sections:
         ps = s.get("page_start")
         pe = s.get("page_end") if s.get("page_end") is not None else s.get("page_stop")
         if ps is None:
             continue
-        section_ranges.append({
-            "title": s.get("title") or "(untitled)",
-            "page_start": int(ps),
-            "page_end": int(pe) if pe is not None else int(ps),
-            "level": int(s.get("level", 1)),
-        })
+        section_ranges.append(
+            {
+                "title": s.get("title") or "(untitled)",
+                "page_start": int(ps),
+                "page_end": int(pe) if pe is not None else int(ps),
+                "level": int(s.get("level", 1)),
+            }
+        )
     if reflowed_path.exists():
-        reflow_sections = json.loads(reflowed_path.read_text()).get("reflowed_sections") or json.loads(reflowed_path.read_text()).get("sections", [])
+        reflow_sections = json.loads(reflowed_path.read_text()).get(
+            "reflowed_sections"
+        ) or json.loads(reflowed_path.read_text()).get("sections", [])
     else:
         reflow_sections = []
-    requirements = json.loads(requirements_path.read_text()).get("requirements", []) if requirements_path.exists() else []
+    requirements = (
+        json.loads(requirements_path.read_text()).get("requirements", [])
+        if requirements_path.exists()
+        else []
+    )
 
     # Organize by page
-    page_map = {} 
+    page_map = {}
     for t in tables:
         pidx = int(t.get("page_index", 0))
         page_map.setdefault(pidx, {}).setdefault("tables", []).append(t)
@@ -182,7 +189,14 @@ def generate_enhanced_walkthrough(pdf_path: Path, output_dir: Path, run_dir: Pat
                     area = el.get("area")
                     summary = el.get("summary") or kind
                     layout06b_pages.setdefault(page_idx, []).append(
-                        {"kind": kind, "y0": y0, "summary": summary, "col": col, "char_count": char_count, "area": area}
+                        {
+                            "kind": kind,
+                            "y0": y0,
+                            "summary": summary,
+                            "col": col,
+                            "char_count": char_count,
+                            "area": area,
+                        }
                     )
                     if kind == "table":
                         layout06b_table_areas.setdefault(page_idx, []).append(area)
@@ -223,11 +237,12 @@ def generate_enhanced_walkthrough(pdf_path: Path, output_dir: Path, run_dir: Pat
 
     # Process each page
     for pidx in sorted(page_map.keys()):
-        if pidx >= len(doc): continue
+        if pidx >= len(doc):
+            continue
         page = doc[pidx]
         items = page_map[pidx]
         H = page.rect.height
-        
+
         # -- Draw Annotations on Image --
         t_list = items.get("tables", [])
         f_list = items.get("figures", [])
@@ -271,7 +286,9 @@ def generate_enhanced_walkthrough(pdf_path: Path, output_dir: Path, run_dir: Pat
                 page.insert_text((rect.x0, rect.y0 - 5), label, color=(0, 0.6, 0), fontsize=12)
                 s.setdefault("_labels", []).append(label)
                 s.setdefault("_rects", []).append(rect)
-                ordered_items.append((rect.y0, "section", {"label": label, "title": s.get("title"), "rect": rect}))
+                ordered_items.append(
+                    (rect.y0, "section", {"label": label, "title": s.get("title"), "rect": rect})
+                )
 
         ordered_items.sort(key=lambda t: t[0])
 
@@ -290,11 +307,11 @@ def generate_enhanced_walkthrough(pdf_path: Path, output_dir: Path, run_dir: Pat
             layout_sketches.append(layout_entry)
 
         # Save Image
-        pix = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5)) # Higher res
+        pix = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5))  # Higher res
         img_filename = f"annotated_p{pidx+1}_enhanced.png"
         img_path = output_dir / img_filename
         pix.save(str(img_path))
-        
+
         # -- Build Data Pane (HTML) --
         data_html = []
 
@@ -315,11 +332,15 @@ def generate_enhanced_walkthrough(pdf_path: Path, output_dir: Path, run_dir: Pat
                     lbl = obj.get("label", "?")
                     title = html.escape(obj.get("title") or "(Untitled section)")
                     data_html.append(f"<div>{swatch}<strong>[{lbl}] {title}</strong></div>")
-                    data_html.append("<hr style='border: 0; border-top: 1px solid #eee; margin: 8px 0;'>")
+                    data_html.append(
+                        "<hr style='border: 0; border-top: 1px solid #eee; margin: 8px 0;'>"
+                    )
 
                 if kind == "figure":
                     lbl = obj.get("_label", "?")
-                    caption = html.escape(obj.get("caption") or obj.get("ai_description") or "(No Caption)")
+                    caption = html.escape(
+                        obj.get("caption") or obj.get("ai_description") or "(No Caption)"
+                    )
                     bbox = obj.get("bbox") or obj.get("bbox_pdf")
                     data_html.append(f"<div>{swatch}<strong>[{lbl}] Figure</strong></div>")
                     if bbox:
@@ -329,7 +350,9 @@ def generate_enhanced_walkthrough(pdf_path: Path, output_dir: Path, run_dir: Pat
                     data_html.append(
                         f"<div style='font-size: 0.9em; font-style: italic; margin-bottom: 8px;'>{caption}</div>"
                     )
-                    data_html.append("<hr style='border: 0; border-top: 1px solid #eee; margin: 8px 0;'>")
+                    data_html.append(
+                        "<hr style='border: 0; border-top: 1px solid #eee; margin: 8px 0;'>"
+                    )
 
                 if kind == "table":
                     lbl = obj.get("_label", "?")
@@ -376,7 +399,9 @@ def generate_enhanced_walkthrough(pdf_path: Path, output_dir: Path, run_dir: Pat
                         data_html.append(
                             f"<div style='font-size:0.75em;color:#666;'>Confidence: {float(conf):.2f}</div>"
                         )
-                    data_html.append("<hr style='border: 0; border-top: 1px solid #eee; margin: 8px 0;'>")
+                    data_html.append(
+                        "<hr style='border: 0; border-top: 1px solid #eee; margin: 8px 0;'>"
+                    )
 
         # Requirements on this page (not ordered because bbox absent)
         r_list = items.get("requirements", [])
@@ -410,11 +435,15 @@ def generate_enhanced_walkthrough(pdf_path: Path, output_dir: Path, run_dir: Pat
         md_lines.append("<table>")
         md_lines.append("<tr>")
         # Left Column: Image
-        md_lines.append(f'<td width="60%" style="vertical-align: top; border: 1px solid #ddd; padding: 0;">')
+        md_lines.append(
+            '<td width="60%" style="vertical-align: top; border: 1px solid #ddd; padding: 0;">'
+        )
         md_lines.append(f'<img src="{output_dir}/{img_filename}" width="100%" />')
         md_lines.append("</td>")
         # Right Column: Data
-        md_lines.append(f'<td width="40%" style="vertical-align: top; padding: 15px; background-color: #fff;">')
+        md_lines.append(
+            '<td width="40%" style="vertical-align: top; padding: 15px; background-color: #fff;">'
+        )
         md_lines.append("\n".join(data_html))
         md_lines.append("</td>")
         md_lines.append("</tr>")
@@ -426,7 +455,10 @@ def generate_enhanced_walkthrough(pdf_path: Path, output_dir: Path, run_dir: Pat
     section_source = reflow_sections or sections
     numbered_sections = []
     if section_source:
-        sorted_secs = sorted(section_source, key=lambda s: (s.get("page_start", 0), s.get("level", 1), s.get("title", "")))
+        sorted_secs = sorted(
+            section_source,
+            key=lambda s: (s.get("page_start", 0), s.get("level", 1), s.get("title", "")),
+        )
         stack = []  # counters per level
         for s in sorted_secs:
             lvl = max(1, int(s.get("level", 1)))
@@ -439,16 +471,22 @@ def generate_enhanced_walkthrough(pdf_path: Path, output_dir: Path, run_dir: Pat
             num = ".".join(str(n) for n in stack)
             pstart = s.get("page_start")
             pend = s.get("page_end") or s.get("page_stop")
-            numbered_sections.append({
-                "level": lvl,
-                "num": num,
-                "title": s.get("title") or "(untitled)",
-                "page_start": pstart,
-                "page_end": pend if pend is not None else pstart,
-            })
+            numbered_sections.append(
+                {
+                    "level": lvl,
+                    "num": num,
+                    "title": s.get("title") or "(untitled)",
+                    "page_start": pstart,
+                    "page_end": pend if pend is not None else pstart,
+                }
+            )
         for sec in numbered_sections:
             indent = "  " * (sec["level"] - 1)
-            page_span = f"pages {sec['page_start']+1}-{sec['page_end']+1}" if sec["page_end"] is not None and sec["page_end"] != sec["page_start"] else f"page {sec['page_start']+1}"
+            page_span = (
+                f"pages {sec['page_start']+1}-{sec['page_end']+1}"
+                if sec["page_end"] is not None and sec["page_end"] != sec["page_start"]
+                else f"page {sec['page_start']+1}"
+            )
             md_lines.append(f"{indent}- {sec['num']} {sec['title']} ({page_span})")
     else:
         md_lines.append("- No sections available")
@@ -456,7 +494,9 @@ def generate_enhanced_walkthrough(pdf_path: Path, output_dir: Path, run_dir: Pat
 
     md_lines.append("## Table Data (full)")
     if tables:
-        sorted_tables = sorted(tables, key=lambda t: (int(t.get("page_index", 0)), t.get("bbox", [0,0,0,0])[1]))
+        sorted_tables = sorted(
+            tables, key=lambda t: (int(t.get("page_index", 0)), t.get("bbox", [0, 0, 0, 0])[1])
+        )
         for idx, t in enumerate(sorted_tables, start=1):
             title = t.get("title") or t.get("title_hint") or f"Table {idx}"
             page_idx = int(t.get("page_index", 0)) + 1
@@ -476,19 +516,33 @@ def generate_enhanced_walkthrough(pdf_path: Path, output_dir: Path, run_dir: Pat
 
     md_lines.append("## Layout Sketcher (text)")
     if layout06b_pages:
-        ranges = numbered_sections if numbered_sections else [{
-            "title": "(no section)",
-            "page_start": min(layout06b_pages.keys()),
-            "page_end": max(layout06b_pages.keys()),
-            "num": "1",
-            "level": 1,
-        }]
+        ranges = (
+            numbered_sections
+            if numbered_sections
+            else [
+                {
+                    "title": "(no section)",
+                    "page_start": min(layout06b_pages.keys()),
+                    "page_end": max(layout06b_pages.keys()),
+                    "num": "1",
+                    "level": 1,
+                }
+            ]
+        )
 
         for sec in ranges:
-            pages_in_sec = [p for p in sorted(layout06b_pages.keys()) if sec["page_start"] <= p <= sec["page_end"]]
+            pages_in_sec = [
+                p
+                for p in sorted(layout06b_pages.keys())
+                if sec["page_start"] <= p <= sec["page_end"]
+            ]
             if not pages_in_sec:
                 continue
-            span = f"pages {sec['page_start']+1}-{sec['page_end']+1}" if sec["page_end"] is not None and sec["page_end"] != sec["page_start"] else f"page {sec['page_start']+1}"
+            span = (
+                f"pages {sec['page_start']+1}-{sec['page_end']+1}"
+                if sec["page_end"] is not None and sec["page_end"] != sec["page_start"]
+                else f"page {sec['page_start']+1}"
+            )
             indent = "  " * (sec["level"] - 1)
             md_lines.append(f"{indent}- Section {sec['num']}: {sec['title']} ({span})")
             for page_idx in pages_in_sec:
@@ -500,7 +554,9 @@ def generate_enhanced_walkthrough(pdf_path: Path, output_dir: Path, run_dir: Pat
                 for it in items:
                     if it["kind"] != "text":
                         continue
-                    col_totals[it.get("col")] = col_totals.get(it.get("col"), 0) + (it.get("char_count") or 0)
+                    col_totals[it.get("col")] = col_totals.get(it.get("col"), 0) + (
+                        it.get("char_count") or 0
+                    )
                 total_chars = sum(col_totals.values()) or 1
                 dominant_col = None
                 dominant_share = None
@@ -577,12 +633,15 @@ def generate_enhanced_walkthrough(pdf_path: Path, output_dir: Path, run_dir: Pat
     local_md = output_dir / "walkthrough_local.md"
     local_md_text = md_text.replace(f"{output_dir}/", "")
     local_md.write_text(local_md_text)
-    
+
     print(f"Enhanced walkthrough fragment generated: {output_md}")
     print(f"Self-contained walkthrough (relative assets): {local_md}")
 
+
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Generate enhanced walkthrough markdown from pipeline artifacts.")
+    parser = argparse.ArgumentParser(
+        description="Generate enhanced walkthrough markdown from pipeline artifacts."
+    )
     parser.add_argument("pdf", type=Path, help="Source PDF to visualize")
     parser.add_argument("output", type=Path, help="Output directory for walkthrough files")
     parser.add_argument(

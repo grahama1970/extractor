@@ -104,6 +104,7 @@ class SourceType(str, Enum):
     MD = "markdown"
     RST = "rst"
     TXT = "text"
+    JSON = "json"
     IMAGE = "image"
     UNKNOWN = "unknown"
 
@@ -271,48 +272,51 @@ class UnifiedDocument(BaseModel):
     def from_artifacts(cls, results_root: Union[str, Path]) -> "UnifiedDocument":
         """
         Reconstruct a UnifiedDocument from pipeline artifact JSONs (S04, S05, S06).
-        
+
         Args:
             results_root: Path to the pipeline results directory
-            
+
         Returns:
             UnifiedDocument: The reconstructed document
         """
         results_root = Path(results_root)
-        
+
         # 1. Load Sections & Blocks (S04)
         sections_path = results_root / "04_section_builder" / "json_output" / "04_sections.json"
         sections_data = {}
         if sections_path.exists():
             with sections_path.open("r", encoding="utf-8") as f:
                 import json
+
                 sections_data = json.load(f)
-        
+
         # 2. Load Tables (S05)
         tables_path = results_root / "05c_table_merger" / "json_output" / "05c_tables.json"
         if not tables_path.exists():
             tables_path = results_root / "05_table_extractor" / "json_output" / "05_tables.json"
-        
+
         tables_data = {"tables": []}
         if tables_path.exists():
             with tables_path.open("r", encoding="utf-8") as f:
                 import json
+
                 tables_data = json.load(f)
-        
+
         # 3. Load Figures (S06)
         figures_path = results_root / "06b_figure_describer" / "json_output" / "06b_figures.json"
         if not figures_path.exists():
             figures_path = results_root / "06_figure_extractor" / "json_output" / "06_figures.json"
-            
+
         figures_data = {"figures": []}
         if figures_path.exists():
             with figures_path.open("r", encoding="utf-8") as f:
                 import json
+
                 figures_data = json.load(f)
-        
+
         # --- Assemble blocks ---
         blocks = []
-        
+
         # Add sections and their blocks in order
         for section in sections_data.get("sections", []):
             for b in section.get("blocks", []):
@@ -320,54 +324,54 @@ class UnifiedDocument(BaseModel):
                     page_number=b.get("page"),
                     bbox=b.get("bbox"),
                 )
-                blocks.append(BaseBlock(
-                    id=b.get("id"),
-                    type=b.get("block_type", "text"),
-                    content=b.get("text", ""),
-                    metadata=metadata,
-                    parent_id=section.get("id")
-                ))
-        
+                blocks.append(
+                    BaseBlock(
+                        id=b.get("id"),
+                        type=b.get("block_type", "text"),
+                        content=b.get("text", ""),
+                        metadata=metadata,
+                        parent_id=section.get("id"),
+                    )
+                )
+
         # Add Tables
         for t in tables_data.get("tables", []):
             cells = []
             if "cells" in t:
                 cells = [TableCell(**c) for c in t["cells"]]
-                
-            blocks.append(TableBlock(
-                id=t.get("id") or t.get("table_id"),
-                rows=t.get("rows", 0),
-                cols=t.get("cols", 0),
-                cells=cells,
-                headers=t.get("headers"),
-                content=t.get("llm_title") or t.get("title") or "Table",
-                metadata=BlockMetadata(
-                    page_number=t.get("page_index", 0),
-                    bbox=t.get("bbox")
+
+            blocks.append(
+                TableBlock(
+                    id=t.get("id") or t.get("table_id"),
+                    rows=t.get("rows", 0),
+                    cols=t.get("cols", 0),
+                    cells=cells,
+                    headers=t.get("headers"),
+                    content=t.get("llm_title") or t.get("title") or "Table",
+                    metadata=BlockMetadata(page_number=t.get("page_index", 0), bbox=t.get("bbox")),
                 )
-            ))
-            
+            )
+
         # Add Figures
         for f in figures_data.get("figures", []):
-            blocks.append(ImageBlock(
-                id=f.get("figure_id") or f.get("id"),
-                src=f.get("image_path", ""),
-                alt=f.get("ai_description") or f.get("llm_description") or f.get("title") or "",
-                content=f.get("llm_title") or f.get("title") or "Figure",
-                metadata=BlockMetadata(
-                    page_number=f.get("page", 0),
-                    bbox=f.get("bbox")
+            blocks.append(
+                ImageBlock(
+                    id=f.get("figure_id") or f.get("id"),
+                    src=f.get("image_path", ""),
+                    alt=f.get("ai_description") or f.get("llm_description") or f.get("title") or "",
+                    content=f.get("llm_title") or f.get("title") or "Figure",
+                    metadata=BlockMetadata(page_number=f.get("page", 0), bbox=f.get("bbox")),
                 )
-            ))
+            )
 
         full_text = "\n".join([str(b.content) for b in blocks if isinstance(b.content, str)])
-        
+
         return cls(
             id=str(results_root.name),
             source_type=SourceType.PDF,
             blocks=blocks,
             metadata=DocumentMetadata(title=str(results_root.stem)),
-            full_text=full_text
+            full_text=full_text,
         )
 
     def to_arangodb(self) -> Dict[str, Any]:

@@ -14,6 +14,7 @@ from scripts.lessons.arango_client import get_db
 
 app = typer.Typer(add_completion=False)
 
+
 def resolve_key(col, title: str | None, scope: str | None) -> str | None:
     if not title:
         return None
@@ -21,10 +22,15 @@ def resolve_key(col, title: str | None, scope: str | None) -> str | None:
     docs = list(cur) if cur else []
     return docs[0]["_key"] if docs else None
 
+
 @app.command()
 def link(
-    from_key: str = typer.Option("", help="_key of source lesson (alternative: --from-title + --from-scope)"),
-    to_key: str = typer.Option("", help="_key of target lesson (alternative: --to-title + --to-scope)"),
+    from_key: str = typer.Option(
+        "", help="_key of source lesson (alternative: --from-title + --from-scope)"
+    ),
+    to_key: str = typer.Option(
+        "", help="_key of target lesson (alternative: --to-title + --to-scope)"
+    ),
     from_title: str = typer.Option("", help="Resolve source by title"),
     from_scope: str = typer.Option("tabbed", help="Resolve source scope"),
     to_title: str = typer.Option("", help="Resolve target by title"),
@@ -51,9 +57,10 @@ def link(
     ins = edges.insert(doc)
     print(f"Linked lessons: {ins.get('_key')}  {_fmt_node(fk)} -> {_fmt_node(tk)}")
 
+
 def _fmt_node(k: str) -> str:
     return f"lessons/{k}"
 
+
 if __name__ == "__main__":
     app()
-

@@ -47,10 +47,26 @@ def main(db: str = typer.Argument("lean4_test")):
         adb.create_graph(
             gname,
             edge_definitions=[
-                {"edge_collection": "depends_on", "from_vertex_collections": ["sections", "theorems"], "to_vertex_collections": ["lemmas"]},
-                {"edge_collection": "contradicts", "from_vertex_collections": ["sections"], "to_vertex_collections": ["sections"]},
-                {"edge_collection": "refines", "from_vertex_collections": ["sections"], "to_vertex_collections": ["sections"]},
-                {"edge_collection": "similar_knn", "from_vertex_collections": ["sections", "theorems"], "to_vertex_collections": ["sections", "theorems"]},
+                {
+                    "edge_collection": "depends_on",
+                    "from_vertex_collections": ["sections", "theorems"],
+                    "to_vertex_collections": ["lemmas"],
+                },
+                {
+                    "edge_collection": "contradicts",
+                    "from_vertex_collections": ["sections"],
+                    "to_vertex_collections": ["sections"],
+                },
+                {
+                    "edge_collection": "refines",
+                    "from_vertex_collections": ["sections"],
+                    "to_vertex_collections": ["sections"],
+                },
+                {
+                    "edge_collection": "similar_knn",
+                    "from_vertex_collections": ["sections", "theorems"],
+                    "to_vertex_collections": ["sections", "theorems"],
+                },
             ],
         )
 
@@ -75,4 +91,3 @@ def main(db: str = typer.Argument("lean4_test")):
 
 if __name__ == "__main__":
     app()
-

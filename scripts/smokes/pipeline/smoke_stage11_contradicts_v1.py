@@ -15,7 +15,9 @@ app = typer.Typer(add_completion=False)
 
 @app.command()
 def main(
-    flat_json: Path = typer.Option(..., exists=True, help="Stage 10 flattened JSON (10_flattened_data.json)"),
+    flat_json: Path = typer.Option(
+        ..., exists=True, help="Stage 10 flattened JSON (10_flattened_data.json)"
+    ),
     out_dir: Path = typer.Option(Path("data/results/pipeline")),
 ):
     docs = json.loads(flat_json.read_text())
@@ -31,9 +33,10 @@ def main(
     bundle = out_dir / "11_arango_create_graph/json_output/11_bundle.json"
     bundle.parent.mkdir(parents=True, exist_ok=True)
     bundle.write_text(json.dumps({"documents": docs}, indent=2))
-    typer.echo(f"OK: Wrote bundle {bundle}; run 'python -m extractor.pipeline.steps.11_arango_create_graph debug-bundle {bundle}' to validate edges.")
+    typer.echo(
+        f"OK: Wrote bundle {bundle}; run 'python -m extractor.pipeline.steps.11_arango_create_graph debug-bundle {bundle}' to validate edges."
+    )
 
 
 if __name__ == "__main__":
     app()
-

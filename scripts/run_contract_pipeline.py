@@ -29,12 +29,12 @@ DEFAULT_OUT = ROOT / "data" / "results" / "pipeline_contract"
 JUDGE_SCHEMA = ROOT / "tools" / "contract_loop" / "judges" / "llm_judge.schema.json"
 
 
-
 def _clean_slate(path: Path) -> None:
     """Wipe the output directory to ensure no stale data persists."""
     if path.exists():
         print(f">> 🧹 Cleaning slate: {path}")
         import shutil
+
         shutil.rmtree(path)
     path.mkdir(parents=True, exist_ok=True)
 
@@ -240,7 +240,6 @@ def _verify_fixture_step(step_name: str, out: Path, fixture: dict) -> None:
         return
 
 
-
 def _select_samples(items: Sequence[str], limit: int, min_chars: int) -> list[str]:
     samples = []
     for item in items:
@@ -363,7 +362,9 @@ def _args_s06(out: Path, _args: argparse.Namespace) -> list[str]:
     return ["--pipeline-dir", str(out), "--pdf-dir", str(out / "01_annotation_processor")]
 
 
-def _run_step(step: Step, out: Path, args: argparse.Namespace, env: dict, fixture: Optional[dict]) -> bool:
+def _run_step(
+    step: Step, out: Path, args: argparse.Namespace, env: dict, fixture: Optional[dict]
+) -> bool:
     if args.verify_only:
         return _verify_step(step, out, args, env, fixture)
 
@@ -452,7 +453,6 @@ def main() -> int:
     )
     ap.add_argument("--verify-only", action="store_true", help="Verify existing outputs only")
     args = ap.parse_args()
-
 
     if not args.verify_only:
         if not args.pdf:
@@ -581,7 +581,9 @@ def main() -> int:
             execute=False,
             output_paths=("08_lean4_theorem_prover",),
         )
-        insert_at = next((i for i, s in enumerate(steps) if s.name == "08_extract_requirements"), None)
+        insert_at = next(
+            (i for i, s in enumerate(steps) if s.name == "08_extract_requirements"), None
+        )
         if insert_at is None:
             steps.append(lean4_step)
         else:

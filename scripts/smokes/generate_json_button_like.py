@@ -20,7 +20,6 @@ import base64
 import io
 import json
 import os
-from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict
@@ -32,8 +31,11 @@ print("SKIP: generate_json_button_like smoke deprecated (SciLLM-only)")
 raise SystemExit(0)
 
 
-def expand_box(x: float, y: float, w: float, h: float, factor: float = 1.2) -> tuple[float, float, float, float]:
+def expand_box(
+    x: float, y: float, w: float, h: float, factor: float = 1.2
+) -> tuple[float, float, float, float]:
     """Expand a normalized box by factor around its center, clamped to [0,1]."""
+
     def clamp(v: float, lo=0.0, hi=1.0) -> float:
         return max(lo, min(hi, v))
 
@@ -81,17 +83,28 @@ async def run() -> Dict[str, Any]:
     prompt = (
         "You are an expert table extractor. Given an image of a table from a PDF, return ONLY a strict JSON object with EXACT keys and types:\n\n"
         "{\n"
-        "  \"title\": string,            // concise title; if inferred, prefix with INFERRED_\n"
-        "  \"columns\": string[],        // header cells as strings\n"
-        "  \"data\": string[][]          // row-major 2D array of cell text\n"
+        '  "title": string,            // concise title; if inferred, prefix with INFERRED_\n'
+        '  "columns": string[],        // header cells as strings\n'
+        '  "data": string[][]          // row-major 2D array of cell text\n'
         "}\n\n"
         "Rules:\n- Respond with a single JSON object only (no markdown, no code fences, no commentary).\n- Do not include any extra keys.\n- Normalize whitespace; keep cell contents as plain strings."
     )
 
-    params = {"model": os.getenv("LITELLM_DEFAULT_MODEL", "gemini/gemini-2.5-flash"), "text": prompt, "image": data_url}
+    params = {
+        "model": os.getenv("LITELLM_DEFAULT_MODEL", "gemini/gemini-2.5-flash"),
+        "text": prompt,
+        "image": data_url,
+    }
 
     # Call litellm_call with JSON mode; no max token restriction is explicitly passed here
-    results = await litellm_call([params], wrap_json=True, response_format="json_object", desc="Generate JSON Smoke", show_progress=False, concurrency=1)
+    results = await litellm_call(
+        [params],
+        wrap_json=True,
+        response_format="json_object",
+        desc="Generate JSON Smoke",
+        show_progress=False,
+        concurrency=1,
+    )
     out = results[0] if results else ""
 
     # Normalize result to dict
@@ -107,7 +120,11 @@ async def run() -> Dict[str, Any]:
             try:
                 obj = json.loads(content)
             except Exception as e:
-                return {"ok": False, "error": f"non_json_output: {e}", "raw": (content or "")[:2000]}
+                return {
+                    "ok": False,
+                    "error": f"non_json_output: {e}",
+                    "raw": (content or "")[:2000],
+                }
         else:
             return {"ok": False, "error": "empty_output"}
 

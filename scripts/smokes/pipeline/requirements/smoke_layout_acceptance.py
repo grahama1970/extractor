@@ -17,10 +17,9 @@ import json
 import os
 import re
 import subprocess
-import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 import typer
 
@@ -90,7 +89,9 @@ def summarize(p07: Path) -> Dict[str, Any]:
         # sentence-level requirements (modal verbs)
         modals = re.findall(r"\b(shall|must|will|should)\b", text, flags=re.I)
         # conditional requirements
-        conditionals = re.findall(r"\b(if|when|where)\b.*?\b(shall|must|will|should)\b", text, flags=re.I | re.S)
+        conditionals = re.findall(
+            r"\b(if|when|where)\b.*?\b(shall|must|will|should)\b", text, flags=re.I | re.S
+        )
         # table titles (very approximate: look for lines starting with 'Table' or 'Title:' in text nearby)
         titled = 0
         for t in tables:
@@ -120,8 +121,10 @@ def summarize(p07: Path) -> Dict[str, Any]:
 
 def diff_against_spec(summary: Dict[str, Any], spec: ExpectedSpec) -> Dict[str, Any]:
     diffs = {}
+
     def want(actual, expected, key):
         diffs[key] = {"actual": actual, "+/-": actual - expected, "expected": expected}
+
     want(summary.get("top_sections", 0), spec.sections, "sections")
     s1 = summary.get("s1", {})
     s2 = summary.get("s2", {})
@@ -143,15 +146,25 @@ def main(
     p07 = run_extract(pdf, out_dir)
     summary = summarize(p07)
     diffs = diff_against_spec(summary, SPEC)
-    artifacts = Path("scripts/artifacts"); artifacts.mkdir(parents=True, exist_ok=True)
-    (artifacts/"layout_acceptance_summary.json").write_text(json.dumps({"summary": summary, "diffs": diffs}, indent=2))
+    artifacts = Path("scripts/artifacts")
+    artifacts.mkdir(parents=True, exist_ok=True)
+    (artifacts / "layout_acceptance_summary.json").write_text(
+        json.dumps({"summary": summary, "diffs": diffs}, indent=2)
+    )
 
-    strict = os.getenv("ACCEPT_STRICT", "").lower() in {"1","true","yes","y"}
+    strict = os.getenv("ACCEPT_STRICT", "").lower() in {"1", "true", "yes", "y"}
     ok = all(v["+/-"] == 0 for v in diffs.values())
     if strict and not ok:
-        typer.echo("Layout acceptance failed (strict). See scripts/artifacts/layout_acceptance_summary.json", err=True)
+        typer.echo(
+            "Layout acceptance failed (strict). See scripts/artifacts/layout_acceptance_summary.json",
+            err=True,
+        )
         raise typer.Exit(1)
-    print(json.dumps({"ok": ok, "artifact": "scripts/artifacts/layout_acceptance_summary.json"}, indent=2))
+    print(
+        json.dumps(
+            {"ok": ok, "artifact": "scripts/artifacts/layout_acceptance_summary.json"}, indent=2
+        )
+    )
 
 
 if __name__ == "__main__":

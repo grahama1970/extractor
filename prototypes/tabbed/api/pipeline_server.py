@@ -176,13 +176,15 @@ def run_external(req: RunExternalRequest):
     mode = (req.mode or "live").lower().strip()
     deterministic = mode in {"deterministic", "offline", "heuristic", "skip"}
     if deterministic:
-        cmd.extend([
-            "--skip-llm03",
-            "--skip-descriptions06",
-            "--summary-only07",
-            "--skip-proving08",
-            "--fast-embeddings10",
-        ])
+        cmd.extend(
+            [
+                "--skip-llm03",
+                "--skip-descriptions06",
+                "--summary-only07",
+                "--skip-proving08",
+                "--fast-embeddings10",
+            ]
+        )
     proc = subprocess.run(cmd, env=env)
     ok = proc.returncode == 0
 

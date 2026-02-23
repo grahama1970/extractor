@@ -188,7 +188,9 @@ class LineBuilder(BaseBuilder):
             )
         inline_detection_results = [None] * len(page_detection_results)
         if do_inline_math_detection:
-            if self.inline_detection_model is not None and all(r is not None for r in page_detection_results):
+            if self.inline_detection_model is not None and all(
+                r is not None for r in page_detection_results
+            ):
                 self.inline_detection_model.disable_tqdm = self.disable_tqdm
                 inline_detection_results = self.inline_detection_model(
                     images=page_images,
@@ -343,9 +345,11 @@ class LineBuilder(BaseBuilder):
             page_texts.append(page_text)
 
         if self.ocr_error_model is None:
+
             class _Res:
                 def __init__(self, n):
                     self.labels = ["good"] * n
+
             return _Res(len(pages))
         self.ocr_error_model.disable_tqdm = self.disable_tqdm
         ocr_error_detection_results = self.ocr_error_model(

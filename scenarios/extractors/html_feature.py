@@ -42,6 +42,7 @@ def main() -> int:
 
     try:
         from scenarios.extractors.common import import_provider
+
         HTMLProvider = import_provider("providers/html.py", "HTMLProvider")
     except Exception as e:
         logger.warning(f"SKIP: cannot import HTMLProvider: {e}")
@@ -67,7 +68,10 @@ def main() -> int:
     counts, heads = summarise_unified(doc)
     try:
         from scenarios.extractors.common import write_unified_snapshot
-        snap_path = write_unified_snapshot("html", doc.id, doc.model_dump(by_alias=True, mode="json"))
+
+        snap_path = write_unified_snapshot(
+            "html", doc.id, doc.model_dump(by_alias=True, mode="json")
+        )
     except Exception:
         snap_path = None
     inserted = try_arango_insert(doc)

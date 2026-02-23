@@ -37,6 +37,24 @@ services:
     # tmpfs:
     #   - /tmp
 
+  # HURIDOCS vision-based TOC extraction (Strategy 3 fallback in S00)
+  # Enable by setting HURIDOCS_TOC_URL=http://localhost:5060 in .env
+  huridocs-toc:
+    image: ghcr.io/huridocs/pdf-document-layout-analysis:latest
+    container_name: huridocs-toc
+    ports:
+      - "5060:5060"
+    restart: unless-stopped
+    init: true
+    working_dir: /app
+    command: /app/start.sh
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+    profiles:
+      - toc  # Only starts with: docker compose --profile toc up -d huridocs-toc
+
   # runner (optional; for CI or secure runs)
   # runner:
   #   image: mcr.microsoft.com/playwright:v1.49.1-jammy

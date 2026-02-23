@@ -21,8 +21,17 @@ def main(tmpdir: Path = typer.Option(Path("/tmp/extractor_smoke10"))):
         "proof_results": [
             {
                 "status": "unproved",
-                "analysis": {"normalized_prop": "A", "polarity": "assert", "shape": "predicate", "used_lemmas": ["Nat.add_comm"]},
-                "item": {"requirement_text": "A", "context": {"section_id": "S1", "doc_id": "D1"}, "source_details": {"section_id": "S1"}},
+                "analysis": {
+                    "normalized_prop": "A",
+                    "polarity": "assert",
+                    "shape": "predicate",
+                    "used_lemmas": ["Nat.add_comm"],
+                },
+                "item": {
+                    "requirement_text": "A",
+                    "context": {"section_id": "S1", "doc_id": "D1"},
+                    "source_details": {"section_id": "S1"},
+                },
             }
         ]
     }
@@ -31,6 +40,7 @@ def main(tmpdir: Path = typer.Option(Path("/tmp/extractor_smoke10"))):
     flat_json = tmpdir / "flat10.json"
     import importlib.util as _util
     from pathlib import Path as _Path
+
     p = _Path("scripts/pipeline/stage10_pass_through_lemmas.py").resolve()
     spec = _util.spec_from_file_location("stage10_pass", str(p))
     mod = _util.module_from_spec(spec)

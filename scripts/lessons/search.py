@@ -8,11 +8,11 @@
 # ///
 
 from __future__ import annotations
-import os, json
 import typer
 from scripts.lessons.arango_client import get_db
 
 app = typer.Typer(add_completion=False)
+
 
 @app.command()
 def search(
@@ -47,14 +47,18 @@ def search(
     results = list(cursor)
     if json_out:
         import json as _json
+
         print(_json.dumps(results, ensure_ascii=False))
     else:
         for i, r in enumerate(results, 1):
-            print(f"{i}. {r['title']}  [tags: {', '.join(r.get('tags', []))}]  (scope: {r.get('scope')})")
-            prob = (r.get('problem') or '')
+            print(
+                f"{i}. {r['title']}  [tags: {', '.join(r.get('tags', []))}]  (scope: {r.get('scope')})"
+            )
+            prob = r.get("problem") or ""
             print(f"   {prob[:120].strip()}...")
         if not results:
             print("No results.")
+
 
 if __name__ == "__main__":
     app()

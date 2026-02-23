@@ -43,6 +43,7 @@ def main() -> int:
 
     try:
         from scenarios.extractors.common import import_provider
+
         PdfProvider = import_provider("providers/pdf.py", "PdfProvider")
     except Exception as e:
         logger.warning(f"SKIP: cannot import PdfProvider: {e}")

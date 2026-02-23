@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import List, Tuple, Optional
@@ -118,7 +117,9 @@ def app():
     with st.sidebar:
         st.header("Input")
         pdf_file = st.file_uploader("Choose PDF", type=["pdf"], accept_multiple_files=False)
-        images_dir_str = st.text_input("Or images folder (relative to repo)", "data/labelstudio/images/BHT_CV32A65X_marked")
+        images_dir_str = st.text_input(
+            "Or images folder (relative to repo)", "data/labelstudio/images/BHT_CV32A65X_marked"
+        )
         images_dir = (REPO_ROOT / images_dir_str).resolve()
         dpi = st.number_input("Render DPI", value=300, step=50)
         render_btn = st.button("Render PDF → images")
@@ -156,7 +157,9 @@ def app():
     # Canvas
     st.subheader(f"Page {page+1} — {img_path.name}")
     if st_canvas is None:
-        st.error("streamlit-drawable-canvas not installed. `pip install streamlit-drawable-canvas`.\n")
+        st.error(
+            "streamlit-drawable-canvas not installed. `pip install streamlit-drawable-canvas`.\n"
+        )
         st.stop()
 
     canvas_res = st_canvas(
@@ -184,26 +187,50 @@ def app():
         st.header("Selection")
         # list existing boxes on this page
         page_boxes = [b for b in boxes if b.page == page + 1]
-        idx = st.selectbox("Existing boxes on page", options=list(range(len(page_boxes))), format_func=lambda i: page_boxes[i].id or f"box_{i+1}") if page_boxes else None
+        idx = (
+            st.selectbox(
+                "Existing boxes on page",
+                options=list(range(len(page_boxes))),
+                format_func=lambda i: page_boxes[i].id or f"box_{i+1}",
+            )
+            if page_boxes
+            else None
+        )
         active_box = page_boxes[idx] if idx is not None else new_box
         if active_box is None:
             st.info("Draw a rectangle to start annotating.")
         else:
-            active_box.type = st.selectbox("type", ["table","requirements","section","figure"], index=["table","requirements","section","figure"].index(active_box.type) if active_box.type in ["table","requirements","section","figure"] else 0)
+            active_box.type = st.selectbox(
+                "type",
+                ["table", "requirements", "section", "figure"],
+                index=(
+                    ["table", "requirements", "section", "figure"].index(active_box.type)
+                    if active_box.type in ["table", "requirements", "section", "figure"]
+                    else 0
+                ),
+            )
             active_box.id = st.text_input("id", value=active_box.id)
-            active_box.expected_json = st.text_input("expected_json (repo-relative path)", value=active_box.expected_json or f"data/gold_standards/tables/{images_dir.name}_table.json")
+            active_box.expected_json = st.text_input(
+                "expected_json (repo-relative path)",
+                value=active_box.expected_json
+                or f"data/gold_standards/tables/{images_dir.name}_table.json",
+            )
             part_str = st.text_input("part_idx (optional)", value=str(active_box.part_idx or ""))
             active_box.part_idx = int(part_str) if part_str.strip().isdigit() else None
 
             if active_box.type == "table":
                 st.markdown("**Table Gold**")
-                cols_str = st.text_input("Columns (comma-separated)", value="Name,Direction,Type,Description")
+                cols_str = st.text_input(
+                    "Columns (comma-separated)", value="Name,Direction,Type,Description"
+                )
                 cols = [c.strip() for c in cols_str.split(",") if c.strip()]
                 # rows editor
                 st.caption("Rows (edit cells; add/remove rows)")
                 default_rows = pd.DataFrame([[""] * max(1, len(cols))], columns=cols or ["col1"])
                 df_key = f"rows_df_{page}_{active_box.id}"
-                df = st.data_editor(default_rows, num_rows="dynamic", use_container_width=True, key=df_key)
+                df = st.data_editor(
+                    default_rows, num_rows="dynamic", use_container_width=True, key=df_key
+                )
                 rows = df.values.tolist()
 
                 if st.button("Save Gold", type="primary"):
@@ -265,4 +292,3 @@ def app():
 
 if __name__ == "__main__":
     app()
-

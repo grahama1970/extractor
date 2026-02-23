@@ -1,4 +1,3 @@
-from pathlib import Path
 
 from extractor.core.providers import fetcher_bridge
 from extractor.core.fetcher_client import FetcherDownload, RollingWindow
@@ -16,7 +15,10 @@ def test_ensure_local_source_downloads_url(monkeypatch, tmp_path):
     fake_path.write_text("hi", encoding="utf-8")
     fake_download = FetcherDownload(
         path=fake_path,
-        metadata={"download_mode": "rolling_extract", "rolling_windows_path": str(tmp_path / "windows.jsonl")},
+        metadata={
+            "download_mode": "rolling_extract",
+            "rolling_windows_path": str(tmp_path / "windows.jsonl"),
+        },
         windows=[RollingWindow(index=0, start=0, end=4, text="test")],
     )
 

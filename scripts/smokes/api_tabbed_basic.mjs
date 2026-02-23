@@ -5,11 +5,13 @@ async function getApiBase() {
   const candidates = [process.env.API_BASE, 'http://127.0.0.1:8001', 'http://127.0.0.1:8000'].filter(Boolean);
   for (const u of candidates) {
     try {
-      const r = await fetch(u.replace(/\/$/, '') + '/api/list');
+      const r = await fetch(u.replace(/\/$/, '') + '/api/list', { signal: AbortSignal.timeout(3000) });
       if (r.ok) return u.replace(/\/$/, '');
     } catch {}
   }
-  throw new Error('API base not reachable on 8001/8000');
+  // Exit code 3 = skip (no API server available), consistent with CDP smoke behavior
+  console.log('SKIP: No API server reachable (set API_BASE or start server on 8001/8000).');
+  process.exit(3);
 }
 
 (async () => {

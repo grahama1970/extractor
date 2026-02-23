@@ -13,14 +13,15 @@ from loguru import logger
 from scenarios.extractors.common import (
     ScenarioResult,
     find_sample,
-    try_arango_insert,
     write_summary,
 )
 
 
 def main() -> int:
     name = "image"
-    sample: Optional[Path] = find_sample("images/image.png", "images/*.png", "images/*.jpg", "images/*.jpeg")
+    sample: Optional[Path] = find_sample(
+        "images/image.png", "images/*.png", "images/*.jpg", "images/*.jpeg"
+    )
     if not sample:
         logger.info("SKIP: no image sample found under data/")
         res = ScenarioResult(
@@ -41,6 +42,7 @@ def main() -> int:
 
     try:
         from scenarios.extractors.common import import_provider
+
         ImageProvider = import_provider("providers/image.py", "ImageProvider")
     except Exception as e:
         logger.warning(f"SKIP: cannot import ImageProvider: {e}")

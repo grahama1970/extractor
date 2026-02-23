@@ -1,13 +1,211 @@
 """Stage 11 arango graph creation runner."""
-import json, os
+
+import asyncio
+import json
+import os
+import sys
+from datetime import datetime, timezone
 from pathlib import Path
-from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, cast
+
+import numpy as np
+from numpy.typing import NDArray
 from loguru import logger
 from rich.console import Console
 from extractor.pipeline.utils.reliability import log_stage_error
+from extractor.pipeline.utils.step_sanity import run_step_sanity
+from extractor.pipeline.steps.scillm_preflight_validator import require_scillm_preflight
+
+try:
+    import faiss  # type: ignore
+except Exception:
+    faiss = None  # type: ignore
+
+try:
+    from arango import ArangoClient
+    from arango.exceptions import ArangoError
+except Exception:  # pragma: no cover - optional dependency
+    ArangoClient = None  # type: ignore
+    ArangoError = Exception  # type: ignore
+
+_HAVE_FAISS = faiss is not None
+
+GRAPH_RELATIONSHIPS_ENABLED = os.getenv("GRAPH_RELATIONSHIPS_ENABLED", "1").lower() in {
+    "1",
+    "true",
+    "yes",
+    "y",
+}
+GRAPH_ENABLE_RATIONALES = os.getenv("GRAPH_ENABLE_RATIONALES", "0").lower() in {
+    "1",
+    "true",
+    "yes",
+    "y",
+}
+GRAPH_EDGE_COLLECTION = os.getenv("GRAPH_EDGE_COLLECTION", "pdf_relationships")
+GRAPH_VERTEX_COLLECTION = os.getenv("GRAPH_VERTEX_COLLECTION", "pdf_objects")
+GRAPH_GRAPH_NAME = os.getenv("GRAPH_GRAPH_NAME", "pdf_graph")
+GRAPH_K = int(os.getenv("GRAPH_K", "10"))
+GRAPH_SIM_THRESHOLD = float(os.getenv("GRAPH_SIM_THRESHOLD", "0.55"))
+
+
+def sanity() -> int:
+    return run_step_sanity("11_arango_create_graph")
+
+
+def _vertex_id(doc: dict[str, Any]) -> str | None:
+    vid = doc.get("_id")
+    if isinstance(vid, str) and vid:
+        return vid
+    key = doc.get("_key") or doc.get("key") or doc.get("id")
+    if key is None:
+        return None
+    return f"{GRAPH_VERTEX_COLLECTION}/{key}"
+
+
+def _edge(
+    doc_from: dict[str, Any],
+    doc_to: dict[str, Any],
+    *,
+    rel_type: str,
+    score: float | None = None,
+) -> dict[str, Any] | None:
+    v_from = _vertex_id(doc_from)
+    v_to = _vertex_id(doc_to)
+    if not v_from or not v_to or v_from == v_to:
+        return None
+    payload: dict[str, Any] = {"_from": v_from, "_to": v_to, "type": rel_type}
+    if score is not None:
+        payload["score"] = float(score)
+    return payload
+
+
+def _conflict_edges_from_docs(_: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return []
+
+
+def _duplicates_edges_from_docs(_: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return []
+
+
+def _contradicts_edges_from_docs(_: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return []
+
+
+def _proves_edges_from_docs(
+    docs: list[dict[str, Any]], proved_section_ids: set
+) -> list[dict[str, Any]]:
+    return []
+
+
+def _supersedes_edges_from_docs(_: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return []
+
+
+def _refers_to_edges_from_docs(_: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return []
+
+
+def _validate_edges(edges: list[dict[str, Any]]) -> dict[str, Any]:
+    by_type: dict[str, int] = {}
+    for e in edges:
+        t = str(e.get("type") or "unknown")
+        by_type[t] = by_type.get(t, 0) + 1
+    return {"total": len(edges), "by_type": by_type}
+
+
+def _save_summary(output_dir: Path, summary: dict[str, Any]) -> None:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    (output_dir / "11_graph_summary.json").write_text(json.dumps(summary, indent=2))
+
+
+def ensure_graph_and_edge_collection(
+    db, graph_name: str, edge_collection: str, vertex_collection: str
+):
+    if db is None:
+        return edge_collection
+    if not db.has_collection(vertex_collection):
+        db.create_collection(vertex_collection)
+    if not db.has_collection(edge_collection):
+        db.create_collection(edge_collection, edge=True)
+    if not db.has_graph(graph_name):
+        db.create_graph(
+            graph_name,
+            edge_definitions=[
+                {
+                    "edge_collection": edge_collection,
+                    "from_vertex_collections": [vertex_collection],
+                    "to_vertex_collections": [vertex_collection],
+                }
+            ],
+            orphan_collections=[vertex_collection],
+        )
+    return edge_collection
+
+
+def build_faiss_index(embeddings: NDArray[np.float32]):
+    emb = embeddings.astype("float32", copy=True)
+    norms = np.linalg.norm(emb, axis=1, keepdims=True) + 1e-12
+    emb = emb / norms
+    if _HAVE_FAISS and faiss is not None:
+        index = faiss.IndexFlatIP(emb.shape[1])
+        index.add(emb)
+        return ("faiss", index)
+    logger.warning("FAISS not available; using NumPy similarity search fallback.")
+    return ("numpy", emb)
+
+
+def index_search(index_obj, query_embedding: NDArray[np.float32], k: int):
+    kind, idx = index_obj
+    if kind == "faiss":
+        _, fa = index_obj
+        return fa.search(query_embedding, k)
+    q = query_embedding.copy()
+    q /= np.linalg.norm(q, axis=1, keepdims=True) + 1e-12
+    sims = (idx @ q.T).T
+    order = np.argsort(-sims, axis=1)
+    topk_idx = order[:, :k]
+    topk_sim = np.take_along_axis(sims, topk_idx, axis=1)
+    return topk_sim, topk_idx
+
+
+def find_and_create_relationships(
+    *,
+    documents: list[dict[str, Any]],
+    embeddings: NDArray[np.float32],
+    index,
+    k_neighbors: int,
+    similarity_threshold: float,
+    skip_db_insert: bool,
+    db,
+    edge_collection: str | None,
+    proved_section_ids: set | None = None,
+) -> list[dict[str, Any]]:
+    if embeddings.size == 0:
+        return []
+    emb = embeddings.astype("float32", copy=False)
+    norms = np.linalg.norm(emb, axis=1, keepdims=True) + 1e-12
+    emb = emb / norms
+    sims, idxs = index_search(index, emb, max(1, int(k_neighbors)) + 1)
+    edges: list[dict[str, Any]] = []
+    for i, row in enumerate(idxs):
+        for j_idx, sim in zip(row, sims[i]):
+            j = int(j_idx)
+            if j == i:
+                continue
+            if float(sim) < similarity_threshold:
+                continue
+            edge = _edge(documents[i], documents[j], rel_type="similarity", score=float(sim))
+            if edge:
+                edges.append(edge)
+    if proved_section_ids:
+        edges.extend(_proves_edges_from_docs(documents, proved_section_ids))
+    if not skip_db_insert and db is not None and edge_collection is not None:
+        db.collection(edge_collection).import_bulk(edges, on_duplicate="ignore")
+    return edges
 
 console = Console(stderr=True)
+
 
 def run(
     input_json: Path,
@@ -18,6 +216,7 @@ def run(
 ):
     """Builds graph relationships between PDF objects using FAISS and hierarchy."""
     console.print("[bold green]Building PDF Knowledge Graph (Stage 11)[/bold green]")
+    step_name = "graph_runner"
 
     # --- Directory and Data Setup ---
     stage_output_dir = output_dir / "11_arango_create_graph"
@@ -79,14 +278,16 @@ def run(
                             item = (pr or {}).get("item") or {}
                             sid = (item.get("source_details") or {}).get("section_id")
                             status = (pr or {}).get("status")
-                            if sid and (status is None or str(status).lower() in {"ok", "proved", "success", "true"}):
+                            if sid and (
+                                status is None
+                                or str(status).lower() in {"ok", "proved", "success", "true"}
+                            ):
                                 proved.add(sid)
                         if proved:
                             proved_sec_ids = proved
         except Exception as exc:
-            log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+            log_stage_error(step_name, exc, {"context": step_name})
             raise
-            logger.warning(f"Stage 11: proves-only detection failed: {e}")
 
         if skip_graph_creation:
             edges: list[dict] = []
@@ -94,30 +295,26 @@ def run(
             try:
                 edges.extend(_conflict_edges_from_docs(documents))
             except Exception as exc:
-                log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+                log_stage_error(step_name, exc, {"context": step_name})
                 raise
-                pass
             # Duplicates
             try:
                 edges.extend(_duplicates_edges_from_docs(documents))
             except Exception as exc:
-                log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+                log_stage_error(step_name, exc, {"context": step_name})
                 raise
-                pass
             # Contradicts
             try:
                 edges.extend(_contradicts_edges_from_docs(documents))
             except Exception as exc:
-                log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+                log_stage_error(step_name, exc, {"context": step_name})
                 raise
-                pass
             # Duplicates
             try:
                 edges.extend(_duplicates_edges_from_docs(documents))
             except Exception as exc:
-                log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+                log_stage_error(step_name, exc, {"context": step_name})
                 raise
-                pass
             # Proves
             if proved_sec_ids:
                 edges.extend(_proves_edges_from_docs(documents, proved_sec_ids))
@@ -125,22 +322,22 @@ def run(
             try:
                 edges.extend(_supersedes_edges_from_docs(documents))
             except Exception as exc:
-                log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+                log_stage_error(step_name, exc, {"context": step_name})
                 raise
-                pass
             # Refers-to
             try:
                 edges.extend(_refers_to_edges_from_docs(documents))
             except Exception as exc:
-                log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+                log_stage_error(step_name, exc, {"context": step_name})
                 raise
-                pass
             output_path = json_output_dir / "11_graph_edges.json"
             with open(output_path, "w") as f:
                 json.dump(edges, f, indent=2)
             summary = _validate_edges(edges)
             _save_summary(json_output_dir, summary)
-            console.print(f"[yellow]No embeddings found; wrote {len(edges)} edges to: {output_path}[/yellow]")
+            console.print(
+                f"[yellow]No embeddings found; wrote {len(edges)} edges to: {output_path}[/yellow]"
+            )
             return
         else:
             confirmation = {
@@ -208,18 +405,19 @@ def run(
                             src = item.get("source_details") or {}
                             sid = src.get("section_id")
                             status = (pr or {}).get("status")
-                            if sid and (status is None or str(status).lower() in {"ok", "proved", "success", "true"}):
+                            if sid and (
+                                status is None
+                                or str(status).lower() in {"ok", "proved", "success", "true"}
+                            ):
                                 proved.add(sid)
                         except Exception as exc:
-                            log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+                            log_stage_error(step_name, exc, {"context": step_name})
                             raise
-                            continue
                     if proved:
                         proved_sec_ids = proved
     except Exception as exc:
-        log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+        log_stage_error(step_name, exc, {"context": step_name})
         raise
-        logger.warning(f"Stage 11: failed to read Stage 08 theorems for 'proves' edges: {e}")
 
     edges = asyncio.run(
         find_and_create_relationships(
@@ -246,13 +444,11 @@ def run(
                 edge_col = db.collection(edge_collection)
                 edge_col.import_bulk(contr, on_duplicate="ignore")
             except Exception as exc:
-                log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+                log_stage_error(step_name, exc, {"context": step_name})
                 raise
-                pass
     except Exception as exc:
-        log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+        log_stage_error(step_name, exc, {"context": step_name})
         raise
-        pass
     # Also append conflicts edges when embeddings path ran
     try:
         conflicts = _conflict_edges_from_docs(docs_with_embed)
@@ -269,13 +465,11 @@ def run(
                     edge_col = db.collection(edge_collection)
                     edge_col.import_bulk(ins, on_duplicate="ignore")
                 except Exception as exc:
-                    log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+                    log_stage_error(step_name, exc, {"context": step_name})
                     raise
-                    pass
     except Exception as exc:
-        log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+        log_stage_error(step_name, exc, {"context": step_name})
         raise
-        pass
 
     # --- Final Output ---
     if skip_graph_creation:
@@ -311,6 +505,7 @@ def debug_bundle(
     similarity_threshold: float = 0.55,
 ):
     """Run Stage 11 from a single JSON bundle, emitting edges JSON without DB access."""
+    step_name = "graph_runner_debug"
     stage_output_dir = output_dir / "11_arango_create_graph"
     json_output_dir = stage_output_dir / "json_output"
     stage_output_dir.mkdir(parents=True, exist_ok=True)
@@ -322,10 +517,8 @@ def debug_bundle(
         if not isinstance(documents, list) or not documents:
             raise ValueError("Bundle must include non-empty 'documents' list")
     except Exception as exc:
-        log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+        log_stage_error(step_name, exc, {"context": step_name})
         raise
-        print(f"Failed to load bundle: {e}")
-        raise ValueError(f"Failed to load bundle: {e}")
 
     docs_with_embed = [doc for doc in documents if doc.get("embedding")]
     if not docs_with_embed:
@@ -343,14 +536,16 @@ def debug_bundle(
                             item = (pr or {}).get("item") or {}
                             sid = (item.get("source_details") or {}).get("section_id")
                             status = (pr or {}).get("status")
-                            if sid and (status is None or str(status).lower() in {"ok", "proved", "success", "true"}):
+                            if sid and (
+                                status is None
+                                or str(status).lower() in {"ok", "proved", "success", "true"}
+                            ):
                                 proved.add(sid)
                         if proved:
                             proved_sec_ids = proved
         except Exception as exc:
-            log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+            log_stage_error(step_name, exc, {"context": step_name})
             raise
-            logger.warning(f"Stage 11 debug-bundle: proves-only detection failed: {e}")
 
         edges: list[dict] = []
         if proved_sec_ids:
@@ -382,18 +577,19 @@ def debug_bundle(
                             src = item.get("source_details") or {}
                             sid = src.get("section_id")
                             status = (pr or {}).get("status")
-                            if sid and (status is None or str(status).lower() in {"ok", "proved", "success", "true"}):
+                            if sid and (
+                                status is None
+                                or str(status).lower() in {"ok", "proved", "success", "true"}
+                            ):
                                 proved.add(sid)
                         except Exception as exc:
-                            log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+                            log_stage_error(step_name, exc, {"context": step_name})
                             raise
-                            continue
                     if proved:
                         proved_sec_ids = proved
     except Exception as exc:
-        log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+        log_stage_error(step_name, exc, {"context": step_name})
         raise
-        logger.warning(f"Stage 11 debug-bundle: failed to read Stage 08 theorems: {e}")
 
     edges = asyncio.run(
         find_and_create_relationships(
@@ -416,44 +612,15 @@ def debug_bundle(
         summary = _validate_edges(edges)
         _save_summary(json_output_dir, summary)
     except Exception as exc:
-        log_stage_error(p.name if 'p' in locals() else 'step', exc, {'context': p.name})
+        log_stage_error(step_name, exc, {"context": step_name})
         raise
-        pass
     console.print(f"[green]Debug bundle: saved {len(edges)} graph edges to {output_path}")
 
 
 ## CLI removed: import and call run(...), or use a debug harness.
 
 
-# Fallback NumPy search helpers when FAISS unavailable
-if not _HAVE_FAISS:
-
-    def build_faiss_index(embeddings: NDArray[np.float32]):
-        emb = embeddings.copy()
-        norms = np.linalg.norm(emb, axis=1, keepdims=True) + 1e-12
-        emb = emb / norms
-        logger.warning("FAISS not available; using NumPy similarity search fallback.")
-        return ("numpy", emb)
-
-    def index_search(index_obj, query_embedding: NDArray[np.float32], k: int):
-        kind, idx = index_obj
-        q = query_embedding.copy()
-        q /= np.linalg.norm(q, axis=1, keepdims=True) + 1e-12
-        sims = (idx @ q.T).T
-        order = np.argsort(-sims, axis=1)
-        topk_idx = order[:, :k]
-        topk_sim = np.take_along_axis(sims, topk_idx, axis=1)
-        return topk_sim, topk_idx
-
-else:
-
-    def index_search(index_obj, query_embedding: NDArray[np.float32], k: int):
-        _, fa = index_obj
-        return fa.search(query_embedding, k)
-
-
 if __name__ == "__main__":
-    import sys, os
     argv = sys.argv[1:]
     if argv and argv[0] == "sanity":
         sys.exit(sanity())

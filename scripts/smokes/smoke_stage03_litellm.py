@@ -9,13 +9,15 @@
 from __future__ import annotations
 
 import os
-import sys
 import json
 import typer
 from dotenv import load_dotenv, find_dotenv
 
 
-app = typer.Typer(add_completion=False, help="Smoke: Stage 03 header verify (SciLLM-only; litellm path deprecated)")
+app = typer.Typer(
+    add_completion=False,
+    help="Smoke: Stage 03 header verify (SciLLM-only; litellm path deprecated)",
+)
 
 TINY_PNG_DATA = (
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
@@ -32,7 +34,9 @@ def main(
     outdir = os.path.join("scripts", "artifacts")
     os.makedirs(outdir, exist_ok=True)
     with open(os.path.join(outdir, "stage03_litellm.json"), "w", encoding="utf-8") as f:
-        json.dump({"skip": True, "reason": "SciLLM-only; litellm smoke deprecated"}, f, ensure_ascii=False)
+        json.dump(
+            {"skip": True, "reason": "SciLLM-only; litellm smoke deprecated"}, f, ensure_ascii=False
+        )
     typer.echo("SKIP: Stage 03 litellm smoke deprecated (SciLLM-only)")
 
 

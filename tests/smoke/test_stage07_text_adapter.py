@@ -1,6 +1,5 @@
 import os
 import sys
-import asyncio
 import pytest
 
 # Ensure 'src' is importable

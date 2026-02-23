@@ -121,15 +121,11 @@ class TestReflowOutput:
 
     def test_confidence_out_of_range_fails(self):
         with pytest.raises(ValidationError):
-            ReflowOutput.model_validate(
-                {"reflowed_json": {"blocks": []}, "confidence": 1.5}
-            )
+            ReflowOutput.model_validate({"reflowed_json": {"blocks": []}, "confidence": 1.5})
 
     def test_negative_confidence_fails(self):
         with pytest.raises(ValidationError):
-            ReflowOutput.model_validate(
-                {"reflowed_json": {"blocks": []}, "confidence": -0.1}
-            )
+            ReflowOutput.model_validate({"reflowed_json": {"blocks": []}, "confidence": -0.1})
 
 
 class TestValidateReflowOutput:

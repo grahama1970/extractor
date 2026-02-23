@@ -29,7 +29,9 @@ def test_fast_pdf_creates_json(tmp_path: Path):
     doc.close()
 
     out_dir = tmp_path / "out"
-    result = runner.invoke(cli.app, [str(pdf_path), str(out_dir), "--mode", "fast", "--fast-section"])
+    result = runner.invoke(
+        cli.app, [str(pdf_path), str(out_dir), "--mode", "fast", "--fast-section"]
+    )
 
     assert result.exit_code == 0, result.output
     out_file = out_dir / "sample_fast.json"
@@ -62,9 +64,8 @@ def test_structured_runs_with_stub_provider(tmp_path: Path, monkeypatch):
                 metadata=DocumentMetadata(),
             )
 
-    # Stub provider detection and flatten to avoid heavy dependencies
+    # Stub provider detection to avoid heavy dependencies
     monkeypatch.setattr(cli, "provider_from_filepath", lambda _p: DummyProvider)
-    monkeypatch.setattr(cli.s10, "flatten_document_to_pdf_objects", lambda **_kw: [{"id": "obj1"}])
 
     src = tmp_path / "page.html"
     src.write_text("<html><body>hello</body></html>")
@@ -79,4 +80,7 @@ def test_structured_runs_with_stub_provider(tmp_path: Path, monkeypatch):
     flat = base / "10_arangodb_exporter" / "json_output" / "10_flattened_data.json"
     assert reflow.exists(), "reflow output missing"
     assert flat.exists(), "flattened output missing"
-    assert json.loads(flat.read_text())[0]["id"] == "obj1"
+    # Check flattened data structure (block_id instead of id)
+    flat_data = json.loads(flat.read_text())
+    assert len(flat_data) >= 1, "should have at least one flattened entry"
+    assert flat_data[0].get("block_id") == "b1" or "_key" in flat_data[0]

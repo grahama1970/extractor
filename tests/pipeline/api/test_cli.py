@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List
 
 import pytest
 from typer.testing import CliRunner
@@ -72,7 +72,9 @@ def test_cli_run_json(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, runner: C
     assert data["sections"][0]["title"] == "Intro"
 
 
-def test_cli_run_text_output(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, runner: CliRunner) -> None:
+def test_cli_run_text_output(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, runner: CliRunner
+) -> None:
     pdf = tmp_path / "input.pdf"
     pdf.write_bytes(b"%PDF-1.4\n%")
 

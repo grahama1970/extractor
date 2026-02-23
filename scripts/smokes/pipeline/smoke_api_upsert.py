@@ -21,7 +21,9 @@ import typer
 from dotenv import load_dotenv, find_dotenv
 
 
-app = typer.Typer(add_completion=False, help="Smoke: run external → upsert (Stage 10→11) via API server")
+app = typer.Typer(
+    add_completion=False, help="Smoke: run external → upsert (Stage 10→11) via API server"
+)
 
 
 def _wait_http(url: str, timeout: float = 15.0) -> None:
@@ -49,24 +51,27 @@ def main(
 
     # Launch FastAPI server (uvicorn)
     venv_py = sys.executable
-    env['PYTHON'] = venv_py
-    server = subprocess.Popen([
-        venv_py,
-        "-m",
-        "uvicorn",
-        "prototypes.tabbed.api.server:app",
-        f"--port={port}",
-        "--host=127.0.0.1",
-        "--log-level=error",
-    ], env=env)
+    env["PYTHON"] = venv_py
+    server = subprocess.Popen(
+        [
+            venv_py,
+            "-m",
+            "uvicorn",
+            "prototypes.tabbed.api.server:app",
+            f"--port={port}",
+            "--host=127.0.0.1",
+            "--log-level=error",
+        ],
+        env=env,
+    )
     try:
         _wait_http(f"http://127.0.0.1:{port}/openapi.json")
         # 1) Extract via run-external (minimal single box)
         payload = {
             "pdf_path": str(pdf),
             "boxes_by_page": {
-                1: [ {"id": "t1", "type": "Table", "x": 0.15, "y": 0.40, "w": 0.70, "h": 0.40} ]
-            }
+                1: [{"id": "t1", "type": "Table", "x": 0.15, "y": 0.40, "w": 0.70, "h": 0.40}]
+            },
         }
         data = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(
@@ -84,7 +89,7 @@ def main(
             raise SystemExit("results_dir missing after run-external")
 
         # 2) Upsert to Arango (Stage 10→11)
-        up = json.dumps({ "results_dir": str(results_dir), "fast_embeddings": True }).encode("utf-8")
+        up = json.dumps({"results_dir": str(results_dir), "fast_embeddings": True}).encode("utf-8")
         req2 = urllib.request.Request(
             f"http://127.0.0.1:{port}/api/pipeline/upsert",
             data=up,
@@ -111,17 +116,23 @@ def main(
             raise SystemExit("Stage 11 confirmation missing edges_created")
 
         # Save a tiny artifact log for CI
-        artifacts = Path("scripts/artifacts"); artifacts.mkdir(parents=True, exist_ok=True)
+        artifacts = Path("scripts/artifacts")
+        artifacts.mkdir(parents=True, exist_ok=True)
         log = artifacts / f"smoke_api_upsert_{int(time.time())}.log"
-        log.write_text(json.dumps({
-            "ok": True,
-            "results_dir": str(results_dir),
-            "export_confirmation": str(conf10),
-            "graph_confirmation": str(conf11),
-            "created": created,
-            "updated": updated,
-            "edges": c11.get("edges_created"),
-        }, indent=2))
+        log.write_text(
+            json.dumps(
+                {
+                    "ok": True,
+                    "results_dir": str(results_dir),
+                    "export_confirmation": str(conf10),
+                    "graph_confirmation": str(conf11),
+                    "created": created,
+                    "updated": updated,
+                    "edges": c11.get("edges_created"),
+                },
+                indent=2,
+            )
+        )
         typer.echo(f"OK: upsert smoke passed → {log}")
     finally:
         try:

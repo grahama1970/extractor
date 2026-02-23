@@ -2,7 +2,6 @@ import json
 from pathlib import Path
 from typing import List
 
-import types
 
 import extractor.pipeline.api as api
 
@@ -14,7 +13,7 @@ class DummyCompleted:
 def _stub_run_factory(tmp_out: Path):
     """Create a stub for subprocess.run that emulates stage outputs."""
 
-    def _stub_run(cmd: List[str], cwd=None):  # signature match used
+    def _stub_run(cmd: List[str], cwd=None, env=None, **kwargs):  # signature match used
         # Identify stage by script name in cmd[1]
         args = list(map(str, cmd))
         if "01_annotation_processor.py" in args[1]:
@@ -39,7 +38,9 @@ def _stub_run_factory(tmp_out: Path):
             out = Path(args[args.index("-o") + 1])
             sections = out / "04_section_builder" / "json_output"
             sections.mkdir(parents=True, exist_ok=True)
-            (sections / "04_sections.json").write_text(json.dumps({"sections": [{"title": "Test"}]}))
+            (sections / "04_sections.json").write_text(
+                json.dumps({"sections": [{"title": "Test"}]})
+            )
         return DummyCompleted()
 
     return _stub_run
@@ -51,7 +52,10 @@ def test_extract_sections_smoke(tmp_path, monkeypatch):
     pdf.write_bytes(b"%PDF-1.4\n%dummy\n")
 
     # Stub subprocess.run used by api._run
-    monkeypatch.setattr(api, "subprocess", types.SimpleNamespace(run=_stub_run_factory(tmp_path)))
+    # The api module imports subprocess and calls subprocess.run directly
+    import subprocess as subprocess_module
+
+    monkeypatch.setattr(subprocess_module, "run", _stub_run_factory(tmp_path))
 
     # Run API against temp output dir
     out_dir = tmp_path / "results"
@@ -59,4 +63,3 @@ def test_extract_sections_smoke(tmp_path, monkeypatch):
 
     assert path.exists(), "Sections JSON should exist"
     assert isinstance(sections, list) and sections, "Sections should be non-empty"
-

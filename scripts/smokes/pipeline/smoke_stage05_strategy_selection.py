@@ -31,6 +31,7 @@ def ensure_stage05_tables(results_root: Path) -> Path:
         return target
 
     import subprocess
+
     subprocess.run(
         [
             sys.executable,
@@ -103,10 +104,16 @@ def main(results: Path = typer.Option(Path("data/results/pipeline"), "--results"
 
     art_dir = Path("scripts/artifacts")
     art_dir.mkdir(parents=True, exist_ok=True)
-    (art_dir / "stage05_strategy_selection.json").write_text(json.dumps({"issues": issues, "sanitized_changes": sanitized_changes}, ensure_ascii=False, indent=2))
+    (art_dir / "stage05_strategy_selection.json").write_text(
+        json.dumps(
+            {"issues": issues, "sanitized_changes": sanitized_changes}, ensure_ascii=False, indent=2
+        )
+    )
 
     if issues:
-        raise SystemExit("Stage 05 strategy selection smoke failed; see stage05_strategy_selection.json")
+        raise SystemExit(
+            "Stage 05 strategy selection smoke failed; see stage05_strategy_selection.json"
+        )
 
     if sanitized_changes == 0:
         typer.echo("WARN: No differences between raw and sanitized tables detected.")

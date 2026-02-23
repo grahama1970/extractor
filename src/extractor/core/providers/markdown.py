@@ -14,7 +14,11 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional, Union
 
 from loguru import logger
-from extractor.core.providers.utils import emit_list_blocks, normalize_heading_level, ensure_hierarchy
+from extractor.core.providers.utils import (
+    emit_list_blocks,
+    normalize_heading_level,
+    ensure_hierarchy,
+)
 from extractor.core.providers.fetcher_bridge import ensure_local_source, attach_fetcher_metadata
 
 from extractor.core.schema.unified_document import (

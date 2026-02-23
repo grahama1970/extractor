@@ -27,12 +27,13 @@ try:
 except Exception:  # pragma: no cover - optional import for environments without src on PYTHONPATH
     run_codex_exec = None  # type: ignore
 
-app = typer.Typer(help="Run gamified evaluation in one command: codebase + prompt/rules + instances")
+app = typer.Typer(
+    help="Run gamified evaluation in one command: codebase + prompt/rules + instances"
+)
 
 
 def _which(cmd: str) -> bool:
     return shutil.which(cmd) is not None
-
 
 
 def _is_exe(path: str) -> bool:
@@ -58,6 +59,7 @@ def _find_codex_bin() -> str:
     home = os.environ.get("CODEX_HOME")
     if home:
         from pathlib import Path as _P
+
         cand = _P(home) / "bin" / "codex"
         if cand.exists():
             return cand.as_posix()
@@ -74,6 +76,7 @@ def _find_codex_bin() -> str:
     except Exception:
         pass
     return "codex"
+
 
 def _read_json(path: Path) -> dict:
     try:
@@ -242,7 +245,13 @@ def _start_dashboard(api_base: str, port: int = 5199) -> Optional[subprocess.Pop
     env["VITE_PORT"] = str(port)
     # Ensure deps installed once (best-effort)
     try:
-        subprocess.run(["npm", "install"], cwd=str(dashboard_dir), check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(
+            ["npm", "install"],
+            cwd=str(dashboard_dir),
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
     except Exception:
         pass
     try:
@@ -286,9 +295,10 @@ def _slug(name: str) -> str:
 
 def _parse_approaches_from_prompt(prompt: str) -> List[Dict[str, str]]:
     import re
+
     text = prompt or ""
     # Try to isolate the Approaches section
-    m = re.search(r"##\s*Approaches\s*(.*?)\n## ", text, flags=re.S|re.I)
+    m = re.search(r"##\s*Approaches\s*(.*?)\n## ", text, flags=re.S | re.I)
     block = m.group(1) if m else text
     names: List[str] = []
     # 1) YAML code block parsing by regex: "- name: XYZ"
@@ -305,7 +315,16 @@ def _parse_approaches_from_prompt(prompt: str) -> List[Dict[str, str]]:
         capturing = False
         for ln in lines:
             low = ln.strip().lower()
-            if low.startswith("approaches:") or low.startswith("approach:") or low.startswith("try ") or low == "try:" or low == "approaches" or low == "approach" or low.startswith("#") and "approaches" in low:
+            if (
+                low.startswith("approaches:")
+                or low.startswith("approach:")
+                or low.startswith("try ")
+                or low == "try:"
+                or low == "approaches"
+                or low == "approach"
+                or low.startswith("#")
+                and "approaches" in low
+            ):
                 capturing = True
                 if ":" in ln and not ln.strip().startswith("#"):
                     tail = ln.split(":", 1)[1].strip()
@@ -356,8 +375,11 @@ def _parse_approaches_from_prompt(prompt: str) -> List[Dict[str, str]]:
 
 def _parse_codebase_from_prompt(prompt: str) -> Optional[Path]:
     import re
+
     for ln in (prompt or "").splitlines():
-        if ":" in ln and ln.lower().strip().startswith(("codebase:", "path:", "dir:", "directory:", "repo_root:")):
+        if ":" in ln and ln.lower().strip().startswith(
+            ("codebase:", "path:", "dir:", "directory:", "repo_root:")
+        ):
             p = ln.split(":", 1)[1].strip()
             if p:
                 pp = Path(p).expanduser()
@@ -389,7 +411,11 @@ def _compile_prompt_to_rules(prompt: str, base_rules_path: Path) -> dict:
         "meta": {"name": "prompt-run"},
         "variants": variants,
         "scoring": {
-            "weights": (base.get("weights") or base.get("scoring", {}).get("weights") or {"efficiency": 0.55, "accuracy": 0.20, "stability": 0.15, "ux": 0.10})
+            "weights": (
+                base.get("weights")
+                or base.get("scoring", {}).get("weights")
+                or {"efficiency": 0.55, "accuracy": 0.20, "stability": 0.15, "ux": 0.10}
+            )
         },
         "plateau": base.get("plateau", {"epsilon": 0.15, "window": 5}),
     }
@@ -403,7 +429,9 @@ def _ensure_file(path: Path, content: str, overwrite: bool = False) -> None:
     path.write_text(content, encoding="utf-8")
 
 
-def _generate_multiplication_poc(codebase: Path, approaches: List[Dict[str, str]]) -> Dict[str, Any]:
+def _generate_multiplication_poc(
+    codebase: Path, approaches: List[Dict[str, str]]
+) -> Dict[str, Any]:
     """Create baseline, variants, and benchmark if missing.
     Returns dict with paths and approach names.
     """
@@ -420,7 +448,9 @@ def _generate_multiplication_poc(codebase: Path, approaches: List[Dict[str, str]
     # Adjust for location under prototypes/gamified: repo root is two levels up
     repo_root = Path(__file__).resolve().parents[2]
     if not variants.exists():
-        _ensure_file(variants, (repo_root / "src/algos/multiply_variants.py").read_text(encoding="utf-8"))
+        _ensure_file(
+            variants, (repo_root / "src/algos/multiply_variants.py").read_text(encoding="utf-8")
+        )
     if not bench.exists():
         _ensure_file(bench, (repo_root / "bench/multiply_benchmark.py").read_text(encoding="utf-8"))
 
@@ -439,7 +469,13 @@ def _generate_multiplication_poc(codebase: Path, approaches: List[Dict[str, str]
 def _post_json(url: str, payload: Dict[str, Any]) -> None:
     try:
         import urllib.request
-        req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers={"Content-Type": "application/json"}, method="POST")
+
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
         urllib.request.urlopen(req, timeout=5)
     except Exception:
         pass
@@ -479,16 +515,27 @@ def _extract_tasks_json(prompt: str) -> List[Dict[str, Any]]:
 def _run_task(task: Dict[str, Any], env: Dict[str, str], api_base: str) -> None:
     tname = str(task.get("name") or task.get("type") or "task")
     scope = str(task.get("scope") or "pre")
-    _post_json(api_base.rstrip("/") + "/ingest/log", {
-        "ts": time.time(), "run_id": "gamified", "variant": env.get("VARIANT"), "episode_id": None,
-        "stream": "app", "source": "gamified_cli", "message": f"task start: {scope}:{tname}", "meta": {}
-    })
+    _post_json(
+        api_base.rstrip("/") + "/ingest/log",
+        {
+            "ts": time.time(),
+            "run_id": "gamified",
+            "variant": env.get("VARIANT"),
+            "episode_id": None,
+            "stream": "app",
+            "source": "gamified_cli",
+            "message": f"task start: {scope}:{tname}",
+            "meta": {},
+        },
+    )
     try:
         typ = str(task.get("type"))
         cwd = task.get("cwd")
         if typ == "create_file":
             p = Path(task["path"]).expanduser()
-            _ensure_file(p, str(task.get("content", "")), overwrite=bool(task.get("overwrite", False)))
+            _ensure_file(
+                p, str(task.get("content", "")), overwrite=bool(task.get("overwrite", False))
+            )
         elif typ == "run_shell":
             cmd = str(task["cmd"])
             subprocess.run(cmd, shell=True, cwd=cwd or None, check=False, env=env)
@@ -501,17 +548,30 @@ def _run_task(task: Dict[str, Any], env: Dict[str, str], api_base: str) -> None:
             if code:
                 # run a short-lived python process; propagate env
                 code_patched = "__file__='-';\n" + code
-                subprocess.run([sys.executable, "-c", code_patched], cwd=cwd or None, check=False, env=env)
+                subprocess.run(
+                    [sys.executable, "-c", code_patched], cwd=cwd or None, check=False, env=env
+                )
         else:
             pass
     finally:
-        _post_json(api_base.rstrip("/") + "/ingest/log", {
-            "ts": time.time(), "run_id": "gamified", "variant": env.get("VARIANT"), "episode_id": None,
-            "stream": "app", "source": "gamified_cli", "message": f"task end: {scope}:{tname}", "meta": {}
-        })
+        _post_json(
+            api_base.rstrip("/") + "/ingest/log",
+            {
+                "ts": time.time(),
+                "run_id": "gamified",
+                "variant": env.get("VARIANT"),
+                "episode_id": None,
+                "stream": "app",
+                "source": "gamified_cli",
+                "message": f"task end: {scope}:{tname}",
+                "meta": {},
+            },
+        )
 
 
-def _scoreboard_from_results(raw: Dict[str, Dict[str, Any]], wmap: Dict[str, float], speed_split: Dict[str, float]) -> Dict[str, Any]:
+def _scoreboard_from_results(
+    raw: Dict[str, Dict[str, Any]], wmap: Dict[str, float], speed_split: Dict[str, float]
+) -> Dict[str, Any]:
     """Build Scorecard-like dict with ApproachScore shape expected by tests.
 
     raw[name] should contain: correctness (dict), timings_ms (dict), robust (bool), loc (int).
@@ -581,7 +641,7 @@ def _scoreboard_from_results(raw: Dict[str, Dict[str, Any]], wmap: Dict[str, flo
     best_total = -1.0
     for nm, data in board["approaches"].items():
         if float(data.get("total_points", -1.0)) > best_total:
-            best_total = float(data["total_points"]) 
+            best_total = float(data["total_points"])
             winner = nm
     board["winner"] = winner
     return board
@@ -606,14 +666,24 @@ def _ideate_approaches(prompt: str) -> List[Dict[str, str]]:
         ]
     # Generic placeholders
     return [
-        {"name": "variant_alpha", "mechanics": "Baseline iterative/refinement strategy; emphasizes simplicity and correctness first."},
-        {"name": "variant_beta", "mechanics": "Divide‑and‑conquer style strategy; reduces problem size recursively and recombines."},
-        {"name": "variant_gamma", "mechanics": "Block/tiling strategy; partitions inputs into chunks and aggregates partial results with normalization."},
+        {
+            "name": "variant_alpha",
+            "mechanics": "Baseline iterative/refinement strategy; emphasizes simplicity and correctness first.",
+        },
+        {
+            "name": "variant_beta",
+            "mechanics": "Divide‑and‑conquer style strategy; reduces problem size recursively and recombines.",
+        },
+        {
+            "name": "variant_gamma",
+            "mechanics": "Block/tiling strategy; partitions inputs into chunks and aggregates partial results with normalization.",
+        },
     ]
 
 
 def _backend_up(api_base: str) -> bool:
     import urllib.request, urllib.error
+
     try:
         with urllib.request.urlopen(api_base.rstrip("/") + "/scoreboard", timeout=2) as r:
             return 200 <= getattr(r, "status", 200) < 500
@@ -621,18 +691,33 @@ def _backend_up(api_base: str) -> bool:
         return False
 
 
-def _start_backend(api_base: str, extra_env: Optional[Dict[str, str]] = None) -> Optional[subprocess.Popen]:
+def _start_backend(
+    api_base: str, extra_env: Optional[Dict[str, str]] = None
+) -> Optional[subprocess.Popen]:
     # Only supports localhost targets today
-    if not api_base.startswith("http://localhost:") and not api_base.startswith("http://127.0.0.1:"):
+    if not api_base.startswith("http://localhost:") and not api_base.startswith(
+        "http://127.0.0.1:"
+    ):
         return None
     port = int(api_base.rsplit(":", 1)[-1])
     env = os.environ.copy()
     if extra_env:
         env.update({k: str(v) for k, v in extra_env.items() if v is not None})
     # Try uvicorn via module
-    cmd = ["uv", "run", "--script", "scripts/logger_uv.py", "--host", "127.0.0.1", "--port", str(port)]
+    cmd = [
+        "uv",
+        "run",
+        "--script",
+        "scripts/logger_uv.py",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        str(port),
+    ]
     try:
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
+        proc = subprocess.Popen(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env
+        )
         return proc
     except FileNotFoundError:
         # Fallback: inline python runner
@@ -641,19 +726,27 @@ def _start_backend(api_base: str, extra_env: Optional[Dict[str, str]] = None) ->
             f"uvicorn.run(s.app, host='127.0.0.1', port={port})"
         )
         try:
-            proc = subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
+            proc = subprocess.Popen(
+                [sys.executable, "-c", code],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                env=env,
+            )
             return proc
         except Exception:
             return None
 
 
-
-async def _run_codex_exec_fallback(*, codex_bin: str, cwd: str, prompt_text: str, yolo: bool, on_out, on_err) -> type('R', (), {})():
+async def _run_codex_exec_fallback(
+    *, codex_bin: str, cwd: str, prompt_text: str, yolo: bool, on_out, on_err
+) -> type("R", (), {})():
     import asyncio
-    args = [codex_bin, 'exec', '-']
+
+    args = [codex_bin, "exec", "-"]
     if yolo:
-        args.append('--dangerously-bypass-approvals-and-sandbox')
-    args.extend(['-C', cwd])
+        args.append("--dangerously-bypass-approvals-and-sandbox")
+    args.extend(["-C", cwd])
     proc = await asyncio.create_subprocess_exec(
         *args,
         cwd=cwd,
@@ -664,7 +757,7 @@ async def _run_codex_exec_fallback(*, codex_bin: str, cwd: str, prompt_text: str
     # Feed stdin
     if proc.stdin:
         try:
-            proc.stdin.write(prompt_text.encode('utf-8'))
+            proc.stdin.write(prompt_text.encode("utf-8"))
             await proc.stdin.drain()
         except Exception:
             pass
@@ -672,6 +765,7 @@ async def _run_codex_exec_fallback(*, codex_bin: str, cwd: str, prompt_text: str
             proc.stdin.close()
         except Exception:
             pass
+
     async def pump(reader, cb):
         while True:
             chunk = await reader.read(65536)
@@ -681,15 +775,18 @@ async def _run_codex_exec_fallback(*, codex_bin: str, cwd: str, prompt_text: str
                 cb(chunk)
             except Exception:
                 pass
+
     await asyncio.gather(pump(proc.stdout, on_out), pump(proc.stderr, on_err))
     rc = await proc.wait()
-    R = type('Exec', (), {})
+    R = type("Exec", (), {})
     r = R()
     r.returncode = rc
     r.timed_out = False
     r.idle_timed_out = False
     r.was_killed = False
     return r
+
+
 def _wait_for_backend(api_base: str, timeout_s: float = 25.0) -> bool:
     deadline = time.time() + timeout_s
     while time.time() < deadline:
@@ -701,36 +798,91 @@ def _wait_for_backend(api_base: str, timeout_s: float = 25.0) -> bool:
 
 @app.command()
 def run(
-    codebase: Optional[Path] = typer.Option(None, file_okay=False, dir_okay=True, help="Directory of the project to gamify (can be provided in --prompt)"),
-    rules: Optional[Path] = typer.Option(Path("prototypes/gamified/rules/score_v1.json"), help="Rules JSON file (optional if --prompt provided)"),
-    prompt: Optional[str] = typer.Option(None, help="Single prompt containing codebase path, approaches to try, and any hints."),
-    prompt_file: Optional[Path] = typer.Option(None, help="Markdown prompt file with sections (Codebase, Approaches, etc.)."),
-    instances: Optional[int] = typer.Option(None, help="Number of Codex CLI instances (concurrency). Default adapts to your CPU"),
-    run_id: Optional[str] = typer.Option(None, help="Run identifier used to group artifacts (default: YYYYMMDD-HHMMSS)"),
+    codebase: Optional[Path] = typer.Option(
+        None,
+        file_okay=False,
+        dir_okay=True,
+        help="Directory of the project to gamify (can be provided in --prompt)",
+    ),
+    rules: Optional[Path] = typer.Option(
+        Path("prototypes/gamified/rules/score_v1.json"),
+        help="Rules JSON file (optional if --prompt provided)",
+    ),
+    prompt: Optional[str] = typer.Option(
+        None, help="Single prompt containing codebase path, approaches to try, and any hints."
+    ),
+    prompt_file: Optional[Path] = typer.Option(
+        None, help="Markdown prompt file with sections (Codebase, Approaches, etc.)."
+    ),
+    instances: Optional[int] = typer.Option(
+        None, help="Number of Codex CLI instances (concurrency). Default adapts to your CPU"
+    ),
+    run_id: Optional[str] = typer.Option(
+        None, help="Run identifier used to group artifacts (default: YYYYMMDD-HHMMSS)"
+    ),
     api_base: str = typer.Option("http://localhost:8000", help="Ingest API base"),
     start_dashboard: bool = typer.Option(True, help="Start the React dashboard (web logs)"),
     dashboard_port: int = typer.Option(5199, help="Dashboard port (vite dev)"),
     autostart_backend: bool = typer.Option(True, help="Start the FastAPI backend if not running"),
-    yolo: bool = typer.Option(True, help="Pass --dangerously-bypass-approvals-and-sandbox to codex exec for non-interactive runs"),
-    emit_only: bool = typer.Option(False, help="Emit per-instance prompts and exit (do not spawn codex)"),
-    aggregate_only: bool = typer.Option(False, help="Aggregate a scorecard for --run-id from existing instance outputs and exit"),
-    detach: bool = typer.Option(False, help="Spawn codex instances and return immediately without waiting (write PID files)"),
-    sequential: bool = typer.Option(False, help="Force sequential execution (pool size = 1). Workaround for flaky harnesses."),
-    instance_timeout_s: int = typer.Option(300, help="Per-instance hard timeout in seconds (default 300s)."),
-    idle_timeout_s: int = typer.Option(300, help="Per-instance idle timeout in seconds (default 300s)."),
-    max_wall_time_s: Optional[int] = typer.Option(None, help="Maximum wall time for the master wait loop in seconds (optional)."),
-    codex_bin_opt: Optional[Path] = typer.Option(None, help="Explicit path to codex CLI (overrides autodetect and env)."),
-    optimize_prompt: bool = typer.Option(True, help="Validate/optimize the prompt with prompt_optimization.yaml before running"),
-    compile_prompt: bool = typer.Option(False, help="Compile a research file into a structured prompt via LLM before optimizing"),
-    prompt_research_file: Optional[Path] = typer.Option(None, help="Research Markdown to compile into a prompt (used when --compile-prompt)"),
-    rules_path: Optional[Path] = typer.Option(Path("prototypes/gamified/rules/prompt_optimization.yaml"), help="Path to prompt optimization rules YAML"),
-    spec: Optional[Path] = typer.Option(None, help="Run from a spec YAML (Happy Path). Overrides other options except --run-id and --fast."),
+    yolo: bool = typer.Option(
+        True,
+        help="Pass --dangerously-bypass-approvals-and-sandbox to codex exec for non-interactive runs",
+    ),
+    emit_only: bool = typer.Option(
+        False, help="Emit per-instance prompts and exit (do not spawn codex)"
+    ),
+    aggregate_only: bool = typer.Option(
+        False, help="Aggregate a scorecard for --run-id from existing instance outputs and exit"
+    ),
+    detach: bool = typer.Option(
+        False, help="Spawn codex instances and return immediately without waiting (write PID files)"
+    ),
+    sequential: bool = typer.Option(
+        False, help="Force sequential execution (pool size = 1). Workaround for flaky harnesses."
+    ),
+    instance_timeout_s: int = typer.Option(
+        300, help="Per-instance hard timeout in seconds (default 300s)."
+    ),
+    idle_timeout_s: int = typer.Option(
+        300, help="Per-instance idle timeout in seconds (default 300s)."
+    ),
+    max_wall_time_s: Optional[int] = typer.Option(
+        None, help="Maximum wall time for the master wait loop in seconds (optional)."
+    ),
+    codex_bin_opt: Optional[Path] = typer.Option(
+        None, help="Explicit path to codex CLI (overrides autodetect and env)."
+    ),
+    optimize_prompt: bool = typer.Option(
+        True, help="Validate/optimize the prompt with prompt_optimization.yaml before running"
+    ),
+    compile_prompt: bool = typer.Option(
+        False, help="Compile a research file into a structured prompt via LLM before optimizing"
+    ),
+    prompt_research_file: Optional[Path] = typer.Option(
+        None, help="Research Markdown to compile into a prompt (used when --compile-prompt)"
+    ),
+    rules_path: Optional[Path] = typer.Option(
+        Path("prototypes/gamified/rules/prompt_optimization.yaml"),
+        help="Path to prompt optimization rules YAML",
+    ),
+    spec: Optional[Path] = typer.Option(
+        None,
+        help="Run from a spec YAML (Happy Path). Overrides other options except --run-id and --fast.",
+    ),
     # ArangoDB connection (required for full web logger functionality)
-    arango_host: str = typer.Option(os.environ.get("ARANGO_HOST", "127.0.0.1"), help="ArangoDB host"),
+    arango_host: str = typer.Option(
+        os.environ.get("ARANGO_HOST", "127.0.0.1"), help="ArangoDB host"
+    ),
     arango_port: int = typer.Option(int(os.environ.get("ARANGO_PORT", 8529)), help="ArangoDB port"),
-    arango_username: str = typer.Option(os.environ.get("ARANGO_USERNAME", "root"), help="ArangoDB username"),
-    arango_password: str = typer.Option(os.environ.get("ARANGO_PASS", "openSesame"), help="ArangoDB password"),
-    arango_db: str = typer.Option(os.environ.get("ARANGO_DB", "marker"), help="ArangoDB database name"),
+    arango_username: str = typer.Option(
+        os.environ.get("ARANGO_USERNAME", "root"), help="ArangoDB username"
+    ),
+    arango_password: str = typer.Option(
+        os.environ.get("ARANGO_PASS", "openSesame"), help="ArangoDB password"
+    ),
+    arango_db: str = typer.Option(
+        os.environ.get("ARANGO_DB", "marker"), help="ArangoDB database name"
+    ),
 ):
     """Minimal, batteries-included gamified run."""
     # Ensure prototypes/gamified skeleton exists so docs/rules paths resolve
@@ -743,14 +895,16 @@ def run(
     try:
         import sys as _sys
         from pathlib import Path as _P
-        _src = _P('src').resolve()
+
+        _src = _P("src").resolve()
         if str(_src) not in _sys.path:
             _sys.path.insert(0, str(_src))
         # Try to (re)import run_codex_exec if optional import failed at module import time
-        if globals().get('run_codex_exec') is None:
+        if globals().get("run_codex_exec") is None:
             try:
                 from extractor.pipeline.utils.deprecated_codex_call import run_codex_exec as _rc  # type: ignore
-                globals()['run_codex_exec'] = _rc
+
+                globals()["run_codex_exec"] = _rc
             except Exception:
                 pass
     except Exception:
@@ -761,6 +915,7 @@ def run(
     if spec is not None:
         try:
             from prototypes.gamified.spec.v1 import load_spec, render_prompt  # type: ignore
+
             spec_obj = load_spec(spec)
             prompt = render_prompt(spec_obj)
             codebase = Path(spec_obj.codebase.repo_root).resolve()
@@ -770,9 +925,9 @@ def run(
             optimize_prompt = True
             if rules_path is None:
                 rules_path = Path(spec_obj.optimizer.rules)
-            spec_snapshot_text = Path(spec).read_text(encoding='utf-8')
+            spec_snapshot_text = Path(spec).read_text(encoding="utf-8")
         except Exception as e:
-            raise typer.BadParameter(f'Failed to load spec: {e}')
+            raise typer.BadParameter(f"Failed to load spec: {e}")
     if not _which("node"):
         typer.echo("warning: node is not available; some validators or tools may not run")
     use_codex = True
@@ -794,8 +949,16 @@ def run(
     # Preflight codex: verify we can run a trivial command
     def _codex_preflight() -> bool:
         try:
-            p = subprocess.run([codex_bin, "exec", "-C", str(Path.cwd().resolve()), "-"], input="echo codex_ok", capture_output=True, text=True, timeout=10)
-            return p.returncode == 0 and ("codex_ok" in (p.stdout or "") or "codex_ok" in (p.stderr or ""))
+            p = subprocess.run(
+                [codex_bin, "exec", "-C", str(Path.cwd().resolve()), "-"],
+                input="echo codex_ok",
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            return p.returncode == 0 and (
+                "codex_ok" in (p.stdout or "") or "codex_ok" in (p.stderr or "")
+            )
         except Exception:
             return False
 
@@ -804,9 +967,15 @@ def run(
     # codex is not present (above), per project requirements.
 
     # If requested, compile a research file into a prompt via LLM
-    if compile_prompt and prompt_research_file is not None and prompt is None and prompt_file is None:
+    if (
+        compile_prompt
+        and prompt_research_file is not None
+        and prompt is None
+        and prompt_file is None
+    ):
         try:
             from prototypes.gamified.tools.prompt_compile import _call_llm_compile  # type: ignore
+
             research_txt = prompt_research_file.read_text(encoding="utf-8")
             prompt = _call_llm_compile(research_txt)
             typer.echo(f"[prompt] compiled from research -> {prompt_research_file}")
@@ -826,6 +995,7 @@ def run(
         try:
             from prototypes.gamified.tools.prompt_opt import PromptOptimizer  # type: ignore
             import yaml  # type: ignore
+
             rules_obj = None
             if rules_path and rules_path.exists():
                 try:
@@ -842,7 +1012,9 @@ def run(
                         typer.echo(f" - [{e.code}] {e.message}")
                     raise typer.Exit(code=2)
                 # Write optimized prompt for traceability and use it downstream
-                run_root = Path("workspace/runs").resolve() / (run_id or time.strftime("%Y%m%d-%H%M%S"))
+                run_root = Path("workspace/runs").resolve() / (
+                    run_id or time.strftime("%Y%m%d-%H%M%S")
+                )
                 (run_root / "manifests").mkdir(parents=True, exist_ok=True)
                 outp = run_root / "manifests" / "prompt_optimized.md"
                 outp.write_text(optimized, encoding="utf-8")
@@ -851,7 +1023,9 @@ def run(
             else:
                 typer.echo("warning: rules not found or unreadable; skipping prompt optimization")
         except Exception as e:
-            typer.echo(f"warning: prompt optimizer unavailable or failed ({e}); proceeding with raw prompt")
+            typer.echo(
+                f"warning: prompt optimizer unavailable or failed ({e}); proceeding with raw prompt"
+            )
 
     # Resolve codebase from CLI or prompt
     if codebase is None and prompt:
@@ -869,13 +1043,15 @@ def run(
         run_id = time.strftime("%Y%m%d-%H%M%S")
     run_root = Path("workspace/runs").resolve() / run_id
     # Persist spec snapshot if provided
-    if 'spec_snapshot_text' in locals() and spec_snapshot_text:
-        (run_root / 'manifests').mkdir(parents=True, exist_ok=True)
-        (run_root / 'manifests' / 'spec.yaml').write_text(spec_snapshot_text, encoding='utf-8')
+    if "spec_snapshot_text" in locals() and spec_snapshot_text:
+        (run_root / "manifests").mkdir(parents=True, exist_ok=True)
+        (run_root / "manifests" / "spec.yaml").write_text(spec_snapshot_text, encoding="utf-8")
     inst_root = run_root / "instances"
     inst_root.mkdir(parents=True, exist_ok=True)
     try:
-        (run_root / "codex_bin.txt").write_text((shutil.which(codex_bin) or codex_bin), encoding="utf-8")
+        (run_root / "codex_bin.txt").write_text(
+            (shutil.which(codex_bin) or codex_bin), encoding="utf-8"
+        )
     except Exception:
         pass
 
@@ -926,7 +1102,9 @@ def run(
     rules_obj: Dict[str, Any] = {}
     if prompt:
         try:
-            rules_compiled = _compile_prompt_to_rules(prompt, Path("prototypes/gamified/rules/score_v1.json").resolve())
+            rules_compiled = _compile_prompt_to_rules(
+                prompt, Path("prototypes/gamified/rules/score_v1.json").resolve()
+            )
             # If no approaches found, fall back to 3 generic names
             if not rules_compiled.get("variants"):
                 ideas = _ideate_approaches(prompt)
@@ -934,20 +1112,30 @@ def run(
             else:
                 # If variants look instructional/invalid for multiplication, replace with ideated set
                 try:
-                    names = [str(v.get("name")) for v in (rules_compiled.get("variants") or []) if isinstance(v, dict) and v.get("name")]
+                    names = [
+                        str(v.get("name"))
+                        for v in (rules_compiled.get("variants") or [])
+                        if isinstance(v, dict) and v.get("name")
+                    ]
                 except Exception:
                     names = []
                 low = (prompt or "").lower()
-                if ("multiply" in low or "multiplication" in low) and (len(names) < 3 or not all(n.startswith("mul_") for n in names)):
+                if ("multiply" in low or "multiplication" in low) and (
+                    len(names) < 3 or not all(n.startswith("mul_") for n in names)
+                ):
                     rules_compiled["variants"] = _ideate_approaches(prompt)
             # Write to temp rules path next to manifest
-            tmp_rules = Path("workspace/manifests").resolve() / f"rules_prompt_{int(time.time())}.json"
+            tmp_rules = (
+                Path("workspace/manifests").resolve() / f"rules_prompt_{int(time.time())}.json"
+            )
             _write_json(tmp_rules, rules_compiled)
             rules = tmp_rules
             rules_obj = rules_compiled
             typer.echo(f"[rules] compiled from prompt -> {tmp_rules}")
         except Exception as e:
-            typer.echo(f"warning: failed to compile rules from prompt: {e}; using default rules file")
+            typer.echo(
+                f"warning: failed to compile rules from prompt: {e}; using default rules file"
+            )
             if rules is None:
                 rules = Path("prototypes/gamified/rules/score_v1.json").resolve()
             rules_obj = _read_json(rules.resolve())
@@ -979,8 +1167,14 @@ def run(
     if start_dashboard:
         dash_proc = _start_dashboard(api_base=api_base, port=dashboard_port)
     # Proactive guidance: some harnesses kill long-lived parents; direct humans to web logs
-    dash_url = f"http://localhost:{dashboard_port}" if start_dashboard else api_base.rstrip("/") + "/proto/dashboard"
-    typer.echo(f"[monitor] Web logs available at {dash_url} (scoreboard: {api_base.rstrip('/')}/scoreboard)")
+    dash_url = (
+        f"http://localhost:{dashboard_port}"
+        if start_dashboard
+        else api_base.rstrip("/") + "/proto/dashboard"
+    )
+    typer.echo(
+        f"[monitor] Web logs available at {dash_url} (scoreboard: {api_base.rstrip('/')}/scoreboard)"
+    )
 
     # Extract optional instructions tasks from prompt and run pre tasks
     tasks_list: List[Dict[str, Any]] = _extract_tasks_json(prompt or "") if prompt else []
@@ -993,7 +1187,9 @@ def run(
     # 5) Generate POC artifacts (baseline/variants/bench) and run N headless benchmark instances
     gen = _generate_multiplication_poc(codebase, rules_obj.get("variants") or [])
     try:
-        vnames = gen.get("approach_names") or [f"v{i+1}" for i in range(desired_variants or instances)]
+        vnames = gen.get("approach_names") or [
+            f"v{i+1}" for i in range(desired_variants or instances)
+        ]
         results_dir = Path("bench/results").resolve()
         results_dir.mkdir(parents=True, exist_ok=True)
         out_paths: Dict[str, Path] = {}
@@ -1031,9 +1227,11 @@ def run(
             p_lines.append("")
             if prompt:
                 p_lines.append("## Original Prompt")
-                p_lines.append("""
+                p_lines.append(
+                    """
 ```markdown
-""".strip())
+""".strip()
+                )
                 p_lines.append(prompt.strip())
                 p_lines.append("```")
                 p_lines.append("")
@@ -1046,32 +1244,50 @@ def run(
             exec_cfg = rules_obj.get("execution", {}) or {}
             exec_max_iters = int(exec_cfg.get("max_iters", default_max_iters))
             p_lines.append("## Gamified Rules (Summary)")
-            p_lines.append(f"- Plateau: epsilon={plat.get('epsilon', default_epsilon)}, window={plat.get('window', default_window)}")
+            p_lines.append(
+                f"- Plateau: epsilon={plat.get('epsilon', default_epsilon)}, window={plat.get('window', default_window)}"
+            )
             p_lines.append(f"- Max iters: {exec_max_iters}")
-            p_lines.append("- Scoring (internal per-iteration): correctness/speed/robustness/brevity -> 100 total")
+            p_lines.append(
+                "- Scoring (internal per-iteration): correctness/speed/robustness/brevity -> 100 total"
+            )
             p_lines.append("")
             p_lines.append("## Stop Condition")
-            p_lines.append("- Do not stop until plateau (per epsilon/window) or max iterations reached.")
+            p_lines.append(
+                "- Do not stop until plateau (per epsilon/window) or max iterations reached."
+            )
             p_lines.append("")
             p_lines.append("## Iteration Contract")
             p_lines.append("- If the function for this approach is missing, implement it.")
             p_lines.append("- Run the benchmark; capture stdout/stderr; compute metrics.")
-            p_lines.append("- Write a well-formatted JSON summary per iteration in the output dir: iter_XX_summary.json with score, metrics, stderr/stdout digests, and mutation info.")
-            p_lines.append("- Propose and apply a code change based on metrics; repeat until stop condition.")
+            p_lines.append(
+                "- Write a well-formatted JSON summary per iteration in the output dir: iter_XX_summary.json with score, metrics, stderr/stdout digests, and mutation info."
+            )
+            p_lines.append(
+                "- Propose and apply a code change based on metrics; repeat until stop condition."
+            )
             p_lines.append("")
             p_lines.append("## Research MCPs (When Blocked)")
             p_lines.append("- If blocked or an API/library detail is unknown, use research MCPs:")
-            p_lines.append("  - Perplexity Ask: craft a precise query; return concise, citation-backed notes.")
-            p_lines.append("  - Context7 Docs: fetch official docs for the relevant library/API and summarize key constraints.")
-            p_lines.append("- Keep research minimal and targeted to unblock; cite sources when applicable in logs.")
-            p_lines.append("- Do not stall the iteration loop waiting for exhaustive research; prefer incremental, testable changes.")
+            p_lines.append(
+                "  - Perplexity Ask: craft a precise query; return concise, citation-backed notes."
+            )
+            p_lines.append(
+                "  - Context7 Docs: fetch official docs for the relevant library/API and summarize key constraints."
+            )
+            p_lines.append(
+                "- Keep research minimal and targeted to unblock; cite sources when applicable in logs."
+            )
+            p_lines.append(
+                "- Do not stall the iteration loop waiting for exhaustive research; prefer incremental, testable changes."
+            )
             p_lines.append("")
             p_lines.append("## Benchmark Parameters")
             p_lines.append("- Scales/trials: S=6x5, M=200x5, L=2000x5; L timeout=2000ms")
             # Include mechanics if provided via rules variants
             mech = None
             try:
-                for v in (rules_obj.get("variants") or []):
+                for v in rules_obj.get("variants") or []:
                     if isinstance(v, dict) and v.get("name") == name and v.get("mechanics"):
                         mech = v.get("mechanics")
                         break
@@ -1088,6 +1304,7 @@ def run(
                 p_lines.append("## Tasks (from original prompt)")
                 try:
                     import json as _json
+
                     p_lines.append("```json tasks")
                     p_lines.append(_json.dumps(tasks_list, indent=2))
                     p_lines.append("```")
@@ -1101,11 +1318,24 @@ def run(
             # Optional fast bench args for Codex path (to keep smokes quick)
             fast_args = ""
             if os.environ.get("GAMIFIED_FAST_BENCH"):
-                fast_args = " " + " ".join([
-                    "--S_digits", "3", "--S_trials", "1",
-                    "--M_digits", "6", "--M_trials", "1",
-                    "--L_digits", "8", "--L_trials", "1", "--L_timeout_ms", "250",
-                ])
+                fast_args = " " + " ".join(
+                    [
+                        "--S_digits",
+                        "3",
+                        "--S_trials",
+                        "1",
+                        "--M_digits",
+                        "6",
+                        "--M_trials",
+                        "1",
+                        "--L_digits",
+                        "8",
+                        "--L_trials",
+                        "1",
+                        "--L_timeout_ms",
+                        "250",
+                    ]
+                )
             cmd_line = (
                 f"python scripts/variant_agent.py --approach {name} "
                 f"--bench bench/multiply_benchmark.py --baseline src/core/multiply.py "
@@ -1124,9 +1354,15 @@ def run(
             p_lines.append("## Monitoring")
             p_lines.append(f"- Web logs: {dash_url}")
             p_lines.append(f"- API scoreboard: {api_base.rstrip('/')}/scoreboard?run_id={run_id}")
-            p_lines.append(f"- API episodes (latest): {api_base.rstrip('/')}/episodes?run_id={run_id}&variant={name}&limit=1")
-            p_lines.append(f"- API logs (tail): {api_base.rstrip('/')}/logs?run_id={run_id}&variant={name}&limit=50")
-            p_lines.append("- Note: Codex harness may terminate long-lived parents; rely on web logs for progress.")
+            p_lines.append(
+                f"- API episodes (latest): {api_base.rstrip('/')}/episodes?run_id={run_id}&variant={name}&limit=1"
+            )
+            p_lines.append(
+                f"- API logs (tail): {api_base.rstrip('/')}/logs?run_id={run_id}&variant={name}&limit=50"
+            )
+            p_lines.append(
+                "- Note: Codex harness may terminate long-lived parents; rely on web logs for progress."
+            )
             # Write prompt file for reference and launch Codex with stdin-fed prompt
             prompt_text = "\n".join(p_lines)
             prompt_path.write_text(prompt_text, encoding="utf-8")
@@ -1177,9 +1413,11 @@ def run(
             p_lines.append("")
             if prompt:
                 p_lines.append("## Original Prompt")
-                p_lines.append("""
+                p_lines.append(
+                    """
 ```markdown
-""".strip())
+""".strip()
+                )
                 p_lines.append(prompt.strip())
                 p_lines.append("```")
                 p_lines.append("")
@@ -1191,30 +1429,48 @@ def run(
             exec_cfg = rules_obj.get("execution", {}) or {}
             exec_max_iters = int(exec_cfg.get("max_iters", default_max_iters))
             p_lines.append("## Gamified Rules (Summary)")
-            p_lines.append(f"- Plateau: epsilon={plat.get('epsilon', default_epsilon)}, window={plat.get('window', default_window)}")
+            p_lines.append(
+                f"- Plateau: epsilon={plat.get('epsilon', default_epsilon)}, window={plat.get('window', default_window)}"
+            )
             p_lines.append(f"- Max iters: {exec_max_iters}")
-            p_lines.append("- Scoring (internal per-iteration): correctness/speed/robustness/brevity -> 100 total")
+            p_lines.append(
+                "- Scoring (internal per-iteration): correctness/speed/robustness/brevity -> 100 total"
+            )
             p_lines.append("")
             p_lines.append("## Stop Condition")
-            p_lines.append("- Do not stop until plateau (per epsilon/window) or max iterations reached.")
+            p_lines.append(
+                "- Do not stop until plateau (per epsilon/window) or max iterations reached."
+            )
             p_lines.append("")
             p_lines.append("## Iteration Contract")
             p_lines.append("- If the function for this approach is missing, implement it.")
             p_lines.append("- Run the benchmark; capture stdout/stderr; compute metrics.")
-            p_lines.append("- Write a well-formatted JSON summary per iteration in the output dir: iter_XX_summary.json with score, metrics, stderr/stdout digests, and mutation info.")
-            p_lines.append("- Propose and apply a code change based on metrics; repeat until stop condition.")
+            p_lines.append(
+                "- Write a well-formatted JSON summary per iteration in the output dir: iter_XX_summary.json with score, metrics, stderr/stdout digests, and mutation info."
+            )
+            p_lines.append(
+                "- Propose and apply a code change based on metrics; repeat until stop condition."
+            )
             p_lines.append("")
             p_lines.append("## Research MCPs (When Blocked)")
             p_lines.append("- If blocked or an API/library detail is unknown, use research MCPs:")
-            p_lines.append("  - Perplexity Ask: craft a precise query; return concise, citation-backed notes.")
-            p_lines.append("  - Context7 Docs: fetch official docs for the relevant library/API and summarize key constraints.")
-            p_lines.append("- Keep research minimal and targeted to unblock; cite sources when applicable in logs.")
-            p_lines.append("- Do not stall the iteration loop waiting for exhaustive research; prefer incremental, testable changes.")
+            p_lines.append(
+                "  - Perplexity Ask: craft a precise query; return concise, citation-backed notes."
+            )
+            p_lines.append(
+                "  - Context7 Docs: fetch official docs for the relevant library/API and summarize key constraints."
+            )
+            p_lines.append(
+                "- Keep research minimal and targeted to unblock; cite sources when applicable in logs."
+            )
+            p_lines.append(
+                "- Do not stall the iteration loop waiting for exhaustive research; prefer incremental, testable changes."
+            )
             p_lines.append("")
             p_lines.append("## Benchmark Parameters")
             p_lines.append("- Scales/trials: S=6x5, M=200x5, L=2000x5; L timeout=2000ms")
             mech = None
-            for v in (rules_obj.get("variants") or []):
+            for v in rules_obj.get("variants") or []:
                 if isinstance(v, dict) and v.get("name") == name and v.get("mechanics"):
                     mech = v.get("mechanics")
                     break
@@ -1227,6 +1483,7 @@ def run(
                 p_lines.append("## Tasks (from original prompt)")
                 try:
                     import json as _json
+
                     p_lines.append("```json tasks")
                     p_lines.append(_json.dumps(tasks_list, indent=2))
                     p_lines.append("```")
@@ -1239,11 +1496,24 @@ def run(
             pw = plat.get("window", default_window)
             fast_args = ""
             if os.environ.get("GAMIFIED_FAST_BENCH"):
-                fast_args = " " + " ".join([
-                    "--S_digits", "3", "--S_trials", "1",
-                    "--M_digits", "6", "--M_trials", "1",
-                    "--L_digits", "8", "--L_trials", "1", "--L_timeout_ms", "250",
-                ])
+                fast_args = " " + " ".join(
+                    [
+                        "--S_digits",
+                        "3",
+                        "--S_trials",
+                        "1",
+                        "--M_digits",
+                        "6",
+                        "--M_trials",
+                        "1",
+                        "--L_digits",
+                        "8",
+                        "--L_trials",
+                        "1",
+                        "--L_timeout_ms",
+                        "250",
+                    ]
+                )
             cmd_line = (
                 f"python scripts/variant_agent.py --approach {name} "
                 f"--bench bench/multiply_benchmark.py --baseline src/core/multiply.py "
@@ -1262,13 +1532,24 @@ def run(
             p_lines.append("## Monitoring")
             p_lines.append(f"- Web logs: {dash_url}")
             p_lines.append(f"- API scoreboard: {api_base.rstrip('/')}/scoreboard?run_id={run_id}")
-            p_lines.append(f"- API episodes (latest): {api_base.rstrip('/')}/episodes?run_id={run_id}&variant={name}&limit=1")
-            p_lines.append(f"- API logs (tail): {api_base.rstrip('/')}/logs?run_id={run_id}&variant={name}&limit=50")
-            p_lines.append("- Note: Codex harness may terminate long-lived parents; rely on web logs for progress.")
+            p_lines.append(
+                f"- API episodes (latest): {api_base.rstrip('/')}/episodes?run_id={run_id}&variant={name}&limit=1"
+            )
+            p_lines.append(
+                f"- API logs (tail): {api_base.rstrip('/')}/logs?run_id={run_id}&variant={name}&limit=50"
+            )
+            p_lines.append(
+                "- Note: Codex harness may terminate long-lived parents; rely on web logs for progress."
+            )
             prompt_text = "\n".join(p_lines)
             prompt_path.write_text(prompt_text, encoding="utf-8")
             inst_dirs[name] = inst_dir
-            prompt_meta[name] = {"idx": idx, "inst_dir": inst_dir, "prompt_path": prompt_path, "prompt_text": prompt_text}
+            prompt_meta[name] = {
+                "idx": idx,
+                "inst_dir": inst_dir,
+                "prompt_path": prompt_path,
+                "prompt_text": prompt_text,
+            }
 
         # If emit-only, write a launch script and exit early
         if emit_only:
@@ -1285,9 +1566,11 @@ def run(
                     p_lines.append("")
                     if prompt:
                         p_lines.append("## Original Prompt")
-                        p_lines.append("""
+                        p_lines.append(
+                            """
 ```markdown
-""".strip())
+""".strip()
+                        )
                         p_lines.append(prompt.strip())
                         p_lines.append("```")
                         p_lines.append("")
@@ -1299,31 +1582,51 @@ def run(
                     exec_cfg = rules_obj.get("execution", {}) or {}
                     exec_max_iters = int(exec_cfg.get("max_iters", default_max_iters))
                     p_lines.append("## Gamified Rules (Summary)")
-                    p_lines.append(f"- Plateau: epsilon={plat.get('epsilon', default_epsilon)}, window={plat.get('window', default_window)}")
+                    p_lines.append(
+                        f"- Plateau: epsilon={plat.get('epsilon', default_epsilon)}, window={plat.get('window', default_window)}"
+                    )
                     p_lines.append(f"- Max iters: {exec_max_iters}")
-                    p_lines.append("- Scoring (internal per-iteration): correctness/speed/robustness/brevity -> 100 total")
+                    p_lines.append(
+                        "- Scoring (internal per-iteration): correctness/speed/robustness/brevity -> 100 total"
+                    )
                     p_lines.append("")
                     p_lines.append("## Stop Condition")
-                    p_lines.append("- Do not stop until plateau (per epsilon/window) or max iterations reached.")
+                    p_lines.append(
+                        "- Do not stop until plateau (per epsilon/window) or max iterations reached."
+                    )
                     p_lines.append("")
                     p_lines.append("## Iteration Contract")
                     p_lines.append("- If the function for this approach is missing, implement it.")
                     p_lines.append("- Run the benchmark; capture stdout/stderr; compute metrics.")
-                    p_lines.append("- Write a well-formatted JSON summary per iteration in the output dir: iter_XX_summary.json with score, metrics, stderr/stdout digests, and mutation info.")
-                    p_lines.append("- Propose and apply a code change based on metrics; repeat until stop condition.")
+                    p_lines.append(
+                        "- Write a well-formatted JSON summary per iteration in the output dir: iter_XX_summary.json with score, metrics, stderr/stdout digests, and mutation info."
+                    )
+                    p_lines.append(
+                        "- Propose and apply a code change based on metrics; repeat until stop condition."
+                    )
                     p_lines.append("")
                     p_lines.append("## Research MCPs (When Blocked)")
-                    p_lines.append("- If blocked or an API/library detail is unknown, use research MCPs:")
-                    p_lines.append("  - Perplexity Ask: craft a precise query; return concise, citation-backed notes.")
-                    p_lines.append("  - Context7 Docs: fetch official docs for the relevant library/API and summarize key constraints.")
-                    p_lines.append("- Keep research minimal and targeted to unblock; cite sources when applicable in logs.")
-                    p_lines.append("- Do not stall the iteration loop waiting for exhaustive research; prefer incremental, testable changes.")
+                    p_lines.append(
+                        "- If blocked or an API/library detail is unknown, use research MCPs:"
+                    )
+                    p_lines.append(
+                        "  - Perplexity Ask: craft a precise query; return concise, citation-backed notes."
+                    )
+                    p_lines.append(
+                        "  - Context7 Docs: fetch official docs for the relevant library/API and summarize key constraints."
+                    )
+                    p_lines.append(
+                        "- Keep research minimal and targeted to unblock; cite sources when applicable in logs."
+                    )
+                    p_lines.append(
+                        "- Do not stall the iteration loop waiting for exhaustive research; prefer incremental, testable changes."
+                    )
                     p_lines.append("")
                     p_lines.append("## Benchmark Parameters")
                     p_lines.append("- Scales/trials: S=6x5, M=200x5, L=2000x5; L timeout=2000ms")
                     p_lines.append("")
                     mech = None
-                    for v in (rules_obj.get("variants") or []):
+                    for v in rules_obj.get("variants") or []:
                         if isinstance(v, dict) and v.get("name") == name and v.get("mechanics"):
                             mech = v.get("mechanics")
                             break
@@ -1336,6 +1639,7 @@ def run(
                         p_lines.append("## Tasks (from original prompt)")
                         try:
                             import json as _json
+
                             p_lines.append("```json tasks")
                             p_lines.append(_json.dumps(tasks_list, indent=2))
                             p_lines.append("```")
@@ -1348,11 +1652,24 @@ def run(
                     pw = plat.get("window", default_window)
                     fast_args = ""
                     if os.environ.get("GAMIFIED_FAST_BENCH"):
-                        fast_args = " " + " ".join([
-                            "--S_digits", "3", "--S_trials", "1",
-                            "--M_digits", "6", "--M_trials", "1",
-                            "--L_digits", "8", "--L_trials", "1", "--L_timeout_ms", "250",
-                        ])
+                        fast_args = " " + " ".join(
+                            [
+                                "--S_digits",
+                                "3",
+                                "--S_trials",
+                                "1",
+                                "--M_digits",
+                                "6",
+                                "--M_trials",
+                                "1",
+                                "--L_digits",
+                                "8",
+                                "--L_trials",
+                                "1",
+                                "--L_timeout_ms",
+                                "250",
+                            ]
+                        )
                     cmd_line = (
                         f"python scripts/variant_agent.py --approach {name} "
                         f"--bench bench/multiply_benchmark.py --baseline src/core/multiply.py "
@@ -1370,10 +1687,18 @@ def run(
                     p_lines.append("")
                     p_lines.append("## Monitoring")
                     p_lines.append(f"- Web logs: {dash_url}")
-                    p_lines.append(f"- API scoreboard: {api_base.rstrip('/')}/scoreboard?run_id={run_id}")
-                    p_lines.append(f"- API episodes (latest): {api_base.rstrip('/')}/episodes?run_id={run_id}&variant={name}&limit=1")
-                    p_lines.append(f"- API logs (tail): {api_base.rstrip('/')}/logs?run_id={run_id}&variant={name}&limit=50")
-                    p_lines.append("- Note: Codex harness may terminate long-lived parents; rely on web logs for progress.")
+                    p_lines.append(
+                        f"- API scoreboard: {api_base.rstrip('/')}/scoreboard?run_id={run_id}"
+                    )
+                    p_lines.append(
+                        f"- API episodes (latest): {api_base.rstrip('/')}/episodes?run_id={run_id}&variant={name}&limit=1"
+                    )
+                    p_lines.append(
+                        f"- API logs (tail): {api_base.rstrip('/')}/logs?run_id={run_id}&variant={name}&limit=50"
+                    )
+                    p_lines.append(
+                        "- Note: Codex harness may terminate long-lived parents; rely on web logs for progress."
+                    )
                     prompt_text = "\n".join(p_lines)
                     prompt_path.write_text(prompt_text, encoding="utf-8")
                     inst_dirs[name] = inst_dir
@@ -1382,7 +1707,9 @@ def run(
                     )
 
                 sh_path = run_root / "launch_all.sh"
-                sh_lines = ["#!/usr/bin/env bash", "set -euo pipefail"] + [ln for ln in launch_lines]
+                sh_lines = ["#!/usr/bin/env bash", "set -euo pipefail"] + [
+                    ln for ln in launch_lines
+                ]
                 sh_path.write_text("\n".join(sh_lines) + "\n", encoding="utf-8")
                 os.chmod(sh_path, 0o755)
                 typer.echo(f"[emit-only] prompts ready in {inst_root}; launch via {sh_path}")
@@ -1417,18 +1744,34 @@ def run(
                     try:
                         raw[name] = json.loads(latest.read_text())
                     except Exception:
-                        raw[name] = {"approach": name, "correctness": {"S": False, "M": False, "L": False}, "timings_ms": {"S": float("inf"), "M": float("inf"), "L": float("inf")}, "robust": False, "loc": 0}
+                        raw[name] = {
+                            "approach": name,
+                            "correctness": {"S": False, "M": False, "L": False},
+                            "timings_ms": {"S": float("inf"), "M": float("inf"), "L": float("inf")},
+                            "robust": False,
+                            "loc": 0,
+                        }
                 else:
-                    raw[name] = {"approach": name, "correctness": {"S": False, "M": False, "L": False}, "timings_ms": {"S": float("inf"), "M": float("inf"), "L": float("inf")}, "robust": False, "loc": 0}
+                    raw[name] = {
+                        "approach": name,
+                        "correctness": {"S": False, "M": False, "L": False},
+                        "timings_ms": {"S": float("inf"), "M": float("inf"), "L": float("inf")},
+                        "robust": False,
+                        "loc": 0,
+                    }
 
             speed_split = {"S": 11.0, "M": 12.0, "L": 12.0}
             wmap = {"correctness": 45.0, "speed": 35.0, "robustness": 10.0, "brevity": 10.0}
             board = _scoreboard_from_results(raw, wmap, speed_split)
-            scorecard = {"scales": ["S", "M", "L"], "approaches": board["approaches"], "winner": board["winner"]}
+            scorecard = {
+                "scales": ["S", "M", "L"],
+                "approaches": board["approaches"],
+                "winner": board["winner"],
+            }
             out_json_legacy = Path("bench/results/multiply_scorecard.json").resolve()
             out_json_legacy.parent.mkdir(parents=True, exist_ok=True)
             out_json_legacy.write_text(json.dumps(scorecard, indent=2), encoding="utf-8")
-            run_scorecard = (run_root / "scorecard.json")
+            run_scorecard = run_root / "scorecard.json"
             run_scorecard.parent.mkdir(parents=True, exist_ok=True)
             run_scorecard.write_text(json.dumps(scorecard, indent=2), encoding="utf-8")
             typer.echo(f"[aggregate-only] winner={board['winner']} scorecard={run_scorecard}")
@@ -1444,15 +1787,28 @@ def run(
                 idx = meta["idx"]
                 proc = _spawn_one(idx, name)
                 try:
-                    pid_path = (inst_dirs.get(name) or Path(f"workspace/agent/gamified_{name}")) / "codex_pid.txt"
+                    pid_path = (
+                        inst_dirs.get(name) or Path(f"workspace/agent/gamified_{name}")
+                    ) / "codex_pid.txt"
                     pid_path.write_text(str(proc.pid), encoding="utf-8")
                 except Exception:
                     pass
-                _post_json(api_base.rstrip("/") + "/ingest/log", {
-                    "ts": time.time(), "run_id": "gamified", "variant": name, "episode_id": None,
-                    "stream": "app", "source": "gamified_cli", "message": f"spawned(detached) {name} pid={proc.pid}", "meta": {}
-                })
-            typer.echo(f"[detach] spawned {len(vnames)} instances; monitor {inst_root} and web logs at {dash_url}; then run again with --aggregate-only to collate results")
+                _post_json(
+                    api_base.rstrip("/") + "/ingest/log",
+                    {
+                        "ts": time.time(),
+                        "run_id": "gamified",
+                        "variant": name,
+                        "episode_id": None,
+                        "stream": "app",
+                        "source": "gamified_cli",
+                        "message": f"spawned(detached) {name} pid={proc.pid}",
+                        "meta": {},
+                    },
+                )
+            typer.echo(
+                f"[detach] spawned {len(vnames)} instances; monitor {inst_root} and web logs at {dash_url}; then run again with --aggregate-only to collate results"
+            )
             return
 
         async def _run_all_async():
@@ -1468,55 +1824,91 @@ def run(
                     err_path = inst_dir / "codex_stderr.log"
                     out_f = open(out_path, "ab", buffering=0)
                     err_f = open(err_path, "ab", buffering=0)
+
                     def on_out(b: bytes):
                         try:
                             out_f.write(b)
                         except Exception:
                             pass
+
                     def on_err(b: bytes):
                         try:
                             err_f.write(b)
                         except Exception:
                             pass
-                    _post_json(api_base.rstrip("/") + "/ingest/log", {
-                        "ts": time.time(), "run_id": "gamified", "variant": name, "episode_id": None,
-                        "stream": "app", "source": "gamified_cli", "message": f"started {name}", "meta": {}
-                    })
+
+                    _post_json(
+                        api_base.rstrip("/") + "/ingest/log",
+                        {
+                            "ts": time.time(),
+                            "run_id": "gamified",
+                            "variant": name,
+                            "episode_id": None,
+                            "stream": "app",
+                            "source": "gamified_cli",
+                            "message": f"started {name}",
+                            "meta": {},
+                        },
+                    )
                     try:
                         if run_codex_exec is None:
                             try:
                                 from extractor.pipeline.utils.deprecated_codex_call import run_codex_exec as _rc  # type: ignore
-                                globals()['run_codex_exec'] = _rc
+
+                                globals()["run_codex_exec"] = _rc
                             except Exception:
                                 pass
-                        res = await (run_codex_exec(
-                            script_or_path="-",
-                            codex_bin=codex_bin,
-                            extra_args=["-C", cwd],
-                            cwd=cwd,
-                            forward_stdin=True,
-                            stdin_bytes=prompt_text.encode("utf-8"),
-                            bypass_approvals_and_sandbox=bool(yolo),
-                            overall_timeout_s=float(instance_timeout_s) if instance_timeout_s else None,
-                            idle_timeout_s=float(idle_timeout_s) if idle_timeout_s else None,
-                            stdout_capture_limit=0,
-                            stderr_capture_limit=0,
-                            on_stdout_chunk=on_out,
-                            on_stderr_chunk=on_err,
-                        ) if globals().get('run_codex_exec') is not None else _run_codex_exec_fallback(codex_bin=codex_bin, cwd=cwd, prompt_text=prompt_text, yolo=bool(yolo), on_out=on_out, on_err=on_err))
+                        res = await (
+                            run_codex_exec(
+                                script_or_path="-",
+                                codex_bin=codex_bin,
+                                extra_args=["-C", cwd],
+                                cwd=cwd,
+                                forward_stdin=True,
+                                stdin_bytes=prompt_text.encode("utf-8"),
+                                bypass_approvals_and_sandbox=bool(yolo),
+                                overall_timeout_s=(
+                                    float(instance_timeout_s) if instance_timeout_s else None
+                                ),
+                                idle_timeout_s=float(idle_timeout_s) if idle_timeout_s else None,
+                                stdout_capture_limit=0,
+                                stderr_capture_limit=0,
+                                on_stdout_chunk=on_out,
+                                on_stderr_chunk=on_err,
+                            )
+                            if globals().get("run_codex_exec") is not None
+                            else _run_codex_exec_fallback(
+                                codex_bin=codex_bin,
+                                cwd=cwd,
+                                prompt_text=prompt_text,
+                                yolo=bool(yolo),
+                                on_out=on_out,
+                                on_err=on_err,
+                            )
+                        )
                         if res.timed_out or res.idle_timed_out:
                             (inst_dir / "timed_out.txt").write_text(
                                 "overall" if res.timed_out else "idle", encoding="utf-8"
                             )
                     finally:
                         try:
-                            out_f.close(); err_f.close()
+                            out_f.close()
+                            err_f.close()
                         except Exception:
                             pass
-                    _post_json(api_base.rstrip("/") + "/ingest/log", {
-                        "ts": time.time(), "run_id": "gamified", "variant": name, "episode_id": None,
-                        "stream": "app", "source": "gamified_cli", "message": f"finished {name}", "meta": {}
-                    })
+                    _post_json(
+                        api_base.rstrip("/") + "/ingest/log",
+                        {
+                            "ts": time.time(),
+                            "run_id": "gamified",
+                            "variant": name,
+                            "episode_id": None,
+                            "stream": "app",
+                            "source": "gamified_cli",
+                            "message": f"finished {name}",
+                            "meta": {},
+                        },
+                    )
 
             await asyncio.gather(*[_one(n) for n in vnames])
 
@@ -1524,10 +1916,19 @@ def run(
             try:
                 asyncio.run(asyncio.wait_for(_run_all_async(), timeout=float(max_wall_time_s)))
             except asyncio.TimeoutError:
-                _post_json(api_base.rstrip("/") + "/ingest/log", {
-                    "ts": time.time(), "run_id": "gamified", "variant": None, "episode_id": None,
-                    "stream": "app", "source": "gamified_cli", "message": f"master wall time exceeded {max_wall_time_s}s; stopping waits", "meta": {}
-                })
+                _post_json(
+                    api_base.rstrip("/") + "/ingest/log",
+                    {
+                        "ts": time.time(),
+                        "run_id": "gamified",
+                        "variant": None,
+                        "episode_id": None,
+                        "stream": "app",
+                        "source": "gamified_cli",
+                        "message": f"master wall time exceeded {max_wall_time_s}s; stopping waits",
+                        "meta": {},
+                    },
+                )
         else:
             asyncio.run(_run_all_async())
 
@@ -1538,16 +1939,30 @@ def run(
             apath = inst_dirs.get(name) or Path(f"workspace/agent/gamified_{name}")
             latest = None
             if apath.exists():
-                candidates = sorted([p for p in apath.glob("iter_*.json") if not p.name.endswith("_summary.json")])
+                candidates = sorted(
+                    [p for p in apath.glob("iter_*.json") if not p.name.endswith("_summary.json")]
+                )
                 if candidates:
                     latest = candidates[-1]
             if latest:
                 try:
                     raw[name] = json.loads(latest.read_text())
                 except Exception:
-                    raw[name] = {"approach": name, "correctness": {"S": False, "M": False, "L": False}, "timings_ms": {"S": float("inf"), "M": float("inf"), "L": float("inf")}, "robust": False, "loc": 0}
+                    raw[name] = {
+                        "approach": name,
+                        "correctness": {"S": False, "M": False, "L": False},
+                        "timings_ms": {"S": float("inf"), "M": float("inf"), "L": float("inf")},
+                        "robust": False,
+                        "loc": 0,
+                    }
             else:
-                raw[name] = {"approach": name, "correctness": {"S": False, "M": False, "L": False}, "timings_ms": {"S": float("inf"), "M": float("inf"), "L": float("inf")}, "robust": False, "loc": 0}
+                raw[name] = {
+                    "approach": name,
+                    "correctness": {"S": False, "M": False, "L": False},
+                    "timings_ms": {"S": float("inf"), "M": float("inf"), "L": float("inf")},
+                    "robust": False,
+                    "loc": 0,
+                }
 
         speed_split = {"S": 11.0, "M": 12.0, "L": 12.0}
         wmap = {"correctness": 45.0, "speed": 35.0, "robustness": 10.0, "brevity": 10.0}
@@ -1562,7 +1977,7 @@ def run(
         out_json_legacy = Path("bench/results/multiply_scorecard.json").resolve()
         out_json_legacy.parent.mkdir(parents=True, exist_ok=True)
         out_json_legacy.write_text(json.dumps(scorecard, indent=2), encoding="utf-8")
-        run_scorecard = (run_root / "scorecard.json")
+        run_scorecard = run_root / "scorecard.json"
         run_scorecard.parent.mkdir(parents=True, exist_ok=True)
         run_scorecard.write_text(json.dumps(scorecard, indent=2), encoding="utf-8")
         typer.echo(f"[scorecard] {out_json_legacy}")
@@ -1571,18 +1986,38 @@ def run(
         now_ts = time.time()
         for vname, vdata in (board.get("approaches") or {}).items():
             try:
-                _post_json(api_base.rstrip("/") + "/ingest/episode", {
-                    "ts": now_ts, "run_id": "gamified", "episode_id": f"{vname}-{int(now_ts)}", "variant": vname,
-                    "pass": True, "score": float(vdata.get("total_points", 0.0)), "metrics": {}, "error_count": 0, "screenshots": []
-                })
+                _post_json(
+                    api_base.rstrip("/") + "/ingest/episode",
+                    {
+                        "ts": now_ts,
+                        "run_id": "gamified",
+                        "episode_id": f"{vname}-{int(now_ts)}",
+                        "variant": vname,
+                        "pass": True,
+                        "score": float(vdata.get("total_points", 0.0)),
+                        "metrics": {},
+                        "error_count": 0,
+                        "screenshots": [],
+                    },
+                )
             except Exception:
                 pass
         if board.get("winner"):
             try:
-                _post_json(api_base.rstrip("/") + "/ingest/episode", {
-                    "ts": now_ts, "run_id": "gamified", "episode_id": f"win-{int(now_ts)}", "variant": board["winner"],
-                    "pass": True, "score": board["approaches"][board["winner"]]["total_points"], "metrics": {}, "error_count": 0, "screenshots": []
-                })
+                _post_json(
+                    api_base.rstrip("/") + "/ingest/episode",
+                    {
+                        "ts": now_ts,
+                        "run_id": "gamified",
+                        "episode_id": f"win-{int(now_ts)}",
+                        "variant": board["winner"],
+                        "pass": True,
+                        "score": board["approaches"][board["winner"]]["total_points"],
+                        "metrics": {},
+                        "error_count": 0,
+                        "screenshots": [],
+                    },
+                )
             except Exception:
                 pass
         # Post-run tasks
@@ -1598,8 +2033,12 @@ def run(
 
 @app.command()
 def status(
-    run_id: Optional[str] = typer.Option(None, help="Run identifier (default: latest under workspace/runs)"),
-    idle_threshold_s: int = typer.Option(300, help="Age threshold in seconds to consider stalled (default 300s)"),
+    run_id: Optional[str] = typer.Option(
+        None, help="Run identifier (default: latest under workspace/runs)"
+    ),
+    idle_threshold_s: int = typer.Option(
+        300, help="Age threshold in seconds to consider stalled (default 300s)"
+    ),
 ):
     """Print per-variant status for a run (CLI-only, defaults for easy debugging)."""
     runs_root = Path("workspace/runs").resolve()
@@ -1656,83 +2095,106 @@ def init(out: Path = typer.Option(Path("gamified.yaml"), help="Path to write the
     """Interactive wizard to create a minimal spec (Happy Path)."""
     try:
         repo_root = typer.prompt("Codebase repo_root", default=".")
-        a_csv = typer.prompt("Approach names (comma-separated, 3+)", default="fueling_density_mpc, edge_stability_mhd, heat_extraction_adaptive")
-        approaches = [x.strip() for x in a_csv.split(',') if x.strip()]
+        a_csv = typer.prompt(
+            "Approach names (comma-separated, 3+)",
+            default="fueling_density_mpc, edge_stability_mhd, heat_extraction_adaptive",
+        )
+        approaches = [x.strip() for x in a_csv.split(",") if x.strip()]
         if len(approaches) < 3:
             typer.secho("Need at least 3 approaches", fg=typer.colors.RED)
             raise typer.Exit(code=2)
         typer.echo("Constraints (press Enter for defaults)")
+
         def _ask(prompt_text, default):
             try:
                 return float(typer.prompt(prompt_text, default=str(default)))
             except Exception:
                 return default
+
         edt = _ask("edge_density_threshold [m^-3]", 1.0e19)
         qmin = _ask("q_min", 2.0)
         beta = _ask("beta_max", 0.04)
         hfp = _ask("heat_flux_peak_max [MW/m^2]", 10.0)
         spec = {
-            'version': 1,
-            'codebase': {'repo_root': repo_root},
-            'approaches': [{'name': n} for n in approaches],
-            'runner': {'type': 'analysis_sim'},
-            'scoring': {'weights': {'correctness': 35, 'robustness': 25, 'speed': 25, 'brevity': 15}},
-            'constraints': {
-                'edge_density_threshold': edt,
-                'q_min': qmin,
-                'beta_max': beta,
-                'heat_flux_peak_max': hfp,
+            "version": 1,
+            "codebase": {"repo_root": repo_root},
+            "approaches": [{"name": n} for n in approaches],
+            "runner": {"type": "analysis_sim"},
+            "scoring": {
+                "weights": {"correctness": 35, "robustness": 25, "speed": 25, "brevity": 15}
             },
-            'optimizer': {'rules': 'prototypes/gamified/rules/prompt_optimization.yaml'},
-            'execution': {'concurrency': 3, 'codex_exec': True, 'autostart_backend': True, 'autostart_dashboard': True},
-            'observability': {'backend': 'arango', 'dashboard': True},
+            "constraints": {
+                "edge_density_threshold": edt,
+                "q_min": qmin,
+                "beta_max": beta,
+                "heat_flux_peak_max": hfp,
+            },
+            "optimizer": {"rules": "prototypes/gamified/rules/prompt_optimization.yaml"},
+            "execution": {
+                "concurrency": 3,
+                "codex_exec": True,
+                "autostart_backend": True,
+                "autostart_dashboard": True,
+            },
+            "observability": {"backend": "arango", "dashboard": True},
         }
         import yaml  # type: ignore
+
         out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(yaml.safe_dump(spec, sort_keys=False), encoding='utf-8')
+        out.write_text(yaml.safe_dump(spec, sort_keys=False), encoding="utf-8")
         typer.secho(f"Wrote spec → {out}", fg=typer.colors.GREEN)
     except KeyboardInterrupt:
         raise typer.Exit(code=130)
 
+
 @app.command()
-def open(run_id: str = typer.Option(None, help="Run ID to open (default: latest)", rich_help_panel="Happy Path")):
+def open(
+    run_id: str = typer.Option(
+        None, help="Run ID to open (default: latest)", rich_help_panel="Happy Path"
+    )
+):
     """Prints dashboard URLs for a run (and attempts to open in browser)."""
-    runs_dir = Path('workspace/runs')
+    runs_dir = Path("workspace/runs")
     if not run_id:
         # pick the most recent run directory
         try:
             run_id = sorted([p.name for p in runs_dir.iterdir() if p.is_dir()])[-1]
         except Exception:
-            typer.secho('No runs found', fg=typer.colors.RED)
+            typer.secho("No runs found", fg=typer.colors.RED)
             raise typer.Exit(code=2)
     run_root = runs_dir / run_id
-    api_txt = run_root / 'api_base.txt'
+    api_txt = run_root / "api_base.txt"
     if not api_txt.exists():
-        typer.secho('api_base.txt not found for this run', fg=typer.colors.RED)
+        typer.secho("api_base.txt not found for this run", fg=typer.colors.RED)
         raise typer.Exit(code=2)
     api_base = api_txt.read_text().strip()
     proto = f"{api_base.rstrip('/')}/proto/dashboard"
     score = f"{api_base.rstrip('/')}/scoreboard?run_id={run_id}"
-    vite = 'http://localhost:5199'
-    typer.echo(f"Run: {run_id}\n- API scoreboard: {score}\n- Backend proto: {proto}\n- Dashboard (Vite): {vite}")
+    vite = "http://localhost:5199"
+    typer.echo(
+        f"Run: {run_id}\n- API scoreboard: {score}\n- Backend proto: {proto}\n- Dashboard (Vite): {vite}"
+    )
     try:
         typer.launch(proto)
     except Exception:
         pass
 
+
 @app.command()
-def replay(run_id: str = typer.Argument(..., help='Run ID to replay')):
+def replay(run_id: str = typer.Argument(..., help="Run ID to replay")):
     """Re-run using the stored spec snapshot if available; otherwise abort."""
-    run_root = Path('workspace/runs') / run_id
-    spec_path = run_root / 'manifests' / 'spec.yaml'
+    run_root = Path("workspace/runs") / run_id
+    spec_path = run_root / "manifests" / "spec.yaml"
     if not spec_path.exists():
-        typer.secho('No spec.yaml snapshot found for this run', fg=typer.colors.RED)
+        typer.secho("No spec.yaml snapshot found for this run", fg=typer.colors.RED)
         raise typer.Exit(code=2)
     # Delegate to this module's run command with --spec
     import subprocess, sys
-    cmd = [sys.executable, '-m', 'prototypes.gamified.cli', 'run', '--spec', str(spec_path)]
+
+    cmd = [sys.executable, "-m", "prototypes.gamified.cli", "run", "--spec", str(spec_path)]
     typer.secho(f"[replay] running: {' '.join(cmd)}", fg=typer.colors.BLUE)
     raise typer.Exit(code=subprocess.run(cmd).returncode)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     app()

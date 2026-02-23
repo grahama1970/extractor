@@ -38,18 +38,25 @@ def check_prerequisites() -> list[str]:
 
     # Check lean_runner container
     import subprocess
+
     result = subprocess.run(
         ["docker", "ps", "--filter", "name=lean_runner", "--format", "{{.Names}}"],
-        capture_output=True, text=True
+        capture_output=True,
+        text=True,
     )
     if "lean_runner" not in result.stdout:
-        issues.append("lean_runner container not running (start with: make lean-runner-up in lean4 repo)")
+        issues.append(
+            "lean_runner container not running (start with: make lean-runner-up in lean4 repo)"
+        )
 
     # Check certainly is available
     try:
         from scillm.integrations.certainly import is_available
+
         if not is_available():
-            issues.append("certainly package not available (install with: pip install scillm[certainly])")
+            issues.append(
+                "certainly package not available (install with: pip install scillm[certainly])"
+            )
     except ImportError:
         issues.append("scillm.integrations.certainly not found")
 
@@ -58,7 +65,9 @@ def check_prerequisites() -> list[str]:
 
 @app.command()
 def main(
-    skip_impossible: bool = typer.Option(False, "--skip-impossible", help="Skip impossible proof test"),
+    skip_impossible: bool = typer.Option(
+        False, "--skip-impossible", help="Skip impossible proof test"
+    ),
     timeout: int = typer.Option(120, "--timeout", "-t", help="Proof timeout in seconds"),
 ):
     """Test Lean4 theorem proving integration."""
@@ -92,15 +101,23 @@ def main(
                 compile_timeout_s=timeout,
             )
             test1_ok = result.get("ok", False)
-            results["tests"].append({
-                "name": "simple_provable",
-                "ok": test1_ok,
-                "requirement": "n + 1 > n",
-                "lean_code": result.get("best", {}).get("lean4", "")[:200] if test1_ok else None,
-                "error": None if test1_ok else result.get("error") or result.get("diagnosis", {}).get("diagnosis"),
-            })
+            results["tests"].append(
+                {
+                    "name": "simple_provable",
+                    "ok": test1_ok,
+                    "requirement": "n + 1 > n",
+                    "lean_code": (
+                        result.get("best", {}).get("lean4", "")[:200] if test1_ok else None
+                    ),
+                    "error": (
+                        None
+                        if test1_ok
+                        else result.get("error") or result.get("diagnosis", {}).get("diagnosis")
+                    ),
+                }
+            )
             if test1_ok:
-                typer.echo(f"  PASS: Proof found")
+                typer.echo("  PASS: Proof found")
             else:
                 typer.echo(f"  FAIL: {result.get('error') or 'No proof found'}", err=True)
                 results["ok"] = False
@@ -121,17 +138,19 @@ def main(
                 )
                 test2_ok = result.get("ok", False) is False  # We expect failure
                 has_diagnosis = bool(result.get("diagnosis"))
-                results["tests"].append({
-                    "name": "impossible_proof",
-                    "ok": test2_ok and has_diagnosis,
-                    "expected_failure": True,
-                    "actually_failed": not result.get("ok", False),
-                    "has_diagnosis": has_diagnosis,
-                })
+                results["tests"].append(
+                    {
+                        "name": "impossible_proof",
+                        "ok": test2_ok and has_diagnosis,
+                        "expected_failure": True,
+                        "actually_failed": not result.get("ok", False),
+                        "has_diagnosis": has_diagnosis,
+                    }
+                )
                 if test2_ok and has_diagnosis:
-                    typer.echo(f"  PASS: Correctly failed with diagnosis")
+                    typer.echo("  PASS: Correctly failed with diagnosis")
                 else:
-                    typer.echo(f"  FAIL: Expected failure with diagnosis", err=True)
+                    typer.echo("  FAIL: Expected failure with diagnosis", err=True)
                     results["ok"] = False
             except Exception as e:
                 typer.echo(f"  ERROR: {e}", err=True)
@@ -146,17 +165,21 @@ def main(
                 tactics=[],
                 num_candidates=1,
             )
-            test3_ok = result.get("ok", False) is False and "empty" in result.get("error", "").lower()
-            results["tests"].append({
-                "name": "empty_requirement",
-                "ok": test3_ok,
-                "expected_failure": True,
-                "error": result.get("error"),
-            })
+            test3_ok = (
+                result.get("ok", False) is False and "empty" in result.get("error", "").lower()
+            )
+            results["tests"].append(
+                {
+                    "name": "empty_requirement",
+                    "ok": test3_ok,
+                    "expected_failure": True,
+                    "error": result.get("error"),
+                }
+            )
             if test3_ok:
-                typer.echo(f"  PASS: Correctly rejected empty requirement")
+                typer.echo("  PASS: Correctly rejected empty requirement")
             else:
-                typer.echo(f"  FAIL: Should reject empty requirement", err=True)
+                typer.echo("  FAIL: Should reject empty requirement", err=True)
                 results["ok"] = False
         except Exception as e:
             typer.echo(f"  ERROR: {e}", err=True)

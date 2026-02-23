@@ -32,7 +32,15 @@ def main(db: str = typer.Option("lean4_prod", "--db")):
     client = ArangoClient(hosts=url)
     adb = client.db(db, username=user, password=pwd)
     coll_counts: Dict[str, int] = {}
-    for name in ("sections", "lemmas", "theorems", "depends_on", "contradicts", "refines", "similar_knn"):
+    for name in (
+        "sections",
+        "lemmas",
+        "theorems",
+        "depends_on",
+        "contradicts",
+        "refines",
+        "similar_knn",
+    ):
         coll_counts[name] = adb.collection(name).count() if adb.has_collection(name) else 0
 
     # Simple graph coverage metrics
@@ -41,7 +49,11 @@ def main(db: str = typer.Option("lean4_prod", "--db")):
     LET with_dep = LENGTH(FOR s IN sections FILTER LENGTH(FOR e IN depends_on FILTER e._from == s._id LIMIT 1 RETURN 1) > 0 RETURN 1)
     RETURN { total, with_dep, coverage: with_dep / MAX(total, 1) }
     """
-    dep_cov = list(adb.aql.execute(q_dep_cov))[0] if adb.has_collection("sections") else {"total":0,"with_dep":0,"coverage":0}
+    dep_cov = (
+        list(adb.aql.execute(q_dep_cov))[0]
+        if adb.has_collection("sections")
+        else {"total": 0, "with_dep": 0, "coverage": 0}
+    )
 
     q_con_pairs = """
     RETURN LENGTH(
@@ -59,7 +71,11 @@ def main(db: str = typer.Option("lean4_prod", "--db")):
     )
     RETURN { avg: AVERAGE(deg), max: MAX(deg) }
     """
-    knn_deg = list(adb.aql.execute(q_knn_deg))[0] if adb.has_collection("similar_knn") else {"avg":0,"max":0}
+    knn_deg = (
+        list(adb.aql.execute(q_knn_deg))[0]
+        if adb.has_collection("similar_knn")
+        else {"avg": 0, "max": 0}
+    )
 
     report = {
         "collections": coll_counts,
@@ -72,4 +88,3 @@ def main(db: str = typer.Option("lean4_prod", "--db")):
 
 if __name__ == "__main__":
     app()
-

@@ -1,7 +1,7 @@
 ---
 fixture: sanity_generated_fixture
 pdf: fixtures/sanity_generated_fixture/source.pdf
-generated: 2026-01-12T14:26:30.004070
+generated: 2026-02-09T07:56:43.958657
 
 steps:
   s02:

@@ -16,7 +16,6 @@ Example Usage:
 >>> # Add usage examples
 """
 
-
 from bs4 import BeautifulSoup
 
 from extractor.core.schema import BlockTypes

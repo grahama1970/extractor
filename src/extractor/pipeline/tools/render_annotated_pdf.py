@@ -31,7 +31,6 @@ Notes
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -123,17 +122,31 @@ def _draw_rect_overlay(
         sh.draw_rect(rect)
         # stroke_opacity defaults to 1.0; set fill_opacity for translucent fills
         if fill:
-            sh.finish(color=color, fill=color, dashes=None, closePath=True,
-                      fill_opacity=max(0.0, min(1.0, float(fill_alpha))),
-                      stroke_opacity=1.0, width=max(0.5, float(width)))
+            sh.finish(
+                color=color,
+                fill=color,
+                dashes=None,
+                closePath=True,
+                fill_opacity=max(0.0, min(1.0, float(fill_alpha))),
+                stroke_opacity=1.0,
+                width=max(0.5, float(width)),
+            )
         else:
-            sh.finish(color=color, fill=None, dashes=None, closePath=True,
-                      stroke_opacity=1.0, width=max(0.5, float(width)))
+            sh.finish(
+                color=color,
+                fill=None,
+                dashes=None,
+                closePath=True,
+                stroke_opacity=1.0,
+                width=max(0.5, float(width)),
+            )
         sh.commit()
     except Exception:
         # Fallback: basic draw without alpha support
         try:
-            page.draw_rect(rect, color=color, width=max(0.5, float(width)), fill=(color if fill else None))
+            page.draw_rect(
+                rect, color=color, width=max(0.5, float(width)), fill=(color if fill else None)
+            )
         except Exception:
             pass
 
@@ -210,9 +223,12 @@ def _draw_label_tab_overlay(
     _draw_rect_overlay(page, tab_rect, color, fill=True, fill_alpha=1.0, width=0.0)
     # White text inside tab
     try:
-        page.insert_textbox(tab_rect, text, fontsize=max(5.0, float(fontsize)), color=(1,1,1), align=1)
+        page.insert_textbox(
+            tab_rect, text, fontsize=max(5.0, float(fontsize)), color=(1, 1, 1), align=1
+        )
     except Exception:
         pass
+
 
 def _add_label_tab_inside_top_right(
     page: "fitz.Page",
@@ -272,7 +288,8 @@ def _add_label_tab_inside_top_right(
         pass
     return fta
 
-def _add_note(page: "fitz.Page", rect: "fitz.Rect", text: str, color: Tuple[float,float,float]):
+
+def _add_note(page: "fitz.Page", rect: "fitz.Rect", text: str, color: Tuple[float, float, float]):
     """Add a small sticky note near the top-right of rect for compatibility with viewers' comment lists."""
     try:
         pt = fitz.Point(rect.x1 - 8, max(rect.y0 + 8, 8))
@@ -286,7 +303,9 @@ def _add_note(page: "fitz.Page", rect: "fitz.Rect", text: str, color: Tuple[floa
         except Exception:
             pass
         try:
-            flag_val = getattr(fitz, "ANNOT_FLAG_PRINT", None) or getattr(fitz, "PDF_ANNOT_PRINT", None)
+            flag_val = getattr(fitz, "ANNOT_FLAG_PRINT", None) or getattr(
+                fitz, "PDF_ANNOT_PRINT", None
+            )
             if flag_val is not None:
                 na.set_flags(flag_val)
         except Exception:
@@ -324,14 +343,12 @@ def _add_freetext_bold(
         if r is None:
             return None
         ft = page.add_freetext_annot(r, text, fontsize=max(6.0, float(fontsize)))
-        ok_font = False
         for name in ("helvB", "Helvetica-Bold", "Times-Bold", "Courier-Bold", "helv"):
             try:
                 # Newer PyMuPDF
                 if hasattr(ft, "set_font"):
                     try:
                         ft.set_font(name, max(6.0, float(fontsize)))
-                        ok_font = True
                         break
                     except Exception:
                         pass
@@ -352,6 +369,8 @@ def _add_freetext_bold(
         return ft
     except Exception:
         return None
+
+
 def _rect_from(obj: Dict[str, Any]) -> Optional["fitz.Rect"]:
     bb = obj.get("bbox") or obj.get("original_rect") or obj.get("expanded_rect")
     if not isinstance(bb, (list, tuple)) or len(bb) != 4:
@@ -419,54 +438,78 @@ def _parse_pages(pages: str, total_pages: int) -> Optional[set[int]]:
     if not pages:
         return None
     out: set[int] = set()
-    for chunk in pages.split(','):
+    for chunk in pages.split(","):
         chunk = chunk.strip()
         if not chunk:
             continue
-        if '-' in chunk:
-            a,b = chunk.split('-',1)
+        if "-" in chunk:
+            a, b = chunk.split("-", 1)
             try:
-                start = int(a); end = int(b)
+                start = int(a)
+                end = int(b)
             except ValueError:
                 continue
             if start > end:
-                start,end = end,start
-            for n in range(start, end+1):
+                start, end = end, start
+            for n in range(start, end + 1):
                 if 1 <= n <= total_pages:
-                    out.add(n-1)
+                    out.add(n - 1)
         else:
             try:
                 n = int(chunk)
             except ValueError:
                 continue
             if 1 <= n <= total_pages:
-                out.add(n-1)
+                out.add(n - 1)
     return out or None
+
 
 @app.command()
 def from_run(
-    pdf: Path = typer.Option(..., "--pdf", help="Input Stage 01 clean PDF", exists=True, dir_okay=False),
-    run_dir: Path = typer.Option(..., "--run-dir", help="Pipeline run directory (contains 02/04/05/06 JSON)", exists=True, file_okay=False),
+    pdf: Path = typer.Option(
+        ..., "--pdf", help="Input Stage 01 clean PDF", exists=True, dir_okay=False
+    ),
+    run_dir: Path = typer.Option(
+        ...,
+        "--run-dir",
+        help="Pipeline run directory (contains 02/04/05/06 JSON)",
+        exists=True,
+        file_okay=False,
+    ),
     out: Optional[Path] = typer.Option(None, "--out", help="Output annotated PDF path"),
     include_sections: bool = typer.Option(True, help="Include Stage 04 sections"),
     include_tables: bool = typer.Option(True, help="Include Stage 05 tables"),
     include_figures: bool = typer.Option(True, help="Include Stage 06 figures"),
     include_text_groups: bool = typer.Option(True, help="Include Stage 02 text groups"),
-    sections_style: str = typer.Option("stroke", "--sections-style", help="Sections style: stroke|fill|both"),
-    fill_alpha: float = typer.Option(0.05, help="Fill opacity (0..1). Used for non-sections; sections use this when sections-style includes fill"),
+    sections_style: str = typer.Option(
+        "stroke", "--sections-style", help="Sections style: stroke|fill|both"
+    ),
+    fill_alpha: float = typer.Option(
+        0.05,
+        help="Fill opacity (0..1). Used for non-sections; sections use this when sections-style includes fill",
+    ),
     tables_origin: str = typer.Option("camelot", help="Tables bbox origin: camelot|fitz"),
-    export_pages: bool = typer.Option(False, help="Also export annotated pages as PNGs next to output"),
+    export_pages: bool = typer.Option(
+        False, help="Also export annotated pages as PNGs next to output"
+    ),
     png_dpi: int = typer.Option(144, help="DPI for PNG export"),
-    pages: str = typer.Option('', help="Limit PNG export to these pages (1-indexed, e.g. '1,3,10-12'). PNG export only; PDF annotations are full-document."),
-    legend: bool = typer.Option(False, help="Write per-page legend markdown files alongside the annotated PDF"),
-    figure_expand: float = typer.Option(0.20, help="Expand figure boxes by this fraction (e.g., 0.2 = +20%)"),
+    pages: str = typer.Option(
+        "",
+        help="Limit PNG export to these pages (1-indexed, e.g. '1,3,10-12'). PNG export only; PDF annotations are full-document.",
+    ),
+    legend: bool = typer.Option(
+        False, help="Write per-page legend markdown files alongside the annotated PDF"
+    ),
+    figure_expand: float = typer.Option(
+        0.20, help="Expand figure boxes by this fraction (e.g., 0.2 = +20%)"
+    ),
 ):
     """Annotate sections, tables, figures, and text groups from a run directory."""
     # Resolve JSON paths
-    p02 = run_dir / '02_marker_extractor/json_output/02_marker_blocks.json'
-    p04 = run_dir / '04_section_builder/json_output/04_sections.json'
-    p05 = run_dir / '05_table_extractor/json_output/05_tables.json'
-    p06 = run_dir / '06_figure_extractor/json_output/06_figures.json'
+    p02 = run_dir / "02_marker_extractor/json_output/02_marker_blocks.json"
+    p04 = run_dir / "04_section_builder/json_output/04_sections.json"
+    p05 = run_dir / "05_table_extractor/json_output/05_tables.json"
+    p06 = run_dir / "06_figure_extractor/json_output/06_figures.json"
 
     def _load(p: Path):
         try:
@@ -488,33 +531,42 @@ def from_run(
     with doc:
         legends: Dict[int, List[str]] = {}
         # Sections (Stage 04)
-        if include_sections and j04 and isinstance(j04.get('sections'), list):
-            for s in j04['sections']:
-                anchor = s.get('anchor') or {}
-                bb = anchor.get('bbox')
-                pno = anchor.get('page_idx')
+        if include_sections and j04 and isinstance(j04.get("sections"), list):
+            for s in j04["sections"]:
+                anchor = s.get("anchor") or {}
+                bb = anchor.get("bbox")
+                pno = anchor.get("page_idx")
                 if not bb or pno is None or not (0 <= pno < len(doc)):
                     continue
                 rect = _clamp_to_page(fitz.Rect(*bb), doc[pno].rect)
                 if rect is None:
                     continue
                 label = f"section:{(s.get('title') or 'Section')[:24]}"
-                color = _color_rgb('section')
+                color = _color_rgb("section")
                 use_fill = color if sections_style in {"fill", "both"} else None
-                _add_rect_annot(doc[pno], rect, color=color, width=1.2, fill=use_fill, alpha=fill_alpha if use_fill else 1.0)
+                _add_rect_annot(
+                    doc[pno],
+                    rect,
+                    color=color,
+                    width=1.2,
+                    fill=use_fill,
+                    alpha=fill_alpha if use_fill else 1.0,
+                )
                 # Flattened overlay for guaranteed visibility
-                _draw_rect_overlay(doc[pno], rect, color, fill=bool(use_fill), fill_alpha=fill_alpha, width=1.2)
+                _draw_rect_overlay(
+                    doc[pno], rect, color, fill=bool(use_fill), fill_alpha=fill_alpha, width=1.2
+                )
                 _add_label_tab(doc[pno], rect, label, color, alpha=0.25, fontsize=6.5)
                 _draw_label_tab_overlay(doc[pno], rect, label, color, fontsize=6.5)
                 _add_note(doc[pno], rect, label, color)
                 legends.setdefault(pno, []).append(label)
 
         # Tables (Stage 05)
-        if include_tables and j05 and isinstance(j05.get('tables'), list):
-            for t in j05['tables']:
-                bb = t.get('bbox')
+        if include_tables and j05 and isinstance(j05.get("tables"), list):
+            for t in j05["tables"]:
+                bb = t.get("bbox")
                 try:
-                    pno = int(t.get('page_number', 1)) - 1
+                    pno = int(t.get("page_number", 1)) - 1
                 except Exception:
                     pno = 0
                 if not bb or not (0 <= pno < len(doc)):
@@ -529,31 +581,47 @@ def from_run(
                 if rect is None:
                     continue
                 # Render-only: no page-area heuristics here; rely on Stage 05 filtering
-                shp = t.get('pandas_metrics', {}).get('shape') or []
-                rows = int(shp[0]) if len(shp) > 0 and str(shp[0]).isdigit() else None
-                cols = int(shp[1]) if len(shp) > 1 and str(shp[1]).isdigit() else None
+                shp = t.get("pandas_metrics", {}).get("shape") or []
+                int(shp[0]) if len(shp) > 0 and str(shp[0]).isdigit() else None
+                int(shp[1]) if len(shp) > 1 and str(shp[1]).isdigit() else None
                 # Allow 1-column tables; downstream can decide if they are paragraphs
                 # Label: Table RxC for clarity
                 label = f"Table {shp[0] if len(shp)>0 else '?'}x{shp[1] if len(shp)>1 else '?'}"
-                color = _color_rgb('table')
+                color = _color_rgb("table")
                 # Requirement: colored boxes with ~95% transparency (i.e., 5% opacity)
-                ann = _add_rect_annot(doc[pno], rect, color=color, width=0.8, fill=color, alpha=max(0.0, min(1.0, fill_alpha)))
-                _draw_rect_overlay(doc[pno], rect, color, fill=True, fill_alpha=fill_alpha, width=0.8)
+                ann = _add_rect_annot(
+                    doc[pno],
+                    rect,
+                    color=color,
+                    width=0.8,
+                    fill=color,
+                    alpha=max(0.0, min(1.0, fill_alpha)),
+                )
+                _draw_rect_overlay(
+                    doc[pno], rect, color, fill=True, fill_alpha=fill_alpha, width=0.8
+                )
                 try:
                     if ann is not None:
-                        ann.set_info(content=label); ann.set_info(subject="Table"); ann.set_info(title=label)
+                        ann.set_info(content=label)
+                        ann.set_info(subject="Table")
+                        ann.set_info(title=label)
                 except Exception:
                     pass
                 _add_note(doc[pno], rect, label, color)
-                _add_freetext_bold(doc[pno], rect, label, color=(0,0,0), fontsize=8.0)
+                _add_freetext_bold(doc[pno], rect, label, color=(0, 0, 0), fontsize=8.0)
                 legends.setdefault(pno, []).append(label)
 
         # Figures (Stage 06)
-        if include_figures and j06 and isinstance(j06.get('figures'), list) and len(j06.get('figures') or [])>0:
-            for f in j06['figures']:
-                bb = f.get('bbox')
+        if (
+            include_figures
+            and j06
+            and isinstance(j06.get("figures"), list)
+            and len(j06.get("figures") or []) > 0
+        ):
+            for f in j06["figures"]:
+                bb = f.get("bbox")
                 try:
-                    pno = int(f.get('page_number', 1)) - 1
+                    pno = int(f.get("page_number", 1)) - 1
                 except Exception:
                     pno = 0
                 if not bb or not (0 <= pno < len(doc)):
@@ -567,19 +635,33 @@ def from_run(
                         cy = (rect0.y0 + rect0.y1) / 2.0
                         w = rect0.width * (1.0 + figure_expand)
                         h = rect0.height * (1.0 + figure_expand)
-                        rect = _clamp_to_page(fitz.Rect(cx - w/2.0, cy - h/2.0, cx + w/2.0, cy + h/2.0), doc[pno].rect)
+                        rect = _clamp_to_page(
+                            fitz.Rect(cx - w / 2.0, cy - h / 2.0, cx + w / 2.0, cy + h / 2.0),
+                            doc[pno].rect,
+                        )
                     except Exception:
                         rect = rect0
                 if rect is None:
                     continue
                 label = "Figure"
-                color = _color_rgb('figure')
-                ann = _add_rect_annot(doc[pno], rect, color=color, width=0.8, fill=color, alpha=max(0.0, min(1.0, fill_alpha)))
-                _draw_rect_overlay(doc[pno], rect, color, fill=True, fill_alpha=fill_alpha, width=0.8)
+                color = _color_rgb("figure")
+                ann = _add_rect_annot(
+                    doc[pno],
+                    rect,
+                    color=color,
+                    width=0.8,
+                    fill=color,
+                    alpha=max(0.0, min(1.0, fill_alpha)),
+                )
+                _draw_rect_overlay(
+                    doc[pno], rect, color, fill=True, fill_alpha=fill_alpha, width=0.8
+                )
                 try:
                     if ann is not None:
                         try:
-                            ann.set_info(content=label); ann.set_info(subject=label); ann.set_info(title=label)
+                            ann.set_info(content=label)
+                            ann.set_info(subject=label)
+                            ann.set_info(title=label)
                         except Exception:
                             pass
                 except Exception:
@@ -590,10 +672,10 @@ def from_run(
         # No fallback figures: render only Stage 06 output
 
         # Text groups (Stage 02 blocks)
-        if include_text_groups and j02 and isinstance(j02.get('blocks'), list):
-            for b in j02['blocks']:
-                btype = str(b.get('block_type') or '').lower()
-                if 'textgroup' not in btype:
+        if include_text_groups and j02 and isinstance(j02.get("blocks"), list):
+            for b in j02["blocks"]:
+                btype = str(b.get("block_type") or "").lower()
+                if "textgroup" not in btype:
                     continue
                 rect0 = _rect_from(b)
                 pno = _page_index(b)
@@ -602,17 +684,28 @@ def from_run(
                 rect = _clamp_to_page(rect0, doc[pno].rect)
                 if rect is None:
                     continue
-                label = 'TextGroup'
+                label = "TextGroup"
                 color = (0.45, 0.45, 0.45)
-                ann = _add_rect_annot(doc[pno], rect, color=color, width=0.8, fill=color, alpha=max(0.0, min(1.0, fill_alpha)))
-                _draw_rect_overlay(doc[pno], rect, color, fill=True, fill_alpha=fill_alpha, width=0.8)
+                ann = _add_rect_annot(
+                    doc[pno],
+                    rect,
+                    color=color,
+                    width=0.8,
+                    fill=color,
+                    alpha=max(0.0, min(1.0, fill_alpha)),
+                )
+                _draw_rect_overlay(
+                    doc[pno], rect, color, fill=True, fill_alpha=fill_alpha, width=0.8
+                )
                 try:
                     if ann is not None:
-                        ann.set_info(content=label); ann.set_info(subject="TextGroup"); ann.set_info(title=label)
+                        ann.set_info(content=label)
+                        ann.set_info(subject="TextGroup")
+                        ann.set_info(title=label)
                 except Exception:
                     pass
                 _add_note(doc[pno], rect, label, color)
-                _add_freetext_bold(doc[pno], rect, label, color=(0,0,0), fontsize=8.0)
+                _add_freetext_bold(doc[pno], rect, label, color=(0, 0, 0), fontsize=8.0)
                 legends.setdefault(pno, []).append(label)
 
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -620,7 +713,7 @@ def from_run(
         doc.save(str(out), garbage=4, deflate=True)
     # Second-pass rewrite to avoid rare 'annotation not bound to any page' in some viewers
     try:
-        tmp = out.with_suffix('.pdf.tmp')
+        tmp = out.with_suffix(".pdf.tmp")
         with fitz.open(str(out)) as d2:
             d2.save(str(tmp), garbage=4, deflate=True)
         tmp.replace(out)
@@ -630,16 +723,18 @@ def from_run(
     # Optional per-page legend sidecar
     if legend:
         try:
-            side_root = out.parent / (out.stem + '_ann')
+            side_root = out.parent / (out.stem + "_ann")
             side_root.mkdir(parents=True, exist_ok=True)
             for pno, items in legends.items():
-                (side_root / f'page_{pno+1}_legend.md').write_text('\n'.join(f'- {it}' for it in items), encoding='utf-8')
+                (side_root / f"page_{pno+1}_legend.md").write_text(
+                    "\n".join(f"- {it}" for it in items), encoding="utf-8"
+                )
         except Exception:
             pass
 
     if export_pages:
         try:
-            d = out.parent / (out.stem + '_pages')
+            d = out.parent / (out.stem + "_pages")
             d.mkdir(parents=True, exist_ok=True)
             doc = fitz.open(str(out))
             allowed = _parse_pages(pages, len(doc))
@@ -651,15 +746,24 @@ def from_run(
                     pm = doc[i].get_pixmap(dpi=int(png_dpi), annots=True)
                 except TypeError:
                     pm = doc[i].get_pixmap(dpi=int(png_dpi))
-                (d / f'page_{i+1}.png').write_bytes(pm.tobytes('png'))
+                (d / f"page_{i+1}.png").write_bytes(pm.tobytes("png"))
         except Exception:
             pass
     typer.secho(f"Wrote annotated PDF: {out}", fg=typer.colors.GREEN)
 
+
 @app.command()
 def from_blocks(
-    pdf: Path = typer.Option(..., "--pdf", help="Input PDF (prefer Stage 01 clean PDF)", exists=True, dir_okay=False),
-    blocks_json: Path = typer.Option(..., "--blocks-json", help="Stage 02 blocks JSON (02_marker_blocks.json)", exists=True, dir_okay=False),
+    pdf: Path = typer.Option(
+        ..., "--pdf", help="Input PDF (prefer Stage 01 clean PDF)", exists=True, dir_okay=False
+    ),
+    blocks_json: Path = typer.Option(
+        ...,
+        "--blocks-json",
+        help="Stage 02 blocks JSON (02_marker_blocks.json)",
+        exists=True,
+        dir_okay=False,
+    ),
     out: Path = typer.Option(..., "--out", help="Output annotated PDF path"),
     block_type_key: str = typer.Option("block_type", help="Key for type label in blocks JSON"),
     min_width: float = typer.Option(6.0, help="Minimum box width to draw (pt)"),
@@ -670,7 +774,7 @@ def from_blocks(
     data = json.loads(blocks_json.read_text())
     blocks = data.get("blocks") if isinstance(data, dict) else None
     if not isinstance(blocks, list):
-        raise SystemExit("Invalid blocks JSON: expected {\"blocks\": [...]} at top level")
+        raise SystemExit('Invalid blocks JSON: expected {"blocks": [...]} at top level')
 
     doc = fitz.open(str(pdf))
     with doc:
@@ -697,8 +801,12 @@ def from_blocks(
 
 @app.command()
 def from_stage01(
-    pdf: Path = typer.Option(..., "--pdf", help="Input PDF (Stage 01 clean PDF)", exists=True, dir_okay=False),
-    stage01_json: Path = typer.Option(..., "--stage01-json", help="01_annotations.json path", exists=True, dir_okay=False),
+    pdf: Path = typer.Option(
+        ..., "--pdf", help="Input PDF (Stage 01 clean PDF)", exists=True, dir_okay=False
+    ),
+    stage01_json: Path = typer.Option(
+        ..., "--stage01-json", help="01_annotations.json path", exists=True, dir_okay=False
+    ),
     out: Path = typer.Option(..., "--out", help="Output annotated PDF path"),
     style: str = typer.Option("both", help="Annotation style: stroke|fill|both"),
     fill_alpha: float = typer.Option(0.12, help="Fill opacity (0..1) when style includes fill"),
@@ -706,7 +814,7 @@ def from_stage01(
     data = json.loads(stage01_json.read_text())
     annots = data.get("annotations") if isinstance(data, dict) else None
     if not isinstance(annots, list):
-        raise SystemExit("Invalid Stage 01 JSON: expected {\"annotations\": [...]} at top level")
+        raise SystemExit('Invalid Stage 01 JSON: expected {"annotations": [...]} at top level')
 
     doc = fitz.open(str(pdf))
     with doc:
@@ -719,7 +827,11 @@ def from_stage01(
             rect = _clamp_to_page(rect0, page.rect)
             if rect is None:
                 continue
-            t = str(((a.get("interpretation") or {}).get("inferred_object") or {}).get("type") or a.get("type") or "region")
+            t = str(
+                ((a.get("interpretation") or {}).get("inferred_object") or {}).get("type")
+                or a.get("type")
+                or "region"
+            )
             label = f"{t}:{a.get('id','')}".rstrip(":")
             color = _color_rgb(t)
             use_fill = color if style in {"fill", "both"} else None

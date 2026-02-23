@@ -45,7 +45,14 @@ def draw(
     try:
         sh = pg.new_shape()
         sh.draw_rect(rect)
-        sh.finish(color=color, fill=color, closePath=True, width=1.2, fill_opacity=0.08, stroke_opacity=1.0)
+        sh.finish(
+            color=color,
+            fill=color,
+            closePath=True,
+            width=1.2,
+            fill_opacity=0.08,
+            stroke_opacity=1.0,
+        )
         sh.commit()
     except Exception:
         pg.draw_rect(rect, color=color, width=1.2, fill=color)
@@ -81,4 +88,3 @@ def draw(
 
 if __name__ == "__main__":
     app()
-

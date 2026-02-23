@@ -17,7 +17,7 @@ def ensure_embedder() -> Any:
             _EMBEDDER = SentenceTransformer("all-MiniLM-L6-v2")
             logger.success("Text embedding model loaded.")
         except Exception as exc:
-            log_stage_error('embeddings.py', exc, {'context': 'embeddings.py'})
+            log_stage_error("embeddings.py", exc, {"context": "embeddings.py"})
             raise
             logger.warning(
                 f"Failed to load text embedding model (continuing without embeddings): {e}"

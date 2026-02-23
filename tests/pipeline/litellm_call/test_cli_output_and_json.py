@@ -49,7 +49,7 @@ def test_json_shorthand_sets_flags(monkeypatch, runner: CliRunner):
 
     monkeypatch.setattr(lc, "litellm_call", fake_call)
     app = lc.build_cli()
-    res = runner.invoke(app, ["main", "Return only {\\\"ok\\\":true}", "--json"])
+    res = runner.invoke(app, ["main", 'Return only {\\"ok\\":true}', "--json"])
     assert res.exit_code == 0
     # Ensure --json mapped to both settings
     assert captured.get("wrap_json") is True

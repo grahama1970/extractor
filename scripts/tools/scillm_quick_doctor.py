@@ -73,7 +73,7 @@ def _call_direct(base: str, key: str, model: str) -> Dict[str, Any]:
         messages=[
             {
                 "role": "user",
-                "content": "Return only {\"ok\":true} as JSON.",
+                "content": 'Return only {"ok":true} as JSON.',
             }
         ],
         response_format={"type": "json_object"},
@@ -83,15 +83,9 @@ def _call_direct(base: str, key: str, model: str) -> Dict[str, Any]:
 
 @app.command()
 def main(
-    base: Optional[str] = typer.Option(
-        None, "--base", help="Override CHUTES_API_BASE"
-    ),
-    key: Optional[str] = typer.Option(
-        None, "--key", help="Override CHUTES_API_KEY"
-    ),
-    model: Optional[str] = typer.Option(
-        None, "--model", help="Override CHUTES_TEXT_MODEL"
-    ),
+    base: Optional[str] = typer.Option(None, "--base", help="Override CHUTES_API_BASE"),
+    key: Optional[str] = typer.Option(None, "--key", help="Override CHUTES_API_KEY"),
+    model: Optional[str] = typer.Option(None, "--model", help="Override CHUTES_TEXT_MODEL"),
 ):
     env_base = base or os.environ.get("CHUTES_API_BASE", "").strip()
     env_key = key or os.environ.get("CHUTES_API_KEY", "").strip()
@@ -110,10 +104,7 @@ def main(
 
     had_openai_env = _unset_openai_envs()
 
-    warnings.filterwarnings(
-        "ignore",
-        message="Pydantic serializer warnings:"
-    )
+    warnings.filterwarnings("ignore", message="Pydantic serializer warnings:")
 
     # Direct path only
     try:

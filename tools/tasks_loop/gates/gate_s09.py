@@ -33,7 +33,7 @@ def load_contract(fixture_name: str) -> dict:
             expected="s09.json",
             actual="missing",
             file=str(contract_path),
-            hint="Run: python utils/compile_contracts.py"
+            hint="Run: python utils/compile_contracts.py",
         )
     return json.loads(contract_path.read_text())
 
@@ -42,7 +42,7 @@ def checks(fixture_name: str):
     contract = load_contract(fixture_name)
     expected = contract.get("expected", {})
     expected_summaries = expected.get("sections_with_summary")
-    
+
     # Find database
     db_path = PIPELINE_DIR / "pipeline.duckdb"
     if not db_path.exists():
@@ -53,35 +53,37 @@ def checks(fixture_name: str):
             expected="pipeline.duckdb",
             actual="missing",
             file=str(PIPELINE_DIR),
-            hint="Run S07 first"
+            hint="Run S07 first",
         )
-    
+
     con = duckdb.connect(str(db_path), read_only=True)
-    
+
     # Check if column exists
     try:
         con.execute("SELECT llm_summary FROM sections LIMIT 1")
     except Exception:
-         raise GateError(
+        raise GateError(
             message="llm_summary column missing",
             expected="column exists in sections table",
             actual="missing",
             file=str(db_path),
-            hint="Run S09"
+            hint="Run S09",
         )
-        
+
     # Check count of non-null summaries
-    actual_summaries = con.execute("SELECT COUNT(*) FROM sections WHERE llm_summary IS NOT NULL").fetchone()[0]
-    
+    actual_summaries = con.execute(
+        "SELECT COUNT(*) FROM sections WHERE llm_summary IS NOT NULL"
+    ).fetchone()[0]
+
     if expected_summaries is not None and actual_summaries < expected_summaries:
-         raise GateError(
+        raise GateError(
             message="Insufficient summaries",
             expected=f"at least {expected_summaries}",
             actual=actual_summaries,
             file=str(db_path),
-            hint="Check S09 LLM execution"
+            hint="Check S09 LLM execution",
         )
-    
+
     print(f"✅ Sections with summary: {actual_summaries} >= {expected_summaries or 0}")
     con.close()
 
@@ -90,5 +92,5 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Gate S09: Section Summarizer")
     parser.add_argument("--fixture", required=True, help="Fixture name")
     args = parser.parse_args()
-    
+
     sys.exit(run_gate("S09: Section Summarizer", lambda: checks(args.fixture)))

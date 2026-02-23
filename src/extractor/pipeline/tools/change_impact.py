@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List
 
 
 def _index_by_key(objs: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
@@ -23,7 +23,8 @@ def change_impact(old_path: Path, new_path: Path, out_file: Path) -> Dict[str, A
         raise ValueError("Both inputs must be lists")
     io = _index_by_key(o)
     inew = _index_by_key(n)
-    old_keys = set(io.keys()); new_keys = set(inew.keys())
+    old_keys = set(io.keys())
+    new_keys = set(inew.keys())
     added = list(new_keys - old_keys)
     removed = list(old_keys - new_keys)
     common = old_keys & new_keys
@@ -35,7 +36,11 @@ def change_impact(old_path: Path, new_path: Path, out_file: Path) -> Dict[str, A
         "added": added,
         "removed": removed,
         "modified": modified,
-        "impact_sections": sorted({inew[k].get("section_id") for k in added if k in inew} | {io[k].get("section_id") for k in removed if k in io} | {inew[k].get("section_id") for k in modified if k in inew}),
+        "impact_sections": sorted(
+            {inew[k].get("section_id") for k in added if k in inew}
+            | {io[k].get("section_id") for k in removed if k in io}
+            | {inew[k].get("section_id") for k in modified if k in inew}
+        ),
     }
     out_file.parent.mkdir(parents=True, exist_ok=True)
     out_file.write_text(json.dumps(report, indent=2))
@@ -53,4 +58,3 @@ if __name__ == "__main__":
         print(json.dumps(res, indent=2))
 
     app()
-

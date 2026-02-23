@@ -47,19 +47,11 @@ def _refresh_latest_status() -> None:
 
 def _run_contract(contract: Contract, *, contracts_root: Path, runner_name: str) -> int:
     runner = AgentFactory.create(runner_name)
-    run_root = (
-        ROOT
-        / "logs"
-        / "contract_loop"
-        / contract.task_id
-        / _timestamp()
-    )
+    run_root = ROOT / "logs" / "contract_loop" / contract.task_id / _timestamp()
     run_root.mkdir(parents=True, exist_ok=True)
 
     schema_path = (
-        Path(contract.agent.output_schema)
-        if contract.agent.output_schema
-        else _default_schema()
+        Path(contract.agent.output_schema) if contract.agent.output_schema else _default_schema()
     )
     prompt = contract.prompt
     handle: RunHandle | None = None
@@ -127,9 +119,7 @@ def _run_contract(contract: Contract, *, contracts_root: Path, runner_name: str)
             _refresh_latest_status()
             return 2
 
-        failure_report = json.loads(
-            gate_result.failure_report_path.read_text(encoding="utf-8")
-        )
+        failure_report = json.loads(gate_result.failure_report_path.read_text(encoding="utf-8"))
         prompt = _build_resume_prompt(failure_report)
 
     return 2
@@ -159,7 +149,7 @@ def main() -> int:
 
     contracts_root = args.contracts_root
     contract_index = args.contract_index or (contracts_root / "CONTRACT.md")
-    
+
     # Determine runner
     runner_name = args.runner or os.environ.get("CONTRACT_LOOP_RUNNER", "claude")
 
@@ -170,11 +160,7 @@ def main() -> int:
 
     for contract_path in contract_paths:
         contract = load_contract(contract_path)
-        result = _run_contract(
-            contract, 
-            contracts_root=contracts_root,
-            runner_name=runner_name
-        )
+        result = _run_contract(contract, contracts_root=contracts_root, runner_name=runner_name)
         _refresh_latest_status()
         if result != 0:
             return result

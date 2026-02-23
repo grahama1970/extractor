@@ -21,9 +21,7 @@ def extract_fast_text(pdf_path: str, pages: Optional[List[int]] = None) -> Dict[
     try:
         import fitz  # PyMuPDF
     except Exception as e:
-        raise RuntimeError(
-            f"PyMuPDF not available: {e}. Install with: pip install pymupdf"
-        )
+        raise RuntimeError(f"PyMuPDF not available: {e}. Install with: pip install pymupdf")
 
     p = Path(pdf_path)
     if not p.exists() or not p.is_file():
@@ -47,4 +45,3 @@ def extract_fast_text(pdf_path: str, pages: Optional[List[int]] = None) -> Dict[
         "page_count": len(result_pages) if pages else page_count,
         "pages": result_pages,
     }
-

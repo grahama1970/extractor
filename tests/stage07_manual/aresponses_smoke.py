@@ -4,7 +4,6 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
-import os
 from dataclasses import dataclass
 from dotenv import load_dotenv, find_dotenv
 from pathlib import Path
@@ -36,10 +35,14 @@ def extract_text(resp: Any) -> str:
         out = resp.get("output")
     buf: List[str] = []
     if isinstance(out, list) and out:
-        content = getattr(out[0], "content", None) or (out[0].get("content") if isinstance(out[0], dict) else None)
+        content = getattr(out[0], "content", None) or (
+            out[0].get("content") if isinstance(out[0], dict) else None
+        )
         if isinstance(content, list):
             for item in content:
-                txt = getattr(item, "text", None) if not isinstance(item, dict) else item.get("text")
+                txt = (
+                    getattr(item, "text", None) if not isinstance(item, dict) else item.get("text")
+                )
                 if isinstance(txt, str) and txt.strip():
                     buf.append(txt)
     return "\n".join(buf)
@@ -54,11 +57,11 @@ def try_parse_json(text: str) -> Optional[Dict[str, Any]]:
             s = s[:-3]
     s = s.strip()
     # naive brace crop
-    if s and (s[0] != '{' or s[-1] != '}'):
-        a = s.find('{')
-        b = s.rfind('}')
+    if s and (s[0] != "{" or s[-1] != "}"):
+        a = s.find("{")
+        b = s.rfind("}")
         if a != -1 and b != -1 and b > a:
-            s = s[a:b+1]
+            s = s[a : b + 1]
     try:
         return json.loads(s)
     except Exception:
@@ -79,7 +82,7 @@ async def try_openai(model: str, items: List[Dict[str, Any]], sys_text: str) -> 
         t = extract_text(r)
         if t.strip():
             return t, "json_object"
-    except Exception as e:
+    except Exception:
         pass
     # 2) json_schema minimal (with image)
     schema = {
@@ -91,7 +94,10 @@ async def try_openai(model: str, items: List[Dict[str, Any]], sys_text: str) -> 
     kwargs2 = {
         "model": model,
         "input": [{"role": "user", "content": items}],
-        "response_format": {"type": "json_schema", "json_schema": {"name": "reflow", "schema": schema, "strict": True}},
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {"name": "reflow", "schema": schema, "strict": True},
+        },
         "max_output_tokens": 400,
         "instructions": sys_text,
     }
@@ -127,11 +133,14 @@ async def main() -> None:
     # Stage-07 style minimal system instruction
     sys_text = (
         "Return ONLY a JSON object with keys: reflowed_json, ocr_corrections, improvements_made, summary. "
-        "reflowed_json must contain {\"section_id\",\"title\",\"blocks\":[]}. No code fences."
+        'reflowed_json must contain {"section_id","title","blocks":[]}. No code fences.'
     )
     # One image + short text
     context = "Stage07 minimal probe"
-    items = [{"type": "input_text", "text": context}, {"type": "input_image", "image_url": section_img}]
+    items = [
+        {"type": "input_text", "text": context},
+        {"type": "input_image", "image_url": section_img},
+    ]
 
     models = [
         Probe("openai/gpt-5-mini", "openai"),
@@ -151,7 +160,9 @@ async def main() -> None:
                 # fallback: text-only
                 if not text.strip():
                     items_text_only = [{"type": "input_text", "text": context}]
-                    text, mode = await try_openai(p.model, items_text_only, sys_text+" Return only minimal JSON if needed.")
+                    text, mode = await try_openai(
+                        p.model, items_text_only, sys_text + " Return only minimal JSON if needed."
+                    )
             elif p.provider == "gemini":
                 text, mode = await try_gemini(p.model, items, sys_text)
                 # fallback: text-only
@@ -169,9 +180,13 @@ async def main() -> None:
             ok = False
             parsed = try_parse_json(text)
             if isinstance(parsed, dict):
-                ok = bool(parsed.get("reflowed_json")) or ("ok" in parsed)  # accept trivial JSON in smoke
+                ok = bool(parsed.get("reflowed_json")) or (
+                    "ok" in parsed
+                )  # accept trivial JSON in smoke
                 if ok:
-                    (outdir / f"{mslug}__parsed.json").write_text(json.dumps(parsed, indent=2, ensure_ascii=False), encoding="utf-8")
+                    (outdir / f"{mslug}__parsed.json").write_text(
+                        json.dumps(parsed, indent=2, ensure_ascii=False), encoding="utf-8"
+                    )
             print(f"mode={mode} len={len(text)} ok={ok}")
         except Exception as e:
             print(f"error: {type(e).__name__}: {e}")

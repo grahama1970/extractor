@@ -29,7 +29,9 @@ def test_extract_content_from_openai_like_dict_text_and_list_parts():
 
 class DummyResp:
     def __init__(self):
-        self.usage = type("U", (), {"prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5})()
+        self.usage = type(
+            "U", (), {"prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5}
+        )()
         self._hidden_params = {"response_cost": 0.000001, "cache_hit": False}
 
 

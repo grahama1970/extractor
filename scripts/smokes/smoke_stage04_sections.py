@@ -31,7 +31,12 @@ def main():
     build = getattr(mod, "build_sections_from_blocks")
     blocks = [
         {"block_type": "SectionHeader", "text": "1. Intro", "page_idx": 0, "bbox": [0, 0, 100, 20]},
-        {"block_type": "Text", "text": "This is the intro.", "page_idx": 0, "bbox": [0, 30, 200, 60]},
+        {
+            "block_type": "Text",
+            "text": "This is the intro.",
+            "page_idx": 0,
+            "bbox": [0, 30, 200, 60],
+        },
         {"block_type": "Text", "text": "More text.", "page_idx": 0, "bbox": [0, 65, 200, 90]},
     ]
     sections = build(blocks, fallback_heuristics=True)

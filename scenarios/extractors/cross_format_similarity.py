@@ -92,6 +92,7 @@ def main() -> int:
         return 0
 
     from scenarios.extractors.common import import_provider
+
     try:
         MarkdownProvider = import_provider("providers/markdown.py", "MarkdownProvider")
         HTMLProvider = import_provider("providers/html.py", "HTMLProvider")
@@ -131,7 +132,11 @@ def main() -> int:
     h_threshold = float(os.getenv("CROSS_FORMAT_HEADING_OVERLAP", "0.8"))
     t_threshold = float(os.getenv("CROSS_FORMAT_TABLE_PARITY", "0.8"))
     f_threshold = float(os.getenv("CROSS_FORMAT_FIGURE_CAPTIONS", "0.8"))
-    enforce_paragraphs = os.getenv("CROSS_FORMAT_ENFORCE_PARAGRAPHS", "0").lower() in {"1", "true", "yes"}
+    enforce_paragraphs = os.getenv("CROSS_FORMAT_ENFORCE_PARAGRAPHS", "0").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
     p_threshold = float(os.getenv("CROSS_FORMAT_PARAGRAPH_PARITY", "0.2"))
 
     # Build top-2 heading sets directly from docs
@@ -187,7 +192,11 @@ def main() -> int:
 
         # Figure caption presence parity (presence counts approximated by FIGURE blocks)
         fa, fb = count_type(dists[a], "FIGURE"), count_type(dists[b], "FIGURE")
-        f_parity = 1.0 if (fa == fb or (fa == 0 and fb == 0)) else (1.0 if min(fa, fb) / max(fa, fb) >= f_threshold else 0.0)
+        f_parity = (
+            1.0
+            if (fa == fb or (fa == 0 and fb == 0))
+            else (1.0 if min(fa, fb) / max(fa, fb) >= f_threshold else 0.0)
+        )
         if f_parity < f_threshold:
             ok = False
             reasons.append(f"figures_parity<{f_threshold}({a},{b})={f_parity:.2f}")
@@ -209,7 +218,11 @@ def main() -> int:
         input_path=str(Path(md).parent),
         provider="cross",
         source_type=None,
-        block_counts={"md": sum(dists["md"].values()), "html": sum(dists["html"].values()), "docx": sum(dists["docx"].values())},
+        block_counts={
+            "md": sum(dists["md"].values()),
+            "html": sum(dists["html"].values()),
+            "docx": sum(dists["docx"].values()),
+        },
         heading_sample=heads.get("md", [])[:5],
         arango_inserted=False,
         artifacts={},

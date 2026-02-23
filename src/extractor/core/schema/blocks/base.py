@@ -85,7 +85,7 @@ class BlockId(BaseModel):
     def validate_block_type(cls, v):
         from extractor.core.schema import BlockTypes
 
-        if not v in BlockTypes:
+        if v not in BlockTypes:
             raise ValueError(f"Invalid block type: {v}")
         return v
 

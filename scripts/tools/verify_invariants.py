@@ -18,7 +18,7 @@ class Check:
     path: str
     json_pointer: str  # e.g., "/sections"
     metric: str  # "len" or "value"
-    op: str      # "==", ">=", "<="
+    op: str  # "==", ">=", "<="
     value: Any
     why: str
 
@@ -60,7 +60,8 @@ def _compare(lhs: Any, op: str, rhs: Any) -> bool:
         ">=": lambda a, b: a >= b,
         "<=": lambda a, b: a <= b,
         "starts_with": lambda a, b: isinstance(a, str) and str(a).startswith(str(b)),
-        "contains": lambda a, b: (isinstance(a, (list, tuple, set)) and b in a) or (isinstance(a, str) and str(b) in a),
+        "contains": lambda a, b: (isinstance(a, (list, tuple, set)) and b in a)
+        or (isinstance(a, str) and str(b) in a),
     }
     return ops.get(op, lambda a, b: False)(lhs, rhs)
 
@@ -109,15 +110,17 @@ def main() -> int:
             if ok:
                 passes.append(c.id)
             else:
-                failures.append({
-                    "id": c.id,
-                    "why": c.why,
-                    "path": str(target),
-                    "metric": c.metric,
-                    "actual": metric_val,
-                    "op": c.op,
-                    "expected": expect,
-                })
+                failures.append(
+                    {
+                        "id": c.id,
+                        "why": c.why,
+                        "path": str(target),
+                        "metric": c.metric,
+                        "actual": metric_val,
+                        "op": c.op,
+                        "expected": expect,
+                    }
+                )
         except Exception as e:
             failures.append({"id": c.id, "why": c.why, "error": str(e), "path": str(target)})
 

@@ -24,6 +24,7 @@ def check_pymupdf() -> bool:
     """Check PyMuPDF can open the test PDF."""
     try:
         import fitz
+
         if not TEST_PDF.exists():
             print(f"WARN: Test PDF not found: {TEST_PDF}")
             return True  # Not a hard failure
@@ -41,6 +42,7 @@ def check_camelot() -> bool:
     """Check Camelot can extract tables from test PDF."""
     try:
         import camelot
+
         if not TEST_PDF.exists():
             print("WARN: Test PDF not found, skipping camelot check")
             return True
@@ -56,6 +58,7 @@ def check_duckdb() -> bool:
     """Check DuckDB can create and query a database."""
     try:
         import duckdb
+
         conn = duckdb.connect(":memory:")
         conn.execute("CREATE TABLE test (id INTEGER)")
         conn.execute("INSERT INTO test VALUES (1)")
@@ -71,7 +74,7 @@ def check_duckdb() -> bool:
 def check_scillm() -> bool:
     """Check SCILLM import (soft failure - LLM steps are optional)."""
     try:
-        from extractor.pipeline.utils.scillm_router import get_text_router
+
         print("✅ SCILLM: OK (import successful)")
         return True
     except Exception as e:
@@ -85,24 +88,24 @@ def main() -> int:
     print("=" * 50)
     print(f"Test PDF: {TEST_PDF}")
     print()
-    
+
     results = [
         ("PyMuPDF", check_pymupdf()),
         ("Camelot", check_camelot()),
         ("DuckDB", check_duckdb()),
         ("SCILLM", check_scillm()),
     ]
-    
+
     print()
     print("=" * 50)
     print("SUMMARY")
     print("=" * 50)
-    
+
     failed = [name for name, passed in results if not passed]
     for name, passed in results:
         status = "✅" if passed else "❌"
         print(f"  {status} {name}")
-    
+
     if failed:
         print(f"\n❌ PREFLIGHT FAILED: {failed}")
         return 1

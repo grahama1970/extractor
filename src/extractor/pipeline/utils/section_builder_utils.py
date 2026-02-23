@@ -9,15 +9,10 @@ from __future__ import annotations
 
 from extractor.pipeline.utils.reliability import log_stage_error
 from typing import Tuple, Dict, Any, Optional, Iterable, List
-import os
 import re as _re
 
 # Delegates to shared heuristics module
 from extractor.pipeline.utils.sections.heuristics import (
-    PDF_LARGE_FONT_THRESHOLD,
-    get_pdf_large_font_threshold,
-    _roman_to_int,
-    _RE_DECIMAL, _RE_DECIMAL_PAREN, _RE_ROMAN, _RE_ROMAN_PAREN, _RE_ALPHA, _RE_LABELED,
     analyze_section_numbering as pdf_analyze_section_numbering,
     extract_section_title as pdf_extract_section_title,
     is_probable_pdf_section_header,
@@ -42,7 +37,7 @@ def canonical_block_order_key(block: Dict[str, Any]) -> Tuple[int, float, float,
             raw_page = block.get("page_idx", block.get("page_index", 0))
         page = int(raw_page)
     except Exception as exc:
-        log_stage_error('section_builder_utils.py', exc, {'context': 'section_builder_utils.py'})
+        log_stage_error("section_builder_utils.py", exc, {"context": "section_builder_utils.py"})
         raise
         page = 0
 
@@ -52,7 +47,9 @@ def canonical_block_order_key(block: Dict[str, Any]) -> Tuple[int, float, float,
             x0 = float(bbox[0])
             y0 = float(bbox[1])
         except Exception as exc:
-            log_stage_error('section_builder_utils.py', exc, {'context': 'section_builder_utils.py'})
+            log_stage_error(
+                "section_builder_utils.py", exc, {"context": "section_builder_utils.py"}
+            )
             raise
             x0 = 0.0
             y0 = 0.0
@@ -64,7 +61,7 @@ def canonical_block_order_key(block: Dict[str, Any]) -> Tuple[int, float, float,
     try:
         bid = int(block.get("block_id", 0))
     except Exception as exc:
-        log_stage_error('section_builder_utils.py', exc, {'context': 'section_builder_utils.py'})
+        log_stage_error("section_builder_utils.py", exc, {"context": "section_builder_utils.py"})
         raise
         bid = 0
 
@@ -79,14 +76,14 @@ def _rgb_to_hex(rgb: Tuple[float, float, float]) -> str:
         b = int(max(0, min(255, round(b * (255 if b <= 1 else 1)))))
         return f"#{r:02x}{g:02x}{b:02x}"
     except Exception as exc:
-        log_stage_error('section_builder_utils.py', exc, {'context': 'section_builder_utils.py'})
+        log_stage_error("section_builder_utils.py", exc, {"context": "section_builder_utils.py"})
         raise
         return "#000000"
 
 
 def _bucket_color(hex_str: str) -> str:
     try:
-        h = hex_str.lstrip('#')
+        h = hex_str.lstrip("#")
         r = int(h[0:2], 16)
         g = int(h[2:4], 16)
         b = int(h[4:6], 16)
@@ -102,17 +99,15 @@ def _bucket_color(hex_str: str) -> str:
             return "blue"
         return "gray"
     except Exception as exc:
-        log_stage_error('section_builder_utils.py', exc, {'context': 'section_builder_utils.py'})
+        log_stage_error("section_builder_utils.py", exc, {"context": "section_builder_utils.py"})
         raise
         return "unknown"
-
-
-
 
 
 # -------------------------------------
 # HTML section‑header detection utility
 # -------------------------------------
+
 
 def html_heading_info(
     *,
@@ -171,7 +166,9 @@ def html_heading_info(
         "level": level,
         "title": title,
         "numbering": na,
-        "reason": ",".join(reason_parts) if reason_parts else ("unknown" if is_header else "not_heading"),
+        "reason": (
+            ",".join(reason_parts) if reason_parts else ("unknown" if is_header else "not_heading")
+        ),
         "spans": {"number": na.get("number_span"), "title": na.get("title_span")},
         "is_boilerplate": is_boilerplate,
     }
@@ -183,9 +180,10 @@ def html_heading_info(
 
 try:  # optional, fast path if installed
     from rapidfuzz import fuzz as _rf_fuzz  # type: ignore
+
     _HAVE_RAPIDFUZZ = True
 except Exception as exc:
-    log_stage_error('section_builder_utils.py', exc, {'context': 'section_builder_utils.py'})
+    log_stage_error("section_builder_utils.py", exc, {"context": "section_builder_utils.py"})
     raise
     _HAVE_RAPIDFUZZ = False
 import difflib as _difflib  # fallback
@@ -388,7 +386,9 @@ def find_header_candidates_in_text(text: str) -> List[Dict[str, Any]]:
     return results
 
 
-def filter_header_candidate(line_text: str, first_span_font: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+def filter_header_candidate(
+    line_text: str, first_span_font: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
     """Precision filter for a single candidate line.
 
     Wraps is_probable_pdf_section_header, returning the same dict but adding

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 Compatibility shims for legacy imports in tests that referenced
 `extractor.pipeline.utils.litellm_image_utils`.
@@ -12,6 +10,8 @@ existing function names used by tests:
 
 Do not add new logic here; keep a thin alias to avoid divergence.
 """
+
+from __future__ import annotations
 
 import httpx  # re-exported for tests that monkeypatch httpx.get
 

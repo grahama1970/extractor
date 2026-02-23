@@ -39,10 +39,20 @@ def sanitize_text(s: str) -> str:
     if not s:
         return s
     removals = [
-        "\u200e", "\u200f",  # LRM/RLM
-        "\u200b", "\u200c", "\u200d",  # zero-width
-        "\u202a", "\u202b", "\u202c", "\u202d", "\u202e",  # bidi overrides
-        "\u2066", "\u2067", "\u2068", "\u2069",  # isolates
+        "\u200e",
+        "\u200f",  # LRM/RLM
+        "\u200b",
+        "\u200c",
+        "\u200d",  # zero-width
+        "\u202a",
+        "\u202b",
+        "\u202c",
+        "\u202d",
+        "\u202e",  # bidi overrides
+        "\u2066",
+        "\u2067",
+        "\u2068",
+        "\u2069",  # isolates
     ]
     for ch in removals:
         s = s.replace(ch, "")
@@ -53,8 +63,19 @@ def sanitize_text(s: str) -> str:
 
 def sanitize_obj(obj: Any, *, max_string: int = 20000) -> Any:
     drop_keys = {
-        "polygons", "polygon", "points", "mask", "glyphs", "glyph", "bitmap",
-        "image_data", "image_bytes", "data_url", "base64", "pix", "chars",
+        "polygons",
+        "polygon",
+        "points",
+        "mask",
+        "glyphs",
+        "glyph",
+        "bitmap",
+        "image_data",
+        "image_bytes",
+        "data_url",
+        "base64",
+        "pix",
+        "chars",
     }
     if isinstance(obj, dict):
         out: Dict[str, Any] = {}
@@ -109,15 +130,44 @@ def approx_image_tokens(width: int, height: int, *, tokens_per_patch: int = 4) -
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--results", default="data/results/pipeline", help="Pipeline results base dir")
-    ap.add_argument("--out", default="tests/stage07_manual", help="Output directory for payload files")
-    ap.add_argument("--auto-triage", action="store_true", help="If over model token budget, write trimmed variants")
-    ap.add_argument("--headroom", type=int, default=1024, help="Reserved tokens for response/overhead")
-    ap.add_argument("--model", default=None, help="Model name for token estimation (default env/openai/gpt-5-mini)")
-    ap.add_argument("--compact", action="store_true", help="Build a compact prompt (no heavy blocks)")
-    ap.add_argument("--table-confidence-threshold", type=float, default=0.6, help="Threshold below which a table image is attached")
-    ap.add_argument("--max-table-rows", type=int, default=20, help="Max rows per high-confidence table to embed")
-    ap.add_argument("--include-figures", action="store_true", help="Include figure images (off by default in compact)")
-    ap.add_argument("--include-annotations", action="store_true", help="Include annotation images (off by default)")
+    ap.add_argument(
+        "--out", default="tests/stage07_manual", help="Output directory for payload files"
+    )
+    ap.add_argument(
+        "--auto-triage",
+        action="store_true",
+        help="If over model token budget, write trimmed variants",
+    )
+    ap.add_argument(
+        "--headroom", type=int, default=1024, help="Reserved tokens for response/overhead"
+    )
+    ap.add_argument(
+        "--model",
+        default=None,
+        help="Model name for token estimation (default env/openai/gpt-5-mini)",
+    )
+    ap.add_argument(
+        "--compact", action="store_true", help="Build a compact prompt (no heavy blocks)"
+    )
+    ap.add_argument(
+        "--table-confidence-threshold",
+        type=float,
+        default=0.6,
+        help="Threshold below which a table image is attached",
+    )
+    ap.add_argument(
+        "--max-table-rows", type=int, default=20, help="Max rows per high-confidence table to embed"
+    )
+    ap.add_argument(
+        "--include-figures",
+        action="store_true",
+        help="Include figure images (off by default in compact)",
+    )
+    ap.add_argument(
+        "--include-annotations",
+        action="store_true",
+        help="Include annotation images (off by default)",
+    )
     ap.set_defaults(compact=True)
     args = ap.parse_args()
 
@@ -134,7 +184,9 @@ def main() -> None:
     section = sec_list[0] if sec_list else {}
     title = section.get("display_title") or section.get("title") or "Untitled"
 
-    raw_text = section.get("merged_text") or section.get("source_text") or section.get("raw_text") or ""
+    raw_text = (
+        section.get("merged_text") or section.get("source_text") or section.get("raw_text") or ""
+    )
     if not raw_text:
         lines: List[str] = []
         for b in section.get("blocks", []) or []:
@@ -221,8 +273,10 @@ def main() -> None:
         "level": section.get("level"),
         "page_start": section.get("page_start"),
         "page_end": section.get("page_end", section.get("page_start")),
-        "section_number": (section.get("metadata") or {}).get("section_number") or section.get("section_number"),
-        "section_hash": (section.get("metadata") or {}).get("section_hash") or section.get("section_hash"),
+        "section_number": (section.get("metadata") or {}).get("section_number")
+        or section.get("section_number"),
+        "section_hash": (section.get("metadata") or {}).get("section_hash")
+        or section.get("section_hash"),
         "blocks_count": len(section.get("blocks", [])),
     }
     ctx_lines.append("\nSection JSON Summary:")
@@ -237,7 +291,9 @@ def main() -> None:
         dst = outdir / "images" / "section.png"
         dst.write_bytes(section_img_path.read_bytes())
         payload_images.append(dst)
-        payload_meta.append({"order": len(payload_meta) + 1, "kind": "section", "filename": f"images/{dst.name}"})
+        payload_meta.append(
+            {"order": len(payload_meta) + 1, "kind": "section", "filename": f"images/{dst.name}"}
+        )
 
     tdir = outdir / "images"
     t_idx = 1
@@ -250,13 +306,15 @@ def main() -> None:
             dst = tdir / f"table{t_idx}.png"
             dst.write_bytes(src.read_bytes())
             payload_images.append(dst)
-            payload_meta.append({
-                "order": len(payload_meta) + 1,
-                "kind": "table",
-                "filename": f"images/{dst.name}",
-                "table_index": t_idx,
-                "confidence": round(table_confidence(t), 3),
-            })
+            payload_meta.append(
+                {
+                    "order": len(payload_meta) + 1,
+                    "kind": "table",
+                    "filename": f"images/{dst.name}",
+                    "table_index": t_idx,
+                    "confidence": round(table_confidence(t), 3),
+                }
+            )
         t_idx += 1
 
     if args.include_figures or not args.compact:
@@ -270,7 +328,14 @@ def main() -> None:
                 dst = tdir / f"figure{f_idx}.png"
                 dst.write_bytes(src.read_bytes())
                 payload_images.append(dst)
-                payload_meta.append({"order": len(payload_meta) + 1, "kind": "figure", "filename": f"images/{dst.name}", "figure_index": f_idx})
+                payload_meta.append(
+                    {
+                        "order": len(payload_meta) + 1,
+                        "kind": "figure",
+                        "filename": f"images/{dst.name}",
+                        "figure_index": f_idx,
+                    }
+                )
                 f_idx += 1
 
     # Include up to 2 annotation images if requested
@@ -289,7 +354,14 @@ def main() -> None:
                 dst = tdir / f"annotation{a_idx}.png"
                 dst.write_bytes(src.read_bytes())
                 payload_images.append(dst)
-                payload_meta.append({"order": len(payload_meta) + 1, "kind": "annotation", "filename": f"images/{dst.name}", "annotation_index": a_idx})
+                payload_meta.append(
+                    {
+                        "order": len(payload_meta) + 1,
+                        "kind": "annotation",
+                        "filename": f"images/{dst.name}",
+                        "annotation_index": a_idx,
+                    }
+                )
                 a_idx += 1
 
     # Enrich images manifest with sizes and token estimates
@@ -299,13 +371,15 @@ def main() -> None:
             try:
                 im = Image.open(p)
                 w, h = im.size
-                info.update({
-                    "width": w,
-                    "height": h,
-                    "pixels": w * h,
-                    "megapixels": round((w * h) / 1_000_000, 2),
-                    "approx_tokens": approx_image_tokens(w, h),
-                })
+                info.update(
+                    {
+                        "width": w,
+                        "height": h,
+                        "pixels": w * h,
+                        "megapixels": round((w * h) / 1_000_000, 2),
+                        "approx_tokens": approx_image_tokens(w, h),
+                    }
+                )
             except Exception:
                 info.update({"approx_tokens": 64})
         else:
@@ -314,11 +388,16 @@ def main() -> None:
 
     for meta, p in zip(payload_meta, payload_images):
         meta.update(_image_info(p))
-    (outdir / "images_manifest.json").write_text(json.dumps({"images": payload_meta}, ensure_ascii=False, indent=2), encoding="utf-8")
+    (outdir / "images_manifest.json").write_text(
+        json.dumps({"images": payload_meta}, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
     # Token estimate
     import os as _os
-    model_name = args.model or (_os.getenv("LITELLM_VLM_MODEL") or _os.getenv("LITELLM_MODEL") or "openai/gpt-5-mini")
+
+    model_name = args.model or (
+        _os.getenv("LITELLM_VLM_MODEL") or _os.getenv("LITELLM_MODEL") or "openai/gpt-5-mini"
+    )
     sec_sanitized = sanitize_obj(section)
     section_full_sanitized = json.dumps(sec_sanitized, ensure_ascii=False, indent=2)
     (outdir / "section_full_sanitized.json").write_text(section_full_sanitized, encoding="utf-8")
@@ -339,26 +418,35 @@ def main() -> None:
         if table_confidence(t) >= float(args.table_confidence_threshold):
             for r in df_rows[: int(args.max_table_rows)]:
                 rows.append([r.get(c, None) for c in cols])
-        tables_compact.append({"index": i, "columns": cols, "rows": rows, "confidence": round(table_confidence(t), 3)})
-    ctx_tables_compact = json.dumps({"tables_compact": tables_compact}, ensure_ascii=False, indent=2)
+        tables_compact.append(
+            {"index": i, "columns": cols, "rows": rows, "confidence": round(table_confidence(t), 3)}
+        )
+    ctx_tables_compact = json.dumps(
+        {"tables_compact": tables_compact}, ensure_ascii=False, indent=2
+    )
 
     full_tables_payload = []
     for i, t in enumerate(table_list, start=1):
         pm = t.get("pandas_metrics") or {}
-        full_tables_payload.append({
-            "index": i,
-            "metrics": sanitize_obj(pm, max_string=100000),
-            "pandas_df": sanitize_obj(t.get("pandas_df") or [], max_string=100000),
-        })
+        full_tables_payload.append(
+            {
+                "index": i,
+                "metrics": sanitize_obj(pm, max_string=100000),
+                "pandas_df": sanitize_obj(t.get("pandas_df") or [], max_string=100000),
+            }
+        )
     ctx_tables_full = json.dumps({"tables_full": full_tables_payload}, ensure_ascii=False, indent=2)
 
     # Token totals
-    text_tokens = approx_text_tokens(context_text, model_name) + approx_text_tokens(section_full_sanitized, model_name)
+    text_tokens = approx_text_tokens(context_text, model_name) + approx_text_tokens(
+        section_full_sanitized, model_name
+    )
     image_tokens_total = sum(int(m.get("approx_tokens", 0) or 0) for m in payload_meta)
 
     def _model_max_tokens(name: str) -> Optional[int]:
         try:
             from litellm import get_max_tokens as _get_max  # type: ignore
+
             return int(_get_max(name))
         except Exception:
             low = (name or "").lower()
@@ -380,7 +468,9 @@ def main() -> None:
         "section_json_chars": len(section_full_sanitized),
         "tables_compact_chars": len(ctx_tables_compact),
     }
-    (outdir / "token_estimate.json").write_text(json.dumps(token_report, ensure_ascii=False, indent=2), encoding="utf-8")
+    (outdir / "token_estimate.json").write_text(
+        json.dumps(token_report, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
     # Auto-triage images if over budget
     triage_applied = False
@@ -404,7 +494,11 @@ def main() -> None:
                     return 1
                 return 0
 
-            candidates = sorted(payload_meta, key=lambda m: (importance_rank(m), int(m.get("approx_tokens", 0) or 0)), reverse=True)
+            candidates = sorted(
+                payload_meta,
+                key=lambda m: (importance_rank(m), int(m.get("approx_tokens", 0) or 0)),
+                reverse=True,
+            )
             removed: List[Dict[str, Any]] = []
             saved = 0
             for m in candidates:
@@ -417,14 +511,26 @@ def main() -> None:
             kept = [m for m in payload_meta if m not in removed]
 
             (outdir / "images_manifest_trimmed.json").write_text(
-                json.dumps({"images": kept, "removed": [m.get("filename") for m in removed], "over_by": over_by}, ensure_ascii=False, indent=2),
+                json.dumps(
+                    {
+                        "images": kept,
+                        "removed": [m.get("filename") for m in removed],
+                        "over_by": over_by,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
                 encoding="utf-8",
             )
 
             # Write trimmed JSON payload variants
-            trimmed_input_content: List[Dict[str, Any]] = [{"type": "input_text", "text": context_text}]
+            trimmed_input_content: List[Dict[str, Any]] = [
+                {"type": "input_text", "text": context_text}
+            ]
             for m in kept:
-                trimmed_input_content.append({"type": "input_image", "image_url": f"<attach via UI: {m['filename']}>"})
+                trimmed_input_content.append(
+                    {"type": "input_image", "image_url": f"<attach via UI: {m['filename']}>"}
+                )
             responses_payload_trimmed = {
                 "model": model_name,
                 "temperature": 1.0,
@@ -432,19 +538,31 @@ def main() -> None:
                 "response_format": {"type": "json_object"},
                 "input": [{"role": "user", "content": trimmed_input_content}],
             }
-            (outdir / "responses_input_trimmed.json").write_text(json.dumps(responses_payload_trimmed, ensure_ascii=False, indent=2), encoding="utf-8")
+            (outdir / "responses_input_trimmed.json").write_text(
+                json.dumps(responses_payload_trimmed, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
 
-            trimmed_messages_content: List[Dict[str, Any]] = [{"type": "text", "text": context_text}]
+            trimmed_messages_content: List[Dict[str, Any]] = [
+                {"type": "text", "text": context_text}
+            ]
             for m in kept:
-                trimmed_messages_content.append({"type": "image_url", "image_url": {"url": f"<attach via UI: {m['filename']}>"}})
+                trimmed_messages_content.append(
+                    {"type": "image_url", "image_url": {"url": f"<attach via UI: {m['filename']}>"}}
+                )
             chat_payload_trimmed = {
                 "model": model_name,
                 "messages": [
-                    {"role": "system", "content": "You are a technical editor. Reflow input into clean Markdown and return strict JSON with keys: reflowed_text, ocr_corrections, improvements_made, summary."},
+                    {
+                        "role": "system",
+                        "content": "You are a technical editor. Reflow input into clean Markdown and return strict JSON with keys: reflowed_text, ocr_corrections, improvements_made, summary.",
+                    },
                     {"role": "user", "content": trimmed_messages_content},
                 ],
             }
-            (outdir / "chat_messages_trimmed.json").write_text(json.dumps(chat_payload_trimmed, ensure_ascii=False, indent=2), encoding="utf-8")
+            (outdir / "chat_messages_trimmed.json").write_text(
+                json.dumps(chat_payload_trimmed, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
 
             triage_applied = True
             triage_kept = kept
@@ -452,7 +570,9 @@ def main() -> None:
     # Write Responses input and Chat messages (templates; filenames for images)
     input_content: List[Dict[str, Any]] = [{"type": "input_text", "text": context_text}]
     for p in payload_images:
-        input_content.append({"type": "input_image", "image_url": f"<attach via UI: images/{p.name}>"})
+        input_content.append(
+            {"type": "input_image", "image_url": f"<attach via UI: images/{p.name}>"}
+        )
     responses_payload = {
         "model": "gpt-5-mini",
         "temperature": 1.0,
@@ -460,19 +580,28 @@ def main() -> None:
         "response_format": {"type": "json_object"},
         "input": [{"role": "user", "content": input_content}],
     }
-    (outdir / "responses_input.json").write_text(json.dumps(responses_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    (outdir / "responses_input.json").write_text(
+        json.dumps(responses_payload, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
     messages_content: List[Dict[str, Any]] = [{"type": "text", "text": context_text}]
     for p in payload_images:
-        messages_content.append({"type": "image_url", "image_url": {"url": f"<attach via UI: images/{p.name}>"}})
+        messages_content.append(
+            {"type": "image_url", "image_url": {"url": f"<attach via UI: images/{p.name}>"}}
+        )
     chat_payload = {
         "model": "gpt-5-mini",
         "messages": [
-            {"role": "system", "content": "You are a technical editor. Reflow input into clean Markdown and return strict JSON with keys: reflowed_text, ocr_corrections, improvements_made, summary."},
+            {
+                "role": "system",
+                "content": "You are a technical editor. Reflow input into clean Markdown and return strict JSON with keys: reflowed_text, ocr_corrections, improvements_made, summary.",
+            },
             {"role": "user", "content": messages_content},
         ],
     }
-    (outdir / "chat_messages.json").write_text(json.dumps(chat_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    (outdir / "chat_messages.json").write_text(
+        json.dumps(chat_payload, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
     # Web prompts
     system_prompt = (
@@ -489,32 +618,32 @@ def main() -> None:
         "- Text/Headings/Lists: Fix OCR splits/hyphenation and obvious typos only outside tables. Record fixes in ocr_corrections.\n\n"
         "Return ONLY this JSON object (no extra text):\n"
         "{\n"
-        "  \"section_id\": string,\n"
-        "  \"title\": string,\n"
-        "  \"blocks\": [\n"
-        "    { \"type\": \"heading\", \"level\": int, \"text\": string, \"source\": { \"pages\": [int], \"block_ids\": [string] } },\n"
-        "    { \"type\": \"paragraph\", \"text\": string, \n"
-        "      \"source\": { \"pages\": [int], \"block_ids\": [string] } },\n"
-        "    { \"type\": \"list\", \"style\": \"bulleted|numbered\", \"items\": [string, ...], \n"
-        "      \"source\": { \"pages\": [int], \"block_ids\": [string] } },\n"
-        "    { \"type\": \"table\", \n"
-        "      \"title\": string | null,\n"
-        "      \"columns\": [string], \n"
-        "      \"rows\": [[string|number|null, ...]], \n"
-        "      \"confidence\": { \"status\": \"high|medium|low\", \"density\": number|null, \"source\": \"camelot+pandas\" },\n"
-        "      \"markdown\": string | null, \n"
-        "      \"markdown_provenance\": \"image\" | null, \n"
-        "      \"image_refs\": [string, ...],\n"
-        "      \"source\": { \"table_indices\": [int], \"page_indices\": [int] } },\n"
-        "    { \"type\": \"figure\", \"title\": string | null, \"caption\": string | null, \"alt\": string, \"image_ref\": string, \n"
-        "      \"source\": { \"pages\": [int], \"block_ids\": [string] } }\n"
+        '  "section_id": string,\n'
+        '  "title": string,\n'
+        '  "blocks": [\n'
+        '    { "type": "heading", "level": int, "text": string, "source": { "pages": [int], "block_ids": [string] } },\n'
+        '    { "type": "paragraph", "text": string, \n'
+        '      "source": { "pages": [int], "block_ids": [string] } },\n'
+        '    { "type": "list", "style": "bulleted|numbered", "items": [string, ...], \n'
+        '      "source": { "pages": [int], "block_ids": [string] } },\n'
+        '    { "type": "table", \n'
+        '      "title": string | null,\n'
+        '      "columns": [string], \n'
+        '      "rows": [[string|number|null, ...]], \n'
+        '      "confidence": { "status": "high|medium|low", "density": number|null, "source": "camelot+pandas" },\n'
+        '      "markdown": string | null, \n'
+        '      "markdown_provenance": "image" | null, \n'
+        '      "image_refs": [string, ...],\n'
+        '      "source": { "table_indices": [int], "page_indices": [int] } },\n'
+        '    { "type": "figure", "title": string | null, "caption": string | null, "alt": string, "image_ref": string, \n'
+        '      "source": { "pages": [int], "block_ids": [string] } }\n'
         "  ],\n"
-        "  \"ocr_corrections\": { \"erroneous\": \"corrected\", ... },\n"
-        "  \"improvements_made\": string,\n"
-        "  \"summary\": string\n"
+        '  "ocr_corrections": { "erroneous": "corrected", ... },\n'
+        '  "improvements_made": string,\n'
+        '  "summary": string\n'
         "}\n\n"
         "Notes\n"
-        "- Tables: build from provided columns+rows; ensure exact cell content; trim whitespace only. Include markdown only if pandas failed or confidence is low, in which case set markdown_provenance=\"image\" and add relevant image_refs.\n"
+        '- Tables: build from provided columns+rows; ensure exact cell content; trim whitespace only. Include markdown only if pandas failed or confidence is low, in which case set markdown_provenance="image" and add relevant image_refs.\n'
         "- Use provided titles from 'Titles (tables & figures)'. If none literal, use the INFERRED: title as-is (light rephrasing allowed).\n"
         "- Figures: include a concise caption and set image_ref to the uploaded filename (e.g., images/figure1.png).\n"
         "- Return strict JSON only."
@@ -543,7 +672,13 @@ def main() -> None:
         except Exception:
             return 0.0
 
-    def _closest_text(blocks: List[Dict[str, Any]], page: int, target_bbox: List[float], direction: str = "above", max_gap: float = 50.0) -> Optional[Dict[str, Any]]:
+    def _closest_text(
+        blocks: List[Dict[str, Any]],
+        page: int,
+        target_bbox: List[float],
+        direction: str = "above",
+        max_gap: float = 50.0,
+    ) -> Optional[Dict[str, Any]]:
         best, best_gap = None, 1e9
         for b in blocks or []:
             try:
@@ -577,14 +712,18 @@ def main() -> None:
         try:
             page = int(t.get("page_index", 0) or 0)
             tb = t.get("bbox") or []
-            cand = _closest_text(sec_blocks, page, tb, "above") or _closest_text(sec_blocks, page, tb, "below")
+            cand = _closest_text(sec_blocks, page, tb, "above") or _closest_text(
+                sec_blocks, page, tb, "below"
+            )
             txt = _btxt(cand)
             if txt:
                 title = txt
             else:
                 cols = (t.get("pandas_metrics") or {}).get("columns") or []
                 head = ", ".join(map(str, cols[:3]))
-                title, derived = (f"INFERRED: Table - {head}" if head else "INFERRED: Table"), "inferred"
+                title, derived = (
+                    f"INFERRED: Table - {head}" if head else "INFERRED: Table"
+                ), "inferred"
         except Exception:
             title, derived = "INFERRED: Table", "inferred"
         tables_titles.append({"index": i, "title": title, "derived": derived})
@@ -595,13 +734,17 @@ def main() -> None:
         try:
             page = int(f.get("page", f.get("page_idx", 0)) or 0)
             fb = f.get("bbox") or []
-            cand = _closest_text(sec_blocks, page, fb, "above") or _closest_text(sec_blocks, page, fb, "below")
+            cand = _closest_text(sec_blocks, page, fb, "above") or _closest_text(
+                sec_blocks, page, fb, "below"
+            )
             txt = _btxt(cand)
             if txt:
                 title = txt
             else:
                 adesc = sanitize_text(str(f.get("ai_description") or ""))
-                title, derived = (f"INFERRED: {adesc[:80]}" if adesc else "INFERRED: Figure"), "inferred"
+                title, derived = (
+                    f"INFERRED: {adesc[:80]}" if adesc else "INFERRED: Figure"
+                ), "inferred"
         except Exception:
             title, derived = "INFERRED: Figure", "inferred"
         figures_titles.append({"index": j, "title": title, "derived": derived})
@@ -645,7 +788,9 @@ def main() -> None:
         prompt_lines_trim.append("\nTrimmed Attach List (auto-triage applied):")
         for m in triage_kept:
             prompt_lines_trim.append(f" - {m['filename']}")
-        (outdir / "prompt_web_trimmed.md").write_text("\n".join(prompt_lines_trim), encoding="utf-8")
+        (outdir / "prompt_web_trimmed.md").write_text(
+            "\n".join(prompt_lines_trim), encoding="utf-8"
+        )
 
     # Relaxed variant (no strict JSON)
     relaxed_sys = (

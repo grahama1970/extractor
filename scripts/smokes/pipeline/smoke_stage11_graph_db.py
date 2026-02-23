@@ -80,4 +80,3 @@ def main(results: Path = typer.Option(Path("data/results/pipeline_db_smoke"), "-
 
 if __name__ == "__main__":
     app()
-

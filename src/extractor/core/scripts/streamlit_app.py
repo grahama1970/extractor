@@ -30,6 +30,8 @@ from extractor.core.config.parser import ConfigParser
 from extractor.core.output import text_from_rendered
 from extractor.core.schema import BlockTypes
 
+_model_dict = create__model_dict()
+
 COLORS = [
     "#4e79a7",
     "#f28e2c",
@@ -245,16 +247,16 @@ with open(
                                                                                 )
 
                                                                                 with col1:
-                                                                                    page_count = (
+                                                                                    total_pages = (
                                                                                         page_count(
                                                                                             in_file
                                                                                         )
                                                                                     )
                                                                                     page_number = st.number_input(
-                                                                                        f"Page number out of {page_count}:",
+                                                                                        f"Page number out of {total_pages}:",
                                                                                         min_value=0,
                                                                                         value=0,
-                                                                                        max_value=page_count,
+                                                                                        max_value=total_pages,
                                                                                     )
                                                                                     pil_image = get_page_image(
                                                                                         in_file,

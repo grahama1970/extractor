@@ -29,7 +29,7 @@ def load_contract(fixture_name: str) -> dict:
             expected="s05.json",
             actual="missing",
             file=str(contract_path),
-            hint="Run: python utils/compile_contracts.py"
+            hint="Run: python utils/compile_contracts.py",
         )
     return json.loads(contract_path.read_text())
 
@@ -38,13 +38,13 @@ def checks(fixture_name: str):
     contract = load_contract(fixture_name)
     expected = contract.get("expected", {})
     expected_table_count = expected.get("table_count")
-    
+
     tables_file = JSON_DIR / "05_tables.json"
     data = load_json(tables_file, required_keys=["tables"])
-    
+
     tables = data.get("tables", [])
     actual_count = len(tables)
-    
+
     if expected_table_count is not None:
         if actual_count < expected_table_count:
             raise GateError(
@@ -52,10 +52,12 @@ def checks(fixture_name: str):
                 expected=f">={expected_table_count}",
                 actual=actual_count,
                 file=str(tables_file),
-                hint="Check Camelot extraction (maybe tables missed?)"
+                hint="Check Camelot extraction (maybe tables missed?)",
             )
         elif actual_count > expected_table_count:
-            print(f"⚠️  Table count higher than expected ({actual_count} > {expected_table_count}). Assuming splits.")
+            print(
+                f"⚠️  Table count higher than expected ({actual_count} > {expected_table_count}). Assuming splits."
+            )
         else:
             print(f"✅ Table count: {actual_count} == {expected_table_count}")
     else:
@@ -66,5 +68,5 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Gate S05: Table Extractor")
     parser.add_argument("--fixture", required=True, help="Fixture name")
     args = parser.parse_args()
-    
+
     sys.exit(run_gate("S05: Table Extractor", lambda: checks(args.fixture)))

@@ -6,13 +6,14 @@ from pathlib import Path
 from typing import Optional
 
 import typer
-from loguru import logger
 
 from extractor.pipeline.utils.deprecated_codex_call import run_codex_exec
 import aiohttp
 import asyncio
 
-app = typer.Typer(help="Request research via Codex exec using MCP Perplexity + Context7 (JSON output)")
+app = typer.Typer(
+    help="Request research via Codex exec using MCP Perplexity + Context7 (JSON output)"
+)
 
 
 async def _post_log(api_base: Optional[str], payload: dict) -> None:
@@ -20,7 +21,9 @@ async def _post_log(api_base: Optional[str], payload: dict) -> None:
         return
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.post(api_base.rstrip('/') + '/ingest/log', json=payload, timeout=10) as _:
+            async with session.post(
+                api_base.rstrip("/") + "/ingest/log", json=payload, timeout=10
+            ) as _:
                 pass
     except Exception:
         pass
@@ -29,20 +32,27 @@ async def _post_log(api_base: Optional[str], payload: dict) -> None:
 @app.command()
 def run(
     topic: str = typer.Option(..., help="Research topic/problem statement"),
-    context_file: Optional[Path] = typer.Option(None, help="Optional context file to include in the prompt"),
+    context_file: Optional[Path] = typer.Option(
+        None, help="Optional context file to include in the prompt"
+    ),
     api_base: Optional[str] = typer.Option(None, help="Optional ingest API base for logging"),
     run_id: str = typer.Option("run-research", help="Run id for logging"),
     variant: str = typer.Option("research", help="Variant tag for logging"),
     codex_bin: str = typer.Option("codex", help="Codex CLI binary"),
     yolo: bool = typer.Option(True, help="--dangerously-bypass-approvals-and-sandbox"),
     sandbox: Optional[str] = typer.Option(None, help="--sandbox value"),
-    save_to: Optional[Path] = typer.Option(None, help="Optional path to save the full research JSON (e.g., data/research/research_YYYYMMDD.json)"),
-    docs_dir: Optional[Path] = typer.Option(None, help="Optional directory to write docs summaries (Context7) as individual JSON files"),
+    save_to: Optional[Path] = typer.Option(
+        None,
+        help="Optional path to save the full research JSON (e.g., data/research/research_YYYYMMDD.json)",
+    ),
+    docs_dir: Optional[Path] = typer.Option(
+        None, help="Optional directory to write docs summaries (Context7) as individual JSON files"
+    ),
 ):
     ctx_text = ""
     if context_file and context_file.exists():
         try:
-            ctx_text = context_file.read_text(encoding='utf-8')
+            ctx_text = context_file.read_text(encoding="utf-8")
         except Exception:
             ctx_text = ""
 
@@ -58,13 +68,13 @@ def run(
             "heuristics": [],
             "docs": [],
             "takeaways": [],
-            "sources": []
+            "sources": [],
         },
         "instructions": [
             "Use Perplexity MCP for external evidence; include citations.",
             "Use Context7 MCP for exact API docs/limits.",
-            "Output one JSON object only following schema." 
-        ]
+            "Output one JSON object only following schema.",
+        ],
     }
 
     prompt = (
@@ -74,15 +84,26 @@ def run(
     )
 
     async def _go():
-        await _post_log(api_base, {"ts": time.time(), "run_id": run_id, "variant": variant, "stream": "app", "source": "codex_research", "message": f"Research start: {topic}", "meta": {}})
+        await _post_log(
+            api_base,
+            {
+                "ts": time.time(),
+                "run_id": run_id,
+                "variant": variant,
+                "stream": "app",
+                "source": "codex_research",
+                "message": f"Research start: {topic}",
+                "meta": {},
+            },
+        )
 
         res = await run_codex_exec(
             script_or_path=prompt,
             codex_bin=codex_bin,
             bypass_approvals_and_sandbox=yolo,
             sandbox_mode=sandbox,
-            stdout_capture_limit=512*1024,
-            stderr_capture_limit=512*1024,
+            stdout_capture_limit=512 * 1024,
+            stderr_capture_limit=512 * 1024,
         )
         out = (res.stdout or "").strip()
         print(out)
@@ -95,7 +116,18 @@ def run(
             try:
                 save_to.parent.mkdir(parents=True, exist_ok=True)
                 save_to.write_text(json.dumps(obj, ensure_ascii=False, indent=2))
-                await _post_log(api_base, {"ts": time.time(), "run_id": run_id, "variant": variant, "stream": "app", "source": "codex_research", "message": f"Saved research to {save_to}", "meta": {}})
+                await _post_log(
+                    api_base,
+                    {
+                        "ts": time.time(),
+                        "run_id": run_id,
+                        "variant": variant,
+                        "stream": "app",
+                        "source": "codex_research",
+                        "message": f"Saved research to {save_to}",
+                        "meta": {},
+                    },
+                )
             except Exception:
                 pass
         if obj is not None and docs_dir:
@@ -109,12 +141,38 @@ def run(
                             name = d.get("id") or d.get("library") or d.get("name")
                         if not name:
                             name = f"doc_{i+1}"
-                        safe = "".join(c if c.isalnum() or c in ("-","_",".") else "_" for c in str(name))
-                        (docs_dir / f"{safe}.json").write_text(json.dumps(d, ensure_ascii=False, indent=2))
-                    await _post_log(api_base, {"ts": time.time(), "run_id": run_id, "variant": variant, "stream": "app", "source": "codex_research", "message": f"Saved {len(docs)} docs to {docs_dir}", "meta": {}})
+                        safe = "".join(
+                            c if c.isalnum() or c in ("-", "_", ".") else "_" for c in str(name)
+                        )
+                        (docs_dir / f"{safe}.json").write_text(
+                            json.dumps(d, ensure_ascii=False, indent=2)
+                        )
+                    await _post_log(
+                        api_base,
+                        {
+                            "ts": time.time(),
+                            "run_id": run_id,
+                            "variant": variant,
+                            "stream": "app",
+                            "source": "codex_research",
+                            "message": f"Saved {len(docs)} docs to {docs_dir}",
+                            "meta": {},
+                        },
+                    )
             except Exception:
                 pass
-        await _post_log(api_base, {"ts": time.time(), "run_id": run_id, "variant": variant, "stream": "stdout", "source": "codex_research", "message": out[-800] if out else "", "meta": {"rc": res.returncode}})
+        await _post_log(
+            api_base,
+            {
+                "ts": time.time(),
+                "run_id": run_id,
+                "variant": variant,
+                "stream": "stdout",
+                "source": "codex_research",
+                "message": out[-800] if out else "",
+                "meta": {"rc": res.returncode},
+            },
+        )
 
     asyncio.run(_go())
 

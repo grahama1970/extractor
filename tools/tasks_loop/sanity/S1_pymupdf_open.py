@@ -2,6 +2,7 @@
 import sys
 import fitz
 
+
 def main():
     try:
         doc = fitz.open("fixtures/camelot_fixture.pdf")
@@ -9,6 +10,7 @@ def main():
     except Exception as e:
         print(f"FAIL: {e}")
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()

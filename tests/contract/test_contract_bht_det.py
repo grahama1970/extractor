@@ -28,4 +28,3 @@ def test_bht_deterministic_contract():
     assert all(isinstance(p, int) and p >= 1 for p in pages)
     # Offline: merged groups may be zero
     assert summary.get("merged_table_groups", 0) >= 0
-

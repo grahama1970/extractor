@@ -11,13 +11,17 @@ def _get_adapter(logs_root: Optional[Path] = None):
     """
     try:  # prefer local path when executed inside repo
         from src.llm_adapter.adapter import LLMAdapter  # type: ignore
+
         return LLMAdapter(logs_root=logs_root)
     except Exception:
         try:
             from llm_adapter.adapter import LLMAdapter  # type: ignore
+
             return LLMAdapter(logs_root=logs_root)
         except Exception as e:
-            raise ImportError(f"LLMAdapter unavailable: {e}. Ensure scillm/adapter deps are installed.")
+            raise ImportError(
+                f"LLMAdapter unavailable: {e}. Ensure scillm/adapter deps are installed."
+            )
 
 
 def apply_schema_hint(model: str, user_text: str) -> str:
@@ -39,9 +43,9 @@ def apply_schema_hint(model: str, user_text: str) -> str:
     if os.getenv("STAGE07_FORCE_SCHEMA_HINT", "1").lower() in ("1", "true", "yes", "y"):
         hint = (
             "\nTop-level object MUST be exactly: {"
-            "\"reflowed_json\": object, \"ocr_corrections\": object, "
-            "\"improvements_made\": string, \"summary\": string }. "
-            "Inside reflowed_json: { \"title\": string, \"blocks\": array }. "
+            '"reflowed_json": object, "ocr_corrections": object, '
+            '"improvements_made": string, "summary": string }. '
+            'Inside reflowed_json: { "title": string, "blocks": array }. '
             "Each block is one of: paragraph/list/table/figure. "
             "Do not add extra top-level keys."
         )

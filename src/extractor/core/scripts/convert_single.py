@@ -114,5 +114,8 @@ def main(pdf_path, **kwargs):
 
 
 if __name__ == "__main__":
-    print('[deprecated] convert_single is no longer supported.\nUse: python -m src.cli extract <input> <out_dir> [--mode fast|accurate]', file=__import__('sys').stderr)
+    print(
+        "[deprecated] convert_single is no longer supported.\nUse: python -m src.cli extract <input> <out_dir> [--mode fast|accurate]",
+        file=__import__("sys").stderr,
+    )
     raise SystemExit(2)

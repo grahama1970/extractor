@@ -8,8 +8,10 @@
 # ///
 
 from __future__ import annotations
-import time, uuid, random
-from typing import List, Dict
+import time
+import uuid
+import random
+from typing import List
 import typer
 from scripts.lessons.arango_client import get_db
 
@@ -71,7 +73,7 @@ def seed(
     batch: str = typer.Option("", help="Demo batch id; default random UUID"),
 ):
     db = get_db()
-    col = db.collection("lessons")
+    db.collection("lessons")
     ts = int(time.time())
     batch_id = batch or uuid.uuid4().hex[:12]
     inserted = 0
@@ -113,4 +115,3 @@ def seed(
 
 if __name__ == "__main__":
     app()
-

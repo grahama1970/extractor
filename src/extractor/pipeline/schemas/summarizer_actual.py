@@ -14,12 +14,14 @@ from pydantic import BaseModel, Field
 
 class SummaryData(BaseModel):
     """Summary data for a regular section."""
+
     summary: str
     key_concepts: List[str] = Field(default_factory=list)
 
 
 class CheckpointSummaryData(BaseModel):
     """Checkpoint summary data with additional fields."""
+
     checkpoint_summary: str
     major_themes: List[str] = Field(default_factory=list)
     key_concepts: List[str] = Field(default_factory=list)
@@ -28,6 +30,7 @@ class CheckpointSummaryData(BaseModel):
 
 class Summary(BaseModel):
     """A single summary entry with metadata."""
+
     section_id: str
     section_title: str
     section_level: int
@@ -43,6 +46,7 @@ class Summarizer09Output(BaseModel):
 
     This matches the real structure produced by 09_section_summarizer.py
     """
+
     timestamp: datetime
     source_json: str
     status: Literal["Completed", "Failed"]

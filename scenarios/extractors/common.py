@@ -23,9 +23,7 @@ from typing import Any, Dict, Optional
 
 from loguru import logger
 import sys
-import json
 import time
-from typing import Dict
 import types
 
 
@@ -46,15 +44,17 @@ def import_provider(module_filename: str, class_name: str):
 
     # Provide a minimal stub for 'pdftext.schema.Reference' if missing,
     # so providers like image.py can import without the heavy dependency.
-    if 'pdftext' not in sys.modules:
-        pdftext_mod = types.ModuleType('pdftext')
-        sys.modules['pdftext'] = pdftext_mod
-        schema_mod = types.ModuleType('pdftext.schema')
+    if "pdftext" not in sys.modules:
+        pdftext_mod = types.ModuleType("pdftext")
+        sys.modules["pdftext"] = pdftext_mod
+        schema_mod = types.ModuleType("pdftext.schema")
+
         class Reference:  # minimal placeholder used for typing only
             def __init__(self, *args, **kwargs):
                 pass
+
         schema_mod.Reference = Reference
-        sys.modules['pdftext.schema'] = schema_mod
+        sys.modules["pdftext.schema"] = schema_mod
 
     mod_path = SRC_PATH / "extractor" / "core" / module_filename
     if not mod_path.exists():
@@ -67,6 +67,8 @@ def import_provider(module_filename: str, class_name: str):
     spec.loader.exec_module(module)  # type: ignore[attr-defined]
     cls = getattr(module, class_name)
     return cls
+
+
 ART_ROOT = Path(os.getenv("SCENARIOS_ARTIFACT_ROOT", ROOT / "scripts" / "artifacts"))
 ART_ROOT.mkdir(parents=True, exist_ok=True)
 SAMPLE_ROOT = Path(os.getenv("EXTRACTOR_SAMPLE_DIR", ROOT / "data"))
@@ -74,10 +76,7 @@ SAMPLE_ROOT = Path(os.getenv("EXTRACTOR_SAMPLE_DIR", ROOT / "data"))
 
 def ts() -> str:
     return (
-        datetime.utcnow()
-        .isoformat(timespec="milliseconds")
-        .replace(":", "-")
-        .replace(".", "-")
+        datetime.utcnow().isoformat(timespec="milliseconds").replace(":", "-").replace(".", "-")
         + "Z"
     )
 
@@ -107,9 +106,7 @@ def arango_env_ready() -> bool:
         v = os.getenv(name)
         return v if v and not v.strip().startswith("${") else None
 
-    url = _env("ARANGO_URL") or (
-        (_env("ARANGO_HOST") and _env("ARANGO_PORT")) and "ok" or None
-    )
+    url = _env("ARANGO_URL") or ((_env("ARANGO_HOST") and _env("ARANGO_PORT")) and "ok" or None)
     user = _env("ARANGO_USER") or _env("ARANGO_USERNAME")
     password = _env("ARANGO_PASS") or _env("ARANGO_PASSWORD")
     dbname = _env("ARANGO_DB") or _env("ARANGO_DATABASE")
@@ -167,7 +164,6 @@ def try_arango_insert(doc: Any) -> bool:
             ensure_database,
             ensure_collection,
         )
-        from arango.exceptions import ArangoError  # type: ignore
 
         host = os.getenv("ARANGO_HOST", "localhost")
         port = int(os.getenv("ARANGO_PORT", 8529))

@@ -27,13 +27,27 @@ app = typer.Typer(add_completion=False)
 BASE_PDF_10 = Path("data/results/pipeline/10_arangodb_exporter/json_output/10_flattened_data.json")
 SAMPLES: Dict[str, Path] = {
     "html": Path("data/results/pipeline/01_annotation_processor/BHT_CV32A65X_marked_clean.html"),
-    "docx": Path("data/results/pipeline/01_annotation_processor/bht_formats/BHT_CV32A65X_marked_clean.docx"),
-    "pptx": Path("data/results/pipeline/01_annotation_processor/bht_formats/BHT_CV32A65X_marked_clean.pptx"),
-    "xlsx": Path("data/results/pipeline/01_annotation_processor/bht_formats/BHT_CV32A65X_marked_clean.xlsx"),
-    "epub": Path("data/results/pipeline/01_annotation_processor/bht_formats/BHT_CV32A65X_marked_clean.epub"),
-    "rst": Path("data/results/pipeline/01_annotation_processor/bht_formats/BHT_CV32A65X_marked_clean.rst"),
-    "xml": Path("data/results/pipeline/01_annotation_processor/bht_formats/BHT_CV32A65X_marked_clean.xml"),
-    "md": Path("data/results/pipeline/01_annotation_processor/bht_formats/BHT_CV32A65X_marked_clean.md"),
+    "docx": Path(
+        "data/results/pipeline/01_annotation_processor/bht_formats/BHT_CV32A65X_marked_clean.docx"
+    ),
+    "pptx": Path(
+        "data/results/pipeline/01_annotation_processor/bht_formats/BHT_CV32A65X_marked_clean.pptx"
+    ),
+    "xlsx": Path(
+        "data/results/pipeline/01_annotation_processor/bht_formats/BHT_CV32A65X_marked_clean.xlsx"
+    ),
+    "epub": Path(
+        "data/results/pipeline/01_annotation_processor/bht_formats/BHT_CV32A65X_marked_clean.epub"
+    ),
+    "rst": Path(
+        "data/results/pipeline/01_annotation_processor/bht_formats/BHT_CV32A65X_marked_clean.rst"
+    ),
+    "xml": Path(
+        "data/results/pipeline/01_annotation_processor/bht_formats/BHT_CV32A65X_marked_clean.xml"
+    ),
+    "md": Path(
+        "data/results/pipeline/01_annotation_processor/bht_formats/BHT_CV32A65X_marked_clean.md"
+    ),
 }
 
 
@@ -93,10 +107,15 @@ def main(out_root: Path = typer.Option(Path("data/results/meta_parity"))):
             continue
         counts = load_types(stage10)
         ok = delta_ok(pdf_counts, counts)
-        summary["formats"][label] = {"status": "ok" if ok else "mismatch", "counts": counts, "stage10": str(stage10)}
+        summary["formats"][label] = {
+            "status": "ok" if ok else "mismatch",
+            "counts": counts,
+            "stage10": str(stage10),
+        }
         if not ok:
             failures.append(label)
-    artifacts = Path("scripts/artifacts"); artifacts.mkdir(parents=True, exist_ok=True)
+    artifacts = Path("scripts/artifacts")
+    artifacts.mkdir(parents=True, exist_ok=True)
     # Historical name kept for continuity
     (artifacts / "meta_cli_parity_summary.json").write_text(json.dumps(summary, indent=2))
     # Happy Path artifact name

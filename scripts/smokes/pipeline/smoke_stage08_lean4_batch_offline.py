@@ -44,8 +44,14 @@ def main(
     output_json = tmpdir / "out.json"
 
     items = [
-        {"requirement_text": "For all even m,n, m+n is even.", "context": {"section_id": "S1", "doc_id": "D123"}},
-        {"requirement_text": "There are infinitely many primes.", "context": {"section_id": "S2", "doc_id": "D123"}},
+        {
+            "requirement_text": "For all even m,n, m+n is even.",
+            "context": {"section_id": "S1", "doc_id": "D123"},
+        },
+        {
+            "requirement_text": "There are infinitely many primes.",
+            "context": {"section_id": "S2", "doc_id": "D123"},
+        },
     ]
     input_json.write_text(json.dumps(items, ensure_ascii=False))
 

@@ -14,7 +14,6 @@ from extractor.pipeline.utils.sections.heuristics import (
     analyze_section_numbering as _analyze_section_numbering,
     extract_section_title as _extract_section_title,
     looks_like_header_text as _looks_like_header_text,
-    _roman_to_int as _heuristic_roman_to_int,
 )
 
 # Re-export for compatibility
@@ -28,6 +27,7 @@ SECTION_NUMBER_PATTERNS = [
     r"^\([ivxlcdm]+\)",
     r"^\d+\)",
 ]
+
 
 def roman_to_int(roman: str) -> int:
     """Convert Roman numeral to integer."""
@@ -45,11 +45,13 @@ def roman_to_int(roman: str) -> int:
             prev = val
     return total
 
+
 def normalize_section_number(value: Optional[str]) -> str:
     """Normalize a section number string."""
     if not value:
         return ""
     return str(value).strip().rstrip(".")
+
 
 def coerce_depth(depth: Any) -> List[int]:
     """Coerce depth to list of integers."""
@@ -64,6 +66,7 @@ def coerce_depth(depth: Any) -> List[int]:
             return normalized
     return []
 
+
 def derive_parent_number(sec_num: str) -> Optional[str]:
     """Derive parent section number from a child section number."""
     trimmed = normalize_section_number(sec_num)
@@ -74,21 +77,23 @@ def derive_parent_number(sec_num: str) -> Optional[str]:
         return None
     return ".".join(parts[:-1])
 
+
 def analyze_section_numbering(text: str) -> Dict[str, Any]:
     """Analyze section numbering patterns with depth detection."""
     return _analyze_section_numbering(text)
+
 
 def derive_section_depth(numbering_analysis: Dict[str, Any]) -> List[int]:
     """Derive numeric section depth list from numbering analysis."""
     depth: List[int] = []
     if not numbering_analysis or not numbering_analysis.get("has_numbering"):
         return depth
-    
+
     ntype = numbering_analysis.get("numbering_type")
     ntext = (numbering_analysis.get("number_text") or "").strip()
     if not ntext:
         return depth
-    
+
     try:
         if ntype == "decimal":
             ntext = ntext.rstrip(".")
@@ -102,7 +107,7 @@ def derive_section_depth(numbering_analysis: Dict[str, Any]) -> List[int]:
             ch = re.sub(r"[^A-Za-z]", "", ntext).upper()[:1]
             if ch:
                 depth = [ord(ch) - ord("A") + 1]
-        elif ntype in ("alpha_lower", "alpha"): # handle aliased types
+        elif ntype in ("alpha_lower", "alpha"):  # handle aliased types
             ch = re.sub(r"[^A-Za-z]", "", ntext).lower()[:1]
             if ch:
                 depth = [ord(ch) - ord("a") + 1]
@@ -114,41 +119,87 @@ def derive_section_depth(numbering_analysis: Dict[str, Any]) -> List[int]:
         depth = []
     return depth
 
+
 def extract_section_title(text: str) -> str:
     """Extract title text without leading numbering."""
     return _extract_section_title(text)
 
+
 def clean_section_title(text: str) -> str:
-    """Remove SECTION_BREADCRUMB comments from title."""
+    """Clean section title by removing TOC formatting, breadcrumbs, and noise.
+
+    Handles:
+    - SECTION_BREADCRUMB comments
+    - TOC dotted leaders (e.g., "1. Introduction.............4")
+    - Trailing page numbers
+    - Excessive whitespace
+    """
+    # Handle multi-line with breadcrumb
     text_lines = text.split("\n")
     if len(text_lines) > 1 and "<!-- SECTION_BREADCRUMB" in text_lines[-1]:
-        return text_lines[0].strip()
+        text = text_lines[0]
+
+    text = text.strip()
+
+    # Strip TOC dotted/dashed leaders and trailing page numbers
+    # Pattern: "1. Title.............4" or "Title ------------ 42"
+    import re
+    toc_pattern = re.compile(r'^(.*?)\s*[.\-·…_]{3,}\s*\d+\s*$')
+    match = toc_pattern.match(text)
+    if match:
+        text = match.group(1).strip()
+
+    # Also strip standalone trailing page numbers (e.g., "1. Title 4")
+    # Only if the number is at the very end after whitespace
+    trailing_pagenum = re.compile(r'^(.+?)\s+(\d{1,4})\s*$')
+    match = trailing_pagenum.match(text)
+    if match:
+        potential_title = match.group(1).strip()
+        # Only strip if the remaining title is meaningful (not just a number)
+        if len(potential_title) > 3 and not potential_title.isdigit():
+            text = potential_title
+
     return text.strip()
+
 
 def detect_header_level(text: str) -> int:
     """Enhanced header level detection with depth analysis."""
     text = text.strip()
-    if text.startswith("# "): return 1
-    elif text.startswith("## "): return 2
-    elif text.startswith("### "): return 3
-    elif text.startswith("#### "): return 4
-    elif text.startswith("##### "): return 5
-    elif text.startswith("###### "): return 6
-    
+    if text.startswith("# "):
+        return 1
+    elif text.startswith("## "):
+        return 2
+    elif text.startswith("### "):
+        return 3
+    elif text.startswith("#### "):
+        return 4
+    elif text.startswith("##### "):
+        return 5
+    elif text.startswith("###### "):
+        return 6
+
     numbering_analysis = analyze_section_numbering(text)
     if numbering_analysis["has_numbering"]:
         return numbering_analysis["depth_level"]
-    
+
     # Fallback keyword detection
     lower_text = text.lower()
-    if any(k in lower_text for k in ["introduction", "abstract", "conclusion", "references", "appendix"]): return 1
-    if any(k in lower_text for k in ["methodology", "implementation", "results", "discussion"]): return 2
-    if any(k in lower_text for k in ["interface", "protocol", "algorithm", "structure"]): return 3
+    if any(
+        k in lower_text
+        for k in ["introduction", "abstract", "conclusion", "references", "appendix"]
+    ):
+        return 1
+    if any(k in lower_text for k in ["methodology", "implementation", "results", "discussion"]):
+        return 2
+    if any(k in lower_text for k in ["interface", "protocol", "algorithm", "structure"]):
+        return 3
     return 2
+
 
 def looks_like_header_text(text: str) -> bool:
     """Heuristic: detect if text looks like a header."""
     return _looks_like_header_text(text)
+
 
 __all__ = [
     "SECTION_NUMBER_PATTERNS",

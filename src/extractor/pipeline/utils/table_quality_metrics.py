@@ -167,7 +167,7 @@ def calculate_consistency_score(df: pd.DataFrame) -> float:
         # Check if all values are of the same type
         first_type = type(values.iloc[0])
         for value in values[1:]:
-            if type(value) != first_type:
+            if type(value) is not first_type:
                 consistent_data_types = False
                 break
 
@@ -227,16 +227,8 @@ def calculate_table_confidence(table: Any) -> Dict[str, float]:
         consistency = calculate_consistency_score(table.df)
         whitespace = calculate_whitespace_score(table)
     except Exception as exc:
-        log_stage_error('table_quality_metrics.py', exc, {'context': 'table_quality_metrics.py'})
+        log_stage_error("table_quality_metrics.py", exc, {"context": "table_quality_metrics.py"})
         raise
-        logger.error(f"Error calculating quality metrics: {str(e)}")
-        return {
-            "confidence": 0.0,
-            "accuracy": 0.0,
-            "completeness": 0.0,
-            "consistency": 0.0,
-            "whitespace": 0.0,
-        }
 
     # Define weights for each metric
     weights = {
@@ -346,9 +338,8 @@ if __name__ == "__main__":
             print(f"  - Overall confidence: {confidence['confidence']:.4f}")
 
     except Exception as exc:
-        log_stage_error('table_quality_metrics.py', exc, {'context': 'table_quality_metrics.py'})
+        log_stage_error("table_quality_metrics.py", exc, {"context": "table_quality_metrics.py"})
         raise
-        all_validation_failures.append(f"Error in test 1: {str(e)}")
 
     # Test 2: Edge case - empty DataFrame
     total_tests += 1
@@ -368,9 +359,8 @@ if __name__ == "__main__":
                 f"Consistency for empty DataFrame should be 0, got {consistency}"
             )
     except Exception as exc:
-        log_stage_error('table_quality_metrics.py', exc, {'context': 'table_quality_metrics.py'})
+        log_stage_error("table_quality_metrics.py", exc, {"context": "table_quality_metrics.py"})
         raise
-        all_validation_failures.append(f"Error in test 2: {str(e)}")
 
     # Final validation result
     if all_validation_failures:

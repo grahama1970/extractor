@@ -21,6 +21,7 @@ from loguru import logger
 @dataclass
 class ProofResult:
     """Result of a Lean 4 proof attempt."""
+
     success: bool
     lean_code: str
     stdout: str
@@ -38,7 +39,7 @@ def get_cli_cmd() -> str:
 
 async def prove_via_cli(requirement: str, strategy: Any) -> Dict[str, Any]:
     """Invoke external Lean4 CLI when LEAN4_CLI_CMD is set.
-    
+
     Supports two contract styles:
     - Stdin JSON: command contains "{stdin}" placeholder
     - File I/O: command has both "{input}" and "{output}"
@@ -65,12 +66,12 @@ async def prove_via_cli(requirement: str, strategy: Any) -> Dict[str, Any]:
             stdout, stderr = await proc.communicate(stdin_bytes)
             out_str = stdout.decode("utf-8", errors="ignore")
             err_str = stderr.decode("utf-8", errors="ignore")
-            
+
             try:
                 result = json.loads(out_str) if out_str.strip() else {}
             except Exception:
                 result = {"success": False, "stderr": "Non-JSON output", "stdout": out_str}
-            
+
             return {
                 "success": bool(result.get("success", False)),
                 "lean_code": result.get("lean_code", ""),
@@ -82,8 +83,11 @@ async def prove_via_cli(requirement: str, strategy: Any) -> Dict[str, Any]:
             }
         except Exception as e:
             return {
-                "success": False, "stderr": f"CLI invoke failed: {e}",
-                "return_code": 1, "lean_code": "", "stdout": "",
+                "success": False,
+                "stderr": f"CLI invoke failed: {e}",
+                "return_code": 1,
+                "lean_code": "",
+                "stdout": "",
             }
 
     # Mode 2: File I/O
@@ -92,10 +96,12 @@ async def prove_via_cli(requirement: str, strategy: Any) -> Dict[str, Any]:
             in_path = Path(td) / "requirement.json"
             out_path = Path(td) / "proof.json"
             in_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2))
-            
-            cmd_str = cmd_template.replace("{input}", str(in_path)).replace("{output}", str(out_path))
+
+            cmd_str = cmd_template.replace("{input}", str(in_path)).replace(
+                "{output}", str(out_path)
+            )
             argv = shlex.split(cmd_str)
-            
+
             try:
                 proc = await asyncio.create_subprocess_exec(
                     *argv,
@@ -103,7 +109,7 @@ async def prove_via_cli(requirement: str, strategy: Any) -> Dict[str, Any]:
                     stderr=asyncio.subprocess.PIPE,
                 )
                 stdout, stderr = await proc.communicate()
-                
+
                 try:
                     result = json.loads(out_path.read_text()) if out_path.exists() else {}
                 except Exception:
@@ -120,14 +126,19 @@ async def prove_via_cli(requirement: str, strategy: Any) -> Dict[str, Any]:
                 }
             except Exception as e:
                 return {
-                    "success": False, "stderr": f"CLI invoke failed: {e}",
-                    "return_code": 1, "lean_code": "", "stdout": "",
+                    "success": False,
+                    "stderr": f"CLI invoke failed: {e}",
+                    "return_code": 1,
+                    "lean_code": "",
+                    "stdout": "",
                 }
 
     return {
         "success": False,
         "stderr": "LEAN4_CLI_CMD missing required placeholders",
-        "return_code": 1, "lean_code": "", "stdout": "",
+        "return_code": 1,
+        "lean_code": "",
+        "stdout": "",
     }
 
 
@@ -153,7 +164,7 @@ async def prove_batch_via_cli(items: List[Dict[str, Any]]) -> List[Dict[str, Any
             data = "\n".join(json.dumps(it, ensure_ascii=False) for it in items) + "\n"
             stdout, _ = await proc.communicate(data.encode("utf-8"))
             out_str = stdout.decode("utf-8", errors="ignore")
-            
+
             for line in out_str.splitlines():
                 line = line.strip()
                 if not line:
@@ -169,16 +180,20 @@ async def prove_batch_via_cli(items: List[Dict[str, Any]]) -> List[Dict[str, Any
             with tempfile.TemporaryDirectory() as td:
                 in_path = Path(td) / "batch_in.jsonl"
                 out_path = Path(td) / "batch_out.jsonl"
-                
+
                 with open(in_path, "w", encoding="utf-8") as f:
                     for it in items:
                         f.write(json.dumps(it, ensure_ascii=False) + "\n")
-                
-                cmd_str = cmd_template.replace("{input_jsonl}", str(in_path)).replace("{output_jsonl}", str(out_path))
+
+                cmd_str = cmd_template.replace("{input_jsonl}", str(in_path)).replace(
+                    "{output_jsonl}", str(out_path)
+                )
                 argv = shlex.split(cmd_str)
-                proc = await asyncio.create_subprocess_exec(*argv, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+                proc = await asyncio.create_subprocess_exec(
+                    *argv, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+                )
                 await proc.communicate()
-                
+
                 if out_path.exists():
                     for line in out_path.read_text(encoding="utf-8", errors="ignore").splitlines():
                         line = line.strip()
@@ -200,8 +215,13 @@ async def execute_lean_code_docker(lean_code: str) -> ProofResult:
     """Execute Lean code using Docker container fallback."""
     try:
         proc = await asyncio.create_subprocess_exec(
-            "docker", "exec", "-i", "lean_runner",
-            "sh", "-c", "cd /workspace/mathlib_project && lake env lean --stdin",
+            "docker",
+            "exec",
+            "-i",
+            "lean_runner",
+            "sh",
+            "-c",
+            "cd /workspace/mathlib_project && lake env lean --stdin",
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -224,8 +244,12 @@ async def execute_lean_code_docker(lean_code: str) -> ProofResult:
     except Exception as e:
         logger.error(f"Lean Docker execution failed: {e}")
         return ProofResult(
-            success=False, lean_code=lean_code, stdout="", stderr=str(e),
-            return_code=1, error_messages=[str(e)],
+            success=False,
+            lean_code=lean_code,
+            stdout="",
+            stderr=str(e),
+            return_code=1,
+            error_messages=[str(e)],
         )
 
 

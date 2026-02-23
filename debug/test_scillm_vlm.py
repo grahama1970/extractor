@@ -3,13 +3,14 @@
 Smoke: SciLLM/Router vision-capable sanity using your VLM alias.
 Uses a text-only JSON prompt to verify routing/JSON handling.
 """
-import os, json, sys
+import os
+import json
+import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from litellm import Router
-from extractor.pipeline.utils.litellm_call import normalize_model_id, list_models, completion_simple
+from extractor.pipeline.utils.litellm_call import list_models, completion_simple
 
 
 def main() -> int:
@@ -38,7 +39,8 @@ def main() -> int:
     )
     content = (
         out.choices[0].message.get("content")
-        if hasattr(out, "choices") else out.get("choices", [{}])[0].get("message", {}).get("content", "")
+        if hasattr(out, "choices")
+        else out.get("choices", [{}])[0].get("message", {}).get("content", "")
     )
     try:
         data = json.loads(content)

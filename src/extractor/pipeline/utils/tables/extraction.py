@@ -12,7 +12,6 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from loguru import logger
 from extractor.pipeline.utils.diagnostics import make_event
-from extractor.pipeline.utils.reliability import log_stage_error
 
 try:
     from camelot import io as camelot_io
@@ -57,7 +56,7 @@ def try_camelot_strategy(
     """Try a specific Camelot extraction strategy and record diagnostics on failure."""
     if camelot_io is None:
         raise ImportError("Camelot is required for table extraction")
-    
+
     page_str = str(page_num + 1)  # Camelot uses 1-based page numbers
     try:
         tables = camelot_io.read_pdf(
@@ -97,7 +96,7 @@ def extract_table_image(
     custom_name: Optional[str] = None,
 ) -> Optional[str]:
     """Extract table as image with padding.
-    
+
     Args:
         pdf_doc: fitz.Document object
         page_num: 0-based page number
@@ -106,12 +105,12 @@ def extract_table_image(
         table_idx: Table index for filename
         diagnostics: Optional list to append errors
         custom_name: Optional custom filename
-        
+
     Returns:
         Path to saved image or None on error
     """
     import fitz
-    
+
     try:
         page = pdf_doc[page_num]
         x1, y1, x2, y2 = bbox
@@ -141,7 +140,7 @@ def extract_table_image(
         img_path = output_dir / filename
         pix.save(str(img_path))
         return str(img_path)
-        
+
     except Exception as e:
         logger.error(f"Failed to extract table image: {e}")
         if diagnostics is not None:
@@ -158,6 +157,97 @@ def extract_table_image(
             except Exception:
                 pass
         return None
+
+
+def extract_page_half_image(
+    pdf_path: Path,
+    page_index: int,
+    half: str,
+    dpi: int = 200,
+) -> "Image.Image":
+    """Render top or bottom half of a PDF page to PIL Image.
+
+    Args:
+        pdf_path: Path to PDF file.
+        page_index: 0-based page number.
+        half: ``"top"`` or ``"bottom"``.
+        dpi: Render resolution.
+
+    Returns:
+        PIL Image of the requested half (RGB).
+    """
+    import fitz
+    from PIL import Image as PILImage
+
+    doc = fitz.open(str(pdf_path))
+    try:
+        page = doc[page_index]
+        rect = page.rect
+        mid_y = (rect.y0 + rect.y1) / 2.0
+        if half == "top":
+            clip = fitz.Rect(rect.x0, rect.y0, rect.x1, mid_y)
+        elif half == "bottom":
+            clip = fitz.Rect(rect.x0, mid_y, rect.x1, rect.y1)
+        else:
+            raise ValueError(f"half must be 'top' or 'bottom', got {half!r}")
+        pix = page.get_pixmap(clip=clip, dpi=dpi)
+        img = PILImage.frombytes("RGB", (pix.width, pix.height), pix.samples)
+    finally:
+        doc.close()
+    return img
+
+
+def concat_page_halves(
+    pdf_path: Path,
+    page_n: int,
+    page_n1: int,
+    output_path: Optional[Path] = None,
+    dpi: int = 200,
+    target_size: Tuple[int, int] = (224, 224),
+) -> "Image.Image":
+    """Concatenate bottom of page N + top of page N+1 side-by-side.
+
+    This follows the PubTables-v2 approach: the two halves are placed
+    side-by-side and resized to *target_size* so a standard vision
+    classifier can consume them.
+
+    Args:
+        pdf_path: Path to PDF.
+        page_n: 0-based index of the first page.
+        page_n1: 0-based index of the second page.
+        output_path: If given, save the result as PNG.
+        dpi: Render resolution.
+        target_size: Final (width, height) after resize.
+
+    Returns:
+        PIL Image (RGB) of the combined halves.
+    """
+    from PIL import Image as PILImage
+
+    bottom = extract_page_half_image(pdf_path, page_n, "bottom", dpi=dpi)
+    top = extract_page_half_image(pdf_path, page_n1, "top", dpi=dpi)
+
+    # Normalise both halves to a common height before pasting
+    target_h = max(bottom.height, top.height)
+    if bottom.height != target_h:
+        ratio = target_h / bottom.height
+        bottom = bottom.resize((int(bottom.width * ratio), target_h))
+    if top.height != target_h:
+        ratio = target_h / top.height
+        top = top.resize((int(top.width * ratio), target_h))
+
+    combined = PILImage.new("RGB", (bottom.width + top.width, target_h))
+    combined.paste(bottom, (0, 0))
+    combined.paste(top, (bottom.width, 0))
+
+    # Resize to standard classifier input
+    combined = combined.resize(target_size)
+
+    if output_path is not None:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        combined.save(str(output_path))
+
+    return combined
 
 
 def bbox_tuple_for(table_obj: Any) -> Optional[Tuple[float, float, float, float]]:
@@ -180,5 +270,7 @@ __all__ = [
     "PYMUPDF_DPI",
     "try_camelot_strategy",
     "extract_table_image",
+    "extract_page_half_image",
+    "concat_page_halves",
     "bbox_tuple_for",
 ]

@@ -21,11 +21,9 @@ Notes
 from __future__ import annotations
 
 import base64
-import io
 import json
 import os
 import sys
-import time
 from pathlib import Path
 from typing import Optional
 
@@ -71,15 +69,21 @@ def _fetch_models(api_base: str, api_key: str, timeout: float = 15.0) -> list[st
 
 
 def main(
-    model_id: Optional[str] = typer.Option(None, "--model-id", help="Exact model id (from /v1/models)"),
-    image_path: Optional[Path] = typer.Option(None, "--image-path", exists=True, file_okay=True, dir_okay=False),
+    model_id: Optional[str] = typer.Option(
+        None, "--model-id", help="Exact model id (from /v1/models)"
+    ),
+    image_path: Optional[Path] = typer.Option(
+        None, "--image-path", exists=True, file_okay=True, dir_okay=False
+    ),
     image_url: Optional[str] = typer.Option(None, "--image-url", help="HTTP(S) URL for an image"),
     prompt: str = typer.Option(
         'Describe the image in <= 8 words and return only {"ok":true,"desc":string} as JSON.',
         "--prompt",
         help="User text prompt",
     ),
-    out: Path = typer.Option(Path("scripts/artifacts/scillm_vision_probe.json"), "--out", help="Save JSON here"),
+    out: Path = typer.Option(
+        Path("scripts/artifacts/scillm_vision_probe.json"), "--out", help="Save JSON here"
+    ),
 ):
     _add_scillm_path_from_env()
 
@@ -117,9 +121,7 @@ def main(
         content.append({"type": "image_url", "image_url": {"url": data_url}})
     else:
         # Default small Wikimedia image
-        image_url = (
-            "https://upload.wikimedia.org/wikipedia/commons/thumb/3/3f/Logo_OpenAI.svg/256px-Logo_OpenAI.svg.png"
-        )
+        image_url = "https://upload.wikimedia.org/wikipedia/commons/thumb/3/3f/Logo_OpenAI.svg/256px-Logo_OpenAI.svg.png"
         content.append({"type": "image_url", "image_url": {"url": image_url}})
 
     # Call scillm (JSON mode; client-side strictness)
@@ -144,7 +146,9 @@ def main(
         typer.echo(json.dumps({"ok": True, "out": str(out), "model": mid}))
     except Exception:
         out.write_text(content_str, encoding="utf-8")
-        typer.echo(json.dumps({"ok": False, "out": str(out), "model": mid, "note": "non-JSON content"}))
+        typer.echo(
+            json.dumps({"ok": False, "out": str(out), "model": mid, "note": "non-JSON content"})
+        )
 
 
 if __name__ == "__main__":

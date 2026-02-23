@@ -8,7 +8,6 @@
 #   "pymupdf>=1.23.0",
 # ]
 # ///
-import sys
 from pathlib import Path
 import importlib.util
 import typer

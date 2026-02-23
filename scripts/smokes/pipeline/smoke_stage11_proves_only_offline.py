@@ -39,12 +39,14 @@ def main():
     bundle_dir.mkdir(parents=True, exist_ok=True)
 
     # Minimal flattened doc (no embedding)
-    docs = [{
-        "_key": "obj1",
-        "section_id": "S1",
-        "source_pdf": "dummy.pdf",
-        "text_content": "Spec section with a requirement",
-    }]
+    docs = [
+        {
+            "_key": "obj1",
+            "section_id": "S1",
+            "source_pdf": "dummy.pdf",
+            "text_content": "Spec section with a requirement",
+        }
+    ]
     bundle = bundle_dir / "bundle.json"
     bundle.write_text(json.dumps({"documents": docs}, indent=2))
 
@@ -66,7 +68,15 @@ def main():
     env = dict(**os.environ)
     src_dir = str((Path(__file__).resolve().parents[3] / "src").resolve())
     env["PYTHONPATH"] = f"{src_dir}:{env.get('PYTHONPATH','')}"
-    cmd = [sys.executable, "-m", "extractor.pipeline.steps.11_arango_create_graph", "debug-bundle", str(bundle), "-o", str(out_dir)]
+    cmd = [
+        sys.executable,
+        "-m",
+        "extractor.pipeline.steps.11_arango_create_graph",
+        "debug-bundle",
+        str(bundle),
+        "-o",
+        str(out_dir),
+    ]
     rc = subprocess.run(cmd, env=env).returncode
     if rc != 0:
         typer.echo("Stage 11 debug-bundle failed", err=True)
@@ -83,12 +93,15 @@ def main():
     # Save a concise report
     Path("scripts/artifacts").mkdir(parents=True, exist_ok=True)
     (Path("scripts/artifacts") / "stage11_proves_only_offline.json").write_text(
-        json.dumps({
-            "edges_path": str(edges_path),
-            "summary_path": str(summary_path),
-            "total": len(edges),
-            "proves": len(proves),
-        }, indent=2)
+        json.dumps(
+            {
+                "edges_path": str(edges_path),
+                "summary_path": str(summary_path),
+                "total": len(edges),
+                "proves": len(proves),
+            },
+            indent=2,
+        )
     )
     print("OK: proves-only edges emitted and summary present")
 

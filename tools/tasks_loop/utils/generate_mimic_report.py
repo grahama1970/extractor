@@ -11,14 +11,15 @@ Usage:
     python generate_mimic_report.py --fixture synthesis_messy_BHT
 """
 import argparse
-import base64
 import html
 import subprocess
 from pathlib import Path
 
 TASKS_LOOP = Path(__file__).resolve().parents[1]
 FIXTURES_DIR = TASKS_LOOP / "fixtures"
-RESULTS_DIR = TASKS_LOOP.parent.parent / "data/results/pipeline/10_markdown_exporter/markdown_output"
+RESULTS_DIR = (
+    TASKS_LOOP.parent.parent / "data/results/pipeline/10_markdown_exporter/markdown_output"
+)
 
 
 HTML_TEMPLATE = """
@@ -109,26 +110,27 @@ HTML_TEMPLATE = """
 </html>
 """
 
+
 def generate_report(fixture_name: str):
     fixture_dir = FIXTURES_DIR / fixture_name
-    
+
     # 1. Gather Paths
     pdf_path = fixture_dir / "source.pdf"
     spec_path = fixture_dir / "SPEC.md"
     expected_md_path = fixture_dir / "source_expected.md"
-    extracted_md_path = RESULTS_DIR / "full_document.md" 
-    # NOTE: extracted path assumes mostly single-run environment or manually copied. 
+    extracted_md_path = RESULTS_DIR / "full_document.md"
+    # NOTE: extracted path assumes mostly single-run environment or manually copied.
     # Ideally extracting from '10_markdown_exporter'
-    
+
     # 2. Read Content
     pdf_size = pdf_path.stat().st_size if pdf_path.exists() else 0
     spec_content = spec_path.read_text() if spec_path.exists() else "MISSING SPEC"
     expected_md = expected_md_path.read_text() if expected_md_path.exists() else "MISSING EXPECTED"
-    
+
     extracted_md = "MISSING EXTRACTED OUTPUT"
     if extracted_md_path.exists():
         extracted_md = extracted_md_path.read_text()
-        
+
     # 3. Generate Diff
     diff_output = "No diff available."
     if expected_md_path.exists() and extracted_md_path.exists():
@@ -149,17 +151,18 @@ def generate_report(fixture_name: str):
         extracted_md=html.escape(extracted_md),
         expected_md=html.escape(expected_md),
         diff_output=html.escape(diff_output),
-        spec_content=html.escape(spec_content)
+        spec_content=html.escape(spec_content),
     )
-    
+
     out_path = fixture_dir / "MIMIC_REPORT.html"
     out_path.write_text(html_content)
     print(f"Report generated: {out_path}")
     print(f"Open with: firefox {out_path}")
 
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--fixture", required=True)
     args = parser.parse_args()
-    
+
     generate_report(args.fixture)

@@ -31,7 +31,12 @@ def main():
     flat = tmp / "10_flattened.json"
     data = [
         {"_key": "k1", "doc_id": "D", "section_id": "S1", "text_content": "Alpha section"},
-        {"_key": "k2", "doc_id": "D", "section_id": "S2", "text_content": "See section S1 for details"},
+        {
+            "_key": "k2",
+            "doc_id": "D",
+            "section_id": "S2",
+            "text_content": "See section S1 for details",
+        },
     ]
     flat.write_text(json.dumps(data, indent=2))
 
@@ -39,7 +44,16 @@ def main():
     src_dir = str((Path(__file__).resolve().parents[3] / "src").resolve())
     env["PYTHONPATH"] = f"{src_dir}:{env.get('PYTHONPATH','')}"
     stage11.parent.mkdir(parents=True, exist_ok=True)
-    cmd = [sys.executable, "-m", "extractor.pipeline.steps.11_arango_create_graph", "run", str(flat), "-o", str(out_dir), "--skip-graph-creation"]
+    cmd = [
+        sys.executable,
+        "-m",
+        "extractor.pipeline.steps.11_arango_create_graph",
+        "run",
+        str(flat),
+        "-o",
+        str(out_dir),
+        "--skip-graph-creation",
+    ]
     if subprocess.run(cmd, env=env).returncode != 0:
         typer.echo("Stage 11 run failed", err=True)
         raise typer.Exit(1)
@@ -47,7 +61,9 @@ def main():
     edges = json.loads((stage11 / "11_graph_edges.json").read_text())
     ok = any(e.get("relationship_type") == "refers_to" for e in edges)
     Path("scripts/artifacts").mkdir(parents=True, exist_ok=True)
-    (Path("scripts/artifacts")/"stage11_refers_to.json").write_text(json.dumps({"ok": ok, "edges": len(edges)}, indent=2))
+    (Path("scripts/artifacts") / "stage11_refers_to.json").write_text(
+        json.dumps({"ok": ok, "edges": len(edges)}, indent=2)
+    )
     if not ok:
         typer.echo("No 'refers_to' edge found", err=True)
         raise typer.Exit(1)
@@ -56,4 +72,3 @@ def main():
 
 if __name__ == "__main__":
     app()
-

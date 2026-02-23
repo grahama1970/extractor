@@ -9,7 +9,8 @@ This bypasses providers: it treats each paragraph/table row as one block in orde
 Used only for deterministic parity against the canonical flattened PDF blocks.
 """
 from __future__ import annotations
-import argparse, json
+import argparse
+import json
 from pathlib import Path
 from bs4 import BeautifulSoup
 from docx import Document
@@ -42,7 +43,7 @@ def reflatten_md(path: Path):
         else:
             # drop the TEXT: prefix if present
             if line.startswith("TEXT:"):
-                line = line[len("TEXT:"):].strip()
+                line = line[len("TEXT:") :].strip()
             blocks.append({"type": "text", "text": line})
     return blocks
 
@@ -57,7 +58,7 @@ def reflatten_rst(path: Path):
             blocks.append({"type": "table", "text": "table"})
         else:
             if line.startswith("TEXT:"):
-                line = line[len("TEXT:"):].strip()
+                line = line[len("TEXT:") :].strip()
             blocks.append({"type": "text", "text": line})
     return blocks
 

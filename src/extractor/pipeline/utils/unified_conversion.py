@@ -68,7 +68,7 @@ def _default_document_title(source_path: Optional[str], sections: Sequence[Dict[
         try:
             return Path(source_path).stem
         except Exception as exc:
-            log_stage_error('unified_conversion.py', exc, {'context': 'unified_conversion.py'})
+            log_stage_error("unified_conversion.py", exc, {"context": "unified_conversion.py"})
             raise
     return "Document"
 

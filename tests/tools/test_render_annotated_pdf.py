@@ -19,4 +19,3 @@ def test_parse_pages_various_patterns():
     # empty / invalid
     assert rap._parse_pages("", total) is None
     assert rap._parse_pages("x-y, a", total) is None
-

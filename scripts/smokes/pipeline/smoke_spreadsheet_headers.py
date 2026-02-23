@@ -22,7 +22,9 @@ app = typer.Typer(add_completion=False)
 
 
 @app.command()
-def main(tmp_dir: Path = typer.Option(Path("data/results/structured_parity_smoke/spreadsheet_synth"))):
+def main(
+    tmp_dir: Path = typer.Option(Path("data/results/structured_parity_smoke/spreadsheet_synth")),
+):
     tmp_dir.mkdir(parents=True, exist_ok=True)
     xlsx_path = tmp_dir / "headers.xlsx"
     wb = Workbook()
@@ -33,7 +35,15 @@ def main(tmp_dir: Path = typer.Option(Path("data/results/structured_parity_smoke
     wb.save(xlsx_path)
 
     meta = STRUCTURED_PIPELINES[SpreadsheetProvider]
-    artifacts = run_structured_pipeline(SpreadsheetProvider, xlsx_path, tmp_dir, stage_prefix=meta.stage_prefix, skip_export10=True, skip_embeddings10=True, fast_embeddings10=True)
+    artifacts = run_structured_pipeline(
+        SpreadsheetProvider,
+        xlsx_path,
+        tmp_dir,
+        stage_prefix=meta.stage_prefix,
+        skip_export10=True,
+        skip_embeddings10=True,
+        fast_embeddings10=True,
+    )
     s07 = json.loads(Path(artifacts["stage07"]).read_text())
     sections = s07.get("reflowed_sections") or []
     if not sections:
@@ -52,4 +62,3 @@ def main(tmp_dir: Path = typer.Option(Path("data/results/structured_parity_smoke
 
 if __name__ == "__main__":
     app()
-

@@ -16,7 +16,9 @@ class _Recorder:
             def __init__(self):
                 self.usage = {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
                 self._hidden_params = {"response_cost": 0.0, "cache_hit": False}
-                self.choices = [type("_C", (), {"text": None, "message": type("_M", (), {"content": "ok"})()})()]
+                self.choices = [
+                    type("_C", (), {"text": None, "message": type("_M", (), {"content": "ok"})()})()
+                ]
 
         return _Resp()
 
@@ -58,4 +60,3 @@ def test_moonshot_multimodal_payload(tmp_path: Path, monkeypatch):
     # Ensure we don't pass OpenAI-only response_format to moonshot
     kwargs = call["kwargs"]
     assert "response_format" not in kwargs, f"Unexpected response_format in kwargs: {kwargs}"
-

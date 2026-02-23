@@ -13,7 +13,9 @@ from extractor.pipeline.steps import _09_section_summarizer as stage09
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--input", type=Path, required=True, help="07_reflowed.json or 08_theorems.json")
+    ap.add_argument(
+        "--input", type=Path, required=True, help="07_reflowed.json or 08_theorems.json"
+    )
     ap.add_argument("--out", type=Path, required=True, help="Results root (pipeline)")
     ap.add_argument("--concurrency", type=int, default=4)
     ap.add_argument("--window", type=int, default=3)
@@ -35,4 +37,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

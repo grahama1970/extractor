@@ -25,8 +25,11 @@ from PIL import Image, ImageDraw
 try:
     from pdftext.schema import Reference  # type: ignore
 except Exception:  # pragma: no cover - optional dependency in minimal/offline mode
+
     class Reference:  # type: ignore
         ...
+
+
 from pydantic import computed_field
 
 from extractor.core.providers import ProviderOutput

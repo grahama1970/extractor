@@ -1,6 +1,3 @@
-from __future__ import annotations
-
-from extractor.pipeline.utils.reliability import log_stage_error
 """
 Thin, test-oriented CLI and helpers compatible with prior `litellm_call` usage.
 
@@ -11,19 +8,25 @@ Notes
   effort and conservative.
 """
 
+from __future__ import annotations
+
 import asyncio
 import json
 import sys
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Tuple
+from typing import Any, Dict, List, Tuple
 
 import typer
+
+from extractor.pipeline.utils.reliability import log_stage_error
 
 # Default model pin (purely a placeholder for tests)
 MODEL = "chutes:text:default"
 
 
-def _to_messages_and_model(item: Dict[str, Any], default_model: str) -> Tuple[str, List[Dict[str, Any]], Dict[str, Any]]:
+def _to_messages_and_model(
+    item: Dict[str, Any], default_model: str
+) -> Tuple[str, List[Dict[str, Any]], Dict[str, Any]]:
     """Extract `(model, messages, extras)` from a single work item.
 
     - Preserves extra kwargs (e.g., temperature) exactly as provided.
@@ -45,7 +48,7 @@ async def litellm_call(prompts: List[Any], **kwargs) -> List[str]:
     try:
         from .scillm_router import get_text_router
     except Exception as exc:
-        log_stage_error('litellm_call.py', exc, {'context': 'litellm_call.py'})
+        log_stage_error("litellm_call.py", exc, {"context": "litellm_call.py"})
         raise
         get_text_router = None  # type: ignore
 
@@ -53,7 +56,11 @@ async def litellm_call(prompts: List[Any], **kwargs) -> List[str]:
         # Fallback: echo content for sanity
         outs: List[str] = []
         for i, p in enumerate(prompts):
-            text = json.dumps(p) if not isinstance(p, (str, bytes)) else (p.decode() if isinstance(p, bytes) else p)
+            text = (
+                json.dumps(p)
+                if not isinstance(p, (str, bytes))
+                else (p.decode() if isinstance(p, bytes) else p)
+            )
             outs.append(str(text))
         return outs
 
@@ -78,9 +85,7 @@ async def litellm_call(prompts: List[Any], **kwargs) -> List[str]:
             resp = await router.acompletion(**params)
             # Minimal text extraction; avoid importing the full utils here
             text = (
-                resp.get("choices", [{}])[0]
-                .get("message", {})
-                .get("content", "")
+                resp.get("choices", [{}])[0].get("message", {}).get("content", "")
                 if isinstance(resp, dict)
                 else getattr(getattr(resp, "choices", [None])[0], "text", "")
             )
@@ -91,9 +96,8 @@ async def litellm_call(prompts: List[Any], **kwargs) -> List[str]:
             else:
                 out.append(text)
         except Exception as exc:
-            log_stage_error('litellm_call.py', exc, {'context': 'litellm_call.py'})
+            log_stage_error("litellm_call.py", exc, {"context": "litellm_call.py"})
             raise
-            out.append(json.dumps({"error": {"type": type(e).__name__, "message": str(e)[:200]}}) if wrap_json else "")
     return out
 
 
@@ -106,7 +110,7 @@ def _looks_like_json(s: str) -> bool:
             json.loads(s2)
             return True
         except Exception as exc:
-            log_stage_error('litellm_call.py', exc, {'context': 'litellm_call.py'})
+            log_stage_error("litellm_call.py", exc, {"context": "litellm_call.py"})
             raise
             return False
     return False
@@ -121,9 +125,16 @@ def build_cli() -> typer.Typer:
     app = typer.Typer(add_completion=False, help="LiteLLM-compatible CLI wrapper (SciLLM-backed)")
 
     @app.command()
-    def sanity(wrap_json: bool = typer.Option(False, "--wrap-json", help="Wrap non-JSON output as {content}")) -> None:
+    def sanity(
+        wrap_json: bool = typer.Option(
+            False, "--wrap-json", help="Wrap non-JSON output as {content}"
+        )
+    ) -> None:
         """Minimal sanity call (tests monkeypatch `litellm_call`)."""
-        prompt = {"model": MODEL, "messages": [{"role": "user", "content": "Return only {\"ok\":true} as JSON."}]}
+        prompt = {
+            "model": MODEL,
+            "messages": [{"role": "user", "content": 'Return only {"ok":true} as JSON.'}],
+        }
 
         async def _run():
             return await litellm_call([prompt], wrap_json=wrap_json, response_format="json_object")
@@ -135,11 +146,19 @@ def build_cli() -> typer.Typer:
     def main(
         sources: List[str] = typer.Argument(None),
         stdin: bool = typer.Option(False, "--stdin", help="Read prompts (one per line) from stdin"),
-        json_shorthand: bool = typer.Option(False, "--json", help="Shorthand for --wrap-json + --response-format json_object"),
-        wrap_json: bool = typer.Option(False, "--wrap-json", help="Wrap non-JSON output as {content}"),
-        response_format: str | None = typer.Option(None, "--response-format", help="Response format type, e.g., json_object"),
+        json_shorthand: bool = typer.Option(
+            False, "--json", help="Shorthand for --wrap-json + --response-format json_object"
+        ),
+        wrap_json: bool = typer.Option(
+            False, "--wrap-json", help="Wrap non-JSON output as {content}"
+        ),
+        response_format: str | None = typer.Option(
+            None, "--response-format", help="Response format type, e.g., json_object"
+        ),
         quiet: bool = typer.Option(False, "--quiet", help="Suppress stdout (use with --output)"),
-        output: Path | None = typer.Option(None, "--output", help="Write outputs (one per line) to file"),
+        output: Path | None = typer.Option(
+            None, "--output", help="Write outputs (one per line) to file"
+        ),
     ) -> None:
         # Apply shorthand
         if json_shorthand:

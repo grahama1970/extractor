@@ -46,7 +46,7 @@ def _template_for(approach: str) -> Optional[str]:
     if approach == "mul_shift_add":
         return (
             "def mul_shift_add(a: int, b: int) -> int:\n"
-            "    \"\"\"Iterative shift-add (Russian peasant) with sign correction.\"\"\"\n"
+            '    """Iterative shift-add (Russian peasant) with sign correction."""\n'
             "    sign = -1 if (a < 0) ^ (b < 0) else 1\n"
             "    x, y = abs(a), abs(b)\n"
             "    res = 0\n"
@@ -60,9 +60,9 @@ def _template_for(approach: str) -> Optional[str]:
     if approach == "mul_karatsuba":
         return (
             "def mul_karatsuba(a: int, b: int) -> int:\n"
-            "    \"\"\"Karatsuba multiplication with tunable bit cutoff.\n"
+            '    """Karatsuba multiplication with tunable bit cutoff.\n'
             "    CUTOFF_BITS = 64\n"
-            "    \"\"\"\n"
+            '    """\n'
             "    sign = -1 if (a < 0) ^ (b < 0) else 1\n"
             "    x, y = abs(a), abs(b)\n"
             "\n"
@@ -85,9 +85,9 @@ def _template_for(approach: str) -> Optional[str]:
     if approach == "mul_chunked":
         return (
             "def mul_chunked(a: int, b: int) -> int:\n"
-            "    \"\"\"Chunked schoolbook multiplication with tunable base exponent.\n"
+            '    """Chunked schoolbook multiplication with tunable base exponent.\n'
             "    BASE_EXP = 4  # base = 10**BASE_EXP\n"
-            "    \"\"\"\n"
+            '    """\n'
             "    sign = -1 if (a < 0) ^ (b < 0) else 1\n"
             "    x, y = abs(a), abs(b)\n"
             "    if x == 0 or y == 0:\n"
@@ -122,15 +122,41 @@ def _template_for(approach: str) -> Optional[str]:
     return None
 
 
-def _synthesize_if_missing(approach: str, variants_path: Path, prompt_file: Optional[Path], api_base: str, run_id: str) -> None:
+def _synthesize_if_missing(
+    approach: str, variants_path: Path, prompt_file: Optional[Path], api_base: str, run_id: str
+) -> None:
     if _function_exists(variants_path, approach):
         return
     code = _template_for(approach)
     if code:
         _append_code(variants_path, code)
-        _post_json(api_base.rstrip("/") + "/ingest/log", {"ts": time.time(), "run_id": run_id, "variant": approach, "episode_id": None, "stream": "app", "source": "variant_agent", "message": "synthesis: template added", "meta": {}})
+        _post_json(
+            api_base.rstrip("/") + "/ingest/log",
+            {
+                "ts": time.time(),
+                "run_id": run_id,
+                "variant": approach,
+                "episode_id": None,
+                "stream": "app",
+                "source": "variant_agent",
+                "message": "synthesis: template added",
+                "meta": {},
+            },
+        )
     else:
-        _post_json(api_base.rstrip("/") + "/ingest/log", {"ts": time.time(), "run_id": run_id, "variant": approach, "episode_id": None, "stream": "stderr", "source": "variant_agent", "message": "no template for approach; skipping", "meta": {}})
+        _post_json(
+            api_base.rstrip("/") + "/ingest/log",
+            {
+                "ts": time.time(),
+                "run_id": run_id,
+                "variant": approach,
+                "episode_id": None,
+                "stream": "stderr",
+                "source": "variant_agent",
+                "message": "no template for approach; skipping",
+                "meta": {},
+            },
+        )
 
 
 def _extract_function_block(text: str, func_name: str) -> tuple[int, int]:
@@ -166,7 +192,14 @@ def _replace_function(module_path: Path, func_name: str, new_code: str) -> None:
     module_path.write_text(updated, encoding="utf-8")
 
 
-def _mutate_based_on_metrics(approach: str, variants_path: Path, metrics: Dict[str, Any], prompt_file: Optional[Path], api_base: str, run_id: str) -> tuple[bool, Dict[str, Any]]:
+def _mutate_based_on_metrics(
+    approach: str,
+    variants_path: Path,
+    metrics: Dict[str, Any],
+    prompt_file: Optional[Path],
+    api_base: str,
+    run_id: str,
+) -> tuple[bool, Dict[str, Any]]:
     try:
         txt = variants_path.read_text(encoding="utf-8") if variants_path.exists() else ""
     except Exception:
@@ -175,6 +208,7 @@ def _mutate_based_on_metrics(approach: str, variants_path: Path, metrics: Dict[s
     info: Dict[str, Any] = {}
     if approach == "mul_karatsuba":
         import re
+
         grid: List[int] = [32, 48, 64, 80, 96, 128]
         m = re.search(r"CUTOFF_BITS\s*=\s*(\d+)", txt)
         cur = int(m.group(1)) if m else 64
@@ -184,9 +218,14 @@ def _mutate_based_on_metrics(approach: str, variants_path: Path, metrics: Dict[s
             new_txt = re.sub(r"CUTOFF_BITS\s*=\s*\d+", f"CUTOFF_BITS = {nxt}", txt)
             variants_path.write_text(new_txt, encoding="utf-8")
             changed = True
-            info = {"change_reason": f"CUTOFF_BITS {cur} -> {nxt}", "expected_impact": {"S": "same", "M": "faster", "L": "faster"}, "risks": ["too small cutoff reduces asymptotic benefit"]}
+            info = {
+                "change_reason": f"CUTOFF_BITS {cur} -> {nxt}",
+                "expected_impact": {"S": "same", "M": "faster", "L": "faster"},
+                "risks": ["too small cutoff reduces asymptotic benefit"],
+            }
     elif approach == "mul_chunked":
         import re
+
         grid: List[int] = [3, 4, 5, 6]
         m = re.search(r"BASE_EXP\s*=\s*(\d+)", txt)
         cur = int(m.group(1)) if m else 4
@@ -196,10 +235,18 @@ def _mutate_based_on_metrics(approach: str, variants_path: Path, metrics: Dict[s
             new_txt = re.sub(r"BASE_EXP\s*=\s*\d+", f"BASE_EXP = {nxt}", txt)
             variants_path.write_text(new_txt, encoding="utf-8")
             changed = True
-            info = {"change_reason": f"BASE_EXP {cur} -> {nxt}", "expected_impact": {"S": "same", "M": "faster", "L": "faster"}, "risks": ["carry overhead with very large base"]}
+            info = {
+                "change_reason": f"BASE_EXP {cur} -> {nxt}",
+                "expected_impact": {"S": "same", "M": "faster", "L": "faster"},
+                "risks": ["carry overhead with very large base"],
+            }
     elif approach == "mul_shift_add":
         changed = False
-        info = {"change_reason": "no tunables", "expected_impact": {"S": "same", "M": "same", "L": "same"}, "risks": []}
+        info = {
+            "change_reason": "no tunables",
+            "expected_impact": {"S": "same", "M": "same", "L": "same"},
+            "risks": [],
+        }
     return changed, info
 
 
@@ -266,7 +313,9 @@ def main():
     scores: list[float] = []
     best: Dict[str, Any] = {}
 
-    out_dir = Path(args.out_dir) if args.out_dir else Path(f"workspace/agent/{args.run_id}_{approach}")
+    out_dir = (
+        Path(args.out_dir) if args.out_dir else Path(f"workspace/agent/{args.run_id}_{approach}")
+    )
     out_dir.mkdir(parents=True, exist_ok=True)
     if args.prompt_file:
         try:
@@ -276,7 +325,13 @@ def main():
             meta = {"prompt_file": args.prompt_file}
         log("app", "instance prompt attached", meta)
     log("app", f"variant agent start: {approach}")
-    _synthesize_if_missing(approach, Path(args.variants), Path(args.prompt_file) if args.prompt_file else None, api_base, args.run_id)
+    _synthesize_if_missing(
+        approach,
+        Path(args.variants),
+        Path(args.prompt_file) if args.prompt_file else None,
+        api_base,
+        args.run_id,
+    )
 
     for it in range(1, args.max_iters + 1):
         out_file = out_dir / f"iter_{it:02d}.json"
@@ -317,7 +372,9 @@ def main():
             "stderr_lines": len((proc.stderr or "").splitlines()) if proc.stderr else 0,
             "stdout_lines": len((proc.stdout or "").splitlines()) if proc.stdout else 0,
         }
-        (out_dir / f"iter_{it:02d}_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+        (out_dir / f"iter_{it:02d}_summary.json").write_text(
+            json.dumps(summary, indent=2), encoding="utf-8"
+        )
 
         _post_json(
             epi_url,
@@ -347,11 +404,21 @@ def main():
                 log("app", f"plateau detected at iter {it}; stopping")
                 break
 
-        changed, info = _mutate_based_on_metrics(approach, Path(args.variants), metrics, Path(args.prompt_file) if args.prompt_file else None, api_base, args.run_id)
+        changed, info = _mutate_based_on_metrics(
+            approach,
+            Path(args.variants),
+            metrics,
+            Path(args.prompt_file) if args.prompt_file else None,
+            api_base,
+            args.run_id,
+        )
         try:
             summary_path = out_dir / f"iter_{it:02d}_summary.json"
             data = json.loads(summary_path.read_text())
-            data["mutation"] = {"applied": bool(changed), **({k: v for k, v in (info or {}).items() if v is not None})}
+            data["mutation"] = {
+                "applied": bool(changed),
+                **({k: v for k, v in (info or {}).items() if v is not None}),
+            }
             summary_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
         except Exception:
             pass
@@ -361,12 +428,15 @@ def main():
     log("app", f"variant agent complete: {approach}; best={best.get('score')}")
     try:
         (out_dir / "done.json").write_text(
-            json.dumps({
-                "ok": True,
-                "variant": approach,
-                "best_score": best.get("score"),
-                "best_iter": best.get("iter"),
-            }, indent=2),
+            json.dumps(
+                {
+                    "ok": True,
+                    "variant": approach,
+                    "best_score": best.get("score"),
+                    "best_iter": best.get("iter"),
+                },
+                indent=2,
+            ),
             encoding="utf-8",
         )
     except Exception:
@@ -375,4 +445,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

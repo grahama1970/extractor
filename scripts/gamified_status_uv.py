@@ -27,4 +27,3 @@ if __name__ == "__main__":
     if len(sys.argv) == 1 or sys.argv[1] != "status":
         sys.argv.insert(1, "status")
     app()
-

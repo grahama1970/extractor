@@ -37,13 +37,21 @@ def main():
     }
     (stage11 / "11_graph_summary.json").write_text(json.dumps(summary, indent=2))
     # Put a minimal confirmation file so loader picks up the stage
-    (stage11 / "11_graph_confirmation.json").write_text(json.dumps({"status": "Completed"}, indent=2))
+    (stage11 / "11_graph_confirmation.json").write_text(
+        json.dumps({"status": "Completed"}, indent=2)
+    )
 
     # Run Stage 14
     env = dict(**os.environ)
     src_dir = str((Path(__file__).resolve().parents[3] / "src").resolve())
     env["PYTHONPATH"] = f"{src_dir}:{env.get('PYTHONPATH','')}"
-    cmd = [sys.executable, "-m", "extractor.pipeline.steps.14_report_generator", "run", str(out_dir)]
+    cmd = [
+        sys.executable,
+        "-m",
+        "extractor.pipeline.steps.14_report_generator",
+        "run",
+        str(out_dir),
+    ]
     if subprocess.run(cmd, env=env).returncode != 0:
         typer.echo("Stage 14 run failed", err=True)
         raise typer.Exit(1)
@@ -54,7 +62,9 @@ def main():
     g = stats.get("graph", {}) if ok else {}
     ok = ok and "edge_counts_by_type" in g and "violations_count" in g
     Path("scripts/artifacts").mkdir(parents=True, exist_ok=True)
-    (Path("scripts/artifacts")/"stage14_graph_counts.json").write_text(json.dumps({"ok": ok, "graph": g}, indent=2))
+    (Path("scripts/artifacts") / "stage14_graph_counts.json").write_text(
+        json.dumps({"ok": ok, "graph": g}, indent=2)
+    )
     if not ok:
         typer.echo("Graph counts missing in final report", err=True)
         raise typer.Exit(1)

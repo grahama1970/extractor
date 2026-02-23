@@ -1,4 +1,3 @@
-
 import json
 import shutil
 import tempfile
@@ -54,6 +53,7 @@ class TestManifest(unittest.TestCase):
         self.assertEqual(step["status"], "success")
         self.assertIsNotNone(step["output_hash"])
         self.assertEqual(step["artifacts"], ["out_artifacts"])
+
 
 if __name__ == "__main__":
     unittest.main()

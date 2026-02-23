@@ -16,7 +16,6 @@ Example Usage:
 """
 
 from typing import Annotated, List, Optional, Any
-import os
 
 try:
     from surya.layout import LayoutPredictor  # type: ignore

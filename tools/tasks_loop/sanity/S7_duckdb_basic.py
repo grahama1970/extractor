@@ -2,6 +2,7 @@
 import sys
 import duckdb
 
+
 def main():
     try:
         con = duckdb.connect(":memory:")
@@ -16,6 +17,7 @@ def main():
     except Exception as e:
         print(f"FAIL: {e}")
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()

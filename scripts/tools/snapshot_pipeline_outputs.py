@@ -15,11 +15,12 @@ from shutil import copy2
 # Load expected_common directly by path for script execution
 import importlib.util as _ilu
 import sys as _sys
-_ec_path = Path('scripts/tools/expected_common.py')
-spec = _ilu.spec_from_file_location('expected_common', _ec_path)
+
+_ec_path = Path("scripts/tools/expected_common.py")
+spec = _ilu.spec_from_file_location("expected_common", _ec_path)
 if spec and spec.loader:
     _mod = _ilu.module_from_spec(spec)
-    _sys.modules['expected_common'] = _mod
+    _sys.modules["expected_common"] = _mod
     spec.loader.exec_module(_mod)
     STEP_FILES = _mod.STEP_FILES
 else:
@@ -31,8 +32,12 @@ def ts() -> str:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Snapshot current pipeline JSONs and visuals to timestamped dir")
-    ap.add_argument("--out", required=True, type=Path, help="pipeline results root (data/results/pipeline)")
+    ap = argparse.ArgumentParser(
+        description="Snapshot current pipeline JSONs and visuals to timestamped dir"
+    )
+    ap.add_argument(
+        "--out", required=True, type=Path, help="pipeline results root (data/results/pipeline)"
+    )
     ap.add_argument("--visual-dir", type=Path, default=Path("scripts/artifacts/visuals"))
     ap.add_argument("--dest-root", type=Path, default=Path("scripts/artifacts/snapshots"))
     ap.add_argument("--steps", default="01,02,04,05,06,07,09")

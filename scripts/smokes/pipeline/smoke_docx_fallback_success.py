@@ -25,7 +25,12 @@ app = typer.Typer(add_completion=False)
 
 @app.command()
 def main(
-    docx_path: Path = typer.Option(Path("data/results/pipeline/01_annotation_processor/bht_formats/BHT_CV32A65X_marked_clean.docx"), exists=True),
+    docx_path: Path = typer.Option(
+        Path(
+            "data/results/pipeline/01_annotation_processor/bht_formats/BHT_CV32A65X_marked_clean.docx"
+        ),
+        exists=True,
+    ),
     results_dir: Path = typer.Option(Path("data/results/structured_parity_smoke/docx_fallback")),
 ):
     meta = STRUCTURED_PIPELINES[DOCXProvider]
@@ -40,8 +45,8 @@ def main(
         auto_convert_mangled_docx=True,
     )
     # Accept either: direct return of PDF paths, or structured path return but PDF fallback artifacts exist
-    s07_path = Path(artifacts["stage07"]).resolve()
-    s10_path = Path(artifacts["stage10_flattened"]).resolve()
+    Path(artifacts["stage07"]).resolve()
+    Path(artifacts["stage10_flattened"]).resolve()
     # Look for PDF fallback outputs regardless of return
     pdf_root = results_dir / docx_path.stem
     pdf07 = pdf_root / "07_reflow_section" / "json_output" / "07_reflowed.json"
@@ -51,7 +56,12 @@ def main(
         raise typer.Exit(code=1)
     payload = json.loads(pdf07.read_text())
     diags = payload.get("diagnostics") or []
-    mangled = any(isinstance(d, dict) and d.get("structured_pipeline") == "docx_mangled_check" and d.get("mangled_docx") for d in diags)
+    mangled = any(
+        isinstance(d, dict)
+        and d.get("structured_pipeline") == "docx_mangled_check"
+        and d.get("mangled_docx")
+        for d in diags
+    )
     if not mangled:
         typer.echo("Mangled diagnostic not recorded in Stage 07 payload.", err=True)
         raise typer.Exit(code=1)

@@ -16,7 +16,6 @@ Success Criteria:
 - At least one block is a SectionHeader or Text type
 """
 
-import os
 import sys
 from pathlib import Path
 
@@ -42,40 +41,40 @@ def main() -> int:
             if alt.exists():
                 pdf_path = alt
                 break
-    
+
     if not pdf_path:
         print(f"SKIP: No fixture PDF found (checked {FIXTURE_PDF} and alternatives)")
         return 0  # Skip, not fail
-    
+
     print(f"Testing marker extraction on: {pdf_path.name}")
-    
+
     # Try to import and run marker extraction
     try:
         # Add src to path if needed
         src_path = ROOT / "src"
         if str(src_path) not in sys.path:
             sys.path.insert(0, str(src_path))
-        
+
         from extractor.pipeline.steps.s02_marker_extractor import extract_blocks
-        
+
         blocks, presence = extract_blocks(pdf_path)
-        
+
         if not blocks:
             print("FAIL: No blocks extracted")
             return 1
-        
+
         # Check for meaningful content
         block_types = set(b.get("block_type") for b in blocks)
         expected_types = {"SectionHeader", "Text", "Table", "Figure", "ListItem"}
         found_types = block_types & expected_types
-        
+
         if not found_types:
             print(f"FAIL: No expected block types found. Got: {block_types}")
             return 1
-        
+
         print(f"OK: Extracted {len(blocks)} blocks, types: {found_types}")
         return 0
-        
+
     except ImportError as e:
         # Check if it's a marker-specific import failure
         if "marker" in str(e).lower() or "surya" in str(e).lower():

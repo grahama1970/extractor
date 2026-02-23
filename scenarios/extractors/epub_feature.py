@@ -28,6 +28,7 @@ def main() -> int:
         # Synthesize a minimal EPUB if none present
         try:
             from ebooklib import epub  # type: ignore
+
             tmp = Path(tempfile.gettempdir()) / "scenario_sample.epub"
             book = epub.EpubBook()
             book.set_title("Scenario Sample")
@@ -61,6 +62,7 @@ def main() -> int:
 
     try:
         from scenarios.extractors.common import import_provider
+
         EPUBProvider = import_provider("providers/epub.py", "EPUBProvider")
     except Exception as e:
         logger.warning(f"SKIP: cannot import EPUBProvider: {e}")
@@ -105,7 +107,10 @@ def main() -> int:
     counts, heads = summarise_unified(doc)
     try:
         from scenarios.extractors.common import write_unified_snapshot
-        snap_path = write_unified_snapshot("epub", doc.id, doc.model_dump(by_alias=True, mode="json"))
+
+        snap_path = write_unified_snapshot(
+            "epub", doc.id, doc.model_dump(by_alias=True, mode="json")
+        )
     except Exception:
         snap_path = None
     inserted = try_arango_insert(doc)

@@ -13,6 +13,7 @@ from scripts.lessons.arango_client import get_db
 
 app = typer.Typer(add_completion=False)
 
+
 @app.command()
 def delete(
     key: str = typer.Option("", help="_key of the lesson to delete"),
@@ -44,6 +45,7 @@ def delete(
         except Exception as e:
             print(f"Failed to delete key={d['_key']}: {e}")
             raise typer.Exit(1)
+
 
 if __name__ == "__main__":
     app()

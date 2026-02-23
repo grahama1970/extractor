@@ -33,7 +33,7 @@ def load_contract(fixture_name: str) -> dict:
             expected="s07.json",
             actual="missing",
             file=str(contract_path),
-            hint="Run: python utils/compile_contracts.py"
+            hint="Run: python utils/compile_contracts.py",
         )
     return json.loads(contract_path.read_text())
 
@@ -41,7 +41,7 @@ def load_contract(fixture_name: str) -> dict:
 def checks(fixture_name: str):
     contract = load_contract(fixture_name)
     expected = contract.get("expected", {})
-    
+
     # Find database
     db_path = PIPELINE_DIR / "pipeline.duckdb"
     if not db_path.exists():
@@ -52,11 +52,11 @@ def checks(fixture_name: str):
             expected="pipeline.duckdb or corpus.duckdb",
             actual="missing",
             file=str(PIPELINE_DIR),
-            hint="Run S07 first"
+            hint="Run S07 first",
         )
-    
+
     con = duckdb.connect(str(db_path), read_only=True)
-    
+
     # Check tables exist
     required_tables = ["sections", "blocks", "tables", "figures", "merged_content"]
     for table in required_tables:
@@ -67,10 +67,10 @@ def checks(fixture_name: str):
                 expected="table exists",
                 actual="missing",
                 file=str(db_path),
-                hint=f"Check S07 ingestion for {table}"
+                hint=f"Check S07 ingestion for {table}",
             )
         print(f"✅ Table {table}: {result[0]} rows")
-    
+
     # Check expected row counts
     if expected.get("sections_rows"):
         actual = con.execute("SELECT COUNT(*) FROM sections").fetchone()[0]
@@ -80,16 +80,16 @@ def checks(fixture_name: str):
                 expected=expected["sections_rows"],
                 actual=actual,
                 file=str(db_path),
-                hint="Check S04 output"
+                hint="Check S04 output",
             )
-    
+
     con.close()
-    print(f"✅ DuckDB structure verified")
+    print("✅ DuckDB structure verified")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Gate S07: DuckDB Ingest")
     parser.add_argument("--fixture", required=True, help="Fixture name")
     args = parser.parse_args()
-    
+
     sys.exit(run_gate("S07: DuckDB Ingest", lambda: checks(args.fixture)))

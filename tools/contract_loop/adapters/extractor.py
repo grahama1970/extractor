@@ -463,11 +463,7 @@ def _visual_dir(out: Path, step_name: str) -> Path:
 def _list_images(path: Path) -> list[Path]:
     if not path.exists():
         return []
-    return [
-        p
-        for p in path.iterdir()
-        if p.is_file() and p.suffix.lower() in IMAGE_EXTENSIONS
-    ]
+    return [p for p in path.iterdir() if p.is_file() and p.suffix.lower() in IMAGE_EXTENSIONS]
 
 
 def _resolve_visual_path(out: Path, raw: str | None) -> Path | None:
@@ -528,9 +524,7 @@ def _assert_visual_mapping(step_name: str, out: Path) -> None:
                 f"{step_name}: missing visual path for item {idx} ({spec['path_fields']})"
             )
         if not found_path.exists():
-            raise ContractLoopError(
-                f"{step_name}: visual path missing on disk: {found_path}"
-            )
+            raise ContractLoopError(f"{step_name}: visual path missing on disk: {found_path}")
         try:
             found_path.relative_to(visual_dir)
         except Exception:
@@ -551,6 +545,7 @@ def _ensure_visual_symlink(out: Path, step_name: str) -> None:
             target.unlink()
         else:
             import shutil
+
             shutil.rmtree(target, ignore_errors=True)
     try:
         target.symlink_to(visual_dir, target_is_directory=True)

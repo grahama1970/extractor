@@ -16,8 +16,15 @@ DOC = os.path.join(ROOT, "docs", "STATE_OF_PROJECT.md")
 
 def run(cmd: str, env=None) -> tuple[int, str]:
     print(f"$ {cmd}")
-    proc = subprocess.run(cmd, shell=True, cwd=ROOT, env=env or os.environ.copy(),
-                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    proc = subprocess.run(
+        cmd,
+        shell=True,
+        cwd=ROOT,
+        env=env or os.environ.copy(),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
     return proc.returncode, proc.stdout.strip()
 
 
@@ -34,16 +41,24 @@ def main():
 
     # UI smokes
     kc_code, _ = run("BASE_URL=http://127.0.0.1:8080 node scripts/smokes/ui_keyboard_core.mjs")
-    sh_code, _ = run("BASE_URL=http://127.0.0.1:8080 node scripts/smokes/ui_search_highlight_thumb.mjs")
+    sh_code, _ = run(
+        "BASE_URL=http://127.0.0.1:8080 node scripts/smokes/ui_search_highlight_thumb.mjs"
+    )
 
     # API smokes
     oslc_code, _ = run("BASE_URL=http://127.0.0.1:8000 uv run scripts/smokes/api_oslc_stub.py")
     cfs_code, _ = run("BASE_URL=http://127.0.0.1:8000 uv run scripts/smokes/api_conflicts_save.py")
 
     # Pipeline smokes
-    reqif_code, _ = run("PYTHONPATH=$(pwd)/src .venv/bin/python scripts/smokes/pipeline/smoke_reqif_export_v0.py")
-    rtm_code, _ = run("PYTHONPATH=$(pwd)/src .venv/bin/python scripts/smokes/pipeline/smoke_stage14_rtm_v0.py")
-    resume_code, _ = run("PYTHONPATH=$(pwd)/src .venv/bin/python scripts/smokes/pipeline/smoke_resume_manifest.py")
+    reqif_code, _ = run(
+        "PYTHONPATH=$(pwd)/src .venv/bin/python scripts/smokes/pipeline/smoke_reqif_export_v0.py"
+    )
+    rtm_code, _ = run(
+        "PYTHONPATH=$(pwd)/src .venv/bin/python scripts/smokes/pipeline/smoke_stage14_rtm_v0.py"
+    )
+    resume_code, _ = run(
+        "PYTHONPATH=$(pwd)/src .venv/bin/python scripts/smokes/pipeline/smoke_resume_manifest.py"
+    )
 
     # Artifacts
     reqif_path = os.path.join("scripts", "artifacts", "export.reqif")
@@ -55,13 +70,19 @@ def main():
     section.append(f"## Auto‑Run Validation — {ts}")
     section.append("")
     section.append("- UX Health")
-    section.append("  - Command:\n    ```bash\n    BASE_URL=http://127.0.0.1:8080/main \\\n    node scripts/ux_check_broken.mjs\n    ```")
+    section.append(
+        "  - Command:\n    ```bash\n    BASE_URL=http://127.0.0.1:8080/main \\\n    node scripts/ux_check_broken.mjs\n    ```"
+    )
     section.append(f"  - Status: {'OK' if ux_code==0 else 'FAIL'}")
     section.append(f"  - Latest log: {ux_log or '(none)'}")
     section.append("")
     section.append("- UI Smokes (subset)")
-    section.append(f"  - Keyboard core: {'OK' if kc_code==0 else 'FAIL'} — scripts/smokes/ui_keyboard_core.mjs")
-    section.append(f"  - Search highlight + thumb: {'OK' if sh_code==0 else 'FAIL'} — scripts/smokes/ui_search_highlight_thumb.mjs")
+    section.append(
+        f"  - Keyboard core: {'OK' if kc_code==0 else 'FAIL'} — scripts/smokes/ui_keyboard_core.mjs"
+    )
+    section.append(
+        f"  - Search highlight + thumb: {'OK' if sh_code==0 else 'FAIL'} — scripts/smokes/ui_search_highlight_thumb.mjs"
+    )
     section.append("")
     section.append("- API Smokes")
     section.append(f"  - OSLC stub: {'OK' if oslc_code==0 else 'FAIL'}")
@@ -82,4 +103,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

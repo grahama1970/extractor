@@ -20,11 +20,13 @@ from tenacity import (
     wait_exponential_jitter,
     retry_if_exception_type,
 )
+
 try:
     import litellm  # type: ignore
 except Exception as exc:
-    log_stage_error('async_processing.py', exc, {'context': 'async_processing.py'})
+    log_stage_error("async_processing.py", exc, {"context": "async_processing.py"})
     raise
+
     class _DummyLitellm:
         class exceptions:  # type: ignore
             Timeout = Exception

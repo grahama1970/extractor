@@ -70,6 +70,18 @@ properties:
         type: boolean
         description: "Multi-column layouts with complex reading order"
         default: false
+      generic_table_headers:
+        type: boolean
+        description: "Tables extracted with integer headers (0, 1, 2) instead of semantic headers"
+        default: true
+      boilerplate_pollution:
+        type: boolean
+        description: "Content polluted with repeated navigation, watermarks, or footers"
+        default: true
+      missing_figures:
+        type: boolean
+        description: "Figures present in PDF but failed to extract"
+        default: false
 
   # Configuration Section (Intent)
   # This is compiled into the runtime profile.

@@ -1,5 +1,3 @@
-import os
-import re
 import subprocess
 import sys
 import time
@@ -50,4 +48,3 @@ def test_emit_only_generates_contractual_prompts(tmp_path: Path):
         txt = prompt.read_text()
         for sec in required:
             assert sec in txt, f"section '{sec}' missing in {prompt}"
-

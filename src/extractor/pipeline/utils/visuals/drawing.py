@@ -1,6 +1,5 @@
 import fitz
-from typing import Optional, List, Tuple, Any
-from loguru import logger
+from typing import Optional, List, Tuple
 
 from extractor.pipeline.utils.reliability import log_stage_error
 from extractor.pipeline.utils.visuals import formatting as fmt
@@ -40,7 +39,7 @@ def draw_gutter_tag(
     target: fitz.Rect,
     text: str,
     color: Tuple[float, float, float] = (0.12, 0.12, 0.12),
-    font: float = 9.0
+    font: float = 9.0,
 ) -> None:
     if not text or lane is None:
         return
@@ -111,7 +110,7 @@ def draw_t_endcaps(
     lane: fitz.Rect,
     y0: float,
     y1: float,
-    color: Tuple[float, float, float] = (0.25, 0.25, 0.25)
+    color: Tuple[float, float, float] = (0.25, 0.25, 0.25),
 ) -> None:
     if lane is None:
         return
@@ -123,10 +122,14 @@ def draw_t_endcaps(
         vertical.update()
 
         top_bar = page.add_line_annot(fitz.Point(x - 6, y0), fitz.Point(x + 6, y0))
-        top_bar.set_colors(stroke=color); top_bar.set_border(width=1.0); top_bar.update()
+        top_bar.set_colors(stroke=color)
+        top_bar.set_border(width=1.0)
+        top_bar.update()
 
         bottom_bar = page.add_line_annot(fitz.Point(x - 6, y1), fitz.Point(x + 6, y1))
-        bottom_bar.set_colors(stroke=color); bottom_bar.set_border(width=1.0); bottom_bar.update()
+        bottom_bar.set_colors(stroke=color)
+        bottom_bar.set_border(width=1.0)
+        bottom_bar.update()
     except Exception:
         page.draw_line(fitz.Point(x, y0), fitz.Point(x, y1), color=color, width=1.0)
         page.draw_line(fitz.Point(x - 6, y0), fitz.Point(x + 6, y0), color=color, width=1.0)
@@ -138,7 +141,7 @@ def draw_section_title_plaque(
     rect: fitz.Rect,
     text: str,
     stroke: Tuple[float, float, float] = (0.86, 0.25, 0.2),
-    font: float = 11.0
+    font: float = 11.0,
 ) -> None:
     if not text:
         return
@@ -152,12 +155,17 @@ def draw_section_title_plaque(
     h = font * 1.8
     top = max(page.rect.y0 + 6, rect.y0 - h - 6)
     left = rect.x0 + 6
-    plaque = fitz.Rect(left, top, left + page.get_text_length(t, fontsize=font) + 2 * PLAQUE_PAD_X, top + h)
+    plaque = fitz.Rect(
+        left, top, left + page.get_text_length(t, fontsize=font) + 2 * PLAQUE_PAD_X, top + h
+    )
 
     page.draw_rect(plaque, fill=(1, 1, 1), color=stroke, width=0.9, overlay=True)
     page.insert_text(
         (plaque.x0 + PLAQUE_PAD_X, plaque.y0 + font * 1.2 - 1),
-        t, fontsize=font, color=stroke, overlay=True
+        t,
+        fontsize=font,
+        color=stroke,
+        overlay=True,
     )
 
 
@@ -187,8 +195,13 @@ def draw_figure_watermark(page: fitz.Page, rect: fitz.Rect, text: str) -> None:
 
     page.draw_rect(box, fill=(1.0, 1.0, 1.0), color=(0.7, 0.7, 0.7), width=0.6, overlay=True)
     page.insert_textbox(
-        box, "\n".join(lines), fontsize=font, color=(0.25, 0.25, 0.25),
-        lineheight=1.2, align=0, overlay=True
+        box,
+        "\n".join(lines),
+        fontsize=font,
+        color=(0.25, 0.25, 0.25),
+        lineheight=1.2,
+        align=0,
+        overlay=True,
     )
 
 
@@ -198,7 +211,7 @@ def draw_table_metrics(
     headers_preview: Optional[str],
     camelot_acc: Optional[float],
     pandas_acc: Optional[float],
-    color: Tuple[float, float, float] = (0.0, 0.0, 0.0)
+    color: Tuple[float, float, float] = (0.0, 0.0, 0.0),
 ) -> None:
     y = rect.y1 - 6
     x = rect.x0 + 8
@@ -206,7 +219,9 @@ def draw_table_metrics(
     font2 = 9.0
 
     if headers_preview:
-        page.insert_text((x, y - font1), f"Data: {headers_preview}", fontsize=font1, color=color, overlay=True)
+        page.insert_text(
+            (x, y - font1), f"Data: {headers_preview}", fontsize=font1, color=color, overlay=True
+        )
         y -= font1 + 2
 
     metrics: List[str] = []
@@ -225,7 +240,9 @@ def draw_table_metrics(
     page.insert_text(
         (x, y - font2),
         f"Metrics: {', '.join(metrics) if metrics else '—'}",
-        fontsize=font2, color=color, overlay=True
+        fontsize=font2,
+        color=color,
+        overlay=True,
     )
 
 
@@ -233,7 +250,7 @@ def draw_table_preview_box(
     page: fitz.Page,
     rect: fitz.Rect,
     lines: List[str],
-    color: Tuple[float, float, float] = (0.0, 0.0, 0.0)
+    color: Tuple[float, float, float] = (0.0, 0.0, 0.0),
 ) -> None:
     if not lines:
         return
@@ -256,7 +273,9 @@ def draw_table_preview_box(
 
     page.draw_rect(box, fill=TABLE_CALLOUT_BG, color=(0.65, 0.65, 0.65), width=0.6, overlay=True)
     preview_text = "\n".join(panel_lines)
-    page.insert_textbox(box, preview_text, fontsize=font, color=color, lineheight=1.2, align=0, overlay=True)
+    page.insert_textbox(
+        box, preview_text, fontsize=font, color=color, lineheight=1.2, align=0, overlay=True
+    )
 
 
 def draw_figure_caption_box(page: fitz.Page, rect: fitz.Rect, text: str) -> None:
@@ -280,14 +299,19 @@ def draw_figure_caption_box(page: fitz.Page, rect: fitz.Rect, text: str) -> None
             rect.x0 + 6,
             max(rect.y0 - height - 8, page.rect.y0 + 6),
             rect.x0 + 6 + max_width,
-            max(rect.y0 - 8, page.rect.y0 + 6) + height
+            max(rect.y0 - 8, page.rect.y0 + 6) + height,
         )
 
     page.draw_rect(box, fill=FIGURE_CALLOUT_BG, color=(0.5, 0.6, 0.8), width=0.6, overlay=True)
     panel = ["Figure description:"] + lines
     page.insert_textbox(
-        box, "\n".join(panel), fontsize=font, color=(0.1, 0.14, 0.2),
-        lineheight=1.2, align=0, overlay=True
+        box,
+        "\n".join(panel),
+        fontsize=font,
+        color=(0.1, 0.14, 0.2),
+        lineheight=1.2,
+        align=0,
+        overlay=True,
     )
 
 
@@ -325,7 +349,9 @@ def draw_label(
                 page.draw_rect(bg, color=color, width=0.4, fill=LABEL_BG, overlay=False)
                 y = top + font
                 for ln in lines:
-                    page.insert_text((x, y), ln, fontsize=font, color=LABEL_TEXT_COLOR, overlay=False)
+                    page.insert_text(
+                        (x, y), ln, fontsize=font, color=LABEL_TEXT_COLOR, overlay=False
+                    )
                     y += line_height
             return fitz.Point(bg.x0 + width / 2.0, bg.y0 + height / 2.0)
 
@@ -373,7 +399,10 @@ def draw_label(
         # Try above
         top = rect.y0 - LABEL_MARGIN_PTS - text_height
         if top >= page.rect.y0 + 2:
-            x = max(page.rect.x0 + LABEL_MARGIN_PTS, min(rect.x0, page.rect.x1 - width - LABEL_MARGIN_PTS))
+            x = max(
+                page.rect.x0 + LABEL_MARGIN_PTS,
+                min(rect.x0, page.rect.x1 - width - LABEL_MARGIN_PTS),
+            )
             center = _draw_lines(x, top, width, lines)
             end = fitz.Point(rect.x0 + rect.width / 2.0, rect.y0)
             page.draw_line(center, end, color=color, width=0.4)
@@ -383,10 +412,12 @@ def draw_label(
         top = rect.y1 + LABEL_MARGIN_PTS
         if top + text_height > page.rect.y1 - 2:
             top = page.rect.y1 - text_height - 2
-        x = max(page.rect.x0 + LABEL_MARGIN_PTS, min(rect.x0, page.rect.x1 - width - LABEL_MARGIN_PTS))
+        x = max(
+            page.rect.x0 + LABEL_MARGIN_PTS, min(rect.x0, page.rect.x1 - width - LABEL_MARGIN_PTS)
+        )
         center = _draw_lines(x, top, width, lines)
         end = fitz.Point(rect.x0 + rect.width / 2.0, rect.y1)
         page.draw_line(end, center, color=color, width=0.4)
 
     except Exception as exc:
-        log_stage_error(STEP_NAME, exc, {'context': 'draw_label'})
+        log_stage_error(STEP_NAME, exc, {"context": "draw_label"})
