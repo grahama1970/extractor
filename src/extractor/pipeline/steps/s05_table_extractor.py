@@ -1062,6 +1062,43 @@ def extract_all_tables(
     quality_summary["param_source"] = param_source
     quality_summary["params_used"] = params_used
 
+    # ---------------------------------------------------------------
+    # S00 Profile-Driven Strategy Routing (TASK-003)
+    # ---------------------------------------------------------------
+    # Use table_style and domain from S00 to select optimal baseline
+    # strategy BEFORE trying all strategies. This avoids wasted time
+    # on lattice when tables are borderless, and vice versa.
+    s00_table_style = (context or {}).get("table_style", "none")
+    s00_domain = (context or {}).get("domain", "general")
+    s00_multi_col = (context or {}).get("has_multi_column", False)
+
+    if not last_good:
+        if s00_table_style == "borderless":
+            # Borderless tables: stream first, lattice as fallback
+            last_good = "stream_default"
+            param_source = param_source or "s00_routing"
+            quality_summary["s00_routed_strategy"] = "stream_default"
+            logger.info(f"S00 routing: table_style=borderless → stream_default first")
+        elif s00_table_style == "bordered":
+            # Bordered tables: lattice is correct baseline
+            if s00_domain == "defense":
+                last_good = "lattice_strong"
+                quality_summary["s00_routed_strategy"] = "lattice_strong"
+                logger.info(f"S00 routing: table_style=bordered, domain=defense → lattice_strong")
+            # else: lattice_default is the default, no change needed
+        elif s00_table_style == "mixed":
+            # Mixed: keep lattice_default baseline, stream will be tried as fallback
+            # but ensure all stream strategies get tried
+            quality_summary["s00_routed_strategy"] = "mixed_sweep"
+            logger.info(f"S00 routing: table_style=mixed → full strategy sweep")
+
+    # Multi-column layout: increase horizontal padding for better capture
+    if s00_multi_col:
+        os.environ.setdefault("TABLE_HORIZONTAL_PADDING_RATIO", "0.15")
+
+    quality_summary["s00_table_style"] = s00_table_style
+    quality_summary["s00_domain"] = s00_domain
+
     # Shadow S00 prediction (Shadow-LEGO seed producer)
     # If the classifier predicts this PDF needs stream mode, reorder strategies
     # to try stream FIRST instead of last. This is a seed, not a gate.

@@ -44,6 +44,18 @@ CAMELOT_STRATEGIES = {
         "flavor": "stream",
         "params": {"edge_tol": 50},
     },
+    "stream_tight": {
+        "flavor": "stream",
+        "params": {"edge_tol": 30, "row_tol": 5},
+    },
+    "stream_wide": {
+        "flavor": "stream",
+        "params": {"edge_tol": 80, "row_tol": 15},
+    },
+    "stream_columns": {
+        "flavor": "stream",
+        "params": {"edge_tol": 50, "column_tol": 10},
+    },
 }
 
 
