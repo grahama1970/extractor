@@ -196,10 +196,7 @@ def extract_tables_from_page(
 
     # Strategy Selection
     baseline_name = "lattice_default"
-    if (
-        last_good_strategy in CAMELOT_STRATEGIES
-        and "lattice" in CAMELOT_STRATEGIES[last_good_strategy]["flavor"]
-    ):
+    if last_good_strategy in CAMELOT_STRATEGIES:
         baseline_name = last_good_strategy
 
     strategies_to_try = [{"name": baseline_name, **CAMELOT_STRATEGIES[baseline_name]}]
