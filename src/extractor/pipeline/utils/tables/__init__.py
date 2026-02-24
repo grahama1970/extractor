@@ -12,6 +12,8 @@ from extractor.pipeline.utils.tables.extraction import (
     try_camelot_strategy,
     extract_table_image,
     bbox_tuple_for,
+    pre_rasterize_page,
+    cleanup_raster_cache,
 )
 
 # Metrics
@@ -38,6 +40,15 @@ from extractor.pipeline.utils.tables.heuristics import (
     demote_sentence_like_single_row_tables,
     demote_text_heavy_lattice_tables,
     coalesce_repeated_header_rows,
+)
+
+# Strategy Selector
+from extractor.pipeline.utils.tables.strategy_selector import (
+    predict_strategy,
+    log_disagreement,
+    should_skip_sweep,
+    StrategyPrediction,
+    STRATEGY_SELECTOR_MODE,
 )
 
 __all__ = [
@@ -69,4 +80,10 @@ __all__ = [
     "demote_sentence_like_single_row_tables",
     "demote_text_heavy_lattice_tables",
     "coalesce_repeated_header_rows",
+    # Strategy Selector
+    "predict_strategy",
+    "log_disagreement",
+    "should_skip_sweep",
+    "StrategyPrediction",
+    "STRATEGY_SELECTOR_MODE",
 ]

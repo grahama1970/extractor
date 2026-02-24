@@ -461,7 +461,168 @@ def sync_to_datalake(doc_node: Dict[str, Any], flattened_data: list, doc_key: st
     ensure_sparta_collections(mem_adb)
     sync_sparta_readme(mem_adb, doc_id)
 
+    # 5. Extract and sync glossary entries from glossary-tagged sections
+    _sync_glossary_from_datalake(flattened_data, doc_id, doc_node.get("filename", "unknown"), mem_adb)
+
     logger.success(f"Datalake Knowledge Graph Sync Complete: {len(chunks)} assets in '{mem_db_name}'")
+
+
+# ---------------------------------------------------------------------------
+# Glossary sync — extract term→definition pairs from glossary sections
+# ---------------------------------------------------------------------------
+
+_glossary_collections_ensured: set = set()
+
+
+def _ensure_glossary_collections(db):
+    """Create glossary + glossary_edges collections if they don't exist."""
+    db_name = getattr(db, "name", "memory")
+    if db_name in _glossary_collections_ensured:
+        return
+    _glossary_collections_ensured.add(db_name)
+
+    if not db.has_collection("glossary"):
+        db.create_collection("glossary")
+    if not db.has_collection("glossary_edges"):
+        db.create_collection("glossary_edges", edge=True)
+
+    # Indexes
+    try:
+        col = db.collection("glossary")
+        col.add_hash_index(["term_lower"], unique=True)  # type: ignore[attr-defined]
+        col.add_hash_index(["category"])  # type: ignore[attr-defined]
+    except Exception as e:
+        logger.debug(f"Failed to create glossary collection indexes: {e}")
+    try:
+        edge_col = db.collection("glossary_edges")
+        edge_col.add_hash_index(["_from"])  # type: ignore[attr-defined]
+        edge_col.add_hash_index(["_to"])  # type: ignore[attr-defined]
+    except Exception as e:
+        logger.debug(f"Failed to create glossary_edges indexes: {e}")
+
+
+def _upsert_glossary_entry(
+    col, edge_col, term: str, definition: str, category: str,
+    doc_key: str, doc_name: str, section_id: str, section_title: str,
+):
+    """Upsert a single glossary entry. Append definition if term exists."""
+    from datetime import datetime
+
+    term_key = hashlib.md5(term.lower().encode()).hexdigest()
+    now = datetime.utcnow().isoformat() + "Z"
+
+    def_entry = {
+        "definition": definition,
+        "source_doc_key": doc_key,
+        "source_filename": doc_name,
+        "source_section_id": section_id,
+        "source_section_title": section_title,
+        "added_at": now,
+    }
+
+    try:
+        existing = col.get(term_key)
+    except Exception:
+        existing = None
+
+    if existing:
+        # Dedup: skip if same doc + same definition text
+        for d in existing.get("definitions", []):
+            if d.get("source_doc_key") == doc_key and d.get("definition") == definition:
+                return  # Already stored
+        existing["definitions"].append(def_entry)
+        # Update aliases
+        aliases = set(existing.get("aliases", []))
+        aliases.add(term)
+        existing["aliases"] = list(aliases)
+        existing["updated_at"] = now
+        col.replace(existing)
+    else:
+        doc = {
+            "_key": term_key,
+            "term": term,
+            "term_lower": term.lower(),
+            "definitions": [def_entry],
+            "aliases": [term],
+            "category": category,
+            "first_seen_at": now,
+            "updated_at": now,
+        }
+        col.insert(doc, overwrite=True)
+
+    # Edge: glossary/{term_key} → datalake_docs/{doc_key}
+    edge_key = hashlib.md5(f"{term_key}_{doc_key}".encode()).hexdigest()
+    edge = {
+        "_key": edge_key,
+        "_from": f"glossary/{term_key}",
+        "_to": f"datalake_docs/{doc_key}",
+        "type": "defined_in",
+        "section_id": section_id,
+        "added_at": now,
+    }
+    try:
+        edge_col.insert(edge, overwrite=True)
+    except Exception as e:
+        logger.warning(f"Failed to insert glossary edge for term '{term}': {e}")
+
+
+def _sync_glossary_from_datalake(flattened_data: list, doc_id: str, doc_name: str, mem_db):
+    """Find glossary sections in flattened data and extract/upsert entries."""
+    # Find chunks from glossary-tagged sections
+    glossary_texts = {}  # section_id → (text, section_title)
+    for item in flattened_data:
+        meta = item.get("data", {})
+        section_title = item.get("section_title", "")
+        section_id = item.get("section_id", "")
+
+        # Check if this chunk's section is tagged as glossary
+        if meta.get("metadata_type") == "glossary" or meta.get("type") == "metadata":
+            text = item.get("text_content", "")
+            if text and text.strip():
+                if section_id in glossary_texts:
+                    glossary_texts[section_id] = (
+                        glossary_texts[section_id][0] + "\n" + text,
+                        section_title or glossary_texts[section_id][1],
+                    )
+                else:
+                    glossary_texts[section_id] = (text, section_title)
+
+    if not glossary_texts:
+        return
+
+    _ensure_glossary_collections(mem_db)
+
+    try:
+        from extractor.pipeline.utils.glossary_extractor import extract_glossary_entries
+    except ImportError:
+        logger.warning("glossary_extractor not available — skipping glossary sync")
+        return
+
+    col = mem_db.collection("glossary")
+    edge_col = mem_db.collection("glossary_edges")
+    total_entries = 0
+
+    for section_id, (text, section_title) in glossary_texts.items():
+        entries = extract_glossary_entries(text)
+        if len(entries) < 3:
+            logger.debug(f"Section '{section_title}' yielded {len(entries)} entries — skipping (min 3)")
+            continue
+
+        for entry in entries:
+            _upsert_glossary_entry(
+                col, edge_col,
+                term=entry["term"],
+                definition=entry["definition"],
+                category=entry.get("category", "definition"),
+                doc_key=doc_id,
+                doc_name=doc_name,
+                section_id=section_id,
+                section_title=section_title,
+            )
+            total_entries += 1
+
+    if total_entries:
+        logger.info(f"Synced {total_entries} glossary entries from {len(glossary_texts)} section(s)")
 
 
 def sync_to_codebase(pipeline_dir: Path):
@@ -709,8 +870,8 @@ def build_flattened_data(repo, pipeline_dir: Path) -> list:
             try:
                 meta = json.loads(meta_json) if isinstance(meta_json, str) else meta_json
                 req_bbox = meta.get("bbox")
-            except (json.JSONDecodeError, TypeError):
-                pass
+            except (json.JSONDecodeError, TypeError) as e:
+                logger.debug(f"Failed to parse requirement metadata JSON: {e}")
 
         entry = {
             "_key": r_id,

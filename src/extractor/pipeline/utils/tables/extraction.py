@@ -93,8 +93,8 @@ def try_camelot_strategy(
                         {"page": page_num, "strategy": strategy.get("name")},
                     )
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Failed to record camelot strategy failure diagnostic: {e}")
         return []
 
 
@@ -166,8 +166,8 @@ def extract_table_image(
                         {"page": page_num, "table_idx": table_idx},
                     )
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Failed to record image extraction failure diagnostic: {e}")
         return None
 
 
@@ -260,6 +260,52 @@ def concat_page_halves(
         combined.save(str(output_path))
 
     return combined
+
+
+def pre_rasterize_page(
+    pdf_path: Path,
+    page_num: int,
+    output_dir: Path,
+    dpi: int = 300,
+) -> Path:
+    """Render a PDF page to PNG once via PyMuPDF.
+
+    Used to avoid re-rasterizing the same page when retrying
+    multiple lattice strategies (which differ only in OpenCV
+    line_scale params, not the source raster).
+
+    Args:
+        pdf_path: Path to the PDF.
+        page_num: 0-based page number.
+        output_dir: Directory for temp PNG.
+        dpi: Render resolution.
+
+    Returns:
+        Path to the cached PNG file.
+    """
+    import fitz
+
+    png_path = output_dir / f"_raster_p{page_num}.png"
+    if png_path.exists():
+        return png_path
+
+    doc = fitz.open(str(pdf_path))
+    try:
+        page = doc[page_num]
+        pix = page.get_pixmap(dpi=dpi)
+        pix.save(str(png_path))
+    finally:
+        doc.close()
+    return png_path
+
+
+def cleanup_raster_cache(output_dir: Path, page_num: int) -> None:
+    """Remove the cached raster PNG for a page."""
+    png_path = output_dir / f"_raster_p{page_num}.png"
+    try:
+        png_path.unlink(missing_ok=True)
+    except OSError as e:
+        logger.debug(f"Failed to clean up raster cache {png_path}: {e}")
 
 
 def bbox_tuple_for(table_obj: Any) -> Optional[Tuple[float, float, float, float]]:
