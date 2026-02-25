@@ -1,1 +1,0 @@
-print('Pre-benchmark checks complete for', __file__)
