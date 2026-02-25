@@ -1,0 +1,297 @@
+{
+  "description": "Pre-recorded calibration session for testing",
+  "session": {
+    "_key": "test_doc_2026-01-20",
+    "preset_id": "test-document",
+    "pdf_path": "tests/fixtures/calibration/test_doc.pdf",
+    "status": "in_progress",
+    "created_at": "2026-01-20T10:00:00Z",
+    "updated_at": "2026-01-20T11:30:00Z",
+    "metadata": {
+      "page_count": 10,
+      "total_elements": 25
+    }
+  },
+  "examples": [
+    {
+      "_key": "ex_001",
+      "session_key": "test_doc_2026-01-20",
+      "page_number": 0,
+      "element_idx": 0,
+      "element_type": "header",
+      "bbox": [72, 72, 540, 100],
+      "human_verdict": "correct",
+      "round_number": 1
+    },
+    {
+      "_key": "ex_002",
+      "session_key": "test_doc_2026-01-20",
+      "page_number": 0,
+      "element_idx": 1,
+      "element_type": "header",
+      "bbox": [72, 200, 540, 228],
+      "human_verdict": "correct",
+      "round_number": 1
+    },
+    {
+      "_key": "ex_003",
+      "session_key": "test_doc_2026-01-20",
+      "page_number": 1,
+      "element_idx": 0,
+      "element_type": "header",
+      "bbox": [72, 72, 540, 100],
+      "human_verdict": "correct",
+      "round_number": 1
+    },
+    {
+      "_key": "ex_004",
+      "session_key": "test_doc_2026-01-20",
+      "page_number": 1,
+      "element_idx": 1,
+      "element_type": "table",
+      "bbox": [72, 150, 540, 350],
+      "human_verdict": "correct",
+      "round_number": 1
+    },
+    {
+      "_key": "ex_005",
+      "session_key": "test_doc_2026-01-20",
+      "page_number": 2,
+      "element_idx": 0,
+      "element_type": "header",
+      "bbox": [72, 72, 540, 100],
+      "human_verdict": "correct",
+      "round_number": 1
+    },
+    {
+      "_key": "ex_006",
+      "session_key": "test_doc_2026-01-20",
+      "page_number": 2,
+      "element_idx": 1,
+      "element_type": "figure",
+      "bbox": [100, 200, 500, 450],
+      "human_verdict": "correct",
+      "round_number": 1
+    },
+    {
+      "_key": "ex_007",
+      "session_key": "test_doc_2026-01-20",
+      "page_number": 3,
+      "element_idx": 0,
+      "element_type": "header",
+      "bbox": [72, 72, 540, 100],
+      "human_verdict": "correct",
+      "round_number": 1
+    },
+    {
+      "_key": "ex_008",
+      "session_key": "test_doc_2026-01-20",
+      "page_number": 3,
+      "element_idx": 1,
+      "element_type": "table",
+      "bbox": [72, 150, 540, 400],
+      "human_verdict": "correct",
+      "round_number": 2
+    },
+    {
+      "_key": "ex_009",
+      "session_key": "test_doc_2026-01-20",
+      "page_number": 3,
+      "element_idx": 2,
+      "element_type": "figure",
+      "bbox": [100, 450, 500, 650],
+      "human_verdict": "correct",
+      "round_number": 2
+    },
+    {
+      "_key": "ex_010",
+      "session_key": "test_doc_2026-01-20",
+      "page_number": 4,
+      "element_idx": 0,
+      "element_type": "header",
+      "bbox": [72, 72, 540, 100],
+      "human_verdict": "correct",
+      "round_number": 2
+    },
+    {
+      "_key": "ex_011",
+      "session_key": "test_doc_2026-01-20",
+      "page_number": 4,
+      "element_idx": 1,
+      "element_type": "header",
+      "bbox": [72, 150, 540, 178],
+      "human_verdict": "correct",
+      "round_number": 2
+    },
+    {
+      "_key": "ex_012",
+      "session_key": "test_doc_2026-01-20",
+      "page_number": 4,
+      "element_idx": 2,
+      "element_type": "table",
+      "bbox": [72, 220, 540, 380],
+      "human_verdict": "correct",
+      "round_number": 2
+    },
+    {
+      "_key": "ex_013",
+      "session_key": "test_doc_2026-01-20",
+      "page_number": 5,
+      "element_idx": 0,
+      "element_type": "header",
+      "bbox": [72, 72, 540, 100],
+      "human_verdict": "correct",
+      "round_number": 2
+    },
+    {
+      "_key": "ex_014",
+      "session_key": "test_doc_2026-01-20",
+      "page_number": 5,
+      "element_idx": 1,
+      "element_type": "figure",
+      "bbox": [100, 150, 500, 400],
+      "human_verdict": "correct",
+      "round_number": 2
+    },
+    {
+      "_key": "ex_015",
+      "session_key": "test_doc_2026-01-20",
+      "page_number": 6,
+      "element_idx": 0,
+      "element_type": "header",
+      "bbox": [72, 72, 540, 100],
+      "human_verdict": "correct",
+      "round_number": 2
+    },
+    {
+      "_key": "ex_016",
+      "session_key": "test_doc_2026-01-20",
+      "page_number": 6,
+      "element_idx": 1,
+      "element_type": "table",
+      "bbox": [72, 150, 540, 350],
+      "human_verdict": "correct",
+      "round_number": 2
+    },
+    {
+      "_key": "ex_017",
+      "session_key": "test_doc_2026-01-20",
+      "page_number": 6,
+      "element_idx": 2,
+      "element_type": "figure",
+      "bbox": [100, 400, 500, 600],
+      "human_verdict": "correct",
+      "round_number": 2
+    },
+    {
+      "_key": "ex_018",
+      "session_key": "test_doc_2026-01-20",
+      "page_number": 7,
+      "element_idx": 0,
+      "element_type": "header",
+      "bbox": [72, 72, 540, 100],
+      "human_verdict": "correct",
+      "round_number": 2
+    },
+    {
+      "_key": "ex_019",
+      "session_key": "test_doc_2026-01-20",
+      "page_number": 7,
+      "element_idx": 1,
+      "element_type": "header",
+      "bbox": [72, 150, 540, 178],
+      "human_verdict": "correct",
+      "round_number": 2
+    },
+    {
+      "_key": "ex_020",
+      "session_key": "test_doc_2026-01-20",
+      "page_number": 8,
+      "element_idx": 0,
+      "element_type": "header",
+      "bbox": [72, 72, 540, 100],
+      "human_verdict": "correct",
+      "round_number": 2
+    },
+    {
+      "_key": "ex_021",
+      "session_key": "test_doc_2026-01-20",
+      "page_number": 8,
+      "element_idx": 1,
+      "element_type": "table",
+      "bbox": [72, 150, 540, 450],
+      "human_verdict": "wrong_type",
+      "correction": {"correct_type": "figure"},
+      "note": "This is actually a complex diagram, not a table",
+      "round_number": 2
+    },
+    {
+      "_key": "ex_022",
+      "session_key": "test_doc_2026-01-20",
+      "page_number": 9,
+      "element_idx": 0,
+      "element_type": "header",
+      "bbox": [72, 72, 540, 100],
+      "human_verdict": "correct",
+      "round_number": 2
+    },
+    {
+      "_key": "ex_023",
+      "session_key": "test_doc_2026-01-20",
+      "page_number": 9,
+      "element_idx": 1,
+      "element_type": "figure",
+      "bbox": [100, 200, 500, 400],
+      "human_verdict": "correct",
+      "round_number": 2
+    }
+  ],
+  "patterns": [
+    {
+      "_key": "pat_001",
+      "preset_id": "test-document",
+      "element_type": "header",
+      "pattern_data": {
+        "regex": "^\\d+\\.\\d*\\s+",
+        "font_size_min": 14,
+        "is_bold": true
+      },
+      "active": true,
+      "examples_count": 12,
+      "accuracy": 100.0
+    },
+    {
+      "_key": "pat_002",
+      "preset_id": "test-document",
+      "element_type": "table",
+      "pattern_data": {
+        "has_grid_lines": true
+      },
+      "active": true,
+      "examples_count": 5,
+      "accuracy": 83.3
+    },
+    {
+      "_key": "pat_003",
+      "preset_id": "test-document",
+      "element_type": "figure",
+      "pattern_data": {
+        "caption_regex": "Figure\\s+\\d+\\.\\d+:",
+        "caption_position": "below"
+      },
+      "active": true,
+      "examples_count": 6,
+      "accuracy": 100.0
+    }
+  ],
+  "stats": {
+    "reviewed": 23,
+    "correct": 22,
+    "accuracy": 95.65,
+    "by_type": {
+      "header": {"reviewed": 12, "correct": 12},
+      "table": {"reviewed": 5, "correct": 4},
+      "figure": {"reviewed": 6, "correct": 6}
+    }
+  }
+}

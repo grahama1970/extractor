@@ -1,0 +1,119 @@
+fixtures:
+- name: gauntlet-false-positives
+  filename: gauntlet_false_positives.pdf
+  source_skill: fixture-tricky
+  registered_at: '2026-02-07T01:03:31.168388'
+  tags:
+  - false-positive
+  - gauntlet
+  - numbered-list
+  - address-block
+  - code-block
+  description: Adversarial PDF with patterns that trigger false table detection -
+    single-column tables should be filtered
+  expected_table_count: 7
+- name: malformed-tables-stream
+  filename: malformed_tables_stream.pdf
+  source_skill: fixture-tricky
+  registered_at: '2026-02-07T01:25:02.074381'
+  tags:
+  - malformed
+  - stream
+  - camelot
+  description: Malformed tables that test stream extraction mode
+  expected_table_count: 7
+- name: adversarial-false-tables
+  filename: adversarial_false_tables.pdf
+  source_skill: corpus
+  registered_at: '2026-02-07T02:28:00.000000'
+  tags:
+  - false-positive
+  - single-column
+  - filter-test
+  description: All tables in this PDF are single-column false positives that must be filtered
+  should_have_no_tables: true
+- name: adversarial-gauntlet-all
+  filename: adversarial_gauntlet_all.pdf
+  source_skill: corpus
+  registered_at: '2026-02-07T02:45:00.000000'
+  tags:
+  - adversarial
+  - multi-column
+  - real-tables
+  description: Gauntlet adversarial PDF with 7 real multi-column tables (not false positives)
+  expected_table_count: 7
+- name: borderless-nasa-tables
+  filename: borderless_nasa_tables.pdf
+  source_skill: fixture-tricky
+  registered_at: '2026-02-07T03:50:00.000000'
+  tags:
+  - borderless
+  - nasa
+  - stream-mode
+  - lattice-misses
+  - learned-from-corpus
+  description: NASA-style borderless tables that Camelot lattice mode cannot detect - requires stream mode
+  expected_table_count: 1
+  requires_stream_mode: true
+- name: bibliography-single-column
+  filename: bibliography_single_column.pdf
+  source_skill: fixture-tricky
+  registered_at: '2026-02-07T03:50:00.000000'
+  tags:
+  - bibliography
+  - single-column
+  - false-positive
+  - learned-from-corpus
+  description: Bibliography/reference list that appears as single-column table - should be filtered
+  should_have_no_tables: true
+- name: physics-equations
+  filename: physics_equations.pdf
+  source_skill: fixture-tricky
+  registered_at: '2026-02-07T03:50:00.000000'
+  tags:
+  - physics
+  - equations
+  - math-heavy
+  - performance
+  - learned-from-corpus
+  description: Physics equations that can cause Camelot to hang on complex pages
+  expected_table_count: 0
+# === REQUIREMENTS FIXTURES (S08 testing) ===
+- name: requirements-tricky
+  filename: requirements_tricky.pdf
+  source_skill: fixture-tricky
+  registered_at: '2026-02-07T05:00:00.000000'
+  tags:
+  - requirements
+  - s08
+  - shall
+  - must
+  - modal-verbs
+  description: All requirements extraction test patterns - SHALL/MUST/WILL, numbering schemes, conditionals
+  expected_requirement_count: 65  # Includes formal REQ-* and modal verb sentences
+- name: requirements-false-positives
+  filename: requirements_false_positives.pdf
+  source_skill: fixture-tricky
+  registered_at: '2026-02-07T05:00:00.000000'
+  tags:
+  - requirements
+  - s08
+  - false-positive
+  - shall
+  description: Text with 'shall' that should NOT be extracted as requirements (meeting notes, quotes)
+  # Note: Regex extraction finds 10 candidates - LLM filtering should reject these
+  # This fixture demonstrates why LLM validation is needed for requirement extraction
+  expected_requirement_count: 10
+  xfail: true
+  xfail_reason: "Regex extraction cannot distinguish meeting notes/quotes from requirements - requires LLM filtering"
+- name: requirements-table-embedded
+  filename: requirements_table_embedded.pdf
+  source_skill: fixture-tricky
+  registered_at: '2026-02-07T05:00:00.000000'
+  tags:
+  - requirements
+  - s08
+  - table
+  - table-requirements
+  description: Requirements embedded in table cells with SHALL/MUST statements
+  expected_requirement_count: 4

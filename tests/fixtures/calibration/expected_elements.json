@@ -1,0 +1,201 @@
+{
+  "description": "Expected elements for test_doc.pdf calibration fixture",
+  "pdf_path": "tests/fixtures/calibration/test_doc.pdf",
+  "page_count": 10,
+  "elements_by_page": {
+    "0": [
+      {
+        "element_idx": 0,
+        "element_type": "header",
+        "bbox": [72, 72, 540, 100],
+        "text": "1. Introduction",
+        "expected_verdict": "correct"
+      },
+      {
+        "element_idx": 1,
+        "element_type": "header",
+        "bbox": [72, 200, 540, 228],
+        "text": "1.1 Background",
+        "expected_verdict": "correct"
+      }
+    ],
+    "1": [
+      {
+        "element_idx": 0,
+        "element_type": "header",
+        "bbox": [72, 72, 540, 100],
+        "text": "2. Requirements",
+        "expected_verdict": "correct"
+      },
+      {
+        "element_idx": 1,
+        "element_type": "table",
+        "bbox": [72, 150, 540, 350],
+        "rows": 5,
+        "cols": 3,
+        "expected_verdict": "correct"
+      }
+    ],
+    "2": [
+      {
+        "element_idx": 0,
+        "element_type": "header",
+        "bbox": [72, 72, 540, 100],
+        "text": "3. Technical Specifications",
+        "expected_verdict": "correct"
+      },
+      {
+        "element_idx": 1,
+        "element_type": "figure",
+        "bbox": [100, 200, 500, 450],
+        "caption": "Figure 3.1: System Architecture",
+        "expected_verdict": "correct"
+      }
+    ],
+    "3": [
+      {
+        "element_idx": 0,
+        "element_type": "header",
+        "bbox": [72, 72, 540, 100],
+        "text": "3.1 Component Details",
+        "expected_verdict": "correct"
+      },
+      {
+        "element_idx": 1,
+        "element_type": "table",
+        "bbox": [72, 150, 540, 400],
+        "rows": 8,
+        "cols": 4,
+        "expected_verdict": "correct"
+      },
+      {
+        "element_idx": 2,
+        "element_type": "figure",
+        "bbox": [100, 450, 500, 650],
+        "caption": "Figure 3.2: Data Flow",
+        "expected_verdict": "correct"
+      }
+    ],
+    "4": [
+      {
+        "element_idx": 0,
+        "element_type": "header",
+        "bbox": [72, 72, 540, 100],
+        "text": "4. Testing Procedures",
+        "expected_verdict": "correct"
+      },
+      {
+        "element_idx": 1,
+        "element_type": "header",
+        "bbox": [72, 150, 540, 178],
+        "text": "4.1 Unit Tests",
+        "expected_verdict": "correct"
+      },
+      {
+        "element_idx": 2,
+        "element_type": "table",
+        "bbox": [72, 220, 540, 380],
+        "rows": 6,
+        "cols": 3,
+        "expected_verdict": "correct"
+      }
+    ],
+    "5": [
+      {
+        "element_idx": 0,
+        "element_type": "header",
+        "bbox": [72, 72, 540, 100],
+        "text": "4.2 Integration Tests",
+        "expected_verdict": "correct"
+      },
+      {
+        "element_idx": 1,
+        "element_type": "figure",
+        "bbox": [100, 150, 500, 400],
+        "caption": "Figure 4.1: Test Coverage",
+        "expected_verdict": "correct"
+      }
+    ],
+    "6": [
+      {
+        "element_idx": 0,
+        "element_type": "header",
+        "bbox": [72, 72, 540, 100],
+        "text": "5. Deployment",
+        "expected_verdict": "correct"
+      },
+      {
+        "element_idx": 1,
+        "element_type": "table",
+        "bbox": [72, 150, 540, 350],
+        "rows": 5,
+        "cols": 4,
+        "expected_verdict": "correct"
+      },
+      {
+        "element_idx": 2,
+        "element_type": "figure",
+        "bbox": [100, 400, 500, 600],
+        "caption": "Figure 5.1: Deployment Pipeline",
+        "expected_verdict": "correct"
+      }
+    ],
+    "7": [
+      {
+        "element_idx": 0,
+        "element_type": "header",
+        "bbox": [72, 72, 540, 100],
+        "text": "6. Maintenance",
+        "expected_verdict": "correct"
+      },
+      {
+        "element_idx": 1,
+        "element_type": "header",
+        "bbox": [72, 150, 540, 178],
+        "text": "6.1 Monitoring",
+        "expected_verdict": "correct"
+      }
+    ],
+    "8": [
+      {
+        "element_idx": 0,
+        "element_type": "header",
+        "bbox": [72, 72, 540, 100],
+        "text": "7. Appendix",
+        "expected_verdict": "correct"
+      },
+      {
+        "element_idx": 1,
+        "element_type": "table",
+        "bbox": [72, 150, 540, 450],
+        "rows": 12,
+        "cols": 5,
+        "expected_verdict": "correct"
+      }
+    ],
+    "9": [
+      {
+        "element_idx": 0,
+        "element_type": "header",
+        "bbox": [72, 72, 540, 100],
+        "text": "8. References",
+        "expected_verdict": "correct"
+      },
+      {
+        "element_idx": 1,
+        "element_type": "figure",
+        "bbox": [100, 200, 500, 400],
+        "caption": "Figure 8.1: Reference Diagram",
+        "expected_verdict": "correct"
+      }
+    ]
+  },
+  "summary": {
+    "total_elements": 25,
+    "by_type": {
+      "header": 12,
+      "table": 6,
+      "figure": 7
+    }
+  }
+}
