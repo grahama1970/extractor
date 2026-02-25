@@ -8,20 +8,20 @@ All colors MUST be HSL.
 
 @layer base {
   :root {
-    --background: 248 250 252;
-    --foreground: 15 23 42;
+    --background: 214 32% 98%;
+    --foreground: 217 33% 17%;
 
     --card: 0 0% 100%;
-    --card-foreground: 15 23 42;
+    --card-foreground: 217 33% 17%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 15 23 42;
+    --popover-foreground: 217 33% 17%;
 
     --primary: 239 68% 68%;
     --primary-foreground: 0 0% 100%;
 
     --secondary: 241 10% 91%;
-    --secondary-foreground: 15 23 42;
+    --secondary-foreground: 217 33% 17%;
 
     --muted: 241 10% 96%;
     --muted-foreground: 100 7% 40%;
@@ -37,6 +37,9 @@ All colors MUST be HSL.
     --ring: 239 68% 68%;
 
     --radius: 0.75rem;
+
+    /* Persona accent — overridden by PersonaProvider at runtime */
+    --persona-accent: 239 68% 68%;
 
     /* PDF Annotation specific colors */
     --annotation-section: 0 84% 60%;
@@ -131,6 +134,33 @@ All colors MUST be HSL.
   body {
     @apply bg-background text-foreground;
   }
+}
+
+/* Persona accent utilities */
+.text-persona { color: hsl(var(--persona-accent)); }
+.bg-persona { background-color: hsl(var(--persona-accent)); }
+.border-persona { border-color: hsl(var(--persona-accent)); }
+
+/* iOS safe-area bottom padding */
+.safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+
+/* 5ft distance-aware animations */
+@keyframes fade-in-5ft {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes breathe {
+  0%, 100% { transform: scale(1); opacity: 0.7; }
+  50% { transform: scale(1.08); opacity: 0.9; }
+}
+
+.animate-fade-in-5ft {
+  animation: fade-in-5ft 800ms cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+.animate-breathe {
+  animation: breathe 4s ease-in-out infinite;
 }
 
 /* Full-viewport app; make sure nothing constrains #root */
