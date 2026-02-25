@@ -8,13 +8,13 @@ import { Loader2 } from "lucide-react";
 import { isDev } from "@/lib/env";
 import { PersonaProvider } from "@/contexts/PersonaContext";
 import PersonaShell from "@/components/PersonaShell";
-import Index from "./pages/Index";
-import ClassicLayout from "./pages/ClassicLayout";
-import TabbedLayout from "./pages/TabbedLayout";
-import DashboardLayout from "./pages/DashboardLayout";
 import NotFound from "./pages/NotFound";
-import ExtractPage from "./pages/ExtractPage";
-import AskPage from "./pages/AskPage";
+const Index = React.lazy(() => import("./pages/Index"));
+const ClassicLayout = React.lazy(() => import("./pages/ClassicLayout"));
+const TabbedLayout = React.lazy(() => import("./pages/TabbedLayout"));
+const DashboardLayout = React.lazy(() => import("./pages/DashboardLayout"));
+const ExtractPage = React.lazy(() => import("./pages/ExtractPage"));
+const AskPage = React.lazy(() => import("./pages/AskPage"));
 const ReviewLayout = React.lazy(() => import("./pages/ReviewLayout"));
 const QuarantineView = React.lazy(() => import("./pages/QuarantineView"));
 const DatalakeDashboard = React.lazy(() => import("./pages/DatalakeDashboard"));
@@ -60,16 +60,16 @@ const App = () => (
         <PersonaProvider>
           <Routes>
             {/* Standalone routes (no persona shell) */}
-            <Route path="/" element={<Index />} />
-            <Route path="/classic" element={<ClassicLayout />} />
-            <Route path="/main" element={<ClassicLayout />} />
-            <Route path="/tabbed" element={<TabbedLayout />} />
-            <Route path="/dashboard" element={<DashboardLayout />} />
-            <Route path="/extract" element={<ExtractPage />} />
+            <Route path="/" element={<React.Suspense fallback={LazyFallback}><Index /></React.Suspense>} />
+            <Route path="/classic" element={<React.Suspense fallback={LazyFallback}><ClassicLayout /></React.Suspense>} />
+            <Route path="/main" element={<React.Suspense fallback={LazyFallback}><ClassicLayout /></React.Suspense>} />
+            <Route path="/tabbed" element={<React.Suspense fallback={LazyFallback}><TabbedLayout /></React.Suspense>} />
+            <Route path="/dashboard" element={<React.Suspense fallback={LazyFallback}><DashboardLayout /></React.Suspense>} />
+            <Route path="/extract" element={<React.Suspense fallback={LazyFallback}><ExtractPage /></React.Suspense>} />
 
             {/* Persona-aware routes wrapped in PersonaShell */}
             <Route element={<PersonaShell />}>
-              <Route path="/ask" element={<AskPage />} />
+              <Route path="/ask" element={<React.Suspense fallback={LazyFallback}><AskPage /></React.Suspense>} />
               <Route path="/review" element={
                 <React.Suspense fallback={LazyFallback}>
                   <ReviewLayout />
