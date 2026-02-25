@@ -1,0 +1,117 @@
+# SPARTA Stress Test Fixture
+# ===========================
+# Designed to cover ALL extraction bugs identified in PDF_EXTRACTION_REPORT.md:
+#   1. Figure extraction failure (block_type detection in Stage 02)
+#   2. Generic table headers ['0','1','2'] instead of semantic
+#   3. Section pollution (navigation elements treated as sections)
+#   4. Invalid JSON from summarizing boilerplate
+#   5. False PASS verification despite empty content
+#
+# Generator: python generate_complex_fixture.py output.pdf --config twin_config.yml
+
+layout: single
+pages: 5
+preset_id: sparta_stress_test
+category: Engineering
+description: "SPARTA stress test - ALL extraction bugs from batch analysis"
+
+runtime:
+  features:
+    enable_proving: true
+    summarization_prompt: |
+      Summarize the key security concepts in this section.
+      Focus on threat actors, vulnerabilities, and mitigations.
+  errors: ["hyphenation", "ligatures", "trapped_headers", "generic_table_headers", "boilerplate_pollution", "missing_figures", "split_tables"]
+  detection:
+    keywords: ["APT", "Threat", "Vulnerability", "Mitigation", "CVE", "Attack"]
+    min_score: 2
+    layout: single
+    section_pattern: "^\\d+\\.?\\s+"
+    filename_triggers: ["sparta", "security", "threat", "apt"]
+
+# BUG #2: Headers that should NOT be treated as section headers
+# Tests: s03_suspicious_headers.py semantic rejection
+ambiguous_headers:
+  - text: "// This section gives a brief overview of the technical"
+    size: 10
+    font: "Helvetica"
+  - text: "CLICK TO FLY BACK TO THE CONTENTS"
+    size: 9
+    font: "Helvetica-Bold"
+  - text: "Page 1 of 5"
+    size: 8
+    font: "Helvetica"
+  - text: "TLP: GREEN - Distribution Authorized"
+    size: 8
+    font: "Helvetica"
+
+# BUG #2, #3: Table with known headers (tests TABLE_LLM_ASSIST)
+tables:
+  false_header_text: "SECTION 5: APT ACTIVITY"
+  strict_verification: true
+  # Ground truth: extractor MUST infer these columns, not output [0,1,2,3]
+  expected_headers: ["Threat Actor", "TTPs", "Target Sector", "First Observed"]
+
+# BUG #1: Figure extraction (tests s02_marker_extractor Picture block type)
+figures:
+  expected_count: 1  # Should find at least 1 figure
+  # Note: generate_complex_fixture.py currently doesn't add figures.
+  # This tests that extraction doesn't report 0 when figures exist.
+
+# BUG #3: Text that looks like requirements but SHOULD NOT be extracted
+# Tests: false positive rejection in requirement extraction
+false_positives:
+  - text: "Users should consider reading the executive summary first."
+  - text: "The following tables may be updated in future revisions."
+  - text: "Note: This is informational guidance only."
+  - text: "// This section gives a brief overview of the technical"
+
+# Ground truth content - MUST be extracted correctly
+critical_content:
+  - id: "REQ-SPARTA-001"
+    text: "The system shall detect APT activity within 24 hours of initial compromise."
+    type: "Requirement"
+    status: "Active"
+    strict_verification: true
+  - id: "REQ-SPARTA-002"
+    text: "All threat indicators must be stored with CVE references when available."
+    type: "Requirement"
+    status: "Active"
+    strict_verification: true
+  - id: "FINDING-001"
+    text: "APT29 used spear-phishing with malicious attachments targeting defense contractors."
+    type: "Finding"
+    strict_verification: true
+
+# BUG #3, #4: Boilerplate that causes summarizer JSON parse errors
+# These should be FILTERED OUT, not summarized
+text_noise:
+  - "CLICK TO FLY BACK TO THE CONTENTS"
+  - "TLP: GREEN"
+  - "Mandiant... CONFIDENTIAL"
+  - "iALERT White Paper"
+  - "THE CONTENTS"
+  - "FOREWORD | Doug Loverro"
+  - "7 HARRISON, JOHNSON, YOUNG"
+  - "PROPRIETARY - BOEING/BHT EXTERNAL USE"
+  - "Page X of Y"
+  - "© 2024 All Rights Reserved"
+
+# BUG #1: Chaos config for figure/image block injection
+chaos:
+  ligature_map:
+    "fi": "ﬁ"
+    "fl": "ﬂ"
+    "ff": "ﬀ"
+  hyphenation_probability: 0.3
+  mojibake_probability: 0.05
+  nesting_probability: 0.2
+
+# Feature flags
+features:
+  nesting_complexity: true
+  trapped_headers: true
+  generic_table_headers: true
+  boilerplate_pollution: true
+  missing_figures: true
+  split_tables: true

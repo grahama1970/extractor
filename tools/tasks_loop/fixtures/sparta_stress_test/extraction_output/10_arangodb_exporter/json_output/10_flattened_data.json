@@ -1,0 +1,67 @@
+[
+  {
+    "_key": "d7e4b4ec970a4120ba9983c84c01f5cc",
+    "source_pdf": "tools/tasks_loop/fixtures/sparta_stress_test/extraction_output",
+    "object_type": "Text",
+    "text_content": "",
+    "section_id": "section_2",
+    "section_title": "2. Requirements",
+    "section_level": 0,
+    "page_num": 2,
+    "data": {
+      "text": ""
+    }
+  },
+  {
+    "_key": "57aa640adf6f91dd6498f719007782e2",
+    "source_pdf": "tools/tasks_loop/fixtures/sparta_stress_test/extraction_output",
+    "object_type": "Text",
+    "text_content": "",
+    "section_id": "section_0",
+    "section_title": "1. Introduction",
+    "section_level": 0,
+    "page_num": 0,
+    "data": {
+      "text": ""
+    }
+  },
+  {
+    "_key": "7d57c77c5e741793ee0595c68de2d1ed",
+    "source_pdf": "tools/tasks_loop/fixtures/sparta_stress_test/extraction_output",
+    "object_type": "Text",
+    "text_content": "",
+    "section_id": "section_1",
+    "section_title": "SECTION 5: APT ACTIVITY\nR5\nVAL_5",
+    "section_level": 0,
+    "page_num": 0,
+    "data": {
+      "text": ""
+    }
+  },
+  {
+    "_key": "f5d5081da451a212cfa38d99057d092c",
+    "source_pdf": "tools/tasks_loop/fixtures/sparta_stress_test/extraction_output",
+    "object_type": "Table",
+    "text_content": "Table: Untitled\n",
+    "section_id": "section_0",
+    "page_num": 0,
+    "data": {
+      "table_id": "table_p1_t2",
+      "caption": "Untitled",
+      "html": ""
+    }
+  },
+  {
+    "_key": "be2aff3d8a45daa08db22204d5be4185",
+    "source_pdf": "tools/tasks_loop/fixtures/sparta_stress_test/extraction_output",
+    "object_type": "Table",
+    "text_content": "Table: Untitled\n",
+    "section_id": "section_1",
+    "page_num": 1,
+    "data": {
+      "table_id": "table_p2_t1",
+      "caption": "Untitled",
+      "html": ""
+    }
+  }
+]

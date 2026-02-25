@@ -1,0 +1,81 @@
+{
+  "meta": {
+    "version": "1.0",
+    "pipeline_id": "extraction_output",
+    "generated_at": "2026-01-23T10:56:28.984055",
+    "source_pdf": "tools/tasks_loop/fixtures/sparta_stress_test/sparta_stress_test.pdf"
+  },
+  "statistics": {
+    "timestamp": "2026-01-23T10:56:28.983857",
+    "stages_present": [
+      "02_marker",
+      "03_verification",
+      "04_sections",
+      "04a_audit",
+      "05_tables",
+      "06_figures",
+      "db_stats",
+      "meta"
+    ],
+    "metrics": {
+      "total_blocks": 0,
+      "avg_confidence": 0.0,
+      "verified_blocks": 41,
+      "suspicious_rate": 0.0,
+      "total_sections": 3,
+      "max_depth": 1,
+      "total_tables": 2,
+      "total_figures": 0,
+      "requirements_extracted": 0
+    }
+  },
+  "content_summary": {
+    "toc": [
+      {
+        "number": "1",
+        "title": "1. Introduction",
+        "page": 0
+      },
+      {
+        "number": "",
+        "title": "SECTION 5: APT ACTIVITY\nR5\nVAL_5",
+        "page": 0
+      },
+      {
+        "number": "2",
+        "title": "2. Requirements",
+        "page": 2
+      }
+    ],
+    "key_entities": [],
+    "major_sections": [
+      {
+        "title": "1. Introduction",
+        "level": 1,
+        "page": 0
+      },
+      {
+        "title": "SECTION 5: APT ACTIVITY\nR5\nVAL_5",
+        "level": 2,
+        "page": 0
+      },
+      {
+        "title": "2. Requirements",
+        "level": 1,
+        "page": 2
+      }
+    ]
+  },
+  "verification": {
+    "status": "PASS_WITH_WARNINGS",
+    "issues": [],
+    "warnings": [
+      "2/2 tables have generic headers"
+    ],
+    "checks": {
+      "structure_integrity": true,
+      "content_completeness": true,
+      "extraction_quality": true
+    }
+  }
+}

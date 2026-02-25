@@ -1,0 +1,10 @@
+{
+  "images": [
+    "14_report_generator/visual_output/visual_report.html"
+  ],
+  "json": [
+    "14_report_generator/json_output/artifacts_index.json",
+    "14_report_generator/json_output/final_report.json"
+  ],
+  "text": []
+}

@@ -1,0 +1,52 @@
+{
+  "domain": "engineering",
+  "page_count": 3,
+  "layout": {
+    "columns": 2,
+    "style": "double"
+  },
+  "hierarchy": {
+    "section_style": "markdown",
+    "has_structure": true
+  },
+  "elements": {
+    "tables": false,
+    "figures": false,
+    "formulas": false,
+    "requirements": true
+  },
+  "preset_match": {
+    "matched": "stress_test",
+    "confidence": 20,
+    "all_scores": {
+      "arxiv": 5,
+      "requirements_spec": 8,
+      "stress_test": 20
+    },
+    "needs_new_preset": false,
+    "errors": [
+      "hyphenation",
+      "ligatures",
+      "trapped_headers",
+      "nesting_complexity",
+      "generic_table_headers",
+      "boilerplate_pollution",
+      "missing_figures",
+      "mojibake",
+      "split_tables"
+    ],
+    "features": {
+      "enable_proving": true,
+      "summarization_prompt": "Summarize this messy section."
+    }
+  },
+  "route": "fast",
+  "complexity_score": 1,
+  "thresholds_hit": [
+    "multi_column"
+  ],
+  "detected_preset": "stress_test",
+  "file": "tools/tasks_loop/fixtures/sparta_stress_test/sparta_stress_test.pdf",
+  "timestamp": 1769183443.7201614,
+  "duration_ms": 149
+}

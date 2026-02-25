@@ -1,0 +1,81 @@
+{
+  "total_ms": 345217,
+  "stages": [
+    {
+      "name": "01_annotation_processor",
+      "latency_ms": 7
+    },
+    {
+      "name": "02_marker_extractor",
+      "latency_ms": 7319
+    },
+    {
+      "name": "03_suspicious_headers",
+      "latency_ms": 44
+    },
+    {
+      "name": "04_section_builder",
+      "latency_ms": 368
+    },
+    {
+      "name": "04a_layout_audit",
+      "latency_ms": 1
+    },
+    {
+      "name": "05_table_extractor",
+      "latency_ms": 4722
+    },
+    {
+      "name": "05b_table_describer",
+      "latency_ms": 326670
+    },
+    {
+      "name": "05c_table_merger",
+      "latency_ms": 3
+    },
+    {
+      "name": "06_figure_extractor",
+      "latency_ms": 10
+    },
+    {
+      "name": "06b_figure_describer",
+      "latency_ms": 1358
+    },
+    {
+      "name": "07_assemble_corpus",
+      "latency_ms": 122
+    },
+    {
+      "name": "07b_text_cleaner",
+      "latency_ms": 63
+    },
+    {
+      "name": "08_extract_requirements",
+      "latency_ms": 4166
+    },
+    {
+      "name": "08b_lean4_theorem_prover",
+      "latency_ms": 36
+    },
+    {
+      "name": "09_section_summarizer",
+      "latency_ms": 60
+    },
+    {
+      "name": "10_markdown_exporter",
+      "latency_ms": 139
+    },
+    {
+      "name": "10_arangodb_exporter",
+      "latency_ms": 33
+    },
+    {
+      "name": "14_report_generator",
+      "latency_ms": 96
+    }
+  ],
+  "served_model": {
+    "text": "moonshotai/Kimi-K2-Instruct-0905",
+    "vlm": "Qwen/Qwen3-VL-235B-A22B-Instruct"
+  }
+}

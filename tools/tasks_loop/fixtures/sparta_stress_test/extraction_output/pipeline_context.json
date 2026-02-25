@@ -1,0 +1,41 @@
+{
+  "preset_name": "stress_test",
+  "config": {
+    "category": "Engineering",
+    "description": "Stress test fixture designed to contain ALL common extraction mistakes detected in SPARTA report",
+    "detection": {
+      "filename_triggers": [
+        "stress",
+        "sparta",
+        "mistake"
+      ],
+      "keywords": [
+        "STRESS",
+        "TEST",
+        "ERROR",
+        "MISTAKE"
+      ],
+      "layout": "single",
+      "min_score": 1,
+      "section_pattern": "^\\d+"
+    },
+    "errors": [
+      "hyphenation",
+      "ligatures",
+      "trapped_headers",
+      "nesting_complexity",
+      "generic_table_headers",
+      "boilerplate_pollution",
+      "missing_figures",
+      "mojibake",
+      "split_tables"
+    ],
+    "features": {
+      "enable_proving": true,
+      "summarization_prompt": "Summarize this messy section."
+    },
+    "layout": "single"
+  },
+  "timestamp": 1769183443.7227852,
+  "profile_path": "tools/tasks_loop/fixtures/sparta_stress_test/extraction_output/00_profile_detector/profile.json"
+}

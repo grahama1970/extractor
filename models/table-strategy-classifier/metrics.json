@@ -1,0 +1,32 @@
+{
+  "accuracy": 0.9973614775725593,
+  "macro_f1": 0.8631313242078529,
+  "n_samples": 7572,
+  "n_classes": 10,
+  "best_model": "gradient_boosting",
+  "sklearn_version": "1.8.0",
+  "n_features": 21,
+  "feature_order": [
+    "category",
+    "domain_defense",
+    "domain_engineering",
+    "domain_scientific",
+    "frag_agent_tuned",
+    "frag_lattice_default",
+    "frag_lattice_strong",
+    "frag_memory_learned",
+    "frag_stream_columns",
+    "frag_stream_default",
+    "frag_stream_tight",
+    "frag_stream_wide",
+    "has_fragmentation",
+    "lattice_found",
+    "max_fragmentation",
+    "num_strategies_tried",
+    "num_tables",
+    "stream_found",
+    "table_style_bordered",
+    "table_style_borderless",
+    "table_style_mixed"
+  ]
+}

@@ -1,0 +1,514 @@
+{
+  "timestamp": "2026-01-23T10:50:51.057306",
+  "run_id": "5cf925b60ab04a63b4f67988b36e55cd",
+  "metadata": {
+    "llm_used": true,
+    "page_count": 3,
+    "source_pdf": "tools/tasks_loop/fixtures/sparta_stress_test/sparta_stress_test.pdf"
+  },
+  "source_pdf": "tools/tasks_loop/fixtures/sparta_stress_test/sparta_stress_test.pdf",
+  "status": "Completed",
+  "block_count": 41,
+  "block_type_distribution": {
+    "Text": 41
+  },
+  "suspicious_block_count": 0,
+  "blocks": [
+    {
+      "block_type": "Text",
+      "page_idx": 0,
+      "page": 0,
+      "text": "1. Introduction",
+      "bbox": [
+        50.0,
+        30.739999771118164,
+        175.00999450683594,
+        55.5260009765625
+      ]
+    },
+    {
+      "block_type": "Text",
+      "page_idx": 0,
+      "page": 0,
+      "text": "This document is a synthetic test fixture.",
+      "bbox": [
+        50.0,
+        68.17500305175781,
+        245.63494873046875,
+        83.28900146484375
+      ]
+    },
+    {
+      "block_type": "Text",
+      "page_idx": 0,
+      "page": 0,
+      "text": "// This section gives a brief overview of the technical",
+      "bbox": [
+        50.0,
+        99.25,
+        280.64996337890625,
+        112.98999786376953
+      ]
+    },
+    {
+      "block_type": "Text",
+      "page_idx": 0,
+      "page": 0,
+      "text": "CLICK TO FLY BACK TO THE CONTENTS",
+      "bbox": [
+        50.0,
+        120.37000274658203,
+        228.00198364257812,
+        132.76300048828125
+      ]
+    },
+    {
+      "block_type": "Text",
+      "page_idx": 0,
+      "page": 0,
+      "text": "Page 1 of 5",
+      "bbox": [
+        50.0,
+        141.39999389648438,
+        90.91999053955078,
+        152.39199829101562
+      ]
+    },
+    {
+      "block_type": "Text",
+      "page_idx": 0,
+      "page": 0,
+      "text": "TLP: GREEN - Distribution Authorized",
+      "bbox": [
+        50.0,
+        161.39999389648438,
+        185.15199279785156,
+        172.39199829101562
+      ]
+    },
+    {
+      "block_type": "Text",
+      "page_idx": 0,
+      "page": 0,
+      "text": "Table 1: System Data (Configured)",
+      "bbox": [
+        50.0,
+        199.3000030517578,
+        204.49996948242188,
+        212.83999633789062
+      ]
+    },
+    {
+      "block_type": "Text",
+      "page_idx": 0,
+      "page": 0,
+      "text": "ID\nValue\nDescription",
+      "bbox": [
+        60.0,
+        233.25,
+        350.0099792480469,
+        246.99000549316406
+      ]
+    },
+    {
+      "block_type": "Text",
+      "page_idx": 0,
+      "page": 0,
+      "text": "Data row 0\nR0\nVAL_0",
+      "bbox": [
+        60.0,
+        253.25,
+        348.3499755859375,
+        266.989990234375
+      ]
+    },
+    {
+      "block_type": "Text",
+      "page_idx": 0,
+      "page": 0,
+      "text": "Data row 1\nR1\nVAL_1",
+      "bbox": [
+        60.0,
+        273.25,
+        348.3499755859375,
+        286.989990234375
+      ]
+    },
+    {
+      "block_type": "Text",
+      "page_idx": 0,
+      "page": 0,
+      "text": "Data row 2\nR2\nVAL_2",
+      "bbox": [
+        60.0,
+        293.25,
+        348.3499755859375,
+        306.989990234375
+      ]
+    },
+    {
+      "block_type": "Text",
+      "page_idx": 0,
+      "page": 0,
+      "text": "Data row 3\nR3\nVAL_3",
+      "bbox": [
+        60.0,
+        313.25,
+        348.3499755859375,
+        326.989990234375
+      ]
+    },
+    {
+      "block_type": "Text",
+      "page_idx": 0,
+      "page": 0,
+      "text": "Data row 4\nR4\nVAL_4",
+      "bbox": [
+        60.0,
+        333.25,
+        348.3499755859375,
+        346.989990234375
+      ]
+    },
+    {
+      "block_type": "Text",
+      "page_idx": 0,
+      "page": 0,
+      "text": "SECTION 5: APT ACTIVITY\nR5\nVAL_5",
+      "bbox": [
+        60.0,
+        353.25,
+        425.59002685546875,
+        366.989990234375
+      ]
+    },
+    {
+      "block_type": "Text",
+      "page_idx": 0,
+      "page": 0,
+      "text": "Data row 6\nR6\nVAL_6",
+      "bbox": [
+        60.0,
+        373.25,
+        348.3499755859375,
+        386.989990234375
+      ]
+    },
+    {
+      "block_type": "Text",
+      "page_idx": 0,
+      "page": 0,
+      "text": "Data row 7\nR7\nVAL_7",
+      "bbox": [
+        60.0,
+        393.25,
+        348.3499755859375,
+        406.989990234375
+      ]
+    },
+    {
+      "block_type": "Text",
+      "page_idx": 0,
+      "page": 0,
+      "text": "Data row 8\nR8\nVAL_8",
+      "bbox": [
+        60.0,
+        413.25,
+        348.3499755859375,
+        426.989990234375
+      ]
+    },
+    {
+      "block_type": "Text",
+      "page_idx": 0,
+      "page": 0,
+      "text": "Data row 9\nR9\nVAL_9",
+      "bbox": [
+        60.0,
+        433.25,
+        348.3499755859375,
+        446.989990234375
+      ]
+    },
+    {
+      "block_type": "Text",
+      "page_idx": 0,
+      "page": 0,
+      "text": "(Table continues on next page...)",
+      "bbox": [
+        50.0,
+        460.3699951171875,
+        181.5709686279297,
+        472.5559997558594
+      ]
+    },
+    {
+      "block_type": "Text",
+      "page_idx": 1,
+      "page": 1,
+      "text": "Table 1 (Continued)",
+      "bbox": [
+        50.0,
+        39.29999923706055,
+        138.3699951171875,
+        52.84000015258789
+      ]
+    },
+    {
+      "block_type": "Text",
+      "page_idx": 1,
+      "page": 1,
+      "text": "ID\nValue\nDescription",
+      "bbox": [
+        60.0,
+        73.25,
+        350.0099792480469,
+        86.98999786376953
+      ]
+    },
+    {
+      "block_type": "Text",
+      "page_idx": 1,
+      "page": 1,
+      "text": "R10\nVAL_10\nData row 10",
+      "bbox": [
+        60.0,
+        93.25,
+        353.90997314453125,
+        106.98999786376953
+      ]
+    },
+    {
+      "block_type": "Text",
+      "page_idx": 1,
+      "page": 1,
+      "text": "R11\nVAL_11\nData row 11",
+      "bbox": [
+        60.0,
+        113.25,
+        353.90997314453125,
+        126.98999786376953
+      ]
+    },
+    {
+      "block_type": "Text",
+      "page_idx": 1,
+      "page": 1,
+      "text": "R12\nVAL_12\nData row 12",
+      "bbox": [
+        60.0,
+        133.25,
+        353.90997314453125,
+        146.99000549316406
+      ]
+    },
+    {
+      "block_type": "Text",
+      "page_idx": 1,
+      "page": 1,
+      "text": "R13\nVAL_13\nData row 13",
+      "bbox": [
+        60.0,
+        153.25,
+        353.90997314453125,
+        166.99000549316406
+      ]
+    },
+    {
+      "block_type": "Text",
+      "page_idx": 1,
+      "page": 1,
+      "text": "R14\nVAL_14\nData row 14",
+      "bbox": [
+        60.0,
+        173.25,
+        353.90997314453125,
+        186.99000549316406
+      ]
+    },
+    {
+      "block_type": "Text",
+      "page_idx": 1,
+      "page": 1,
+      "text": "R15\nVAL_15\nData row 15",
+      "bbox": [
+        60.0,
+        193.25,
+        353.90997314453125,
+        206.99000549316406
+      ]
+    },
+    {
+      "block_type": "Text",
+      "page_idx": 1,
+      "page": 1,
+      "text": "(End of Table 1)",
+      "bbox": [
+        50.0,
+        250.3699951171875,
+        114.52998352050781,
+        262.5559997558594
+      ]
+    },
+    {
+      "block_type": "Text",
+      "page_idx": 2,
+      "page": 2,
+      "text": "2. Requirements",
+      "bbox": [
+        50.0,
+        30.739999771118164,
+        190.0399932861328,
+        55.5260009765625
+      ]
+    },
+    {
+      "block_type": "Text",
+      "page_idx": 2,
+      "page": 2,
+      "text": "REQ-SYN-001: The system shall handle synthetic data.",
+      "bbox": [
+        50.0,
+        68.17500305175781,
+        320.83099365234375,
+        83.28900146484375
+      ]
+    },
+    {
+      "block_type": "Text",
+      "page_idx": 2,
+      "page": 2,
+      "text": "REQ-SYN-002: The system must ignore false headers.",
+      "bbox": [
+        50.0,
+        88.17500305175781,
+        317.7619323730469,
+        103.28900146484375
+      ]
+    },
+    {
+      "block_type": "Text",
+      "page_idx": 2,
+      "page": 2,
+      "text": "Examples (Non-Normative):",
+      "bbox": [
+        50.0,
+        117.16000366210938,
+        207.3560028076172,
+        133.6840057373047
+      ]
+    },
+    {
+      "block_type": "Text",
+      "page_idx": 2,
+      "page": 2,
+      "text": "Users should consider reading the executive summary first.",
+      "bbox": [
+        50.0,
+        138.1750030517578,
+        338.5409851074219,
+        153.28900146484375
+      ]
+    },
+    {
+      "block_type": "Text",
+      "page_idx": 2,
+      "page": 2,
+      "text": "The following tables may be updated in future revisions.",
+      "bbox": [
+        50.0,
+        158.1750030517578,
+        321.4579162597656,
+        173.28900146484375
+      ]
+    },
+    {
+      "block_type": "Text",
+      "page_idx": 2,
+      "page": 2,
+      "text": "Note: This is informational guidance only.",
+      "bbox": [
+        50.0,
+        178.1750030517578,
+        251.13494873046875,
+        193.28900146484375
+      ]
+    },
+    {
+      "block_type": "Text",
+      "page_idx": 2,
+      "page": 2,
+      "text": "// This section gives a brief overview of the technical",
+      "bbox": [
+        50.0,
+        198.1750030517578,
+        303.7149353027344,
+        213.28900146484375
+      ]
+    },
+    {
+      "block_type": "Text",
+      "page_idx": 2,
+      "page": 2,
+      "text": "Critical Requirements:",
+      "bbox": [
+        50.0,
+        237.16000366210938,
+        178.02798461914062,
+        253.6840057373047
+      ]
+    },
+    {
+      "block_type": "Text",
+      "page_idx": 2,
+      "page": 2,
+      "text": "[Active]\nREQ-SPARTA-001: The system shall detect APT activity within 24 hours of initial compromise.",
+      "bbox": [
+        50.0,
+        258.17498779296875,
+        509.70098876953125,
+        273.28900146484375
+      ]
+    },
+    {
+      "block_type": "Text",
+      "page_idx": 2,
+      "page": 2,
+      "text": "[Active]\nREQ-SPARTA-002: All threat indicators must be stored with CVE references when available.",
+      "bbox": [
+        50.0,
+        278.17498779296875,
+        501.16497802734375,
+        293.28900146484375
+      ]
+    },
+    {
+      "block_type": "Text",
+      "page_idx": 2,
+      "page": 2,
+      "text": "FINDING-001: APT29 used spear-phishing with malicious attachments targeting defense contractors.",
+      "bbox": [
+        50.0,
+        298.17498779296875,
+        542.1400146484375,
+        313.28900146484375
+      ]
+    },
+    {
+      "block_type": "Text",
+      "page_idx": 2,
+      "page": 2,
+      "text": "CLICK TO FLY BACK TO THE CONTENTS\nTLP: GREEN\nMandiant... CONFIDENTIAL\niALERT White Paper\nTHE CONTENTS\nFOREWORD | Doug Loverro\n7 HARRISON, JOHNSON, YOUNG\nPROPRIETARY - BOEING/BHT EXTERNAL USE\nPage X of Y\n© 2024 All Rights Reserved",
+      "bbox": [
+        50.0,
+        740.3250122070312,
+        249.0440216064453,
+        842.6909790039062
+      ]
+    }
+  ],
+  "predictors_present": {},
+  "timings": {
+    "duration_ms": 7313
+  }
+}

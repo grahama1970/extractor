@@ -1,0 +1,8 @@
+{
+  "timestamp": "2026-01-23T10:56:22.919508",
+  "source_json": "tools/tasks_loop/fixtures/sparta_stress_test/extraction_output/02_marker_extractor/json_output/02_marker_blocks.json",
+  "source_pdf": "tools/tasks_loop/fixtures/sparta_stress_test/extraction_output/01_annotation_processor/sparta_stress_test_clean.pdf",
+  "status": "Completed",
+  "figure_count": 0,
+  "figures": []
+}

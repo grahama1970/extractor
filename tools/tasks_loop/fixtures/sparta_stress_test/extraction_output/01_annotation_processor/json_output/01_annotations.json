@@ -1,0 +1,10 @@
+{
+  "timestamp": "2026-01-23T10:50:43.733783",
+  "run_id": "995e2e94c08442beb197fd5150a57d3d",
+  "source_pdf": "tools/tasks_loop/fixtures/sparta_stress_test/sparta_stress_test.pdf",
+  "clean_pdf_path": "tools/tasks_loop/fixtures/sparta_stress_test/extraction_output/01_annotation_processor/sparta_stress_test_clean.pdf",
+  "status": "No annotations found.",
+  "annotation_count": 0,
+  "annotations": [],
+  "diagnostics": []
+}

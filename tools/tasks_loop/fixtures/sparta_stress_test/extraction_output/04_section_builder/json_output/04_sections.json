@@ -1,0 +1,1455 @@
+{
+  "success": true,
+  "timestamp": "2026-01-23T10:50:51.479529",
+  "source_json": "tools/tasks_loop/fixtures/sparta_stress_test/extraction_output/03_suspicious_headers/json_output/03_verified_blocks.json",
+  "source_pdf": "tools/tasks_loop/fixtures/sparta_stress_test/extraction_output/01_annotation_processor/sparta_stress_test_clean.pdf",
+  "status": "Completed",
+  "section_count": 3,
+  "hierarchy_depth": 2,
+  "visual_captures": 3,
+  "suspicious_header_analysis": {
+    "validation_method": "stage03_llm_verification",
+    "total_sections": 3,
+    "validated_sections": 0,
+    "suspicious_sections": 0,
+    "categories": {
+      "low_confidence": [],
+      "ocr_errors": [],
+      "formatting_issues": [],
+      "context_issues": [],
+      "sequence_issues": [],
+      "false_positives": []
+    },
+    "statistics": {
+      "avg_confidence": 0.0,
+      "confidence_distribution": {},
+      "common_issues": {},
+      "validation_summary": {
+        "sections_validated": 0,
+        "total_suspicious": 0,
+        "suspicious_rate": 0.0,
+        "avg_confidence": 0.0
+      }
+    }
+  },
+  "sections": [
+    {
+      "title": "1. Introduction",
+      "level": 1,
+      "blocks": [
+        {
+          "block_type": "SectionHeader",
+          "page_idx": 0,
+          "page": 0,
+          "text": "1. Introduction",
+          "bbox": [
+            50.0,
+            30.739999771118164,
+            175.00999450683594,
+            55.5260009765625
+          ],
+          "header_char_spans": {
+            "number": {
+              "start": 0,
+              "end": 1
+            },
+            "title": {
+              "start": 3,
+              "end": 15
+            }
+          },
+          "header_title": "Introduction",
+          "first_span_font": {
+            "color_rgb": [
+              0,
+              0,
+              0
+            ],
+            "color_hex": "#000000",
+            "color_bucket": "black"
+          },
+          "section_titles": [
+            "Introduction"
+          ],
+          "section_hashes": [
+            "0b79795d3efc95b9976c7c5b933afce2"
+          ],
+          "section_number": "1",
+          "section_level": 1,
+          "section_depth": [
+            1
+          ],
+          "section_breadcrumbs": [
+            "1 Introduction"
+          ]
+        },
+        {
+          "block_type": "Text",
+          "page_idx": 0,
+          "page": 0,
+          "text": "This document is a synthetic test fixture.",
+          "bbox": [
+            50.0,
+            68.17500305175781,
+            245.63494873046875,
+            83.28900146484375
+          ],
+          "first_span_font": {
+            "color_rgb": [
+              0,
+              0,
+              0
+            ],
+            "color_hex": "#000000",
+            "color_bucket": "black"
+          },
+          "section_titles": [
+            "1. Introduction"
+          ],
+          "section_hashes": [
+            "0b79795d3efc95b9976c7c5b933afce2"
+          ],
+          "section_number": "1",
+          "section_level": 1,
+          "section_depth": [
+            1
+          ],
+          "section_breadcrumbs": [
+            "1 Introduction"
+          ]
+        },
+        {
+          "block_type": "Text",
+          "page_idx": 0,
+          "page": 0,
+          "text": "Table 1: System Data (Configured)",
+          "bbox": [
+            50.0,
+            199.3000030517578,
+            204.49996948242188,
+            212.83999633789062
+          ],
+          "first_span_font": {
+            "color_rgb": [
+              0,
+              0,
+              0
+            ],
+            "color_hex": "#000000",
+            "color_bucket": "black"
+          },
+          "section_titles": [
+            "1. Introduction"
+          ],
+          "section_hashes": [
+            "0b79795d3efc95b9976c7c5b933afce2"
+          ],
+          "section_number": "1",
+          "section_level": 1,
+          "section_depth": [
+            1
+          ],
+          "section_breadcrumbs": [
+            "1 Introduction"
+          ]
+        },
+        {
+          "block_type": "Text",
+          "page_idx": 0,
+          "page": 0,
+          "text": "ID\nValue\nDescription",
+          "bbox": [
+            60.0,
+            233.25,
+            350.0099792480469,
+            246.99000549316406
+          ],
+          "first_span_font": {
+            "color_rgb": [
+              255,
+              255,
+              255
+            ],
+            "color_hex": "#ffffff",
+            "color_bucket": "white"
+          },
+          "section_titles": [
+            "1. Introduction"
+          ],
+          "section_hashes": [
+            "0b79795d3efc95b9976c7c5b933afce2"
+          ],
+          "section_number": "1",
+          "section_level": 1,
+          "section_depth": [
+            1
+          ],
+          "section_breadcrumbs": [
+            "1 Introduction"
+          ]
+        },
+        {
+          "block_type": "Text",
+          "page_idx": 0,
+          "page": 0,
+          "text": "Data row 0\nR0\nVAL_0",
+          "bbox": [
+            60.0,
+            253.25,
+            348.3499755859375,
+            266.989990234375
+          ],
+          "first_span_font": {
+            "color_rgb": [
+              0,
+              0,
+              0
+            ],
+            "color_hex": "#000000",
+            "color_bucket": "black"
+          },
+          "section_titles": [
+            "1. Introduction"
+          ],
+          "section_hashes": [
+            "0b79795d3efc95b9976c7c5b933afce2"
+          ],
+          "section_number": "1",
+          "section_level": 1,
+          "section_depth": [
+            1
+          ],
+          "section_breadcrumbs": [
+            "1 Introduction"
+          ]
+        },
+        {
+          "block_type": "Text",
+          "page_idx": 0,
+          "page": 0,
+          "text": "Data row 1\nR1\nVAL_1",
+          "bbox": [
+            60.0,
+            273.25,
+            348.3499755859375,
+            286.989990234375
+          ],
+          "first_span_font": {
+            "color_rgb": [
+              0,
+              0,
+              0
+            ],
+            "color_hex": "#000000",
+            "color_bucket": "black"
+          },
+          "section_titles": [
+            "1. Introduction"
+          ],
+          "section_hashes": [
+            "0b79795d3efc95b9976c7c5b933afce2"
+          ],
+          "section_number": "1",
+          "section_level": 1,
+          "section_depth": [
+            1
+          ],
+          "section_breadcrumbs": [
+            "1 Introduction"
+          ]
+        },
+        {
+          "block_type": "Text",
+          "page_idx": 0,
+          "page": 0,
+          "text": "Data row 2\nR2\nVAL_2",
+          "bbox": [
+            60.0,
+            293.25,
+            348.3499755859375,
+            306.989990234375
+          ],
+          "first_span_font": {
+            "color_rgb": [
+              0,
+              0,
+              0
+            ],
+            "color_hex": "#000000",
+            "color_bucket": "black"
+          },
+          "section_titles": [
+            "1. Introduction"
+          ],
+          "section_hashes": [
+            "0b79795d3efc95b9976c7c5b933afce2"
+          ],
+          "section_number": "1",
+          "section_level": 1,
+          "section_depth": [
+            1
+          ],
+          "section_breadcrumbs": [
+            "1 Introduction"
+          ]
+        },
+        {
+          "block_type": "Text",
+          "page_idx": 0,
+          "page": 0,
+          "text": "Data row 3\nR3\nVAL_3",
+          "bbox": [
+            60.0,
+            313.25,
+            348.3499755859375,
+            326.989990234375
+          ],
+          "first_span_font": {
+            "color_rgb": [
+              0,
+              0,
+              0
+            ],
+            "color_hex": "#000000",
+            "color_bucket": "black"
+          },
+          "section_titles": [
+            "1. Introduction"
+          ],
+          "section_hashes": [
+            "0b79795d3efc95b9976c7c5b933afce2"
+          ],
+          "section_number": "1",
+          "section_level": 1,
+          "section_depth": [
+            1
+          ],
+          "section_breadcrumbs": [
+            "1 Introduction"
+          ]
+        },
+        {
+          "block_type": "Text",
+          "page_idx": 0,
+          "page": 0,
+          "text": "Data row 4\nR4\nVAL_4",
+          "bbox": [
+            60.0,
+            333.25,
+            348.3499755859375,
+            346.989990234375
+          ],
+          "first_span_font": {
+            "color_rgb": [
+              0,
+              0,
+              0
+            ],
+            "color_hex": "#000000",
+            "color_bucket": "black"
+          },
+          "section_titles": [
+            "1. Introduction"
+          ],
+          "section_hashes": [
+            "0b79795d3efc95b9976c7c5b933afce2"
+          ],
+          "section_number": "1",
+          "section_level": 1,
+          "section_depth": [
+            1
+          ],
+          "section_breadcrumbs": [
+            "1 Introduction"
+          ]
+        }
+      ],
+      "page_start": 0,
+      "page_end": 0,
+      "bbox": [
+        50.0,
+        30.739999771118164,
+        350.0099792480469,
+        346.989990234375
+      ],
+      "metadata": {
+        "section_number": "1",
+        "section_depth": [
+          1
+        ],
+        "section_hash": "0b79795d3efc95b9976c7c5b933afce2",
+        "block_count": 9,
+        "validation_method": "stage03_or_fallback",
+        "diagnostics": [],
+        "header_char_spans": {
+          "number": {
+            "start": 0,
+            "end": 1
+          },
+          "title": {
+            "start": 3,
+            "end": 15
+          }
+        },
+        "title_display": "Introduction",
+        "pages": [
+          0
+        ],
+        "page_start": 0,
+        "page_end": 0,
+        "page_count": 1,
+        "breadcrumbs": [
+          {
+            "id": "section_0",
+            "title": "1 Introduction",
+            "section_number": "1",
+            "level": 1,
+            "section_hash": "0b79795d3efc95b9976c7c5b933afce2"
+          }
+        ],
+        "breadcrumb_titles": [
+          "1 Introduction"
+        ]
+      },
+      "display_title": "Introduction",
+      "id": "section_0",
+      "parent_id": null,
+      "pages": [
+        0
+      ],
+      "section_number": "1",
+      "section_depth": [
+        1
+      ],
+      "has_visual": true,
+      "visual_path": "04_section_builder/visual_output/section_section_0.png"
+    },
+    {
+      "title": "SECTION 5: APT ACTIVITY\nR5\nVAL_5",
+      "level": 2,
+      "blocks": [
+        {
+          "block_type": "SectionHeader",
+          "page_idx": 0,
+          "page": 0,
+          "text": "SECTION 5: APT ACTIVITY\nR5\nVAL_5",
+          "bbox": [
+            60.0,
+            353.25,
+            425.59002685546875,
+            366.989990234375
+          ],
+          "first_span_font": {
+            "color_rgb": [
+              0,
+              0,
+              0
+            ],
+            "color_hex": "#000000",
+            "color_bucket": "black"
+          },
+          "section_titles": [
+            "SECTION 5: APT ACTIVITY\nR5\nVAL_5"
+          ],
+          "section_hashes": [
+            "e8efb1e65313da321c179a9a37e512b9"
+          ],
+          "section_number": "",
+          "section_level": 2,
+          "section_breadcrumbs": [
+            "1 Introduction",
+            "SECTION 5: APT ACTIVITY\nR5\nVAL_5"
+          ]
+        },
+        {
+          "block_type": "Text",
+          "page_idx": 0,
+          "page": 0,
+          "text": "Data row 6\nR6\nVAL_6",
+          "bbox": [
+            60.0,
+            373.25,
+            348.3499755859375,
+            386.989990234375
+          ],
+          "first_span_font": {
+            "color_rgb": [
+              0,
+              0,
+              0
+            ],
+            "color_hex": "#000000",
+            "color_bucket": "black"
+          },
+          "section_titles": [
+            "SECTION 5: APT ACTIVITY\nR5\nVAL_5"
+          ],
+          "section_hashes": [
+            "e8efb1e65313da321c179a9a37e512b9"
+          ],
+          "section_number": "",
+          "section_level": 2,
+          "section_breadcrumbs": [
+            "1 Introduction",
+            "SECTION 5: APT ACTIVITY\nR5\nVAL_5"
+          ]
+        },
+        {
+          "block_type": "Text",
+          "page_idx": 0,
+          "page": 0,
+          "text": "Data row 7\nR7\nVAL_7",
+          "bbox": [
+            60.0,
+            393.25,
+            348.3499755859375,
+            406.989990234375
+          ],
+          "first_span_font": {
+            "color_rgb": [
+              0,
+              0,
+              0
+            ],
+            "color_hex": "#000000",
+            "color_bucket": "black"
+          },
+          "section_titles": [
+            "SECTION 5: APT ACTIVITY\nR5\nVAL_5"
+          ],
+          "section_hashes": [
+            "e8efb1e65313da321c179a9a37e512b9"
+          ],
+          "section_number": "",
+          "section_level": 2,
+          "section_breadcrumbs": [
+            "1 Introduction",
+            "SECTION 5: APT ACTIVITY\nR5\nVAL_5"
+          ]
+        },
+        {
+          "block_type": "Text",
+          "page_idx": 0,
+          "page": 0,
+          "text": "Data row 8\nR8\nVAL_8",
+          "bbox": [
+            60.0,
+            413.25,
+            348.3499755859375,
+            426.989990234375
+          ],
+          "first_span_font": {
+            "color_rgb": [
+              0,
+              0,
+              0
+            ],
+            "color_hex": "#000000",
+            "color_bucket": "black"
+          },
+          "section_titles": [
+            "SECTION 5: APT ACTIVITY\nR5\nVAL_5"
+          ],
+          "section_hashes": [
+            "e8efb1e65313da321c179a9a37e512b9"
+          ],
+          "section_number": "",
+          "section_level": 2,
+          "section_breadcrumbs": [
+            "1 Introduction",
+            "SECTION 5: APT ACTIVITY\nR5\nVAL_5"
+          ]
+        },
+        {
+          "block_type": "Text",
+          "page_idx": 0,
+          "page": 0,
+          "text": "Data row 9\nR9\nVAL_9",
+          "bbox": [
+            60.0,
+            433.25,
+            348.3499755859375,
+            446.989990234375
+          ],
+          "first_span_font": {
+            "color_rgb": [
+              0,
+              0,
+              0
+            ],
+            "color_hex": "#000000",
+            "color_bucket": "black"
+          },
+          "section_titles": [
+            "SECTION 5: APT ACTIVITY\nR5\nVAL_5"
+          ],
+          "section_hashes": [
+            "e8efb1e65313da321c179a9a37e512b9"
+          ],
+          "section_number": "",
+          "section_level": 2,
+          "section_breadcrumbs": [
+            "1 Introduction",
+            "SECTION 5: APT ACTIVITY\nR5\nVAL_5"
+          ]
+        },
+        {
+          "block_type": "Text",
+          "page_idx": 0,
+          "page": 0,
+          "text": "(Table continues on next page...)",
+          "bbox": [
+            50.0,
+            460.3699951171875,
+            181.5709686279297,
+            472.5559997558594
+          ],
+          "first_span_font": {
+            "color_rgb": [
+              0,
+              0,
+              0
+            ],
+            "color_hex": "#000000",
+            "color_bucket": "black"
+          },
+          "section_titles": [
+            "SECTION 5: APT ACTIVITY\nR5\nVAL_5"
+          ],
+          "section_hashes": [
+            "e8efb1e65313da321c179a9a37e512b9"
+          ],
+          "section_number": "",
+          "section_level": 2,
+          "section_breadcrumbs": [
+            "1 Introduction",
+            "SECTION 5: APT ACTIVITY\nR5\nVAL_5"
+          ]
+        },
+        {
+          "block_type": "Text",
+          "page_idx": 1,
+          "page": 1,
+          "text": "Table 1 (Continued)",
+          "bbox": [
+            50.0,
+            39.29999923706055,
+            138.3699951171875,
+            52.84000015258789
+          ],
+          "first_span_font": {
+            "color_rgb": [
+              0,
+              0,
+              0
+            ],
+            "color_hex": "#000000",
+            "color_bucket": "black"
+          },
+          "section_titles": [
+            "SECTION 5: APT ACTIVITY\nR5\nVAL_5"
+          ],
+          "section_hashes": [
+            "e8efb1e65313da321c179a9a37e512b9"
+          ],
+          "section_number": "",
+          "section_level": 2,
+          "section_breadcrumbs": [
+            "1 Introduction",
+            "SECTION 5: APT ACTIVITY\nR5\nVAL_5"
+          ]
+        },
+        {
+          "block_type": "Text",
+          "page_idx": 1,
+          "page": 1,
+          "text": "ID\nValue\nDescription",
+          "bbox": [
+            60.0,
+            73.25,
+            350.0099792480469,
+            86.98999786376953
+          ],
+          "first_span_font": {
+            "color_rgb": [
+              0,
+              0,
+              0
+            ],
+            "color_hex": "#000000",
+            "color_bucket": "black"
+          },
+          "section_titles": [
+            "SECTION 5: APT ACTIVITY\nR5\nVAL_5"
+          ],
+          "section_hashes": [
+            "e8efb1e65313da321c179a9a37e512b9"
+          ],
+          "section_number": "",
+          "section_level": 2,
+          "section_breadcrumbs": [
+            "1 Introduction",
+            "SECTION 5: APT ACTIVITY\nR5\nVAL_5"
+          ]
+        },
+        {
+          "block_type": "Text",
+          "page_idx": 1,
+          "page": 1,
+          "text": "R10\nVAL_10\nData row 10",
+          "bbox": [
+            60.0,
+            93.25,
+            353.90997314453125,
+            106.98999786376953
+          ],
+          "first_span_font": {
+            "color_rgb": [
+              0,
+              0,
+              0
+            ],
+            "color_hex": "#000000",
+            "color_bucket": "black"
+          },
+          "section_titles": [
+            "SECTION 5: APT ACTIVITY\nR5\nVAL_5"
+          ],
+          "section_hashes": [
+            "e8efb1e65313da321c179a9a37e512b9"
+          ],
+          "section_number": "",
+          "section_level": 2,
+          "section_breadcrumbs": [
+            "1 Introduction",
+            "SECTION 5: APT ACTIVITY\nR5\nVAL_5"
+          ]
+        },
+        {
+          "block_type": "Text",
+          "page_idx": 1,
+          "page": 1,
+          "text": "R11\nVAL_11\nData row 11",
+          "bbox": [
+            60.0,
+            113.25,
+            353.90997314453125,
+            126.98999786376953
+          ],
+          "first_span_font": {
+            "color_rgb": [
+              0,
+              0,
+              0
+            ],
+            "color_hex": "#000000",
+            "color_bucket": "black"
+          },
+          "section_titles": [
+            "SECTION 5: APT ACTIVITY\nR5\nVAL_5"
+          ],
+          "section_hashes": [
+            "e8efb1e65313da321c179a9a37e512b9"
+          ],
+          "section_number": "",
+          "section_level": 2,
+          "section_breadcrumbs": [
+            "1 Introduction",
+            "SECTION 5: APT ACTIVITY\nR5\nVAL_5"
+          ]
+        },
+        {
+          "block_type": "Text",
+          "page_idx": 1,
+          "page": 1,
+          "text": "R12\nVAL_12\nData row 12",
+          "bbox": [
+            60.0,
+            133.25,
+            353.90997314453125,
+            146.99000549316406
+          ],
+          "first_span_font": {
+            "color_rgb": [
+              0,
+              0,
+              0
+            ],
+            "color_hex": "#000000",
+            "color_bucket": "black"
+          },
+          "section_titles": [
+            "SECTION 5: APT ACTIVITY\nR5\nVAL_5"
+          ],
+          "section_hashes": [
+            "e8efb1e65313da321c179a9a37e512b9"
+          ],
+          "section_number": "",
+          "section_level": 2,
+          "section_breadcrumbs": [
+            "1 Introduction",
+            "SECTION 5: APT ACTIVITY\nR5\nVAL_5"
+          ]
+        },
+        {
+          "block_type": "Text",
+          "page_idx": 1,
+          "page": 1,
+          "text": "R13\nVAL_13\nData row 13",
+          "bbox": [
+            60.0,
+            153.25,
+            353.90997314453125,
+            166.99000549316406
+          ],
+          "first_span_font": {
+            "color_rgb": [
+              0,
+              0,
+              0
+            ],
+            "color_hex": "#000000",
+            "color_bucket": "black"
+          },
+          "section_titles": [
+            "SECTION 5: APT ACTIVITY\nR5\nVAL_5"
+          ],
+          "section_hashes": [
+            "e8efb1e65313da321c179a9a37e512b9"
+          ],
+          "section_number": "",
+          "section_level": 2,
+          "section_breadcrumbs": [
+            "1 Introduction",
+            "SECTION 5: APT ACTIVITY\nR5\nVAL_5"
+          ]
+        },
+        {
+          "block_type": "Text",
+          "page_idx": 1,
+          "page": 1,
+          "text": "R14\nVAL_14\nData row 14",
+          "bbox": [
+            60.0,
+            173.25,
+            353.90997314453125,
+            186.99000549316406
+          ],
+          "first_span_font": {
+            "color_rgb": [
+              0,
+              0,
+              0
+            ],
+            "color_hex": "#000000",
+            "color_bucket": "black"
+          },
+          "section_titles": [
+            "SECTION 5: APT ACTIVITY\nR5\nVAL_5"
+          ],
+          "section_hashes": [
+            "e8efb1e65313da321c179a9a37e512b9"
+          ],
+          "section_number": "",
+          "section_level": 2,
+          "section_breadcrumbs": [
+            "1 Introduction",
+            "SECTION 5: APT ACTIVITY\nR5\nVAL_5"
+          ]
+        },
+        {
+          "block_type": "Text",
+          "page_idx": 1,
+          "page": 1,
+          "text": "R15\nVAL_15\nData row 15",
+          "bbox": [
+            60.0,
+            193.25,
+            353.90997314453125,
+            206.99000549316406
+          ],
+          "first_span_font": {
+            "color_rgb": [
+              0,
+              0,
+              0
+            ],
+            "color_hex": "#000000",
+            "color_bucket": "black"
+          },
+          "section_titles": [
+            "SECTION 5: APT ACTIVITY\nR5\nVAL_5"
+          ],
+          "section_hashes": [
+            "e8efb1e65313da321c179a9a37e512b9"
+          ],
+          "section_number": "",
+          "section_level": 2,
+          "section_breadcrumbs": [
+            "1 Introduction",
+            "SECTION 5: APT ACTIVITY\nR5\nVAL_5"
+          ]
+        },
+        {
+          "block_type": "Text",
+          "page_idx": 1,
+          "page": 1,
+          "text": "(End of Table 1)",
+          "bbox": [
+            50.0,
+            250.3699951171875,
+            114.52998352050781,
+            262.5559997558594
+          ],
+          "first_span_font": {
+            "color_rgb": [
+              0,
+              0,
+              0
+            ],
+            "color_hex": "#000000",
+            "color_bucket": "black"
+          },
+          "section_titles": [
+            "SECTION 5: APT ACTIVITY\nR5\nVAL_5"
+          ],
+          "section_hashes": [
+            "e8efb1e65313da321c179a9a37e512b9"
+          ],
+          "section_number": "",
+          "section_level": 2,
+          "section_breadcrumbs": [
+            "1 Introduction",
+            "SECTION 5: APT ACTIVITY\nR5\nVAL_5"
+          ]
+        }
+      ],
+      "page_start": 0,
+      "page_end": 1,
+      "bbox": [
+        50.0,
+        39.29999923706055,
+        425.59002685546875,
+        472.5559997558594
+      ],
+      "metadata": {
+        "section_number": "",
+        "section_depth": [],
+        "section_hash": "e8efb1e65313da321c179a9a37e512b9",
+        "block_count": 15,
+        "validation_method": "stage03_or_fallback",
+        "diagnostics": [],
+        "header_char_spans": {
+          "number": null,
+          "title": null
+        },
+        "title_display": "SECTION 5: APT ACTIVITY\nR5\nVAL_5",
+        "pages": [
+          0,
+          1
+        ],
+        "page_start": 0,
+        "page_end": 1,
+        "page_count": 2,
+        "breadcrumbs": [
+          {
+            "id": "section_0",
+            "title": "1 Introduction",
+            "section_number": "1",
+            "level": 1,
+            "section_hash": "0b79795d3efc95b9976c7c5b933afce2"
+          },
+          {
+            "id": "section_1",
+            "title": "SECTION 5: APT ACTIVITY\nR5\nVAL_5",
+            "level": 2,
+            "section_hash": "e8efb1e65313da321c179a9a37e512b9"
+          }
+        ],
+        "breadcrumb_titles": [
+          "1 Introduction",
+          "SECTION 5: APT ACTIVITY\nR5\nVAL_5"
+        ],
+        "composite_size_bytes": 123650,
+        "composite_width": 1077,
+        "composite_height": 2916
+      },
+      "display_title": "SECTION 5: APT ACTIVITY\nR5\nVAL_5",
+      "id": "section_1",
+      "parent_id": "section_0",
+      "pages": [
+        0,
+        1
+      ],
+      "has_visual": true,
+      "visual_path": "04_section_builder/visual_output/section_section_1.png"
+    },
+    {
+      "title": "2. Requirements",
+      "level": 1,
+      "blocks": [
+        {
+          "block_type": "SectionHeader",
+          "page_idx": 2,
+          "page": 2,
+          "text": "2. Requirements",
+          "bbox": [
+            50.0,
+            30.739999771118164,
+            190.0399932861328,
+            55.5260009765625
+          ],
+          "header_char_spans": {
+            "number": {
+              "start": 0,
+              "end": 1
+            },
+            "title": {
+              "start": 3,
+              "end": 15
+            }
+          },
+          "header_title": "Requirements",
+          "first_span_font": {
+            "color_rgb": [
+              0,
+              0,
+              0
+            ],
+            "color_hex": "#000000",
+            "color_bucket": "black"
+          },
+          "section_titles": [
+            "Requirements"
+          ],
+          "section_hashes": [
+            "5a2ebfb8baa378cfcfcba58bbb1380c2"
+          ],
+          "section_number": "2",
+          "section_level": 1,
+          "section_depth": [
+            2
+          ],
+          "section_breadcrumbs": [
+            "2 Requirements"
+          ]
+        },
+        {
+          "block_type": "Text",
+          "page_idx": 2,
+          "page": 2,
+          "text": "REQ-SYN-001: The system shall handle synthetic data.",
+          "bbox": [
+            50.0,
+            68.17500305175781,
+            320.83099365234375,
+            83.28900146484375
+          ],
+          "first_span_font": {
+            "color_rgb": [
+              0,
+              0,
+              0
+            ],
+            "color_hex": "#000000",
+            "color_bucket": "black"
+          },
+          "section_titles": [
+            "2. Requirements"
+          ],
+          "section_hashes": [
+            "5a2ebfb8baa378cfcfcba58bbb1380c2"
+          ],
+          "section_number": "2",
+          "section_level": 1,
+          "section_depth": [
+            2
+          ],
+          "section_breadcrumbs": [
+            "2 Requirements"
+          ]
+        },
+        {
+          "block_type": "Text",
+          "page_idx": 2,
+          "page": 2,
+          "text": "REQ-SYN-002: The system must ignore false headers.",
+          "bbox": [
+            50.0,
+            88.17500305175781,
+            317.7619323730469,
+            103.28900146484375
+          ],
+          "first_span_font": {
+            "color_rgb": [
+              0,
+              0,
+              0
+            ],
+            "color_hex": "#000000",
+            "color_bucket": "black"
+          },
+          "section_titles": [
+            "2. Requirements"
+          ],
+          "section_hashes": [
+            "5a2ebfb8baa378cfcfcba58bbb1380c2"
+          ],
+          "section_number": "2",
+          "section_level": 1,
+          "section_depth": [
+            2
+          ],
+          "section_breadcrumbs": [
+            "2 Requirements"
+          ]
+        },
+        {
+          "block_type": "Text",
+          "page_idx": 2,
+          "page": 2,
+          "text": "Examples (Non-Normative):",
+          "bbox": [
+            50.0,
+            117.16000366210938,
+            207.3560028076172,
+            133.6840057373047
+          ],
+          "first_span_font": {
+            "color_rgb": [
+              0,
+              0,
+              0
+            ],
+            "color_hex": "#000000",
+            "color_bucket": "black"
+          },
+          "section_titles": [
+            "2. Requirements"
+          ],
+          "section_hashes": [
+            "5a2ebfb8baa378cfcfcba58bbb1380c2"
+          ],
+          "section_number": "2",
+          "section_level": 1,
+          "section_depth": [
+            2
+          ],
+          "section_breadcrumbs": [
+            "2 Requirements"
+          ]
+        },
+        {
+          "block_type": "Text",
+          "page_idx": 2,
+          "page": 2,
+          "text": "Users should consider reading the executive summary first.",
+          "bbox": [
+            50.0,
+            138.1750030517578,
+            338.5409851074219,
+            153.28900146484375
+          ],
+          "first_span_font": {
+            "color_rgb": [
+              77,
+              77,
+              77
+            ],
+            "color_hex": "#4d4d4d",
+            "color_bucket": "gray"
+          },
+          "section_titles": [
+            "2. Requirements"
+          ],
+          "section_hashes": [
+            "5a2ebfb8baa378cfcfcba58bbb1380c2"
+          ],
+          "section_number": "2",
+          "section_level": 1,
+          "section_depth": [
+            2
+          ],
+          "section_breadcrumbs": [
+            "2 Requirements"
+          ]
+        },
+        {
+          "block_type": "Text",
+          "page_idx": 2,
+          "page": 2,
+          "text": "The following tables may be updated in future revisions.",
+          "bbox": [
+            50.0,
+            158.1750030517578,
+            321.4579162597656,
+            173.28900146484375
+          ],
+          "first_span_font": {
+            "color_rgb": [
+              77,
+              77,
+              77
+            ],
+            "color_hex": "#4d4d4d",
+            "color_bucket": "gray"
+          },
+          "section_titles": [
+            "2. Requirements"
+          ],
+          "section_hashes": [
+            "5a2ebfb8baa378cfcfcba58bbb1380c2"
+          ],
+          "section_number": "2",
+          "section_level": 1,
+          "section_depth": [
+            2
+          ],
+          "section_breadcrumbs": [
+            "2 Requirements"
+          ]
+        },
+        {
+          "block_type": "Text",
+          "page_idx": 2,
+          "page": 2,
+          "text": "Note: This is informational guidance only.",
+          "bbox": [
+            50.0,
+            178.1750030517578,
+            251.13494873046875,
+            193.28900146484375
+          ],
+          "first_span_font": {
+            "color_rgb": [
+              77,
+              77,
+              77
+            ],
+            "color_hex": "#4d4d4d",
+            "color_bucket": "gray"
+          },
+          "section_titles": [
+            "2. Requirements"
+          ],
+          "section_hashes": [
+            "5a2ebfb8baa378cfcfcba58bbb1380c2"
+          ],
+          "section_number": "2",
+          "section_level": 1,
+          "section_depth": [
+            2
+          ],
+          "section_breadcrumbs": [
+            "2 Requirements"
+          ]
+        },
+        {
+          "block_type": "Text",
+          "page_idx": 2,
+          "page": 2,
+          "text": "Critical Requirements:",
+          "bbox": [
+            50.0,
+            237.16000366210938,
+            178.02798461914062,
+            253.6840057373047
+          ],
+          "first_span_font": {
+            "color_rgb": [
+              0,
+              0,
+              0
+            ],
+            "color_hex": "#000000",
+            "color_bucket": "black"
+          },
+          "section_titles": [
+            "2. Requirements"
+          ],
+          "section_hashes": [
+            "5a2ebfb8baa378cfcfcba58bbb1380c2"
+          ],
+          "section_number": "2",
+          "section_level": 1,
+          "section_depth": [
+            2
+          ],
+          "section_breadcrumbs": [
+            "2 Requirements"
+          ]
+        },
+        {
+          "block_type": "Text",
+          "page_idx": 2,
+          "page": 2,
+          "text": "[Active]\nREQ-SPARTA-001: The system shall detect APT activity within 24 hours of initial compromise.",
+          "bbox": [
+            50.0,
+            258.17498779296875,
+            509.70098876953125,
+            273.28900146484375
+          ],
+          "first_span_font": {
+            "color_rgb": [
+              179,
+              0,
+              0
+            ],
+            "color_hex": "#b30000",
+            "color_bucket": "red"
+          },
+          "section_titles": [
+            "2. Requirements"
+          ],
+          "section_hashes": [
+            "5a2ebfb8baa378cfcfcba58bbb1380c2"
+          ],
+          "section_number": "2",
+          "section_level": 1,
+          "section_depth": [
+            2
+          ],
+          "section_breadcrumbs": [
+            "2 Requirements"
+          ]
+        },
+        {
+          "block_type": "Text",
+          "page_idx": 2,
+          "page": 2,
+          "text": "[Active]\nREQ-SPARTA-002: All threat indicators must be stored with CVE references when available.",
+          "bbox": [
+            50.0,
+            278.17498779296875,
+            501.16497802734375,
+            293.28900146484375
+          ],
+          "first_span_font": {
+            "color_rgb": [
+              179,
+              0,
+              0
+            ],
+            "color_hex": "#b30000",
+            "color_bucket": "red"
+          },
+          "section_titles": [
+            "2. Requirements"
+          ],
+          "section_hashes": [
+            "5a2ebfb8baa378cfcfcba58bbb1380c2"
+          ],
+          "section_number": "2",
+          "section_level": 1,
+          "section_depth": [
+            2
+          ],
+          "section_breadcrumbs": [
+            "2 Requirements"
+          ]
+        },
+        {
+          "block_type": "Text",
+          "page_idx": 2,
+          "page": 2,
+          "text": "FINDING-001: APT29 used spear-phishing with malicious attachments targeting defense contractors.",
+          "bbox": [
+            50.0,
+            298.17498779296875,
+            542.1400146484375,
+            313.28900146484375
+          ],
+          "first_span_font": {
+            "color_rgb": [
+              0,
+              0,
+              0
+            ],
+            "color_hex": "#000000",
+            "color_bucket": "black"
+          },
+          "section_titles": [
+            "2. Requirements"
+          ],
+          "section_hashes": [
+            "5a2ebfb8baa378cfcfcba58bbb1380c2"
+          ],
+          "section_number": "2",
+          "section_level": 1,
+          "section_depth": [
+            2
+          ],
+          "section_breadcrumbs": [
+            "2 Requirements"
+          ]
+        }
+      ],
+      "page_start": 2,
+      "page_end": 2,
+      "bbox": [
+        50.0,
+        30.739999771118164,
+        542.1400146484375,
+        313.28900146484375
+      ],
+      "metadata": {
+        "section_number": "2",
+        "section_depth": [
+          2
+        ],
+        "section_hash": "5a2ebfb8baa378cfcfcba58bbb1380c2",
+        "block_count": 11,
+        "validation_method": "stage03_or_fallback",
+        "diagnostics": [],
+        "header_char_spans": {
+          "number": {
+            "start": 0,
+            "end": 1
+          },
+          "title": {
+            "start": 3,
+            "end": 15
+          }
+        },
+        "title_display": "Requirements",
+        "pages": [
+          2
+        ],
+        "page_start": 2,
+        "page_end": 2,
+        "page_count": 1,
+        "breadcrumbs": [
+          {
+            "id": "section_2",
+            "title": "2 Requirements",
+            "section_number": "2",
+            "level": 1,
+            "section_hash": "5a2ebfb8baa378cfcfcba58bbb1380c2"
+          }
+        ],
+        "breadcrumb_titles": [
+          "2 Requirements"
+        ]
+      },
+      "display_title": "Requirements",
+      "id": "section_2",
+      "parent_id": null,
+      "pages": [
+        2
+      ],
+      "section_number": "2",
+      "section_depth": [
+        2
+      ],
+      "has_visual": true,
+      "visual_path": "04_section_builder/visual_output/section_section_2.png"
+    }
+  ],
+  "timings": {
+    "stage_start_ts": "2026-01-23T10:50:51.114317",
+    "stage_end_ts": "2026-01-23T10:50:51.479548",
+    "stage_duration_ms": 365
+  },
+  "run_id": "3c40018303614526ab4f63d96b811bb5"
+}

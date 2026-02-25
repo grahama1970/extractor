@@ -1,0 +1,14 @@
+{
+  "images": [
+    "04a_layout_audit/visual_output/section_0.png",
+    "04a_layout_audit/visual_output/section_3.png",
+    "04a_layout_audit/visual_output/section_4.png",
+    "04a_layout_audit/visual_output/section_2.png",
+    "04a_layout_audit/visual_output/section_1.png"
+  ],
+  "json": [
+    "04a_layout_audit/json_output/artifacts_index.json",
+    "04a_layout_audit/json_output/04a_layout_audit.json"
+  ],
+  "text": []
+}

@@ -1,0 +1,30 @@
+#!/usr/bin/env python3
+"""Standalone entry point for calibrate CLI.
+
+Usage:
+    ./scripts/calibrate detect doc.pdf --page 0
+    ./scripts/calibrate sample session_key --count 5
+    ./scripts/calibrate verdict session_key elem_001 correct
+    ./scripts/calibrate status session_key
+    ./scripts/calibrate finish session_key
+"""
+
+import sys
+from pathlib import Path
+
+# Add src to path
+src_path = Path(__file__).parent.parent / "src"
+sys.path.insert(0, str(src_path))
+
+# Block the problematic imports by pre-loading the cli module differently
+# We need to import calibrate_cli without triggering cli/__init__.py
+import importlib.util
+
+calibrate_cli_path = src_path / "extractor" / "cli" / "calibrate_cli.py"
+spec = importlib.util.spec_from_file_location("calibrate_cli", calibrate_cli_path)
+calibrate_cli = importlib.util.module_from_spec(spec)
+sys.modules["calibrate_cli"] = calibrate_cli
+spec.loader.exec_module(calibrate_cli)
+
+if __name__ == "__main__":
+    calibrate_cli.app()

@@ -1,0 +1,85 @@
+preset_id: arxiv_scientific
+category: Scientific
+layout: double
+description: "ArXiv scientific papers - optimized for 2-column layout, equations, LaTeX tables"
+
+# Detection triggers
+detection:
+  keywords:
+    - "arXiv"
+    - "Abstract"
+    - "Introduction"
+    - "References"
+    - "Theorem"
+    - "Lemma"
+    - "Proof"
+    - "et al."
+  filename_triggers:
+    - "arxiv"
+    # ArXiv paper IDs: YYMM.NNNNN format (e.g., 2501.12345 = Jan 2025)
+    - "2401"    # 2024 papers
+    - "2402"
+    - "2403"
+    - "2404"
+    - "2405"
+    - "2406"
+    - "2407"
+    - "2408"
+    - "2409"
+    - "2410"
+    - "2411"
+    - "2412"
+    - "2501"    # 2025 papers
+    - "2502"
+    - "2503"
+    - "2504"
+    - "2505"
+    - "2506"
+    - "2507"
+    - "2508"
+    - "2509"
+    - "2510"
+    - "2511"
+    - "2512"
+    - "2601"    # 2026 papers
+    - "2602"
+  section_pattern: "^\\d+(\\.\\d+)*\\s+[A-Z]"
+  layout: double
+  min_score: 3
+
+# Runtime configuration
+runtime:
+  features:
+    timeout_multiplier: 2.5  # Scientific papers need more time
+    table_strategy: "lattice_sensitive"  # Better for thin LaTeX table lines
+    line_scale: 15  # More sensitive line detection for LaTeX tables
+    enable_equation_detection: true
+    preserve_math_notation: true
+
+  # Common errors in ArXiv PDFs
+  errors:
+    - hyphenation          # Column-break hyphenation
+    - ligatures            # fi, fl, ff ligatures
+    - split_tables         # Tables spanning columns
+    - latex_table_borders  # Thin LaTeX table lines
+    - formula_fragments    # Split equations across lines
+    - superscript_refs     # Citation superscripts
+
+  # Camelot parameters optimized for LaTeX tables
+  camelot:
+    flavor: lattice
+    line_scale: 15
+    process_background: true
+    copy_text: ["v"]
+
+# Summarization prompt for scientific papers
+summarization_prompt: |
+  Analyze this section of a scientific paper from arXiv.
+  Focus on:
+  - Key methodology and algorithms
+  - Main results and findings
+  - Technical contributions
+  - Mathematical formulations (preserve notation)
+
+  Keep summaries concise but technically accurate.
+  Preserve variable names, equation numbers, and theorem references.

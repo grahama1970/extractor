@@ -1,0 +1,58 @@
+{
+  "status": "ok",
+  "selected_backbone": "gradient_boosting",
+  "selected_metrics": {
+    "macro_f1": 0.8631313242078529,
+    "accuracy": 0.9973614775725593
+  },
+  "model_path": "/home/graham/workspace/experiments/extractor/models/table-strategy-classifier/model.joblib",
+  "source": {
+    "mode": "jsonl",
+    "labels_jsonl": "/home/graham/.pi/assistant/training_data/table-strategy-selector/labels.jsonl"
+  },
+  "results": [
+    {
+      "backbone": "gradient_boosting",
+      "status": "ok",
+      "accuracy": 0.9973614775725593,
+      "macro_f1": 0.8631313242078529,
+      "train_samples": 6435,
+      "val_samples": 1137,
+      "num_classes": 10,
+      "feature_count": 21
+    },
+    {
+      "backbone": "random_forest",
+      "status": "ok",
+      "accuracy": 0.9964819700967458,
+      "macro_f1": 0.7881818768966957,
+      "train_samples": 6435,
+      "val_samples": 1137,
+      "num_classes": 10,
+      "feature_count": 21
+    },
+    {
+      "backbone": "logistic_regression",
+      "status": "ok",
+      "accuracy": 0.9894459102902374,
+      "macro_f1": 0.6640763013933229,
+      "train_samples": 6435,
+      "val_samples": 1137,
+      "num_classes": 10,
+      "feature_count": 21
+    }
+  ],
+  "taxonomy": {
+    "status": "ok",
+    "result": {
+      "bridge_tags": [],
+      "collection_tags": {},
+      "confidence": 0.3,
+      "method": "keywords",
+      "worth_remembering": false
+    }
+  },
+  "memory_store": {
+    "status": "skipped"
+  }
+}

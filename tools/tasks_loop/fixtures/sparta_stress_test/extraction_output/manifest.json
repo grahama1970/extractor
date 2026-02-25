@@ -1,0 +1,51 @@
+{
+  "input_pdf": "tools/tasks_loop/fixtures/sparta_stress_test/extraction_output",
+  "outputs": {
+    "01": "tools/tasks_loop/fixtures/sparta_stress_test/extraction_output/01_annotation_processor/json_output/01_annotations.json",
+    "02": "tools/tasks_loop/fixtures/sparta_stress_test/extraction_output/02_marker_extractor/json_output/02_marker_blocks.json",
+    "03": "tools/tasks_loop/fixtures/sparta_stress_test/extraction_output/03_suspicious_headers/json_output/03_verified_blocks.json",
+    "04": "tools/tasks_loop/fixtures/sparta_stress_test/extraction_output/04_section_builder/json_output/04_sections.json",
+    "05": "tools/tasks_loop/fixtures/sparta_stress_test/extraction_output/05_table_extractor/json_output/05_tables.json",
+    "05b": "tools/tasks_loop/fixtures/sparta_stress_test/extraction_output/05b_table_describer/json_output/05b_tables.json",
+    "05c": "tools/tasks_loop/fixtures/sparta_stress_test/extraction_output/05c_table_merger/json_output/05c_merged_tables.json",
+    "06": "tools/tasks_loop/fixtures/sparta_stress_test/extraction_output/06_figure_extractor/json_output/06_figures.json",
+    "06b": "tools/tasks_loop/fixtures/sparta_stress_test/extraction_output/06_figure_extractor/json_output/06_figures.json"
+  },
+  "counts": {
+    "blocks02": 41,
+    "verified03": 41,
+    "sections04": 3,
+    "tables05": 2,
+    "figures06": 0
+  },
+  "flags": {
+    "summary_only": false,
+    "skip_fig_descriptions": false,
+    "stop_on_fail": true,
+    "stage_timeout": 600
+  },
+  "served_model": {
+    "text": "moonshotai/Kimi-K2-Instruct-0905",
+    "vlm": "Qwen/Qwen3-VL-235B-A22B-Instruct"
+  },
+  "timings_ms": {
+    "01_annotation_processor": 7,
+    "02_marker_extractor": 7319,
+    "03_suspicious_headers": 44,
+    "04_section_builder": 368,
+    "04a_layout_audit": 1,
+    "05_table_extractor": 4722,
+    "05b_table_describer": 326670,
+    "05c_table_merger": 3,
+    "06_figure_extractor": 10,
+    "06b_figure_describer": 1358,
+    "07_assemble_corpus": 122,
+    "07b_text_cleaner": 63,
+    "08_extract_requirements": 4166,
+    "08b_lean4_theorem_prover": 36,
+    "09_section_summarizer": 60,
+    "10_markdown_exporter": 139,
+    "10_arangodb_exporter": 33,
+    "14_report_generator": 96
+  }
+}

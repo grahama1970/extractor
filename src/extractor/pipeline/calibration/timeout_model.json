@@ -1,0 +1,17 @@
+{
+  "base_timeout_s": 0.6298084034247893,
+  "sec_per_page": 1.7351440081445202,
+  "sec_per_table": 3.263306963199532,
+  "sec_per_figure": 0.0,
+  "sec_per_section": 0.27590744583664073,
+  "formula_multiplier": 0.980569939529239,
+  "requirements_multiplier": 1.0665319825666821,
+  "domain_multipliers": {
+    "engineering": 0.991666967297746,
+    "general": 0.9473412412014267,
+    "scientific": 1.060991791500827
+  },
+  "trained_on_samples": 264,
+  "training_mae_s": 38.01265374375611,
+  "training_r2": 0.9325263840214593
+}

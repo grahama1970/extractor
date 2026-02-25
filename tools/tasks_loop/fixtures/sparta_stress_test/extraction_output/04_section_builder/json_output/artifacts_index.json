@@ -1,0 +1,14 @@
+{
+  "images": [
+    "04_section_builder/visual_output/section_section_0.png",
+    "04_section_builder/visual_output/section_section_4.png",
+    "04_section_builder/visual_output/section_section_1.png",
+    "04_section_builder/visual_output/section_section_3.png",
+    "04_section_builder/visual_output/section_section_2.png"
+  ],
+  "json": [
+    "04_section_builder/json_output/04_sections.json",
+    "04_section_builder/json_output/artifacts_index.json"
+  ],
+  "text": []
+}

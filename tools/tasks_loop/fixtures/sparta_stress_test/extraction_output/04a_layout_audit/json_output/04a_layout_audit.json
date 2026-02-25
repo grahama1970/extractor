@@ -1,0 +1,41 @@
+{
+  "step": "04a_layout_audit",
+  "ok": true,
+  "errors": 0,
+  "results_root": "tools/tasks_loop/fixtures/sparta_stress_test/extraction_output",
+  "sections_checked": 3,
+  "checks": [
+    {
+      "section_title": "1. Introduction",
+      "ok": true,
+      "section_index": 0,
+      "block_count": 9
+    },
+    {
+      "section_title": "SECTION 5: APT ACTIVITY\nR5\nVAL_5",
+      "ok": true,
+      "section_index": 1,
+      "block_count": 15
+    },
+    {
+      "section_title": "2. Requirements",
+      "ok": true,
+      "section_index": 2,
+      "block_count": 11
+    }
+  ],
+  "visuals": [
+    {
+      "section_id": "section_0",
+      "visual_path": "04a_layout_audit/visual_output/section_0.png"
+    },
+    {
+      "section_id": "section_1",
+      "visual_path": "04a_layout_audit/visual_output/section_1.png"
+    },
+    {
+      "section_id": "section_2",
+      "visual_path": "04a_layout_audit/visual_output/section_2.png"
+    }
+  ]
+}

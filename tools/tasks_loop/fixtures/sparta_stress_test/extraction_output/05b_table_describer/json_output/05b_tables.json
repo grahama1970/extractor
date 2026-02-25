@@ -1,0 +1,262 @@
+{
+  "timestamp": "2026-01-23T10:50:56.212351",
+  "source_pdf": "tools/tasks_loop/fixtures/sparta_stress_test/extraction_output/01_annotation_processor/sparta_stress_test_clean.pdf",
+  "status": "Completed",
+  "table_count": 2,
+  "tables": [
+    {
+      "page_number": 1,
+      "page_index": 0,
+      "table_index": 2,
+      "bbox": [
+        50.0,
+        185.70000000000005,
+        435.59,
+        456.07
+      ],
+      "extraction_method": "camelot",
+      "strategy": "stream_default",
+      "fragmentation_score": 0,
+      "pandas_df": [
+        {
+          "0": "Table 1: System Data (Configured)",
+          "1": "",
+          "2": ""
+        },
+        {
+          "0": "ID",
+          "1": "Value",
+          "2": "Description"
+        },
+        {
+          "0": "R0",
+          "1": "VAL_0",
+          "2": "Data row 0"
+        },
+        {
+          "0": "R1",
+          "1": "VAL_1",
+          "2": "Data row 1"
+        },
+        {
+          "0": "R2",
+          "1": "VAL_2",
+          "2": "Data row 2"
+        },
+        {
+          "0": "R3",
+          "1": "VAL_3",
+          "2": "Data row 3"
+        },
+        {
+          "0": "R4",
+          "1": "VAL_4",
+          "2": "Data row 4"
+        },
+        {
+          "0": "R5",
+          "1": "VAL_5",
+          "2": "SECTION 5: APT ACTIVITY"
+        },
+        {
+          "0": "R6",
+          "1": "VAL_6",
+          "2": "Data row 6"
+        },
+        {
+          "0": "R7",
+          "1": "VAL_7",
+          "2": "Data row 7"
+        },
+        {
+          "0": "R8",
+          "1": "VAL_8",
+          "2": "Data row 8"
+        },
+        {
+          "0": "R9",
+          "1": "VAL_9",
+          "2": "Data row 9"
+        }
+      ],
+      "pandas_metrics": {
+        "shape": [
+          12,
+          3
+        ],
+        "columns": [
+          "0",
+          "1",
+          "2"
+        ],
+        "dtypes": {
+          "0": "object",
+          "1": "object",
+          "2": "object"
+        },
+        "null_counts": {
+          "0": 0,
+          "1": 0,
+          "2": 0
+        },
+        "total_cells": 36,
+        "non_empty_cells": 34,
+        "data_density": 0.9444444444444444
+      },
+      "camelot_metrics": {
+        "accuracy": 98.22748905387391,
+        "whitespace": 5.555555555555555
+      },
+      "score": 34.0,
+      "quality_fallback": true,
+      "strategy_history": [
+        {
+          "strategy": "stream_default",
+          "fragmentation": 0,
+          "score": 34.0
+        }
+      ],
+      "table_image_path": "05_table_extractor/visual_output/page_1_table_2.png",
+      "section_id": "section_0"
+    },
+    {
+      "page_number": 2,
+      "page_index": 1,
+      "table_index": 1,
+      "bbox": [
+        50.0,
+        26.289999999999964,
+        363.91,
+        216.07000000000005
+      ],
+      "extraction_method": "camelot",
+      "strategy": "stream_default",
+      "fragmentation_score": 0,
+      "pandas_df": [
+        {
+          "0": "Table 1 (Continued)",
+          "1": "",
+          "2": ""
+        },
+        {
+          "0": "ID",
+          "1": "Value",
+          "2": "Description"
+        },
+        {
+          "0": "R10",
+          "1": "VAL_10",
+          "2": "Data row 10"
+        },
+        {
+          "0": "R11",
+          "1": "VAL_11",
+          "2": "Data row 11"
+        },
+        {
+          "0": "R12",
+          "1": "VAL_12",
+          "2": "Data row 12"
+        },
+        {
+          "0": "R13",
+          "1": "VAL_13",
+          "2": "Data row 13"
+        },
+        {
+          "0": "R14",
+          "1": "VAL_14",
+          "2": "Data row 14"
+        },
+        {
+          "0": "R15",
+          "1": "VAL_15",
+          "2": "Data row 15"
+        }
+      ],
+      "pandas_metrics": {
+        "shape": [
+          8,
+          3
+        ],
+        "columns": [
+          "0",
+          "1",
+          "2"
+        ],
+        "dtypes": {
+          "0": "object",
+          "1": "object",
+          "2": "object"
+        },
+        "null_counts": {
+          "0": 0,
+          "1": 0,
+          "2": 0
+        },
+        "total_cells": 24,
+        "non_empty_cells": 22,
+        "data_density": 0.9166666666666666
+      },
+      "camelot_metrics": {
+        "accuracy": 98.7552336765871,
+        "whitespace": 8.333333333333332
+      },
+      "score": 22.0,
+      "quality_fallback": true,
+      "strategy_history": [
+        {
+          "strategy": "stream_default",
+          "fragmentation": 0,
+          "score": 22.0
+        }
+      ],
+      "table_image_path": "05_table_extractor/visual_output/page_2_table_1.png",
+      "section_id": "section_1"
+    }
+  ],
+  "run_id": "4c51563c870d4c92925571f9fe1f87c5",
+  "metrics": {
+    "quality": {
+      "pages_processed": 3,
+      "pages_with_tables": 3,
+      "pages_with_fallback": 3,
+      "tables_with_fallback": 0
+    },
+    "strategies": {
+      "lattice_default": {
+        "attempts": 3,
+        "successes": 0,
+        "failures": 3,
+        "total_duration_ms": 1406
+      },
+      "lattice_strong": {
+        "attempts": 3,
+        "successes": 0,
+        "failures": 3,
+        "total_duration_ms": 1251
+      },
+      "lattice_sensitive": {
+        "attempts": 3,
+        "successes": 0,
+        "failures": 3,
+        "total_duration_ms": 1902
+      },
+      "stream_default": {
+        "attempts": 3,
+        "successes": 3,
+        "failures": 0,
+        "total_duration_ms": 52
+      }
+    }
+  },
+  "timings": {
+    "duration": 4716
+  },
+  "quality_warnings": [
+    "Table 2: generic integer headers",
+    "Table 1: generic integer headers"
+  ],
+  "demoted_text_blocks": [],
+  "enriched_timestamp": 1769183782.8886049
+}
