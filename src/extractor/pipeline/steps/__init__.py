@@ -19,6 +19,7 @@ from . import (
     s09_section_summarizer,
     s10_markdown_exporter,
     s11_json_exporter,
+    s12_framework_mapper,
     s14_report_generator,
 )
 
@@ -38,5 +39,6 @@ __all__ = [
     "s09_section_summarizer",
     "s10_markdown_exporter",
     "s11_json_exporter",
+    "s12_framework_mapper",
     "s14_report_generator",
 ]

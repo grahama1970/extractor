@@ -231,8 +231,8 @@ def _merge_with_classifier(
     if tmp_dir is not None:
         try:
             shutil.rmtree(tmp_dir, ignore_errors=True)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Failed to clean up temp dir {tmp_dir}: {e}")
 
     return merged
 
@@ -456,8 +456,8 @@ def run(
                 src = ctx.get("source_pdf") or ctx.get("pdf_path")
                 if src and Path(src).exists():
                     pdf_path = Path(src)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Failed to read pipeline context for PDF path: {e}")
 
     # Process
     try:

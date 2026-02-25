@@ -27,6 +27,8 @@ from extractor.pipeline.utils.tables.metrics import (
     fragmentation_score_with_domain,
     should_retry_fragmentation,
     has_fragmentation_improvement,
+    has_column_collapse,
+    has_header_collapse,
     should_replace_table,
 )
 
@@ -70,6 +72,8 @@ __all__ = [
     "fragmentation_score_with_domain",
     "should_retry_fragmentation",
     "has_fragmentation_improvement",
+    "has_column_collapse",
+    "has_header_collapse",
     "should_replace_table",
     # Heuristics
     "is_header_row_table",

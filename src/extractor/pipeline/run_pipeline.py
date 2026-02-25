@@ -1532,6 +1532,14 @@ def _run_common_stages(
         s11_json_exporter as s11_export,
     )
 
+    # Import s12_framework_mapper for control extraction (after s10 produces flattened data)
+    s12 = None
+    try:
+        from extractor.pipeline.steps import s12_framework_mapper as _s12_fw
+        s12 = _s12_fw
+    except ImportError:
+        logger.info("Stage 12 [Framework Mapper] not available: s12_framework_mapper module not found.")
+
     # Import s10_arangodb_exporter for JSON output (QRA/downstream compatibility)
     s10 = None
     try:
@@ -1753,6 +1761,33 @@ def _run_common_stages(
                     "latency_ms": stage_latencies.get("10_arangodb_exporter"),
                 },
             )
+
+    # 12 (Framework Mapper) - extract control references and create chunk→control edges
+    if s12 is not None:
+        json_path_10 = out / "10_arangodb_exporter" / "json_output" / "10_flattened_data.json"
+        if json_path_10.exists():
+            stage_12_out = out / "12_framework_mapper"
+            _step(
+                "12_framework_mapper",
+                s12.run,
+                out,  # pipeline_dir
+                stage_12_out,  # output_dir
+                preset_config,
+                stop_on_fail=False,  # Don't fail pipeline if control mapping fails
+                timeout_sec=args.stage_timeout,
+                log_dir_base=out,
+                on_timing=lambda n, dt: stage_latencies.update({n: dt}),
+            )
+            map_path = stage_12_out / "json_output" / "12_framework_map.json"
+            if map_path.exists():
+                manifest.record_stage(
+                    "12_framework_mapper",
+                    "Completed",
+                    {
+                        "json": str(map_path.relative_to(out)),
+                        "latency_ms": stage_latencies.get("12_framework_mapper"),
+                    },
+                )
 
     # 14 (Report Generator) - always run at end
     stage_14_out = out / "14_report_generator"

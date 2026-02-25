@@ -111,8 +111,8 @@ try:
     if ext_rules.exists():
         with open(ext_rules, "r") as f:
             RELEVANT_RULES = json.load(f)
-except Exception:
-    pass
+except Exception as e:
+    logger.debug(f"Failed to load external relevant_rules.json, using defaults: {e}")
 
 
 def _compute_relevant_to_for_annotation(a: Dict[str, Any]) -> List[str]:
@@ -130,8 +130,8 @@ def _compute_relevant_to_for_annotation(a: Dict[str, Any]) -> List[str]:
             inf = interp.get("inferred_object") or {}
             if isinstance(inf, dict):
                 inferred_type = str(inf.get("type") or "").lower()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Failed to parse interpretation fields: {e}")
 
         texts = [note, echo] + labels
         # 1) Keywords
@@ -349,8 +349,8 @@ def _gridline_features(image_path: str) -> Dict[str, Optional[float]]:
         feats["gridlines_h_density"] = h_density
         feats["gridlines_v_density"] = v_density
         feats["gridlines_detected"] = bool(h_density > 0.002 and v_density > 0.002)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Gridline feature extraction failed for {image_path}: {e}")
     return feats
 
 
@@ -625,8 +625,8 @@ async def process_pdf_pipeline(config: Config):
         idx, meta = build_ann_index(data)
         if idx:
             save_ann_index(idx, meta, stage_output_dir / "annots_faiss", data)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Optional FAISS index build failed: {e}")
 
     (json_output_dir / "01_annotations.json").write_text(json.dumps(payload, indent=2))
 

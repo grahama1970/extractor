@@ -77,6 +77,9 @@ dependencies = [
  "faiss-cpu>=1.12.0",
  "nltk>=3.9.2",
  "pymupdf-layout>=1.27.1",
+ "joblib>=1.3.0",
+ "scipy>=1.11.0",
+ "httpx>=0.28.0",
 ]
 [[project.authors]]
 name = "Graham Anderson"

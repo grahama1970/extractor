@@ -616,8 +616,8 @@ def extract_section_visual_enhanced(
                     f"Composite capped to {len(page_range)} pages",
                     {"pages_included": page_range, "extra_pages": extra_pages},
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Failed to append composite_capped diagnostic: {e}")
         for page_num in page_range:
             if page_num >= len(pdf_doc):
                 continue
@@ -728,8 +728,8 @@ def extract_section_visual_enhanced(
                 section.setdefault("visual_page_paths", extra_paths)
                 section.setdefault("metadata", {})["visual_page_paths"] = extra_paths
                 section["metadata"]["visual_capped"] = True
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Failed to save per-page visual images: {e}")
         with BytesIO() as buf:
             composite.save(buf, format="PNG")
             try:
@@ -738,8 +738,8 @@ def extract_section_visual_enhanced(
                 )
                 section["metadata"]["composite_width"] = int(composite.width)
                 section["metadata"]["composite_height"] = int(composite.height)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Failed to record composite metadata: {e}")
             b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
         pdf_doc.close()
         return b64
@@ -750,8 +750,8 @@ def extract_section_visual_enhanced(
             _append_diag(
                 section, "error", "visual_extract_failed", str(e), {"section_id": section.get("id")}
             )
-        except Exception:
-            pass
+        except Exception as e2:
+            logger.debug(f"Failed to append visual_extract_failed diagnostic: {e2}")
         return None
 
 def summarize_suspicious_from_verified(blocks: list[dict], sections: list[dict]) -> dict:
@@ -801,8 +801,8 @@ def _append_diag(section: dict, severity: str, code: str, message: str, context:
         md = section.setdefault("metadata", {})
         diags = md.setdefault("diagnostics", [])
         diags.append(make_event("04_section_builder", severity, code, message, context))
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Failed to append diagnostic event '{code}': {e}")
 
 
 def build_sections_from_blocks(
@@ -1656,8 +1656,8 @@ async def process_sections_comprehensive(
             try:
                 import fitz
                 fallback_doc = fitz.open(str(pdf_path))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Failed to open PDF for visual rendering: {e}")
 
             for section in sections:
                 visual_path = image_output_dir / f"section_{section['id']}.png"
@@ -1683,8 +1683,8 @@ async def process_sections_comprehensive(
                         try: section["visual_path"] = str(visual_path.relative_to(results_root))
                         except ValueError: section["visual_path"] = str(visual_path)
                         visual_count += 1
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"Failed to render fallback visual for section {section.get('id')}: {e}")
 
             if fallback_doc:
                 fallback_doc.close()
@@ -2037,8 +2037,8 @@ def _is_glossary_section(title: str, content: str = "") -> bool:
                 # Content verification failed — keyword match alone is unreliable
                 # but still tag if no content to check
                 return False
-            except ImportError:
-                pass
+            except ImportError as e:
+                logger.debug(f"Glossary content verifier not available: {e}")
         return True  # No content yet at detection time, trust keyword
 
     # Tier 1: ML classifier (if available)
@@ -2055,8 +2055,8 @@ def _is_glossary_section(title: str, content: str = "") -> bool:
                     return True
                 if not content:
                     return score > 0.8  # Higher threshold without content verification
-    except ImportError:
-        pass
+    except ImportError as e:
+        logger.debug(f"Glossary classifier not available: {e}")
 
     return False
 
@@ -2187,8 +2187,8 @@ def run(
             candidate = pdf_dir / f"{stem}_clean.pdf"
             if candidate.exists():
                 pdf_path = candidate
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Failed to resolve clean PDF from input metadata: {e}")
 
     if not pdf_path:
         try:

@@ -45,7 +45,7 @@ from extractor.pipeline.utils.profile.preset import match_preset
 try:
     import pymupdf.layout  # GNN-based ML layout — must import BEFORE pymupdf4llm/fitz
 except ImportError:
-    pass
+    logger.debug("pymupdf.layout not available, GNN-based ML layout disabled")
 
 try:
     import fitz
@@ -155,15 +155,15 @@ def analyze_with_pymupdf4llm(pdf_path: Path) -> Dict[str, Any]:
                 try:
                     if len(_column_boxes(page)) > 1:
                         multi_col_pages += 1
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Column detection failed on page {page_idx}: {e}")
 
             # Image detection
             try:
                 if page.get_images(full=False):
                     image_pages += 1
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Image detection failed on page {page_idx}: {e}")
 
             # Text extraction
             page_text = page.get_text()
@@ -186,8 +186,8 @@ def analyze_with_pymupdf4llm(pdf_path: Path) -> Dict[str, Any]:
                     img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
                     img = img.resize((224, 224))
                     classifier_images.append(img)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Classifier image capture failed on page {page_idx}: {e}")
 
         # Tally drawing results
         for _, region_count in drawing_density:
@@ -221,8 +221,8 @@ def analyze_with_pymupdf4llm(pdf_path: Path) -> Dict[str, Any]:
                     table_pages_direct += 1
                     total_table_count += n_tables
                     max_tables_per_page = max(max_tables_per_page, n_tables)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"find_tables() failed on page {page_idx}: {e}")
 
         # TOC extraction (from open doc)
         toc_info = extract_toc_from_doc(doc)
@@ -303,8 +303,8 @@ def analyze_with_pymupdf4llm(pdf_path: Path) -> Dict[str, Any]:
         logger.error(f"pymupdf4llm analysis failed: {e}")
         try:
             doc.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Failed to close PDF document: {e}")
         return analyze_fallback(pdf_path)
 
 
@@ -379,8 +379,8 @@ def _scan_page_drawings(
 
         candidate_pages.add(page_idx)
         density.append((page_idx, region_count))
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Drawing scan failed on page {page_idx}: {e}")
 
 
 def _collect_font_data(
@@ -412,8 +412,8 @@ def _collect_font_data(
                     "flags": first_span.get("flags", 0),
                 })
         page_lines.append(lines_on_page)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Font data collection failed: {e}")
 
 
 def analyze_fallback(pdf_path: Path) -> Dict[str, Any]:
@@ -678,8 +678,8 @@ def run(pdf_path: Path, output_dir: Path, verbose_preset: bool = False) -> Path:
     if context_file.exists():
         try:
             context = json.loads(context_file.read_text())
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Failed to read existing pipeline_context.json: {e}")
     elements = result.get("elements", {})
     toc_info = result.get("toc", {})
     context.update({

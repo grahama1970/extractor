@@ -424,8 +424,8 @@ def extract_blocks(
                 }
                 proc = psutil.Process()
                 diag_info["process_memory_mb"] = round(proc.memory_info().rss / (1024**2), 1)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Failed to collect memory diagnostics: {e}")
 
         # Log comprehensive error info
         logger.error(f"Marker document building failed for {pdf_path.name}")
@@ -496,16 +496,16 @@ def extract_blocks(
                             font_size = None
                             try:
                                 font_size = float(getattr(s0, "font_size", 0))
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                logger.debug(f"Failed to parse font_size: {e}")
 
                             first_span_font = {"name": font_name, "size": font_size}
                             formats = getattr(s0, "formats", []) or []
                             first_span_font["bold"] = bool("bold" in formats)
                             first_span_font["italic"] = bool("italic" in formats)
                             block_dict["first_span_font"] = first_span_font
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"Failed to extract font info for block: {e}")
 
                     # BBox
                     if hasattr(block, "polygon") and getattr(block, "polygon"):
@@ -513,8 +513,8 @@ def extract_blocks(
                             bx = getattr(block.polygon, "bbox", None)
                             if bx:
                                 block_dict["bbox"] = [float(v) for v in bx]
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug(f"Failed to extract bbox from polygon: {e}")
 
                     # Metrics
                     try:
@@ -524,16 +524,16 @@ def extract_blocks(
                             block_dict["quality_score"] = float(block.calculate_quality_score())
                         if getattr(block, "requires_review", False):
                             block_dict["requires_review"] = True
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"Failed to extract block metrics: {e}")
 
                     # Suspicion
                     try:
                         block_dict["is_suspicious"] = bool(getattr(block, "is_suspicious", False))
                         if getattr(block, "suspicious_reasons", None):
                             block_dict["suspicious_reasons"] = block.suspicious_reasons
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"Failed to extract suspicion flags: {e}")
 
                     # Header Flag
                     if block_dict.get("block_type") == "SectionHeader":
@@ -555,8 +555,8 @@ def extract_blocks(
                             block_dict["block_id"] = int(block.block_id)
                         if hasattr(block, "id"):
                             block_dict["id"] = str(block.id)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"Failed to extract block_id/id: {e}")
 
                     # Skip empty Text blocks - they provide no useful content
                     if block_dict.get("block_type") == "Text" and not block_dict.get("text", "").strip():
@@ -843,8 +843,8 @@ def run(
                 page_count = len(tmp_doc)
                 # Extract PDF outline/bookmarks (TOC)
                 toc_entries = _extract_toc(tmp_doc)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Failed to open PDF for page count/TOC: {e}")
     else:
         # Visuals were rendered, but we still need TOC
         try:
@@ -852,8 +852,8 @@ def run(
 
             with fitz.open(str(pdf_path)) as tmp_doc:
                 toc_entries = _extract_toc(tmp_doc)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Failed to extract TOC from PDF: {e}")
 
     if toc_entries:
         logger.info(f"Extracted {len(toc_entries)} TOC entries from PDF bookmarks")

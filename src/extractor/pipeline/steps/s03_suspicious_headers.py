@@ -101,8 +101,8 @@ def _log_header_verdict(
             record["confidence"] = confidence
         with open(_TRAINING_DIR / "s03_header_verdicts.jsonl", "a") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Failed to log header verdict to training data: {e}")
 
 
 def _classify_header(
@@ -459,8 +459,8 @@ class VerificationTask:
                     "h": getattr(pix, "height", None),
                 },
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Failed to render context image for block {self.block_idx}: {e}")
         return b64
 
 
@@ -663,8 +663,8 @@ async def process_pdf_pipeline(config: Config):
                     _log_header_verdict(raw_text, _font_name, _font_size, _is_bold,
                                         "accept", "heuristic", "strict_numbered_title_period")
                     continue
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Heuristic header accept check failed: {e}")
 
             # Auto-REJECT heuristics
             is_numbered = bool(_re.match(r"^\s*\d+(?:[\.-]\d+){1,}\s+\S", raw_text))
@@ -752,8 +752,8 @@ async def process_pdf_pipeline(config: Config):
             try:
                 if not block.get("context_image_path"):
                     _ = task.render_context_image_b64()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Failed to render debug visual for block {task.block_idx}: {e}")
 
         is_header = res.get("is_header", False)
         block["suspicious_header"] = False
@@ -919,8 +919,8 @@ def run(
             candidates = sorted(pdf_dir.glob("*_clean.pdf"))
             if candidates:
                 clean_pdf_path = candidates[0]
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Failed to find clean PDF in {pdf_dir}: {e}")
 
     if clean_pdf_path is None:
         # Final fallback - assume user passed input_json which is valid, try to find PDF
@@ -980,8 +980,8 @@ def run(
                         if hdr.get("spans"):
                             block["header_char_spans"] = hdr["spans"]
                             block.setdefault("header_title", hdr.get("title"))
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Strict header recheck failed for block: {e}")
 
                 if is_header and has_bullet_prefix(raw_text):
                     is_header = False

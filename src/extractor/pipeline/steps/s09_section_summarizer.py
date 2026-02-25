@@ -430,8 +430,8 @@ def _emit_summary_visuals(pipeline_dir: Path, repo: ContentRepository) -> None:
                         cand = pipeline_dir / cand
                     if cand.exists():
                         section_visuals[str(sid)] = cand
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Failed to load section visuals from S04 output: {e}")
 
     doc = None
     if source_pdf:

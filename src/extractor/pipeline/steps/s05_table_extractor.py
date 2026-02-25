@@ -66,6 +66,8 @@ from extractor.pipeline.utils.tables import (
     fragmentation_score_with_domain,
     should_retry_fragmentation,
     has_fragmentation_improvement,
+    has_column_collapse,
+    has_header_collapse,
     should_replace_table,
     sanitize_cell,
     coalesce_repeated_header_rows,
@@ -246,11 +248,21 @@ def extract_tables_from_page(
         if existing:
             ex_frag = int(existing.get("fragmentation", 0))
             ex_score = float(existing.get("score", 0))
+            ex_collapsed = existing.get("column_collapse", False)
+            ex_hdr_collapsed = existing.get("header_collapse", False)
             if "lattice" in existing.get("strategy", "") and "stream" in st_name:
-                if ex_score > 10 and ex_frag < 100:
+                # Allow stream to replace lattice when lattice has column or header collapse
+                if ex_score > 10 and ex_frag < 100 and not ex_collapsed and not ex_hdr_collapsed:
                     return "skipped", bool(existing.get("quality_fallback"))
 
-            if not should_replace_table(ex_frag, new_frag, ex_score, scr):
+            new_collapsed = has_column_collapse(tbl.df)
+            new_hdr_collapsed = has_header_collapse(tbl.df)
+            # Always replace if existing has column or header collapse and new doesn't
+            if ex_collapsed and not new_collapsed:
+                pass  # fall through to replacement
+            elif ex_hdr_collapsed and not new_hdr_collapsed:
+                pass  # fall through to replacement
+            elif not should_replace_table(ex_frag, new_frag, ex_score, scr):
                 return "skipped", bool(existing.get("quality_fallback"))
 
             existing["history"].append(
@@ -260,6 +272,8 @@ def extract_tables_from_page(
             if st_name != existing.get("strategy") and (
                 has_fragmentation_improvement(ex_frag, new_frag)
                 or should_retry_fragmentation(ex_frag)
+                or ex_collapsed
+                or ex_hdr_collapsed
             ):
                 fallback = True
 
@@ -269,6 +283,8 @@ def extract_tables_from_page(
                     "score": scr,
                     "strategy": st_name,
                     "fragmentation": new_frag,
+                    "column_collapse": new_collapsed,
+                    "header_collapse": new_hdr_collapsed,
                     "quality_fallback": fallback,
                 }
             )
@@ -277,12 +293,16 @@ def extract_tables_from_page(
             best_strategy = st_name
             return "replaced", fallback
 
+        collapsed = has_column_collapse(tbl.df)
+        hdr_collapsed = has_header_collapse(tbl.df)
         fallback = st_name != baseline_name
         page_tables[bbox_k] = {
             "table": tbl,
             "score": scr,
             "strategy": st_name,
             "fragmentation": new_frag,
+            "column_collapse": collapsed,
+            "header_collapse": hdr_collapsed,
             "history": [{"strategy": st_name, "fragmentation": new_frag, "score": scr}],
             "quality_fallback": fallback,
         }
@@ -313,7 +333,11 @@ def extract_tables_from_page(
         has_fragmentation = any(
             should_retry_fragmentation(int(p["fragmentation"] or 0)) for p in page_tables.values()
         ) if page_tables else False
-        needs_more = not page_tables or has_fragmentation
+        has_collapse = any(
+            p.get("column_collapse", False) or p.get("header_collapse", False)
+            for p in page_tables.values()
+        ) if page_tables else False
+        needs_more = not page_tables or has_fragmentation or has_collapse
 
         # Always try at least one stream strategy
         should_try_stream = is_stream and not _tried_stream
@@ -349,7 +373,11 @@ def extract_tables_from_page(
             bq = _quantize_bbox(bbox)
             replaced = False
             for k in list(page_tables.keys()):
-                if iou(bq, k) >= 0.70:
+                # Lower IOU threshold when existing table has header collapse,
+                # since stream captures wider bbox (includes title row area)
+                existing_info = page_tables[k]
+                iou_thresh = 0.35 if existing_info.get("header_collapse") else 0.70
+                if iou(bq, k) >= iou_thresh:
                     _register(sn, t, k, score)
                     replaced = True
                     break
@@ -360,11 +388,13 @@ def extract_tables_from_page(
 
         strategy_durations[sn]["found"][page_num] = found
 
-        # Early exit after baseline only if no fragmentation AND we've tried stream.
+        # Early exit after baseline only if no fragmentation/collapse AND we've tried stream.
         if (
             strat["name"] == baseline_name
             and found > 0
             and all(p.get("fragmentation", 0) == 0 for p in page_tables.values())
+            and all(not p.get("column_collapse", False) for p in page_tables.values())
+            and all(not p.get("header_collapse", False) for p in page_tables.values())
             and _tried_stream
         ):
             break

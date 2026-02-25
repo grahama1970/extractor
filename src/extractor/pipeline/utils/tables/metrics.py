@@ -185,6 +185,66 @@ def generate_pandas_metrics(df: pd.DataFrame) -> Dict[str, Any]:
     return metrics
 
 
+def has_column_collapse(df: pd.DataFrame, threshold: float = 0.70) -> bool:
+    """Detect if a lattice extraction collapsed all data into column 0.
+
+    When Camelot's lattice mode fails to detect internal grid lines, all text
+    ends up in the first column while columns 1..N are NaN/empty.  This is a
+    strong signal that stream extraction should be tried instead.
+
+    Args:
+        df: Extracted table DataFrame.
+        threshold: Fraction of non-empty cells in column 0 above which
+                   collapse is flagged. Default 0.70.
+
+    Returns:
+        True if column collapse is detected.
+    """
+    if df.empty or df.shape[1] < 3:
+        return False  # Need at least 3 columns to diagnose collapse
+
+    non_empty = df.astype(str).apply(
+        lambda s: s.str.strip().ne("") & s.str.lower().ne("nan")
+    )
+    total_non_empty = int(non_empty.sum().sum())
+    if total_non_empty == 0:
+        return False
+
+    col0_non_empty = int(non_empty.iloc[:, 0].sum())
+    ratio = col0_non_empty / total_non_empty
+    return ratio >= threshold
+
+
+def has_header_collapse(df: pd.DataFrame) -> bool:
+    """Detect if lattice extraction collapsed header cells into one cell with newlines.
+
+    When Camelot's lattice mode fails to detect thin gridlines in the header row,
+    all header values end up in a single cell separated by ``\\n`` while data rows
+    are extracted correctly into separate columns.
+
+    Returns:
+        True if header collapse is detected.
+    """
+    if df.empty or df.shape[0] < 2 or df.shape[1] < 3:
+        return False
+
+    # Check first row for any cell containing \n (collapsed headers)
+    row0 = df.iloc[0]
+    has_newline_cell = any("\n" in str(v) for v in row0)
+    if not has_newline_cell:
+        return False
+
+    # Confirm data rows do NOT have the same pattern (not just multi-line cells)
+    data_newline_count = 0
+    check_rows = min(df.shape[0], 5)
+    for i in range(1, check_rows):
+        if any("\n" in str(v) for v in df.iloc[i]):
+            data_newline_count += 1
+
+    # Header collapse: header has \n but most data rows don't
+    return data_newline_count < (check_rows - 1) * 0.5
+
+
 def score_table(df: pd.DataFrame) -> float:
     """Score a table based on non-empty cell count."""
     if df.empty:

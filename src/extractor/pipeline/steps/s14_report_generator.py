@@ -262,8 +262,8 @@ def _safe_json(data: Any) -> str:
                     return float(o)
                 if isinstance(o, (np.ndarray,)):
                     return o.tolist()
-            except ImportError:
-                pass
+            except ImportError as e:
+                logger.debug(f"numpy not available for JSON serialization: {e}")
             return str(o)
 
     return json.dumps(data, cls=CustomEncoder, indent=2)

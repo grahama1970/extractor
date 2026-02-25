@@ -61,8 +61,8 @@ def _log_requirement_verdict(
             record["type"] = req_type
         with open(_TRAINING_DIR / "s08_requirement_verdicts.jsonl", "a") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Failed to log requirement verdict to training data: {e}")
 
 
 def _classify_requirement_sentence(text: str) -> dict | None:

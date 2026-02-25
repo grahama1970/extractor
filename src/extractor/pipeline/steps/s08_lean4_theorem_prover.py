@@ -105,8 +105,8 @@ async def prove_requirements(db_path: Path, output_dir: Path):
             "Bridge base: %s",
             os.getenv("CERTAINLY_BRIDGE_BASE") or os.getenv("LEAN4_BRIDGE_BASE") or "(unset)",
         )
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Failed to log Lean4 diagnostics: {e}")
 
     # 2. Stream Results
     from scillm.extras.providers import certainly_prove_iter
