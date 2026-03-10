@@ -11,7 +11,10 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict
 
-import fitz  # PyMuPDF
+try:
+    import fitz  # PyMuPDF (optional — regression testing only)
+except ImportError:
+    fitz = None  # type: ignore[assignment]
 from loguru import logger
 
 from extractor.pipeline.utils.reliability import log_stage_error
@@ -39,6 +42,7 @@ from extractor.pipeline.utils.visuals.drawing import (
 
 
 def _append_timing(logs_dir: Path, record: dict[str, Any]) -> None:
+    """Append timing record to JSONL log file."""
     logs_dir.mkdir(parents=True, exist_ok=True)
     path = logs_dir / "timings.jsonl"
     with path.open("a", encoding="utf-8") as fp:
@@ -46,6 +50,7 @@ def _append_timing(logs_dir: Path, record: dict[str, Any]) -> None:
 
 
 def _summarize_timings(logs_dir: Path) -> None:
+    """Summarize timing data from the timings.jsonl log file."""
     timings_path = logs_dir / "timings.jsonl"
     if not timings_path.exists():
         return
@@ -72,6 +77,7 @@ def _summarize_timings(logs_dir: Path) -> None:
 
 
 def _write_artifacts_index(stage_dir: Path) -> None:
+    """Write a JSON index of artifact file paths in the specified directory."""
     artifacts = []
     for path in stage_dir.rglob("*"):
         if path.is_file():
@@ -83,6 +89,7 @@ def _write_artifacts_index(stage_dir: Path) -> None:
 
 
 def sanity() -> int:
+    """Return 0 for sanity."""
     return 0
 
 
@@ -313,6 +320,7 @@ def run(
     pages_touched: set[int] = set()
 
     def _normalized_page_index(idx: Any) -> int | None:
+        """Normalize a page index, adjusting out-of-bounds values to None."""
         _pg = _coerce_page(idx)
         if _pg is None:
             return None
@@ -332,6 +340,7 @@ def run(
         source_ids: list[str] | None = None,
         label_text: str | None = None,
     ) -> None:
+        """Register an overlay on a page with its attributes."""
         nonlocal overlay_id
         _pg = _normalized_page_index(page_idx)
         if _pg is None:
@@ -734,9 +743,11 @@ def run(
                         by_page.setdefault(p, []).append(o)
 
                     def _is_generic(h: str) -> bool:
+                        """Validate if string represents a generic ID format."""
                         return bool(h) and all(tok.isdigit() for tok in h.split("|"))
 
                     def _h_iou(a, b):
+                        """Calculate the Intersection over Union (IoU) of two intervals."""
                         try:
                             ax0, _, ax1, _ = a
                             bx0, _, bx1, _ = b
@@ -1423,6 +1434,7 @@ def run(
     if rewrite_headers:
 
         def _parse_hex_color(h: str | None) -> tuple[float, float, float]:
+            """Parse a hex color string into an RGB tuple."""
             try:
                 if not h:
                     return (0, 0, 0)

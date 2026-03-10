@@ -3,7 +3,10 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict, List, Set
 
-import fitz
+try:
+    import fitz  # PyMuPDF (optional — regression testing only)
+except ImportError:
+    fitz = None  # type: ignore[assignment]
 from loguru import logger
 
 from extractor.pipeline.utils.reliability import log_stage_error
@@ -135,6 +138,7 @@ def draw_vertical_tabs(
         return summary
 
     def _build_per_page(candidates: list[dict[str, Any]]) -> defaultdict[int, list[dict[str, Any]]]:
+        """Build a mapping of page numbers to candidate dictionaries."""
         mapping: defaultdict[int, list[dict[str, Any]]] = defaultdict(list)
         for tab in candidates:
             for pg in tab.get("pages", []):

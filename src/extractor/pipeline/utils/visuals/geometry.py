@@ -8,7 +8,10 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-import fitz
+try:
+    import fitz  # PyMuPDF (optional — regression testing only)
+except ImportError:
+    fitz = None  # type: ignore[assignment]
 
 
 STEP_NAME = "09a_pdf_annotator"

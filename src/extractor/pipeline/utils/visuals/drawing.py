@@ -1,4 +1,7 @@
-import fitz
+try:
+    import fitz  # PyMuPDF (optional — regression testing only)
+except ImportError:
+    fitz = None  # type: ignore[assignment]
 from typing import Optional, List, Tuple
 
 from extractor.pipeline.utils.reliability import log_stage_error
@@ -41,6 +44,7 @@ def draw_gutter_tag(
     color: Tuple[float, float, float] = (0.12, 0.12, 0.12),
     font: float = 9.0,
 ) -> None:
+    """Draw a gutter tag with specified text and styling on a page."""
     if not text or lane is None:
         return
     t = text.strip()
@@ -112,6 +116,7 @@ def draw_t_endcaps(
     y1: float,
     color: Tuple[float, float, float] = (0.25, 0.25, 0.25),
 ) -> None:
+    """Draw T-shaped endcaps for the given lane."""
     if lane is None:
         return
     x = lane.x1 - 10.0
@@ -143,6 +148,7 @@ def draw_section_title_plaque(
     stroke: Tuple[float, float, float] = (0.86, 0.25, 0.2),
     font: float = 11.0,
 ) -> None:
+    """Draw a section title plaque on the specified PDF page."""
     if not text:
         return
     t = text.strip()
@@ -170,6 +176,7 @@ def draw_section_title_plaque(
 
 
 def draw_figure_watermark(page: fitz.Page, rect: fitz.Rect, text: str) -> None:
+    """Draw a watermark with specified text on a PDF page."""
     text = (text or "").strip()
     if not text:
         return
@@ -213,6 +220,7 @@ def draw_table_metrics(
     pandas_acc: Optional[float],
     color: Tuple[float, float, float] = (0.0, 0.0, 0.0),
 ) -> None:
+    """Draw table metrics on a PDF page within a specified rectangle."""
     y = rect.y1 - 6
     x = rect.x0 + 8
     font1 = 9.5
@@ -252,6 +260,7 @@ def draw_table_preview_box(
     lines: List[str],
     color: Tuple[float, float, float] = (0.0, 0.0, 0.0),
 ) -> None:
+    """Draw a preview box for a table on the specified PDF page."""
     if not lines:
         return
     max_lines = min(len(lines), 6)
@@ -279,6 +288,7 @@ def draw_table_preview_box(
 
 
 def draw_figure_caption_box(page: fitz.Page, rect: fitz.Rect, text: str) -> None:
+    """Draw a caption box on a page with formatted text."""
     caption = (text or "").strip()
     if not caption:
         return
@@ -322,6 +332,7 @@ def draw_label(
     color: Tuple[float, float, float],
     font_size: float,
 ) -> None:
+    """Draw a label with specified text and styling on a page."""
     try:
         if not text or not text.strip():
             return
@@ -333,6 +344,7 @@ def draw_label(
         right_space = page.rect.x1 - rect.x1
 
         def _draw_lines(x: float, top: float, width: float, lines: List[str]) -> fitz.Point:
+            """Draw multiple lines of text as a freetext annotation."""
             height = line_height * len(lines)
             bg = fitz.Rect(x - 2, top - 2, x + width + 2, top + height + 2)
             text_block = "\n".join(lines)

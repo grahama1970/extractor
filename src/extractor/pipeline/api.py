@@ -113,9 +113,8 @@ def extract_sections(
 
     clean_pdf = _find_clean_pdf(p.anno_dir)
 
-    # Stage 02 - Select extractor based on environment variable
-    extractor_mode = os.getenv("STAGE02_EXTRACTOR", "pymupdf").lower()
-    extractor_script = "s02_pymupdf_extractor.py" if extractor_mode != "marker" else "s02_marker_extractor.py"
+    # Stage 02 - pdf_oxide extraction (MIT-licensed, replaces PyMuPDF)
+    extractor_script = "s02_pdf_oxide_adapter.py"
     _log("started", "02_marker_extractor", os.fspath(clean_pdf))
     t0 = time.time()
     try:

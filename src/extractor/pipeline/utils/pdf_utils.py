@@ -4,7 +4,10 @@ Simple PDF utility functions
 No complex classes, just simple functions that work!
 """
 
-import fitz  # PyMuPDF
+try:
+    import fitz  # PyMuPDF (optional — regression testing only)
+except ImportError:
+    fitz = None  # type: ignore[assignment]
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from loguru import logger
@@ -145,6 +148,7 @@ def patch_bht_reqs_table_merge_headers(pdf_path: Path) -> None:
     """
 
     def _rgb_from_int(n: int) -> tuple[float, float, float]:
+        """Return RGB values as floats from an integer representation."""
         r = (n >> 16) & 0xFF
         g = (n >> 8) & 0xFF
         b = n & 0xFF

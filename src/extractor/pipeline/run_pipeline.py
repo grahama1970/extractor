@@ -403,12 +403,18 @@ def _s00_timeout(out: Path, default: int) -> int:
 
 
 def _detect_scanned_pdf_path(pdf_path: Path) -> Optional[Dict[str, Any]]:
+    """Detect scanned PDFs using pdf_oxide profiling."""
     try:
-        import fitz
-        from extractor.pipeline.steps.s02_pymupdf_extractor import _detect_scanned_pdf
+        from pdf_oxide import PdfDocument
 
-        with fitz.open(str(pdf_path)) as doc:
-            return _detect_scanned_pdf(doc)
+        doc = PdfDocument(str(pdf_path))
+        profile = doc.profile_document()
+        is_scanned = profile.get("is_scanned", False)
+        return {
+            "is_scanned": is_scanned,
+            "confidence": 0.9 if is_scanned else 0.1,
+            "detection_method": "pdf_oxide",
+        }
     except Exception as exc:
         logger.warning(f"Scanned PDF detection failed for {pdf_path.name}: {exc}")
         return None
@@ -1006,28 +1012,18 @@ def _run_pdf_strategy(pdf: Path, out: Path, args: argparse.Namespace) -> int:
     # Import steps lazily to avoid import-time side effects.
     # Avoid importing online-only steps when running in deterministic offline mode.
 
-    # Select s02 extractor based on environment variable
-    # STAGE02_EXTRACTOR=pymupdf (default, fast, no ML dependencies)
-    # STAGE02_EXTRACTOR=marker (requires Surya, slower but may have better layout detection)
-    extractor_mode = os.getenv("STAGE02_EXTRACTOR", "pymupdf").lower()
-    if extractor_mode == "marker":
-        from extractor.pipeline.steps import s02_marker_extractor as s02
-        logger.info("Using Marker/Surya extractor (STAGE02_EXTRACTOR=marker)")
-    else:
-        from extractor.pipeline.steps import s02_pymupdf_extractor as s02
-        logger.info("Using PyMuPDF extractor (STAGE02_EXTRACTOR=pymupdf)")
+    # pdf_oxide is the sole extraction engine (MIT-licensed, writes S00-S06 in one call)
+    from extractor.pipeline.steps import s02_pdf_oxide_adapter as s02
+    logger.info("Using pdf_oxide extractor")
 
     from extractor.pipeline.steps import (
         s01_annotation_processor as s01,
-        s03_suspicious_headers as s03,
-        s04_section_builder as s04,
-        s04a_layout_audit as s04a,
         s05_table_extractor as s05,
         s05b_table_describer as s05b,
         s05c_table_merger as s05c,
-        s06_figure_extractor as s06,
         s06b_figure_describer as s06b,
     )
+    # S03, S04, S04a, S06 absorbed into pdf_oxide — no longer imported
 
     # Lazy import for optional DB steps to avoid hard dependency on python-arango if not needed
     if not args.skip_export:
@@ -1089,11 +1085,10 @@ def _run_pdf_strategy(pdf: Path, out: Path, args: argparse.Namespace) -> int:
         if pdf_path and pdf_path.exists():
             file_size_mb = round(pdf_path.stat().st_size / (1024 * 1024), 2)
             try:
-                import fitz
-                with fitz.open(str(pdf_path)) as doc:
-                    page_count = len(doc)
+                from pdf_oxide import PdfDocument
+                page_count = PdfDocument(str(pdf_path)).page_count()
             except Exception:
-                pass
+                    pass
         minimal_profile = {
             "domain": preset_name or "unknown",
             "page_count": page_count,
@@ -1114,64 +1109,9 @@ def _run_pdf_strategy(pdf: Path, out: Path, args: argparse.Namespace) -> int:
         (s00_dir / "profile.json").write_text(json.dumps(minimal_profile, indent=2))
         logger.info(f"00_profile_detector: Wrote minimal profile.json for forced preset '{preset_name}'")
 
-    elif not getattr(args, "skip_s00", False):
-        try:
-            from extractor.pipeline.steps import s00_profile_detector as s00
-            from extractor.core.presets import PRESET_REGISTRY
-
-            logger.info("00_profile_detector: Running profile detection...")
-
-            # Run S00
-            s00_out_file = _step(
-                "00_profile_detector",
-                s00.run,
-                pdf,
-                out,
-                stop_on_fail=False,  # Don't crash pipeline if profile fails, just warn
-                timeout_sec=args.stage_timeout,
-                log_dir_base=out,
-            )
-
-            # Load Profile and Context
-            if s00_out_file and s00_out_file.exists():
-                try:
-                    profile_data = json.loads(s00_out_file.read_text())
-                    preset_name = profile_data.get("detected_preset")
-                    logger.info(f"00_profile_detector: Detected Preset = {preset_name}")
-
-                    if preset_name in PRESET_REGISTRY:
-                        preset_config = PRESET_REGISTRY[preset_name]
-                        logger.info(f"00_profile_detector: Loaded config for {preset_name}")
-                    elif preset_name:
-                        logger.warning(
-                            f"00_profile_detector: Preset '{preset_name}' not in registry. Using defaults."
-                        )
-
-                except Exception as e:
-                    logger.warning(f"00_profile_detector: Failed to load profile JSON: {e}")
-            else:
-                logger.warning("00_profile_detector: No output file produced.")
-
-            # Save Context Artifact — merge with S00's existing data (timeout, table estimates)
-            context_file = out / "pipeline_context.json"
-            context_data = {}
-            if context_file.exists():
-                try:
-                    context_data = json.loads(context_file.read_text())
-                except Exception:
-                    pass
-            context_data.update({
-                "preset_name": preset_name,
-                "config": preset_config,
-                "timestamp": time.time(),
-                "profile_path": str(s00_out_file) if s00_out_file else None,
-            })
-            context_file.write_text(json.dumps(context_data, indent=2))
-
-        except ImportError:
-            logger.warning("00_profile_detector: Module not found. Skipping context injection.")
-        except Exception as e:
-            logger.error(f"00_profile_detector: Unexpected failure: {e}")
+    else:
+        # S00 profiling handled by pdf_oxide adapter during S02
+        logger.info("00_profile_detector: will be written by pdf_oxide adapter in S02")
 
     # Enforce implications: proving implies requirements miner
     if args.prove_requirements and not args.extract_requirements:
@@ -1236,132 +1176,35 @@ def _run_pdf_strategy(pdf: Path, out: Path, args: argparse.Namespace) -> int:
     # equation detection via _detect_equation(). Future: /create-classifier for
     # vision-based equation region detection + /create-gpt for Unicode→LaTeX.
 
-    # 03
-    pdf_dir = out / "01_annotation_processor"
-    a03 = _step(
-        "03_suspicious_headers",
-        s03.run,
-        a02,
-        pdf_dir,
-        out,
-        skip_llm=False,  # Always run candidate generator (rendering etc.)
-        stop_on_fail=args.stop_on_fail,
-        timeout_sec=args.stage_timeout,
-        log_dir_base=out,
-        on_timing=lambda n, dt: stage_latencies.update({n: dt}),
-    )
-    if not a03:
-        if args.stop_on_fail:
-            return 1
-        logger.warning("Stage 03 failed, continuing with empty result")
+    # pdf_oxide adapter wrote S00/S03/S04/S04a/S06 during S02 — collect paths
+    a03 = out / "03_suspicious_headers" / "json_output" / "03_suspicious_headers.json"
+    a04_path = out / "04_section_builder" / "json_output" / "04_sections.json"
+    a06 = out / "06_figure_extractor" / "json_output" / "06_figures.json"
     results["03"] = a03
-    _write_artifacts_index(out, (out / "03_suspicious_headers"))
-    try:
-        vcount = len(__import__("json").loads(a03.read_text()).get("blocks", []))
-    except Exception:
-        vcount = None
-    manifest.record_stage(
-        "03_suspicious_headers",
-        "Completed",
-        {
-            "json": str(a03.relative_to(out)),
-            "latency_ms": stage_latencies.get("03_suspicious_headers"),
-        },
-        counts={"candidates": vcount} if isinstance(vcount, int) else None,
-    )
-
-    # 04 (hard-require Stage 03 outputs)
-    try:
-        _a03_obj = json.loads(a03.read_text())
-        if (
-            not isinstance(_a03_obj, dict)
-            or "blocks" not in _a03_obj
-            or not isinstance(_a03_obj["blocks"], list)
-        ):
-            raise ValueError("Stage 03 output missing required key 'blocks' (list)")
-    except Exception as e:
-        logger.warning(f"04_section_builder: Stage 03 outputs validation failed → {e}")
-        # Proceed with a03 as-is (if it exists) or None; s04 handles None.
-    a04_path = _step(
-        "04_section_builder",
-        s04.run,
-        a03,
-        pdf_dir,
-        out,
-        preset_config=preset_config,  # Validate with context
-        stop_on_fail=args.stop_on_fail,
-        timeout_sec=args.stage_timeout,
-        log_dir_base=out,
-        on_timing=lambda n, dt: stage_latencies.update({n: dt}),
-    )
-    if not a04_path:
-        if args.stop_on_fail:
-            return 1
-        logger.warning("Stage 04 failed, continuing with empty result")
     results["04"] = a04_path
-    _write_artifacts_index(out, (out / "04_section_builder"))
+    results["06"] = a06
+    for stage_name, stage_path in [
+        ("03_suspicious_headers", a03),
+        ("04_section_builder", a04_path),
+        ("04a_layout_audit", out / "04a_layout_audit" / "04a_layout_audit.json"),
+        ("06_figure_extractor", a06),
+    ]:
+        if stage_path.exists():
+            manifest.record_stage(stage_name, "Completed", {"engine": "pdf_oxide"})
+    # Load profile for preset context
     try:
-        sec_count = len(__import__("json").loads(a04_path.read_text()).get("sections", []))
+        profile_data = json.loads((out / "00_profile_detector" / "profile.json").read_text())
+        preset_name = profile_data.get("detected_preset")
+        from extractor.core.presets import PRESET_REGISTRY
+        if preset_name and preset_name in PRESET_REGISTRY:
+            preset_config = PRESET_REGISTRY[preset_name]
     except Exception:
-        sec_count = None
-    manifest.record_stage(
-        "04_section_builder",
-        "Completed",
-        {
-            "json": str(a04_path.relative_to(out)),
-            "latency_ms": stage_latencies.get("04_section_builder"),
-        },
-        counts={"sections": sec_count} if isinstance(sec_count, int) else None,
-    )
+        pass
+    pdf_dir = out / "01_annotation_processor"
+    pdf_dir.mkdir(parents=True, exist_ok=True)
 
-    # 04a – layout audit (fail fast on ordering issues before tables/figures)
-    skip_04a = False
-    if isinstance(sec_count, int) and sec_count == 0:
-        try:
-            scanned_info_path = out / "scanned_pdf.json"
-            if scanned_info_path.exists():
-                scanned_info = json.loads(scanned_info_path.read_text())
-            else:
-                scanned_info = {}
-        except Exception:
-            scanned_info = {}
-        if scanned_info.get("is_scanned"):
-            skip_04a = True
-            logger.warning(
-                "04a_layout_audit: skipped (scanned PDF with zero sections)."
-            )
-            manifest.record_stage(
-                "04a_layout_audit",
-                "Skipped",
-                {},
-                extra={"reason": "scanned_pdf_zero_sections"},
-            )
-
-    if not skip_04a:
-        a04a = _step(
-            "04a_layout_audit",
-            s04a.run,
-            out,
-            stop_on_fail=args.stop_on_fail,
-            timeout_sec=args.stage_timeout,
-            log_dir_base=out,
-            on_timing=lambda n, dt: stage_latencies.update({n: dt}),
-        )
-        if not a04a and args.stop_on_fail:
-            return 1
-        if a04a:
-            _write_artifacts_index(out, (out / "04a_layout_audit"))
-            manifest.record_stage(
-                "04a_layout_audit",
-                "Completed",
-                {
-                    "json": str(a04a.relative_to(out)),
-                    "latency_ms": stage_latencies.get("04a_layout_audit"),
-                },
-            )
-
-    # 04b (Footnote Detector) — REMOVED: S02 pymupdf already tags blocks with
-    # block_type="Footnote" using font/layout heuristics. Downstream filters by type.
+    # S03, S04, S04a handled by pdf_oxide adapter above
+    # S04b (Footnote Detector) handled by pdf_oxide block classifier
 
     # 05
     if args.skip_tables05:
@@ -1439,36 +1282,7 @@ def _run_pdf_strategy(pdf: Path, out: Path, args: argparse.Namespace) -> int:
         logger.warning("05c_table_merger: failed, continuing")
     results["05c"] = a05c
 
-    # 06 (deterministic extraction, VLM descriptions done in 06b)
-    a06 = _step(
-        "06_figure_extractor",
-        s06.run,
-        a02,
-        a04_path,
-        pdf_dir,
-        out,
-        stop_on_fail=args.stop_on_fail,
-        timeout_sec=args.stage_timeout,
-        log_dir_base=out,
-        on_timing=lambda n, dt: stage_latencies.update({n: dt}),
-    )
-    if not a06:
-        logger.warning("06_figure_extractor: failed, continuing")
-    results["06"] = a06
-    _write_artifacts_index(out, (out / "06_figure_extractor"))
-    try:
-        fcount = len(__import__("json").loads(a06.read_text()).get("figures", []))
-    except Exception:
-        fcount = None
-    manifest.record_stage(
-        "06_figure_extractor",
-        "Completed",
-        {
-            "json": str(a06.relative_to(out)),
-            "latency_ms": stage_latencies.get("06_figure_extractor"),
-        },
-        counts={"figures": fcount} if isinstance(fcount, int) else None,
-    )
+    # S06 handled by pdf_oxide adapter above
 
     # 06b (VLM Descriptions - decoupled)
     a06b = _step(

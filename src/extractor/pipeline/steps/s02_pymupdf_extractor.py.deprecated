@@ -27,7 +27,12 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime
 
-import fitz  # PyMuPDF
+try:
+    import fitz  # PyMuPDF
+    _HAVE_FITZ = True
+except ImportError:
+    fitz = None  # type: ignore[assignment]
+    _HAVE_FITZ = False
 from loguru import logger
 
 from extractor.pipeline.utils.sections.heuristics import is_probable_pdf_section_header
@@ -583,6 +588,298 @@ def _get_font_info(span: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def extract_blocks_oxide(
+    pdf_path: Path,
+    page_range: Optional[List[int]] = None,
+    filter_headers_footers: bool = True,
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """Extract text blocks using pdf_oxide (MIT-licensed Rust engine).
+
+    Drop-in replacement for extract_blocks(). Returns the same dict shape.
+    Uses pdf_oxide's extract_spans for font-level data.
+    """
+    from pdf_oxide import PdfDocument
+
+    t0 = time.monotonic()
+
+    try:
+        doc = PdfDocument(str(pdf_path))
+    except Exception as e:
+        logger.error(f"Failed to open PDF with pdf_oxide: {pdf_path.name} - {e}")
+        return [], {
+            "is_scanned_pdf": False,
+            "is_corrupted": True,
+            "error": str(e),
+            "detection_method": "pdf_oxide",
+        }
+
+    page_count = doc.page_count()
+    if page_count == 0:
+        return [], {
+            "is_scanned_pdf": False,
+            "is_corrupted": True,
+            "error": "Document has no pages",
+            "detection_method": "pdf_oxide",
+        }
+
+    # Determine page range
+    if page_range:
+        start_page = max(0, min(page_range))
+        end_page = min(page_count - 1, max(page_range))
+        pages_to_process = list(range(start_page, end_page + 1))
+    else:
+        start_page = 0
+        pages_to_process = list(range(page_count))
+
+    # Slide deck detection via page dimensions
+    try:
+        w, h = doc.page_dimensions(0)
+        is_slide_deck = w > 0 and h > 0 and (w / h) > SLIDE_ASPECT_RATIO_THRESHOLD
+    except Exception:
+        is_slide_deck = False
+
+    # First pass: collect font sizes for footnote detection
+    all_font_sizes = []
+    for page_idx in pages_to_process:
+        try:
+            spans = doc.extract_spans(page_idx)
+            for span in spans:
+                sz = span.get("font_size", 0)
+                if sz > 0:
+                    all_font_sizes.append(sz)
+        except Exception:
+            pass
+
+    avg_font_size = sum(all_font_sizes) / len(all_font_sizes) if all_font_sizes else 12.0
+
+    blocks = []
+    block_counter = 0
+    header_footer_filtered = 0
+    footnotes_detected = 0
+
+    for page_idx in pages_to_process:
+        page_num = page_idx
+        try:
+            _, page_height = doc.page_dimensions(page_idx)
+            page_width, _ = doc.page_dimensions(page_idx)
+        except Exception:
+            page_height = 792.0
+            page_width = 612.0
+
+        try:
+            spans = doc.extract_spans(page_idx)
+        except Exception as e:
+            logger.debug(f"extract_spans failed on page {page_idx}: {e}")
+            continue
+
+        # Group spans into lines by y-coordinate proximity
+        lines: list[list[dict]] = []
+        current_line: list[dict] = []
+        last_y = None
+
+        for span in spans:
+            bbox = span.get("bbox")
+            y = bbox[1] if bbox else None
+
+            if last_y is not None and y is not None and abs(y - last_y) > 3:
+                if current_line:
+                    lines.append(current_line)
+                    current_line = []
+
+            current_line.append(span)
+            last_y = y
+
+        if current_line:
+            lines.append(current_line)
+
+        for line_spans in lines:
+            block_counter += 1
+            block_id = f"block-{block_counter:06d}"
+
+            # Combine text
+            line_text_parts = [s.get("text", "") for s in line_spans if s.get("text")]
+            raw_text = " ".join(line_text_parts)
+            raw_text = _normalize_text(raw_text)
+
+            if not raw_text.strip():
+                continue
+
+            # Font info from first span
+            first_span = line_spans[0]
+            font_size = first_span.get("font_size", 0.0)
+            is_bold = first_span.get("is_bold", False)
+            is_italic = first_span.get("is_italic", False)
+            flags = 0
+            if is_bold:
+                flags |= 16
+            if is_italic:
+                flags |= 2
+
+            font_info = {
+                "size": font_size,
+                "flags": flags,
+                "color": "black",
+                "color_bucket": "black",
+            }
+
+            # Build bbox from span bboxes
+            all_bboxes = [s.get("bbox") for s in line_spans if s.get("bbox")]
+            if all_bboxes:
+                bbox = [
+                    min(b[0] for b in all_bboxes),
+                    min(b[1] for b in all_bboxes),
+                    max(b[0] + b[2] for b in all_bboxes),  # x + width
+                    max(b[1] + b[3] for b in all_bboxes),  # y + height
+                ]
+            else:
+                bbox = [0, 0, 0, 0]
+
+            # Header/footer detection
+            hf_region = None
+            is_footnote = False
+            is_equation = False
+            if filter_headers_footers and not is_slide_deck:
+                hf_region = _detect_header_footer_region(bbox, page_height, raw_text)
+                if hf_region:
+                    header_footer_filtered += 1
+
+                if not hf_region:
+                    is_footnote = _detect_footnote(
+                        bbox, page_height, raw_text,
+                        avg_font_size, font_info["size"]
+                    )
+                    if is_footnote:
+                        footnotes_detected += 1
+
+                is_equation = _detect_equation(bbox, page_width, raw_text, line_spans)
+
+            # Section header heuristics
+            header_result = is_probable_pdf_section_header(raw_text)
+            is_header = header_result["is_header"]
+            confidence = header_result.get("confidence", 0.0)
+            header_level = header_result.get("level")
+
+            # Determine block type
+            if hf_region == "header":
+                block_type = "PageHeader"
+            elif hf_region == "footer":
+                block_type = "PageFooter"
+            elif is_footnote:
+                block_type = "Footnote"
+            elif is_equation:
+                block_type = "Equation"
+            elif is_header:
+                block_type = "SectionHeader"
+            else:
+                block_type = "Text"
+
+            blocks.append({
+                "id": block_id,
+                "page": page_num,
+                "page_idx": page_num,
+                "bbox": bbox,
+                "text": raw_text,
+                "block_type": block_type,
+                "font_size": font_info["size"],
+                "font_flags": font_info["flags"],
+                "font_color": font_info["color"],
+                "font_color_bucket": font_info["color_bucket"],
+                "is_header": is_header,
+                "header_confidence": confidence,
+                "header_level": header_level,
+                "first_span_font": font_info,
+                "header_footer_region": hf_region,
+                "is_footnote": is_footnote,
+                "is_equation": is_equation,
+                "latex_content": raw_text if is_equation else None,
+            })
+
+    # Multi-column re-sorting (same logic as pymupdf version)
+    multi_column_pages = []
+    if blocks and not is_slide_deck:
+        pages_blocks: Dict[int, list] = {}
+        for b in blocks:
+            pg = b.get("page", 0)
+            if pg not in pages_blocks:
+                pages_blocks[pg] = []
+            pages_blocks[pg].append(b)
+
+        reordered_blocks = []
+        for page_num in sorted(pages_blocks.keys()):
+            page_blocks = pages_blocks[page_num]
+            if len(page_blocks) < 5:
+                reordered_blocks.extend(page_blocks)
+                continue
+
+            pw = max(b.get("bbox", [0, 0, 0, 0])[2] for b in page_blocks)
+            pw = pw if pw > 100 else 612
+
+            x_coords = sorted(b.get("bbox", [0, 0, 0, 0])[0] for b in page_blocks)
+            gaps = []
+            for i in range(len(x_coords) - 1):
+                gap = x_coords[i + 1] - x_coords[i]
+                gaps.append((gap, x_coords[i]))
+
+            column_boundary = None
+            if gaps:
+                largest_gap, gap_pos = max(gaps)
+                if largest_gap > pw * 0.15:
+                    column_boundary = gap_pos + largest_gap / 2
+
+            if column_boundary:
+                left_col = [b for b in page_blocks if b.get("bbox", [0, 0, 0, 0])[0] < column_boundary]
+                right_col = [b for b in page_blocks if b.get("bbox", [0, 0, 0, 0])[0] >= column_boundary]
+                left_col.sort(key=lambda b: b.get("bbox", [0, 0, 0, 0])[1])
+                right_col.sort(key=lambda b: b.get("bbox", [0, 0, 0, 0])[1])
+                reordered_blocks.extend(left_col)
+                reordered_blocks.extend(right_col)
+                multi_column_pages.append(page_num)
+            else:
+                reordered_blocks.extend(page_blocks)
+
+        blocks = reordered_blocks
+
+    # Scanned detection using pdf_oxide's detect_page_type if available
+    is_scanned = False
+    try:
+        if hasattr(doc, "detect_page_type"):
+            sample_size = min(SCANNED_PAGE_SAMPLE_SIZE, page_count)
+            scanned_pages = 0
+            for i in range(sample_size):
+                pt = doc.detect_page_type(i)
+                if pt in ("scanned", "hybrid"):
+                    scanned_pages += 1
+            is_scanned = scanned_pages > sample_size * 0.5
+        else:
+            # Fallback: check text density
+            sample_size = min(SCANNED_PAGE_SAMPLE_SIZE, page_count)
+            pages_with_text = 0
+            for i in range(sample_size):
+                try:
+                    text = doc.extract_text(i).strip()
+                    if text and len(text) > 20:
+                        pages_with_text += 1
+                except Exception:
+                    pass
+            is_scanned = pages_with_text < sample_size * 0.3
+    except Exception:
+        pass
+
+    scanned_info = {
+        "is_scanned_pdf": is_scanned,
+        "detection_method": "pdf_oxide",
+        "multi_column_pages": multi_column_pages,
+        "header_footer_filtered": header_footer_filtered,
+        "footnotes_detected": footnotes_detected,
+        "avg_font_size": round(avg_font_size, 1),
+    }
+
+    if is_slide_deck:
+        scanned_info["document_type"] = "slide_deck"
+
+    return blocks, scanned_info
+
+
 def extract_blocks(
     pdf_path: Path,
     page_range: Optional[List[int]] = None,
@@ -882,10 +1179,11 @@ def run(
     page_range: Optional[List[int]] = None,
     mark_all_headers_suspicious: bool = False,
     timeout: int = 600,  # Ignored, kept for API compatibility with run_pipeline.py
+    engine: str = "",
 ) -> Path:
     """
-    Run Stage 02 extraction using PyMuPDF.
-    
+    Run Stage 02 extraction.
+
     Args:
         pdf_path: Path to input PDF
         output_dir: Output directory for results
@@ -893,30 +1191,37 @@ def run(
         page_range: Optional page range to process
         mark_all_headers_suspicious: Mark all headers for s03 verification
         timeout: Ignored (PyMuPDF is fast, no timeout needed)
-    
+        engine: "pdf_oxide" for Rust engine, "pymupdf" for legacy, "" for auto (env var)
+
     Returns:
         Path to output JSON file
     """
     t0 = time.monotonic()
     run_id = uuid.uuid4().hex
-    
+
+    # Engine selection
+    selected_engine = engine or os.environ.get("EXTRACTOR_ENGINE", "pymupdf")
+
     # Setup output directories
     stage_output_dir = output_dir / STEP_NAME
     json_output_dir = stage_output_dir / "json_output"
     json_output_dir.mkdir(parents=True, exist_ok=True)
-    
+
     # Configure logging
     log_file = stage_output_dir / f"stage_02.log"
     try:
         logger.add(str(log_file), level="DEBUG", rotation="10 MB")
     except Exception as e:
         logger.warning(f"Failed to add log file handler {log_file}: {e}")
-    
-    logger.info(f"Stage 02 (PyMuPDF): Processing {pdf_path.name}")
-    
-    # Extract blocks
+
+    logger.info(f"Stage 02 (engine={selected_engine}): Processing {pdf_path.name}")
+
+    # Extract blocks (route by engine)
     try:
-        blocks, scanned_info = extract_blocks(pdf_path, page_range)
+        if selected_engine == "pdf_oxide":
+            blocks, scanned_info = extract_blocks_oxide(pdf_path, page_range)
+        else:
+            blocks, scanned_info = extract_blocks(pdf_path, page_range)
 
         # Handle corrupted file detection
         if scanned_info.get("is_corrupted"):
@@ -961,8 +1266,12 @@ def run(
     
     # Get page count
     try:
-        with fitz.open(str(pdf_path)) as doc:
-            page_count = len(doc)
+        if selected_engine == "pdf_oxide":
+            from pdf_oxide import PdfDocument as _PdfDoc
+            page_count = _PdfDoc(str(pdf_path)).page_count()
+        else:
+            with fitz.open(str(pdf_path)) as doc:
+                page_count = len(doc)
     except Exception:
         page_count = 0
     

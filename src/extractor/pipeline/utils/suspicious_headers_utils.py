@@ -7,24 +7,31 @@ from __future__ import annotations
 import hashlib
 from typing import Any
 
-import fitz  # PyMuPDF
+try:
+    import fitz  # PyMuPDF (optional — regression testing only)
+except ImportError:
+    fitz = None  # type: ignore[assignment]
 
 
 def norm_text(s: str) -> str:
+    """Normalize whitespace in a string."""
     return " ".join((s or "").split())
 
 
 def text_sha1(s: str) -> str:
+    """Compute SHA1 hash of normalized UTF-8 encoded text."""
     return hashlib.sha1(norm_text(s).encode("utf-8")).hexdigest()
 
 
 def has_bullet_prefix(text: str) -> bool:
+    """Check if text starts with a bullet character."""
     bullets = {"•", "●", "▪", "‣", "⁃", "–", "—", "-", "*", "+", "·"}
     t = (text or "").lstrip()
     return bool(t) and t[0] in bullets
 
 
 def bucket_color_hex(hex_str: str) -> str:
+    """Bucketize hex color into named category based on RGB values."""
     try:
         h = hex_str.lstrip("#")
         r = int(h[0:2], 16)

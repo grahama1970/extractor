@@ -10,7 +10,10 @@ from extractor.pipeline.utils.reliability import log_stage_error
 from pathlib import Path
 from typing import Any, Iterable, Optional, Tuple
 
-import fitz  # PyMuPDF
+try:
+    import fitz  # PyMuPDF (optional — regression testing only)
+except ImportError:
+    fitz = None  # type: ignore[assignment]
 
 
 def _estimate_bbox(page: "fitz.Page", block: dict[str, Any]) -> list[float]:
@@ -29,24 +32,28 @@ def _estimate_bbox(page: "fitz.Page", block: dict[str, Any]) -> list[float]:
 
 
 def _expand_bbox(bbox: Iterable[float], page_h: float, ratio: float) -> list[float]:
+    """Expand bounding box coordinates with padding based on a ratio."""
     x0, y0, x1, y1 = map(float, bbox)
     pad = (y1 - y0) * ratio
     return [x0, max(0.0, y0 - pad), x1, min(page_h, y1 + pad)]
 
 
 def _render_region(page: "fitz.Page", bbox: Iterable[float], scale: float = 2.0) -> bytes:
+    """Render a specified page region as a PNG byte array."""
     rect = fitz.Rect(*bbox)
     pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), clip=rect)
     return pix.tobytes("png")
 
 
 def _save_image_bytes(dst_dir: Path, figure_id: str, data: bytes) -> Path:
+    """Save image bytes as PNG file, returning its path."""
     p = dst_dir / f"{figure_id}.png"
     p.write_bytes(data)
     return p
 
 
 def _nearby_text(page: "fitz.Page", bbox: Iterable[float]) -> str:
+    """Extract text from a PDF page within a specified bounding box."""
     rect = fitz.Rect(*bbox)
     blocks = page.get_text("blocks")
     lines = [
@@ -56,6 +63,7 @@ def _nearby_text(page: "fitz.Page", bbox: Iterable[float]) -> str:
 
 
 def _bbox_area(bbox: Iterable[float]) -> int:
+    """Calculate the area of a bounding box defined by coordinates."""
     x0, y0, x1, y1 = map(float, bbox)
     try:
         return int((x1 - x0) * (y1 - y0))
@@ -66,6 +74,7 @@ def _bbox_area(bbox: Iterable[float]) -> int:
 
 
 def _normalize_title(title: Optional[str]) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+    """Normalize a title string, extracting its figure number."""
     import re as _re
 
     if not title:
@@ -100,6 +109,7 @@ def _assemble_result(
     metadata: Optional[dict] = None,
     extraction_time: Optional[str] = None,
 ) -> dict[str, Any]:
+    """Assemble a structured result object for an extracted figure."""
     bbox_list = [
         float(expanded_bbox[0]),
         float(expanded_bbox[1]),

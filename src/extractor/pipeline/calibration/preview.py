@@ -8,7 +8,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-import fitz  # PyMuPDF
+try:
+    import fitz  # PyMuPDF (optional — regression testing only)
+except ImportError:
+    fitz = None  # type: ignore[assignment]
 
 from extractor.pipeline.calibration.detector import (
     DetectedElement,

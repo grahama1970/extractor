@@ -8,7 +8,10 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-import fitz
+try:
+    import fitz  # PyMuPDF (optional — regression testing only)
+except ImportError:
+    fitz = None  # type: ignore[assignment]
 
 
 STEP_NAME = "09a_pdf_annotator"
@@ -138,6 +141,7 @@ def stable_overlay_id(
     page_token = f"@{page_index + 1}" if page_index >= 0 else ""
 
     def _first_str(keys: List[str]) -> Optional[str]:
+        """Return the first non-empty string value from a list of keys."""
         for key in keys:
             val = payload.get(key)
             if val is None:

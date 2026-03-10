@@ -4,7 +4,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Tuple
 
-import fitz  # PyMuPDF
+try:
+    import fitz  # PyMuPDF (optional — regression testing only)
+except ImportError:
+    fitz = None  # type: ignore[assignment]
 from PIL import Image, ImageDraw, ImageFont
 
 

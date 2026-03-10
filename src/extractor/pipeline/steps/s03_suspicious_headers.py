@@ -41,7 +41,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-import fitz  # PyMuPDF
+try:
+    import fitz  # PyMuPDF (optional — regression testing only)
+except ImportError:
+    fitz = None  # type: ignore[assignment]
 from loguru import logger
 
 # --- Pipeline Utils ---
@@ -315,11 +318,13 @@ def _env_vlm_model(default: str = "") -> str:
 
 
 def sanity() -> int:
+    """Run sanity check and return the result."""
     return run_step_sanity(STEP_NAME)
 
 
 @dataclass
 class Config:
+    """Store configuration parameters for document processing tasks."""
     input_pdf: Path
     input_json: Path
     output_dir: Path
@@ -799,8 +804,8 @@ async def process_pdf_pipeline(config: Config):
                 }
             )
 
-        api_key = os.getenv("CHUTES_API_KEY")
-        api_base = os.getenv("CHUTES_API_BASE", "https://llm.chutes.ai/v1")
+        api_key = os.getenv("SCILLM_PROXY_KEY", "sk-dev-proxy-123")
+        api_base = os.getenv("SCILLM_API_BASE", "http://localhost:4010")
 
         async for r in parallel_acompletions_iter(
             requests,
