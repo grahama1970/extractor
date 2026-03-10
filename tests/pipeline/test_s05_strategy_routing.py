@@ -66,21 +66,24 @@ def test_stream_columns_params():
     assert s["params"]["column_tol"] == 10
 
 
+def _mock_oxide_doc_proxy():
+    """Create a mock that mimics _OxideDocProxy with 0 pages."""
+    mock = MagicMock()
+    mock.__len__ = lambda self: 0
+    mock.close = MagicMock()
+    return mock
+
+
 def test_borderless_routes_to_stream():
     """TASK-003: S00 table_style=borderless should route to stream_default first."""
     from extractor.pipeline.steps.s05_table_extractor import extract_all_tables
-    from extractor.pipeline.utils.tables.extraction import CAMELOT_STRATEGIES
-
-    # Mock fitz.open to avoid needing a real PDF
-    mock_doc = MagicMock()
-    mock_doc.__len__ = lambda self: 0  # 0 pages = no iteration
-    mock_doc.__enter__ = lambda self: self
-    mock_doc.__exit__ = lambda *args: None
 
     context = {"table_style": "borderless", "domain": "scientific"}
 
-    with patch("extractor.pipeline.steps.s05_table_extractor.fitz") as mock_fitz:
-        mock_fitz.open.return_value = mock_doc
+    with patch(
+        "extractor.pipeline.steps.s05_table_extractor._OxideDocProxy"
+    ) as mock_cls:
+        mock_cls.return_value = _mock_oxide_doc_proxy()
         _, strategy_summary, quality_summary = extract_all_tables(
             pdf_path=Path("/dev/null"),
             output_dir=Path("/tmp/test_s05_routing"),
@@ -98,13 +101,12 @@ def test_bordered_routes_to_lattice():
     """TASK-003: S00 table_style=bordered should keep lattice_default."""
     from extractor.pipeline.steps.s05_table_extractor import extract_all_tables
 
-    mock_doc = MagicMock()
-    mock_doc.__len__ = lambda self: 0
-
     context = {"table_style": "bordered", "domain": "general"}
 
-    with patch("extractor.pipeline.steps.s05_table_extractor.fitz") as mock_fitz:
-        mock_fitz.open.return_value = mock_doc
+    with patch(
+        "extractor.pipeline.steps.s05_table_extractor._OxideDocProxy"
+    ) as mock_cls:
+        mock_cls.return_value = _mock_oxide_doc_proxy()
         _, _, quality_summary = extract_all_tables(
             pdf_path=Path("/dev/null"),
             output_dir=Path("/tmp/test_s05_routing"),
@@ -123,13 +125,12 @@ def test_bordered_defense_routes_to_lattice_strong():
     """TASK-003: S00 table_style=bordered + domain=defense → lattice_strong."""
     from extractor.pipeline.steps.s05_table_extractor import extract_all_tables
 
-    mock_doc = MagicMock()
-    mock_doc.__len__ = lambda self: 0
-
     context = {"table_style": "bordered", "domain": "defense"}
 
-    with patch("extractor.pipeline.steps.s05_table_extractor.fitz") as mock_fitz:
-        mock_fitz.open.return_value = mock_doc
+    with patch(
+        "extractor.pipeline.steps.s05_table_extractor._OxideDocProxy"
+    ) as mock_cls:
+        mock_cls.return_value = _mock_oxide_doc_proxy()
         _, _, quality_summary = extract_all_tables(
             pdf_path=Path("/dev/null"),
             output_dir=Path("/tmp/test_s05_routing"),
@@ -145,13 +146,12 @@ def test_mixed_triggers_sweep():
     """TASK-003: S00 table_style=mixed triggers full strategy sweep."""
     from extractor.pipeline.steps.s05_table_extractor import extract_all_tables
 
-    mock_doc = MagicMock()
-    mock_doc.__len__ = lambda self: 0
-
     context = {"table_style": "mixed", "domain": "engineering"}
 
-    with patch("extractor.pipeline.steps.s05_table_extractor.fitz") as mock_fitz:
-        mock_fitz.open.return_value = mock_doc
+    with patch(
+        "extractor.pipeline.steps.s05_table_extractor._OxideDocProxy"
+    ) as mock_cls:
+        mock_cls.return_value = _mock_oxide_doc_proxy()
         _, _, quality_summary = extract_all_tables(
             pdf_path=Path("/dev/null"),
             output_dir=Path("/tmp/test_s05_routing"),
@@ -164,14 +164,7 @@ def test_mixed_triggers_sweep():
 
 def test_s00_context_fields_propagated():
     """TASK-003: Verify table_style, domain, has_multi_column are in pipeline_context."""
-    from extractor.pipeline.steps.s00_profile_detector import analyze_with_pymupdf4llm
-
-    # We can't easily run S00 without a PDF, so test the context write path directly
-    # by checking the code structure
-    import ast
-    import inspect
-
-    # Read S00 source
+    # Check the code structure
     s00_path = Path("src/extractor/pipeline/steps/s00_profile_detector.py")
     src = s00_path.read_text()
 
@@ -183,8 +176,6 @@ def test_s00_context_fields_propagated():
 
 def test_s05_reads_table_style_from_context():
     """TASK-003: Verify S05 reads table_style from context parameter."""
-    import ast
-
     s05_path = Path("src/extractor/pipeline/steps/s05_table_extractor.py")
     src = s05_path.read_text()
 

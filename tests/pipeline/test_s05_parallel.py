@@ -50,26 +50,31 @@ def test_empty_page_result():
     assert r["diagnostics"] == []
 
 
+def _mock_oxide_doc_proxy(page_count=0):
+    """Create a mock that mimics _OxideDocProxy."""
+    mock = MagicMock()
+    mock.__len__ = lambda self: page_count
+    mock.close = MagicMock()
+
+    mock_page = MagicMock()
+    mock_page.rect = MagicMock()
+    mock_page.rect.height = 842
+    mock_page.rect.width = 595
+    mock.__getitem__ = lambda self, idx: mock_page
+    return mock
+
+
 def test_sequential_mode_small_pdf():
     """PDFs with <=4 pages use sequential mode regardless of S05_WORKERS."""
     from extractor.pipeline.steps.s05_table_extractor import extract_all_tables
 
-    mock_doc = MagicMock()
-    mock_doc.__len__ = lambda self: 3  # 3 pages = sequential
-    mock_doc.__enter__ = lambda self: self
-    mock_doc.__exit__ = lambda *args: None
-
-    # Mock extract_tables_from_page to avoid real Camelot calls
-    mock_page = MagicMock()
-    mock_page.rect = MagicMock()
-    mock_page.rect.height = 842
-    mock_doc.__getitem__ = lambda self, idx: mock_page
-
-    with patch("extractor.pipeline.steps.s05_table_extractor.fitz") as mock_fitz, \
+    with patch(
+        "extractor.pipeline.steps.s05_table_extractor._OxideDocProxy"
+    ) as mock_cls, \
          patch("extractor.pipeline.steps.s05_table_extractor.extract_tables_from_page") as mock_extract, \
          patch("extractor.pipeline.steps.s05_table_extractor.S05_WORKERS", 8):
 
-        mock_fitz.open.return_value = mock_doc
+        mock_cls.return_value = _mock_oxide_doc_proxy(page_count=3)
         mock_extract.return_value = (
             [],  # tables
             None,  # best_strategy
@@ -107,11 +112,10 @@ def test_zero_page_pdf_no_crash():
     """0-page PDF should not crash in either mode."""
     from extractor.pipeline.steps.s05_table_extractor import extract_all_tables
 
-    mock_doc = MagicMock()
-    mock_doc.__len__ = lambda self: 0
-
-    with patch("extractor.pipeline.steps.s05_table_extractor.fitz") as mock_fitz:
-        mock_fitz.open.return_value = mock_doc
+    with patch(
+        "extractor.pipeline.steps.s05_table_extractor._OxideDocProxy"
+    ) as mock_cls:
+        mock_cls.return_value = _mock_oxide_doc_proxy(page_count=0)
         tables, st_sum, q_sum = extract_all_tables(
             pdf_path=Path("/dev/null"),
             output_dir=Path("/tmp/test_s05_par"),
@@ -126,13 +130,12 @@ def test_existing_routing_tests_still_pass():
     """Verify the existing S00→S05 routing still works after refactor."""
     from extractor.pipeline.steps.s05_table_extractor import extract_all_tables
 
-    mock_doc = MagicMock()
-    mock_doc.__len__ = lambda self: 0
-
     context = {"table_style": "borderless", "domain": "scientific"}
 
-    with patch("extractor.pipeline.steps.s05_table_extractor.fitz") as mock_fitz:
-        mock_fitz.open.return_value = mock_doc
+    with patch(
+        "extractor.pipeline.steps.s05_table_extractor._OxideDocProxy"
+    ) as mock_cls:
+        mock_cls.return_value = _mock_oxide_doc_proxy(page_count=0)
         _, _, quality_summary = extract_all_tables(
             pdf_path=Path("/dev/null"),
             output_dir=Path("/tmp/test_s05_par"),
