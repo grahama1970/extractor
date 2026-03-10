@@ -23,11 +23,6 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
 
 # Third-party
-try:
-    import fitz  # PyMuPDF
-except ImportError:
-    print("PyMuPDF (fitz) not installed. Stage 05 requires it.", file=sys.stderr)
-    raise
 
 try:
     import camelot  # noqa: F401
@@ -107,6 +102,65 @@ from extractor.pipeline.utils.tables.llm_assist import (
 )
 
 
+# ------------------------------------------------------------------
+# pdf_oxide document proxy — duck-types enough of fitz.Document/Page
+# for the callsites in extract_tables_from_page and extract_all_tables.
+# ------------------------------------------------------------------
+
+
+class _OxidePageProxy:
+    """Mimics fitz.Page for the subset S05 needs (rect, get_pixmap)."""
+
+    def __init__(self, oxide_doc, page_num: int):
+        self._doc = oxide_doc
+        self._page_num = page_num
+        w, h = oxide_doc.page_dimensions(page_num)
+        self.rect = type("Rect", (), {"width": w, "height": h, "x0": 0, "y0": 0, "x1": w, "y1": h})()
+
+    def get_pixmap(self, *, matrix=None, clip=None):
+        dpi = 144
+        if matrix is not None:
+            dpi = int(getattr(matrix, "a", 2.0) * 72)
+        if clip is not None:
+            bbox = (clip.x0, clip.y0, clip.x1, clip.y1) if hasattr(clip, "x0") else tuple(clip)
+            data = self._doc.render_page_clipped(self._page_num, bbox, dpi=dpi)
+        else:
+            data = self._doc.render_page(self._page_num, dpi=dpi)
+        return _OxidePixmapProxy(bytes(data))
+
+
+class _OxidePixmapProxy:
+    """Mimics fitz.Pixmap.save()."""
+
+    def __init__(self, data: bytes):
+        self._data = data
+
+    def save(self, path: str):
+        with open(path, "wb") as f:
+            f.write(self._data)
+
+    def tobytes(self, fmt="png"):
+        return self._data
+
+
+class _OxideDocProxy:
+    """Mimics fitz.Document for the subset S05 needs."""
+
+    def __init__(self, pdf_path: str):
+        import pdf_oxide
+        self._doc = pdf_oxide.open(pdf_path)
+        self._page_count = self._doc.page_count()
+
+    def __len__(self):
+        return self._page_count
+
+    def __getitem__(self, idx):
+        return _OxidePageProxy(self._doc, idx)
+
+    def close(self):
+        pass  # pdf_oxide handles cleanup via drop
+
+
 # --- Initialization ---
 load_dotenv(find_dotenv())
 console = Console()
@@ -183,6 +237,7 @@ def extract_tables_from_page(
     s00_table_style: Optional[str] = None,
     s00_domain: Optional[str] = None,
 ) -> Tuple[List[Dict[str, Any]], Optional[str], Dict[str, Any], Dict[str, Any]]:
+    """Extract tables from a specified PDF page."""
 
     page_tables = {}
     best_strategy = None
@@ -236,9 +291,11 @@ def extract_tables_from_page(
         fallback_strategies.append({"name": nm, **CAMELOT_STRATEGIES[nm]})
 
     def _quantize_bbox(bt):
+        """Quantize bounding box coordinates to two decimal places."""
         return tuple(round(float(x), 2) for x in bt)
 
     def _register(st_name, tbl, bbox_k, scr):
+        """Register a table with domain-aware fragmentation scoring."""
         nonlocal best_strategy
         # Use domain-aware fragmentation scoring for scientific papers
         domain = "scientific" if category and category.lower() == "scientific" else "general"
@@ -475,11 +532,19 @@ def extract_tables_from_page(
         )
         if not img_path:
             try:
-                rect = fitz.Rect(bbox)
-                if rect.is_empty or rect.width <= 0 or rect.height <= 0:
-                    rect = fitz.Rect(pg.rect)
-                rect = rect & pg.rect
-                pix = pg.get_pixmap(matrix=fitz.Matrix(2, 2), clip=rect)
+                bx0, by0, bx1, by1 = bbox[0], bbox[1], bbox[2], bbox[3]
+                bw, bh = bx1 - bx0, by1 - by0
+                if bw <= 0 or bh <= 0:
+                    bx0, by0 = 0, 0
+                    bx1, by1 = pg.rect.width, pg.rect.height
+                # Clamp to page bounds
+                bx0 = max(0, bx0)
+                by0 = max(0, by0)
+                bx1 = min(pg.rect.width, bx1)
+                by1 = min(pg.rect.height, by1)
+                clip = type("R", (), {"x0": bx0, "y0": by0, "x1": bx1, "y1": by1})()
+                matrix = type("M", (), {"a": 2.0})()
+                pix = pg.get_pixmap(matrix=matrix, clip=clip)
                 fallback_path = output_dir / f"page_{page_num+1}_table_{idx+1}_fallback.png"
                 pix.save(str(fallback_path))
                 img_path = str(fallback_path)
@@ -538,6 +603,7 @@ def _page_worker(
     s00_per_page: int,
     s00_table_style: Optional[str],
     s00_domain: Optional[str],
+    engine: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Process one page in a subprocess. All args/returns are picklable.
 
@@ -546,9 +612,7 @@ def _page_worker(
     pdf_path = Path(pdf_path_str)
     output_dir = Path(output_dir_str)
 
-    import fitz as _fitz
-
-    doc = _fitz.open(str(pdf_path))
+    doc = _OxideDocProxy(str(pdf_path))
     local_diagnostics: List[Dict[str, Any]] = []
 
     # Inject strategies snapshot into module-level dict
@@ -589,6 +653,11 @@ def _empty_page_result(page_num: int) -> Dict[str, Any]:
     }
 
 
+def _open_pdf_doc(pdf_path: Path, engine: Optional[str] = None):
+    """Open a PDF document using pdf_oxide."""
+    return _OxideDocProxy(str(pdf_path))
+
+
 def extract_all_tables(
     pdf_path: Path,
     output_dir: Path,
@@ -598,9 +667,11 @@ def extract_all_tables(
     context: Optional[Dict[str, Any]] = None,
     s00_table_pages: int = 0,
     s00_estimated_table_count: int = 0,
+    engine: Optional[str] = None,
 ):
+    """Extract all tables from a PDF and save them to the output directory."""
     try:
-        doc = fitz.open(str(pdf_path))
+        doc = _open_pdf_doc(pdf_path, engine)
     except Exception as exc:
         raise RuntimeError(f"Open PDF failed: {exc}")
 
@@ -876,6 +947,7 @@ def run(
     pdf_dir: Path = Path("data/results/pipeline/01_annotation_processor"),
     output_dir: Path = Path("data/results/pipeline"),
 ):
+    """Extract tables from sections defined in the input JSON file."""
     console.print(f"[green]Extracting tables based on sections in: {input_json.name}[/green]")
     stage_output_dir = output_dir / "05_table_extractor"
     json_output_dir = stage_output_dir / "json_output"
@@ -935,11 +1007,14 @@ def run(
     if _s00_table_pages == 0 and _s00_est_tables > 0:
         _s00_table_pages = (pipeline_ctx or {}).get("table_pages_drawing", 0) or 1
 
+    use_engine = os.getenv("EXTRACTOR_ENGINE", "pdf_oxide")
+
     all_tables, st_sum, q_sum = extract_all_tables(
         pdf_path, image_output_dir, [],
         preset=preset_name, category=preset_category, context=pipeline_ctx,
         s00_table_pages=_s00_table_pages,
         s00_estimated_table_count=_s00_est_tables,
+        engine=use_engine,
     )
 
     # Filter Section Headers from tables
@@ -968,12 +1043,16 @@ def run(
         filtered.append(t)
 
     # Section Association
+    def _rects_intersect(a, b):
+        return a[0] < b[2] and a[2] > b[0] and a[1] < b[3] and a[3] > b[1]
+
     for t in filtered:
-        t_box = fitz.Rect(t["bbox"])
+        t_bbox = t["bbox"]
         for s in sections:
-            if s["page_start"] <= t["page_index"] <= s["page_end"] and fitz.Rect(
-                s["bbox"]
-            ).intersects(t_box):
+            s_bbox = s.get("bbox")
+            if not s_bbox:
+                continue
+            if s["page_start"] <= t["page_index"] <= s["page_end"] and _rects_intersect(t_bbox, s_bbox):
                 t["section_id"] = s.get("id")
                 break
 
@@ -1036,6 +1115,7 @@ def run(
 
 
 def sanity() -> int:
+    """Return the result of the sanity check step."""
     return run_step_sanity(STEP_NAME)
 
 

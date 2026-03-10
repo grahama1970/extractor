@@ -4,6 +4,7 @@ Stage 01: Annotation Processor
 ------------------------------
 PDF Annotation Extract → Context Capture → LLM Interpretation → Clean PDF
 
+Uses pdf_oxide (MIT) as the sole extraction engine.
 Refactored to be self-contained (merged from utils/annots/runner.py).
 """
 
@@ -18,13 +19,6 @@ from pathlib import Path
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional
 from datetime import datetime
-
-# Third-party
-try:
-    import fitz  # PyMuPDF
-except ImportError:
-    print("PyMuPDF (fitz) not installed. Stage 01 requires it.", file=sys.stderr)
-    raise
 
 try:
     import psutil
@@ -55,6 +49,7 @@ RENDER_DPI = 200
 
 @dataclass
 class Config:
+    """Encapsulate settings for PDF processing and LLM integration."""
     input_pdf: Path
     output_dir: Path
     vertical_expansion_ratio: float = 0.5
@@ -116,6 +111,7 @@ except Exception as e:
 
 
 def _compute_relevant_to_for_annotation(a: Dict[str, Any]) -> List[str]:
+    """Derive relevant categories from an annotation."""
     stages: List[str] = []
     try:
         note = (a.get("human_note") or "").lower()
@@ -168,6 +164,7 @@ def _compute_relevant_to_for_annotation(a: Dict[str, Any]) -> List[str]:
 
 
 def _llm_enabled(model: Optional[str]) -> bool:
+    """Check if a model string indicates LLM is enabled."""
     if not model:
         return False
     if isinstance(model, str):
@@ -178,110 +175,163 @@ def _llm_enabled(model: Optional[str]) -> bool:
 
 
 # ------------------------------------------------------------------
-# EXTRACTION LOGIC
+# pdf_oxide ENGINE
 # ------------------------------------------------------------------
 
 
-def _get_expanded_rect(
-    annot: fitz.Annot,
-    page: fitz.Page,
-    config: Config,
-    freetext_rects: List[fitz.Rect],
-    other_annots: List[fitz.Rect],
-) -> fitz.Rect:
-    MAX_RADIUS = 200
-    current = annot.rect
-    cx, cy = (current.x0 + current.x1) / 2, (current.y0 + current.y1) / 2
-
-    # closest FreeText
-    best, best_d = None, float("inf")
-    for ft in freetext_rects:
-        fx, fy = (ft.x0 + ft.x1) / 2, (ft.y0 + ft.y1) / 2
-        d = ((cx - fx) ** 2 + (cy - fy) ** 2) ** 0.5
-        if d < best_d and d <= MAX_RADIUS:
-            best_d, best = d, ft
-    expanded = current if best is None else current | best
-
-    # walls
-    walls = other_annots
-    top = max([r.y1 for r in walls if r.y1 <= expanded.y0], default=0)
-    bot = min([r.y0 for r in walls if r.y0 >= expanded.y1], default=page.rect.height)
-
-    # vertical expansion
-    h = current.y1 - current.y0
-    extra = max(h * config.vertical_expansion_ratio, 40.0) / 2.0
-    y0 = max(top, expanded.y0 - extra)
-    y1 = min(bot, expanded.y1 + extra)
-
-    x0, x1 = (0, page.rect.width) if config.full_page_width else (expanded.x0, expanded.x1)
-    return fitz.Rect(x0, y0, x1, y1)
-
-
-def _get_context_blocks(
-    original_rect: fitz.Rect,
-    expanded_rect: fitz.Rect,
-    page_text_dict: Dict[str, Any],
-    num_blocks: int,
-) -> Dict[str, List[Dict[str, Any]]]:
-    inside, above, below = [], [], []
-    for blk in page_text_dict.get("blocks", []):
-        if "lines" not in blk:
-            continue
-        blk_rect = fitz.Rect(blk["bbox"])
-        if original_rect.intersects(blk_rect):
-            inside.append(blk)
-            continue
-        if expanded_rect.intersects(blk_rect):
-            if blk_rect.y1 <= original_rect.y0:
-                above.append(blk)
-            elif blk_rect.y0 >= original_rect.y1:
-                below.append(blk)
-    above.sort(key=lambda b: original_rect.y0 - b["bbox"][3])
-    below.sort(key=lambda b: b["bbox"][1] - original_rect.y1)
-    return {"inside": inside, "above": above[:num_blocks], "below": below[:num_blocks]}
-
-
-def _union_bbox(blocks: List[Dict[str, Any]]) -> Optional[fitz.Rect]:
-    rect: Optional[fitz.Rect] = None
+def _union_bbox(blocks: List[Dict[str, Any]]) -> Optional[Any]:
+    """Compute the union bounding box of all blocks. Returns object with x0/y0/x1/y1."""
+    x0, y0, x1, y1 = float("inf"), float("inf"), float("-inf"), float("-inf")
+    found = False
     for blk in blocks or []:
-        try:
-            b = blk.get("bbox")
-            if not b:
-                continue
-            r = fitz.Rect(b)
-            rect = r if rect is None else (rect | r)
-        except Exception:
+        b = blk.get("bbox")
+        if not b:
             continue
-    return rect
+        found = True
+        x0, y0 = min(x0, b[0]), min(y0, b[1])
+        x1, y1 = max(x1, b[2]), max(y1, b[3])
+    if not found:
+        return None
+    return type("R", (), {"x0": x0, "y0": y0, "x1": x1, "y1": y1})()
 
 
-def _compute_alignment(page_rect: fitz.Rect, inner_rect: Optional[fitz.Rect]) -> Optional[str]:
+def _compute_alignment(page_rect: Any, inner_rect: Optional[Any]) -> Optional[str]:
+    """Determine horizontal alignment of inner rectangle relative to page."""
     if inner_rect is None:
         return None
     page_cx = (page_rect.x0 + page_rect.x1) / 2.0
     inner_cx = (inner_rect.x0 + inner_rect.x1) / 2.0
     dx = abs(inner_cx - page_cx)
     threshold = 0.1 * (page_rect.x1 - page_rect.x0)
-    if dx <= threshold:
-        return "center"
-    return "left"
+    return "center" if dx <= threshold else "left"
 
 
-def _compute_spacing(
-    original_rect: fitz.Rect, above_blocks: List[Dict[str, Any]], below_blocks: List[Dict[str, Any]]
-) -> Dict[str, Optional[float]]:
-    spacing_above: Optional[float] = None
-    spacing_below: Optional[float] = None
-    if above_blocks:
-        b = fitz.Rect(above_blocks[0].get("bbox"))
-        spacing_above = max(0.0, original_rect.y0 - b.y1)
-    if below_blocks:
-        b = fitz.Rect(below_blocks[0].get("bbox"))
-        spacing_below = max(0.0, b.y0 - original_rect.y1)
-    return {"spacing_above": spacing_above, "spacing_below": spacing_below}
+def extract_annotations_data_oxide(pdf_path: Path, config: Config) -> List[Dict[str, Any]]:
+    """Extract annotations data from a PDF using pdf_oxide engine."""
+    import pdf_oxide
+
+    doc = pdf_oxide.open(str(pdf_path))
+    annots_out = []
+
+    for pno in range(doc.page_count()):
+        annots = doc.extract_annotations(pno)
+        if not annots:
+            continue
+
+        w, h = doc.page_dimensions(pno)
+        page_text_dict = doc.extract_text_dict(pno)
+
+        freetext_annots = [a for a in annots if a.get("type") == "FreeText"]
+        freetext_rects = [[a["rect"][0], a["rect"][1], a["rect"][2], a["rect"][3]] for a in freetext_annots]
+        freetext_notes = [{"rect": a["rect"], "note": a.get("content")} for a in freetext_annots]
+
+        for idx, annot in enumerate(annots):
+            if annot.get("type") == "FreeText" and not config.include_freetext:
+                continue
+
+            rect = annot.get("rect", [0, 0, 0, 0])
+            original_rect = list(rect)
+
+            # Expand rect
+            extra = max((rect[3] - rect[1]) * config.vertical_expansion_ratio, 40.0) / 2.0
+            x0 = 0 if config.full_page_width else rect[0]
+            x1 = w if config.full_page_width else rect[2]
+            y0 = max(0, rect[1] - extra)
+            y1 = min(h, rect[3] + extra)
+            expanded_rect = [x0, y0, x1, y1]
+
+            # Context from text dict blocks
+            inside_blocks, above_blocks, below_blocks = [], [], []
+            for blk in page_text_dict.get("blocks", []):
+                bb = blk.get("bbox")
+                if not bb:
+                    continue
+                bx0, by0, bx1, by1 = bb[0], bb[1], bb[2], bb[3]
+                # Intersection test
+                if bx0 < original_rect[2] and bx1 > original_rect[0] and by0 < original_rect[3] and by1 > original_rect[1]:
+                    inside_blocks.append(blk)
+                elif bx0 < expanded_rect[2] and bx1 > expanded_rect[0] and by0 < expanded_rect[3] and by1 > expanded_rect[1]:
+                    if by1 <= original_rect[1]:
+                        above_blocks.append(blk)
+                    elif by0 >= original_rect[3]:
+                        below_blocks.append(blk)
+
+            above_blocks.sort(key=lambda b: original_rect[1] - b["bbox"][3])
+            below_blocks.sort(key=lambda b: b["bbox"][1] - original_rect[3])
+            above_blocks = above_blocks[:config.context_blocks]
+            below_blocks = below_blocks[:config.context_blocks]
+
+            # Render region
+            img_dir = config.output_dir / "visual_output"
+            img_dir.mkdir(parents=True, exist_ok=True)
+            img_path = img_dir / f"annot_p{pno}_a{idx}.png"
+            try:
+                img_data = doc.render_page_clipped(
+                    pno, tuple(expanded_rect), dpi=config.render_dpi
+                )
+                img_path.write_bytes(bytes(img_data))
+            except Exception as e:
+                logger.debug(f"Render failed for annotation p{pno}_a{idx}: {e}")
+
+            # Features
+            inside_plain = _extract_plain_text(inside_blocks)
+            grid = _gridline_features(str(img_path)) if img_path.exists() else {}
+
+            annots_out.append({
+                "id": f"p{pno}_a{idx}",
+                "page": pno,
+                "type": annot.get("type", "Unknown"),
+                "original_rect": original_rect,
+                "expanded_rect": expanded_rect,
+                "inside_blocks": inside_blocks,
+                "above_blocks": above_blocks,
+                "below_blocks": below_blocks,
+                "image_path": str(img_path),
+                "human_note": next(
+                    (
+                        ft["note"]
+                        for ft in freetext_notes
+                        if (ft["rect"][0] < original_rect[2] and ft["rect"][2] > original_rect[0]
+                            and ft["rect"][1] < original_rect[3] and ft["rect"][3] > original_rect[1])
+                    ),
+                    None,
+                ),
+                "computed_features": {
+                    "alignment": _compute_alignment(
+                        type("R", (), {"x0": 0, "x1": w, "y0": 0, "y1": h})(),
+                        _union_bbox(inside_blocks) if inside_blocks else None,
+                    ),
+                    **_detect_numbering(inside_plain),
+                    "gridlines_detected": grid.get("detected", False),
+                },
+                "provenance": "freetext",
+            })
+
+    return annots_out
+
+
+def create_clean_pdf_oxide(input_path: Path, output_dir: Path) -> str:
+    """Create a clean PDF with annotations removed using pdf_oxide."""
+    import pdf_oxide
+
+    base_name = input_path.stem
+    while base_name.endswith("_clean"):
+        base_name = base_name[:-6]
+    clean_path = output_dir / f"{base_name}_clean.pdf"
+
+    doc = pdf_oxide.open(str(input_path))
+    for pno in range(doc.page_count()):
+        annots = doc.extract_annotations(pno)
+        if annots:
+            doc.remove_annotations(pno, list(range(len(annots))))
+    doc.save(str(clean_path))
+    return str(clean_path)
+
+
 
 
 def _extract_plain_text(blocks: List[Dict[str, Any]]) -> str:
+    """Extract plain text from structured blocks of data."""
     parts: List[str] = []
     for blk in blocks or []:
         for ln in blk.get("lines", []):
@@ -293,6 +343,7 @@ def _extract_plain_text(blocks: List[Dict[str, Any]]) -> str:
 
 
 def _detect_numbering(text: str) -> Dict[str, Optional[Any]]:
+    """Extract numbering prefix details from a string."""
     import re
 
     res: Dict[str, Optional[Any]] = {
@@ -320,6 +371,7 @@ def _detect_numbering(text: str) -> Dict[str, Optional[Any]]:
 
 
 def _gridline_features(image_path: str) -> Dict[str, Optional[float]]:
+    """Extract gridline density and detection status from image."""
     feats: Dict[str, Optional[float]] = {
         "gridlines_h_density": None,
         "gridlines_v_density": None,
@@ -354,120 +406,6 @@ def _gridline_features(image_path: str) -> Dict[str, Optional[float]]:
     return feats
 
 
-def extract_annotations_data(pdf_path: Path, config: Config) -> List[Dict[str, Any]]:
-    annots_out = []
-    try:
-        doc = fitz.open(pdf_path)
-    except Exception as exc:
-        raise RuntimeError(f"Stage 01 failed to open PDF: {pdf_path}") from exc
-
-    with doc:
-        for pno in range(len(doc)):
-            page = doc.load_page(pno)
-            all_annots = list(page.annots() or [])
-            if not all_annots:
-                continue
-
-            freettext_list: List[fitz.Annot] = [
-                a
-                for a in all_annots
-                if (isinstance(a.type, tuple) and len(a.type) > 1 and a.type[1] == ANNOT_FREETEXT)
-            ]
-            freetext_rects = [a.rect for a in freettext_list]
-            freetext_notes = []
-            for a in freettext_list:
-                note = (getattr(a, "info", {}) or {}).get("content") or getattr(a, "contents", None)
-                freetext_notes.append({"rect": a.rect, "note": note})
-
-            page_text_dict = page.get_text("dict")
-            for idx, annot in enumerate(all_annots):
-                if (
-                    isinstance(annot.type, tuple)
-                    and len(annot.type) > 1
-                    and annot.type[1] == ANNOT_FREETEXT
-                    and not config.include_freetext
-                ):
-                    continue
-
-                original_rect = fitz.Rect(annot.rect)
-                other_rects = [a.rect for i, a in enumerate(all_annots) if i != idx]
-                expanded_rect = _get_expanded_rect(annot, page, config, freetext_rects, other_rects)
-
-                # Context extraction
-                context_blocks = _get_context_blocks(
-                    original_rect, expanded_rect, page_text_dict, config.context_blocks
-                )
-
-                # Image rendering
-                matrix = fitz.Matrix(config.render_dpi / 72, config.render_dpi / 72)
-                try:
-                    pix = page.get_pixmap(matrix=matrix, clip=expanded_rect, annots=False)
-                except TypeError:
-                    pix = page.get_pixmap(matrix=matrix, clip=expanded_rect)
-
-                img_dir = config.output_dir / "visual_output"
-                img_dir.mkdir(parents=True, exist_ok=True)
-                img_path = img_dir / f"annot_p{pno}_a{idx}.png"
-                pix.save(str(img_path))
-
-                # Features
-                inside_blocks = context_blocks["inside"]
-                inside_plain = _extract_plain_text(inside_blocks) or ""
-                grid = _gridline_features(str(img_path))
-
-                annots_out.append(
-                    {
-                        "id": f"p{pno}_a{idx}",
-                        "page": pno,
-                        "type": "FreeText",
-                        "original_rect": [
-                            original_rect.x0,
-                            original_rect.y0,
-                            original_rect.x1,
-                            original_rect.y1,
-                        ],
-                        "expanded_rect": [
-                            expanded_rect.x0,
-                            expanded_rect.y0,
-                            expanded_rect.x1,
-                            expanded_rect.y1,
-                        ],
-                        "inside_blocks": inside_blocks,
-                        "above_blocks": context_blocks["above"],
-                        "below_blocks": context_blocks["below"],
-                        "image_path": str(img_path),
-                        "human_note": next(
-                            (
-                                ft["note"]
-                                for ft in freetext_notes
-                                if original_rect.intersects(ft["rect"])
-                            ),
-                            None,
-                        ),  # Simplification
-                        "computed_features": {
-                            "alignment": _compute_alignment(page.rect, _union_bbox(inside_blocks)),
-                            **_detect_numbering(inside_plain),
-                            "gridlines_detected": grid.get("detected", False),
-                        },
-                        "provenance": "freetext",
-                    }
-                )
-    return annots_out
-
-
-def create_clean_pdf(input_path: Path, output_dir: Path) -> str:
-    # Strip any existing _clean suffix to prevent recursion (e.g. foo_clean_clean_clean.pdf)
-    base_name = input_path.stem
-    while base_name.endswith("_clean"):
-        base_name = base_name[:-6]  # Remove "_clean" suffix
-    clean_path = output_dir / f"{base_name}_clean.pdf"
-    doc = fitz.open(input_path)
-    with doc:
-        for page in doc:
-            for annot in list(page.annots() or []):
-                page.delete_annot(annot)
-        doc.save(str(clean_path))
-    return str(clean_path)
 
 
 # ------------------------------------------------------------------
@@ -476,7 +414,9 @@ def create_clean_pdf(input_path: Path, output_dir: Path) -> str:
 
 
 def build_context(annot: Dict[str, Any]) -> str:
+    """Build context string from annotation."""
     def b2s(blocks):
+        """Extract non-empty text lines from structured block data."""
         lines = []
         for blk in blocks:
             for ln in blk.get("lines", []):
@@ -499,6 +439,7 @@ def build_context(annot: Dict[str, Any]) -> str:
 
 
 async def process_pdf_pipeline(config: Config):
+    """Orchestrate a PDF processing pipeline, extracting annotations."""
     datetime.now().isoformat()
     t_stage0 = time.monotonic()
     run_id = get_run_id()
@@ -509,12 +450,13 @@ async def process_pdf_pipeline(config: Config):
     stage_output_dir.mkdir(parents=True, exist_ok=True)
     json_output_dir.mkdir(exist_ok=True)
 
-    logger.info("01: extracting annotations…")
-    data = extract_annotations_data(config.input_pdf, config)
+    logger.info("01: extracting annotations… (engine=pdf_oxide)")
+
+    data = extract_annotations_data_oxide(config.input_pdf, config)
     if config.limit_annotations:
         data = data[: config.limit_annotations]
 
-    clean_pdf_path = create_clean_pdf(config.input_pdf, stage_output_dir)
+    clean_pdf_path = create_clean_pdf_oxide(config.input_pdf, stage_output_dir)
 
     if not data:
         payload = {
@@ -564,8 +506,8 @@ async def process_pdf_pipeline(config: Config):
                 }
             )
 
-        api_key = os.getenv("CHUTES_API_KEY")
-        api_base = os.getenv("CHUTES_API_BASE", "https://llm.chutes.ai/v1")
+        api_key = os.getenv("SCILLM_PROXY_KEY", "sk-dev-proxy-123")
+        api_base = os.getenv("SCILLM_API_BASE", "http://localhost:4010")
 
         async for r in parallel_acompletions_iter(
             requests,
@@ -647,6 +589,7 @@ def run(
     timeout: int = 0,
     cache: bool = True,
 ) -> Path:
+    """Process PDF for annotations, returning output path."""
     stage_output_dir = output_dir / "01_annotation_processor"
     logger.add(stage_output_dir / "stage_01.log", level="DEBUG")
 
@@ -666,6 +609,7 @@ def run(
 
 
 def sanity() -> int:
+    """Perform sanity check for a step."""
     return run_step_sanity(STEP_NAME)
 
 

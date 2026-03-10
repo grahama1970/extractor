@@ -20,6 +20,20 @@ except ImportError:
 
 STEP_NAME = "05_table_extractor"
 
+
+class _Rect:
+    """Lightweight rectangle for pdf_oxide proxy compatibility (replaces fitz.Rect)."""
+    __slots__ = ("x0", "y0", "x1", "y1")
+
+    def __init__(self, x0: float, y0: float, x1: float, y1: float):
+        self.x0, self.y0, self.x1, self.y1 = x0, y0, x1, y1
+
+    @property
+    def width(self): return self.x1 - self.x0
+
+    @property
+    def height(self): return self.y1 - self.y0
+
 # Padding ratios for table image extraction
 VERTICAL_PADDING_RATIO = float(os.getenv("TABLE_VERTICAL_PADDING_RATIO", 0.30))
 HORIZONTAL_PADDING_RATIO = float(os.getenv("TABLE_HORIZONTAL_PADDING_RATIO", 0.07))
@@ -121,8 +135,6 @@ def extract_table_image(
     Returns:
         Path to saved image or None on error
     """
-    import fitz
-
     try:
         page = pdf_doc[page_num]
         x1, y1, x2, y2 = bbox
@@ -144,7 +156,7 @@ def extract_table_image(
         # Convert to PyMuPDF coordinates (origin top-left)
         rect_y0 = page_height - y2_padded
         rect_y1 = page_height - y1_padded
-        bbox_rect = fitz.Rect(x1_padded, rect_y0, x2_padded, rect_y1)
+        bbox_rect = _Rect(x1_padded, rect_y0, x2_padded, rect_y1)
 
         # Render and save
         pix = page.get_pixmap(clip=bbox_rect, dpi=PYMUPDF_DPI)
@@ -188,25 +200,22 @@ def extract_page_half_image(
     Returns:
         PIL Image of the requested half (RGB).
     """
-    import fitz
+    import pdf_oxide
     from PIL import Image as PILImage
+    import io
 
-    doc = fitz.open(str(pdf_path))
-    try:
-        page = doc[page_index]
-        rect = page.rect
-        mid_y = (rect.y0 + rect.y1) / 2.0
-        if half == "top":
-            clip = fitz.Rect(rect.x0, rect.y0, rect.x1, mid_y)
-        elif half == "bottom":
-            clip = fitz.Rect(rect.x0, mid_y, rect.x1, rect.y1)
-        else:
-            raise ValueError(f"half must be 'top' or 'bottom', got {half!r}")
-        pix = page.get_pixmap(clip=clip, dpi=dpi)
-        img = PILImage.frombytes("RGB", (pix.width, pix.height), pix.samples)
-    finally:
-        doc.close()
-    return img
+    doc = pdf_oxide.open(str(pdf_path))
+    w, h = doc.page_dimensions(page_index)
+    mid_y = h / 2.0
+    if half == "top":
+        clip = (0, 0, w, mid_y)
+    elif half == "bottom":
+        clip = (0, mid_y, w, h)
+    else:
+        raise ValueError(f"half must be 'top' or 'bottom', got {half!r}")
+    img_bytes = doc.render_page_clipped(page_index, clip, dpi=dpi)
+    img = PILImage.open(io.BytesIO(bytes(img_bytes)))
+    return img.convert("RGB")
 
 
 def concat_page_halves(
@@ -283,19 +292,15 @@ def pre_rasterize_page(
     Returns:
         Path to the cached PNG file.
     """
-    import fitz
+    import pdf_oxide
 
     png_path = output_dir / f"_raster_p{page_num}.png"
     if png_path.exists():
         return png_path
 
-    doc = fitz.open(str(pdf_path))
-    try:
-        page = doc[page_num]
-        pix = page.get_pixmap(dpi=dpi)
-        pix.save(str(png_path))
-    finally:
-        doc.close()
+    doc = pdf_oxide.open(str(pdf_path))
+    img_bytes = doc.render_page(page_num, dpi=dpi)
+    png_path.write_bytes(bytes(img_bytes))
     return png_path
 
 

@@ -152,48 +152,45 @@ def stitch_headers(tables: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 def detect_table_caption(pdf_path: Path, page_index: int, bbox: List[float]) -> Optional[str]:
     """Find a nearby caption/title for a table by scanning PDF text above it."""
-    import fitz
+    import pdf_oxide
 
     try:
-        doc = fitz.open(str(pdf_path))
-        page = doc[page_index]
-        rect = fitz.Rect(*bbox)
+        doc = pdf_oxide.open(str(pdf_path))
+        x0, y0, x1, y1 = bbox
 
         def _scan_band(top: float) -> Optional[str]:
-            band = fitz.Rect(rect.x0, max(0, top), rect.x1, rect.y0)
-            blocks = page.get_text("blocks", clip=band)
-            blocks = sorted(blocks, key=lambda b: -b[1])
-            for b in blocks:
-                txt = (b[4] or "").strip()
+            """Extract text from band above table, look for 'Table N' pattern."""
+            band = (x0, max(0, top), x1, y0)
+            spans = doc.extract_spans_in_rect(page_index, band)
+            # Group by y-position (descending = closest to table first)
+            spans = sorted(spans, key=lambda s: -s.get("bbox", [0, 0, 0, 0])[1])
+            for s in spans:
+                txt = (s.get("text") or "").strip()
                 if not txt:
                     continue
                 if re.match(r"^\s*Table\s+\d+(?:[-–]\d+)?[.:]", txt, re.IGNORECASE):
                     return txt
             return None
 
-        cap = _scan_band(max(0, rect.y0 - 80))
+        cap = _scan_band(max(0, y0 - 80))
         if cap:
-            doc.close()
             return cap
 
-        cap = _scan_band(max(0, rect.y0 - 200))
+        cap = _scan_band(max(0, y0 - 200))
         if cap:
-            doc.close()
             return cap
 
-        blocks = page.get_text("blocks")
-        above = [b for b in blocks if b[3] <= rect.y0]
-        above = sorted(above, key=lambda b: -b[1])
-
-        for b in above:
-            txt = (b[4] or "").strip()
+        # Fallback: scan all text above the table on the page
+        w, h = doc.page_dimensions(page_index)
+        spans = doc.extract_spans_in_rect(page_index, (0, 0, w, y0))
+        spans = sorted(spans, key=lambda s: -s.get("bbox", [0, 0, 0, 0])[1])
+        for s in spans:
+            txt = (s.get("text") or "").strip()
             if not txt:
                 continue
             if re.match(r"^\s*Table\s+\d+(?:[-–]\d+)?[.:]", txt, re.IGNORECASE):
-                doc.close()
                 return txt
 
-        doc.close()
         return None
     except Exception as exc:
         log_stage_error(STEP_NAME, exc, {"context": "detect_caption"})

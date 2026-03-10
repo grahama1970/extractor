@@ -12,10 +12,6 @@ from typing import Any, Dict, Optional, Tuple
 
 from loguru import logger
 
-try:
-    import fitz  # PyMuPDF
-except ImportError:
-    fitz = None
 
 
 # ------------------------------------------------------------------
@@ -135,8 +131,8 @@ def _predict_strategy_for_table(
 
         # Extract table region image
         page = pdf_doc[page_num]
-        clip = fitz.Rect(bbox[0], bbox[1], bbox[2], bbox[3])
-        mat = fitz.Matrix(2, 2)  # 2x zoom for better quality
+        clip = type("R", (), {"x0": bbox[0], "y0": bbox[1], "x1": bbox[2], "y1": bbox[3]})()
+        mat = type("M", (), {"a": 2.0})()  # 2x zoom for better quality
         pix = page.get_pixmap(matrix=mat, clip=clip)
         img_data = pix.tobytes("png")
         img = Image.open(io.BytesIO(img_data)).convert("RGB")

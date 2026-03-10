@@ -24,22 +24,17 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
-import fitz  # PyMuPDF
 from dotenv import find_dotenv, load_dotenv
 from loguru import logger
 from extractor.pipeline.utils.reliability import log_stage_error
 from rich.console import Console
 
 from extractor.pipeline.utils.figure_extractor_utils import (
-    _estimate_bbox,
     _expand_bbox,
-    _render_region,
     _save_image_bytes,
-    _nearby_text,
     _bbox_area,
     _normalize_title,
     _assemble_result,
-    intersect_sections,
 )
 from extractor.pipeline.utils.step_sanity import run_step_sanity
 
@@ -51,6 +46,7 @@ STEP_NAME = "06_figure_extractor"
 
 
 def sanity() -> int:
+    """Return sanity check result."""
     return run_step_sanity(STEP_NAME)
 
 
@@ -62,53 +58,69 @@ BAND_BELOW_PX = int(os.getenv("STAGE06_BAND_BELOW_PX", "140"))
 FIGURE_MIN_AREA = int(os.getenv("FIGURE_MIN_AREA_PX", "5000"))
 
 
-def _band_texts(page: fitz.Page, bbox: list[float]) -> tuple[str, str]:
-    rr = fitz.Rect(*bbox)
-    band_above = fitz.Rect(rr.x0, max(0, rr.y0 - BAND_ABOVE_PX), rr.x1, rr.y0)
-    band_below = fitz.Rect(rr.x0, rr.y1, rr.x1, min(page.rect.height, rr.y1 + BAND_BELOW_PX))
-
-    def collect(clip_rect: fitz.Rect) -> str:
-        blks = page.get_text("blocks", clip=clip_rect)
-        return " ".join((b[4] or "").strip() for b in blks if (b[4] or "").strip())
-
-    return collect(band_above), collect(band_below)
+# ------------------------------------------------------------------
+# pdf_oxide engine helpers
+# ------------------------------------------------------------------
 
 
-async def _process_one(
+def _band_texts_oxide(doc, page_idx: int, bbox: list[float]) -> tuple[str, str]:
+    """Extract text from bands above/below a bbox using pdf_oxide."""
+    w, h = doc.page_dimensions(page_idx)
+    x0, y0, x1, y1 = bbox
+
+    # Above band
+    above_rect = (x0, max(0, y0 - BAND_ABOVE_PX), x1, y0)
+    below_rect = (x0, y1, x1, min(h, y1 + BAND_BELOW_PX))
+
+    def collect_oxide(rect):
+        spans = doc.extract_spans_in_rect(page_idx, rect)
+        texts = [s["text"].strip() for s in spans if s.get("text", "").strip()]
+        return " ".join(texts)
+
+    return collect_oxide(above_rect), collect_oxide(below_rect)
+
+
+def _nearby_text_oxide(doc, page_idx: int, bbox: list[float]) -> str:
+    """Extract text from a bounding box region using pdf_oxide."""
+    spans = doc.extract_spans_in_rect(page_idx, tuple(bbox))
+    return " ".join(s["text"].strip() for s in spans if s.get("text", "").strip())
+
+
+def _render_region_oxide(doc, page_idx: int, bbox: list[float], dpi: int = 144) -> bytes:
+    """Render a page region using pdf_oxide's clipped rendering."""
+    return bytes(doc.render_page_clipped(page_idx, tuple(bbox), dpi=dpi))
+
+
+async def _process_one_oxide(
     *,
-    doc: fitz.Document,
+    doc,
     block: dict[str, Any],
     figure_id: str,
     image_output_dir: Path,
 ) -> dict[str, Any] | None:
+    """Process a figure block using pdf_oxide engine."""
     try:
         page_num = int(block.get("page_idx", 0))
-        page = doc[page_num]
+        w, h = doc.page_dimensions(page_num)
 
-        bbox0 = block.get("bbox") or _estimate_bbox(page, block)
+        bbox0 = block.get("bbox") or [50.0, 100.0, w - 50, h - 100]
+        if bbox0 == [0, 0, 0, 0]:
+            bbox0 = [50.0, 100.0, w - 50, h - 100]
 
-        # Filtering
         area = _bbox_area(bbox0)
         if area < FIGURE_MIN_AREA:
             return None
-
-        # Max area: e.g. 90% of page? or explicit pixels?
-        # Using env var if present, else fairly permissive (e.g. 4M pixels ~ 2k*2k)
         max_area = int(os.getenv("FIGURE_MAX_AREA_PX", "0"))
         if max_area > 0 and area > max_area:
             return None
 
-        expanded_bbox = _expand_bbox(bbox0, page.rect.height, VERTICAL_PADDING_RATIO)
-
-        image_data = _render_region(page, expanded_bbox)
+        expanded_bbox = _expand_bbox(bbox0, h, VERTICAL_PADDING_RATIO)
+        image_data = _render_region_oxide(doc, page_num, expanded_bbox)
         img_path = _save_image_bytes(image_output_dir, figure_id, image_data)
 
-        # Context gathering (for 06b)
-        above_text, below_text = _band_texts(page, bbox0)
-        nearby_text = _nearby_text(page, expanded_bbox)
+        above_text, below_text = _band_texts_oxide(doc, page_num, bbox0)
+        nearby_text = _nearby_text_oxide(doc, page_num, expanded_bbox)
 
-        # NOTE: Stage 06 is now purely deterministic.
-        # Description/Title will provide nulls/empties, populated by 06b_figure_describer (VLM).
         description: Optional[str] = None
         figure_title: Optional[str] = None
         title_source: Optional[str] = None
@@ -116,8 +128,6 @@ async def _process_one(
 
         number, base_title, normalized_id = _normalize_title(figure_title or number_hint)
 
-        # Attach context strings to the result object so 06b can reuse them
-        # (Must be added to _assemble_result or piggybacked - simpler to piggyback on the record)
         res = _assemble_result(
             figure_id=figure_id,
             page_num=page_num,
@@ -132,7 +142,6 @@ async def _process_one(
             normalized_id=normalized_id,
             extraction_time=datetime.now().isoformat(),
         )
-        # Piggyback context for Stage 06b
         res["context_above"] = above_text
         res["context_below"] = below_text
         res["context_nearby"] = nearby_text
@@ -142,18 +151,21 @@ async def _process_one(
         raise
 
 
-async def _process_all(
+async def _process_all_oxide(
     *,
     pdf_path: Path,
     figure_blocks: list[dict[str, Any]],
     image_output_dir: Path,
 ) -> list[dict[str, Any]]:
+    """Process all figure blocks using pdf_oxide engine."""
+    import pdf_oxide
+
+    doc = pdf_oxide.open(str(pdf_path))
     sem = asyncio.Semaphore(max(1, CONCURRENCY))
-    # Note: No router needed here anymore; purely deterministic.
 
     async def runner(i: int, blk: dict[str, Any]) -> dict[str, Any] | None:
         async with sem:
-            return await _process_one(
+            return await _process_one_oxide(
                 doc=doc,
                 block=blk,
                 figure_id=f"figure_{i+1:03d}",
@@ -161,22 +173,17 @@ async def _process_all(
             )
 
     tasks = []
-    doc = fitz.open(str(pdf_path))
     out: list[dict[str, Any]] = []
-    try:
-        for i, blk in enumerate(figure_blocks):
-            tasks.append(asyncio.create_task(runner(i, blk)))
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        for i, res in enumerate(results):
-            if isinstance(res, Exception):
-                logger.error(f"figure.task.error idx={i} err={res}")
-                continue
-            if res:
-                out.append(res)
-    finally:
-        doc.close()
+    for i, blk in enumerate(figure_blocks):
+        tasks.append(asyncio.create_task(runner(i, blk)))
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    for i, res in enumerate(results):
+        if isinstance(res, Exception):
+            logger.error(f"figure.task.error idx={i} err={res}")
+            continue
+        if res:
+            out.append(res)
 
-    # Write per-figure summaries for diagnostics (metadata only)
     try:
         logs_dir = image_output_dir.parent / "logs"
         logs_dir.mkdir(parents=True, exist_ok=True)
@@ -195,12 +202,33 @@ async def _process_all(
                 )
             )
     except Exception as exc:
-        # Non-critical: don't fail pipeline on log write errors
         logger.warning(f"Failed to write figure summaries: {exc}")
     return out
 
 
-## section intersection moved to utils.intersect_sections
+
+
+def _rects_intersect(a: list, b: list) -> bool:
+    """Pure-Python AABB intersection check (no fitz dependency)."""
+    return a[0] < b[2] and a[2] > b[0] and a[1] < b[3] and a[3] > b[1]
+
+
+def _intersect_sections_simple(figures: list[dict], sections: list[dict]) -> None:
+    """Attach section_id to figures using pure-Python rect intersection."""
+    for figure in figures:
+        bbox = figure.get("bbox")
+        page = figure.get("page")
+        if not bbox or page is None:
+            continue
+        for s in sections:
+            ps = s.get("page_start")
+            pe = s.get("page_end")
+            sb = s.get("bbox")
+            if ps is None or pe is None or sb is None:
+                continue
+            if ps <= page <= pe and _rects_intersect(bbox, sb):
+                figure["section_id"] = s.get("id", "unknown")
+                break
 
 
 def run(
@@ -210,6 +238,7 @@ def run(
     output_dir: Path = Path("data/results/pipeline"),
     bundle: Optional[Path] = None,
     preset_config: Optional[dict[str, Any]] = None,
+    engine: Optional[str] = None,
 ) -> Path:
     """Extract figures, deterministically (image + band texts), write JSON."""
 
@@ -271,12 +300,12 @@ def run(
     figures: list[dict[str, Any]] = []
     if blocks:
         figures = asyncio.run(
-            _process_all(pdf_path=pdf_path, figure_blocks=blocks, image_output_dir=img_dir)
+            _process_all_oxide(pdf_path=pdf_path, figure_blocks=blocks, image_output_dir=img_dir)
         )
 
     # Map to sections
     if figures and sections:
-        intersect_sections(figures, sections)
+        _intersect_sections_simple(figures, sections)
 
     result = {
         "timestamp": datetime.now().isoformat(),
@@ -316,6 +345,7 @@ if __name__ == "__main__":
         "--pipeline-dir", type=Path, required=True, help="Path to pipeline results root"
     )
     parser.add_argument("--pdf-dir", type=Path, help="Dir containing input PDF")
+    parser.add_argument("--engine", choices=["pymupdf", "pdf_oxide"], default=None)
     args = parser.parse_args()
 
     pipeline_dir = args.pipeline_dir
@@ -342,7 +372,8 @@ if __name__ == "__main__":
             sys.exit(1)
 
         run(
-            stage_02_json=stage_02, stage_04_json=stage_04, pdf_dir=pdf_dir, output_dir=pipeline_dir
+            stage_02_json=stage_02, stage_04_json=stage_04, pdf_dir=pdf_dir,
+            output_dir=pipeline_dir, engine=args.engine,
         )
 
     except Exception as e:
