@@ -1165,9 +1165,9 @@ def _run_pdf_strategy(pdf: Path, out: Path, args: argparse.Namespace) -> int:
     _write_artifacts_index(out, (out / "02_marker_extractor"))
     manifest.record_stage(
         "02_marker_extractor",
-        "Completed",
+        "Completed" if a02 else "Failed",
         {
-            "json": str(a02.relative_to(out)),
+            "json": str(a02.relative_to(out)) if a02 else None,
             "latency_ms": stage_latencies.get("02_marker_extractor"),
         },
     )

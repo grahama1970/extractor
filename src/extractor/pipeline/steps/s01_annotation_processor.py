@@ -214,19 +214,19 @@ def extract_annotations_data_oxide(pdf_path: Path, config: Config) -> List[Dict[
     annots_out = []
 
     for pno in range(doc.page_count()):
-        annots = doc.extract_annotations(pno)
+        annots = doc.get_annotations(pno)
         if not annots:
             continue
 
         w, h = doc.page_dimensions(pno)
         page_text_dict = doc.extract_text_dict(pno)
 
-        freetext_annots = [a for a in annots if a.get("type") == "FreeText"]
+        freetext_annots = [a for a in annots if a.get("subtype") == "FreeText"]
         freetext_rects = [[a["rect"][0], a["rect"][1], a["rect"][2], a["rect"][3]] for a in freetext_annots]
         freetext_notes = [{"rect": a["rect"], "note": a.get("content")} for a in freetext_annots]
 
         for idx, annot in enumerate(annots):
-            if annot.get("type") == "FreeText" and not config.include_freetext:
+            if annot.get("subtype") == "FreeText" and not config.include_freetext:
                 continue
 
             rect = annot.get("rect", [0, 0, 0, 0])
@@ -321,7 +321,7 @@ def create_clean_pdf_oxide(input_path: Path, output_dir: Path) -> str:
 
     doc = pdf_oxide.open(str(input_path))
     for pno in range(doc.page_count()):
-        annots = doc.extract_annotations(pno)
+        annots = doc.get_annotations(pno)
         if annots:
             doc.remove_annotations(pno, list(range(len(annots))))
     doc.save(str(clean_path))

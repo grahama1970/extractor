@@ -73,8 +73,8 @@ def _band_texts_oxide(doc, page_idx: int, bbox: list[float]) -> tuple[str, str]:
     below_rect = (x0, y1, x1, min(h, y1 + BAND_BELOW_PX))
 
     def collect_oxide(rect):
-        spans = doc.extract_spans_in_rect(page_idx, rect)
-        texts = [s["text"].strip() for s in spans if s.get("text", "").strip()]
+        spans = doc.extract_spans(page_idx, region=rect)
+        texts = [s.text.strip() for s in spans if getattr(s, "text", "").strip()]
         return " ".join(texts)
 
     return collect_oxide(above_rect), collect_oxide(below_rect)
@@ -82,8 +82,8 @@ def _band_texts_oxide(doc, page_idx: int, bbox: list[float]) -> tuple[str, str]:
 
 def _nearby_text_oxide(doc, page_idx: int, bbox: list[float]) -> str:
     """Extract text from a bounding box region using pdf_oxide."""
-    spans = doc.extract_spans_in_rect(page_idx, tuple(bbox))
-    return " ".join(s["text"].strip() for s in spans if s.get("text", "").strip())
+    spans = doc.extract_spans(page_idx, region=tuple(bbox))
+    return " ".join(s.text.strip() for s in spans if getattr(s, "text", "").strip())
 
 
 def _render_region_oxide(doc, page_idx: int, bbox: list[float], dpi: int = 144) -> bytes:

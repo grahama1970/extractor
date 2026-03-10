@@ -161,11 +161,11 @@ def detect_table_caption(pdf_path: Path, page_index: int, bbox: List[float]) -> 
         def _scan_band(top: float) -> Optional[str]:
             """Extract text from band above table, look for 'Table N' pattern."""
             band = (x0, max(0, top), x1, y0)
-            spans = doc.extract_spans_in_rect(page_index, band)
+            spans = doc.extract_spans(page_index, region=band)
             # Group by y-position (descending = closest to table first)
-            spans = sorted(spans, key=lambda s: -s.get("bbox", [0, 0, 0, 0])[1])
+            spans = sorted(spans, key=lambda s: -(getattr(s, "bbox", (0, 0, 0, 0))[1]))
             for s in spans:
-                txt = (s.get("text") or "").strip()
+                txt = (getattr(s, "text", "") or "").strip()
                 if not txt:
                     continue
                 if re.match(r"^\s*Table\s+\d+(?:[-–]\d+)?[.:]", txt, re.IGNORECASE):
@@ -182,10 +182,10 @@ def detect_table_caption(pdf_path: Path, page_index: int, bbox: List[float]) -> 
 
         # Fallback: scan all text above the table on the page
         w, h = doc.page_dimensions(page_index)
-        spans = doc.extract_spans_in_rect(page_index, (0, 0, w, y0))
-        spans = sorted(spans, key=lambda s: -s.get("bbox", [0, 0, 0, 0])[1])
+        spans = doc.extract_spans(page_index, region=(0, 0, w, y0))
+        spans = sorted(spans, key=lambda s: -(getattr(s, "bbox", (0, 0, 0, 0))[1]))
         for s in spans:
-            txt = (s.get("text") or "").strip()
+            txt = (getattr(s, "text", "") or "").strip()
             if not txt:
                 continue
             if re.match(r"^\s*Table\s+\d+(?:[-–]\d+)?[.:]", txt, re.IGNORECASE):
