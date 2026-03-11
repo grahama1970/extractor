@@ -43,6 +43,7 @@ STEP_NAME = "10_arangodb_exporter"
 
 
 def sanity() -> int:
+    """Run sanity check and return status code."""
     return run_step_sanity(STEP_NAME)
 
 
@@ -69,8 +70,8 @@ def get_embeddings(texts: list[str]) -> list[list[float]]:
     """Get embeddings from the standalone embedding service."""
     service_url = os.getenv("EMBEDDING_SERVICE_URL", "http://127.0.0.1:8602")
     try:
-        import requests
-        resp = requests.post(
+        import httpx
+        resp = httpx.post(
             f"{service_url}/embed/batch",
             json={"texts": texts},
             timeout=120
@@ -634,7 +635,14 @@ def sync_to_codebase(pipeline_dir: Path):
         return
 
     # Use the absolute root defined at module level if available, otherwise detect
-    extractor_root = Path(os.getenv("EXTRACTOR_ROOT", str(pipeline_dir.parents[2])))
+    env_root = os.getenv("EXTRACTOR_ROOT")
+    if env_root:
+        extractor_root = Path(env_root)
+    elif len(pipeline_dir.parents) > 2:
+        extractor_root = pipeline_dir.parents[2]
+    else:
+        logger.debug("Codebase sync: pipeline_dir too shallow to detect extractor root")
+        return
     if not (extractor_root / "src").exists():
         logger.warning(f"Codebase sync: src not found in {extractor_root}")
         return
@@ -811,6 +819,9 @@ def build_flattened_data(repo, pipeline_dir: Path) -> list:
         html_data = tbl.get("html_data", "")
         x0, y0, x1, y1 = tbl.get("x0"), tbl.get("y0"), tbl.get("x1"), tbl.get("y1")
 
+        # S05 extraction quality metrics (carried through S07)
+        metrics = tbl.get("extraction_metrics", {})
+
         entry = {
             "_key": tbl_key,
             "source_pdf": str(pipeline_dir),
@@ -825,6 +836,12 @@ def build_flattened_data(repo, pipeline_dir: Path) -> list:
                 "html": html_data,
                 "image_path": tbl.get("image_path"),
                 "bbox": [x0, y0, x1, y1] if x0 is not None else None,
+                # S05 quality metrics — queryable in ArangoDB
+                "extraction_method": metrics.get("extraction_method"),
+                "fragmentation_score": metrics.get("fragmentation_score"),
+                "pandas_metrics": metrics.get("pandas_metrics"),
+                "camelot_metrics": metrics.get("camelot_metrics"),
+                "strategy_history": metrics.get("strategy_history"),
             },
         }
         flattened.append(entry)
