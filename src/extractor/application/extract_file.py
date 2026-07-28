@@ -25,6 +25,7 @@ from extractor.core.schema.unified_document import (
     SourceType,
     UnifiedDocument,
 )
+from extractor.application.status import validate_required_artifacts
 
 
 PDF_OXIDE_PIN = "5b0538cb94f8c27b3f3f33411b4a9267dc98a022"
@@ -128,6 +129,7 @@ def extract_file(
             extra={"offline": offline, **payload.diagnostics_extra},
         ),
     )
+    result = validate_required_artifacts(result)
     result.write_json(run_dir / "extractor_result.json")
     return result
 
