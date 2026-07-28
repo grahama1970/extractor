@@ -43,6 +43,7 @@ app = typer.Typer(add_completion=False, help="Stage 07 gold-preloaded smoke")
 
 
 def run_smoke() -> None:
+    """Initialize environment and validate required API key for smoke testing."""
     load_dotenv(find_dotenv(usecwd=True) or None)
     os.environ.setdefault("LITELLM_HTTPX", "1")
     os.environ.setdefault("LITELLM_DEBUG", "1")
@@ -99,6 +100,7 @@ def run_smoke() -> None:
 
 @app.command()
 def main() -> None:
+    """Run smoke tests for the application."""
     run_smoke()
 
 

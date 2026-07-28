@@ -10,6 +10,7 @@ except Exception:
 
 
 def _load_mod():
+    """Load the figure extractor module from its file path."""
     spec = importlib.util.spec_from_file_location(
         "stage06", "src/extractor/pipeline/steps/s06_figure_extractor.py"
     )
@@ -22,6 +23,7 @@ def _load_mod():
 @pytest.mark.skipif(not _has_pymupdf, reason="PyMuPDF not installed")
 @pytest.mark.asyncio
 async def test_extract_and_describe_figure_offline(tmp_path):
+    """Test extraction and description of figures from a PDF file."""
     mod = _load_mod()
     fn = getattr(mod, "extract_and_describe_figure")
 

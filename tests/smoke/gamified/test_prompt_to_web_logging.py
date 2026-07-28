@@ -5,10 +5,12 @@ from pathlib import Path
 
 
 def _run(cmd):
+    """Execute a shell command, returning its exit status."""
     return os.system(cmd)
 
 
 def _latest_run_id() -> str:
+    """Return the name of the latest run directory."""
     runs = sorted(Path("workspace/runs").glob("*/instances"))
     return runs[-1].parent.name if runs else ""
 

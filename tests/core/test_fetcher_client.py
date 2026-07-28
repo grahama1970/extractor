@@ -8,15 +8,18 @@ from extractor.core.fetcher_client import FetcherDownload, RollingWindow
 
 
 def test_sanity_check_accepts_defaults():
+    """Check fetcher defaults for sanity in specified parameters."""
     fetcher_client._sanity_check_fetcher_defaults("download_only", 1024, 512)
 
 
 def test_sanity_check_rejects_bad_step():
+    """Check fetcher defaults and raise ValueError for invalid inputs."""
     with pytest.raises(ValueError):
         fetcher_client._sanity_check_fetcher_defaults("download_only", 100, 200)
 
 
 def test_download_with_fetcher_returns_blob(tmp_path, monkeypatch):
+    """Test download functionality with a fetcher returning a blob."""
     blob = tmp_path / "blob.pdf"
     blob.write_bytes(b"data")
     windows_file = tmp_path / "windows.jsonl"

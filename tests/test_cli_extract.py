@@ -19,6 +19,7 @@ runner = CliRunner()
 
 
 def test_fast_pdf_creates_json(tmp_path: Path):
+    """Create a sample PDF and test JSON creation from it."""
     fitz = pytest.importorskip("fitz", reason="PyMuPDF required for fast path")
 
     pdf_path = tmp_path / "sample.pdf"
@@ -44,10 +45,13 @@ def test_fast_pdf_creates_json(tmp_path: Path):
 def test_structured_runs_with_stub_provider(tmp_path: Path, monkeypatch):
     # Dummy provider that returns a minimal UnifiedDocument
     class DummyProvider:
+        """Provide a dummy unified document."""
         def __init__(self, *_args, **_kwargs):
+            """Initialize an instance with variable arguments and keyword arguments."""
             pass
 
         def extract_document(self, path: str):
+            """Extract a document from the specified file path."""
             block = BaseBlock(
                 id="b1",
                 parent_id=None,

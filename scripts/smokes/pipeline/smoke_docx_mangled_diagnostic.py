@@ -29,6 +29,7 @@ def main(
     ),
     results_dir: Path = typer.Option(Path("data/results/structured_parity_smoke/docx_checks")),
 ):
+    """Run structured pipeline for DOCX, saving results."""
     meta = STRUCTURED_PIPELINES[DOCXProvider]
     artifacts = run_structured_pipeline(
         DOCXProvider,

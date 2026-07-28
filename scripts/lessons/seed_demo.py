@@ -43,6 +43,7 @@ SUFFIXES = [
 
 
 def build_keywords(tags: List[str], scope: str) -> str:
+    """Build a keyword string based on provided tags and scope."""
     syn = {
         "cdp": ["chrome", "chromium", "devtools", "browserless", "puppeteer", "playwright"],
         "proxy": ["vite", "backend", "target", "api", "port", "8000", "8001"],
@@ -72,6 +73,7 @@ def seed(
     scope: str = typer.Option("", help="Force scope for all; default mixes"),
     batch: str = typer.Option("", help="Demo batch id; default random UUID"),
 ):
+    """Insert demo lessons into the database with optional scope and batch parameters."""
     db = get_db()
     db.collection("lessons")
     ts = int(time.time())

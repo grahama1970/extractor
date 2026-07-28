@@ -31,16 +31,19 @@ except Exception:
 
 @dataclass
 class ModelSpec:
+    """Define a model specification with name and provider attributes."""
     name: str
     provider: str  # 'openai' | 'gemini' | 'moonshot' | 'other'
 
 
 def b64_image(path: Path) -> str:
+    """Return base64 image data URI from path."""
     raw = path.read_bytes()
     return f"data:image/png;base64,{base64.b64encode(raw).decode('utf-8')}"
 
 
 def clean_fences(s: str) -> str:
+    """Remove markdown code fences and language specifier."""
     s2 = s.strip()
     if s2.startswith("```"):
         s2 = s2.split("\n", 1)[1] if "\n" in s2 else s2
@@ -153,6 +156,7 @@ async def call_responses(
 async def probe_model(
     spec: ModelSpec, outdir: Path, text: str, section_img_b64: str
 ) -> Dict[str, Any]:
+    """Query a model with text and image, returning structured results."""
     model = spec.name
     mslug = model.replace("/", "__")
     mdir = outdir / mslug
@@ -218,6 +222,7 @@ async def probe_model(
 
 
 async def main() -> None:
+    """Create output directory and load context text and image data."""
     base = Path("tests/stage07_manual")
     outdir = base / "model_runs"
     outdir.mkdir(parents=True, exist_ok=True)

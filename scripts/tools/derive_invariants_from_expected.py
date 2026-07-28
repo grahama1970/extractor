@@ -11,10 +11,12 @@ from typing import Any, Dict, List
 
 
 def load_json(p: Path) -> Dict[str, Any]:
+    """Load JSON data from a file path into a dictionary."""
     return json.loads(p.read_text(encoding="utf-8"))
 
 
 def derive_from_expected(expected_root: Path) -> Dict[str, Any]:
+    """Build a dictionary of derived data from expected root."""
     checks: List[Dict[str, Any]] = []
     out_dir = "data/results/pipeline"  # default; invariants verifier uses this
 
@@ -91,6 +93,7 @@ def derive_from_expected(expected_root: Path) -> Dict[str, Any]:
 
 
 def main() -> int:
+    """Generate invariants JSON from expected outputs and save to specified path."""
     ap = argparse.ArgumentParser(description="Derive invariants JSON from expected outputs")
     ap.add_argument("expected_root", type=Path, help="Path like data/expected/pipeline/<slug>")
     ap.add_argument(

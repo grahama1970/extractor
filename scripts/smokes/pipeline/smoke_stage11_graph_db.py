@@ -22,6 +22,7 @@ app = typer.Typer(add_completion=False, help="Smoke: Stage 11 graph creation wit
 
 @app.command()
 def main(results: Path = typer.Option(Path("data/results/pipeline_db_smoke"), "-o")) -> None:
+    """Run pipeline smoke test using flattened JSON data from Stage 10."""
     load_dotenv(find_dotenv() or None)
     # Use flattened JSON from Stage 10
     flat = results / "10_arangodb_exporter" / "json_output" / "10_flattened_data.json"

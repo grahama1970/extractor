@@ -35,10 +35,12 @@ STEP_NAME = "10_arangodb_exporter"
 
 
 def sanity() -> int:
+    """Return the result of a sanity check step."""
     return run_step_sanity(STEP_NAME)
 
 
 def _hash_embedding(text: str, dims: int = 8) -> List[float]:
+    """Generate a normalized hash embedding from input text."""
     digest = hashlib.sha256(text.encode("utf-8")).digest()
     vals = []
     for i in range(0, dims * 4, 4):
@@ -53,6 +55,7 @@ def _hash_embedding(text: str, dims: int = 8) -> List[float]:
 
 
 def _embed_text(text: str, *, skip_embeddings: bool, fast_embeddings: bool) -> Optional[List[float]]:
+    """Embed text into a vector or return None if conditions aren't met."""
     if skip_embeddings or not text or not text.strip():
         return None
     if fast_embeddings:
@@ -71,17 +74,20 @@ def _embed_text(text: str, *, skip_embeddings: bool, fast_embeddings: bool) -> O
 
 
 def _doc_id_from_source(source_pdf: Optional[str]) -> str:
+    """Generate a unique document ID from source or default."""
     basis = source_pdf or "document"
     digest = hashlib.md5(basis.encode("utf-8")).hexdigest()
     return f"doc_{digest}"
 
 
 def _object_key(doc_id: str, idx: int, object_type: str, section_id: Optional[str]) -> str:
+    """Generate a hashed object key from document parameters."""
     raw = f"{doc_id}:{idx}:{object_type}:{section_id or ''}"
     return hashlib.md5(raw.encode("utf-8")).hexdigest()
 
 
 def _summary_map(summaries_data: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    """Map summaries from input data to a keyed dictionary."""
     summaries = []
     if isinstance(summaries_data, dict):
         summaries = summaries_data.get("summaries") or []
@@ -98,6 +104,7 @@ def _summary_map(summaries_data: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
 
 
 def _section_breadcrumb(section: Dict[str, Any]) -> List[str]:
+    """Extract breadcrumb titles from a section dictionary."""
     for key in ("section_breadcrumbs", "breadcrumbs", "breadcrumb_titles"):
         val = section.get(key)
         if isinstance(val, list) and val:
@@ -111,9 +118,11 @@ def _section_breadcrumb(section: Dict[str, Any]) -> List[str]:
 
 
 def _flatten_unified_hierarchy(hierarchy: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Flatten unified hierarchy into a list of nodes."""
     flat: List[Dict[str, Any]] = []
 
     def _walk(node: Dict[str, Any], parent_id: Optional[str]) -> None:
+        """Walk through a node structure, appending details to a flat list."""
         node_id = node.get("id")
         if node_id and node_id != "document-root":
             flat.append(

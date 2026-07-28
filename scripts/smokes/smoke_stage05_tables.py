@@ -18,6 +18,7 @@ app = typer.Typer(add_completion=False, help="Smoke: Stage 05 minimal table ops"
 
 
 def _load_stage05():
+    """Load Stage 05 module."""
     p = Path("src/extractor/pipeline/steps/05_table_extractor.py").resolve()
     spec = importlib.util.spec_from_file_location("stage05", str(p))
     if not spec or not spec.loader:
@@ -31,6 +32,7 @@ def _load_stage05():
 def main(
     input_pdf: Path = typer.Option(Path("data/input/pipeline/BHT_CV32A65X_marked.pdf"), exists=True)
 ):
+    """Process a marked PDF file using configured pipeline stages."""
     try:
         load_dotenv(find_dotenv())
         mod = _load_stage05()

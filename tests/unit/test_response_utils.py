@@ -11,6 +11,7 @@ from extractor.pipeline.utils.litellm_response_utils import (
 
 
 def test_extract_content_from_openai_like_dict_text_and_list_parts():
+    """Extract text content from a structured OpenAI-like response."""
     resp = {
         "choices": [
             {
@@ -28,7 +29,9 @@ def test_extract_content_from_openai_like_dict_text_and_list_parts():
 
 
 class DummyResp:
+    """Initialize a dummy response object with usage metrics."""
     def __init__(self):
+        """Initialize usage statistics and hidden parameters."""
         self.usage = type(
             "U", (), {"prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5}
         )()
@@ -36,6 +39,7 @@ class DummyResp:
 
 
 def test_augment_json_with_cost_wraps_non_json_and_injects_metadata():
+    """Augment JSON with cost metadata, wrapping non-JSON inputs."""
     text = "not json"
     out = augment_json_with_cost(text, DummyResp(), wrap_non_json=True)
     data = json.loads(out)
@@ -46,7 +50,9 @@ def test_augment_json_with_cost_wraps_non_json_and_injects_metadata():
 
 
 def test_augment_json_with_cost_non_dict_metadata_goes_to_underscore():
+    """Verifies non-dict metadata moves to underscore key when augmenting JSON."""
     class DummyResp2:
+        """Represent a dummy API response with usage and cost data."""
         usage = {"prompt_tokens": 1, "completion_tokens": 2, "total_tokens": 3}
         _hidden_params = {"response_cost": 0.1}
 
@@ -76,11 +82,13 @@ def test_augment_json_with_cost_non_dict_metadata_goes_to_underscore():
     ],
 )
 def test_classify_error_categories(msg, category):
+    """Map error message to a predefined category."""
     err = classify_error(Exception(msg))
     assert err["category"] == category
 
 
 def test_format_error_wrap_json_true():
+    """Return formatted error message as JSON when wrap_json is True."""
     s = format_error(Exception("oops"), wrap_json=True)
     data = json.loads(s)
     assert "error" in data and data["error"]["message"]

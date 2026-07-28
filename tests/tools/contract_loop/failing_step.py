@@ -3,6 +3,7 @@ import sys
 
 
 def main() -> int:
+    """Simulate a failing pipeline step."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--pipeline-dir", required=True)
     parser.parse_args()

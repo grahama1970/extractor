@@ -84,10 +84,12 @@ LANG_BY_EXT = {
 
 
 def guess_lang(path: Path) -> str:
+    """Guess the language based on the file extension."""
     return LANG_BY_EXT.get(path.suffix.lower(), "")
 
 
 def is_probably_text(path: Path) -> bool:
+    """Check if a file is likely to contain text based on its content."""
     if path.suffix.lower() in ALLOW_EXT:
         return True
     try:
@@ -122,6 +124,7 @@ def iter_files(root: Path, inputs: Iterable[str]) -> Iterable[Path]:
 
 
 def write_bundle(files: Iterable[Path], repo_root: Path, out_path: Path) -> Tuple[int, int]:
+    """Write a Tabbed UI bundle to path, returning file count and bytes written."""
     out_path.parent.mkdir(parents=True, exist_ok=True)
     count = 0
     bytes_written = 0
@@ -155,6 +158,7 @@ def write_bundle(files: Iterable[Path], repo_root: Path, out_path: Path) -> Tupl
 
 
 def main(argv: List[str]) -> int:
+    """Parse command-line arguments for bundling Tabbed UI source files."""
     parser = argparse.ArgumentParser(description="Bundle Tabbed UI source into a single text file.")
     parser.add_argument(
         "--root",

@@ -1,3 +1,4 @@
+"""High-level async text completion client with router, SDK, and curl fallback."""
 from __future__ import annotations
 
 import json
@@ -47,8 +48,8 @@ async def achutes_text_json(
     # 2) SDK (unless force-curl)
     try:
         if not force_curl:
-            base = os.environ.get("CHUTES_API_BASE", "")
-            key = os.environ.get("CHUTES_API_KEY", "")
+            base = os.environ.get("SCILLM_API_BASE", "http://localhost:4010")
+            key = os.environ.get("SCILLM_PROXY_KEY", "sk-dev-proxy-123")
             model = os.environ.get("CHUTES_TEXT_MODEL", "")
             if base and key and model:
                 resp = await sc_acompletion(

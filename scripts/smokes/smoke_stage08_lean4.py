@@ -4,6 +4,7 @@ from dotenv import load_dotenv, find_dotenv
 
 
 def main():
+    """Load and execute a Python module from a specified file path."""
     try:
         load_dotenv(find_dotenv())
         p = "src/extractor/pipeline/steps/s08_lean4_theorem_prover.py"

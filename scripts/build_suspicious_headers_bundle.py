@@ -22,6 +22,7 @@ from pathlib import Path
 
 
 def main() -> int:
+    """Build a debug bundle for suspicious headers in Stage 03."""
     ap = argparse.ArgumentParser(description="Build suspicious-headers debug bundle for Stage 03")
     ap.add_argument(
         "--source-json", required=True, help="Path to Stage 02 JSON (02_marker_blocks_*.json)"

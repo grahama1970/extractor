@@ -21,6 +21,7 @@ def _get_db():
 
 
 def _ensure_setup():
+    """Ensure collections and view."""
     from scripts.lessons.setup import ensure_collections_and_view
 
     ensure_collections_and_view()
@@ -28,6 +29,7 @@ def _ensure_setup():
 
 @pytest.fixture(scope="module")
 def db():
+    """Return a database connection or skip the test on failure."""
     try:
         _ensure_setup()
         return _get_db()
@@ -36,6 +38,7 @@ def db():
 
 
 def test_seed_and_search_bm25(db):
+    """Test seeding, verifying, and searching BM25 demo data."""
     from scripts.lessons.seed_demo import seed as seed_demo
 
     batch = "testbatch_" + uuid.uuid4().hex[:8]
@@ -76,6 +79,7 @@ def test_seed_and_search_bm25(db):
     reason="FAISS/transformers are heavy or require network; enable with RUN_FAISS_TESTS=1",
 )
 def test_faiss_proposer_creates_edges(db):
+    """Skip test execution based on environment variable for FAISS tests."""
     from scripts.lessons.seed_demo import seed as seed_demo
     from scripts.lessons.propose_faiss import propose as propose_faiss
 

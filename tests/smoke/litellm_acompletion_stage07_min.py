@@ -29,6 +29,7 @@ try:
 except Exception:
 
     def initialize_litellm_cache() -> None:  # type: ignore
+        """Initialize the LiteLLM cache."""
         return None
 
 
@@ -39,6 +40,7 @@ except Exception:
 
 
 def build_guard(compact: bool) -> str:
+    """Return a guardrail string for structured JSON output."""
     if compact:
         return dedent(
             """
@@ -66,6 +68,7 @@ def build_guard(compact: bool) -> str:
 
 
 def _file_to_data_url(path: Path) -> str:
+    """Return a data URL representation of a file's contents."""
     mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
     b64 = base64.b64encode(path.read_bytes()).decode("ascii")
     return f"data:{mime};base64,{b64}"
@@ -109,6 +112,7 @@ def _extract_text(resp: Any) -> str:
 
 
 async def amain(images: List[Path], timeout: int, compact: bool, model: str, context: str) -> None:
+    """Initialize and run asynchronous AI image processing."""
     load_dotenv(find_dotenv())
     initialize_litellm_cache()
     os.environ.setdefault("LITELLM_LOG", "INFO")

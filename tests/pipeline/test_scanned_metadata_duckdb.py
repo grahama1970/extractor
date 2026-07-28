@@ -6,6 +6,7 @@ from extractor.pipeline.steps.s07_json_assembler import run_assemble_corpus
 
 
 def test_scanned_metadata_ingested(tmp_path: Path):
+    """Prepare test files for scanned metadata ingestion."""
     scanned_path = tmp_path / "scanned_pdf.json"
     scanned_path.write_text(json.dumps({"is_scanned": True, "confidence": 0.8}))
 

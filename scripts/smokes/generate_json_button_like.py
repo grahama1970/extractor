@@ -37,6 +37,7 @@ def expand_box(
     """Expand a normalized box by factor around its center, clamped to [0,1]."""
 
     def clamp(v: float, lo=0.0, hi=1.0) -> float:
+        """Clamp a float value within specified minimum and maximum bounds."""
         return max(lo, min(hi, v))
 
     cx = x + w / 2.0
@@ -66,6 +67,7 @@ def crop_to_data_url(img: Image.Image, box_norm: tuple[float, float, float, floa
 
 
 async def run() -> Dict[str, Any]:
+    """Load and process an image from a specified fixture path."""
     load_dotenv(find_dotenv())
 
     # Fixture image with a visible table
@@ -137,6 +139,7 @@ async def run() -> Dict[str, Any]:
 
 
 def main() -> int:
+    """Create a timestamped JSON report file from async data."""
     out_dir = Path("scripts/artifacts")
     out_dir.mkdir(parents=True, exist_ok=True)
     report = asyncio.run(run())

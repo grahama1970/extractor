@@ -1,3 +1,4 @@
+"""Detect and cache whether a given LLM model supports vision (image) inputs."""
 from __future__ import annotations
 from extractor.pipeline.utils.reliability import log_stage_error
 from typing import Any, Dict, Optional
@@ -27,10 +28,12 @@ _VISION_CACHE: Dict[str, bool] = {}
 
 
 def _norm_model(model: Optional[str]) -> str:
+    """Normalize and clean a model string."""
     return (model or "").strip().lower()
 
 
 def get_cached_vision_support(model: str) -> Optional[bool]:
+    """Check if vision support is cached for the given model."""
     m = _norm_model(model)
     if not m:
         return None
@@ -40,6 +43,7 @@ def get_cached_vision_support(model: str) -> Optional[bool]:
 
 
 def set_cached_vision_support(model: str, supported: bool) -> None:
+    """Update vision support flag for a model in cache."""
     m = _norm_model(model)
     if m:
         _VISION_CACHE[m] = bool(supported)
@@ -118,8 +122,8 @@ async def preflight_vision_support(model: str, timeout_sec: int = 10) -> bool:
             ),
         ]
         # We don't need parsed JSON, just a successful roundtrip
-        base = os.getenv("CHUTES_API_BASE")
-        key = os.getenv("CHUTES_API_KEY")
+        base = os.getenv("SCILLM_API_BASE", "http://localhost:4010")
+        key = os.getenv("SCILLM_PROXY_KEY", "sk-dev-proxy-123")
         resp = await sc_acompletion(
             model=model,
             api_base=base,

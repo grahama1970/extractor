@@ -13,6 +13,7 @@ from extractor.pipeline.steps import s10_arangodb_exporter as s10
 
 
 def main():
+    """Parse command-line arguments for the pipeline configuration."""
     p = argparse.ArgumentParser()
     p.add_argument("--reflowed", required=True, type=Path)
     p.add_argument("--summaries", required=True, type=Path)

@@ -28,6 +28,7 @@ app = typer.Typer(add_completion=False)
 
 
 def _load_flatten_function():
+    """Load and return the flatten function from a specified module path."""
     module_path = (
         Path(__file__).resolve().parents[3]
         / "src"
@@ -59,6 +60,7 @@ def main(
     results_dir: Path = typer.Option(Path("data/results/structured_parity_smoke/html")),
     allowed_delta: int = typer.Option(5),
 ) -> None:
+    """Run the document processing pipeline."""
     flatten = _load_flatten_function()
     payload = json.loads(pdf_stage07.read_text())
     sections = payload.get("reflowed_sections") or []

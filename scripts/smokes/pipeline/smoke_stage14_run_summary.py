@@ -24,6 +24,7 @@ app = typer.Typer(add_completion=False)
 
 @app.command()
 def main():
+    """Create and populate a directory with graph summary JSON data."""
     out_dir = Path("data/results/cli_smokes/run_summary").resolve()
     stage11 = out_dir / "11_arango_create_graph/json_output"
     stage11.mkdir(parents=True, exist_ok=True)

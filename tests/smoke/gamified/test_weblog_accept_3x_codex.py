@@ -6,19 +6,23 @@ from pathlib import Path
 
 
 def _run(cmd: str) -> int:
+    """Execute a shell command and return the exit status."""
     return os.system(cmd)
 
 
 def _latest_run_id() -> str:
+    """Return the latest run ID from the workspace directory."""
     runs = sorted(Path("workspace/runs").glob("*/instances"))
     return runs[-1].parent.name if runs else ""
 
 
 def _http_get(url: str, timeout: int = 5):
+    """Open a URL, returning the HTTP response object."""
     return urllib.request.urlopen(url, timeout=timeout)
 
 
 def _http_post(url: str, payload: dict, timeout: int = 5):
+    """Send a POST request with JSON payload to the specified URL."""
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
         url, data=data, headers={"Content-Type": "application/json"}, method="POST"

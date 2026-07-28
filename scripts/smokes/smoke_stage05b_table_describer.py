@@ -22,6 +22,7 @@ app = typer.Typer(
 
 
 def _write_stage05_tables(path: Path) -> None:
+    """Write stage 05 table data to path as JSON."""
     path.write_text(
         json.dumps(
             {
@@ -55,6 +56,7 @@ def main(
         help="Scratch pipeline directory for Stage 05b sanity.",
     )
 ) -> None:
+    """Remove the specified results directory if it exists."""
     if results.exists():
         shutil.rmtree(results)
     stage05_json = results / "05_table_extractor" / "json_output"

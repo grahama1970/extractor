@@ -1,3 +1,4 @@
+"""System diagnostics including CPU, memory, and GPU resource sampling for pipeline runs."""
 from __future__ import annotations
 
 from extractor.pipeline.utils.reliability import log_stage_error
@@ -33,10 +34,12 @@ except Exception:
 
 
 def get_run_id() -> str:
+    """Generate a unique run identifier."""
     return uuid.uuid4().hex
 
 
 def iso_now() -> str:
+    """Return current datetime in ISO 8601 format."""
     return datetime.now().isoformat()
 
 
@@ -48,6 +51,7 @@ def make_event(
     context: Optional[Dict[str, Any]] = None,
     ts: Optional[str] = None,
 ) -> Dict[str, Any]:
+    """Build an event dictionary from given parameters with defaults."""
     return {
         "stage": stage,
         "severity": severity,
@@ -59,6 +63,7 @@ def make_event(
 
 
 def snapshot_resources(prefix: str) -> Dict[str, Any]:
+    """Capture memory usage metrics for a process prefix."""
     out: Dict[str, Any] = {}
     try:
         if psutil is not None:
@@ -91,6 +96,7 @@ def snapshot_resources(prefix: str) -> Dict[str, Any]:
 def build_stage_timings(
     stage_start_ts: str, t0_monotonic: float, extra: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
+    """Build stage timings dictionary with start/end timestamps and duration."""
     import time
 
     timings = {
@@ -113,6 +119,7 @@ def start_resource_sampler(interval_sec: float = 2.0):
     stop_flag = {"stop": False}
 
     def _run():
+        """Monitor system and GPU metrics until stop flag is set."""
         while not stop_flag["stop"]:
             try:
                 proc = psutil.Process()
@@ -460,6 +467,7 @@ def detect_indecipherable_table(
 
     # Check for garbled text (mostly non-alphanumeric characters)
     def is_garbled(text: str) -> bool:
+        """Check if text contains mostly non-alphanumeric characters."""
         if not text:
             return False
         alnum = sum(1 for c in text if c.isalnum() or c.isspace())

@@ -1,8 +1,8 @@
 {
-  "accuracy": 0.9973614775725593,
-  "macro_f1": 0.8631313242078529,
-  "n_samples": 7572,
-  "n_classes": 10,
+  "accuracy": 0.9983525535420099,
+  "macro_f1": 0.9963128461329901,
+  "n_samples": 24269,
+  "n_classes": 9,
   "best_model": "gradient_boosting",
   "sklearn_version": "1.8.0",
   "n_features": 21,

@@ -149,6 +149,7 @@ try:
     if not hasattr(_tx, "QuantizedCacheConfig"):
 
         class QuantizedCacheConfig:
+            """Define configuration for a quantized cache."""
             pass
 
         _tx.QuantizedCacheConfig = QuantizedCacheConfig
@@ -382,7 +383,7 @@ def extract_blocks(
     if use_llm:
         from extractor.core.presets import LLM_CONFIG
 
-        api_key = os.getenv(LLM_CONFIG.get("api_key_env", "CHUTES_API_KEY"))
+        api_key = os.getenv(LLM_CONFIG.get("api_key_env", "SCILLM_PROXY_KEY"), "sk-dev-proxy-123")
         if api_key:
             config["llm_service"] = LLM_CONFIG.get("service")
             config["openai_api_key"] = api_key

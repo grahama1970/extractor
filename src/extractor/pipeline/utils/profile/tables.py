@@ -28,6 +28,7 @@ LINE_TOLERANCE = 2.0
 
 
 def _empty_result() -> Dict[str, Any]:
+    """Return an empty result dictionary with default table metrics."""
     return {
         "estimated_table_count": 0, "table_pages_drawing": 0,
         "table_density_top10": [], "max_tables_per_page": 0,

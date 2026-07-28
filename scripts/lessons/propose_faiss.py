@@ -22,16 +22,19 @@ app = typer.Typer(add_completion=False)
 
 
 def l2_normalize(x: np.ndarray) -> np.ndarray:
+    """Normalize a 2D array along the specified axis using L2 norm."""
     n = np.linalg.norm(x, axis=1, keepdims=True) + 1e-8
     return x / n
 
 
 def pair_id(a_id: str, b_id: str) -> str:
+    """Generate a unique hash for a sorted pair of IDs."""
     a, b = (a_id, b_id) if a_id <= b_id else (b_id, a_id)
     return hashlib.sha1((a + "|" + b).encode("utf-8")).hexdigest()
 
 
 def doc_text(d: Dict[str, Any]) -> str:
+    """Extract and concatenate specified fields from a dictionary into a string."""
     parts: List[str] = []
     for k in ("title", "problem", "playbook"):
         v = d.get(k)
@@ -44,6 +47,7 @@ def doc_text(d: Dict[str, Any]) -> str:
 
 
 def tags_overlap(a: List[str], b: List[str]) -> float:
+    """Compute overlap ratio between two lists of tags."""
     A, B = set([t.lower() for t in a or []]), set([t.lower() for t in b or []])
     if not A and not B:
         return 0.0

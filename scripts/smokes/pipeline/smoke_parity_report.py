@@ -14,10 +14,12 @@ from pathlib import Path
 
 
 def load(p: Path):
+    """Load JSON data from a file path."""
     return json.loads(p.read_text())
 
 
 def main():
+    """Parse command-line arguments and process reference and candidate JSON files."""
     ap = argparse.ArgumentParser()
     ap.add_argument(
         "--refs", type=Path, required=True, nargs="+", help="Reference flattened json(s)"

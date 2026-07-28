@@ -24,18 +24,20 @@ def _auth_params() -> Dict[str, Any]:
 
     Use api_key only and let SciLLM canonicalize headers for Chutes.
     """
-    base = os.environ.get("CHUTES_API_BASE", "")
-    key = os.environ.get("CHUTES_API_KEY", "")
+    base = os.environ.get("SCILLM_API_BASE", "http://localhost:4010")
+    key = os.environ.get("SCILLM_PROXY_KEY", "sk-dev-proxy-123")
     return {"api_base": base, "api_key": key}
 
 
 def _model_entry(model: str) -> Dict[str, Any]:
+    """Builds a model entry dictionary for LiteLLM integration."""
     lp = {"custom_llm_provider": "openai_like", "model": model}
     lp.update(_auth_params())
     return {"model_name": "chutes/text", "litellm_params": lp}
 
 
 def _model_entry_vlm(model: str) -> Dict[str, Any]:
+    """Return model entry configuration with authentication parameters."""
     lp = {"custom_llm_provider": "openai_like", "model": model}
     lp.update(_auth_params())
     return {"model_name": "chutes/vlm", "litellm_params": lp}
@@ -59,6 +61,7 @@ def _import_router_cls():
 
 
 def get_text_router():
+    """Get the global text router, initializing it if not set."""
     global _TEXT_ROUTER
     if _TEXT_ROUTER is not None:
         return _TEXT_ROUTER
@@ -96,6 +99,7 @@ def get_text_router():
 
 
 def get_vlm_router():
+    """Get the singleton VLM router, configured from environment variables."""
     global _VLM_ROUTER
     if _VLM_ROUTER is not None:
         return _VLM_ROUTER
@@ -129,6 +133,7 @@ def get_vlm_router():
 
 
 def _safe_async_close(obj) -> None:
+    """Attempt to asynchronously close an object with an aclose method."""
     try:
         aclose = getattr(obj, "aclose", None)
         if aclose is not None:
@@ -150,6 +155,7 @@ def _safe_async_close(obj) -> None:
 
 
 def close_text_router() -> None:
+    """Close the global text router instance."""
     global _TEXT_ROUTER
     try:
         if _TEXT_ROUTER is not None:
@@ -165,6 +171,7 @@ def close_text_router() -> None:
 
 
 def close_vlm_router() -> None:
+    """Close VLM router and clear global reference."""
     global _VLM_ROUTER
     try:
         if _VLM_ROUTER is not None:
@@ -179,11 +186,13 @@ def close_vlm_router() -> None:
 
 
 def close_all_routers() -> None:
+    """Close all active routers."""
     close_text_router()
     close_vlm_router()
 
 
 def _extract_choice_content(resp: Any) -> Any:
+    """Extract choice content from a response object or dictionary."""
     try:
         choices = getattr(resp, "choices", None)
         if choices is None and isinstance(resp, dict):
@@ -215,6 +224,7 @@ def _extract_choice_content(resp: Any) -> Any:
 
 
 def _response_content_empty(resp: Any) -> bool:
+    """Check if extracted response content is empty."""
     content = _extract_choice_content(resp)
     if content is None:
         return True
@@ -224,6 +234,7 @@ def _response_content_empty(resp: Any) -> bool:
 
 
 def _wrap_router_with_fallback(router: Any, *, fallback_model: str) -> Any:
+    """Wrap a router with a fallback model for asynchronous completion."""
     if not fallback_model:
         return router
     if getattr(router, "_scillm_fallback_wrapped", False):
@@ -232,6 +243,7 @@ def _wrap_router_with_fallback(router: Any, *, fallback_model: str) -> Any:
     orig_acompletion = router.acompletion
 
     async def _acompletion_with_fallback(self, *args, **kwargs):
+        """Obtain an LLM completion, using a fallback model for empty responses."""
         resp = await orig_acompletion(*args, **kwargs)
         if not _response_content_empty(resp):
             return resp

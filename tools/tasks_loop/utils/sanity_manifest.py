@@ -48,18 +48,18 @@ STEP_SANITY_MAP = {
     "s06": ["S1_pymupdf_open"],
     # S06b: Figure describing via VLM
     "s06b": ["S5c_vlm_image_call"],
-    # S07: DuckDB ingestion
-    "s07": ["S7_duckdb_basic", "S7b_duckdb_crud", "S7c_merged_content"],
+    # S07: JSON assembly (replaced DuckDB ingest)
+    "s07": [],
     # S08: Requirements extraction via LLM
-    "s08": ["S5b_scillm_chutes", "S7_duckdb_basic", "S8a_regex_requirements"],
+    "s08": ["S5b_scillm_chutes", "S8a_regex_requirements"],
     # S09: Section summarization via LLM
     "s09": ["S5b_scillm_chutes"],
     # S10: Markdown export (no external deps)
-    "s10": ["S7_duckdb_basic"],
+    "s10": [],
     # S11+: Lean4 proving
     "s11": ["S11_lean4_docker", "S11b_scillm_lean4"],
     # S14: Report generation (no external deps)
-    "s14": ["S7_duckdb_basic"],
+    "s14": [],
 }
 
 

@@ -140,6 +140,7 @@ class ControlCatalog:
     """
 
     def __init__(self):
+        """Initialize dictionaries for control IDs and their mappings."""
         self._exact: Dict[str, str] = {}       # control_id → _key (case-normalized)
         self._ids: List[str] = []               # all control_ids for fuzz matching
         self._framework: Dict[str, str] = {}    # control_id → source_framework

@@ -19,6 +19,7 @@ app = typer.Typer(
 
 
 def _load_stage14():
+    """Load the Stage 14 module from a specified file path."""
     spec = importlib.util.spec_from_file_location(
         "stage14", "src/extractor/pipeline/steps/14_report_generator.py"
     )
@@ -31,6 +32,7 @@ def _load_stage14():
 
 @app.command()
 def main():
+    """Run the pipeline and generate synthetic report data."""
     load_dotenv(find_dotenv())
     mod = _load_stage14()
     base = Path("data/results/pipeline/smokes/report_synth")

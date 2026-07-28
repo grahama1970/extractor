@@ -15,6 +15,7 @@ app = typer.Typer(add_completion=False)
 
 @app.command()
 def main(tmpdir: Path = typer.Option(Path("/tmp/extractor_smoke11"))):
+    """Run command-line interface with optional temporary directory path."""
     tmpdir.mkdir(parents=True, exist_ok=True)
     # Minimal edge_hints JSON like Lean4's --emit-edge-hints
     hints = {

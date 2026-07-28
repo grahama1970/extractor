@@ -11,6 +11,7 @@ except Exception:
 
 
 def _load_mod():
+    """Load module from specified file path."""
     spec = importlib.util.spec_from_file_location(
         "stage05", "src/extractor/pipeline/steps/s05_table_extractor.py"
     )
@@ -22,6 +23,7 @@ def _load_mod():
 
 @pytest.mark.skipif(not _has_deps, reason="Stage 05 deps (PyMuPDF, camelot) not installed")
 def test_camelot_strategy_callable():
+    """Check for the existence of a callable strategy in the module."""
     mod = _load_mod()
     assert hasattr(mod, "try_camelot_strategy")
     # We only assert the function exists and returns a list when invoked with a dummy strategy

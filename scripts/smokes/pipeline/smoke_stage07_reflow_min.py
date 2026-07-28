@@ -38,6 +38,7 @@ app = typer.Typer(add_completion=False, help="Smoke: Stage 07 reflow minimal (li
 
 
 def _ensure_paths():
+    """Establish project root, source path, and artifacts directory."""
     root = Path(__file__).resolve().parents[3]
     sys.path.insert(0, str(root / "src"))
     (root / "scripts" / "artifacts").mkdir(parents=True, exist_ok=True)
@@ -45,6 +46,7 @@ def _ensure_paths():
 
 
 def _artifact_path(root: Path) -> Path:
+    """Perform artifact path operation."""
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     return root / "scripts" / "artifacts" / f"stage07_reflow_min_{ts}.json"
 
@@ -66,6 +68,7 @@ def _resolve_model() -> str:
 
 
 def run_smoke(timeout: int, model: str) -> None:
+    """Run smoke tests with specified timeout and model parameters."""
     try:
         load_dotenv(find_dotenv(usecwd=True) or None)
         os.environ.setdefault("LITELLM_HTTPX", "1")
@@ -159,6 +162,7 @@ def main(
     timeout: int = typer.Option(45, help="Request timeout seconds"),
     model: str = typer.Option(_resolve_model(), help="Model to use"),
 ):
+    """Run the smoke test with specified timeout and model."""
     run_smoke(timeout, model)
 
 

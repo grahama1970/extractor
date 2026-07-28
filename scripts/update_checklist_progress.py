@@ -24,6 +24,7 @@ DEFAULT_PATH = Path("tools/gold_annotator_web/docs/tasks/00N_Tasks_Unified_Check
 
 
 def count_checkboxes(text: str) -> tuple[int, int]:
+    """Count checked and unchecked checkboxes in a text block."""
     total = 0
     done = 0
     in_code = False
@@ -43,6 +44,7 @@ def count_checkboxes(text: str) -> tuple[int, int]:
 
 
 def render_meter(done: int, total: int, width: int = 40) -> str:
+    """Render a progress meter string for given progress."""
     pct = int(round((done / total) * 100)) if total else 0
     filled = int(round((pct / 100) * width))
     bar = "#" * filled + "." * (width - filled)
@@ -50,6 +52,7 @@ def render_meter(done: int, total: int, width: int = 40) -> str:
 
 
 def update_progress_block(text: str, meter_line: str) -> str:
+    """Update progress markers in text with a new meter line."""
     start = "<!-- progress:start -->"
     end = "<!-- progress:end -->"
     if start in text and end in text:
@@ -69,6 +72,7 @@ def update_progress_block(text: str, meter_line: str) -> str:
 
 
 def main() -> int:
+    """Return an exit code after processing a file from command line."""
     path = Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_PATH
     if not path.exists():
         print(f"error: file not found: {path}", file=sys.stderr)

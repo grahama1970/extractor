@@ -120,6 +120,7 @@ def download_pdf(paper: dict, output_dir: Path) -> bool:
 
 
 def main():
+    """Search arXiv for challenging papers and save their data."""
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     all_papers = []

@@ -3,6 +3,7 @@ import pytest
 
 
 def _load_mod():
+    """Load the 'stage12' module."""
     spec = importlib.util.spec_from_file_location(
         "stage12", "src/extractor/pipeline/steps/12_insert_annotations.py"
     )

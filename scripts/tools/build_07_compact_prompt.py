@@ -16,6 +16,7 @@ from typing import Any, Dict, List
 
 
 def _read_json(p: Path) -> Dict[str, Any]:
+    """Load JSON from path, returning empty dict on failure."""
     try:
         return json.loads(p.read_text(encoding="utf-8"))
     except Exception:
@@ -23,6 +24,7 @@ def _read_json(p: Path) -> Dict[str, Any]:
 
 
 def _table_merge_candidates(tables: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Identify table merge candidates."""
     out: List[Dict[str, Any]] = []
     by_key: Dict[str, List[Dict[str, Any]]] = {}
     for t in tables or []:
@@ -37,6 +39,7 @@ def _table_merge_candidates(tables: List[Dict[str, Any]]) -> List[Dict[str, Any]
 
 
 def build_prompt(base: Path, section_idx: int = 0) -> str:
+    """Build a prompt string from specified JSON file paths."""
     sec_p = base / "04_section_builder" / "json_output" / "04_sections.json"
     sk_v2_p = base / "06b_layout_sketcher" / "json_output" / "06b_layout_sketch_v2.json"
     tabs_p = base / "06a_title_caption_enricher" / "json_output" / "05_tables.enriched.json"
@@ -110,6 +113,7 @@ def build_prompt(base: Path, section_idx: int = 0) -> str:
 
 
 def main() -> None:
+    """Build and save a prompt file from environment variables and base path."""
     base = Path(os.environ.get("RESULTS_BASE", "data/results/pipeline_xtrace")).resolve()
     section_idx = int(os.environ.get("SECTION_INDEX", "0"))
     prompt = build_prompt(base, section_idx)

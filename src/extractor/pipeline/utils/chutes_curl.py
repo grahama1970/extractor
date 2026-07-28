@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+"""Low-level curl-based client for Chutes.ai OpenAI-compatible chat completions."""
 from __future__ import annotations
 
 from extractor.pipeline.utils.reliability import log_stage_error
@@ -11,12 +12,14 @@ from typing import Any, Dict, List, Optional, Tuple
 
 
 def _artifacts_dir() -> Path:
+    """Create and return the scripts/artifacts directory path."""
     p = Path("scripts/artifacts")
     p.mkdir(parents=True, exist_ok=True)
     return p
 
 
 def _write(path: Path, obj: Any) -> None:
+    """Serialize object to JSON or text file, creating parent directories if missing."""
     path.parent.mkdir(parents=True, exist_ok=True)
     if isinstance(obj, (dict, list)):
         path.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -38,13 +41,13 @@ def chutes_curl_chat_json(
     Returns (parsed_response, meta). parsed_response is the parsed JSON response
     (dict) or None on failure. meta contains artifact paths and status.
     """
-    base = os.environ.get("CHUTES_API_BASE", "").rstrip("/")
-    api_key = os.environ.get("CHUTES_API_KEY", "")
+    base = os.environ.get("SCILLM_API_BASE", "http://localhost:4010").rstrip("/")
+    api_key = os.environ.get("SCILLM_PROXY_KEY", "sk-dev-proxy-123")
     if not base or not api_key:
         return None, {
             "error": "missing_env",
-            "CHUTES_API_BASE": bool(base),
-            "CHUTES_API_KEY": bool(api_key),
+            "SCILLM_API_BASE": bool(base),
+            "SCILLM_PROXY_KEY": bool(api_key),
         }
 
     model = model or os.environ.get("CHUTES_TEXT_MODEL") or ""

@@ -211,10 +211,10 @@ def llm_summarize(
             base = (
                 os.getenv("OPENAI_BASE_URL")
                 or os.getenv("OPENAI_API_BASE")
-                or os.getenv("CHUTES_API_BASE")
+                or os.getenv("SCILLM_API_BASE", "http://localhost:4010")
                 or ""
             ).rstrip("/")
-            key = os.getenv("OPENAI_API_KEY") or os.getenv("CHUTES_API_KEY") or ""
+            key = os.getenv("OPENAI_API_KEY") or os.getenv("SCILLM_PROXY_KEY", "sk-dev-proxy-123") or ""
             payload = {
                 "model": model.split("/", 1)[1] if model.lower().startswith("openai/") else model,
                 "messages": [

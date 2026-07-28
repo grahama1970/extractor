@@ -6,14 +6,19 @@ import extractor.pipeline.utils.litellm_call as lc
 
 
 class _Recorder:
+    """Record asynchronous completion calls."""
     def __init__(self):
+        """Initialize an empty list to store call records."""
         self.calls = []
 
     async def acompletion(self, *, model, messages, **kwargs):
+        """Simulate an async completion API call, returning a mock response."""
         self.calls.append({"model": model, "messages": messages, "kwargs": kwargs})
 
         class _Resp:
+            """Build a mock API response object for testing purposes."""
             def __init__(self):
+                """Initialize usage and hidden parameters for the object."""
                 self.usage = {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
                 self._hidden_params = {"response_cost": 0.0, "cache_hit": False}
                 self.choices = [

@@ -21,6 +21,7 @@ except Exception:  # pragma: no cover
 
 
 def b64_image(path: Path) -> Optional[str]:
+    """Encode image file to base64 string, optionally converting to PNG."""
     if not path.exists():
         return None
     raw = path.read_bytes()
@@ -36,6 +37,7 @@ def b64_image(path: Path) -> Optional[str]:
 
 
 def sanitize_text(s: str) -> str:
+    """Remove Unicode control characters from text."""
     if not s:
         return s
     removals = [
@@ -62,6 +64,7 @@ def sanitize_text(s: str) -> str:
 
 
 def sanitize_obj(obj: Any, *, max_string: int = 20000) -> Any:
+    """Sanitize an object by removing specified sensitive keys."""
     drop_keys = {
         "polygons",
         "polygon",
@@ -95,10 +98,12 @@ def sanitize_obj(obj: Any, *, max_string: int = 20000) -> Any:
 
 
 def load_json(path: Path) -> Any:
+    """Load JSON data from a file path."""
     return json.loads(path.read_text(encoding="utf-8"))
 
 
 def _get_encoding(model: str):
+    """Return the encoding for a specified model or a default encoding."""
     try:
         if tiktoken is None:
             return None
@@ -111,6 +116,7 @@ def _get_encoding(model: str):
 
 
 def approx_text_tokens(text: str, model: str) -> int:
+    """Count approximate tokens for text and model."""
     if not text:
         return 0
     enc = _get_encoding(model)
@@ -123,11 +129,13 @@ def approx_text_tokens(text: str, model: str) -> int:
 
 
 def approx_image_tokens(width: int, height: int, *, tokens_per_patch: int = 4) -> int:
+    """Return approximate image tokens for dimensions, with a minimum of 64."""
     patches = math.ceil(width / 16) * math.ceil(height / 16)
     return max(patches * tokens_per_patch, 64)
 
 
 def main() -> None:
+    """Run the main data processing pipeline."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--results", default="data/results/pipeline", help="Pipeline results base dir")
     ap.add_argument(
@@ -214,6 +222,7 @@ def main() -> None:
 
     # Heuristic table confidence
     def table_confidence(t: Dict[str, Any]) -> float:
+        """Calculate a table's confidence score using its metrics."""
         pm = t.get("pandas_metrics") or {}
         try:
             shape = pm.get("shape") or [0, 0]
@@ -366,6 +375,7 @@ def main() -> None:
 
     # Enrich images manifest with sizes and token estimates
     def _image_info(p: Path) -> Dict[str, Any]:
+        """Return image file properties: filename, size, and dimensions."""
         info: Dict[str, Any] = {"filename": f"images/{p.name}", "bytes": p.stat().st_size}
         if Image is not None:
             try:
@@ -444,6 +454,7 @@ def main() -> None:
     image_tokens_total = sum(int(m.get("approx_tokens", 0) or 0) for m in payload_meta)
 
     def _model_max_tokens(name: str) -> Optional[int]:
+        """Determine maximum tokens for a model name."""
         try:
             from litellm import get_max_tokens as _get_max  # type: ignore
 
@@ -482,6 +493,7 @@ def main() -> None:
             over_by = (total_est + headroom) - model_max
 
             def importance_rank(m: Dict[str, Any]) -> int:
+                """Return an importance rank based on the type of input dictionary."""
                 kind = m.get("kind")
                 if kind == "annotation":
                     return 5
@@ -663,6 +675,7 @@ def main() -> None:
 
     # Titles (tables & figures)
     def _h_iou(b1: List[float], b2: List[float]) -> float:
+        """Calculate the Intersection over Union (IoU) of two bounding boxes."""
         try:
             ax0, ay0, ax1, ay1 = [float(x) for x in b1]
             bx0, by0, bx1, by1 = [float(x) for x in b2]
@@ -679,6 +692,7 @@ def main() -> None:
         direction: str = "above",
         max_gap: float = 50.0,
     ) -> Optional[Dict[str, Any]]:
+        """Return the closest text block to a target bounding box."""
         best, best_gap = None, 1e9
         for b in blocks or []:
             try:
@@ -703,6 +717,7 @@ def main() -> None:
         return best
 
     def _btxt(b: Optional[Dict[str, Any]]) -> str:
+        """Perform btxt operation."""
         return sanitize_text(str((b or {}).get("text") or "").strip())
 
     sec_blocks = section.get("blocks", []) or []

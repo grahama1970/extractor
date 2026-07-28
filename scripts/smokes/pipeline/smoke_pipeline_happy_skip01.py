@@ -27,6 +27,7 @@ def main(
     pdf: Path = typer.Option(Path("data/input/pipeline/BHT_CV32A65X_marked.pdf"), exists=True),
     results: Path = typer.Option(Path("data/results/pipeline_happy_skip01"), "-o"),
 ):
+    """Execute the main command for processing PDF and saving results."""
     load_dotenv(find_dotenv() or None)
     env = os.environ.copy()
     env.setdefault("PYTHONPATH", str(Path.cwd() / "src"))

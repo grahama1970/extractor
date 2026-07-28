@@ -41,6 +41,7 @@ class PDFLearningDaemon:
     """Continuous PDF extraction and learning daemon."""
 
     def __init__(self, corpus_dir: Path, extractor_dir: Path):
+        """Initialize directories for corpus and extractor management."""
         self.corpus_dir = corpus_dir
         self.extractor_dir = extractor_dir
         self.results_dir = corpus_dir / "results"
@@ -262,6 +263,7 @@ class PDFLearningDaemon:
 
 
 def main():
+    """Parse command-line arguments for a continuous PDF learning daemon."""
     parser = argparse.ArgumentParser(description="Continuous PDF Learning Daemon")
     parser.add_argument("--corpus", type=Path, required=True, help="Corpus directory")
     parser.add_argument("--extractor", type=Path, default=Path("/home/graham/workspace/experiments/extractor"),

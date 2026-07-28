@@ -10,6 +10,7 @@ import pandas as pd
 
 
 def _stable_table_hash(table: Dict[str, Any]) -> str:
+    """Calculate a stable SHA256 hash for a table's key attributes."""
     import hashlib
 
     h = hashlib.sha256()
@@ -23,6 +24,7 @@ def _stable_table_hash(table: Dict[str, Any]) -> str:
 
 
 def _should_assist(table: Dict[str, Any]) -> bool:
+    """Check if the table requires LLM assistance."""
     pm = table.get("pandas_metrics") or {}
     density = float(pm.get("data_density") or 0.0)
     frag = int(table.get("fragmentation_score") or 0)
@@ -38,6 +40,7 @@ def _should_assist(table: Dict[str, Any]) -> bool:
 
 
 def _headers_from_table(t: Dict[str, Any]) -> List[str]:
+    """Extract headers from a table dictionary or first row if absent."""
     if t.get("header"):
         return [str(x) for x in t["header"]]
     if t.get("columns"):
@@ -47,6 +50,7 @@ def _headers_from_table(t: Dict[str, Any]) -> List[str]:
 
 
 def _apply_headers(t: Dict[str, Any], headers: List[str]) -> None:
+    """Apply headers to a dictionary if conditions are met."""
     n = len(headers)
     if t.get("header") and isinstance(t["header"], list) and len(t["header"]) == n:
         t["header"] = headers
@@ -55,6 +59,7 @@ def _apply_headers(t: Dict[str, Any], headers: List[str]) -> None:
 
 
 def _extract_table_text_for_heuristics(t: Dict[str, Any]) -> str:
+    """Extract text from table-like structures in a dictionary."""
     src = t.get("pandas_df_raw") or t.get("pandas_df")
     cells = []
     if isinstance(src, list):
@@ -71,6 +76,7 @@ def _extract_table_text_for_heuristics(t: Dict[str, Any]) -> str:
 
 
 def sanitize_cell(val: Any) -> str:
+    """Sanitize and normalize a string by removing unwanted characters."""
     if val is None:
         return ""
     text = str(val).replace("\u00a0", " ").replace("\n", " ")
@@ -108,6 +114,7 @@ def sanitize_cell(val: Any) -> str:
 
 
 def fragmentation_score(df: pd.DataFrame) -> int:
+    """Calculate fragmentation score for DataFrame."""
     count = 0
     for cell in df.astype(str).values.flatten():
         if sanitize_cell(cell) != str(cell):
@@ -116,16 +123,19 @@ def fragmentation_score(df: pd.DataFrame) -> int:
 
 
 def should_retry_fragmentation(score: int) -> bool:
+    """Check if score exceeds the fragmentation retry threshold."""
     return score > max(0, int(os.getenv("TABLE_FRAGMENTATION_RETRY_THRESHOLD", "0")))
 
 
 def has_fragmentation_improvement(existing: int, new: int) -> bool:
+    """Check if fragmentation improvement meets the minimum threshold."""
     return (existing - new) >= max(1, int(os.getenv("TABLE_FRAGMENTATION_MIN_IMPROVEMENT", "1")))
 
 
 def should_replace_table(
     existing_frag: int, new_frag: int, existing_score: float, new_score: float
 ) -> bool:
+    """Determine if a table should be replaced based on fragmentation."""
     if has_fragmentation_improvement(existing_frag, new_frag):
         return True
     if new_frag == existing_frag and new_score > existing_score:
@@ -134,6 +144,7 @@ def should_replace_table(
 
 
 def _normalize_cell(val: Any) -> str:
+    """Normalize and clean a cell value to a lowercase string."""
     s = str(val or "").strip()
     s = s.replace("\u00a0", " ")
     s = " ".join(s.split())
@@ -141,6 +152,7 @@ def _normalize_cell(val: Any) -> str:
 
 
 def coalesce_repeated_header_rows(df: pd.DataFrame, min_match: float) -> pd.DataFrame:
+    """Coalesce repeated header rows in a DataFrame based on matches."""
     if df is None or df.empty:
         return df
     header_proto = None

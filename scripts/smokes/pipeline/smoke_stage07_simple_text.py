@@ -44,6 +44,7 @@ app = typer.Typer(add_completion=False, help="Stage 07 simple structured-output 
 
 
 def run_smoke() -> None:
+    """Run smoke test setup for environment and API key validation."""
     load_dotenv(find_dotenv(usecwd=True) or None)
     os.environ.setdefault("LITELLM_HTTPX", "1")
     os.environ.setdefault("LITELLM_DEBUG", "1")
@@ -151,6 +152,7 @@ def run_smoke() -> None:
 
 @app.command()
 def main() -> None:
+    """Run smoke tests."""
     run_smoke()
 
 

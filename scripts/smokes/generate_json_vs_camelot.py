@@ -37,6 +37,7 @@ raise SystemExit(0)
 
 # Optional synthetic PDF generator (reportlab). If unavailable, skip.
 def _maybe_generate_synthetic_pdf(path: Path, rows: int = 6, cols: int = 5) -> bool:
+    """Generate a synthetic PDF file at the specified path."""
     try:
         from reportlab.pdfgen import canvas  # type: ignore
         from reportlab.lib.pagesizes import letter  # type: ignore
@@ -79,6 +80,7 @@ def _maybe_generate_synthetic_pdf(path: Path, rows: int = 6, cols: int = 5) -> b
 def _expand_bbox(
     bbox: tuple[float, float, float, float], factor: float, page_w: float, page_h: float
 ) -> tuple[float, float, float, float]:
+    """Expand a bounding box by a scaling factor within page dimensions."""
     x1, y1, x2, y2 = bbox
     cx = (x1 + x2) / 2
     cy = (y1 + y2) / 2
@@ -102,6 +104,7 @@ def _crop_pixmap_to_pil(pix: fitz.Pixmap, rect: fitz.Rect) -> Image.Image:
 
 
 async def run() -> Dict[str, Any]:
+    """Load and process PDF files for pipeline input."""
     load_dotenv(find_dotenv())
 
     synthetic = Path("tests/fixtures/synthetic_table.pdf")
@@ -263,6 +266,7 @@ async def run() -> Dict[str, Any]:
 
 
 def main() -> int:
+    """Create and save a JSON report with a timestamped filename."""
     out_dir = Path("scripts/artifacts")
     out_dir.mkdir(parents=True, exist_ok=True)
     report = asyncio.run(run())

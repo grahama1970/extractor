@@ -5,10 +5,12 @@ from pathlib import Path
 
 
 def _run(cmd: list[str], env: dict | None = None) -> subprocess.CompletedProcess:
+    """Run a command, capturing stdout/stderr."""
     return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
 
 
 def test_emit_only_generates_contractual_prompts(tmp_path: Path):
+    """Test if emit-only generates contractual prompts correctly."""
     run_id = f"test-emit-{int(time.time())}"
     cmd = [
         sys.executable,

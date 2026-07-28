@@ -294,6 +294,27 @@ class DOCXProvider:
                     )
                 )
 
+        # Extract TOC if present
+        toc_entries = self._extract_toc(doc)
+
+        # Build format_metadata
+        format_metadata = {
+            "pdf_imported": is_pdf_imported,
+            "pdf_import_warning": (
+                "This DOCX was likely converted from PDF. Styles and tables may be unreliable."
+                if is_pdf_imported
+                else None
+            ),
+        }
+
+        # Add TOC to metadata if found
+        if toc_entries:
+            format_metadata["toc"] = toc_entries
+            format_metadata["has_toc"] = True
+            logger.info(f"Extracted TOC with {len(toc_entries)} entries")
+        else:
+            format_metadata["has_toc"] = False
+
         unified = UnifiedDocument(
             id=doc_id,
             source_type=SourceType.DOCX,
@@ -301,14 +322,7 @@ class DOCXProvider:
             metadata=DocumentMetadata(
                 title=filepath.stem,
                 author=None,
-                format_metadata={
-                    "pdf_imported": is_pdf_imported,
-                    "pdf_import_warning": (
-                        "This DOCX was likely converted from PDF. Styles and tables may be unreliable."
-                        if is_pdf_imported
-                        else None
-                    ),
-                },
+                format_metadata=format_metadata,
             ),
         )
 
@@ -435,6 +449,107 @@ class DOCXProvider:
             }
 
         return metadata
+
+    def _extract_toc(self, doc: PythonDocxDocument) -> Optional[List[Dict[str, Any]]]:
+        """Extract Table of Contents from DOCX using XML parsing.
+
+        Word TOC is stored in SDT (Structured Document Tag) elements with
+        docPartGallery="Table of Contents". TOC entries are hyperlinks with
+        text and optional page numbers.
+
+        Returns:
+            List of TOC entries: [{"title": str, "level": int, "page": Optional[int]}]
+            or None if no TOC found.
+        """
+        from docx.oxml.ns import qn
+
+        try:
+            toc_entries = []
+
+            # Find all SDT elements in document body
+            for sdt in doc.element.body.iter(qn("w:sdt")):
+                # Check if this SDT is a TOC
+                sdt_pr = sdt.find(qn("w:sdtPr"))
+                if sdt_pr is None:
+                    continue
+
+                # Look for docPartGallery with "Table of Contents"
+                doc_part_obj = sdt_pr.find(qn("w:docPartObj"))
+                if doc_part_obj is not None:
+                    doc_part_gallery = doc_part_obj.find(qn("w:docPartGallery"))
+                    if doc_part_gallery is not None:
+                        gallery_val = doc_part_gallery.get(qn("w:val"), "")
+                        if "Table of Contents" not in gallery_val:
+                            continue
+                    else:
+                        continue
+                else:
+                    continue
+
+                # Found TOC SDT - extract entries from its content
+                sdt_content = sdt.find(qn("w:sdtContent"))
+                if sdt_content is None:
+                    continue
+
+                # TOC entries are typically in paragraphs with TOC styles
+                for para in sdt_content.iter(qn("w:p")):
+                    # Get paragraph style to determine TOC level
+                    p_pr = para.find(qn("w:pPr"))
+                    level = 1  # default level
+
+                    if p_pr is not None:
+                        p_style = p_pr.find(qn("w:pStyle"))
+                        if p_style is not None:
+                            style_val = p_style.get(qn("w:val"), "")
+                            # TOC styles are typically "TOC1", "TOC2", etc.
+                            if style_val.startswith("TOC"):
+                                try:
+                                    level = int(style_val[3:])
+                                except ValueError:
+                                    level = 1
+
+                    # Extract text from paragraph (may include hyperlinks)
+                    text_parts = []
+                    page_num = None
+
+                    for elem in para.iter():
+                        if elem.tag == qn("w:t"):
+                            text = elem.text or ""
+                            text_parts.append(text)
+                        elif elem.tag == qn("w:tab"):
+                            # Tab often separates title from page number
+                            text_parts.append("\t")
+
+                    full_text = "".join(text_parts).strip()
+                    if not full_text:
+                        continue
+
+                    # Try to extract page number (often after tab or at end)
+                    if "\t" in full_text:
+                        parts = full_text.rsplit("\t", 1)
+                        title = parts[0].strip()
+                        try:
+                            page_num = int(parts[1].strip())
+                        except ValueError:
+                            title = full_text
+                    else:
+                        title = full_text
+
+                    # Skip TOC heading itself and empty entries
+                    if title.lower() in ("table of contents", "contents", ""):
+                        continue
+
+                    toc_entries.append({
+                        "title": title,
+                        "level": level,
+                        "page": page_num,
+                    })
+
+            return toc_entries if toc_entries else None
+
+        except Exception as e:
+            logger.debug(f"TOC extraction failed: {e}")
+            return None
 
     def _extract_blocks(self, docx_content, filepath: Path) -> List[BaseBlock]:
         """Extract all content blocks from DOCX"""

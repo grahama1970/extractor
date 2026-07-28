@@ -10,7 +10,7 @@
 Probe pipeline steps for SciLLM/Chutes readiness.
 
 Outputs JSON and Markdown summaries under scripts/artifacts/.
-Does not require live network credentials; if CHUTES/OPENAI keys are
+Does not require live network credentials; if SCILLM/OPENAI keys are
 missing, marks sanity checks as skipped.
 """
 from __future__ import annotations
@@ -32,6 +32,7 @@ ART_DIR.mkdir(parents=True, exist_ok=True)
 
 @dataclass
 class StepRecord:
+    """Store metadata for a processing step including status and dependencies."""
     name: str
     path: str
     import_ok: bool
@@ -49,13 +50,14 @@ def _env_ok() -> bool:
     except Exception:
         pass
     base = (
-        os.getenv("CHUTES_API_BASE") or os.getenv("OPENAI_BASE_URL") or os.getenv("OPENAI_API_BASE")
+        os.getenv("SCILLM_API_BASE", "http://localhost:4010") or os.getenv("OPENAI_BASE_URL") or os.getenv("OPENAI_API_BASE")
     )
-    key = os.getenv("CHUTES_API_KEY") or os.getenv("OPENAI_API_KEY")
+    key = os.getenv("SCILLM_PROXY_KEY", "sk-dev-proxy-123") or os.getenv("OPENAI_API_KEY")
     return bool(base and key)
 
 
 def _scan_text(p: Path) -> tuple[bool, bool]:
+    """Check file text for litellm and scillm library usage."""
     txt = p.read_text(encoding="utf-8", errors="ignore")
     uses_litellm = "litellm_call" in txt or "normalize_model_alias" in txt
     uses_scillm = "scillm_client" in txt
@@ -66,11 +68,11 @@ def _sanity_call() -> bool:
     # OpenAI-compatible HTTP path (no litellm dependency)
     try:
         base = (
-            os.getenv("CHUTES_API_BASE")
+            os.getenv("SCILLM_API_BASE", "http://localhost:4010")
             or os.getenv("OPENAI_BASE_URL")
             or os.getenv("OPENAI_API_BASE")
         )
-        key = os.getenv("CHUTES_API_KEY") or os.getenv("OPENAI_API_KEY")
+        key = os.getenv("SCILLM_PROXY_KEY", "sk-dev-proxy-123") or os.getenv("OPENAI_API_KEY")
         if not base or not key:
             return False
         model = (
@@ -103,6 +105,7 @@ def main(
     output_json: Path = ART_DIR / "steps_chutes_report.json",
     output_md: Path = ART_DIR / "steps_chutes_report.md",
 ) -> int:
+    """Generate steps report in JSON and Markdown formats."""
     steps: List[StepRecord] = []
     env_ok = _env_ok()
 
@@ -145,7 +148,7 @@ def main(
     lines = []
     lines.append("# SciLLM/Chutes Readiness — Pipeline Steps")
     lines.append("")
-    lines.append(f"Env OK: {'✅' if env_ok else '❌'} (needs CHUTES/OPENAI base+key)")
+    lines.append(f"Env OK: {'✅' if env_ok else '❌'} (needs SCILLM/OPENAI base+key)")
     lines.append("")
     lines.append("| step | import | litellm | scillm | sanity | note |")
     lines.append("|---|---:|---:|---:|---:|---|")

@@ -81,8 +81,8 @@ async def direct_scillm_json(
 
     Uses environment variables for model configuration:
     - CHUTES_TEXT_MODEL
-    - CHUTES_API_BASE
-    - CHUTES_API_KEY
+    - SCILLM_API_BASE
+    - SCILLM_PROXY_KEY
     """
     try:
         from scillm import acompletion as _sc_acompletion  # type: ignore
@@ -96,8 +96,8 @@ async def direct_scillm_json(
         try:
             resp = await _sc_acompletion(
                 model=os.environ.get("CHUTES_TEXT_MODEL", ""),
-                api_base=os.environ.get("CHUTES_API_BASE", ""),
-                api_key=os.environ.get("CHUTES_API_KEY", ""),
+                api_base=os.environ.get("SCILLM_API_BASE", "http://localhost:4010"),
+                api_key=os.environ.get("SCILLM_PROXY_KEY", "sk-dev-proxy-123"),
                 custom_llm_provider="openai_like",
                 messages=messages,
                 response_format=response_format or {"type": "json_object"},

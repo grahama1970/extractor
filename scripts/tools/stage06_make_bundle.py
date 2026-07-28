@@ -28,6 +28,7 @@ from pathlib import Path
 
 
 def find_one(glob_str: str) -> Path | None:
+    """Return the last matching file path from a glob pattern."""
     candidates = sorted(Path(".").glob(glob_str))
     return candidates[-1] if candidates else None
 
@@ -47,6 +48,7 @@ def autodiscover(root: Path) -> tuple[Path | None, Path | None, Path | None]:
 
 
 def main() -> int:
+    """Parse command-line arguments for processing input files."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--stage02", type=Path, help="02_marker_blocks.json")
     ap.add_argument("--sections", type=Path, help="04_sections.json")

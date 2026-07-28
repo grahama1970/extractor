@@ -36,6 +36,7 @@ def extract_shall_sentences(text: str) -> list[str]:
 
 @app.command()
 def main():
+    """Run the CLI application, skipping if Lean4 prover is absent."""
     lean_cli = Path("/home/graham/workspace/experiments/lean4/src/lean4_prover/cli_mini.py")
     if not lean_cli.exists():
         print("SKIP: Lean4 CLI not found; install lean4_prover first.")

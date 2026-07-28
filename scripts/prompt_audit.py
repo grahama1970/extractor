@@ -29,18 +29,22 @@ app = typer.Typer(add_completion=False)
 
 
 class AuditError(RuntimeError):
+    """Signal an error specific to an audit."""
     pass
 
 
 def list_prompts(prompts_dir: Path) -> List[Path]:
+    """Return sorted paths to JSON files in the directory."""
     return sorted(prompts_dir.glob("*.json"))
 
 
 def load_json(path: Path) -> Dict:
+    """Load JSON data from a file at the specified path."""
     return json.loads(path.read_text())
 
 
 def audit_prompt(prompt_path: Path, docs_dir: Path, crit_dir: Path) -> Dict:
+    """Validate prompt documentation and criteria files for existence."""
     name = prompt_path.stem  # e.g., 07_reflow_section
     doc_path = docs_dir / f"{name}_PROMPT.md"
     crit_path = crit_dir / f"{name}.json"
@@ -88,6 +92,7 @@ def main(
         True, help="Write audit result to data/audit/prompt_audit.json"
     ),
 ):
+    """Execute prompt audit using specified directories and write results."""
     if not GRADE_PROMPT_PATH.exists():
         raise typer.Exit(code=1)
 

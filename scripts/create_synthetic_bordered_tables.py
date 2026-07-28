@@ -24,6 +24,7 @@ OUTPUT_DIR = Path(__file__).resolve().parent.parent / "data" / "pdfs"
 
 
 def _styles():
+    """Return sample style sheet."""
     return getSampleStyleSheet()
 
 
@@ -563,6 +564,7 @@ def create_dense_grid_pdf(path: Path):
 
 
 def main():
+    """Generate and save synthetic PDF documents to the output directory."""
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     pdfs = [

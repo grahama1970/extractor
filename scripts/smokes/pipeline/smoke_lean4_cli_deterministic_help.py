@@ -23,6 +23,7 @@ app = typer.Typer(add_completion=False)
 
 @app.command()
 def main():
+    """Check for Lean4 CLI existence and display help information."""
     cli = Path("/home/graham/workspace/experiments/lean4/src/lean4_prover/cli_mini.py")
     if not cli.exists():
         print("SKIP: Lean4 CLI not found; skipping help check.")

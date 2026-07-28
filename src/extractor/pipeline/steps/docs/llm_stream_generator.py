@@ -106,6 +106,7 @@ class LLMStreamGenerator:
     """Generates LLM-readable stream format"""
 
     def __init__(self, validator: DeterministicValidator):
+        """Initialize with a deterministic validator instance."""
         self.validator = validator
 
     def generate_base_stream(self, extraction_data: Dict[str, Any]) -> str:
@@ -220,6 +221,7 @@ class LLMStreamGenerator:
 
 
 def main():
+    """Generate a stream separating deterministic data from enhancements."""
     parser = argparse.ArgumentParser(
         description="Generate LLM-readable stream separating deterministic base from non-deterministic enhancements"
     )

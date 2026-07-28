@@ -15,6 +15,7 @@ DOC = os.path.join(ROOT, "docs", "STATE_OF_PROJECT.md")
 
 
 def run(cmd: str, env=None) -> tuple[int, str]:
+    """Execute a shell command and return its exit code and output."""
     print(f"$ {cmd}")
     proc = subprocess.run(
         cmd,
@@ -29,11 +30,13 @@ def run(cmd: str, env=None) -> tuple[int, str]:
 
 
 def latest(pattern: str) -> str:
+    """Return the latest file matching a glob pattern, or empty string if none."""
     files = sorted(glob.glob(os.path.join(ART, pattern)))
     return files[-1] if files else ""
 
 
 def main():
+    """Execute UX and UI health checks and log results with a timestamp."""
     ts = datetime.utcnow().isoformat(timespec="seconds").replace(":", "-") + "Z"
     # UX Health
     ux_code, ux_out = run("BASE_URL=http://127.0.0.1:8080/main node scripts/ux_check_broken.mjs")

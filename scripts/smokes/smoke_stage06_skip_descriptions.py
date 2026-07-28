@@ -24,6 +24,7 @@ app = typer.Typer(
 
 @app.command()
 def main(results: Path = typer.Option(Path("data/results/pipeline"), "-o")) -> None:
+    """Execute the main command for processing pipeline results."""
     load_dotenv(find_dotenv() or None)
     fixture = Path("data/input/pipeline/BHT_CV32A65X_marked.pdf")
     if not fixture.exists():

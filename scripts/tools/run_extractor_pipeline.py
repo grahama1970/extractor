@@ -25,6 +25,7 @@ from extractor.pipeline.run_pipeline import main as _main
 
 
 def main() -> int:  # pragma: no cover
+    """Notify deprecation and delegate to the main function."""
     print(
         "[DEPRECATED] Use `python -m extractor.pipeline` instead of scripts/tools/run_extractor_pipeline.py",
         file=sys.stderr,

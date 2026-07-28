@@ -11,11 +11,14 @@ import extractor.pipeline.utils.litellm_call as lc
 
 @pytest.fixture()
 def runner() -> CliRunner:
+    """Return a CliRunner instance for testing command-line interfaces."""
     return CliRunner()
 
 
 def test_output_and_quiet(monkeypatch, runner: CliRunner, tmp_path):
+    """Validate CLI quiet mode writes output to file."""
     async def fake_call(prompts: List[object], **kwargs):
+        """Return indexed fake answers for each provided prompt."""
         return [f"ans:{i}" for i, _ in enumerate(prompts)]
 
     monkeypatch.setattr(lc, "litellm_call", fake_call)
@@ -41,9 +44,11 @@ def test_output_and_quiet(monkeypatch, runner: CliRunner, tmp_path):
 
 
 def test_json_shorthand_sets_flags(monkeypatch, runner: CliRunner):
+    """Test JSON shorthand flag settings in a CLI application."""
     captured = {}
 
     async def fake_call(prompts: List[object], **kwargs):
+        """Return a JSON string indicating success for given prompts."""
         captured.update(kwargs)
         return [json.dumps({"ok": True})]
 

@@ -21,6 +21,7 @@ app = typer.Typer(add_completion=False)
 
 @app.command()
 def main(tmp_dir: Path = typer.Option(Path("data/results/structured_parity_smoke/xml_synth"))):
+    """Create a sample XML file in the specified directory."""
     tmp_dir.mkdir(parents=True, exist_ok=True)
     xml_path = tmp_dir / "sect.xml"
     xml_path.write_text(

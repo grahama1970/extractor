@@ -19,6 +19,7 @@ app = typer.Typer(add_completion=False)
 
 
 def camelot_to_fitz(bbox, page_rect: "fitz.Rect"):
+    """Transform Camelot bbox to Fitz.Rect, intersecting with page."""
     try:
         x0, y0, x1, y1 = [float(v) for v in bbox]
         H = float(page_rect.height)
@@ -34,6 +35,7 @@ def run(
     run_dir: Path = typer.Option(..., exists=True),
     out: Path = typer.Option(Path("scripts/artifacts/annotated_gold.pdf")),
 ):
+    """Generate an annotated PDF from processing pipeline outputs."""
     p02 = run_dir / "02_marker_extractor/json_output/02_marker_blocks.json"
     p04 = run_dir / "04_section_builder/json_output/04_sections.json"
     p05 = run_dir / "05_table_extractor/json_output/05_tables.json"

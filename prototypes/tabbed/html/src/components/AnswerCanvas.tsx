@@ -10,7 +10,7 @@
  *   - Ctrl+Shift+A → keyboard fallback
  *   - Escape → clear canvas
  */
-import React, { useMemo } from "react";
+import React, { useMemo, useCallback } from "react";
 import { usePersona } from "@/contexts/PersonaContext";
 import { PERSONAS } from "@/lib/persona-config";
 import { useAgentAnswer, type AnswerPayload, type AgentStatus } from "@/hooks/useAgentAnswer";
@@ -19,7 +19,7 @@ import D3Table from "@/components/d3/D3Table";
 
 // --- Idle State ---
 
-function IdleState({ accentHsl }: { accentHsl: string }) {
+function IdleState({ accentHsl, speechAvailable }: { accentHsl: string; speechAvailable?: boolean }) {
   return (
     <div className="flex flex-col items-center justify-center h-full gap-6 animate-fade-in-5ft">
       {/* Persona dot with breathing animation */}
@@ -73,6 +73,7 @@ function StatusIndicator({ status, transcript }: { status: AgentStatus; transcri
     listening: "",
     thinking: "Thinking...",
     rendering: "Rendering...",
+    manipulating: "Updating...",
   };
 
   return (
@@ -127,13 +128,20 @@ function ImageContent({ answer }: { answer: AnswerPayload }) {
   );
 }
 
-function HtmlContent({ answer }: { answer: AnswerPayload }) {
+function HtmlContent({
+  answer,
+  iframeRef,
+}: {
+  answer: AnswerPayload;
+  iframeRef?: (el: HTMLIFrameElement | null) => void;
+}) {
   return (
     <div className="w-full h-full animate-fade-in-5ft">
       {answer.title && (
         <h1 className="text-2xl font-bold text-persona px-8 pt-6">{answer.title}</h1>
       )}
       <iframe
+        ref={iframeRef}
         srcDoc={answer.content}
         className="w-full flex-1 border-0"
         style={{ height: "calc(100% - 60px)" }}
@@ -221,30 +229,30 @@ function TextContent({ answer }: { answer: AnswerPayload }) {
 export default function AnswerCanvas() {
   const { persona } = usePersona();
   const config = PERSONAS[persona];
-  const { answer, status, error, transcript, clear, speechAvailable } = useAgentAnswer(persona);
+  const { answer, status, error, transcript, clear, speechAvailable, setIframeRef } = useAgentAnswer(persona);
 
   const accentHsl = config.accent;
 
   return (
     <div className="relative w-full h-full bg-background overflow-hidden">
       {/* Content area */}
-      {error ? (
+      {error && status !== "manipulating" ? (
         <ErrorDisplay error={error} onDismiss={clear} />
       ) : status === "listening" ? (
         <ListeningState accentHsl={accentHsl} />
-      ) : !answer ? (
+      ) : !answer && status !== "thinking" ? (
         <IdleState accentHsl={accentHsl} speechAvailable={speechAvailable} />
-      ) : answer.type === "image" ? (
+      ) : answer?.type === "image" ? (
         <ImageContent answer={answer} />
-      ) : answer.type === "html" ? (
-        <HtmlContent answer={answer} />
-      ) : answer.type === "data" ? (
+      ) : answer?.type === "html" ? (
+        <HtmlContent answer={answer} iframeRef={setIframeRef} />
+      ) : answer?.type === "data" ? (
         <DataContent answer={answer} accentHsl={accentHsl} />
-      ) : answer.type === "table" ? (
+      ) : answer?.type === "table" ? (
         <TableContent answer={answer} accentHsl={accentHsl} />
-      ) : (
+      ) : answer ? (
         <TextContent answer={answer} />
-      )}
+      ) : null}
 
       {/* Status indicator — bottom-right, subtle */}
       <StatusIndicator status={status} transcript={transcript} />

@@ -20,6 +20,7 @@ from pathlib import Path
 
 
 def has_annots(page) -> bool:
+    """Check if a PDF page contains annotations."""
     try:
         if page.first_annot is not None:
             return True
@@ -37,6 +38,7 @@ def has_annots(page) -> bool:
 
 
 def main(argv: list[str]) -> int:
+    """Check for annotations on the first N pages of a PDF document."""
     ap = argparse.ArgumentParser(description="Check there are annotations on first N pages.")
     ap.add_argument("--pdf", type=Path, required=True)
     ap.add_argument("--pages", type=int, default=3)

@@ -24,6 +24,7 @@ app = typer.Typer(add_completion=False)
 
 @app.command()
 def main():
+    """Execute the main command for the application."""
     out_dir = Path("data/results/cli_smokes/refers_to").resolve()
     stage11 = out_dir / "11_arango_create_graph/json_output"
     tmp = out_dir / "tmp"

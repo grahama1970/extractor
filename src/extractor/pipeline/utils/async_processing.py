@@ -28,12 +28,15 @@ except Exception as exc:
     raise
 
     class _DummyLitellm:
+        """Mock the litellm library interface when unavailable."""
         class exceptions:  # type: ignore
+            """Define custom exception types for handling specific errors."""
             Timeout = Exception
             RateLimitError = Exception
 
         @staticmethod
         def completion(**kwargs):
+            """Raise an error indicating litellm is unavailable in this runtime."""
             raise RuntimeError("litellm unavailable in this runtime")
 
     litellm = _DummyLitellm()  # type: ignore

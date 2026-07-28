@@ -25,6 +25,7 @@ def main(
     results: Path = typer.Option(Path("data/results/pipeline_happy_smoke2"), "-o"),
     arango_db: str = typer.Option("pdf_knowledge_base_test"),
 ):
+    """Run the PDF processing pipeline."""
     load_dotenv(find_dotenv() or None)
     env = os.environ.copy()
     env.setdefault("PYTHONPATH", str(Path.cwd() / "src"))

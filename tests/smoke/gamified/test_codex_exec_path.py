@@ -8,10 +8,12 @@ import pytest
 
 
 def _has_codex() -> bool:
+    """Determine 'codex' executable presence."""
     return shutil.which("codex") is not None
 
 
 def _has_run_codex_exec() -> bool:
+    """Check if the deprecated codex execution module exists."""
     return imps.find_spec("extractor.pipeline.utils.deprecated_codex_call") is not None
 
 
@@ -21,6 +23,7 @@ def _has_run_codex_exec() -> bool:
 @pytest.mark.skipif(not _has_codex(), reason="codex CLI not found on PATH")
 @pytest.mark.skipif(not _has_run_codex_exec(), reason="run_codex_exec not importable")
 def test_codex_exec_end_to_end(tmp_path: Path):
+    """Skip tests based on environment variables and conditions."""
     prompt = tmp_path / "prompt_quick.md"
     prompt.write_text(
         "\n".join(

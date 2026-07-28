@@ -27,6 +27,7 @@ app = typer.Typer(
 
 
 def _wait_http(url: str, timeout: float = 15.0) -> None:
+    """Wait for a URL to become accessible within a timeout period."""
     start = time.monotonic()
     while time.monotonic() - start < timeout:
         try:

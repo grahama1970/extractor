@@ -42,6 +42,7 @@ def _timeout_for_pdf(pdf_dir: Path, default: int = 600) -> int:
 
 
 def run_batch(dry_run: bool = False, max_pdfs: int = 0, timeout: int = 600):
+    """Run a batch process on PDF directories with optional constraints."""
     from extractor.pipeline.steps.s05_table_extractor import run as s05_run
 
     pdf_dirs = sorted(
@@ -89,6 +90,7 @@ def run_batch(dry_run: bool = False, max_pdfs: int = 0, timeout: int = 600):
         try:
             # Use alarm for hard timeout
             def _alarm_handler(signum, frame):
+                """Raise a TimeoutError if the specified timeout is exceeded."""
                 raise TimeoutError(f"S05 exceeded {pdf_timeout}s timeout")
 
             old_handler = signal.signal(signal.SIGALRM, _alarm_handler)
@@ -147,6 +149,7 @@ def run_batch(dry_run: bool = False, max_pdfs: int = 0, timeout: int = 600):
 
 
 def main():
+    """Run batch S05 re-extraction with command-line arguments."""
     parser = argparse.ArgumentParser(description="Batch S05 re-extraction")
     parser.add_argument("--dry-run", action="store_true", help="Just list PDFs")
     parser.add_argument("--max", type=int, default=0, help="Max PDFs to process (0=all)")

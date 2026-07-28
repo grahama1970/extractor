@@ -27,6 +27,7 @@ from typing import Optional, Tuple
 
 @dataclass
 class Inputs:
+    """Store file paths and a float for processing inputs."""
     pdf: Path
     fig_json: Path
     out: Path
@@ -34,6 +35,7 @@ class Inputs:
 
 
 def _latest_run_dir(root: Path) -> Optional[Path]:
+    """Return the most recent pipeline run directory from root."""
     cand = [p for p in (root / "data" / "results" / "pipeline_runs").glob("*") if p.is_dir()]
     if not cand:
         return None
@@ -48,6 +50,7 @@ def _resolve_inputs(
     out: Optional[Path],
     expand: float,
 ) -> Inputs:
+    """Resolve input paths for run directory, PDF, figure JSON, and output."""
     if run_dir is None:
         lr = _latest_run_dir(Path.cwd())
         if lr is None:
@@ -81,6 +84,7 @@ def _resolve_inputs(
 def _expand_and_clamp(
     rect: Tuple[float, float, float, float], page_w: float, page_h: float, ratio: float
 ) -> Tuple[float, float, float, float]:
+    """Expand and clamp a rectangle within page bounds by a ratio."""
     x0, y0, x1, y1 = rect
     w = max(0.0, x1 - x0)
     h = max(0.0, y1 - y0)
@@ -94,6 +98,7 @@ def _expand_and_clamp(
 
 
 def main(argv: list[str]) -> int:
+    """Parse command-line arguments for generating a proof PDF with expanded figure."""
     import argparse
 
     ap = argparse.ArgumentParser(

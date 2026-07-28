@@ -36,6 +36,7 @@ from extractor.pipeline.utils.section_builder_utils import (
 
 
 def _load_blocks(p: Path) -> List[Dict[str, Any]]:
+    """Load and extract blocks from a JSON file at the specified path."""
     with p.open("r", encoding="utf-8") as f:
         data = json.load(f)
     if "pages" in data:
@@ -46,6 +47,7 @@ def _load_blocks(p: Path) -> List[Dict[str, Any]]:
 
 
 def main() -> int:
+    """Parse command-line arguments and process JSON data."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--json", required=True, help="Path to Stage 03/04 JSON")
     ap.add_argument("--limit", type=int, default=10)

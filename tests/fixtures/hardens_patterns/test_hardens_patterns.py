@@ -39,19 +39,25 @@ FIXTURES_DIR = Path(__file__).parent
 
 
 class TestNormalizeCell:
+    """Standardize string whitespace by collapsing and stripping."""
     def test_newline_to_space(self):
+        """Normalize newline characters to spaces in a string."""
         assert normalize_cell("hello\nworld") == "hello world"
 
     def test_nbsp_to_space(self):
+        """Normalize non-breaking spaces to regular spaces in a string."""
         assert normalize_cell("hello\u00a0world") == "hello world"
 
     def test_whitespace_collapse(self):
+        """Test whitespace collapsing in cell normalization."""
         assert normalize_cell("  hello   world  ") == "hello world"
 
     def test_none(self):
+        """Return an empty string for a None input value."""
         assert normalize_cell(None) == ""
 
     def test_multiline(self):
+        """Verifies `normalize_cell` converts multiline strings to a single line."""
         assert normalize_cell("line1\nline2\nline3") == "line1 line2 line3"
 
 
@@ -76,28 +82,35 @@ class TestFixBrokenWords:
         assert _fix_broken_words("rate f") == "rate f"
 
     def test_two_trailing_chars(self):
+        """Fix broken words by removing unintended spaces between characters."""
         assert _fix_broken_words("EXECU TE") == "EXECUTE"
         assert _fix_broken_words("Descripti on") == "Description"
         assert _fix_broken_words("connexi on") == "connexion"
 
     def test_four_trailing_chars(self):
+        """Fix broken words by removing trailing spaces in the input string."""
         assert _fix_broken_words("Asynchro nous") == "Asynchronous"
 
     def test_uppercase(self):
+        """Verify `_fix_broken_words` joins uppercase broken words."""
         assert _fix_broken_words("SUBSY STEM") == "SUBSYSTEM"
 
     def test_identifier_split(self):
+        """Fix broken words by removing spaces within identifiers."""
         assert _fix_broken_words("bht_updat e_i") == "bht_update_i"
         assert _fix_broken_words("bht_predi ction_o") == "bht_prediction_o"
 
     def test_no_false_positive_normal_text(self):
+        """Validate that normal text remains unchanged after processing."""
         assert _fix_broken_words("hello world") == "hello world"
         assert _fix_broken_words("The system shall") == "The system shall"
 
     def test_no_false_positive_section_numbers(self):
+        """Assert the correctness of fixed section number formatting."""
         assert _fix_broken_words("Section 4.2.1") == "Section 4.2.1"
 
     def test_no_false_positive_short_words(self):
+        """Test that short words are not falsely identified as broken."""
         assert _fix_broken_words("in out") == "in out"
         assert _fix_broken_words("See section 4") == "See section 4"
 
@@ -194,13 +207,17 @@ class TestFixBrokenWords:
 
 
 class TestFixDirectionTokens:
+    """Tests fixing direction tokens in text strings."""
     def test_ou_t_merge(self):
+        """Fix direction tokens by replacing abbreviations with full words."""
         assert _fix_direction_tokens("ou t") == "out"
 
     def test_in_out(self):
+        """Test `_fix_direction_tokens` with 'in out' input."""
         assert _fix_direction_tokens("in out") == "in/out"
 
     def test_normal_text_unchanged(self):
+        """Verify normal text remains unchanged."""
         assert _fix_direction_tokens("hello world") == "hello world"
 
 
@@ -208,13 +225,17 @@ class TestFixDirectionTokens:
 
 
 class TestSanitizeCell:
+    """Sanitize cell text, handling None and normalizing whitespace."""
     def test_full_pipeline(self):
+        """Validate cell string sanitization."""
         assert sanitize_cell("Subsyste m\nsplit") == "Subsystem split"
 
     def test_none(self):
+        """Verify `sanitize_cell` returns empty string for None input."""
         assert sanitize_cell(None) == ""
 
     def test_nbsp_and_ocr(self):
+        """Verify non-breaking space replacement in cell sanitization."""
         assert sanitize_cell("EXECU\u00a0TE enable") == "EXECUTE enable"
 
 
@@ -222,6 +243,7 @@ class TestSanitizeCell:
 
 
 class TestFragmentationScore:
+    """Validate that specific characters do not contribute to fragmentation."""
     def test_newline_not_counted(self):
         """Newlines within cells should NOT be counted as fragmentation."""
         import pandas as pd
@@ -259,6 +281,7 @@ class TestFragmentationScore:
 
 
 def _get_fixture(name: str) -> Path:
+    """Return the path of a fixture if it exists, else skip the test."""
     path = FIXTURES_DIR / name
     if not path.exists():
         pytest.skip(f"Fixture {name} not generated. Run generate_fixtures.py first.")
@@ -273,6 +296,7 @@ class TestCodeListingFixture:
     """
 
     def test_lattice_stream_equal_fragmentation(self):
+        """Test equality of lattice and stream fragmentations in a PDF."""
         pdf = _get_fixture("fixture_code_listing.pdf")
         lattice = try_camelot_strategy(
             pdf, 0, {"name": "lattice_default", **CAMELOT_STRATEGIES["lattice_default"]}
@@ -296,6 +320,7 @@ class TestLargeSpecFixture:
     """Pattern 3: Large spec table with NBSP and newlines in cells."""
 
     def test_fragmentation_only_ocr(self):
+        """Test table extraction and fragmentation scoring from a PDF."""
         pdf = _get_fixture("fixture_large_spec.pdf")
         lattice = try_camelot_strategy(
             pdf, 0, {"name": "lattice_default", **CAMELOT_STRATEGIES["lattice_default"]}
@@ -314,6 +339,7 @@ class TestWideMulticolFixture:
     """Pattern 4: Wide 15-column table."""
 
     def test_lattice_wins_wide_table(self):
+        """Verify lattice strategy extracts wide multicolumn table."""
         pdf = _get_fixture("fixture_wide_multicol.pdf")
         lattice = try_camelot_strategy(
             pdf, 0, {"name": "lattice_default", **CAMELOT_STRATEGIES["lattice_default"]}

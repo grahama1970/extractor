@@ -11,6 +11,7 @@ from extractor.pipeline.steps import s14_report_generator as s14
 
 
 def main():
+    """Parse command-line arguments and execute corresponding pipeline operations."""
     p = argparse.ArgumentParser()
     p.add_argument("--results", type=Path)
     p.add_argument("--bundle", type=Path)

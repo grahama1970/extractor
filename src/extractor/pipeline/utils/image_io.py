@@ -7,9 +7,11 @@ from extractor.pipeline.utils.reliability import log_stage_error
 
 
 def _safe_read_image_b64(path_str: str, base_dir: Path) -> Optional[str]:
+    """Read image from path, encode as base64, return None on error."""
     try:
 
         def _candidates() -> list[Path]:
+            """Generate candidate paths from input string and base directory."""
             raw = Path(path_str)
             c: list[Path] = [raw]
             if not raw.is_absolute():
@@ -69,6 +71,7 @@ def _safe_read_image_b64(path_str: str, base_dir: Path) -> Optional[str]:
 
 
 def get_section_image_b64(section_data: Dict[str, object], base_dir: Path) -> Optional[str]:
+    """Load base64 image string for section, returning None if not found."""
     image_path_str = section_data.get("visual_path") or section_data.get("image_path")
     if not image_path_str:
         return None
@@ -76,6 +79,7 @@ def get_section_image_b64(section_data: Dict[str, object], base_dir: Path) -> Op
 
 
 def get_table_image_b64(table: Dict[str, object], base_dir: Path) -> Optional[str]:
+    """Return base64-encoded image from table image path."""
     path = table.get("table_image_path") or table.get("image_path")
     if not path:
         return None
@@ -83,6 +87,7 @@ def get_table_image_b64(table: Dict[str, object], base_dir: Path) -> Optional[st
 
 
 def get_figure_image_b64(figure: Dict[str, object], base_dir: Path) -> Optional[str]:
+    """Return base64-encoded image from figure's image path."""
     path = figure.get("image_path")
     if not path:
         return None
@@ -90,6 +95,7 @@ def get_figure_image_b64(figure: Dict[str, object], base_dir: Path) -> Optional[
 
 
 def get_annotation_image_b64(annot: Dict[str, object], base_dir: Path) -> Optional[str]:
+    """Retrieve and base64 encode image from annotation path, or None."""
     path = annot.get("image_path")
     if not path:
         return None

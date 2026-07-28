@@ -17,6 +17,7 @@ from pathlib import Path
 
 
 def main():
+    """Validate JSON data from a file, ensuring it is a list of 53 blocks."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--flat", type=Path, required=True)
     args = ap.parse_args()

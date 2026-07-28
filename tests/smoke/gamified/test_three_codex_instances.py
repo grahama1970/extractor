@@ -5,6 +5,7 @@ from pathlib import Path
 
 
 def _runs_set():
+    """Return a set of run identifiers from workspace."""
     return set(p.parent.name for p in Path("workspace/runs").glob("*/instances"))
 
 

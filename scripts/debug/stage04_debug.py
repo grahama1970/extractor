@@ -13,6 +13,7 @@ from extractor.pipeline.steps import _04_section_builder as stage04
 
 
 def main() -> int:
+    """Run pipeline stage 04 using blocks, PDFs, and output root."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--blocks", type=Path, required=True, help="02_marker_blocks.json")
     ap.add_argument("--pdfdir", type=Path, required=True, help="dir with *_clean.pdf")

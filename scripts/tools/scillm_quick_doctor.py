@@ -9,13 +9,13 @@
 # ///
 
 """
-SciLLM Quick Doctor: verifies a minimal Chutes chat JSON round-trip.
+SciLLM Quick Doctor: verifies a minimal proxy chat JSON round-trip.
 
 Behavior
-- Reads CHUTES_API_BASE, CHUTES_API_KEY, CHUTES_TEXT_MODEL from env by default.
+- Reads SCILLM_API_BASE, SCILLM_PROXY_KEY, CHUTES_TEXT_MODEL from env by default.
 - Optionally accepts --base/--key/--model overrides.
 - Unsets conflicting OPENAI_* envs to avoid Bearer paths.
-    - Uses scillm.completion directly on an OpenAI-compatible Chutes path (x-api-key).
+    - Uses scillm.completion directly on the local proxy (port 4010).
 - Prints a single JSON object to stdout and exits 0 on success; non-zero on failure.
 """
 
@@ -35,6 +35,7 @@ app = typer.Typer(add_completion=False)
 
 @dataclass
 class DoctorResult:
+    """Return JSON representation of the DoctorResult instance."""
     ok: bool
     method: str
     base: str
@@ -48,6 +49,7 @@ class DoctorResult:
 
 
 def _unset_openai_envs() -> bool:
+    """Remove OpenAI environment variables if they are set."""
     keys = [
         "OPENAI_API_KEY",
         "OPENAI_BASE_URL",
@@ -62,6 +64,7 @@ def _unset_openai_envs() -> bool:
 
 
 def _call_direct(base: str, key: str, model: str) -> Dict[str, Any]:
+    """Call a completion API with specified model and credentials."""
     from scillm import completion  # type: ignore
 
     # Single paved call: let SciLLM canonicalize headers
@@ -83,12 +86,13 @@ def _call_direct(base: str, key: str, model: str) -> Dict[str, Any]:
 
 @app.command()
 def main(
-    base: Optional[str] = typer.Option(None, "--base", help="Override CHUTES_API_BASE"),
-    key: Optional[str] = typer.Option(None, "--key", help="Override CHUTES_API_KEY"),
+    base: Optional[str] = typer.Option(None, "--base", help="Override SCILLM_API_BASE"),
+    key: Optional[str] = typer.Option(None, "--key", help="Override SCILLM_PROXY_KEY"),
     model: Optional[str] = typer.Option(None, "--model", help="Override CHUTES_TEXT_MODEL"),
 ):
-    env_base = base or os.environ.get("CHUTES_API_BASE", "").strip()
-    env_key = key or os.environ.get("CHUTES_API_KEY", "").strip()
+    """Override environment variables with optional command-line arguments."""
+    env_base = base or os.environ.get("SCILLM_API_BASE", "http://localhost:4010").strip()
+    env_key = key or os.environ.get("SCILLM_PROXY_KEY", "sk-dev-proxy-123").strip()
     env_model = model or os.environ.get("CHUTES_TEXT_MODEL", "").strip()
 
     if not env_base or not env_key or not env_model:
@@ -96,7 +100,7 @@ def main(
             json.dumps(
                 {
                     "ok": False,
-                    "error": "Missing CHUTES_API_BASE, CHUTES_API_KEY, or CHUTES_TEXT_MODEL",
+                    "error": "Missing SCILLM_API_BASE, SCILLM_PROXY_KEY, or CHUTES_TEXT_MODEL",
                 }
             )
         )

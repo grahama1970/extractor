@@ -22,10 +22,12 @@ app = typer.Typer(add_completion=False)
 
 
 def _load_json(p: Path):
+    """Load JSON from path."""
     return json.loads(p.read_text())
 
 
 def _edge_hints_to_edges(hints: dict) -> dict:
+    """Extract edge relationships from a hints dictionary."""
     sections = {s["key"]: s for s in hints.get("nodes", {}).get("sections", [])}
     lemmas = {lemma["key"]: lemma for lemma in hints.get("nodes", {}).get("lemmas", [])}
     depends_on = hints.get("edges", {}).get("depends_on", [])
@@ -38,6 +40,7 @@ def _edge_hints_to_edges(hints: dict) -> dict:
 
 
 def _flat10_to_edges(flat10: dict) -> dict:
+    """Extract edges from a flat10 dictionary structure."""
     items = flat10.get("items") or []
     sections = {}
     lemmas = {}
@@ -120,6 +123,7 @@ def main(
         help="Use lemma_candidates when used_lemmas is empty",
     ),
 ):
+    """Process edge hints from Lean4 or Stage 10 JSON and output edges."""
     obj = _load_json(source)
     edges = obj
     if "nodes" in obj and "edges" in obj and "depends_on" in obj.get("edges", {}):

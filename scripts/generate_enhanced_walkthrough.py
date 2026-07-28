@@ -46,6 +46,7 @@ def _find_label_targets(page, labels):
 
 
 def generate_enhanced_walkthrough(pdf_path: Path, output_dir: Path, run_dir: Path):
+    """Generate enhanced walkthrough from PDF and run artifacts."""
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 

@@ -6,10 +6,12 @@ from pathlib import Path
 
 
 def _run(cmd):
+    """Execute a system command and return the exit status."""
     return os.system(cmd)
 
 
 def _latest_run_id() -> str:
+    """Return the latest run ID from the workspace directory."""
     runs = sorted(Path("workspace/runs").glob("*/instances"))
     return runs[-1].parent.name if runs else ""
 

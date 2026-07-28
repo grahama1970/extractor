@@ -43,6 +43,7 @@ GOLD_04 = ROOT / "data/gold_standards/pipeline/004_section_builder_gs.json"
 
 
 def _choose_section(payload: dict) -> dict:
+    """Return the first section from a payload dictionary."""
     secs = (payload or {}).get("sections") or []
     if not secs:
         raise SystemExit("No sections available")
@@ -50,6 +51,7 @@ def _choose_section(payload: dict) -> dict:
 
 
 def _build_min_section(sec: dict) -> dict:
+    """Build a minimal section dictionary from input section data."""
     title = sec.get("title") or "Untitled"
     blocks = sec.get("blocks") or []
     texts = [b.get("text") for b in blocks if isinstance(b, dict) and b.get("text")]
@@ -64,6 +66,7 @@ def _build_min_section(sec: dict) -> dict:
 
 
 def _load_stage07():
+    """Load the stage 07 reflow section module."""
     import importlib.util
 
     p = Path("src/extractor/pipeline/steps/07_reflow_section.py").resolve()
@@ -76,6 +79,7 @@ def _load_stage07():
 
 
 async def main_async() -> None:
+    """Initialize and configure environment variables for async execution."""
     load_dotenv(find_dotenv(usecwd=True) or None)
     os.environ.setdefault("LITELLM_HTTPX", "1")
     os.environ.setdefault("LITELLM_DEBUG", "1")
@@ -123,6 +127,7 @@ app = typer.Typer(add_completion=False, help="Stage 07 function-path smoke (text
 
 @app.command()
 def main() -> None:
+    """Run the main async application."""
     asyncio.run(main_async())
 
 

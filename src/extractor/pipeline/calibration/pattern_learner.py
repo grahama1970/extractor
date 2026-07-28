@@ -707,8 +707,8 @@ Respond in JSON format:
 
         try:
             # Get API configuration
-            api_base = os.environ.get("CHUTES_API_BASE") or os.environ.get("OPENROUTER_API_BASE")
-            api_key = os.environ.get("CHUTES_API_KEY") or os.environ.get("OPENROUTER_API_KEY")
+            api_base = os.environ.get("SCILLM_API_BASE", "http://localhost:4010") or os.environ.get("OPENROUTER_API_BASE")
+            api_key = os.environ.get("SCILLM_PROXY_KEY", "sk-dev-proxy-123") or os.environ.get("OPENROUTER_API_KEY")
             model = os.environ.get("CHUTES_MODEL_ID", "anthropic/claude-3-haiku")
 
             if not api_key:

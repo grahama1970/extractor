@@ -24,6 +24,7 @@ app = typer.Typer(
 
 @app.command()
 def main(results: Path = typer.Option(Path("data/results/pipeline_db_smoke"), "-o")) -> None:
+    """Run pipeline smoke test and save results to specified output path."""
     load_dotenv(find_dotenv() or None)
     source_pdf = "BHT_CV32A65X_marked.pdf"
 

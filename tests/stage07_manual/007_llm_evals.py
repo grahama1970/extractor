@@ -20,6 +20,7 @@ MODELS = [
 
 
 def strip_fences_and_crop(s: str) -> str:
+    """Strip code fences and crop a string to extract JSON content."""
     if not s:
         return s
     s2 = s.strip()
@@ -37,6 +38,7 @@ def strip_fences_and_crop(s: str) -> str:
 
 
 def parse_json(s: str) -> Optional[Dict[str, Any]]:
+    """Parse a JSON string and return a dictionary or None."""
     try:
         return json.loads(strip_fences_and_crop(s))
     except Exception:
@@ -44,6 +46,7 @@ def parse_json(s: str) -> Optional[Dict[str, Any]]:
 
 
 def image_file_to_data_url(path: Path) -> str:
+    """Convert an image file to a base64 data URL."""
     mime = {
         ".png": "image/png",
         ".jpg": "image/jpeg",
@@ -63,6 +66,7 @@ def image_file_to_data_url(path: Path) -> str:
 async def call_model(
     model: str, system_text: str, user_text: str, image_url: str
 ) -> Tuple[str, Dict[str, Any]]:
+    """Invoke model with system/user text and image, returning content and data."""
     messages = [
         {"role": "system", "content": system_text},
         {
@@ -147,6 +151,7 @@ def evaluate_structure(parsed: Dict[str, Any], tables_path: Optional[Path]) -> D
 
     # Titles must be INFERRED (case-insensitive contains)
     def _is_inferred_title(title: Any) -> bool:
+        """Identify if a title string represents an inferred title."""
         return isinstance(title, str) and ("inferred" in title.lower()) and len(title.strip()) >= 9
 
     if tables:
@@ -176,6 +181,7 @@ def evaluate_structure(parsed: Dict[str, Any], tables_path: Optional[Path]) -> D
 
     # Good contiguous text check (accept text under 'text' or 'content')
     def _get_text_content(b: Dict[str, Any]) -> str:
+        """Extract string from dict, prioritizing 'text' or 'content', defaulting to empty."""
         t = b.get("text") if isinstance(b.get("text"), str) else b.get("content")
         return t if isinstance(t, str) else ""
 
@@ -189,6 +195,7 @@ def evaluate_structure(parsed: Dict[str, Any], tables_path: Optional[Path]) -> D
 
 
 async def main() -> None:
+    """Prepare Stage 07 evaluation environment and inputs."""
     base = Path("tests/stage07_manual")
     outdir = base / "evals"
     outdir.mkdir(parents=True, exist_ok=True)

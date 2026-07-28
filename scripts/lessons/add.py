@@ -23,6 +23,7 @@ SYNONYMS = {
 
 
 def build_keywords(tags: list[str], scope: str) -> str:
+    """Builds a string of unique keywords from tags, synonyms, and scope."""
     bag: list[str] = []
     for t in tags:
         bag.append(t)
@@ -51,6 +52,7 @@ def add(
     scope: str = typer.Option("tabbed", help="Repo/component scope"),
     status: str = typer.Option("active", help="active|draft|deprecated"),
 ):
+    """Add a lesson with title, problem, playbook, tags, scope, and status."""
     db = get_db()
     col = db.collection("lessons")
     doc = {
@@ -78,6 +80,7 @@ def add(
 
 
 def _safe(d):
+    """Return a dictionary with specific keys from the input dictionary."""
     return {k: d[k] for k in ("_key", "title", "scope") if k in d}
 
 

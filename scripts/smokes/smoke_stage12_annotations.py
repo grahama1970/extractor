@@ -16,6 +16,7 @@ app = typer.Typer(add_completion=False, help="Smoke: Stage 12 insert annotations
 
 @app.command()
 def main():
+    """Load and execute a Python module from a specified file path."""
     load_dotenv(find_dotenv())
     p = "src/extractor/pipeline/steps/12_insert_annotations.py"
     spec = importlib.util.spec_from_file_location("stage12", p)

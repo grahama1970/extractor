@@ -5,6 +5,7 @@ from pathlib import Path
 
 
 def main(results_dir: str) -> int:
+    """Validate existence of required JSON files in results directory."""
     base = Path(results_dir)
     sections_path = base / "04_section_builder" / "json_output" / "04_sections.json"
     figures_path = base / "06_figure_extractor" / "json_output" / "06_figures.json"

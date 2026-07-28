@@ -14,10 +14,12 @@ from typing import Dict, Any, List
 
 
 def load(flat: Path) -> List[Dict[str, Any]]:
+    """Load JSON data from a file path into a list of dictionaries."""
     return json.loads(flat.read_text())
 
 
 def block_kind(block: Dict[str, Any]) -> str:
+    """Determine the kind of a block, returning "table" or "text"."""
     data = block.get("data") or {}
     if (data.get("type") or "").lower() == "table":
         return "table"
@@ -29,10 +31,12 @@ def block_kind(block: Dict[str, Any]) -> str:
 
 
 def block_text(block: Dict[str, Any]) -> str:
+    """Extract text content from a block dictionary with fallback values."""
     return block.get("text_content") or block.get("text") or block.get("content") or ""
 
 
 def normalize(s: str) -> str:
+    """Clean string by removing 'TEXT:', unescaping, and normalizing whitespace."""
     s = s.replace("TEXT:", "", 1).strip()
     s = s.replace("\\_", "_")
     return " ".join(s.split())
@@ -41,6 +45,7 @@ def normalize(s: str) -> str:
 def compare(
     pdf_blocks: List[Dict[str, Any]], clean_blocks: List[Dict[str, Any]], threshold: float
 ) -> bool:
+    """Validate PDF blocks against clean blocks by threshold."""
     if len(pdf_blocks) != len(clean_blocks):
         print(f"FAIL: block count mismatch pdf={len(pdf_blocks)} clean={len(clean_blocks)}")
         return False
@@ -72,6 +77,7 @@ def compare(
 
 
 def main():
+    """Validate a flattened PDF against provided clean artifacts."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--pdf-flat", type=Path, required=True)
     ap.add_argument(

@@ -5,6 +5,7 @@ from pathlib import Path
 
 
 def load_stage_module():
+    """Load a stage module from a specified file path."""
     stage_path = Path("src/extractor/pipeline/steps/01_annotation_processor.py")
     if not stage_path.exists():
         raise FileNotFoundError(f"Stage file not found: {stage_path}")
@@ -17,6 +18,7 @@ def load_stage_module():
 
 
 def main():
+    """Load configuration and model settings for the processing pipeline."""
     stage01 = load_stage_module()
     model = os.getenv("LITELLM_DEFAULT_MODEL", os.getenv("DEFAULT_LITELLM_MODEL", "openai/gpt-4o-mini"))
     cfg = stage01.Config(

@@ -21,11 +21,13 @@ RESULTS_BASE = ROOT / "data" / "results" / "pipeline"
 
 
 def run(cmd: list[str]) -> None:
+    """Execute a command, logging it and raising on failure."""
     print(">>", " ".join(map(str, cmd)))
     subprocess.run(cmd, check=True)
 
 
 def stage01(pdf: Path, outdir: Path) -> Path:
+    """Run annotation processing on a PDF and return output directory path."""
     run(
         [
             sys.executable,
@@ -71,6 +73,7 @@ def stage02(outdir: Path) -> Path:
 
 
 def stage03(outdir: Path) -> Path:
+    """Run suspicious header detection on Stage 02 output."""
     s02 = outdir / "02_marker_extractor" / "json_output" / "02_marker_blocks.json"
     if not s02.exists():
         raise SystemExit("Need Stage 02 output")
@@ -94,6 +97,7 @@ def stage03(outdir: Path) -> Path:
 
 
 def stage04(outdir: Path) -> Path:
+    """Build document sections from verified blocks."""
     s03 = outdir / "03_suspicious_headers" / "json_output" / "03_verified_blocks.json"
     if not s03.exists():
         raise SystemExit("Need Stage 03 output")
@@ -117,6 +121,7 @@ def stage04(outdir: Path) -> Path:
 
 
 def stage05(outdir: Path) -> Path:
+    """Run table extraction process using Stage 04 output."""
     s04 = outdir / "04_section_builder" / "json_output" / "04_sections.json"
     if not s04.exists():
         raise SystemExit("Need Stage 04 output")
@@ -140,6 +145,7 @@ def stage05(outdir: Path) -> Path:
 
 
 def stage06(outdir: Path) -> Path:
+    """Extract figures from stage outputs and generate result files."""
     s02 = outdir / "02_marker_extractor" / "json_output" / "02_marker_blocks.json"
     s04 = outdir / "04_section_builder" / "json_output" / "04_sections.json"
     if not s02.exists() or not s04.exists():
@@ -166,6 +172,7 @@ def stage06(outdir: Path) -> Path:
 
 
 def stage07(outdir: Path) -> Path:
+    """Return the path to the output directory for stage 07 processing."""
     s04 = outdir / "04_section_builder" / "json_output" / "04_sections.json"
     s05 = outdir / "05_table_extractor" / "json_output" / "05_tables.json"
     s06 = outdir / "06_figure_extractor" / "json_output" / "06_figures.json"
@@ -245,6 +252,7 @@ def stage08(outdir: Path) -> Path:
 
 
 def stage09(outdir: Path) -> Path:
+    """Enrich the assembled corpus using an LLM."""
     s07 = outdir / "07_corpus_assembly" / "json_output" / "07_assembled.json"
     if not s07.exists():
         raise SystemExit("Need Stage 07 output (Corpus)")
@@ -300,6 +308,7 @@ def stage10(outdir: Path) -> Path:
 
 
 def main():
+    """Execute a specified pipeline stage with optional input and output paths."""
     ap = argparse.ArgumentParser(description="Run a single pipeline stage (01–10).")
     ap.add_argument(
         "stage",

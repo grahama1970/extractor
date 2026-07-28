@@ -1,8 +1,10 @@
+"""Sanitize text by stripping Unicode control characters, bidi overrides, and zero-width markers."""
 from __future__ import annotations
 from typing import Optional
 
 
 def sanitize_text(s: Optional[str]) -> str:
+    """Remove zero-width and bidirectional control characters from text."""
     if not s:
         return ""
     removals = [

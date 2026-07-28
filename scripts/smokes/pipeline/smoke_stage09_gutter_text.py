@@ -25,10 +25,12 @@ ART_LOG_JSON = ARTIFACTS_DIR / "gutter_sanity_log.json"
 
 
 def _ensure_artifacts_dir() -> None:
+    """Create the artifacts directory if it does not already exist."""
     ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _lane_rect(page: fitz.Page, gutter_w: float) -> fitz.Rect:
+    """Return a rectangle adjusted for page padding and gutter width."""
     r = page.rect
     # 6pt padding to match 09a _draw_page_gutter_side
     return fitz.Rect(r.x0 + 6, r.y0 + 6, r.x0 + 6 + gutter_w, r.y1 - 6)
@@ -77,6 +79,7 @@ def _count_dark_pixels_in_region(
 
 
 def main() -> int:
+    """Execute the main pipeline process for PDF extraction and annotation."""
     from extractor.pipeline.steps import s09a_pdf_annotator as s09a
 
     _ensure_artifacts_dir()

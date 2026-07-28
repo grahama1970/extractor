@@ -73,6 +73,7 @@ def with_stage_validation(
     """Decorator to add validation to stage functions."""
 
     def decorator(stage_func):
+        """Wrap a function to validate input and execute it."""
         @wraps(stage_func)
         def wrapper(input_data: Dict[str, Any], *args, **kwargs) -> Dict[str, Any]:
             # Input validation
@@ -140,6 +141,7 @@ def create_stage_validator(
     """Factory function to create validators for specific stages."""
 
     def validator_wrapper(stage_func):
+        """Wrap a function with input validation based on a schema."""
         @wraps(stage_func)
         def validated_function(*args, **kwargs):
             # Input validation

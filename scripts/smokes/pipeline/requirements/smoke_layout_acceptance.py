@@ -31,6 +31,7 @@ OUT_DEFAULT = Path("data/results/with_requirements_acceptance")
 
 @dataclass
 class ExpectedSpec:
+    """Define expected specifications for document structure validation."""
     sections: int
     s1_tables: int
     s1_figures: int
@@ -54,6 +55,7 @@ SPEC = ExpectedSpec(
 
 
 def run_extract(pdf: Path, out_dir: Path) -> Path:
+    """Extract PDF content and save output to specified directory."""
     out_dir.mkdir(parents=True, exist_ok=True)
     p07 = out_dir / "07_reflow_section/json_output/07_reflowed.json"
     if p07.exists():
@@ -75,6 +77,7 @@ def run_extract(pdf: Path, out_dir: Path) -> Path:
 
 
 def summarize(p07: Path) -> Dict[str, Any]:
+    """Extract top-level sections from a JSON document."""
     data = json.loads(p07.read_text())
     secs = data.get("reflowed_sections", [])
     # Define top-level sections as those with minimal level
@@ -83,6 +86,7 @@ def summarize(p07: Path) -> Dict[str, Any]:
     tops = [s for s in secs if s.get("level") == minlvl] if minlvl is not None else secs
 
     def section_metrics(s: Dict[str, Any]) -> Dict[str, Any]:
+        """Extract metrics and patterns from a document section."""
         text = str(s.get("reflowed_text") or "")
         tables = s.get("tables") or []
         figures = s.get("figures") or []
@@ -120,9 +124,11 @@ def summarize(p07: Path) -> Dict[str, Any]:
 
 
 def diff_against_spec(summary: Dict[str, Any], spec: ExpectedSpec) -> Dict[str, Any]:
+    """Generate a diff report comparing summary to specification."""
     diffs = {}
 
     def want(actual, expected, key):
+        """Record the difference between actual and expected values for a key."""
         diffs[key] = {"actual": actual, "+/-": actual - expected, "expected": expected}
 
     want(summary.get("top_sections", 0), spec.sections, "sections")
@@ -143,6 +149,7 @@ def main(
     pdf: Path = typer.Option(PDF_DEFAULT, exists=True),
     out_dir: Path = typer.Option(OUT_DEFAULT),
 ):
+    """Process PDF, extract data, summarize, and validate against specifications."""
     p07 = run_extract(pdf, out_dir)
     summary = summarize(p07)
     diffs = diff_against_spec(summary, SPEC)

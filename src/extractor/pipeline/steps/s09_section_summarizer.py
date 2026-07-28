@@ -31,7 +31,7 @@ STEP_NAME = "09_section_summarizer"
 
 # Default model and API settings
 DEFAULT_MODEL = os.getenv("CHUTES_TEXT_MODEL", "moonshotai/Kimi-K2-Instruct-0905")
-DEFAULT_API_BASE = os.getenv("SCILLM_API_BASE", "https://llm.chutes.ai/v1")
+DEFAULT_API_BASE = os.getenv("SCILLM_API_BASE", "http://localhost:4000")
 DEFAULT_CONCURRENCY = int(os.getenv("SCILLM_CONCURRENCY", "6"))
 
 # Minimum content requirements to avoid summarizing boilerplate
@@ -176,7 +176,7 @@ async def run_summarizer(
     all_results = []
     previous_summaries = []
 
-    api_key = os.getenv("CHUTES_API_KEY")
+    api_key = os.getenv("SCILLM_PROXY_KEY", "sk-dev-proxy-123")
 
     # 1.1 Verify bridge connectivity before starting
     if "localhost" in api_base or "127.0.0.1" in api_base:
@@ -243,7 +243,7 @@ async def run_summarizer(
             payloads,
             api_base=api_base,
             api_key=api_key,
-            custom_llm_provider="openai_like",
+            custom_llm_provider="openai",
             concurrency=batch_size,
             repair_invalid_json=True,
             retry_invalid_json=2,
@@ -368,7 +368,7 @@ Return strictly JSON:
         [payload],
         api_base=api_base,
         api_key=api_key,
-        custom_llm_provider="openai_like",
+        custom_llm_provider="openai",
         concurrency=1,
         repair_invalid_json=True,
         timeout=120,
@@ -410,6 +410,7 @@ Return strictly JSON:
 
 
 def _emit_summary_visuals(pipeline_dir: Path, repo: ContentRepository) -> None:
+    """Generate summary visuals from pipeline data and save to output directory."""
     stage_dir = pipeline_dir / "09_section_summarizer"
     visual_dir = stage_dir / "visual_output"
     visual_dir.mkdir(parents=True, exist_ok=True)

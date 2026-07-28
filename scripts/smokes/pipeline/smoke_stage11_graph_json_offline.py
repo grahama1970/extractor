@@ -30,6 +30,7 @@ def main(
     ),
     out_root: Path = typer.Option(Path("data/results/cli_smokes/structured_graph")),
 ):
+    """Generate structured graph from HTML sample."""
     out_root.mkdir(parents=True, exist_ok=True)
     py = sys.executable
     vpy = Path(".venv/bin/python")

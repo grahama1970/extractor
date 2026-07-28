@@ -82,6 +82,7 @@ UTIL_ALLOWLIST = {
 
 
 def _find_bad(files):
+    """Identify files containing improper exception handling patterns."""
     bad = []
     for p in files:
         lines = p.read_text().splitlines()
@@ -97,6 +98,7 @@ def _find_bad(files):
 
 
 def test_broad_except_must_log_and_raise_in_required_steps():
+    """Validate Python files against required criteria and raise errors."""
     root = Path("src/extractor/pipeline/steps")
     # Exclude deprecated directory
     files = [
@@ -117,6 +119,7 @@ def _is_in_allowlist_dir(filepath: str) -> bool:
 
 
 def test_broad_except_must_log_and_raise_in_utils():
+    """Validate utility files enforce broad except logging and raising."""
     files = []
     for d in UTIL_DIRS:
         files.extend(Path(d).rglob("*.py"))

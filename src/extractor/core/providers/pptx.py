@@ -139,7 +139,7 @@ class PPTXProvider:
             metadata.language = props.language or ""
 
         # Presentation-specific metadata
-        metadata.format_metadata = {
+        format_metadata = {
             "file_type": "pptx",
             "slide_count": len(prs.slides),
             "slide_width": prs.slide_width,
@@ -148,10 +148,88 @@ class PPTXProvider:
             "presentation_format": f"{prs.slide_width}x{prs.slide_height}",
         }
 
+        # Extract TOC from first few slides (agenda/contents slides)
+        toc = self._extract_toc(prs)
+        if toc:
+            format_metadata["toc"] = toc
+
+        metadata.format_metadata = format_metadata
+
         # File metadata
         metadata.file_size = filepath.stat().st_size if filepath.exists() else None
 
         return metadata
+
+    def _extract_toc(self, prs: Any) -> Optional[List[Dict[str, Any]]]:
+        """Extract Table of Contents from PPTX presentation.
+
+        PowerPoint TOC/Agenda is typically found in the first 2-3 slides
+        as bullet point lists. We detect slides with titles containing
+        keywords like "Agenda", "Contents", "Overview", "Outline" and
+        extract their bullet points as TOC entries.
+
+        Args:
+            prs: python-pptx Presentation object
+
+        Returns:
+            List of TOC entries with title, level, and slide_number,
+            or None if no TOC-like slides found.
+        """
+        toc_keywords = {"agenda", "contents", "table of contents", "toc",
+                        "overview", "outline", "topics", "index"}
+
+        toc_entries: List[Dict[str, Any]] = []
+        toc_slide_found = False
+
+        # Check first 3 slides for TOC/agenda patterns
+        for slide_idx, slide in enumerate(list(prs.slides)[:3]):
+            slide_title = self._get_slide_title(slide)
+            if not slide_title:
+                continue
+
+            # Check if title suggests this is a TOC/agenda slide
+            title_lower = slide_title.lower()
+            is_toc_slide = any(kw in title_lower for kw in toc_keywords)
+
+            if not is_toc_slide:
+                continue
+
+            toc_slide_found = True
+
+            # Extract bullet points from this slide
+            for shape in slide.shapes:
+                if not hasattr(shape, "has_text_frame") or not shape.has_text_frame:
+                    continue
+
+                # Skip title placeholder
+                if shape.is_placeholder:
+                    try:
+                        ph_type = shape.placeholder_format.type
+                        if ph_type in (PP_PLACEHOLDER.TITLE, PP_PLACEHOLDER.CENTER_TITLE):
+                            continue
+                    except Exception:
+                        pass
+
+                # Extract paragraphs as TOC entries
+                for paragraph in shape.text_frame.paragraphs:
+                    text = "".join(run.text for run in paragraph.runs).strip()
+                    if not text:
+                        continue
+
+                    # Skip very long text (probably not a TOC item)
+                    if len(text) > 150:
+                        continue
+
+                    # Determine level from paragraph indent level
+                    level = paragraph.level + 1 if hasattr(paragraph, "level") else 1
+
+                    toc_entries.append({
+                        "title": text,
+                        "level": level,
+                        "slide_number": slide_idx + 1,
+                    })
+
+        return toc_entries if toc_entries else None
 
     def _extract_slide(self, slide: Slide, slide_idx: int) -> tuple[List[BaseBlock], HierarchyNode]:
         """Extract all content from a single slide with AI-powered analysis"""

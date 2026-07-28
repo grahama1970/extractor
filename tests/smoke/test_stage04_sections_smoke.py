@@ -6,6 +6,7 @@ sys.path.insert(0, os.path.abspath("src"))
 
 
 def _load_mod():
+    """Load the s04_section_builder module from its file path."""
     spec = importlib.util.spec_from_file_location(
         "stage04", "src/extractor/pipeline/steps/s04_section_builder.py"
     )
@@ -16,6 +17,7 @@ def _load_mod():
 
 
 def test_build_sections_from_minimal_blocks():
+    """Build sections from minimal block data for document processing."""
     mod = _load_mod()
     build = getattr(mod, "build_sections_from_blocks")
     # Minimal verified-like blocks: header + two text blocks

@@ -8,11 +8,14 @@ import extractor.pipeline.utils.litellm_call as lc
 
 @pytest.fixture()
 def runner() -> CliRunner:
+    """Return a CliRunner instance for testing command-line interfaces."""
     return CliRunner()
 
 
 def test_main_reads_stdin_with_input(monkeypatch, runner: CliRunner):
+    """Test CLI input handling by simulating standard input prompts."""
     async def fake_call(prompts: List[object], **kwargs):
+        """Simulate responses for input prompts."""
         return [f"ans:{p}" for p in prompts]
 
     monkeypatch.setattr(lc, "litellm_call", fake_call)

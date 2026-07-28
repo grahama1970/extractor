@@ -13,6 +13,7 @@ from extractor.pipeline.steps import _02_marker_extractor as stage02
 
 
 def main() -> int:
+    """Parse command-line arguments and execute the processing stage."""
     ap = argparse.ArgumentParser()
     ap.add_argument("pdf", type=Path, help="input PDF path")
     ap.add_argument("--out", type=Path, required=True, help="pipeline results root")

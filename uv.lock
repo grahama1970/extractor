@@ -1998,7 +1998,9 @@ dependencies = [
     { name = "filetype" },
     { name = "flask" },
     { name = "ftfy" },
+    { name = "httpx" },
     { name = "ijson" },
+    { name = "joblib" },
     { name = "json-repair" },
     { name = "jsonpath-ng" },
     { name = "jsonpickle" },
@@ -2021,8 +2023,6 @@ dependencies = [
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "pyflakes" },
-    { name = "pymupdf" },
-    { name = "pymupdf-layout" },
     { name = "pyperclip" },
     { name = "pytest-asyncio" },
     { name = "python-arango" },
@@ -2035,6 +2035,8 @@ dependencies = [
     { name = "rich" },
     { name = "ruff" },
     { name = "scillm" },
+    { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "scipy", version = "1.16.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "sentence-transformers" },
     { name = "strip-tags" },
     { name = "structlog" },
@@ -2084,6 +2086,10 @@ llm = [
     { name = "google-genai" },
     { name = "openai" },
 ]
+regression = [
+    { name = "pymupdf" },
+    { name = "pymupdf-layout" },
+]
 server = [
     { name = "fastapi" },
     { name = "flask" },
@@ -2098,7 +2104,6 @@ smokes = [
     { name = "opencv-python-headless" },
     { name = "pandas" },
     { name = "pillow" },
-    { name = "pymupdf" },
     { name = "python-dotenv" },
     { name = "strip-tags" },
     { name = "tenacity" },
@@ -2161,8 +2166,10 @@ requires-dist = [
     { name = "ghostscript", marker = "extra == 'accurate'", specifier = ">=0.7" },
     { name = "google-genai", marker = "extra == 'llm'", specifier = ">=1.0.0,<2" },
     { name = "graph-memory", marker = "extra == 'lessons'", git = "ssh://git@github.com/grahama1970/graph-memory-operator.git" },
+    { name = "httpx", specifier = ">=0.28.0" },
     { name = "httpx", marker = "extra == 'smokes'", specifier = ">=0.28.0" },
     { name = "ijson", specifier = ">=3.4.0" },
+    { name = "joblib", specifier = ">=1.3.0" },
     { name = "json-repair", specifier = ">=0.44.1" },
     { name = "json-repair", marker = "extra == 'smokes'", specifier = ">=0.44.1" },
     { name = "jsonpath-ng", specifier = ">=1.7.0" },
@@ -2196,9 +2203,8 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.4.2,<3" },
     { name = "pydantic-settings", specifier = ">=2.0.3,<3" },
     { name = "pyflakes", specifier = ">=3.4.0" },
-    { name = "pymupdf", specifier = ">=1.26.1" },
-    { name = "pymupdf", marker = "extra == 'smokes'", specifier = ">=1.26.1" },
-    { name = "pymupdf-layout", specifier = ">=1.27.1" },
+    { name = "pymupdf", marker = "extra == 'regression'", specifier = ">=1.26.1" },
+    { name = "pymupdf-layout", marker = "extra == 'regression'", specifier = ">=1.27.1" },
     { name = "pyperclip", specifier = ">=1.9.0" },
     { name = "pytest-asyncio", specifier = ">=0.24.0" },
     { name = "python-arango", specifier = ">=8.2.0" },
@@ -2214,6 +2220,7 @@ requires-dist = [
     { name = "rich", specifier = ">=13.0.0" },
     { name = "ruff", specifier = ">=0.13.0" },
     { name = "scillm", git = "https://github.com/grahama1970/scillm.git" },
+    { name = "scipy", specifier = ">=1.11.0" },
     { name = "sentence-transformers", specifier = ">=5.0.0" },
     { name = "sentence-transformers", marker = "extra == 'accurate'", specifier = ">=5.0.0" },
     { name = "spacy", marker = "extra == 'accurate'", specifier = ">=3.8.7" },
@@ -2242,7 +2249,7 @@ requires-dist = [
     { name = "weasyprint", marker = "extra == 'full'", specifier = "~=63.1" },
     { name = "xlsxwriter", specifier = ">=3.2.0,!=3.2.3" },
 ]
-provides-extras = ["full", "smokes", "lessons", "prover", "accurate", "server", "llm"]
+provides-extras = ["full", "smokes", "lessons", "prover", "accurate", "server", "llm", "regression"]
 
 [package.metadata.requires-dev]
 dev = [

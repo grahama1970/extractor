@@ -17,6 +17,7 @@ app = typer.Typer(
 
 
 async def _post_json(url: str, payload: Dict[str, Any]) -> None:
+    """Post JSON payload to URL, logging warnings on failure."""
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post(url, json=payload, timeout=10) as resp:
@@ -27,6 +28,7 @@ async def _post_json(url: str, payload: Dict[str, Any]) -> None:
 
 
 def _clamp01(x: float) -> float:
+    """Clamp a float value within the range [0, 1]."""
     return max(0.0, min(1.0, x))
 
 
@@ -38,6 +40,7 @@ async def _run_episode(
     variant: str,
     tasks: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
+    """Run an episode's tasks and return aggregated results."""
     errors_sample: List[str] = []
     warnings_sample: List[str] = []
     timings: List[float] = []
@@ -152,6 +155,7 @@ def run(
         ..., exists=True, readable=True, help="Tasks JSON file (list or object with 'tasks')"
     ),
 ):
+    """Run an API command with specified parameters."""
     tasks = json.loads(Path(tasks_file).read_text())
     if isinstance(tasks, dict) and "tasks" in tasks:
         tasks = tasks["tasks"]

@@ -22,6 +22,7 @@ def search(
     scope: str = typer.Option("", help="Optional scope filter"),
     json_out: bool = typer.Option(False, "--json", help="Output JSON array"),
 ):
+    """Search for lessons based on query, tags, and scope filters."""
     db = get_db()
     view = "lessons_search"
     tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []

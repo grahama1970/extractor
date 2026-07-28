@@ -21,6 +21,7 @@ app = typer.Typer(add_completion=False, help="Stage 07 figure propagation smoke"
 
 
 def _ensure_stage07(results: Path) -> None:
+    """Rerun Stage 07 to process updated sections, tables, and figures."""
     sec = results / "04_section_builder/json_output/04_sections.json"
     tab = results / "05_table_extractor/json_output/05_tables.json"
     fig = results / "06_figure_extractor/json_output/06_figures.json"
@@ -56,6 +57,7 @@ def _ensure_stage07(results: Path) -> None:
 
 
 def run_smoke(results: Path) -> None:
+    """Initialize environment variables and process smoke test results."""
     load_dotenv(find_dotenv(usecwd=True) or None)
     os.environ.setdefault("LITELLM_HTTPX", "1")
     os.environ.setdefault("LITELLM_DEBUG", "1")
@@ -105,6 +107,7 @@ def run_smoke(results: Path) -> None:
 def main(
     results: Path = typer.Option(Path("data/results/pipeline"), "--results"),
 ):
+    """Run smoke tests, saving results to path."""
     run_smoke(results)
 
 

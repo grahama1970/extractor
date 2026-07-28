@@ -6,11 +6,11 @@
 # ]
 # ///
 """
-Probe SciLLM multimodal (vision) via an OpenAI‑compatible gateway (e.g., Chutes).
+Probe SciLLM multimodal (vision) via the local proxy (port 4010).
 
 Usage (env):
-  export CHUTES_API_BASE=https://api.chutes.ai/v1
-  export CHUTES_API_KEY=...
+  export SCILLM_API_BASE=http://localhost:4010
+  export SCILLM_PROXY_KEY=sk-dev-proxy-123
   uv run scripts/debug/scillm_multimodal_probe.py --image-url https://upload.wikimedia.org/wikipedia/commons/5/5f/Alaskan_Malamute.jpg
 
 Notes
@@ -32,6 +32,7 @@ import urllib.request
 
 
 def _add_scillm_path_from_env() -> None:
+    """Add SCILLM path to system path from environment variable."""
     p = os.getenv("SCILLM_PY_PATH")
     if p and Path(p).exists():
         sys.path.insert(0, p)
@@ -50,6 +51,7 @@ def _to_data_url(path: Path, max_kb: int = 256) -> str:
 
 
 def _pick_vlm_id(ids: list[str]) -> Optional[str]:
+    """Select preferred vision-language model ID from a list."""
     prefers = ("vl", "vision", "gpt-4o", "qwen-vl", "kimi-vl")
     for i in ids:
         low = i.lower()
@@ -59,6 +61,7 @@ def _pick_vlm_id(ids: list[str]) -> Optional[str]:
 
 
 def _fetch_models(api_base: str, api_key: str, timeout: float = 15.0) -> list[str]:
+    """Fetch model IDs from the specified API endpoint."""
     req = urllib.request.Request(
         api_base.rstrip("/") + "/models",
         headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
@@ -85,12 +88,13 @@ def main(
         Path("scripts/artifacts/scillm_vision_probe.json"), "--out", help="Save JSON here"
     ),
 ):
+    """Run image analysis using specified model, image, and prompt."""
     _add_scillm_path_from_env()
 
-    api_base = os.getenv("CHUTES_API_BASE", "").rstrip("/")
-    api_key = os.getenv("CHUTES_API_KEY", "")
+    api_base = os.getenv("SCILLM_API_BASE", "http://localhost:4010").rstrip("/")
+    api_key = os.getenv("SCILLM_PROXY_KEY", "sk-dev-proxy-123")
     if not api_base or not api_key:
-        typer.echo(json.dumps({"ok": False, "error": "CHUTES env not set"}))
+        typer.echo(json.dumps({"ok": False, "error": "SCILLM env not set"}))
         raise typer.Exit(2)
 
     try:

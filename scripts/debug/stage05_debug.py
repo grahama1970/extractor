@@ -13,6 +13,7 @@ from extractor.pipeline.steps import _05_table_extractor as stage05
 
 
 def main() -> int:
+    """Run the main application pipeline."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--sections", type=Path, required=False, help="04_sections.json")
     ap.add_argument("--pdfdir", type=Path, required=False, help="dir containing *_clean.pdf")

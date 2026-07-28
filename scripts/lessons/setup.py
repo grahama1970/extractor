@@ -11,6 +11,7 @@ from scripts.lessons.arango_client import get_db
 
 
 def ensure_collections_and_view():
+    """Ensure required database collections and views exist."""
     db = get_db()
     # Collections
     if not db.has_collection("lessons"):

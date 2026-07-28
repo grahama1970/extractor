@@ -22,6 +22,7 @@ app = typer.Typer(add_completion=False)
 
 
 def _find_latest_edges(root: Path) -> Path | None:
+    """Find the latest edges JSON file in the specified directory."""
     cands = sorted(
         root.rglob("11_arango_create_graph/json_output/11_graph_edges.json"),
         key=lambda p: p.stat().st_mtime,
@@ -34,6 +35,7 @@ def _find_latest_edges(root: Path) -> Path | None:
 def main(
     pdf: Path = typer.Option(Path("data/input/pipeline/BHT_CV32A65X_marked.pdf"), exists=True)
 ):
+    """Run Lean4 CLI proves edges smoke test with a PDF."""
     lean_cli = Path("/home/graham/workspace/experiments/lean4/src/lean4_prover/cli_mini.py")
     if not lean_cli.exists():
         print("SKIP: Lean4 CLI not found; skipping Stage 11 'proves' edges smoke.")

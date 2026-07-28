@@ -21,6 +21,7 @@ app = typer.Typer(add_completion=False)
 
 
 def parse_constraints(table_text: str) -> list[str]:
+    """Parse constraints from a formatted table text into a list."""
     out: list[str] = []
     for line in table_text.splitlines():
         line = line.strip()
@@ -37,6 +38,7 @@ def parse_constraints(table_text: str) -> list[str]:
 
 @app.command()
 def main():
+    """Check if the Lean4 CLI file exists and exit if not found."""
     lean_cli = Path("/home/graham/workspace/experiments/lean4/src/lean4_prover/cli_mini.py")
     if not lean_cli.exists():
         print("SKIP: Lean4 CLI not found")

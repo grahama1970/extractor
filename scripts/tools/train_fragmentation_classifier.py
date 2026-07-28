@@ -31,6 +31,7 @@ NUMERIC_FEATURES = [
 
 
 def load_data():
+    """Load JSON records from file, extracting numeric, text, and label features."""
     records = []
     with open(DATA_PATH) as f:
         for line in f:
@@ -63,6 +64,7 @@ def find_best_threshold(y_true, y_proba, min_recall=0.5):
 
 
 def main():
+    """Run machine learning pipeline with stratified sampling and evaluation metrics."""
     from sklearn.model_selection import StratifiedShuffleSplit
     from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
     from sklearn.linear_model import LogisticRegression

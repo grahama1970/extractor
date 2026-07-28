@@ -18,6 +18,7 @@ def test_toc_filtering():
     assert not _is_toc_or_page_header_footer("1. Introduction")
 
 def test_mid_sentence_merging():
+    """Test merging text blocks for sentence continuity."""
     blocks = [
         {
             "block_type": "SectionHeader",

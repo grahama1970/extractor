@@ -158,6 +158,7 @@ def check_hints_available() -> bool:
 
 
 def main():
+    """Re-run S05 on worst fragmentation offenders."""
     parser = argparse.ArgumentParser(description="Re-run S05 on worst fragmentation offenders")
     parser.add_argument("--top", type=int, default=20, help="Number of top offenders to process")
     parser.add_argument("--min-frag", type=int, default=50, help="Minimum fragmentation score")

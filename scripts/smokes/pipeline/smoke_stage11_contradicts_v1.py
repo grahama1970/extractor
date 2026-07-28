@@ -20,6 +20,7 @@ def main(
     ),
     out_dir: Path = typer.Option(Path("data/results/pipeline")),
 ):
+    """Load and process flattened JSON from a specified file path."""
     docs = json.loads(flat_json.read_text())
     # Inject a simple contradiction pair in-place by adding lean4_norm + polarity
     # Create two documents with same normalized prop and opposite polarity

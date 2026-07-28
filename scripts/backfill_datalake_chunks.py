@@ -124,6 +124,7 @@ def count_tables(data: list) -> int:
 
 
 def main():
+    """Process profiles based on command-line arguments."""
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--limit", type=int, default=0, help="Max profiles to process (0=all)")

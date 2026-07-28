@@ -37,6 +37,7 @@ async def a_run(
     include_images: bool,
     trim_chars: Optional[int],
 ):
+    """Extract structured content from documents using an an AI model."""
     load_dotenv(find_dotenv())
     os.environ.setdefault("LITELLM_LOG", "DEBUG")
 
@@ -117,6 +118,7 @@ def run(
     include_images: bool = typer.Option(True, "--include-images/--no-include-images"),
     trim_chars: Optional[int] = typer.Option(1500, help="Optional context trim for faster smokes"),
 ):
+    """Process pipeline components: sections, tables, figures."""
     asyncio.run(a_run(sections, tables, figures, model, timeout, include_images, trim_chars))
 
 

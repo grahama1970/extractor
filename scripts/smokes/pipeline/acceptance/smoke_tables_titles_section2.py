@@ -24,6 +24,7 @@ OUT = Path("data/results/with_requirements_tables")
 
 
 def ensure_stage07() -> Path:
+    """Ensure output directory exists and return path to JSON file."""
     OUT.mkdir(parents=True, exist_ok=True)
     p07 = OUT / "07_reflow_section/json_output/07_reflowed.json"
     if p07.exists():
@@ -45,6 +46,7 @@ def ensure_stage07() -> Path:
 
 @app.command()
 def main():
+    """Identify top-level sections from stage 07 reflowed data."""
     p07 = ensure_stage07()
     d = json.loads(p07.read_text())
     secs = d.get("reflowed_sections", [])

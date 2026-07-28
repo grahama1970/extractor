@@ -21,6 +21,7 @@ app = typer.Typer(add_completion=False)
 
 @app.command()
 def main(tmp_dir: Path = typer.Option(Path("data/results/structured_parity_smoke/rst_synth"))):
+    """Create a temporary directory and write a sample RST file."""
     tmp_dir.mkdir(parents=True, exist_ok=True)
     rst_path = tmp_dir / "directives.rst"
     rst_path.write_text(

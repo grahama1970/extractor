@@ -26,6 +26,7 @@ except Exception:
 
 
 def _load_stage07():
+    """Load and execute the Stage 07 module from a specified file path."""
     import importlib.util
 
     p = Path("src/extractor/pipeline/steps/07_reflow_section.py").resolve()
@@ -44,6 +45,7 @@ TABLE_JSON = RESULTS_DIR / "05_table_extractor/json_output/05_tables.json"
 
 
 def _sanitize(cell: str) -> str:
+    """Sanitize a string by normalizing whitespace and fixing common errors."""
     if cell is None:
         return ""
     text = str(cell).replace("\u00a0", " ").replace("\n", " ")
@@ -80,10 +82,12 @@ def _sanitize(cell: str) -> str:
 
 
 def _sanitize_row(row: List[str]) -> List[str]:
+    """Sanitize each cell in a row of strings."""
     return [_sanitize(cell) for cell in row]
 
 
 def _ensure_tables_exist() -> None:
+    """Ensure required tables exist, generating them if absent."""
     if not TABLE_JSON.exists():
         from extractor.pipeline.tools.quick_smoke import run as quick_run  # type: ignore
 
@@ -93,6 +97,7 @@ def _ensure_tables_exist() -> None:
 
 
 def _vision_transcribe(image_path: Path, columns: List[str], router: Router) -> List[List[str]]:
+    """Transcribe table data from an image into a structured format."""
     prompt = (
         "You are a meticulous OCR agent. Transcribe the table shown in the image. "
         "Return JSON with keys 'columns' and 'rows'. Columns must exactly match: "
@@ -145,6 +150,7 @@ def _vision_transcribe(image_path: Path, columns: List[str], router: Router) -> 
 
 
 def run_smoke(results: Path) -> None:
+    """Load environment variables and validate API key presence."""
     load_dotenv(find_dotenv(usecwd=True) or None)
     _ensure_tables_exist()
 
@@ -232,6 +238,7 @@ def run_smoke(results: Path) -> None:
 
 @app.command()
 def main(results: Path = typer.Option(Path("data/results/pipeline"), "--results")):
+    """Run the smoke test using the specified results path."""
     run_smoke(results)
 
 

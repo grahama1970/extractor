@@ -17,6 +17,7 @@ if "dotenv" not in sys.modules:
     dotenv = types.ModuleType("dotenv")
 
     def _find_dotenv(*a, **k):
+        """Return the path to the .env file if it exists."""
         return ""
 
     dotenv.find_dotenv = _find_dotenv
@@ -25,6 +26,7 @@ if "pydantic_settings" not in sys.modules:
     ps = types.ModuleType("pydantic_settings")
 
     class BaseSettings: ...
+        """Represent application settings."""
 
     ps.BaseSettings = BaseSettings
     sys.modules["pydantic_settings"] = ps
@@ -33,6 +35,7 @@ from extractor.core.scripts.server import app
 
 
 def test_proto_dashboard_and_ingest_endpoints():
+    """Test prototype dashboard and log ingest endpoints."""
     client = TestClient(app)
 
     # Proto dashboard should be reachable and return HTML

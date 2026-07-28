@@ -21,6 +21,7 @@ def main(
     ),
     out_json: Path = typer.Argument(..., help="Output flattened JSON with rtm.lean4_* fields"),
 ):
+    """Flatten Lean4 proof results into a JSON structure with rtm.lean4_* fields."""
     payload = json.loads(lean4_out.read_text())
     proof_results = payload.get("proof_results") or []
     flat: list[dict] = []

@@ -31,6 +31,7 @@ app = typer.Typer(add_completion=False)
 
 
 def _load_flatten_function():
+    """Load and return the ArangoDB exporter module from the pipeline steps."""
     module_path = (
         Path(__file__).resolve().parents[3]
         / "src"
@@ -71,6 +72,7 @@ def main(
     ),
     allowed_delta: int = typer.Option(5, help="Max allowed delta in object counts"),
 ) -> None:
+    """Process PDF reflowed JSON and DOCX paths for pipeline execution."""
     flatten = _load_flatten_function()
 
     payload = json.loads(pdf_stage07.read_text())

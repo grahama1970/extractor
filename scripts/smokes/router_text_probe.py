@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Router TEXT JSON-mode probe for Chutes via SciLLM (no wrappers).
+Router TEXT JSON-mode probe via SciLLM proxy (no wrappers).
 
 Reads env:
-  - CHUTES_API_BASE, CHUTES_API_KEY
+  - SCILLM_API_BASE, SCILLM_PROXY_KEY
   - CHUTES_TEXT_MODEL, CHUTES_TEXT_MODEL_ALT1, CHUTES_TEXT_MODEL_ALT2 (optional)
   - Writes artifacts under scripts/artifacts/.
 
@@ -21,8 +21,9 @@ from litellm import Router  # SciLLM-compatible Router
 
 
 def build_router() -> Router:
-    base = os.environ["CHUTES_API_BASE"]
-    key = os.environ["CHUTES_API_KEY"]
+    """Build a Router instance configured from environment variables."""
+    base = os.environ.get("SCILLM_API_BASE", "http://localhost:4010")
+    key = os.environ.get("SCILLM_PROXY_KEY", "sk-dev-proxy-123")
     m0 = os.environ.get("CHUTES_TEXT_MODEL", "").strip()
     m1 = os.environ.get("CHUTES_TEXT_MODEL_ALT1", "").strip()
     m2 = os.environ.get("CHUTES_TEXT_MODEL_ALT2", "").strip()
@@ -31,6 +32,7 @@ def build_router() -> Router:
         raise RuntimeError("CHUTES_TEXT_MODEL is not set")
 
     def entry(model: str, order: int) -> Dict[str, Any]:
+        """Build a LiteLLM entry dictionary from model and order."""
         return {
             "model_name": "chutes/text",
             "litellm_params": {
@@ -51,6 +53,7 @@ def build_router() -> Router:
 
 
 def main() -> None:
+    """Generate and save timestamped router probe artifacts in artifacts directory."""
     artifacts_dir = Path("scripts/artifacts")
     artifacts_dir.mkdir(parents=True, exist_ok=True)
     ts = int(time.time())

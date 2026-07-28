@@ -17,6 +17,7 @@ from typing import Iterable, Optional, Tuple
 
 
 def _latest_run_dir(root: Path) -> Optional[Path]:
+    """Return the most recent pipeline run directory from root."""
     runs = [p for p in (root / "data" / "results" / "pipeline_runs").glob("*") if p.is_dir()]
     if not runs:
         return None
@@ -25,6 +26,7 @@ def _latest_run_dir(root: Path) -> Optional[Path]:
 
 
 def _rect_from_camelot(bb: Iterable[float], page_h: float) -> Tuple[float, float, float, float]:
+    """Return rectangle coordinates adjusted for page height."""
     x0, y0, x1, y1 = [float(v) for v in bb]
     y0f = float(page_h) - y1
     y1f = float(page_h) - y0
@@ -32,6 +34,7 @@ def _rect_from_camelot(bb: Iterable[float], page_h: float) -> Tuple[float, float
 
 
 def main() -> int:
+    """Return the latest run directory and resolve input file paths."""
     import fitz
 
     root = Path.cwd()

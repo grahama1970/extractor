@@ -21,6 +21,7 @@ app = typer.Typer(add_completion=False)
 
 @app.command()
 def main(tmp_dir: Path = typer.Option(Path("data/results/structured_parity_smoke/html_synth"))):
+    """Perform main operation."""
     tmp_dir.mkdir(parents=True, exist_ok=True)
     html_path = tmp_dir / "table_headers.html"
     html_path.write_text(

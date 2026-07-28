@@ -20,6 +20,7 @@ app = typer.Typer(add_completion=False)
 
 
 def bm25_rank(db, q: str, scope: str, tags: List[str], k: int) -> List[Dict[str, Any]]:
+    """Rank documents using BM25 algorithm based on query and scope."""
     bind = {"q": q, "k": max(1, k), "tags": tags, "scope": scope or ""}
     aql = """
     FOR d IN lessons_search
@@ -40,6 +41,7 @@ def bm25_rank(db, q: str, scope: str, tags: List[str], k: int) -> List[Dict[str,
 
 
 def graph_score_for_seed(db, seed_id: str, depth: int) -> float:
+    """Calculate graph score for a seed node."""
     aqlg = """
     FOR v, e, p IN 1..@depth ANY @seed lesson_edges
       OPTIONS { bfs: true, uniqueVertices: 'path' }
@@ -70,6 +72,7 @@ def graph_score_for_seed(db, seed_id: str, depth: int) -> float:
 
 
 def fuse_bm25_graph(db, bm25: List[Dict[str, Any]], depth: int, k: int) -> List[Dict[str, Any]]:
+    """Fuse BM25 scores with graph-based rankings for a given depth and top-k results."""
     if not bm25:
         return []
     # Normalize BM25 by reciprocal rank
@@ -107,6 +110,7 @@ def diff(
     depth: int = typer.Option(2, help="Graph depth (1..4)"),
     json_out: bool = typer.Option(False, "--json", help="Output JSON with bm25 and fused arrays"),
 ):
+    """Compare search results based on query, scope, tags, and graph depth."""
     db = get_db()
     tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
     bm25 = bm25_rank(db, q=q, scope=scope, tags=tag_list, k=k)

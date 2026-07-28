@@ -28,6 +28,7 @@ from typing import Iterable, Optional
 
 
 def _latest_stage02_json(run_dir: Path) -> Optional[Path]:
+    """Return the most recent JSON file from a specific directory."""
     candidates = list(
         (run_dir / "02_marker_extractor" / "json_output").glob("02_marker_blocks*.json")
     )
@@ -38,6 +39,7 @@ def _latest_stage02_json(run_dir: Path) -> Optional[Path]:
 
 
 def _iter_blocks(obj) -> Iterable[dict]:
+    """Extract nested blocks or items from a dictionary structure."""
     if isinstance(obj, dict):
         # Common patterns
         if isinstance(obj.get("blocks"), list):
@@ -54,11 +56,13 @@ def _iter_blocks(obj) -> Iterable[dict]:
 
 
 def _block_type(b: dict) -> str:
+    """Extract the type value from a block dictionary."""
     t = b.get("type") or b.get("block_type") or b.get("kind") or ""
     return str(t)
 
 
 def main(argv: list[str]) -> int:
+    """Parse command-line arguments for processing pipeline data."""
     ap = argparse.ArgumentParser(description="Fail if Stage 02 has zero figure-like blocks.")
     ap.add_argument("--json", dest="json_path", type=Path, help="Path to 02_marker_blocks*.json")
     ap.add_argument(

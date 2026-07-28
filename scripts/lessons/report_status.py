@@ -15,6 +15,7 @@ app = typer.Typer(add_completion=False)
 
 
 def read_json_report(path: Path) -> dict | None:
+    """Load JSON from file path, returning None on failure."""
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except Exception:

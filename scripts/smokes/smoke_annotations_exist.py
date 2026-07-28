@@ -18,6 +18,7 @@ except Exception as e:
 
 
 def main() -> int:
+    """Parse command-line arguments for PDF processing parameters."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--pdf", required=True, help="Path to Stage 01 clean PDF (_clean.pdf)")
     ap.add_argument("--pages", type=int, default=5, help="Pages to check (from start)")

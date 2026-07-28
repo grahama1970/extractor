@@ -14,6 +14,7 @@ from extractor.pipeline.utils.reliability import log_stage_error
 
 @dataclass
 class OutputCheck:
+    """Validate output file metadata and constraints."""
     rel_path: str
     kind: str = "json"  # json | file
     key: str | None = None
@@ -23,6 +24,7 @@ class OutputCheck:
 
 @dataclass
 class StepSanitySpec:
+    """Validate a processing step's sanity check specification."""
     step: str
     description: str
     outputs: List[OutputCheck]
@@ -31,6 +33,7 @@ class StepSanitySpec:
 
 @dataclass
 class SanityContext:
+    """Store execution context and results for a pipeline sanity check."""
     step: str
     results_root: Path
     outputs_data: Dict[str, Any] = field(default_factory=dict)
@@ -42,15 +45,18 @@ REGISTRY: Dict[str, StepSanitySpec] = {}
 
 
 def register_step_sanity(spec: StepSanitySpec) -> None:
+    """Register a step sanity specification in the global registry."""
     REGISTRY[spec.step] = spec
 
 
 def _default_results_root() -> Path:
+    """Return results directory path from env var or default."""
     override = os.getenv("EXTRACTOR_RESULTS_ROOT")
     return Path(override) if override else Path("data/results/pipeline")
 
 
 def _manifest_flags(root: Path) -> Dict[str, Any]:
+    """Load and parse flags from a manifest.json file, returning empty dict on error."""
     manifest = root / "manifest.json"
     if not manifest.exists():
         return {}
@@ -64,6 +70,7 @@ def _manifest_flags(root: Path) -> Dict[str, Any]:
 
 
 def _env_flag(*names: str) -> Optional[bool]:
+    """Check environment variables for truthy/falsy values."""
     truthy = {"1", "true", "yes", "on"}
     falsy = {"0", "false", "no", "off"}
     for name in names:
@@ -80,6 +87,7 @@ def _env_flag(*names: str) -> Optional[bool]:
 
 
 def _count_items(obj: Any) -> int:
+    """Count elements in a list, dict, or set, otherwise return zero."""
     if isinstance(obj, (list, tuple, set)):
         return len(obj)
     if isinstance(obj, dict):
@@ -88,12 +96,14 @@ def _count_items(obj: Any) -> int:
 
 
 def _missing_skip_reason(step: str, rel_path: str, *, summary_only: bool) -> Optional[str]:
+    """Return skip reason for missing step based on summary flag."""
     if step == "09_section_summarizer" and summary_only:
         return "summary_only"
     return None
 
 
 def run_step_sanity(step: str, *, results_root: Path | None = None) -> int:
+    """Validate sanity check step execution and return status code."""
     spec = REGISTRY.get(step)
     if spec is None:
         raise ValueError(f"No sanity spec registered for {step}")
@@ -182,12 +192,14 @@ def run_step_sanity(step: str, *, results_root: Path | None = None) -> int:
 
 
 def _count_key(context: SanityContext, rel_path: str, key: str) -> int:
+    """Count occurrences of a key in a context's output data."""
     data = context.outputs_data.get(rel_path) or {}
     items = data.get(key) or []
     return _count_items(items)
 
 
 def _extra_requirements(context: SanityContext) -> List[SanityIssue]:
+    """Check for missing requirements in sanity test results."""
     rel = "07_requirements_miner/json_output/07_requirements.json"
     count = _count_key(context, rel, "requirements")
     if count < 1:
@@ -297,6 +309,7 @@ def _extra_sections(context: SanityContext) -> List[SanityIssue]:
 
 
 def _extra_summaries(context: SanityContext) -> List[SanityIssue]:
+    """Count successful summaries and update sanity context."""
     rel = "09_section_summarizer/json_output/09_summaries.json"
     data = context.outputs_data.get(rel) or {}
     summaries = data.get("summaries") or []
@@ -308,6 +321,7 @@ def _extra_summaries(context: SanityContext) -> List[SanityIssue]:
 
 
 def _extra_pdf_annotations(context: SanityContext) -> List[SanityIssue]:
+    """Check PDF annotations for overlays and report missing ones."""
     rel = "09a_pdf_annotator/json_output/annotations.json"
     overlays = _count_key(context, rel, "overlays")
     context.summary["overlay_count"] = overlays
@@ -317,6 +331,7 @@ def _extra_pdf_annotations(context: SanityContext) -> List[SanityIssue]:
 
 
 def _extra_graph_edges(context: SanityContext) -> List[SanityIssue]:
+    """Check graph edges in JSON output and report missing edges."""
     rel = "11_arango_create_graph/json_output/11_graph_edges.json"
     edges = _count_key(context, rel, "edges")
     context.summary["edge_count"] = edges
@@ -326,6 +341,7 @@ def _extra_graph_edges(context: SanityContext) -> List[SanityIssue]:
 
 
 def _register_default_specs() -> None:
+    """Register default pipeline step validation specs."""
     register_step_sanity(
         StepSanitySpec(
             step="01_annotation_processor",

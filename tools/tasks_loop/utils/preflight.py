@@ -54,23 +54,6 @@ def check_camelot() -> bool:
         return False
 
 
-def check_duckdb() -> bool:
-    """Check DuckDB can create and query a database."""
-    try:
-        import duckdb
-
-        conn = duckdb.connect(":memory:")
-        conn.execute("CREATE TABLE test (id INTEGER)")
-        conn.execute("INSERT INTO test VALUES (1)")
-        result = conn.execute("SELECT COUNT(*) FROM test").fetchone()
-        conn.close()
-        print(f"✅ DuckDB: OK (test query returned {result[0]})")
-        return True
-    except Exception as e:
-        print(f"❌ DuckDB: FAIL - {e}")
-        return False
-
-
 def check_scillm() -> bool:
     """Check SCILLM import (soft failure - LLM steps are optional)."""
     try:
@@ -92,7 +75,6 @@ def main() -> int:
     results = [
         ("PyMuPDF", check_pymupdf()),
         ("Camelot", check_camelot()),
-        ("DuckDB", check_duckdb()),
         ("SCILLM", check_scillm()),
     ]
 

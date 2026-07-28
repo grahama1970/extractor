@@ -24,6 +24,7 @@ app = typer.Typer(add_completion=False)
 
 
 def _load_flatten_function():
+    """Load and return the ArangoDB exporter module from a specified path."""
     module_path = (
         Path(__file__).resolve().parents[3]
         / "src"
@@ -41,6 +42,7 @@ def _load_flatten_function():
 
 
 def _ensure_parent(path: Path) -> None:
+    """Ensure parent directories exist for the given path."""
     path.parent.mkdir(parents=True, exist_ok=True)
 
 
@@ -58,6 +60,7 @@ def main(
     ),
     results_dir: Path = typer.Option(Path("data/results/structured_parity_smoke/xml")),
 ) -> None:
+    """Process PDF and XML inputs to generate pipeline results."""
     flatten = _load_flatten_function()
 
     # Run XML Extraction

@@ -28,10 +28,12 @@ else:
 
 
 def ts() -> str:
+    """Return the current timestamp formatted as YYYYMMDD-HHMMSS."""
     return time.strftime("%Y%m%d-%H%M%S")
 
 
 def main() -> int:
+    """Snapshot current pipeline JSONs and visuals to timestamped dir."""
     ap = argparse.ArgumentParser(
         description="Snapshot current pipeline JSONs and visuals to timestamped dir"
     )

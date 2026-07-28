@@ -30,6 +30,7 @@ def main(
     section_id: str = typer.Option("s0"),
     timeout: int = typer.Option(40),
 ):
+    """Process document section with specified model and prompt."""
     try:
         # Load API keys from .env if present
         load_dotenv(find_dotenv())

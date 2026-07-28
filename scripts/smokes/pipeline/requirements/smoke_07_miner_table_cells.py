@@ -24,6 +24,7 @@ OUT = Path("data/results/with_requirements_miner")
 
 
 def ensure_pipeline() -> Path:
+    """Ensure the existence of a requirements JSON file in output."""
     OUT.mkdir(parents=True, exist_ok=True)
     req_json = OUT / "07_requirements_miner/json_output/07_requirements.json"
     if req_json.exists():
@@ -45,6 +46,7 @@ def ensure_pipeline() -> Path:
 
 @app.command()
 def main():
+    """Extract requirement counts from a JSON input and save to file."""
     req_json = ensure_pipeline()
     data = json.loads(req_json.read_text())
     reqs = data.get("requirements") or []

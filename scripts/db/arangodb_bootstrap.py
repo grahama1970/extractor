@@ -15,6 +15,7 @@ app = typer.Typer(add_completion=False)
 
 
 def _cfg():
+    """Return ArangoDB connection details from environment."""
     url = os.getenv("ARANGODB_URL", "http://localhost:8529")
     user = os.getenv("ARANGODB_USERNAME", os.getenv("ARANGODB_USER", "root"))
     pwd = os.getenv("ARANGODB_PASSWORD")
@@ -26,6 +27,7 @@ def _cfg():
 
 @app.command()
 def main(db: str = typer.Argument("lean4_test")):
+    """Create ArangoDB database and collections."""
     url, user, pwd = _cfg()
     client = ArangoClient(hosts=url)
     sysdb = client.db("_system", username=user, password=pwd)

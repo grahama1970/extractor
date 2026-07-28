@@ -1,3 +1,4 @@
+"""LLM adapter wrapper with schema hinting for SciLLM/Chutes completions."""
 from __future__ import annotations
 
 import os

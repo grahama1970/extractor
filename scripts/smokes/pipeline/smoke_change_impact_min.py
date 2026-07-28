@@ -20,6 +20,7 @@ app = typer.Typer(add_completion=False)
 
 @app.command()
 def main():
+    """Create a temporary directory and write JSON files for processing."""
     out_dir = Path("data/results/cli_smokes/change_impact").resolve()
     tmp = out_dir / "tmp"
     tmp.mkdir(parents=True, exist_ok=True)

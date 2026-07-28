@@ -16,6 +16,7 @@ from litellm import Router
 
 
 def build_router() -> Router:
+    """Build a router with predefined model configurations."""
     model_list = [
         {
             "model_name": "gemini-2.5-flash",
@@ -30,6 +31,7 @@ def build_router() -> Router:
 
 
 def stage07_guard(compact: bool = False) -> str:
+    """Return a JSON object with specified structure based on input flag."""
     if compact:
         return (
             "Return ONLY a JSON object (no code fences). Prefer this shape: "
@@ -72,6 +74,7 @@ def with_image_messages(prompt_guard: str, context: str, image_url: str):
 
 
 def print_resp(label: str, resp):
+    """Print formatted response details including usage and hidden parameters."""
     print(f"\n=== {label} ===")
     try:
         usage = getattr(resp, "usage", None)
@@ -93,6 +96,7 @@ def print_resp(label: str, resp):
 
 
 async def main():
+    """Start the application, loading environment and resources."""
     load_dotenv(find_dotenv())
     router = build_router()
 

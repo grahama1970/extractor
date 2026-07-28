@@ -24,6 +24,7 @@ app = typer.Typer(add_completion=False)
 
 @app.command()
 def main(tmp_dir: Path = typer.Option(Path("data/results/structured_parity_smoke/markdown_synth"))):
+    """Generate a synthetic markdown file with example lists and code."""
     tmp_dir.mkdir(parents=True, exist_ok=True)
     md_path = tmp_dir / "lists.md"
     md_path.write_text(

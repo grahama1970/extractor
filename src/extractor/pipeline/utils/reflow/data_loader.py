@@ -103,6 +103,7 @@ def merge_section_tables(section: dict[str, Any]) -> None:
                         body = pd.DataFrame(t2.get("pandas_df") or [])
 
                         def _collapse_ws(df: pd.DataFrame) -> pd.DataFrame:
+                            """Sanitize DataFrame cells and replace nulls with empty strings."""
                             return df_map(
                                 df,
                                 lambda v: sanitize_table_cell(v) if not pd.isna(v) else "",
@@ -133,6 +134,7 @@ def merge_section_tables(section: dict[str, Any]) -> None:
                         df2 = pd.DataFrame(t2.get("pandas_df") or [])
 
                         def _collapse(df: pd.DataFrame) -> pd.DataFrame:
+                            """Sanitize DataFrame cells, filling NaNs with empty strings."""
                             return df_map(
                                 df,
                                 lambda v: sanitize_table_cell(v) if not pd.isna(v) else "",
@@ -152,6 +154,7 @@ def merge_section_tables(section: dict[str, Any]) -> None:
     if len(merged) > 1:
 
         def _density(t: dict[str, Any]) -> float:
+            """Return data density as a float from the given dictionary."""
             m = t.get("pandas_metrics") or {}
             try:
                 return float(m.get("data_density") or 0.0)
@@ -261,6 +264,7 @@ def consolidate_data(
                 q_vec = embedder.encode(query_text, normalize_embeddings=True)
 
                 def _blocks_to_text(block_list: list[dict[str, Any]]) -> str:
+                    """Convert a list of blocks to a single text string."""
                     lines: list[str] = []
                     for blk in block_list or []:
                         for ln in blk.get("lines", []):

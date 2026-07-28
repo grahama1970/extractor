@@ -24,13 +24,17 @@ def _load_stage11():
         faiss_stub = types.ModuleType("faiss")
 
         class IndexFlatIP:  # noqa: N801
+            """Track the total count of elements added to the index."""
             def __init__(self, d):
+                """Initialize an object with a total count set to zero."""
                 self.ntotal = 0
 
             def add(self, arr):
+                """Increment the total count by the length of the array."""
                 self.ntotal += len(arr)
 
         def normalize_L2(x):
+            """Normalize input vector using L2 normalization."""
             return x
 
         faiss_stub.IndexFlatIP = IndexFlatIP  # type: ignore[attr-defined]
@@ -48,6 +52,7 @@ def _load_stage11():
 
 @app.command()
 def main():
+    """Load environment variables and calculate hierarchy distance."""
     load_dotenv(find_dotenv())
     mod = _load_stage11()
     dist = mod.calculate_hierarchy_distance(

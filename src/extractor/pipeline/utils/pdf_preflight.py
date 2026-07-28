@@ -19,6 +19,7 @@ import numpy as np
 
 @dataclass
 class PreflightReport:
+    """Represent a summary of a document preflight process."""
     pages: int
     annotations_removed: int
     rotations_applied: int
@@ -27,6 +28,7 @@ class PreflightReport:
 
 
 def _ensure_rgb(pix: "fitz.Pixmap") -> "fitz.Pixmap":  # type: ignore
+    """Convert pixmap to RGB, preserving complex formats."""
     if not pix or pix.n >= 4:
         return pix
     return fitz.Pixmap(pix, 0) if pix.n == 1 else fitz.Pixmap(pix)  # type: ignore
@@ -97,6 +99,7 @@ def strip_annotations_and_normalize(
     dedupe_images: bool = True,
     dpi: int = 300,
 ) -> PreflightReport:
+    """Strip annotations, normalize rotation, and deduplicate PDF images."""
     if fitz is None:
         raise RuntimeError("PyMuPDF (fitz) not available; install pymupdf")
     pdf_out.parent.mkdir(parents=True, exist_ok=True)

@@ -22,6 +22,7 @@ from PIL import Image, ImageDraw
 
 @dataclass
 class Box:
+    """Represent a rectangular area with associated metadata."""
     page: int
     x0: float
     y0: float
@@ -32,6 +33,7 @@ class Box:
 
 
 def load_png(pdf: Path, page: int, dpi: int = 144) -> Image.Image:
+    """Load a PNG image from a specified PDF page at given DPI."""
     d = fitz.open(pdf)
     try:
         p = d.load_page(page)
@@ -43,6 +45,7 @@ def load_png(pdf: Path, page: int, dpi: int = 144) -> Image.Image:
 
 
 def draw_boxes(img: Image.Image, boxes: Iterable[Box], color=(255, 0, 0)) -> Image.Image:
+    """Draw bounding boxes on image, returning annotated copy."""
     out = img.copy()
     draw = ImageDraw.Draw(out)
     scale = 144 / 72
@@ -58,6 +61,7 @@ def draw_boxes(img: Image.Image, boxes: Iterable[Box], color=(255, 0, 0)) -> Ima
 
 
 def load_stage(step: str, out_root: Path) -> tuple[Path, List[Box]]:
+    """Load bounding boxes and file path for a processing stage."""
     if step == "02":
         p = out_root / "02_marker_extractor/json_output/02_marker_blocks.json"
         data = json.loads(p.read_text())
@@ -123,6 +127,7 @@ def load_stage(step: str, out_root: Path) -> tuple[Path, List[Box]]:
 
 
 def save_corrections(pdf: Path, step: str, corrections: list[dict], out_dir: Path) -> Path:
+    """Write PDF corrections and step data to a JSON file."""
     out_dir.mkdir(parents=True, exist_ok=True)
     name = f"{pdf.stem}_{step}_corrections.json"
     out = out_dir / name
@@ -133,6 +138,7 @@ def save_corrections(pdf: Path, step: str, corrections: list[dict], out_dir: Pat
 
 
 def main():
+    """Run the Streamlit visual review application."""
     st.set_page_config(page_title="Visual Review", layout="wide")
     pdf = Path(
         st.sidebar.text_input(

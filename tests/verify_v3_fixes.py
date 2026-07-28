@@ -9,7 +9,6 @@ sys.path.append(str(Path.cwd() / "src"))
 
 # Mock dependencies
 from unittest.mock import MagicMock
-sys.modules["duckdb"] = MagicMock()
 sys.modules["extractor.pipeline.utils.reliability"] = MagicMock()
 sys.modules["extractor.pipeline.utils.diagnostics"] = MagicMock()
 
@@ -18,6 +17,7 @@ sys.modules["extractor.pipeline.utils.diagnostics"] = MagicMock()
 from extractor.pipeline.steps.s04_section_builder import TOC_ENTRY_PATTERNSS, PAGE_HEADER_FOOTER_PATTERNSS
 
 class TestV3Fixes(unittest.TestCase):
+    """Test V3 fixes for TOC pattern matching."""
     def test_toc_patterns(self):
         # Test new V3 patterns
         cases = [
@@ -37,6 +37,7 @@ class TestV3Fixes(unittest.TestCase):
             self.assertTrue(matched, f"Failed to match TOC pattern: {text}")
 
     def test_metadata_pattern(self):
+        """Tests if metadata text matches a header/footer pattern."""
         text = "Jkt 067464 PO 00000 Frm 00010"
         matched = False
         for pat in PAGE_HEADER_FOOTER_PATTERNSS:

@@ -1,5 +1,7 @@
 # Extractor - Self-Correcting Agentic Document Processing System
 
+![Extractor header](docs/assets/extractor-header.webp)
+
 Advanced multi-format document extraction system with self-correcting AI agents, annotation-guided learning, and continuous improvement through metadata accumulation. Handles PDFs, DOCX, PPTX, XML, HTML, and more with enterprise-grade accuracy.
 
 ## Quick Start

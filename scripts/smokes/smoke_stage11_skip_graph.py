@@ -22,6 +22,7 @@ app = typer.Typer(
 
 @app.command()
 def main(results: Path = typer.Option(Path("data/results/pipeline"), "-o")) -> None:
+    """Write flattened data to JSON for ArangoDB export."""
     load_dotenv(find_dotenv() or None)
     # Prepare empty-embedding flattened data
     flat_dir = results / "10_arangodb_exporter" / "json_output"

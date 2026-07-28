@@ -1,3 +1,4 @@
+"""Persist pipeline stage metrics to ArangoDB for observability and trend analysis."""
 from __future__ import annotations
 
 import os
@@ -23,6 +24,7 @@ _COLLECTION_NAME = os.getenv("PIPELINE_METRICS_COLLECTION", "pipeline_metrics")
 
 
 def _get_arango_db() -> Optional[StandardDatabase]:
+    """Return the cached ArangoDB connection or initialize it from environment."""
     global _ARANGO_DB
     if _ARANGO_DB is not None:
         return _ARANGO_DB
@@ -49,6 +51,7 @@ def _get_arango_db() -> Optional[StandardDatabase]:
 
 
 def _write_local_log(entry: Dict[str, Any]) -> None:
+    """Append a dictionary entry to a local JSONL log file."""
     try:
         log_path = Path("logs/metrics_log.jsonl")
         log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -61,6 +64,7 @@ def _write_local_log(entry: Dict[str, Any]) -> None:
 
 
 def log_metric(stage: str, data: Dict[str, Any]) -> None:
+    """Log a metric entry with stage and timestamp to ArangoDB."""
     entry: Dict[str, Any] = {
         "stage": stage,
         "timestamp": datetime.utcnow().isoformat(),

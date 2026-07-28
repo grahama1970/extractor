@@ -326,6 +326,7 @@ def classify_error(e: Exception) -> Dict[str, Any]:
     m = msg.lower()
 
     def any_in(s: str, needles: list[str]) -> bool:
+        """Perform any in operation."""
         return any(n in s for n in needles)
 
     category = "unknown"

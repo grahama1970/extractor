@@ -43,10 +43,12 @@ class TestGlossarySetup:
     """Test ArangoDB collection creation."""
 
     def test_collections_exist(self, mem_db):
+        """Check existence of specified collections in the database."""
         assert mem_db.has_collection("glossary")
         assert mem_db.has_collection("glossary_edges")
 
     def test_view_exists(self, mem_db):
+        """Check if the view 'glossary_search' exists in the database."""
         views = [v.get("name") for v in mem_db.views()]
         assert "glossary_search" in views
 
@@ -55,6 +57,7 @@ class TestGlossaryUpsert:
     """Test upserting glossary entries."""
 
     def test_insert_new_entry(self, mem_db):
+        """Test inserting a new glossary entry."""
         from extractor.pipeline.steps.s10_arangodb_exporter import _upsert_glossary_entry
         col = mem_db.collection("glossary")
         edge_col = mem_db.collection("glossary_edges")
@@ -79,6 +82,7 @@ class TestGlossaryUpsert:
         assert doc["definitions"][0]["definition"] == "A test term for unit testing"
 
     def test_upsert_appends_definition(self, mem_db):
+        """Verifies glossary entry upsert appends definitions."""
         from extractor.pipeline.steps.s10_arangodb_exporter import _upsert_glossary_entry
         col = mem_db.collection("glossary")
         edge_col = mem_db.collection("glossary_edges")
@@ -103,6 +107,7 @@ class TestGlossaryUpsert:
         assert len(doc["definitions"]) == 2
 
     def test_upsert_dedup_same_doc(self, mem_db):
+        """Verifies glossary entry deduplication on repeated upsert."""
         from extractor.pipeline.steps.s10_arangodb_exporter import _upsert_glossary_entry
         col = mem_db.collection("glossary")
         edge_col = mem_db.collection("glossary_edges")
@@ -124,6 +129,7 @@ class TestGlossaryRecall:
     """Test the recall CLI function."""
 
     def test_recall_exact(self, mem_db):
+        """Test the recall of exact glossary entries in the database."""
         from extractor.pipeline.steps.s10_arangodb_exporter import _upsert_glossary_entry
         col = mem_db.collection("glossary")
         edge_col = mem_db.collection("glossary_edges")
@@ -142,6 +148,7 @@ class TestGlossaryRecall:
         assert len(result["definitions"]) == 1
 
     def test_recall_not_found(self, mem_db):
+        """Test recall_definition when a term is not found."""
         from scripts.glossary.recall import recall_definition
         result = recall_definition("NONEXISTENT_XYZZY_TERM", db=mem_db)
         assert result["found"] is False

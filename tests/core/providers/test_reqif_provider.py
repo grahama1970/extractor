@@ -62,11 +62,13 @@ MINIMAL_REQIF = """\
 
 @pytest.fixture
 def provider():
+    """Return an instance of ReqIFProvider for testing purposes."""
     return ReqIFProvider()
 
 
 @pytest.fixture
 def reqif_file(tmp_path: Path) -> Path:
+    """Create a temporary REQIF file for testing purposes."""
     fp = tmp_path / "requirements.reqif"
     fp.write_text(MINIMAL_REQIF)
     return fp

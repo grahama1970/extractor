@@ -23,6 +23,7 @@ from pathlib import Path
 
 
 def main() -> int:
+    """Check `timings_summary.json` for valid total timings."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", type=Path, required=True, help="Pipeline output directory")
     args = ap.parse_args()
@@ -57,6 +58,7 @@ def main() -> int:
 
     # Tables: merged logical count == 5; best-effort grouping by logical_table_id or header_norm
     def iter_table_blocks():
+        """Yield table blocks from reflowed JSON data."""
         for s in rs:
             for b in (s.get("reflowed_json", {}) or {}).get("blocks", []):
                 if (b.get("type") or b.get("kind")) == "table":
@@ -79,6 +81,7 @@ def main() -> int:
 
     # Count merged groups (appear on >1 page)
     def table_pages_for_key(k: str) -> set[int]:
+        """Return table page logical IDs matching the specified key."""
         for s in rs:
             for b in (s.get("reflowed_json", {}) or {}).get("blocks", []):
                 if (b.get("type") or b.get("kind")) != "table":
@@ -100,6 +103,7 @@ def main() -> int:
     block_lookup = {str(b.get("id") or b.get("block_id")): b for b in s02.get("blocks", [])}
 
     def pages_for_block_ids(ids):
+        """Return unique page numbers for given block IDs."""
         p = set()
         for bid in ids:
             blk = block_lookup.get(str(bid))

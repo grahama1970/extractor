@@ -49,6 +49,7 @@ def _next_block_id(counter: List[int], prefix: str) -> str:
 
 
 def _normalise_source_type(source_type: Optional[str | SourceType]) -> SourceType:
+    """Normalize input to a SourceType enum, defaulting to PDF."""
     if isinstance(source_type, SourceType):
         return source_type
     if isinstance(source_type, str):
@@ -60,6 +61,7 @@ def _normalise_source_type(source_type: Optional[str | SourceType]) -> SourceTyp
 
 
 def _default_document_title(source_path: Optional[str], sections: Sequence[Dict[str, Any]]) -> str:
+    """Return the default document title from sections or source path."""
     if sections:
         first_title = sections[0].get("document_title") or sections[0].get("title")
         if isinstance(first_title, str) and first_title.strip():
@@ -74,11 +76,13 @@ def _default_document_title(source_path: Optional[str], sections: Sequence[Dict[
 
 
 def _hash_source(source_path: Optional[str], fallback: str = "document") -> str:
+    """Return the MD5 hash of the source path or fallback string."""
     basis = source_path or fallback
     return hashlib.md5(basis.encode("utf-8")).hexdigest()
 
 
 def _paragraphs_from_text(text: str) -> List[str]:
+    """Split text into non-empty, stripped paragraph strings."""
     if not text:
         return []
     candidates = _PARA_SPLIT_RE.split(text)
@@ -92,6 +96,7 @@ def _table_from_section(
     block_id_counter: List[int],
     section_id: str,
 ) -> TableBlock:
+    """Build a TableBlock from a specified section of a table."""
     rows: int = 0
     cols: int = 0
     headers: List[int] = []
@@ -195,6 +200,7 @@ def _figure_block_from_section(
     block_id_counter: List[int],
     section_id: str,
 ) -> BaseBlock:
+    """Build a figure block from figure data and section ID."""
     block_id = _next_block_id(block_id_counter, "figure")
     metadata = BlockMetadata(
         confidence=1.0,

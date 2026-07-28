@@ -69,6 +69,7 @@ def canonical_block_order_key(block: Dict[str, Any]) -> Tuple[int, float, float,
 
 
 def _rgb_to_hex(rgb: Tuple[float, float, float]) -> str:
+    """Convert RGB tuple to hexadecimal color string."""
     try:
         r, g, b = rgb
         r = int(max(0, min(255, round(r * (255 if r <= 1 else 1)))))
@@ -82,6 +83,7 @@ def _rgb_to_hex(rgb: Tuple[float, float, float]) -> str:
 
 
 def _bucket_color(hex_str: str) -> str:
+    """Bucketize a hex color into named categories based on RGB values."""
     try:
         h = hex_str.lstrip("#")
         r = int(h[0:2], 16)
@@ -254,6 +256,7 @@ _SHORT_NAV_TOKENS: set[str] = {
 
 
 def _similarity_ratio(a: str, b: str) -> float:
+    """Compute similarity ratio between two strings, scaled to 0..100."""
     a = a.strip().lower()
     b = b.strip().lower()
     if _HAVE_RAPIDFUZZ:
@@ -264,6 +267,7 @@ def _similarity_ratio(a: str, b: str) -> float:
 
 
 def _fuzzy_in_set(title: str, candidates: Iterable[str], threshold: float = 90.0) -> bool:
+    """Check if a string matches any candidate with minimum similarity threshold."""
     t = (title or "").strip().lower()
     if not t:
         return False
@@ -274,6 +278,7 @@ def _fuzzy_in_set(title: str, candidates: Iterable[str], threshold: float = 90.0
 
 
 def _is_boilerplate_html_title(title: str) -> bool:
+    """Check if a HTML title matches common boilerplate patterns."""
     tl = (title or "").strip().lower()
     if not tl:
         return False

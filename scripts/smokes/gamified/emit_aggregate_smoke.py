@@ -5,6 +5,7 @@ from pathlib import Path
 
 
 def repo_root() -> Path:
+    """Return the root directory path of the repository."""
     return Path(__file__).resolve().parents[2]
 
 

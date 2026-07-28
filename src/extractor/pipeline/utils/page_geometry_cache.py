@@ -9,6 +9,7 @@ import hashlib
 
 @dataclass
 class PageGeom:
+    """Store dimensions and text bounding boxes for a page."""
     width: float
     height: float
     text_bboxes: List[Tuple[float, float, float, float]]
@@ -16,6 +17,7 @@ class PageGeom:
 
 @dataclass
 class PageGeomCache:
+    """Cache page geometry information for a document."""
     doc_key: str
     pages: Dict[int, PageGeom]
 
@@ -45,6 +47,7 @@ class PageGeomCache:
 
 
 def _doc_key_for(pdf_path: Optional[Path], extras: Optional[str] = None) -> str:
+    """Generate a unique key for a PDF based on its path and extras."""
     h = hashlib.sha1()
     base = (str(pdf_path.resolve()) if pdf_path else "") + "|" + str(extras or "")
     try:
@@ -59,12 +62,14 @@ def _doc_key_for(pdf_path: Optional[Path], extras: Optional[str] = None) -> str:
 
 
 def _default_cache_dir(results_root: Path) -> Path:
+    """Return the default cache directory path, creating it if necessary."""
     d = results_root / "_cache"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
 
 def load_cache(results_root: Path, doc_key: str) -> Optional[PageGeomCache]:
+    """Load page geometry cache from file, returning None on failure."""
     path = _default_cache_dir(results_root) / f"page_cache_{doc_key}.json"
     if not path.exists():
         return None
@@ -77,12 +82,14 @@ def load_cache(results_root: Path, doc_key: str) -> Optional[PageGeomCache]:
 
 
 def save_cache(results_root: Path, cache: PageGeomCache) -> Path:
+    """Save cache data to a JSON file in the default cache directory."""
     path = _default_cache_dir(results_root) / f"page_cache_{cache.doc_key}.json"
     path.write_text(json.dumps(cache.to_json(), ensure_ascii=False, indent=2))
     return path
 
 
 def build_from_sections(sections: List[dict]) -> Dict[int, PageGeom]:
+    """Builds a page geometry map from section blocks."""
     pages: Dict[int, PageGeom] = {}
     for sec in sections or []:
         for b in sec.get("blocks") or []:
@@ -103,6 +110,7 @@ def build_from_sections(sections: List[dict]) -> Dict[int, PageGeom]:
 
 
 def fill_missing_with_pymupdf(pages: Dict[int, PageGeom], pdf_path: Optional[Path]) -> None:
+    """Fill missing page geometries using PyMuPDF."""
     if not pdf_path or not pdf_path.exists():
         return
     try:
@@ -139,6 +147,7 @@ def fill_missing_with_pymupdf(pages: Dict[int, PageGeom], pdf_path: Optional[Pat
 def build_or_load(
     results_root: Path, sections: List[dict], pdf_path: Optional[Path]
 ) -> PageGeomCache:
+    """Load page geometry cache, building if not found."""
     titles = "|".join((sec.get("title") or "") for sec in (sections or [])[:10])
     extras = f"{len(sections)}|{titles}"
     key = _doc_key_for(pdf_path, extras=extras)

@@ -10,10 +10,12 @@ from extractor.pipeline.utils.gamified_contracts import (
 
 
 def _read(p: Path):
+    """Load JSON from path."""
     return json.loads(p.read_text())
 
 
 def test_iter_and_summary_contracts(tmp_path: Path):
+    """Validate iteration metrics and summary data contracts."""
     fx = Path("tests/fixtures/gamified")
     metrics = IterMetrics.model_validate(_read(fx / "iter_01.json"))
     assert set(metrics.correctness.keys()) == {"S", "M", "L"}
@@ -28,6 +30,7 @@ def test_iter_and_summary_contracts(tmp_path: Path):
 
 
 def test_scorecard_contract(tmp_path: Path):
+    """Test Scorecard object's contract and validation."""
     fx = Path("tests/fixtures/gamified")
     sc = Scorecard.model_validate(_read(fx / "scorecard.json"))
     sc.validate_winner()

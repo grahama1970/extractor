@@ -23,6 +23,7 @@ app = typer.Typer(add_completion=False)
 
 @app.command()
 def main(tmp_dir: Path = typer.Option(Path("data/results/structured_parity_smoke/epub_synth"))):
+    """Build a sample EPUB book in the specified temporary directory."""
     tmp_dir.mkdir(parents=True, exist_ok=True)
     epub_path = tmp_dir / "img_tbl.epub"
     book = epub.EpubBook()

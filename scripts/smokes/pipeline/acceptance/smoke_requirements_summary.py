@@ -23,6 +23,7 @@ OUT = Path("data/results/with_requirements_summary")
 
 @app.command()
 def main():
+    """Run a subprocess to extract data from a PDF using a specified mode."""
     OUT.mkdir(parents=True, exist_ok=True)
     rc = subprocess.run(
         [

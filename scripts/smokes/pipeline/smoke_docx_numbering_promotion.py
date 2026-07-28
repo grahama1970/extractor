@@ -23,6 +23,7 @@ app = typer.Typer(add_completion=False)
 
 @app.command()
 def main(tmp_dir: Path = typer.Option(Path("data/results/structured_parity_smoke/docx_synth"))):
+    """Generate a DOCX file with structured content and save to specified directory."""
     tmp_dir.mkdir(parents=True, exist_ok=True)
     docx_path = tmp_dir / "numbering.docx"
 

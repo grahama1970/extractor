@@ -1,3 +1,4 @@
+"""Structured error logging and fail-safe JSON writing for pipeline stages."""
 from __future__ import annotations
 
 import json

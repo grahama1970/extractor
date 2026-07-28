@@ -24,6 +24,7 @@ app = typer.Typer(
 
 @app.command()
 def main(results: Path = typer.Option(Path("data/results/pipeline_db_smoke"), "-o")) -> None:
+    """Run a minimal pipeline smoke test."""
     load_dotenv(find_dotenv() or None)
     # Prepare minimal Stage 07/09 payloads
     pdf_name = "BHT_CV32A65X_marked.pdf"

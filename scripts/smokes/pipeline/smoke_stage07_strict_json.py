@@ -39,6 +39,7 @@ app = typer.Typer(add_completion=False, help="Stage 07 structured smoke")
 
 
 def _load_stage07():
+    """Load the Stage 07 module from a specified file path."""
     import importlib.util
 
     module_path = Path("src/extractor/pipeline/steps/07_reflow_section.py").resolve()
@@ -51,6 +52,7 @@ def _load_stage07():
 
 
 def _ensure_dependencies() -> None:
+    """Ensure required dependency files exist, running extraction if missing."""
     if not (RESULTS_04.exists() and RESULTS_05.exists() and RESULTS_06.exists()):
         from extractor.pipeline.tools.quick_smoke import run as quick_run  # type: ignore
 
@@ -60,6 +62,7 @@ def _ensure_dependencies() -> None:
 
 
 def _choose_section(payload: dict) -> dict:
+    """Return the first section from the payload or raise an error if none exist."""
     sections = (payload or {}).get("sections") or []
     if not sections:
         raise SystemExit("No sections available for Stage 07 smoke")
@@ -67,6 +70,7 @@ def _choose_section(payload: dict) -> dict:
 
 
 def _context_from_section(sec: dict) -> str:
+    """Return formatted section title and concatenated text content."""
     title = sec.get("title") or "Untitled"
     blocks = sec.get("blocks") or []
     texts = [blk.get("text") for blk in blocks if isinstance(blk, dict) and blk.get("text")]
@@ -75,6 +79,7 @@ def _context_from_section(sec: dict) -> str:
 
 
 async def run_smoke(results: Path) -> None:
+    """Configure environment and run smoke tests."""
     load_dotenv(find_dotenv(usecwd=True) or None)
     os.environ.setdefault("LITELLM_HTTPX", "1")
     os.environ.setdefault("LITELLM_DEBUG", "1")
@@ -112,6 +117,7 @@ async def run_smoke(results: Path) -> None:
 
 @app.command()
 def main(results: Path = typer.Option(Path("data/results/pipeline"), "--results")) -> None:
+    """Run the smoke test using results from the specified path."""
     asyncio.run(run_smoke(results))
 
 

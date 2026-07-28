@@ -23,10 +23,12 @@ app = typer.Typer(
 
 
 def _rid(prefix: str) -> str:
+    """Generate a unique ID with a prefix, timestamp, and random suffix."""
     return f"{prefix}-{int(time.time())}-{''.join(random.choices(string.ascii_lowercase+string.digits, k=4))}"
 
 
 def _read_jsonl(path: Path) -> List[Dict[str, Any]]:
+    """Load JSONL data from path, skipping invalid lines."""
     rows: List[Dict[str, Any]] = []
     if not path.exists():
         return rows
@@ -39,6 +41,7 @@ def _read_jsonl(path: Path) -> List[Dict[str, Any]]:
 
 
 def _slope(values: List[float]) -> float:
+    """Calculate the average slope of sequential value differences."""
     n = len(values)
     if n < 2:
         return 0.0

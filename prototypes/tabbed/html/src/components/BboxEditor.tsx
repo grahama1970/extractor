@@ -11,7 +11,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import {
   MousePointer2, Plus, Trash2, Undo2, RotateCcw,
 } from "lucide-react";
-import type { Box } from "@/lib/review";
+import type { Box, CorrectionChange } from "@/lib/review";
 
 // --- Types ---
 
@@ -58,7 +58,7 @@ export default function BboxEditor({
   pageNum: number;
   imgSrc: string;
   existingBoxes: Box[];
-  onSave: (annotations: Annotation[]) => void;
+  onSave: (annotations: Annotation[], changes: CorrectionChange[]) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
@@ -71,6 +71,7 @@ export default function BboxEditor({
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [undoStack, setUndoStack] = useState<UndoEntry[]>([]);
+  const [changes, setChanges] = useState<CorrectionChange[]>([]);
 
   // Drawing state
   const drawStart = useRef<{ x: number; y: number } | null>(null);
@@ -88,6 +89,7 @@ export default function BboxEditor({
     }));
     setAnnotations(anns);
     setUndoStack([]);
+    setChanges([]);
     setSelectedIdx(null);
   }, [existingBoxes]);
 
@@ -294,6 +296,11 @@ export default function BboxEditor({
       setUndoStack((us) => [...us, { kind: "add", index: next.length - 1 }]);
       return next;
     });
+    setChanges((prev) => [...prev, {
+      box_id: newAnn.id,
+      action: "added" as const,
+      after: { id: newAnn.id, type: newAnn.type, instanceId: newAnn.id, x: newAnn.x, y: newAnn.y, w: newAnn.w, h: newAnn.h, source: "manual" as const, reviewed: false, edited: true },
+    }]);
     setSelectedIdx(null);
     drawStart.current = null;
     drawCurrent.current = null;
@@ -309,6 +316,11 @@ export default function BboxEditor({
       const oldAnn = { ...ann };
       next[selectedIdx] = { ...ann, action: "delete" };
       setUndoStack((us) => [...us, { kind: "delete", index: selectedIdx, ann: oldAnn }]);
+      setChanges((ch) => [...ch, {
+        box_id: ann.id,
+        action: "deleted" as const,
+        before: { id: ann.id, type: ann.type, instanceId: ann.id, x: ann.x, y: ann.y, w: ann.w, h: ann.h, source: (ann.action === "add" ? "manual" : "pipeline") as Box["source"], reviewed: false, edited: false },
+      }]);
       return next;
     });
     setSelectedIdx(null);
@@ -332,6 +344,7 @@ export default function BboxEditor({
         }
         return next;
       });
+      setChanges((ch) => ch.length > 0 ? ch.slice(0, -1) : ch);
       setSelectedIdx(null);
       return rest;
     });
@@ -348,6 +361,7 @@ export default function BboxEditor({
     }));
     setAnnotations(anns);
     setUndoStack([]);
+    setChanges([]);
     setSelectedIdx(null);
   }, [existingBoxes]);
 
@@ -532,7 +546,7 @@ export default function BboxEditor({
           </div>
         )}
 
-        <Button size="sm" className="w-full" onClick={() => onSave(annotations)}>
+        <Button size="sm" className="w-full" onClick={() => onSave(annotations, changes)}>
           Save Corrections
         </Button>
       </div>

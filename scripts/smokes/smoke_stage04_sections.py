@@ -15,6 +15,7 @@ app = typer.Typer(add_completion=False, help="Smoke: Stage 04 build sections fro
 
 
 def _load_stage04():
+    """Load and execute a Python module from a specified file path."""
     p = "src/extractor/pipeline/steps/04_section_builder.py"
     spec = importlib.util.spec_from_file_location("stage04", p)
     if not spec or not spec.loader:
@@ -26,6 +27,7 @@ def _load_stage04():
 
 @app.command()
 def main():
+    """Load environment variables and execute the main application logic."""
     load_dotenv(find_dotenv())
     mod = _load_stage04()
     build = getattr(mod, "build_sections_from_blocks")

@@ -1,3 +1,4 @@
+"""Build and query FAISS approximate nearest-neighbor indexes over annotation embeddings."""
 from __future__ import annotations
 from extractor.pipeline.utils.reliability import log_stage_error
 from typing import List, Dict, Any, Tuple
@@ -16,6 +17,7 @@ from extractor.pipeline.utils.embeddings import ensure_embedder as _ensure_embed
 
 
 def _blocks_to_text(blks: List[Dict[str, Any]]) -> str:
+    """Extract and join text content from nested document blocks."""
     parts: List[str] = []
     for b in blks or []:
         for ln in b.get("lines", []) or []:
@@ -27,6 +29,7 @@ def _blocks_to_text(blks: List[Dict[str, Any]]) -> str:
 
 
 def _canon_text(a: Dict[str, Any]) -> str:
+    """Extract and join text from document blocks and metadata fields."""
     inside = _blocks_to_text(a.get("inside_blocks", []))
     above = _blocks_to_text(a.get("above_blocks", []))
     below = _blocks_to_text(a.get("below_blocks", []))
@@ -54,6 +57,7 @@ def build_ann_index(annotations: List[Dict[str, Any]]) -> Tuple[Any, Dict[str, A
 
 
 def query_ann_index(index: Any, query_text: str, top_k: int = 3) -> List[Tuple[int, float]]:
+    """Retrieve top-k nearest neighbors from an ANN index for a query."""
     if faiss is None or index is None or not query_text:
         return []
     embedder = _ensure_embedder()
@@ -65,6 +69,7 @@ def query_ann_index(index: Any, query_text: str, top_k: int = 3) -> List[Tuple[i
 
 
 def save_ann_index(index: Any, meta: Dict[str, Any], path_base: Path, annots: List[Dict[str, Any]]):
+    """Save FAISS index and annotation metadata to specified paths."""
     if faiss is None or index is None:
         return
     faiss.write_index(index, str(path_base.with_suffix(".index")))
@@ -84,6 +89,7 @@ def save_ann_index(index: Any, meta: Dict[str, Any], path_base: Path, annots: Li
 
 
 def load_ann_index(path_base: Path) -> Tuple[Any, Dict[str, Any]]:
+    """Load FAISS index and metadata from disk, returning None if missing."""
     if faiss is None:
         return None, {}
     idx_path = path_base.with_suffix(".index")

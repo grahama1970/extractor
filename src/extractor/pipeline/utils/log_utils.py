@@ -15,14 +15,12 @@ Example Usage:
 >>> # Add usage examples
 """
 
-import logging
 import re
 from typing import Any, Dict, List, Optional
 
-from extractor.pipeline.utils.reliability import log_stage_error
+from loguru import logger
 
-# Configure logging
-logger = logging.getLogger(__name__)
+from extractor.pipeline.utils.reliability import log_stage_error
 
 # Regex to identify common data URI patterns for images
 BASE64_IMAGE_PATTERN = re.compile(r"^(data:image/[a-zA-Z+.-]+;base64,)")

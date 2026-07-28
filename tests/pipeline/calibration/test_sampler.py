@@ -21,6 +21,7 @@ def _create_mock_page(page_idx, blocks):
     page = MagicMock()
 
     def get_text_side_effect(fmt=None, **kwargs):
+        """Return page text content as string or dict."""
         if fmt == "dict":
             return {"blocks": blocks}
         return f"Page {page_idx} content"

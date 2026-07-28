@@ -41,6 +41,7 @@ MERGE_CONFIDENCE_THRESHOLD = float(os.environ.get("MERGE_CONFIDENCE_THRESHOLD", 
 
 
 def sanity() -> int:
+    """Return the result of the sanity check step."""
     return run_step_sanity(STEP_NAME)
 
 
@@ -423,6 +424,7 @@ def run(
     output_dir: Path,
     preset_config: Optional[Dict[str, Any]] = None,
 ) -> Path:
+    """Run a processing pipeline using input and output directories."""
 
     # Input from S05b (described) or S05 (raw)
     # run_pipeline passes 'out' as input_dir, so we expect:

@@ -239,6 +239,7 @@ def make_wide_multicol_fixture(path: Path) -> None:
 
 
 def main() -> None:
+    """Generate all PDF test fixtures."""
     make_code_listing_fixture(OUT_DIR / "fixture_code_listing.pdf")
     print(f"Created: fixture_code_listing.pdf")
 

@@ -30,6 +30,7 @@ ART.mkdir(parents=True, exist_ok=True)
 
 
 def main() -> int:
+    """Return the status of a service link creation operation."""
     svc = httpx.get(f"{BASE}/api/oslc/service", timeout=5)
     ok_service = svc.status_code == 200 and (svc.json() or {}).get("ok") is True
 

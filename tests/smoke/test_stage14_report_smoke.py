@@ -3,6 +3,7 @@ import importlib.util
 
 
 def _load_mod():
+    """Load a module from a hardcoded file path."""
     spec = importlib.util.spec_from_file_location(
         "stage14", "src/extractor/pipeline/steps/14_report_generator.py"
     )
@@ -13,6 +14,7 @@ def _load_mod():
 
 
 def test_report_load_and_stats(tmp_path):
+    """Load test report data and generate statistics from pipeline structure."""
     mod = _load_mod()
     # Create minimal pipeline dir layout with canonical json_output files
     base = tmp_path / "pipeline"
@@ -25,6 +27,7 @@ def test_report_load_and_stats(tmp_path):
     (base / "10_arangodb_exporter" / "json_output").mkdir(parents=True)
 
     def dump(p, data):
+        """Dump data as JSON to a path."""
         p.write_text(json.dumps(data))
 
     dump(

@@ -25,6 +25,7 @@ console = Console(stderr=True)
 
 
 def sanity() -> int:
+    """Check the sanity of the current step."""
     return run_step_sanity(STEP_NAME)
 
 
@@ -232,8 +233,11 @@ def generate_content_summary(results: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _safe_json(data: Any) -> str:
+    """Encode data to JSON format, handling custom types appropriately."""
     class CustomEncoder(json.JSONEncoder):
+        """Customize JSON encoding for date, set, and NumPy types."""
         def default(self, o):
+            """Return a JSON-serializable representation of various objects."""
             if isinstance(o, (date, datetime)):
                 return o.isoformat()
             if isinstance(o, set):
@@ -270,6 +274,7 @@ def _safe_json(data: Any) -> str:
 
 
 def _optional_metrics(results: Dict[str, Any]) -> str:
+    """Extract optional metrics from database statistics in results."""
     lines = []
     db = results.get("db_stats")
     if db:
@@ -442,6 +447,7 @@ def generate_toc_integrity_report(results: Dict[str, Any], pipeline_dir: Path) -
 
     # Match TOC entries to sections using title similarity
     def similarity(a: str, b: str) -> float:
+        """Return the similarity ratio between two normalized strings."""
         a_clean = " ".join(a.lower().split())
         b_clean = " ".join(b.lower().split())
         return SequenceMatcher(None, a_clean, b_clean).ratio()
@@ -694,6 +700,7 @@ def run(
     source_pdf: Optional[Path] = None,
     preset_config: Optional[Dict[str, Any]] = None,
 ) -> Optional[Path]:
+    """Run the process using specified results and output directories."""
     try:
         # Inject source_pdf into results for reporting
         # Note: We can't easily modify the full comprehensive report signature without changing calls everywhere,

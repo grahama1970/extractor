@@ -26,6 +26,7 @@ STEP_NAME = "11_json_exporter"
 
 
 def sanity() -> int:
+    """Run sanity check step for the current module."""
     return run_step_sanity(STEP_NAME)
 
 

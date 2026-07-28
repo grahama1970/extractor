@@ -151,6 +151,7 @@ class SanityChecker:
     """Comprehensive sanity checker for extractor skill."""
 
     def __init__(self, test_dir: Path = None, verbose: bool = True):
+        """Initialize test directory and locate test PDF for extraction."""
         self.test_dir = test_dir or Path(tempfile.mkdtemp(prefix="extractor_sanity_"))
         self.verbose = verbose
         self.results: List[Dict[str, Any]] = []
@@ -365,8 +366,8 @@ class SanityChecker:
             return result
 
         # Check for API key
-        if not os.getenv("CHUTES_API_KEY"):
-            result["error"] = "CHUTES_API_KEY not set"
+        if not os.getenv("SCILLM_PROXY_KEY", "sk-dev-proxy-123"):
+            result["error"] = "SCILLM_PROXY_KEY not set"
             self._log("PDF accurate: API key missing", "WARN")
             self.results.append(result)
             return result
@@ -565,6 +566,7 @@ class SanityChecker:
 
 
 def main():
+    """Run extractor skill sanity checks based on arguments."""
     parser = argparse.ArgumentParser(description="Extractor Skill Sanity Check")
     parser.add_argument("--fast-only", action="store_true", help="Skip VLM/accurate tests")
     parser.add_argument(

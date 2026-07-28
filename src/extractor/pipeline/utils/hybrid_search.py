@@ -63,6 +63,7 @@ def hybrid_search_annotations(
             try:
 
                 def _anchor_id(a: Dict[str, Any]) -> Optional[str]:
+                    """Extracts an anchor ID from a dict using ordered key lookups."""
                     _id = a.get("_id")
                     if isinstance(_id, str) and _id:
                         return _id
@@ -102,6 +103,7 @@ def hybrid_search_annotations(
         combined: Dict[str, Dict[str, Any]] = {}
 
         def _k(x: Dict[str, Any]) -> str:
+            """Return an identifier from dict, or generate a stable one from content."""
             return str(
                 x.get("_id") or x.get("_key") or x.get("id") or hash(json.dumps(x, sort_keys=True))
             )

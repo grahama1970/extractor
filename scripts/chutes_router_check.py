@@ -7,9 +7,8 @@ import os
 
 r = Router(
     default_litellm_params={
-        "api_base": os.environ["CHUTES_API_BASE"],
-        "api_key": None,  # prevent Bearer injection
-        "extra_headers": {"x-api-key": os.environ["CHUTES_API_KEY"]},
+        "api_base": os.environ.get("SCILLM_API_BASE", "http://localhost:4010"),
+        "api_key": os.environ.get("SCILLM_PROXY_KEY", "sk-dev-proxy-123"),
     }
 )
 

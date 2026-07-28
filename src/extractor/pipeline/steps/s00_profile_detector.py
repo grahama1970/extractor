@@ -308,6 +308,364 @@ def analyze_with_pymupdf4llm(pdf_path: Path) -> Dict[str, Any]:
         return analyze_fallback(pdf_path)
 
 
+def analyze_with_pdf_oxide(pdf_path: Path) -> Dict[str, Any]:
+    """Comprehensive single-pass PDF analysis using pdf_oxide (MIT-licensed Rust engine).
+
+    Drop-in replacement for analyze_with_pymupdf4llm(). Returns the same dict shape.
+    Uses pdf_oxide's extract_spans, extract_paths, extract_images, extract_tables,
+    render_page, and get_outline APIs.
+    """
+    try:
+        from pdf_oxide import PdfDocument
+    except ImportError:
+        logger.warning("pdf_oxide not available, falling back to pymupdf4llm")
+        return analyze_with_pymupdf4llm(pdf_path)
+
+    try:
+        doc = PdfDocument(str(pdf_path))
+    except Exception as e:
+        logger.error(f"Failed to open PDF with pdf_oxide: {e}")
+        return analyze_fallback(pdf_path)
+
+    try:
+        page_count = doc.page_count()
+
+        # Per-page accumulators
+        table_pages_direct = 0
+        total_table_count = 0
+        max_tables_per_page = 0
+        image_pages = 0
+        full_text = ""
+
+        # Table region estimation (line drawings)
+        drawing_table_regions = 0
+        drawing_table_pages = 0
+        drawing_max_per_page = 0
+        drawing_density: list[tuple[int, int]] = []
+        drawing_candidate_pages: set[int] = set()
+
+        # Font analysis
+        all_font_sizes: list[float] = []
+        page_font_lines: list[list[dict]] = []
+
+        caption_re = re.compile(
+            r"^\s*(?:Table|Figure|Fig\.?|Listing|Algorithm|Exhibit)\s+\d",
+            re.IGNORECASE,
+        )
+        section_number_re = re.compile(
+            r"^\s*(?:"
+            r"\d{1,2}(?:\.\d{1,3}){0,3}"
+            r"|[A-Z](?:\.\d{1,3}){0,2}"
+            r"|[IVXLC]{1,5}"
+            r")\s+[A-Z]",
+        )
+
+        # Font sampling indices
+        font_sample_count = min(20, page_count)
+        if font_sample_count >= page_count:
+            font_sample_indices = set(range(page_count))
+        else:
+            step = page_count / font_sample_count
+            font_sample_indices = {int(i * step) for i in range(font_sample_count)}
+
+        # Classifier image collection
+        classifier_images: list = []
+
+        # Table detection budget
+        TABLE_BUDGET_MAX = 50
+
+        # ══ PASS 1: Cheap signals on ALL pages ══
+        for page_idx in range(page_count):
+            # Image detection
+            try:
+                if doc.extract_images(page_idx):
+                    image_pages += 1
+            except Exception as e:
+                logger.debug(f"Image detection failed on page {page_idx}: {e}")
+
+            # Text extraction
+            try:
+                page_text = doc.extract_text(page_idx)
+                full_text += page_text + "\n"
+            except Exception as e:
+                logger.debug(f"Text extraction failed on page {page_idx}: {e}")
+
+            # Table region estimation via line drawings (pdf_oxide paths)
+            _scan_page_drawings_oxide(
+                doc, page_idx,
+                drawing_candidate_pages, drawing_density,
+            )
+
+            # Font data collection (sampled)
+            if page_idx in font_sample_indices:
+                _collect_font_data_oxide(doc, page_idx, all_font_sizes, page_font_lines)
+
+            # Classifier images (first 3)
+            if page_idx < 3 and ensure_torch():
+                try:
+                    img_bytes = doc.render_page(page_idx, dpi=108)  # 1.5x scale
+                    img = Image.open(__import__("io").BytesIO(img_bytes))
+                    img = img.resize((224, 224))
+                    classifier_images.append(img)
+                except Exception as e:
+                    logger.debug(f"Classifier image capture failed on page {page_idx}: {e}")
+
+        # Tally drawing results
+        for _, region_count in drawing_density:
+            drawing_table_regions += region_count
+            drawing_table_pages += 1
+            drawing_max_per_page = max(drawing_max_per_page, region_count)
+
+        # ══ PASS 2: Targeted table extraction ══
+        baseline_pages = {p for p in (0, 1, 2) if p < page_count}
+
+        if drawing_candidate_pages:
+            table_target_pages = drawing_candidate_pages | baseline_pages
+        else:
+            spread_count = min(TABLE_BUDGET_MAX, max(10, int(page_count ** 0.5)))
+            step = page_count / spread_count
+            spread_pages = {int(i * step) for i in range(spread_count)}
+            table_target_pages = spread_pages | baseline_pages
+
+        if len(table_target_pages) > TABLE_BUDGET_MAX:
+            drawing_density.sort(key=lambda x: x[1], reverse=True)
+            top_pages = {p for p, _ in drawing_density[:TABLE_BUDGET_MAX - 3]}
+            table_target_pages = top_pages | baseline_pages
+
+        table_sample_size = len(table_target_pages)
+        for page_idx in sorted(table_target_pages):
+            try:
+                tables = doc.extract_tables(page_idx)
+                n_tables = len(tables)
+                if n_tables > 0:
+                    table_pages_direct += 1
+                    total_table_count += n_tables
+                    max_tables_per_page = max(max_tables_per_page, n_tables)
+            except Exception as e:
+                logger.debug(f"extract_tables() failed on page {page_idx}: {e}")
+
+        # TOC extraction
+        try:
+            outline = doc.get_outline()
+            toc_entries = [
+                {"title": e.get("title", ""), "level": e.get("level", 1), "page": e.get("page", 0)}
+                for e in outline
+            ] if outline else []
+            toc_info = {
+                "has_toc": len(toc_entries) > 0,
+                "entry_count": len(toc_entries),
+                "max_depth": max((e.get("level", 1) for e in outline), default=0) if outline else 0,
+                "entries": toc_entries[:50],
+            }
+        except Exception as e:
+            logger.debug(f"TOC extraction failed: {e}")
+            toc_info = extract_toc(pdf_path)  # Fallback to text-based
+
+        # Full-text analysis
+        has_formulas = detect_formulas(full_text)
+        has_requirements = detect_requirements(full_text)
+        section_style = detect_section_style(full_text)
+        section_estimate = estimate_section_count(full_text)
+
+        # Font-based section estimation
+        font_estimate = estimate_sections_from_font_data(
+            all_font_sizes, page_font_lines, font_sample_count, page_count,
+            caption_re, section_number_re,
+        )
+
+        toc_estimate = toc_info.get("entry_count", 0)
+        drawing_density.sort(key=lambda x: x[1], reverse=True)
+
+        # Extrapolate table counts
+        if table_sample_size < page_count and table_pages_direct > 0:
+            sample_ratio = page_count / table_sample_size
+            extrapolated_table_pages = int(table_pages_direct * sample_ratio)
+            extrapolated_table_count = int(total_table_count * sample_ratio)
+        else:
+            extrapolated_table_pages = table_pages_direct
+            extrapolated_table_count = total_table_count
+
+        # Table style classification
+        has_bordered = drawing_table_pages > 0
+        has_borderless = table_pages_direct > drawing_table_pages
+        if has_bordered and has_borderless:
+            table_style = "mixed"
+        elif has_borderless:
+            table_style = "borderless"
+        elif has_bordered:
+            table_style = "bordered"
+        else:
+            table_style = "none"
+
+        return {
+            "page_count": page_count,
+            "has_tables": table_pages_direct > 0 or drawing_table_pages > 0,
+            "table_pages": extrapolated_table_pages,
+            "total_table_count": extrapolated_table_count,
+            "has_images": image_pages > 0,
+            "image_pages": image_pages,
+            "has_multi_column": False,  # pdf_oxide doesn't have column_boxes; use heuristic below
+            "multi_col_pages": 0,
+            "has_formulas": has_formulas,
+            "has_requirements": has_requirements,
+            "section_style": section_style,
+            "section_estimate": section_estimate,
+            "font_section_estimate": font_estimate,
+            "toc_section_estimate": toc_estimate,
+            "toc_info": toc_info,
+            "has_toc": toc_info.get("has_toc", False),
+            "full_text_sample": full_text[:2000],
+            "table_regions": {
+                "estimated_table_count": drawing_table_regions,
+                "table_pages_drawing": drawing_table_pages,
+                "table_density_top10": drawing_density[:10],
+                "max_tables_per_page": drawing_max_per_page,
+            },
+            "table_style": table_style,
+            "_classifier_images": classifier_images,
+            "_engine": "pdf_oxide",
+        }
+
+    except Exception as e:
+        logger.error(f"pdf_oxide analysis failed: {e}")
+        return analyze_fallback(pdf_path)
+
+
+def _scan_page_drawings_oxide(
+    doc: Any,
+    page_idx: int,
+    candidate_pages: set,
+    density: list,
+) -> None:
+    """Scan page line drawings for table grid patterns using pdf_oxide extract_paths."""
+    try:
+        paths = doc.extract_paths(page_idx)
+        h_lines: list[tuple[float, float, float]] = []
+        v_lines: list[tuple[float, float, float]] = []
+
+        for path in paths:
+            bbox = path.get("bbox")
+            if not bbox:
+                continue
+            x, y, w, h = bbox
+            # Classify as horizontal or vertical line based on aspect ratio
+            if h < LINE_TOLERANCE and w > 10:
+                h_lines.append((y, x, x + w))
+            elif w < LINE_TOLERANCE and h > 10:
+                v_lines.append((x, y, y + h))
+
+        if len(h_lines) < MIN_TABLE_LINES or len(v_lines) < 2:
+            return
+
+        # Validate table-like grid
+        h_widths = [x2 - x1 for _, x1, x2 in h_lines]
+        page_w, _ = doc.page_dimensions(page_idx)
+
+        if h_widths and page_w > 0:
+            if max(h_widths) < page_w * 0.25:
+                return
+            if len(h_widths) > 1:
+                mean_w = sum(h_widths) / len(h_widths)
+                if mean_w > 0:
+                    std_w = (sum((w - mean_w) ** 2 for w in h_widths) / len(h_widths)) ** 0.5
+                    if std_w / mean_w > 0.6:
+                        return
+
+        # Vertical column structure check
+        if len(v_lines) >= 2:
+            v_xs = sorted(x for x, _, _ in v_lines)
+            x_clusters: list[tuple[float, int]] = []
+            for x in v_xs:
+                matched = False
+                for i, (cx, count) in enumerate(x_clusters):
+                    if abs(x - cx) < 5.0:
+                        x_clusters[i] = ((cx * count + x) / (count + 1), count + 1)
+                        matched = True
+                        break
+                if not matched:
+                    x_clusters.append((x, 1))
+            if len(x_clusters) > 20:
+                return
+            if sum(1 for _, c in x_clusters if c >= 2) < 2:
+                return
+
+        h_ys = sorted(set(round(y, 0) for y, _, _ in h_lines))
+        if not h_ys:
+            return
+
+        region_count = 1
+        for i in range(1, len(h_ys)):
+            if h_ys[i] - h_ys[i - 1] > 30:
+                region_count += 1
+
+        candidate_pages.add(page_idx)
+        density.append((page_idx, region_count))
+    except Exception as e:
+        logger.debug(f"Drawing scan (pdf_oxide) failed on page {page_idx}: {e}")
+
+
+def _collect_font_data_oxide(
+    doc: Any,
+    page_idx: int,
+    all_sizes: list,
+    page_lines: list,
+) -> None:
+    """Collect font size and line data from a page using pdf_oxide extract_spans."""
+    try:
+        spans = doc.extract_spans(page_idx)
+        lines_on_page: list[dict] = []
+        current_line: list[dict] = []
+        last_y = None
+
+        for span in spans:
+            sz = span.get("font_size", 0)
+            txt = span.get("text", "").strip()
+            bbox = span.get("bbox")
+            y = bbox[1] if bbox else None
+
+            if sz > 0 and len(txt) > 0:
+                all_sizes.append(sz)
+
+            # Group spans into lines by y-coordinate proximity
+            if last_y is not None and y is not None and abs(y - last_y) > 3:
+                if current_line:
+                    first = current_line[0]
+                    line_text = " ".join(s.get("text", "") for s in current_line).strip()
+                    flags = 0
+                    if first.get("is_bold"):
+                        flags |= 16  # fitz bold flag
+                    if first.get("is_italic"):
+                        flags |= 2   # fitz italic flag
+                    lines_on_page.append({
+                        "text": line_text,
+                        "size": first.get("font_size", 0),
+                        "flags": flags,
+                    })
+                    current_line = []
+
+            current_line.append(span)
+            last_y = y
+
+        # Flush last line
+        if current_line:
+            first = current_line[0]
+            line_text = " ".join(s.get("text", "") for s in current_line).strip()
+            flags = 0
+            if first.get("is_bold"):
+                flags |= 16
+            if first.get("is_italic"):
+                flags |= 2
+            lines_on_page.append({
+                "text": line_text,
+                "size": first.get("font_size", 0),
+                "flags": flags,
+            })
+
+        page_lines.append(lines_on_page)
+    except Exception as e:
+        logger.debug(f"Font data collection (pdf_oxide) failed on page {page_idx}: {e}")
+
+
 def _scan_page_drawings(
     page: Any,
     page_idx: int,
@@ -525,15 +883,25 @@ def _build_hierarchy(analysis: Dict) -> Dict[str, Any]:
     }
 
 
-def detect_preset(pdf_path: Path, verbose_preset: bool = False) -> Dict[str, Any]:
-    """Main entry point: produce comprehensive profile for PDF."""
+def detect_preset(pdf_path: Path, verbose_preset: bool = False, engine: str = "") -> Dict[str, Any]:
+    """Main entry point: produce comprehensive profile for PDF.
+
+    Args:
+        engine: "pdf_oxide" to use Rust engine, "pymupdf" for legacy, "" for auto (env var).
+    """
+    import os
     if not pdf_path.exists():
         return {"error": "File not found"}
 
     file_size_bytes = pdf_path.stat().st_size
     file_size_mb = file_size_bytes / (1024 * 1024)
 
-    analysis = analyze_with_pymupdf4llm(pdf_path)
+    # Engine selection: explicit arg > env var > default (pymupdf)
+    selected_engine = engine or os.environ.get("EXTRACTOR_ENGINE", "pdf_oxide")
+    if selected_engine == "pdf_oxide":
+        analysis = analyze_with_pdf_oxide(pdf_path)
+    else:
+        analysis = analyze_with_pymupdf4llm(pdf_path)
     if "error" in analysis:
         return analysis
 
@@ -654,7 +1022,7 @@ def detect_preset(pdf_path: Path, verbose_preset: bool = False) -> Dict[str, Any
     return profile
 
 
-def run(pdf_path: Path, output_dir: Path, verbose_preset: bool = False) -> Path:
+def run(pdf_path: Path, output_dir: Path, verbose_preset: bool = False, engine: str = "") -> Path:
     """Run Step 00."""
     t0 = time.monotonic()
 
@@ -662,9 +1030,10 @@ def run(pdf_path: Path, output_dir: Path, verbose_preset: bool = False) -> Path:
     stage_dir.mkdir(parents=True, exist_ok=True)
 
     logger.add(stage_dir / "stage_00.log")
-    logger.info(f"Profiling {pdf_path.name} with pymupdf4llm...")
+    engine_label = engine or "auto"
+    logger.info(f"Profiling {pdf_path.name} (engine={engine_label})...")
 
-    result = detect_preset(pdf_path, verbose_preset=verbose_preset)
+    result = detect_preset(pdf_path, verbose_preset=verbose_preset, engine=engine)
     result["file"] = str(pdf_path)
     result["timestamp"] = time.time()
     result["duration_ms"] = int((time.monotonic() - t0) * 1000)
@@ -776,7 +1145,9 @@ if __name__ == "__main__":
         pdf: Path = typer.Argument(..., help="Path to PDF file"),
         out: Path = typer.Option(Path("data/results/pipeline"), "-o", "--out"),
         verbose_preset: bool = typer.Option(False, "--verbose-preset", help="Show detailed preset selection explanation"),
+        engine: str = typer.Option("", "--engine", help="Engine: pdf_oxide or pymupdf (default: env EXTRACTOR_ENGINE)"),
     ) -> None:
-        run(pdf, out, verbose_preset=verbose_preset)
+        """Run the PDF processing pipeline with specified output and options."""
+        run(pdf, out, verbose_preset=verbose_preset, engine=engine)
 
     typer.run(main)

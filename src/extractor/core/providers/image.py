@@ -162,12 +162,12 @@ async def _vlm_describe_image(
     except ImportError:
         return {"ok": False, "error": "scillm not installed"}
 
-    api_base = os.getenv("CHUTES_API_BASE")
-    api_key = os.getenv("CHUTES_API_KEY")
+    api_base = os.getenv("SCILLM_API_BASE", "http://localhost:4001")
+    api_key = os.getenv("SCILLM_PROXY_KEY", "sk-dev-proxy-123")
     model_id = model or os.getenv("CHUTES_VLM_MODEL") or "Qwen/Qwen2-VL-72B-Instruct"
 
     if not api_key:
-        return {"ok": False, "error": "CHUTES_API_KEY not set"}
+        return {"ok": False, "error": "SCILLM_PROXY_KEY not set"}
 
     try:
         image_url = _encode_image_base64(image_path)
@@ -301,7 +301,7 @@ def _parse_vlm_content_to_blocks(content: str, image_path: str) -> List[BaseBloc
 class ImageProvider(BaseProvider):
     """Image provider supporting both standard and legacy initialization patterns.
 
-    Supports optional VLM text extraction when CHUTES_API_KEY is configured.
+    Supports optional VLM text extraction when SCILLM_PROXY_KEY is configured.
     Set config={'use_vlm': True} to enable (default: True if API key available).
     """
 
@@ -371,7 +371,7 @@ class ImageProvider(BaseProvider):
         """Extract image content to a UnifiedDocument.
 
         Extraction priority:
-        1. VLM (if use_vlm=True and CHUTES_API_KEY is set)
+        1. VLM (if use_vlm=True and SCILLM_PROXY_KEY is set)
         2. OCR (if use_ocr=True or VLM fails/unavailable, using PaddleOCR/Surya/EasyOCR/Tesseract)
         3. Basic ImageBlock with image reference only
 
@@ -395,7 +395,7 @@ class ImageProvider(BaseProvider):
         # Configuration options
         use_vlm = self._config.get("use_vlm", True)
         use_ocr = self._config.get("use_ocr", True)  # Enable OCR fallback by default
-        has_api_key = bool(os.getenv("CHUTES_API_KEY"))
+        has_api_key = bool(os.getenv("SCILLM_PROXY_KEY", "sk-dev-proxy-123"))
 
         blocks: List[Any] = []
         extraction_method = None
@@ -491,7 +491,7 @@ class ImageProvider(BaseProvider):
         # Priority 3: Basic image blocks (no text extraction)
         if not extraction_method:
             if use_vlm and not has_api_key:
-                logger.debug("VLM requested but CHUTES_API_KEY not set. No OCR available.")
+                logger.debug("VLM requested but SCILLM_PROXY_KEY not set. No OCR available.")
 
             # Basic extraction: just image blocks without text
             for i in range(self._image_count):

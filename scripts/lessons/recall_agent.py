@@ -24,11 +24,13 @@ STOP = set(
 
 
 def tokenize(text: str) -> list[str]:
+    """Extract up to 50 valid words from the input text."""
     words = re.findall(r"[A-Za-z0-9_]{3,}", text.lower())
     return [w for w in words if w not in STOP][:50]
 
 
 def latest_artifact() -> str | None:
+    """Return the most recently modified log file in the artifacts directory."""
     pat = str(Path("scripts/artifacts").resolve() / "*.log")
     files = sorted(glob.glob(pat), key=os.path.getmtime, reverse=True)
     return files[0] if files else None
@@ -45,6 +47,7 @@ def recall(
     use_graph: bool = typer.Option(True, help="Fuse BM25 with graph multihop"),
     json_out: bool = typer.Option(False, "--json", help="Output JSON array"),
 ):
+    """Recall data based on a free-form query and optional filters."""
     if not q and from_latest_log:
         p = latest_artifact()
         if p and os.path.isfile(p):

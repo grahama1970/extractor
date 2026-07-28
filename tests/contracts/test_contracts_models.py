@@ -8,6 +8,7 @@ from contracts import HeaderVerdict, ReflowedSection, SectionSummary
 
 
 def test_header_verdict_strict_keys():
+    """Validate HeaderVerdict rejects extra keys."""
     ok = HeaderVerdict(
         doc_id="doc1",
         section_id="s1",
@@ -32,6 +33,7 @@ def test_header_verdict_strict_keys():
 
 
 def test_reflowed_section_requires_reflowed_json():
+    """Validate reflowed JSON structure for a ReflowedSection instance."""
     rj = {"blocks": []}
     ok = ReflowedSection(
         doc_id="doc",
@@ -55,6 +57,7 @@ def test_reflowed_section_requires_reflowed_json():
 
 
 def test_section_summary_strict():
+    """Test SectionSummary strict validation."""
     ok = SectionSummary(
         doc_id="doc",
         section_id="sec",

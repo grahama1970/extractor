@@ -7,6 +7,7 @@ sys.path.insert(0, os.path.abspath("src"))
 
 
 def test_gs_dir_points_to_pipeline_dir():
+    """Validate the existence of gold standards directory and its files."""
     from extractor.pipeline.tools import validate_gold_standard as vgs
 
     gs_dir = vgs._gs_dir()

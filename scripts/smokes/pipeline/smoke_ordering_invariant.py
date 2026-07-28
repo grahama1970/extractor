@@ -21,6 +21,7 @@ app = typer.Typer(add_completion=False)
 
 @app.command()
 def main(tmp_dir: Path = typer.Option(Path("data/results/structured_parity_smoke/ordering"))):
+    """Create a sample HTML file in the specified directory."""
     tmp_dir.mkdir(parents=True, exist_ok=True)
     html_path = tmp_dir / "order.html"
     html_path.write_text(

@@ -19,6 +19,7 @@ from .expected_common import STEP_FILES, normalized_json
 
 
 def main() -> int:
+    """Perform main operation."""
     p = argparse.ArgumentParser(description="Verify pipeline outputs against expected goldens")
     p.add_argument("--pdf", required=True, type=Path)
     p.add_argument("--out", required=True, type=Path)

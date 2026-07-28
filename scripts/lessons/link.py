@@ -16,6 +16,7 @@ app = typer.Typer(add_completion=False)
 
 
 def resolve_key(col, title: str | None, scope: str | None) -> str | None:
+    """Resolve document key by title and scope."""
     if not title:
         return None
     cur = col.find({"title": title, "scope": scope or "tabbed"})
@@ -39,6 +40,7 @@ def link(
     weight: float = typer.Option(0.5, help="Edge weight [0..1]"),
     date: int = typer.Option(0, help="Unix epoch (default: now)"),
 ):
+    """Link two lessons by key or title within specified scopes."""
     db = get_db()
     lessons = db.collection("lessons")
     edges = db.collection("lesson_edges")
@@ -59,6 +61,7 @@ def link(
 
 
 def _fmt_node(k: str) -> str:
+    """Format a node key into a specific lessons path string."""
     return f"lessons/{k}"
 
 

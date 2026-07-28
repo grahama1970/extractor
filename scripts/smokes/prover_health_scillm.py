@@ -25,8 +25,9 @@ def main(
     ),
     timeout: int = typer.Option(60, "--timeout"),
 ) -> None:
-    base = (os.getenv("CHUTES_API_BASE") or "").strip()
-    key = (os.getenv("CHUTES_API_KEY") or "").strip()
+    """Run Lean4 prover with specified model and timeout."""
+    base = (os.getenv("SCILLM_API_BASE", "http://localhost:4010") or "").strip()
+    key = (os.getenv("SCILLM_PROXY_KEY", "sk-dev-proxy-123") or "").strip()
     if not (base and key):
         raise typer.Exit(code=2)
     try:

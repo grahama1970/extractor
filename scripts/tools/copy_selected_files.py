@@ -59,24 +59,29 @@ def _run_git(root: Path, args: Sequence[str], check: bool = False) -> tuple[int,
 
 
 def _is_git_repo(root: Path) -> bool:
+    """Check if a directory is a Git repository."""
     code, out, _ = _run_git(root, ["rev-parse", "--is-inside-work-tree"])
     return code == 0 and out.strip() == "true"
 
 
 def _now_utc_iso() -> str:
+    """Return current UTC time in ISO 8601 format."""
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _posix_rel_path(path: Path, start: Path) -> str:
+    """Return the POSIX path relative to the start directory."""
     return path.relative_to(start).as_posix()
 
 
 def _read_text(path: Path, encoding: str = "utf-8") -> str:
+    """Read text content from a file path, replacing encoding errors."""
     with path.open("r", encoding=encoding, errors="replace") as f:
         return f.read()
 
 
 def _is_binary_by_content(path: Path, sample_bytes: int = 4096) -> bool:
+    """Check if a file is binary by analyzing its initial content."""
     try:
         with path.open("rb") as f:
             chunk = f.read(sample_bytes)
@@ -204,6 +209,7 @@ LANG_BY_EXT = {
 
 
 def _lang_for_file(path: Path) -> str:
+    """Determine language type based on file path or extension."""
     name = path.name.lower()
     if name == "dockerfile":
         return "dockerfile"
@@ -211,12 +217,14 @@ def _lang_for_file(path: Path) -> str:
 
 
 def _parse_csv_list(value: Optional[str]) -> List[str]:
+    """Parse a comma-separated string into a list of stripped items."""
     if not value:
         return []
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
 def _normalize_patterns(patterns: Iterable[str]) -> List[str]:
+    """Normalize patterns by stripping whitespace and excluding comments."""
     norm: List[str] = []
     for p in patterns:
         p = p.strip()
@@ -243,6 +251,7 @@ def _matches_any(path_rel: str, patterns: Sequence[str]) -> bool:
 
 
 def _read_gitignore_patterns(root: Path) -> List[str]:
+    """Extract and normalize Git ignore patterns from repository files."""
     patterns: List[str] = []
     gi = root / ".gitignore"
     if gi.is_file():
@@ -351,6 +360,7 @@ def discover_files(
 
 @dataclass
 class FilterOptions:
+    """Filter files based on patterns, size limits, and large file allowance."""
     include_patterns: List[str]
     max_file_bytes: int
     allow_large: bool
@@ -473,6 +483,7 @@ def write_bundle(
 
 
 def build_cli() -> typer.Typer:
+    """Build a CLI application for bundling project files for LLMs."""
     app = typer.Typer(help="Concatenate selected project files into a single bundle for LLMs")
 
     @app.callback(invoke_without_command=True)

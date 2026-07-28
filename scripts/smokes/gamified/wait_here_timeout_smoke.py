@@ -5,10 +5,12 @@ from pathlib import Path
 
 
 def repo_root() -> Path:
+    """Return the root directory path of the repository."""
     return Path(__file__).resolve().parents[2]
 
 
 def main():
+    """Run a specific smoke test module after adding repo root to sys.path."""
     rr = str(repo_root())
     if rr not in sys.path:
         sys.path.insert(0, rr)

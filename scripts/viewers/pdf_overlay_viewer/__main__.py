@@ -8,6 +8,7 @@ from .assets import INDEX_TEMPLATE, ASSETS
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Copy overlay viewer assets into a stage directory."""
     parser = argparse.ArgumentParser(
         description="Copy overlay viewer assets into a stage directory."
     )

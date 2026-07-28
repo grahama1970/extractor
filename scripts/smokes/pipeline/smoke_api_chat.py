@@ -26,6 +26,7 @@ app = typer.Typer(
 
 
 def _wait_http(url: str, timeout: float = 18.0) -> None:
+    """Wait for HTTP URL to become available within timeout."""
     start = time.monotonic()
     while time.monotonic() - start < timeout:
         try:
@@ -41,6 +42,7 @@ def main(
     pdf: Path = typer.Option(Path("data/input/pipeline/BHT_CV32A65X_marked.pdf"), exists=True),
     port: int = typer.Option(8003),
 ):
+    """Start a server to run the application with specified PDF and port."""
     load_dotenv(find_dotenv() or None)
     env = os.environ.copy()
 

@@ -9,10 +9,12 @@ from typing import Any, Dict, List, Optional
 
 
 class ChutesAuthError(RuntimeError):  # backward-compat for imports
+    """Handle authentication errors for Chutes backward compatibility."""
     pass
 
 
 def _headers(*args, **kwargs) -> Dict[str, str]:  # deprecated
+    """Return deprecated JSON headers for HTTP requests."""
     return {"Accept": "application/json", "Content-Type": "application/json"}
 
 

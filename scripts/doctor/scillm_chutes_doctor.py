@@ -17,6 +17,7 @@ from scillm import completion
 
 
 def _env(name: str) -> str:
+    """Return the value of an environment variable or exit on missing."""
     v = (os.getenv(name) or "").strip()
     if not v:
         print(f"ENV_MISSING {name}")
@@ -25,8 +26,9 @@ def _env(name: str) -> str:
 
 
 def smoke_models():
-    base = _env("CHUTES_API_BASE")
-    key = _env("CHUTES_API_KEY")
+    """Verify API models endpoint returns 200 OK."""
+    base = os.environ.get("SCILLM_API_BASE", "http://localhost:4010")
+    key = os.environ.get("SCILLM_PROXY_KEY", "sk-dev-proxy-123")
     r = httpx.get(
         base.rstrip("/") + "/models", headers={"Authorization": f"Bearer {key}"}, timeout=10
     )
@@ -42,17 +44,19 @@ def smoke_models():
 
 
 def smoke_json():
+    """Check for the presence of a text model in environment variables."""
     model = os.getenv("CHUTES_TEXT_MODEL") or os.getenv("LITELLM_DEFAULT_MODEL")
     if not model:
         print("JSON_SMOKE_SKIPPED no_text_model")
         return
 
     def _once():
+        """Execute a single API call to return a JSON response."""
         resp = completion(
             model=model,
             custom_llm_provider="openai_like",
-            api_base=os.environ["CHUTES_API_BASE"],
-            api_key=os.environ["CHUTES_API_KEY"],
+            api_base=os.environ.get("SCILLM_API_BASE", "http://localhost:4010"),
+            api_key=os.environ.get("SCILLM_PROXY_KEY", "sk-dev-proxy-123"),
             messages=[{"role": "user", "content": 'Return only {"ok":true} as JSON.'}],
             response_format={"type": "json_object"},
             timeout=20,
@@ -108,8 +112,8 @@ def smoke_vlm():
             resp = completion(
                 model=model,
                 custom_llm_provider="openai_like",
-                api_base=os.environ["CHUTES_API_BASE"],
-                api_key=os.environ["CHUTES_API_KEY"],
+                api_base=os.environ.get("SCILLM_API_BASE", "http://localhost:4010"),
+                api_key=os.environ.get("SCILLM_PROXY_KEY", "sk-dev-proxy-123"),
                 messages=messages,
                 timeout=20,
             )
@@ -136,6 +140,7 @@ def smoke_vlm():
 
 
 def main():
+    """Execute smoke tests and exit with a success status code."""
     smoke_models()
     smoke_json()
     smoke_vlm()

@@ -47,6 +47,7 @@ def _should_assist(t: Dict[str, Any]) -> bool:
 
 
 def _attach_llm_assist_headers(result: Dict[str, Any], stage_dir: Path) -> None:
+    """Attach LLM assist headers from sidecar to result."""
     logger.info("Starting TABLE_LLM_ASSIST check...")
     sidecar = stage_dir / "05_tables_llm_assist.json"
     side_data = json.loads(sidecar.read_text()) if sidecar.exists() else {}
@@ -145,9 +146,10 @@ def _attach_llm_assist_headers(result: Dict[str, Any], stage_dir: Path) -> None:
     from scillm.batch import parallel_acompletions_iter
 
     async def process_batch():
+        """Process a batch of requests using asynchronous completions."""
         nonlocal tokens_used
-        api_base = os.getenv("SCILLM_API_BASE", "https://llm.chutes.ai/v1")
-        api_key = os.getenv("CHUTES_API_KEY")
+        api_base = os.getenv("SCILLM_API_BASE", "http://localhost:4010")
+        api_key = os.getenv("SCILLM_PROXY_KEY", "sk-dev-proxy-123")
 
         async for r in parallel_acompletions_iter(
             requests,

@@ -29,6 +29,7 @@ def main(
     ),
     results_dir: Path = typer.Option(Path("data/results/structured_parity_smoke/markdown")),
 ):
+    """Run a structured pipeline using a specified Markdown file."""
     meta = STRUCTURED_PIPELINES[MarkdownProvider]
     artifacts = run_structured_pipeline(
         MarkdownProvider,

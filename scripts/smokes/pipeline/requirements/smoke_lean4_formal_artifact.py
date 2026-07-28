@@ -24,6 +24,7 @@ app = typer.Typer(add_completion=False)
 
 @app.command()
 def main():
+    """Check for the existence of the Lean4 CLI file and exit if missing."""
     lean_cli = Path("/home/graham/workspace/experiments/lean4/src/lean4_prover/cli_mini.py")
     if not lean_cli.exists():
         print("SKIP: Lean4 CLI not found")

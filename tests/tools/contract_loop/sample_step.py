@@ -4,6 +4,7 @@ from pathlib import Path
 
 
 def main() -> int:
+    """Prepare pipeline step output directory, verifying marker on request."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--pipeline-dir", required=True)
     parser.add_argument("--verify-only", action="store_true")

@@ -18,6 +18,7 @@ app = typer.Typer(add_completion=False, help="Stage 08 lean4 smoke")
 
 
 def run_smoke() -> None:
+    """Run the smoke test script, exiting with its status."""
     load_dotenv(find_dotenv())
     origin = Path(__file__).resolve().parent.parent / "smoke_stage08_lean4.py"
     res = subprocess.run([Path("/usr/bin/env"), "python", str(origin)], text=True)
@@ -26,6 +27,7 @@ def run_smoke() -> None:
 
 @app.command()
 def main() -> None:
+    """Run the application's smoke test."""
     run_smoke()
 
 

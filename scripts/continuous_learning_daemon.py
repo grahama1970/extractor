@@ -158,6 +158,7 @@ class ContinuousLearningDaemon:
     """Daemon for continuous PDF learning."""
 
     def __init__(self):
+        """Initialize instance attributes and state for PDF processing."""
         self.state_file = STATE_FILE
         self.state_file.parent.mkdir(parents=True, exist_ok=True)
         self.running = True
@@ -972,6 +973,7 @@ class ContinuousLearningDaemon:
 
 
 def main():
+    """Start the continuous learning daemon for PDF extraction."""
     import typer
 
     app = typer.Typer(help="Continuous Learning Daemon for PDF Extraction")

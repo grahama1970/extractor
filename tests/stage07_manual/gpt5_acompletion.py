@@ -14,6 +14,7 @@ initialize_litellm_cache()
 
 # --- helpers -----------------------------------------------------------------
 def _guess_mime(path: Path) -> str:
+    """Return the MIME type based on the file extension."""
     ext = path.suffix.lower().lstrip(".")
     return {
         "png": "image/png",
@@ -27,6 +28,7 @@ def _guess_mime(path: Path) -> str:
 
 
 def _file_to_data_uri(path: Path) -> str:
+    """Convert file to a data URI string."""
     data = path.read_bytes()
     b64 = base64.b64encode(data).decode("ascii")
     return f"{_guess_mime(path)};base64,{b64}"

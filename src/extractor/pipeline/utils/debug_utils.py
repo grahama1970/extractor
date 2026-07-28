@@ -1,3 +1,4 @@
+"""Timing, JSONL logging, and stage-level observability helpers for pipeline debugging."""
 from __future__ import annotations
 
 import json
@@ -11,6 +12,7 @@ from extractor.pipeline.utils.reliability import log_stage_error
 
 
 def _iso_now() -> str:
+    """Return current UTC time in ISO format with seconds precision."""
     try:
         import datetime as _dt
 
@@ -20,12 +22,14 @@ def _iso_now() -> str:
 
 
 def ensure_logs_dir(base_results_dir: Path, stage_name: str) -> Path:
+    """Create and return a logs directory path under the specified stage."""
     d = base_results_dir / stage_name / "logs"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
 
 def write_jsonl(logs_dir: Path, name: str, payload: Dict[str, Any]) -> None:
+    """Write JSON payload to file in logs directory, appending newline."""
     path = logs_dir / name
     try:
         with path.open("a", encoding="utf-8") as f:
@@ -56,6 +60,7 @@ def log_timing(stage_key: str, record: Dict[str, Any], *, stage_dir: Optional[Pa
 
 @dataclass
 class TimerEvent:
+    """Time an event and log start timestamp to JSONL."""
     logs_dir: Path
     event: str
     meta: Dict[str, Any]
@@ -88,6 +93,7 @@ class TimerEvent:
 
 @contextmanager
 def time_block(logs_dir: Path, event: str, **meta: Any):
+    """Measure execution time and log event with metadata to a directory."""
     te = TimerEvent(logs_dir=logs_dir, event=event, meta=meta)
     try:
         te.__enter__()
@@ -97,6 +103,7 @@ def time_block(logs_dir: Path, event: str, **meta: Any):
 
 
 def summarize_messages(messages: Any) -> Dict[str, Any]:
+    """Summarize message counts, characters, and images from provider-agnostic input."""
     try:
         # Rough, provider-agnostic shape
         count = 0

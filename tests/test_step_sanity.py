@@ -5,11 +5,13 @@ from extractor.pipeline.utils.step_sanity import run_step_sanity
 
 
 def _write_json(path: Path, payload: dict) -> None:
+    """Write JSON data to a specified file path."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload), encoding="utf-8")
 
 
 def test_layout_sketcher_accepts_section_mapping(tmp_path, monkeypatch, capsys):
+    """Test layout sketcher accepts a section mapping."""
     root = tmp_path / "results"
     monkeypatch.setenv("EXTRACTOR_RESULTS_ROOT", str(root))
     sections_path = root / "06b_layout_sketcher" / "json_output" / "06b_layout_sketch.json"
@@ -24,6 +26,7 @@ def test_layout_sketcher_accepts_section_mapping(tmp_path, monkeypatch, capsys):
 
 
 def test_section_summarizer_skipped_when_summary_only(tmp_path, monkeypatch, capsys):
+    """Validates section summarizer skips when summary only is active."""
     root = tmp_path / "results"
     root.mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv("EXTRACTOR_RESULTS_ROOT", str(root))

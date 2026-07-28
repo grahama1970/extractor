@@ -22,6 +22,7 @@ app = typer.Typer(add_completion=False)
 
 
 def _has_keys() -> bool:
+    """Check for the presence of specific environment variables."""
     for k in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY", "AZURE_OPENAI_KEY"):
         if os.getenv(k):
             return True
@@ -30,6 +31,7 @@ def _has_keys() -> bool:
 
 @app.command()
 def main(model: str = typer.Option(os.getenv("LITELLM_MODEL", "openai/gpt-4o-mini"))):
+    """Run the main application command with specified model option."""
     if not _has_keys():
         print("SKIP: no provider keys configured")
         raise typer.Exit(0)

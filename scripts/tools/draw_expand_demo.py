@@ -19,6 +19,7 @@ app = typer.Typer(add_completion=False)
 
 
 def expand_rect(rect: "fitz.Rect", page_rect: "fitz.Rect", scale: float) -> "fitz.Rect":
+    """Expand a rectangle by scale, clipping to page bounds."""
     cx = (rect.x0 + rect.x1) / 2.0
     cy = (rect.y0 + rect.y1) / 2.0
     w = rect.width * (1.0 + scale)
@@ -41,6 +42,7 @@ def draw(
     g: float = typer.Option(0.80, help="box color G 0..1"),
     b: float = typer.Option(0.40, help="box color B 0..1"),
 ):
+    """Draw a specified region on a PDF page and save the output."""
     doc = fitz.open(pdf.as_posix())
     pno = max(0, min(len(doc) - 1, page - 1))
     pg = doc[pno]

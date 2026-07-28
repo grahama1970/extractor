@@ -25,6 +25,7 @@ def list_edges(
     limit: int = typer.Option(25, help="Limit results"),
     json_out: bool = typer.Option(False, "--json", help="Output JSON"),
 ):
+    """List edges based on optional filters for title, scope, and status."""
     db = get_db()
     bind = {"type": etype, "limit": max(1, limit)}
     filters = ["e.type==@type"]

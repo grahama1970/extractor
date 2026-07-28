@@ -51,6 +51,7 @@ def count_jsonl(path: Path, limit: int | None = None) -> int:
 
 
 def file_exists(path: Path, *, min_bytes: int = 1) -> bool:
+    """Check if file exists and meets minimum size requirement."""
     try:
         return path.exists() and path.stat().st_size >= min_bytes
     except Exception as exc:
@@ -73,11 +74,13 @@ def emit_sanity(
 
 
 def env_path(name: str, default: Path) -> Path:
+    """Return environment variable as Path or fall back to default."""
     override = os.getenv(name)
     return Path(override) if override else default
 
 
 def env_bool(name: str, default: bool = False) -> bool:
+    """Convert environment variable to boolean with fallback default."""
     val = os.getenv(name)
     if val is None:
         return default

@@ -23,8 +23,8 @@ COMPLEXITY_THRESHOLDS = {
 
 LLM_CONFIG = {
     "service": "marker.services.openai.OpenAIService",
-    "api_key_env": "CHUTES_API_KEY",
-    "base_url": "https://llm.chutes.ai/v1",
+    "api_key_env": "SCILLM_PROXY_KEY",
+    "base_url": "http://localhost:4010",
     "model": "deepseek-ai/DeepSeek-V3",
 }
 

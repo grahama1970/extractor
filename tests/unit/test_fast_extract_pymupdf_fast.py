@@ -13,6 +13,7 @@ pytestmark = pytest.mark.skipif(fitz is None, reason="PyMuPDF not installed")
 
 
 def _make_pdf(tmpdir: Path) -> Path:
+    """Generate a PDF file with 'Hello, world!' text."""
     p = tmpdir / "hello.pdf"
     doc = fitz.open()
     page = doc.new_page()
@@ -23,6 +24,7 @@ def _make_pdf(tmpdir: Path) -> Path:
 
 
 def test_extract_fast_text_basic():
+    """Extract text from a PDF file using fast extraction methods."""
     from extractor.fast_extract.pymupdf_fast import extract_fast_text
 
     with tempfile.TemporaryDirectory() as td:
@@ -36,6 +38,7 @@ def test_extract_fast_text_basic():
 
 
 def test_extract_fast_text_pages_slice():
+    """Extract text from specified pages of a PDF document."""
     from extractor.fast_extract.pymupdf_fast import extract_fast_text
 
     with tempfile.TemporaryDirectory() as td:

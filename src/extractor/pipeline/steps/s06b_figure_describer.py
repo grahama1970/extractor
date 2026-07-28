@@ -43,6 +43,7 @@ MODEL = os.getenv("CHUTES_VLM_MODEL", "chutes/vlm")
 
 
 def sanity() -> int:
+    """Check step sanity, returning status."""
     return run_step_sanity(STEP_NAME)
 
 
@@ -147,8 +148,8 @@ async def process_figures(figures: List[Dict[str, Any]], output_dir: Path) -> Li
 
     logger.info(f"Describing {len(requests)} figures with {MODEL} (concurrency={CONCURRENCY})...")
 
-    api_key = os.getenv("CHUTES_API_KEY")
-    api_base = os.getenv("CHUTES_API_BASE", "https://llm.chutes.ai/v1")
+    api_key = os.getenv("SCILLM_PROXY_KEY", "sk-dev-proxy-123")
+    api_base = os.getenv("SCILLM_API_BASE", "http://localhost:4010")
 
     async for result in parallel_acompletions_iter(
         requests,
@@ -213,6 +214,7 @@ def run(
     skip_descriptions: bool = False,
     preset_config: Optional[Dict[str, Any]] = None,
 ) -> Path:
+    """Produce path to figure data, optionally generating VLM descriptions."""
 
     if skip_descriptions:
         logger.info("Skipping VLM descriptions (requested).")

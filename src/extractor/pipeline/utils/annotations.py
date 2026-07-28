@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Tuple, cast
 
 
 def rect_overlap_ratio(block_bbox: List[float], annot_rect: List[float]) -> float:
+    """Calculate the overlap ratio between two rectangular areas."""
     try:
         bx0, by0, bx1, by1 = block_bbox
         ax0, ay0, ax1, ay1 = annot_rect
@@ -98,6 +99,7 @@ def cue_from_annotation(a: Dict[str, Any]) -> Tuple[int, float, str]:
 
 
 def summarize_cues(cues: List[Tuple[int, float, str]]) -> Tuple[str, float]:
+    """Summarize positive and negative cues with their respective strengths."""
     pos = [f"{lbl} ({st:.2f})" for pol, st, lbl in cues if pol > 0]
     neg = [f"{lbl} ({st:.2f})" for pol, st, lbl in cues if pol < 0]
     signal = sum(st for pol, st, _ in cues if pol > 0) - sum(st for pol, st, _ in cues if pol < 0)
@@ -110,7 +112,9 @@ def summarize_cues(cues: List[Tuple[int, float, str]]) -> Tuple[str, float]:
 
 
 def annotation_text_snippet(a: Dict[str, Any], max_chars: int = 140) -> str:
+    """Extract text snippet from annotation, truncated to max chars."""
     def _blocks_to_text(blocks: List[Dict[str, Any]]) -> str:
+        """Return all text from blocks as a single normalized string."""
         parts: List[str] = []
         for blk in blocks or []:
             for ln in blk.get("lines", []):
@@ -131,6 +135,7 @@ def annotation_text_snippet(a: Dict[str, Any], max_chars: int = 140) -> str:
 
 
 def load_relevant_rules() -> Dict[str, Any]:
+    """Load relevant rules from a JSON configuration file."""
     try:
         here = Path(__file__).resolve().parents[1] / "steps" / "config" / "relevant_rules.json"
         if here.exists():

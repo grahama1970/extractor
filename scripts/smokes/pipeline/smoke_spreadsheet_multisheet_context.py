@@ -25,6 +25,7 @@ app = typer.Typer(add_completion=False)
 def main(
     tmp_dir: Path = typer.Option(Path("data/results/structured_parity_smoke/spreadsheet_synth")),
 ):
+    """Synthesize a multi-sheet Excel workbook with sample data."""
     tmp_dir.mkdir(parents=True, exist_ok=True)
     xlsx_path = tmp_dir / "multisheet.xlsx"
     wb = Workbook()

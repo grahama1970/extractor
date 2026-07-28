@@ -11,6 +11,7 @@ from extractor.core.schema.unified_document import SourceType
 
 @pytest.fixture
 def provider():
+    """Return a JSONProvider instance for testing purposes."""
     return JSONProvider()
 
 

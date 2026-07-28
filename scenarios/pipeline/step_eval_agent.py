@@ -79,8 +79,8 @@ def _call_router(model: str, content: str) -> dict | None:
         async def _run():
             resp = await sc_acompletion(
                 model=model,
-                api_base=os.environ.get("CHUTES_API_BASE", "").strip() or None,
-                api_key=os.environ.get("CHUTES_API_KEY", "").strip() or None,
+                api_base=os.environ.get("SCILLM_API_BASE", "http://localhost:4010").strip() or None,
+                api_key=os.environ.get("SCILLM_PROXY_KEY", "sk-dev-proxy-123").strip() or None,
                 custom_llm_provider="openai",
                 messages=[{"role": "user", "content": content}],
                 response_format={"type": "json_object"},

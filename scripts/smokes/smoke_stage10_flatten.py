@@ -15,6 +15,7 @@ app = typer.Typer(add_completion=False, help="Smoke: Stage 10 flatten minimal")
 
 
 def _load_stage10():
+    """Load the Stage 10 module from the specified file path."""
     spec = importlib.util.spec_from_file_location(
         "stage10", "src/extractor/pipeline/steps/10_arangodb_exporter.py"
     )
@@ -27,6 +28,7 @@ def _load_stage10():
 
 @app.command()
 def main():
+    """Process and flatten document sections into PDF objects."""
     load_dotenv(find_dotenv())
     mod = _load_stage10()
     flatten = getattr(mod, "flatten_document_to_pdf_objects")

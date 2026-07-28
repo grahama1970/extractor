@@ -42,6 +42,7 @@ router = Router(model_list=model_list)
 
 
 def _print_resp(label: str, resp):
+    """Print formatted response details including usage and hidden parameters."""
     print(f"\n=== {label} ===")
     try:
         usage = getattr(resp, "usage", None)
@@ -63,6 +64,7 @@ def _print_resp(label: str, resp):
 
 
 async def try_case(model: str, messages, label: str):
+    """Attempt an AI completion, printing its response or error."""
     try:
         resp = await router.acompletion(model=model, messages=messages, timeout=45)
         _print_resp(label, resp)
@@ -71,10 +73,12 @@ async def try_case(model: str, messages, label: str):
 
 
 def text_only(prompt: str):
+    """Builds a user text message payload from a prompt string."""
     return [{"role": "user", "content": [{"type": "text", "text": prompt}]}]
 
 
 def image_url(prompt: str, url: str):
+    """Build a user message combining text prompt and image URL."""
     return [
         {
             "role": "user",
@@ -100,6 +104,7 @@ def input_image(prompt: str, url: str):
 
 
 def data_url_for_path(p: str) -> str:
+    """Return a data URL for the given file path or empty string."""
     path = Path(p)
     if not path.exists():
         return ""
@@ -123,6 +128,7 @@ def data_url_for_path(p: str) -> str:
 
 
 def data_url_for_remote(url: str) -> str:
+    """Fetch remote image as data URL, returning empty string on failure."""
     try:
         out = fetch_remote_image_cached(url, timeout=10)
         return out or ""
@@ -131,6 +137,7 @@ def data_url_for_remote(url: str) -> str:
 
 
 async def main():
+    """Build image data URLs from default or environment sources."""
     panda = "https://upload.wikimedia.org/wikipedia/commons/thumb/0/0f/Grosser_Panda.JPG/2560px-Grosser_Panda.JPG"
     # Optional: use images from env (comma-separated). Each item may be a local path or a URL.
     # Build data URLs using the same helpers as the pipeline.

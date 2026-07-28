@@ -85,6 +85,7 @@ except Exception:
 
 
 def _default_pdfs_root() -> str:
+    """Return the default PDF root directory path."""
     here = os.path.abspath(os.path.dirname(__file__))
     # repo_root/prototypes/tabbed/pdfs
     root = os.path.abspath(os.path.join(here, "..", "pdfs"))
@@ -107,6 +108,7 @@ except Exception:
 
 # Artifacts root for listing/downloading server-generated files (e.g., COCO exports)
 def _default_artifacts_root() -> str:
+    """Return the absolute path to the default artifacts directory."""
     here = os.path.abspath(os.path.dirname(__file__))
     # repo_root/scripts/artifacts
     return os.path.abspath(os.path.join(here, "..", "..", "..", "scripts", "artifacts"))
@@ -118,6 +120,7 @@ app = FastAPI()
 
 
 def _latest_results_dir() -> Optional[Path]:
+    """Return the latest results directory path from config."""
     try:
         p = Path(ARTIFACTS_ROOT) / "latest_results.json"
         if not p.exists():
@@ -193,6 +196,7 @@ else:
 
 @app.middleware("http")
 async def no_store_headers(request, call_next):
+    """Set HTTP response headers to prevent caching."""
     resp = await call_next(request)
     try:
         resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, proxy-revalidate"
@@ -206,12 +210,14 @@ async def no_store_headers(request, call_next):
 
 @app.get("/")
 async def root():
+    """Return an HTML response with API endpoint information."""
     return HTMLResponse(
         "<h3>Tabbed Prototype API</h3><ul><li>/api/list</li><li>/api/pdf?rel=...</li><li>/api/ux/generate</li></ul>"
     )
 
 
 def _git_sha() -> str:
+    """Return the short Git SHA, or 'unknown' on failure."""
     try:
         return subprocess.check_output(["git", "rev-parse", "--short", "HEAD"]).decode().strip()
     except Exception:
@@ -238,6 +244,7 @@ _ARANGO_READY = False
 
 
 def _get_env(name: str, default: Optional[str] = None) -> Optional[str]:
+    """Return environment variable value or the specified default."""
     v = os.getenv(name, default if default is not None else None)
     return v
 
@@ -475,6 +482,7 @@ async def api_incident_log(payload: Dict[str, Any]):
 
 
 def _is_within_root(path: str, root: str) -> bool:
+    """Check if path is within the specified root directory."""
     try:
         rp = os.path.realpath(path)
         rr = os.path.realpath(root)
@@ -484,6 +492,7 @@ def _is_within_root(path: str, root: str) -> bool:
 
 
 def _list_pdfs(root: str) -> List[Dict[str, Any]]:
+    """List PDF files in a directory, returning their metadata."""
     items: List[Dict[str, Any]] = []
     if not os.path.isdir(root):
         return items
@@ -501,6 +510,7 @@ def _list_pdfs(root: str) -> List[Dict[str, Any]]:
 
 @app.get("/api/list")
 async def api_list(dir: str | None = None):
+    """List PDF files from a validated directory path."""
     base = SERVER_PDFS_ROOT if not dir else os.path.join(SERVER_PDFS_ROOT, dir)
     if not _is_within_root(base, SERVER_PDFS_ROOT):
         return JSONResponse({"ok": False, "error": "invalid_dir"}, status_code=400)
@@ -509,6 +519,7 @@ async def api_list(dir: str | None = None):
 
 @app.get("/api/pdf")
 async def api_pdf(rel: str):
+    """Return a PDF file response if the path is valid and exists."""
     fp = os.path.join(SERVER_PDFS_ROOT, rel)
     if not _is_within_root(fp, SERVER_PDFS_ROOT) or not os.path.isfile(fp):
         return JSONResponse({"ok": False, "error": "not_found"}, status_code=404)
@@ -516,6 +527,7 @@ async def api_pdf(rel: str):
 
 
 def _abs_pdf_path(rel: str) -> str:
+    """Return the absolute PDF path from a relative path string."""
     fp = os.path.join(SERVER_PDFS_ROOT, rel)
     if not _is_within_root(fp, SERVER_PDFS_ROOT) or not os.path.isfile(fp):
         raise FileNotFoundError("not_found")
@@ -528,12 +540,14 @@ def _abs_pdf_path(rel: str) -> str:
 
 
 def _ensure_docs_schema(db):
+    """Ensure required collections exist in the database schema."""
     try:
         if not db:
             return False
         cols = [c["name"] for c in db.collections()]
 
         def ensure_col(name):
+            """Ensure collection exists, creating it if needed."""
             if name not in cols:
                 db.create_collection(name)
 
@@ -572,6 +586,7 @@ def _ensure_docs_schema(db):
 
 
 def _is_within_artifacts(path: str) -> bool:
+    """Perform is within artifacts operation."""
     try:
         rp = os.path.realpath(path)
         rr = os.path.realpath(ARTIFACTS_ROOT)
@@ -582,6 +597,7 @@ def _is_within_artifacts(path: str) -> bool:
 
 @app.get("/api/artifacts/browse")
 async def api_artifacts_browse(dir: str):
+    """List artifact directory contents."""
     base = dir if os.path.isabs(dir) else os.path.join(ARTIFACTS_ROOT, dir)
     if not _is_within_artifacts(base) or not os.path.isdir(base):
         return JSONResponse({"ok": False, "error": "invalid_dir"}, status_code=400)
@@ -602,6 +618,7 @@ async def api_artifacts_browse(dir: str):
 
 @app.get("/api/artifacts/download")
 async def api_artifacts_download(path: str):
+    """Download a file from the artifacts directory if valid."""
     fp = path if os.path.isabs(path) else os.path.join(ARTIFACTS_ROOT, path)
     if not _is_within_artifacts(fp) or not os.path.isfile(fp):
         return JSONResponse({"ok": False, "error": "not_found"}, status_code=404)
@@ -764,6 +781,7 @@ except Exception:  # pragma: no cover
     litellm_call = None  # type: ignore
 
     def initialize_litellm_cache():  # type: ignore
+        """Perform initialize litellm cache operation."""
         return None
 
 
@@ -780,6 +798,7 @@ except Exception:
 
 
 class AnnotationPayload(BaseModel):
+    """Define an annotation payload with a relationship and page boxes."""
     rel: str
     boxes_by_page: Dict[str, List[Dict[str, Any]]]
 
@@ -884,6 +903,7 @@ async def api_save_annotations_to_db(payload: Dict[str, Any]):
 
 
 class StatusPayload(BaseModel):
+    """Return status information with optional assignee details."""
     rel: str
     status: str
     assignee: Optional[str] = None
@@ -932,6 +952,7 @@ async def api_set_status(payload: StatusPayload):
 
 
 class RunPipelineRequest(BaseModel):
+    """Create a request to run a pipeline with specified parameters."""
     rel: str
     boxes_by_page: Optional[Dict[str, List[Dict[str, Any]]]] = None
     mode: Optional[str] = "live"  # "live" (LLM-on) or "deterministic" (offline-ish)
@@ -1087,6 +1108,7 @@ async def api_run_pipeline(payload: RunPipelineRequest, tasks: BackgroundTasks):
 
 @app.get("/api/pipeline/status")
 async def api_pipeline_status(job_id: str):
+    """Return the status of a pipeline job based on its job ID."""
     try:
         # Look for job in pipeline_runs
         run_dir = Path(ARTIFACTS_ROOT) / "pipeline_runs" / job_id
@@ -1396,6 +1418,7 @@ async def http_generate(payload: Dict[str, Any]):
 
 @app.post("/api/ux/mock/generate")
 async def http_generate_mock():
+    """Return a mock data sample in JSON format."""
     sample = {
         "title": "INFERRED_Table_Example",
         "columns": ["Col A", "Col B", "Col C"],
@@ -1407,6 +1430,7 @@ async def http_generate_mock():
 # LLM health: trivial JSON round-trip via litellm_call
 @app.get("/api/health/llm")
 async def api_health_llm(model: str | None = None, timeout: float = 20.0):
+    """Return health status of the LLM as JSON response."""
     prompt = 'Return only {"ok":true} as JSON.'
     eff_model = (
         model
@@ -1480,6 +1504,7 @@ async def api_health_llm(model: str | None = None, timeout: float = 20.0):
 
 
 def _ensure_graph_bits(db):
+    """Ensure required graph collections exist in the database."""
     try:
         if not db.has_collection("lesson_edges"):
             db.create_collection("lesson_edges", edge=True)
@@ -1493,6 +1518,7 @@ def _ensure_graph_bits(db):
 
 
 def _pair_id(a_id: str, b_id: str) -> str:
+    """Return a SHA-1 hash of two IDs concatenated with a separator."""
     a, b = (a_id, b_id) if a_id <= b_id else (b_id, a_id)
     import hashlib as _hl
 
@@ -1504,6 +1530,7 @@ def _pair_id(a_id: str, b_id: str) -> str:
 def _resolve_lesson_id(
     db, key: Optional[str], title: Optional[str], scope: Optional[str]
 ) -> Optional[str]:
+    """Resolve lesson ID from key or by title lookup."""
     if key:
         return f"lessons/{key}"
     if title:
@@ -1519,6 +1546,7 @@ def _resolve_lesson_id(
 
 @app.post("/api/lessons/edge/related")
 async def api_edge_related(payload: Dict[str, Any]):
+    """Return related lessons based on provided lesson identifiers."""
     db = _arango_connect()
     if not db:
         return JSONResponse({"ok": False, "error": "arango_unavailable"}, status_code=503)
@@ -1580,6 +1608,7 @@ async def api_edge_related(payload: Dict[str, Any]):
 
 @app.post("/api/lessons/edge/reject")
 async def api_edge_reject(payload: Dict[str, Any]):
+    """Reject an edge in the lesson graph based on provided payload."""
     db = _arango_connect()
     if not db:
         return JSONResponse({"ok": False, "error": "arango_unavailable"}, status_code=503)
@@ -1610,6 +1639,7 @@ async def api_edge_reject(payload: Dict[str, Any]):
 
 @app.post("/api/lessons/edge/approve")
 async def api_edge_approve(payload: Dict[str, Any]):
+    """Approve an edge in the lessons database with provided rationale."""
     db = _arango_connect()
     if not db:
         return JSONResponse({"ok": False, "error": "arango_unavailable"}, status_code=503)
@@ -1656,6 +1686,7 @@ async def api_lessons_related(
     direction: str = "both",
     k: int = 10,
 ):
+    """Return related lessons based on optional filters and parameters."""
     db = _arango_connect()
     if not db:
         return JSONResponse({"ok": False, "error": "arango_unavailable"}, status_code=503)
@@ -1725,6 +1756,7 @@ async def api_lessons_multihop(
     direction: str = "ANY",
     limit: int = 10,
 ):
+    """Return lesson data based on optional filters and parameters."""
     db = _arango_connect()
     if not db:
         return JSONResponse({"ok": False, "error": "arango_unavailable"}, status_code=503)
@@ -1847,6 +1879,7 @@ async def api_coco_export(payload: Dict[str, Any]):
 # -----------------------------
 @app.get("/api/suggest/tables")
 async def api_suggest_tables(rel: str, page: int):
+    """Return table suggestions from a PDF based on the given parameters."""
     try:
         src = _abs_pdf_path(rel)
     except FileNotFoundError:
@@ -1896,6 +1929,7 @@ async def api_suggest_tables(rel: str, page: int):
 # -----------------------------
 @app.post("/api/arangodb/insert")
 async def api_arango_insert(payload: dict):
+    """Insert a document and associated chunks into ArangoDB."""
     db = _arango_connect()
     if not db:
         return JSONResponse({"ok": False, "error": "arango_unavailable"}, status_code=503)
@@ -1942,6 +1976,7 @@ async def api_arango_insert(payload: dict):
 # -----------------------------
 @app.post("/api/search")
 async def api_search(payload: dict):
+    """Search documents using the API request's query."""
     q = (payload.get("q") or "").strip()
     if not q:
         return JSONResponse({"ok": False, "error": "missing_q"}, status_code=400)
@@ -1974,6 +2009,7 @@ async def api_search(payload: dict):
 
 @app.post("/api/chat/query")
 async def api_chat_query(payload: dict):
+    """Process a chat query with provided search parameters."""
     session_id = payload.get("session_id") or f"s-{int(time.time())}"
     q = (payload.get("q") or "").strip()
     pdf_hint = (
@@ -2064,6 +2100,7 @@ async def api_chat_query(payload: dict):
 
 @app.post("/api/admin/ensure-pdf-objects-view")
 def api_admin_ensure_pdf_objects_view():
+    """Ensure the existence of a PDF objects view in the database."""
     db = _arango_connect()
     if not db:
         return JSONResponse({"ok": False, "error": "arango_unavailable"}, status_code=503)
@@ -2076,6 +2113,7 @@ def api_admin_ensure_pdf_objects_view():
 # -----------------------------
 @app.get("/api/pipeline/pdf-status")
 def api_pipeline_pdf_status(pdf_rel: Optional[str] = None, pdf_path: Optional[str] = None):
+    """Retrieve PDF processing status from the database."""
     try:
         db = _arango_connect()
         if not db:
@@ -2137,6 +2175,7 @@ def api_pipeline_doc_id(pdf_rel: Optional[str] = None, pdf_path: Optional[str] =
 
 
 class _Box(BaseModel):
+    """Define a rectangular box with position and dimensions attributes."""
     id: Optional[str] = None
     type: str
     instanceId: Optional[str] = None
@@ -2147,6 +2186,7 @@ class _Box(BaseModel):
 
 
 class _RunExternalReq(BaseModel):
+    """Define parameters for an external PDF processing request."""
     pdf_path: Optional[str] = None
     pdf_rel: Optional[str] = None
     boxes_by_page: Dict[int, List[_Box]] = Field(default_factory=dict)
@@ -2156,6 +2196,7 @@ class _RunExternalReq(BaseModel):
 
 
 class _SaveAnnotationsReq(BaseModel):
+    """Define a request to save PDF annotations."""
     pdf_path: Optional[str] = None
     pdf_rel: Optional[str] = None
     boxes_by_page: Dict[int, List[_Box]] = Field(default_factory=dict)
@@ -2163,25 +2204,30 @@ class _SaveAnnotationsReq(BaseModel):
 
 
 class _UpsertReq(BaseModel):
+    """Specify parameters for an upsert request."""
     results_dir: str
     fast_embeddings: bool = True
 
 
 class _ReqListReq(BaseModel):
+    """Return a directory path for results storage."""
     results_dir: str
 
 
 class _ReqEdit(BaseModel):
+    """Return a model with an ID and canonical text representation."""
     id: str
     text_canonical: str
 
 
 class _ReqSaveReq(BaseModel):
+    """Specify a request to save edits to a results directory."""
     results_dir: str
     edits: List[_ReqEdit]
 
 
 class _ReqRerunReq(BaseModel):
+    """Return request rerun parameters including results directory and status."""
     results_dir: str
     filter_status: List[str] | None = None
 
@@ -2192,6 +2238,7 @@ class _ReqRerunReq(BaseModel):
 
 
 class _ConflictItem(BaseModel):
+    """Model a conflict item, including its type and resolution."""
     id: str
     type: str  # 'duplicate' | 'numeric_mismatch' | custom
     groupId: Optional[str] = None
@@ -2200,12 +2247,14 @@ class _ConflictItem(BaseModel):
 
 
 class _SaveConflictsReq(BaseModel):
+    """Return document ID and list of conflict items for saving."""
     doc_id: str
     items: List[_ConflictItem] = Field(default_factory=list)
 
 
 @app.post("/api/conflicts/save")
 def api_conflicts_save(req: _SaveConflictsReq):
+    """Save document conflict data to a JSON file."""
     try:
         out_dir = Path(ARTIFACTS_ROOT)
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -2225,6 +2274,7 @@ def api_conflicts_save(req: _SaveConflictsReq):
 
 @app.get("/api/conflicts/list")
 def api_conflicts_list(doc_id: str):
+    """Return a list of conflict items from a JSON file by document ID."""
     try:
         p = Path(ARTIFACTS_ROOT) / f"conflicts_{doc_id}.json"
         if not p.exists():
@@ -2245,6 +2295,7 @@ def api_conflicts_list(doc_id: str):
 
 @app.get("/api/oslc/service")
 def api_oslc_service():
+    """Return an OSLC Service Provider description."""
     try:
         return {
             "ok": True,
@@ -2262,6 +2313,7 @@ def api_oslc_service():
 
 @app.get("/api/oslc/links")
 def api_oslc_links():
+    """Get OSLC links from file, normalizing legacy formats."""
     try:
         p = Path(ARTIFACTS_ROOT) / "oslc_links.json"
         if not p.exists():
@@ -2280,6 +2332,7 @@ def api_oslc_links():
 
 
 class _OslcLink(BaseModel):
+    """Represent an OSLC link with source, target, and type."""
     source: str
     target: str
     type: str = Field(default="oslc_rm:elaborates")
@@ -2287,6 +2340,7 @@ class _OslcLink(BaseModel):
 
 @app.post("/api/oslc/link")
 def api_oslc_link(link: _OslcLink):
+    """Add an OSLC link to the links JSON file."""
     try:
         out = Path(ARTIFACTS_ROOT) / "oslc_links.json"
         existing: list = []
@@ -2314,6 +2368,7 @@ def api_oslc_link(link: _OslcLink):
 
 
 def _resolve_pdf_for_ui(pdf_path: Optional[str], pdf_rel: Optional[str]) -> Path:
+    """Resolve and validate a PDF path or relative path for UI use."""
     if pdf_path:
         p = Path(pdf_path).expanduser().resolve()
         if not p.exists():
@@ -2336,6 +2391,7 @@ def _resolve_pdf_for_ui(pdf_path: Optional[str], pdf_rel: Optional[str]) -> Path
 def _ui_boxes_to_pipeline_annotations(
     pdf: Path, boxes_by_page: Dict[int, List[_Box]]
 ) -> Dict[str, Any]:
+    """Convert UI box data into pipeline annotations for PDF pages."""
     if fitz is None:
         raise HTTPException(503, "fitz_unavailable")
     doc = fitz.open(str(pdf))
@@ -2392,6 +2448,7 @@ def _ui_boxes_to_pipeline_annotations(
 
 @app.post("/api/pipeline/run-external")
 def api_pipeline_run_external(req: _RunExternalReq):
+    """Run an external pipeline and save results to a specified directory."""
     pdf = _resolve_pdf_for_ui(req.pdf_path, req.pdf_rel)
     results = Path(req.results_dir or (Path("data/results") / f"pipeline_ui_{os.getpid()}"))
     results.mkdir(parents=True, exist_ok=True)
@@ -2464,6 +2521,7 @@ def api_artifact_file(path: str):
 
 @app.post("/api/annotations/save")
 def api_annotations_save(req: _SaveAnnotationsReq):
+    """Save normalized annotations to a specified results directory."""
     try:
         pdf = _resolve_pdf_for_ui(req.pdf_path, req.pdf_rel)
         results = Path(req.results_dir or (Path("data/results") / f"pipeline_ui_{os.getpid()}"))
@@ -2510,6 +2568,7 @@ def api_annotations_save(req: _SaveAnnotationsReq):
 
 @app.post("/api/pipeline/upsert")
 def api_pipeline_upsert(req: _UpsertReq):
+    """Upsert pipeline data based on the provided request parameters."""
     try:
         results = Path(req.results_dir).resolve()
         if not results.exists():
@@ -2577,6 +2636,7 @@ def api_pipeline_upsert(req: _UpsertReq):
 
 @app.get("/api/requirements/list")
 def api_requirements_list(results_dir: str):
+    """Return a list of requirements from specified results directory."""
     try:
         results = Path(results_dir).resolve()
         req07 = results / "07_requirements_miner" / "json_output" / "07_requirements.json"
@@ -2616,6 +2676,7 @@ def api_requirements_list(results_dir: str):
 
 @app.post("/api/requirements/save")
 def api_requirements_save(req: _ReqSaveReq):
+    """Save requirements data from a specified directory path."""
     try:
         results = Path(req.results_dir).resolve()
         req07 = results / "07_requirements_miner" / "json_output" / "07_requirements.json"
@@ -2663,6 +2724,7 @@ def api_requirements_save(req: _ReqSaveReq):
 
 @app.post("/api/requirements/rerun")
 def api_requirements_rerun(req: _ReqRerunReq):
+    """Rerun requirements processing using existing results."""
     try:
         results = Path(req.results_dir).resolve()
         if not results.exists():
@@ -2695,6 +2757,7 @@ def api_requirements_rerun(req: _ReqRerunReq):
 
 @app.get("/api/pipeline/latest")
 def api_pipeline_latest():
+    """Return the latest results directory from a JSON file."""
     try:
         p = Path(ARTIFACTS_ROOT) / "latest_results.json"
         if not p.exists():
@@ -2706,11 +2769,13 @@ def api_pipeline_latest():
 
 
 class _LatestSet(BaseModel):
+    """Store the directory path for the latest set of results."""
     results_dir: str
 
 
 @app.post("/api/pipeline/latest-set")
 def api_pipeline_latest_set(body: _LatestSet):
+    """Save latest results directory to a JSON file and return status."""
     try:
         p = Path(ARTIFACTS_ROOT) / "latest_results.json"
         p.write_text(json.dumps({"results_dir": body.results_dir}, indent=2))

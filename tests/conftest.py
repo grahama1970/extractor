@@ -9,6 +9,7 @@ if str(SRC) not in sys.path:
 
 
 def pytest_ignore_collect(path, config):
+    """Ignore test collection for legacy smoke and archived tests."""
     p = str(path)
     root = str(config.rootpath)
     # Ignore legacy smokes and archived tests; live checks belong to scenarios/

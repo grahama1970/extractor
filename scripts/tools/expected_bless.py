@@ -18,6 +18,7 @@ from .expected_common import STEP_FILES
 
 
 def main() -> int:
+    """Parse command-line arguments for pipeline output validation."""
     p = argparse.ArgumentParser(description="Bless current pipeline outputs as expected (golden)")
     p.add_argument("--pdf", required=True, type=Path)
     p.add_argument(

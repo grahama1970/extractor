@@ -5,6 +5,7 @@ import sys
 
 
 def main(sections_path: str, out_dir: str) -> None:
+    """Generate section summaries from JSON and save to specified directory."""
     sections = json.loads(Path(sections_path).read_text(encoding="utf-8"))
     out_root = Path(out_dir) / "09_section_summarizer" / "json_output"
     out_root.mkdir(parents=True, exist_ok=True)

@@ -33,6 +33,7 @@ app = typer.Typer(add_completion=False)
 
 @app.command()
 def main():
+    """Create necessary output directories for storing results."""
     out_dir = Path("data/results/cli_smokes/proves_only").resolve()
     bundle_dir = out_dir / "tmp"
     (out_dir / "08_lean4_theorem_prover/json_output").mkdir(parents=True, exist_ok=True)

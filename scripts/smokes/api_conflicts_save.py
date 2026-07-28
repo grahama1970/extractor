@@ -27,6 +27,7 @@ ART.mkdir(parents=True, exist_ok=True)
 
 
 def main() -> int:
+    """Send a payload to save document conflicts via an API request."""
     doc_id = "docdemo"
     payload = {
         "doc_id": doc_id,

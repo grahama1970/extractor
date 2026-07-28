@@ -95,6 +95,7 @@ def get_expected_families(gt: dict) -> list:
 
 
 def main():
+    """Run main application, loading data and reporting counts."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--verbose", "-v", action="store_true")
     args = parser.parse_args()

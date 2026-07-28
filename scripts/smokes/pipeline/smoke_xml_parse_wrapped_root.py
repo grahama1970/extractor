@@ -29,6 +29,7 @@ def main(
     ),
     results_dir: Path = typer.Option(Path("data/results/structured_parity_smoke/xml_checks")),
 ):
+    """Run a structured pipeline using the provided XML path and results directory."""
     meta = STRUCTURED_PIPELINES[XMLProvider]
     artifacts = run_structured_pipeline(
         XMLProvider,

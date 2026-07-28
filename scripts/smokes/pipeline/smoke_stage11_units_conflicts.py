@@ -37,6 +37,7 @@ app = typer.Typer(add_completion=False)
 
 @app.command()
 def main():
+    """Build a minimal Stage 10 debug-bundle input."""
     out_dir = Path("data/results/cli_smokes/units_conflicts").resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
 

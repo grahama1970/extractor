@@ -6,11 +6,13 @@ import sys
 
 
 def fail(msg: str) -> None:
+    """Print a failure message and terminate the program."""
     print(f"[FAIL] {msg}")
     sys.exit(1)
 
 
 def main() -> None:
+    """Load and validate pipeline sections from a JSON file."""
     out = Path(os.environ.get("OUT", "data/results/pipeline_live_ci"))
     sec = json.loads((out / "04_section_builder" / "json_output" / "04_sections.json").read_text())
     sections = sec.get("sections") or []

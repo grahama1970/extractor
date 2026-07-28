@@ -26,6 +26,7 @@ app = typer.Typer(add_completion=False)
 
 @app.command()
 def main():
+    """Create and initialize directory structure for CLI smoke test results."""
     out_dir = Path("data/results/cli_smokes/stage14_graph").resolve()
     stage11 = out_dir / "11_arango_create_graph/json_output"
     stage11.mkdir(parents=True, exist_ok=True)

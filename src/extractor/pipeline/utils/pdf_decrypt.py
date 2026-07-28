@@ -117,10 +117,12 @@ def _get_settings() -> Dict[str, Any]:
     """Get decryption settings from environment variables."""
 
     def _bool(name: str, default: str = "0") -> bool:
+        """Return a boolean indicating the environment variable's truthiness."""
         raw = os.getenv(name, default)
         return str(raw).strip().lower() not in {"0", "false", "no", "off", ""}
 
     def _int(name: str, default: int) -> int:
+        """Return integer from environment variable, defaulting on error."""
         try:
             return int(os.getenv(name, str(default)))
         except Exception:
@@ -567,6 +569,7 @@ def _crack_with_pdferli(
     verbose = bool(settings.get("verbose"))
 
     def _worker(path: str, queue: multiprocessing.Queue) -> None:
+        """Execute password cracking and place result in a queue."""
         try:
             pwd = crack_password(
                 file=path,

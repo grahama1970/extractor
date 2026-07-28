@@ -21,6 +21,7 @@ def main(
     artifacts_dir: Path = typer.Option(Path("scripts/artifacts"), help="Artifacts root"),
     output: Path = typer.Option(None, help="Output tar.gz (default under scripts/artifacts)"),
 ) -> None:
+    """Generate a tar.gz archive from annotated PDF files in the artifacts directory."""
     artifacts_dir = artifacts_dir.resolve()
     pdf = artifacts_dir / f"annotated_{slug}.pdf"
     pages_dir = artifacts_dir / f"annotated_{slug}.pdf_pages"

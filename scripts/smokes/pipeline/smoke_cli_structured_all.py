@@ -80,6 +80,7 @@ FORMAT_SAMPLES = [
 
 
 def _assert_stage_paths(root: Path, stem: str, stage07_dir: str) -> None:
+    """Assert existence of stage output paths for a given stem."""
     s07 = root / stem / stage07_dir / "json_output" / "07_reflowed.json"
     s10 = root / stem / "10_arangodb_exporter" / "json_output" / "10_flattened_data.json"
     if not s07.exists() or not s10.exists():
@@ -93,6 +94,7 @@ def _assert_stage_paths(root: Path, stem: str, stage07_dir: str) -> None:
 def main(
     out_root: Path = typer.Option(Path("data/results/cli_smokes/structured_all")),
 ):
+    """Process and organize sample data into structured output directories."""
     out_root.mkdir(parents=True, exist_ok=True)
     for label, sample, stage07_dir in FORMAT_SAMPLES:
         if not sample.exists():

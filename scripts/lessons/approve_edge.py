@@ -16,6 +16,7 @@ app = typer.Typer(add_completion=False)
 
 
 def resolve_id(db, title: str, scope: str) -> str | None:
+    """Retrieve document ID from database matching title and scope."""
     cur = db.aql.execute(
         "FOR d IN lessons FILTER d.title==@t AND d.scope==@s LIMIT 1 RETURN d._id",
         bind_vars={"t": title, "s": scope},
@@ -33,6 +34,7 @@ def approve(
     to_scope: str = typer.Option("", help="To scope"),
     human_rationale: str = typer.Option("Looks good", help="Human override rationale"),
 ):
+    """Approve an edge by ID or from/to titles and scopes."""
     db = get_db()
     ts = int(time.time())
     if not edge_id:

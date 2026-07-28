@@ -21,6 +21,7 @@ app = typer.Typer(add_completion=False)
 
 
 def _iou(a, b) -> float:
+    """Compute intersection over union of two rectangles."""
     try:
         ra = fitz.Rect(*a)
         rb = fitz.Rect(*b)
@@ -33,6 +34,7 @@ def _iou(a, b) -> float:
 
 
 def _safe_load(p: Path) -> Optional[dict]:
+    """Load JSON from path, returning None on failure or missing file."""
     try:
         return json.loads(p.read_text()) if p.exists() else None
     except Exception:
@@ -163,6 +165,7 @@ def _put_box(
 
 
 def _parse_pages(pages: str, total_pages: int) -> Optional[Set[int]]:
+    """Parse page numbers from a string into a set of integers."""
     if not pages:
         return None
     allowed: Set[int] = set()

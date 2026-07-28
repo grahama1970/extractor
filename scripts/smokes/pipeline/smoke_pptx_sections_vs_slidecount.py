@@ -29,6 +29,7 @@ def main(
     ),
     results_dir: Path = typer.Option(Path("data/results/structured_parity_smoke/pptx_checks")),
 ):
+    """Execute the main command for processing PowerPoint files."""
     meta = STRUCTURED_PIPELINES[PPTXProvider]
     artifacts = run_structured_pipeline(
         PPTXProvider,

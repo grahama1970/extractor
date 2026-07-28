@@ -6,6 +6,7 @@ from pathlib import Path
 
 
 def test_codex_resolves_via_explicit_path_and_runs(tmp_path: Path):
+    """Test codex binary resolves and runs via explicit path."""
     codex = shutil.which("codex")
     assert codex, "codex not found on PATH in this environment"
 

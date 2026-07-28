@@ -12,11 +12,9 @@ import os
 import sys
 import asyncio
 import aiohttp
-import logging
+from loguru import logger
 from pathlib import Path
 from typing import Tuple
-
-logger = logging.getLogger(__name__)
 
 # Ensure the local SciLLM / litellm repo is on sys.path first so that
 # `scillm.paved` is importable even when an older PyPI scillm is also
@@ -85,13 +83,13 @@ async def validate_scillm_preflight() -> Tuple[bool, str]:
     Uses paved timeouts; no external wait_for wrapping required.
     Returns (success, reason).
     """
-    base_url = os.getenv("CHUTES_API_BASE", "").rstrip("/")
-    api_key = os.getenv("CHUTES_API_KEY", "")
+    base_url = os.getenv("SCILLM_API_BASE", "http://localhost:4010").rstrip("/")
+    api_key = os.getenv("SCILLM_PROXY_KEY", "sk-dev-proxy-123")
 
     if not base_url:
-        return False, "CHUTES_API_BASE not set"
+        return False, "SCILLM_API_BASE not set"
     if not api_key:
-        return False, "CHUTES_API_KEY not set"
+        return False, "SCILLM_PROXY_KEY not set"
 
     # Prefer paved healthcheck from scillm if available (Router-only policy)
     # Patch: Disabled to avoid scillm.paved import error
@@ -153,8 +151,8 @@ def quick_scillm_check() -> bool:
     """Quick check if SciLLM environment is properly configured."""
     text_model = os.getenv("CHUTES_TEXT_MODEL")
     vlm_model = os.getenv("CHUTES_VLM_MODEL")
-    base_url = os.getenv("CHUTES_API_BASE")
-    api_key = os.getenv("CHUTES_API_KEY")
+    base_url = os.getenv("SCILLM_API_BASE", "http://localhost:4010")
+    api_key = os.getenv("SCILLM_PROXY_KEY", "sk-dev-proxy-123")
 
     if not base_url or not api_key:
         return False
@@ -168,6 +166,5 @@ def quick_scillm_check() -> bool:
 
 if __name__ == "__main__":
     # Quick test
-    logging.basicConfig(level=logging.INFO)
     ok, reason = validate_scillm_env_sync()
     print(f"SciLLM preflight: {'✅ PASS' if ok else '❌ FAIL'} - {reason}")

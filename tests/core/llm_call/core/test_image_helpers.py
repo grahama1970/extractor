@@ -26,6 +26,7 @@ def test_fetch_remote_image_cached_failure(monkeypatch):
     """Test that fetch_remote_image_cached raises on network failures per exception handling policy."""
 
     def fake_get(url, **kwargs):
+        """Raise an error simulating a network failure for the given URL."""
         raise RuntimeError("network fail")
 
     # Patch the httpx module where it's actually imported (in image_helpers)
@@ -41,6 +42,7 @@ def test_fetch_remote_image_cached_failure(monkeypatch):
 
 
 def test_compress_image_cached_returns_data_uri(tmp_path: Path):
+    """Test that compress_image_cached returns a data URI."""
     try:
         from PIL import Image
     except Exception:

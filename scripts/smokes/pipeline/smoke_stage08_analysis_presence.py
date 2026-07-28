@@ -18,6 +18,7 @@ app = typer.Typer(add_completion=False)
 def main(
     theorems: Path = typer.Option(..., exists=True, help="Stage 08 theorems (08_theorems.json)"),
 ):
+    """Validate proof results from theorems file."""
     data = json.loads(theorems.read_text())
     pr = data.get("proof_results") if isinstance(data, dict) else None
     if not isinstance(pr, list) or not pr:

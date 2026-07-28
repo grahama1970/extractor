@@ -27,6 +27,7 @@ except Exception as e:  # fail fast with clear guidance
 
 
 def _rgb_from_int(n: int) -> tuple[float, float, float]:
+    """Return RGB values as floats from an integer representation."""
     r = (n >> 16) & 0xFF
     g = (n >> 8) & 0xFF
     b = n & 0xFF
@@ -204,6 +205,7 @@ def build_requirements_text() -> str:
 
 
 def add_page_3(input_pdf: Path, output_pdf: Path) -> None:
+    """Add a third page to the input PDF, saving to output PDF."""
     if not input_pdf.exists():
         raise FileNotFoundError(f"Input PDF not found: {input_pdf}")
 
@@ -241,6 +243,7 @@ def add_page_3(input_pdf: Path, output_pdf: Path) -> None:
         def wrap_lines(
             para: str, max_width: float, fontname: str, fontsize: float, indent: float = 0.0
         ) -> list[str]:
+            """Wrap text into lines based on specified maximum width and indentation."""
             if not para:
                 return [""]
             words = para.split(" ")
@@ -274,6 +277,7 @@ def add_page_3(input_pdf: Path, output_pdf: Path) -> None:
         paragraphs = body_text.splitlines()
 
         def count_lines_for_size(size: float) -> int:
+            """Calculate total lines for all paragraphs at a given font size."""
             total = 0
             for p in paragraphs:
                 total += len(wrap_lines(p, max_width, body_style["fontname"], size, indent=0.0))
@@ -335,6 +339,7 @@ def add_simulated_tables_section(
     body_rect = fitz.Rect(left, top + 44, right, bottom)
 
     def draw_title(p: "fitz.Page", text: str):
+        """Draw a title with text and a line on the specified page."""
         p.insert_textbox(
             title_rect,
             text,
@@ -346,6 +351,7 @@ def add_simulated_tables_section(
         p.draw_line((left, top + 32), (right, top + 32), color=(0, 0, 0), width=0.5)
 
     def wrap_lines(para: str, max_width: float, fontname: str, fontsize: float) -> list[str]:
+        """Wrap text lines to fit within a specified width using given font metrics."""
         if not para:
             return [""]
         words = para.split(" ")
@@ -373,6 +379,7 @@ def add_simulated_tables_section(
     def draw_paragraph(
         p: "fitz.Page", rect: fitz.Rect, text: str, fontsize: float | None = None
     ) -> float:
+        """Draw paragraph text within a specified rectangle on a page."""
         max_width = rect.x1 - rect.x0
         y = rect.y0
         fontsize = fontsize or body_style["fontsize"]
@@ -406,6 +413,7 @@ def add_simulated_tables_section(
         caption: str | None = None,
         fontsize: float | None = None,
     ) -> float:
+        """Draw a table on a PDF page, returning the final y-coordinate."""
         y = y0
         fontsize = fontsize or max(9.0, body_style["fontsize"] - 0.5)
         # caption above table
@@ -626,6 +634,7 @@ def add_simulated_tables_section(
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Insert simulated hardware requirements into a PDF page."""
     parser = argparse.ArgumentParser(
         description="Insert simulated hardware requirements as page 3 of a PDF"
     )

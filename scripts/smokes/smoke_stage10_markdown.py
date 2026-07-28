@@ -23,6 +23,7 @@ app = typer.Typer(
 
 
 def _build_db(db_path: Path) -> None:
+    """Build a new DuckDB database with initial sections data."""
     if db_path.exists():
         db_path.unlink()
     con = duckdb.connect(str(db_path))
@@ -123,6 +124,7 @@ def main(
         help="Scratch directory for Stage 10 markdown sanity.",
     )
 ) -> None:
+    """Initialize and prepare a directory for markdown sanity results."""
     if results.exists():
         shutil.rmtree(results)
     results.mkdir(parents=True, exist_ok=True)

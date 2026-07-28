@@ -44,46 +44,57 @@ class ContentRepository:
 
     @property
     def sections(self) -> List[Dict]:
+        """Return the sections list, defaulting to empty."""
         return self._data.get("sections", [])
 
     @property
     def blocks(self) -> List[Dict]:
+        """Return blocks, defaulting to an empty list."""
         return self._data.get("blocks", [])
 
     @property
     def tables(self) -> List[Dict]:
+        """Return stored tables, defaulting to an empty list."""
         return self._data.get("tables", [])
 
     @property
     def figures(self) -> List[Dict]:
+        """Return a list of figures from the data dictionary."""
         return self._data.get("figures", [])
 
     @property
     def merged_content(self) -> List[Dict]:
+        """Return merged content from data as a list of dictionaries."""
         return self._data.get("merged_content", [])
 
     @property
     def requirements(self) -> List[Dict]:
+        """Return a list of requirements from the data dictionary."""
         return self._data.get("requirements", [])
 
     @property
     def annotations(self) -> List[Dict]:
+        """Return a list of annotations from the data dictionary."""
         return self._data.get("annotations", [])
 
     @property
     def toc_entries(self) -> List[Dict]:
+        """Return TOC entries, defaulting to an empty list."""
         return self._data.get("toc_entries", [])
 
     @property
     def document_metadata(self) -> Optional[Dict]:
+        """Return document metadata from internal data dictionary."""
         return self._data.get("document_metadata")
 
     @property
     def lean4_proofs(self) -> List[Dict]:
+        """Return Lean 4 proofs, or an empty list if not found."""
         return self._data.get("lean4_proofs", [])
 
     @property
     def metadata(self) -> Dict:
+        """Return metadata from the internal data dictionary."""
         return self._data.get("metadata", {})
 
     # -- lookup helpers --
@@ -218,9 +229,11 @@ class ContentRepository:
         Equivalent to the old v_clean_blocks DuckDB view.
         """
         def box_overlap(ax0, ay0, ax1, ay1, bx0, by0, bx1, by1):
+            """Calculate the area of overlap between two rectangles."""
             return max(0.0, min(ax1, bx1) - max(ax0, bx0)) * max(0.0, min(ay1, by1) - max(ay0, by0))
 
         def box_area(x0, y0, x1, y1):
+            """Calculate the area of a rectangle defined by two corners."""
             return (x1 - x0) * (y1 - y0)
 
         clean = []

@@ -26,6 +26,7 @@ app = typer.Typer(add_completion=False)
 
 
 def _make_results_tree(root: Path) -> Path:
+    """Prepare ArangoDB exporter output directory and data."""
     flat_dir = root / "10_arangodb_exporter" / "json_output"
     flat_dir.mkdir(parents=True, exist_ok=True)
     data = [
@@ -49,6 +50,7 @@ def _make_results_tree(root: Path) -> Path:
 
 @app.command()
 def main(out_dir: Path = Path("scripts/artifacts/rtm_smoke")):
+    """Create output directory and generate final report artifacts."""
     out_dir.mkdir(parents=True, exist_ok=True)
     _make_results_tree(out_dir)
     # Invoke Stage 14 CLI to generate final report artifacts

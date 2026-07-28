@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+"""Text normalization and Marker-based PDF extraction helpers for Stage 02."""
 from __future__ import annotations
 
 import json
@@ -89,6 +90,7 @@ def _normalize_text(text: str) -> str:
 
 
 def fallback_simple_extract(pdf_path: Path, out_json: Path) -> List[Dict[str, Any]]:
+    """Extract PDF data via external script and save as JSON."""
     out_json.parent.mkdir(parents=True, exist_ok=True)
     cmd = [
         os.environ.get("PYTHON", "python"),

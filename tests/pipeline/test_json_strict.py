@@ -4,6 +4,7 @@ from extractor.pipeline.utils.json_utils import parse_json_strict, STRICT_JSON_G
 
 
 def test_parse_json_strict_accepts_valid_object():
+    """Parse a JSON string strictly, returning a Python dictionary."""
     payload = '{"a":1,"b":[2,3],"c":null}'
     parsed = parse_json_strict(payload)
     assert isinstance(parsed, dict)
@@ -22,6 +23,7 @@ def test_parse_json_strict_accepts_valid_object():
     ],
 )
 def test_parse_json_strict_rejects_non_strict(bad):
+    """Validate JSON strings against strict parsing rules."""
     with pytest.raises(ValueError):
         parse_json_strict(bad)
 
@@ -33,6 +35,7 @@ def test_strict_guard_text_present():
 
 
 def test_trim_safety_example():
+    """Trim whitespace from the beginning and end of a JSON string."""
     raw = '   {\n  "a": 1 }\n   '
     trimmed = raw.rstrip("\n ").lstrip("\n ")
     assert trimmed.startswith("{") and trimmed.endswith("}")

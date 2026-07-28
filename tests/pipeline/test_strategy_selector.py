@@ -17,6 +17,7 @@ import pytest
 
 
 def test_heuristic_borderless():
+    """Verify _tier0_heuristic returns stream_default for borderless scientific tables."""
     from extractor.pipeline.utils.tables.strategy_selector import _tier0_heuristic
 
     pred = _tier0_heuristic("borderless", "scientific", False)
@@ -26,6 +27,7 @@ def test_heuristic_borderless():
 
 
 def test_heuristic_bordered_defense():
+    """Test heuristic strategy selection for bordered defense tables."""
     from extractor.pipeline.utils.tables.strategy_selector import _tier0_heuristic
 
     pred = _tier0_heuristic("bordered", "defense", True)
@@ -34,6 +36,7 @@ def test_heuristic_bordered_defense():
 
 
 def test_heuristic_bordered_general():
+    """Test bordered general heuristic returns lattice_default strategy."""
     from extractor.pipeline.utils.tables.strategy_selector import _tier0_heuristic
 
     pred = _tier0_heuristic("bordered", "general", True)
@@ -42,6 +45,7 @@ def test_heuristic_bordered_general():
 
 
 def test_heuristic_mixed():
+    """Test the tier0 heuristic for mixed engineering input."""
     from extractor.pipeline.utils.tables.strategy_selector import _tier0_heuristic
 
     pred = _tier0_heuristic("mixed", "engineering", None)
@@ -50,6 +54,7 @@ def test_heuristic_mixed():
 
 
 def test_heuristic_none_style():
+    """Test heuristic none style."""
     from extractor.pipeline.utils.tables.strategy_selector import _tier0_heuristic
 
     pred = _tier0_heuristic(None, None, None)
@@ -66,6 +71,7 @@ def test_heuristic_has_borders_false():
 
 
 def test_predict_strategy_off_mode(monkeypatch):
+    """Test strategy prediction with selector mode set to off."""
     monkeypatch.setattr(
         "extractor.pipeline.utils.tables.strategy_selector.STRATEGY_SELECTOR_MODE",
         "off",
@@ -77,6 +83,7 @@ def test_predict_strategy_off_mode(monkeypatch):
 
 
 def test_predict_strategy_shadow_mode(monkeypatch):
+    """Validate strategy prediction in shadow mode."""
     monkeypatch.setattr(
         "extractor.pipeline.utils.tables.strategy_selector.STRATEGY_SELECTOR_MODE",
         "shadow",
@@ -89,6 +96,7 @@ def test_predict_strategy_shadow_mode(monkeypatch):
 
 
 def test_should_skip_sweep_shadow(monkeypatch):
+    """Test if the sweep should be skipped based on strategy mode."""
     monkeypatch.setattr(
         "extractor.pipeline.utils.tables.strategy_selector.STRATEGY_SELECTOR_MODE",
         "shadow",
@@ -103,6 +111,7 @@ def test_should_skip_sweep_shadow(monkeypatch):
 
 
 def test_should_skip_sweep_active_high_confidence(monkeypatch):
+    """Verify sweep is skipped with active high confidence."""
     monkeypatch.setattr(
         "extractor.pipeline.utils.tables.strategy_selector.STRATEGY_SELECTOR_MODE",
         "active",
@@ -121,6 +130,7 @@ def test_should_skip_sweep_active_high_confidence(monkeypatch):
 
 
 def test_should_skip_sweep_active_low_confidence(monkeypatch):
+    """Set strategy selector mode for testing sweep skipping logic."""
     monkeypatch.setattr(
         "extractor.pipeline.utils.tables.strategy_selector.STRATEGY_SELECTOR_MODE",
         "active",
@@ -135,12 +145,14 @@ def test_should_skip_sweep_active_low_confidence(monkeypatch):
 
 
 def test_should_skip_sweep_none():
+    """Verify `None` input does not skip sweep."""
     from extractor.pipeline.utils.tables.strategy_selector import should_skip_sweep
 
     assert should_skip_sweep(None) is False
 
 
 def test_log_disagreement_writes_jsonl():
+    """Log disagreement information to a JSONL file."""
     from extractor.pipeline.utils.tables.strategy_selector import (
         log_disagreement,
         StrategyPrediction,
@@ -248,6 +260,7 @@ def test_build_feature_vector_one_hot_encoding():
     order = _feature_order if _feature_order else _FEATURE_COLS + ["category"]
 
     def idx(name):
+        """Return the 0-based index of the name in the order sequence."""
         return order.index(name)
 
     # table_style one-hot

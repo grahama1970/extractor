@@ -23,6 +23,7 @@ app = typer.Typer(add_completion=False)
 
 
 def _find_latest_stage10(root: Path) -> Path:
+    """Find latest '10_flattened_data.json' or return default path."""
     cands = sorted(
         root.rglob("10_arangodb_exporter/json_output/10_flattened_data.json"),
         key=lambda p: p.stat().st_mtime,
@@ -39,6 +40,7 @@ def _find_latest_stage10(root: Path) -> Path:
 def main(
     pdf: Path = typer.Option(Path("data/input/pipeline/BHT_CV32A65X_marked.pdf"), exists=True)
 ):
+    """Check for the existence of the Lean4 CLI and exit if missing."""
     lean_cli = Path("/home/graham/workspace/experiments/lean4/src/lean4_prover/cli_mini.py")
     if not lean_cli.exists():
         print("SKIP: Lean4 CLI not found; skipping RTM lean4_status smoke.")

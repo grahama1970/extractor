@@ -116,6 +116,7 @@ def build_section_context_text(section_data: dict[str, Any]) -> str:
 
 
 def _build_text_router():
+    """Build and return a text router instance."""
     return get_text_router()
 
 
@@ -364,6 +365,7 @@ async def reflow_section_with_llm(
 
             # Annotation images: include top-K by similarity/text length
             def _ann_score(a):
+                """Return the similarity score as a float, defaulting to zero."""
                 try:
                     sim = float(a.get("similarity") or 0.0)
                 except Exception as exc:
@@ -515,6 +517,7 @@ async def reflow_section_with_llm(
             attached = 0
 
             def _attach_blocks(b64: str | None, kind: str, meta: dict):
+                """Attach a base64 image block to the list."""
                 nonlocal attached, image_blocks
                 if b64 and attached < max_images:
                     image_blocks.append(
@@ -639,8 +642,8 @@ async def reflow_section_with_llm(
                         }
                     ]
 
-                    api_key = os.getenv("CHUTES_API_KEY")
-                    api_base = os.getenv("CHUTES_API_BASE", "https://llm.chutes.ai/v1")
+                    api_key = os.getenv("SCILLM_PROXY_KEY", "sk-dev-proxy-123")
+                    api_base = os.getenv("SCILLM_API_BASE", "http://localhost:4010")
 
                     _r_s = None
                     async for r in parallel_acompletions_iter(
@@ -906,8 +909,8 @@ async def reflow_section_with_llm(
                         }
                     ]
 
-                    api_key = os.getenv("CHUTES_API_KEY")
-                    api_base = os.getenv("CHUTES_API_BASE", "https://llm.chutes.ai/v1")
+                    api_key = os.getenv("SCILLM_PROXY_KEY", "sk-dev-proxy-123")
+                    api_base = os.getenv("SCILLM_API_BASE", "http://localhost:4010")
 
                     _r_min = None
                     async for r in parallel_acompletions_iter(
@@ -1172,6 +1175,7 @@ async def reflow_section_with_llm(
             system_text = PROMPT_REFLOW.get("system") or STRICT_JSON_GUARD
 
             def _is_gemini(m: str) -> bool:
+                """Check if string contains 'gemini' (case-insensitive)."""
                 return "gemini" in (m or "").lower()
 
             # Use LiteLLM-standard parts: "text" and "image_url" for all providers.
@@ -1343,6 +1347,7 @@ async def reflow_section_with_llm(
                 logs_dir.mkdir(parents=True, exist_ok=True)
 
                 def _image_bytes_from_part(p: dict) -> int:
+                    """Return image byte count from part dictionary if valid."""
                     try:
                         if not (isinstance(p, dict) and p.get("type") == "image_url"):
                             return 0
@@ -1445,8 +1450,8 @@ async def reflow_section_with_llm(
                     }
                 ]
 
-                api_key = os.getenv("CHUTES_API_KEY")
-                api_base = os.getenv("CHUTES_API_BASE", "https://llm.chutes.ai/v1")
+                api_key = os.getenv("SCILLM_PROXY_KEY", "sk-dev-proxy-123")
+                api_base = os.getenv("SCILLM_API_BASE", "http://localhost:4010")
 
                 _r = None
                 async for r in parallel_acompletions_iter(

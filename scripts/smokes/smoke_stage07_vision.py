@@ -19,6 +19,7 @@ app = typer.Typer(add_completion=False, help="Smoke: Stage 07 vision via adapter
 
 
 def _load_stage01():
+    """Load the Stage 01 module from a specified Python file."""
     p = Path("src/extractor/pipeline/steps/01_annotation_processor.py").resolve()
     spec = importlib.util.spec_from_file_location("stage01", str(p))
     if not spec or not spec.loader:
@@ -29,6 +30,7 @@ def _load_stage01():
 
 
 def _to_data_url(path: Path) -> str:
+    """Return a data URL for a PNG image from a file path."""
     data = path.read_bytes()
     b64 = base64.b64encode(data).decode()
     return f"data:image/png;base64,{b64}"
@@ -51,6 +53,7 @@ def main(
     prompt_version: str = typer.Option("reflow@0.1.0"),
     timeout: int = typer.Option(60),
 ):
+    """Process input PDF with specified model and prompt."""
     try:
         # Load API keys from .env if present
         load_dotenv(find_dotenv())

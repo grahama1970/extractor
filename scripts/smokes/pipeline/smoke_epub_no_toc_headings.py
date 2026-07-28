@@ -24,6 +24,7 @@ app = typer.Typer(add_completion=False)
 
 @app.command()
 def main(tmp_dir: Path = typer.Option(Path("data/results/structured_parity_smoke/epub_synth"))):
+    """Build an EPUB book without a table of contents."""
     tmp_dir.mkdir(parents=True, exist_ok=True)
     epub_path = tmp_dir / "no_toc.epub"
 

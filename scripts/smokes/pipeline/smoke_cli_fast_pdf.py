@@ -25,6 +25,7 @@ def main(
     ),
     output_dir: Path = typer.Option(Path("data/results/cli_smokes/fast_pdf")),
 ):
+    """Run PDF extraction CLI for input to output directory."""
     output_dir.mkdir(parents=True, exist_ok=True)
     cmd = [
         sys.executable,

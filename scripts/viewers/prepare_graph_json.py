@@ -22,6 +22,7 @@ def main(
         Path("graph.json"), help="Viewer-friendly graph JSON (nodes, edges)"
     ),
 ):
+    """Load JSON data from a specified source file and output to a JSON file."""
     obj = json.loads(source.read_text())
     # Accept either edge_hints (nodes: sections/lemmas, edges: depends_on/contradicts/...) or edges.json with same shape
     if "nodes" in obj and "edges" in obj:

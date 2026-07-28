@@ -40,6 +40,7 @@ RESULTS_04 = ROOT / "data/results/pipeline/04_section_builder/json_output/04_sec
 
 
 def _choose_section(sample: dict) -> dict:
+    """Return the first section from a sample dictionary."""
     secs = (sample or {}).get("sections") or []
     if not secs:
         raise SystemExit("Gold sample has no sections")
@@ -47,6 +48,7 @@ def _choose_section(sample: dict) -> dict:
 
 
 def _context_from_section(sec: dict) -> str:
+    """Return formatted section title and concatenated block texts."""
     title = sec.get("title") or "Untitled"
     blocks = sec.get("blocks") or []
     texts = [b.get("text") for b in blocks if isinstance(b, dict) and b.get("text")]
@@ -55,6 +57,7 @@ def _context_from_section(sec: dict) -> str:
 
 
 def _find_section_image(sec: dict) -> Path | None:
+    """Return the image path for a section, checking data and candidates."""
     vp = sec.get("visual_path") or sec.get("image_path")
     if isinstance(vp, str):
         p = (ROOT / vp).resolve()
@@ -84,8 +87,8 @@ async def main_async() -> None:
     sys.path.insert(0, os.path.abspath("src"))
     from scillm import completion
 
-    if not (os.getenv("CHUTES_API_BASE") and os.getenv("CHUTES_API_KEY")):
-        print("CHUTES_API_BASE/CHUTES_API_KEY not set")
+    if not (os.getenv("SCILLM_API_BASE", "http://localhost:4010") and os.getenv("SCILLM_PROXY_KEY", "sk-dev-proxy-123")):
+        print("SCILLM_API_BASE/SCILLM_PROXY_KEY not set")
         raise SystemExit(1)
 
     # Prefer real 04 results; fallback to gold sample
@@ -147,8 +150,8 @@ async def main_async() -> None:
     res = completion(
         model=model,
         custom_llm_provider="openai_like",
-        api_base=os.getenv("CHUTES_API_BASE", ""),
-        api_key=os.getenv("CHUTES_API_KEY", ""),
+        api_base=os.getenv("SCILLM_API_BASE", "http://localhost:4010"),
+        api_key=os.getenv("SCILLM_PROXY_KEY", "sk-dev-proxy-123"),
         messages=messages,
         response_format={"type": "json_schema", "json_schema": {"schema": schema}},
         temperature=0,
@@ -169,6 +172,7 @@ async def main_async() -> None:
 
 @app.command()
 def main() -> None:
+    """Run the asynchronous main function in an event loop."""
     asyncio.run(main_async())
 
 

@@ -3,6 +3,7 @@ from extractor.pipeline.tools import render_annotated_pdf as rap
 
 
 def test_rect_from_camelot_converts_properly():
+    """Convert Camelot bounding box to fitz.Rect with adjusted coordinates."""
     page_rect = fitz.Rect(0, 0, 600, 800)
     camelot_bb = [50, 100, 300, 200]  # x0,y0,x1,y1 with origin bottom-left
     r = rap._rect_from_camelot(camelot_bb, page_rect)
@@ -12,6 +13,7 @@ def test_rect_from_camelot_converts_properly():
 
 
 def test_parse_pages_various_patterns():
+    """Parse page patterns into a set of valid page indices."""
     total = 20
     # 1,3,10-12 -> {0,2,9,10,11}
     s = rap._parse_pages("1,3,10-12", total)

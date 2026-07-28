@@ -119,6 +119,7 @@ def create_test_html():
 
 
 class HTMLExtractionFailure(Exception):
+    """Indicate failure during HTML content extraction."""
     pass
 
 

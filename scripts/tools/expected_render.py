@@ -33,11 +33,13 @@ else:
 
 
 def _load_json(p: Path):
+    """Load JSON data from a specified file path."""
     with p.open("r", encoding="utf-8") as f:
         return json.load(f)
 
 
 def boxes_from_stage02(path: Path) -> Iterable[Box]:
+    """Extract bounding boxes from a JSON file containing block data."""
     data = _load_json(path)
     for i, b in enumerate(data.get("blocks", [])):
         bbox = b.get("bbox") or b.get("bbox0")
@@ -57,6 +59,7 @@ def boxes_from_stage02(path: Path) -> Iterable[Box]:
 
 
 def boxes_from_stage05(path: Path) -> Iterable[Box]:
+    """Extract Box objects from table data in a JSON file."""
     data = _load_json(path)
     for i, t in enumerate(data.get("tables", [])):
         bbox = t.get("bbox")
@@ -76,6 +79,7 @@ def boxes_from_stage05(path: Path) -> Iterable[Box]:
 
 
 def boxes_from_stage06(path: Path) -> Iterable[Box]:
+    """Extract figure bounding boxes from a JSON file."""
     data = _load_json(path)
     for i, f in enumerate(data.get("figures", [])):
         bbox = f.get("bbox")
@@ -95,6 +99,7 @@ def boxes_from_stage06(path: Path) -> Iterable[Box]:
 
 
 def boxes_from_stage03(path: Path) -> Iterable[Box]:
+    """Extract bounding boxes from suspicious headers in a JSON file."""
     data = _load_json(path)
     for i, b in enumerate(data.get("suspicious_headers", [])):
         bbox = b.get("bbox")
@@ -122,6 +127,7 @@ STEP_MAP = {
 
 
 def main() -> int:
+    """Render visual overlays for selected steps based on input arguments."""
     ap = argparse.ArgumentParser(description="Render visual overlays for selected steps")
     ap.add_argument("--pdf", required=True, type=Path)
     ap.add_argument(

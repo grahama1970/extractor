@@ -25,6 +25,7 @@ STEP_NAME = "06b_layout_sketcher"
 
 
 def _norm(v: float, a: float, b: float) -> float:
+    """Normalize a value within a range, clamping to `[0, 1]`."""
     if b <= a:
         return 0.0
     x = (v - a) / (b - a)
@@ -53,6 +54,7 @@ def _grid_bbox(bbox: list[float], page: list[float], grid: int) -> dict[str, int
 
 
 def _summ(text: str, limit: int = 80) -> str:
+    """Normalize and truncate text with ellipsis to a limit."""
     if not text:
         return ""
     s = " ".join(str(text).split())
@@ -60,21 +62,25 @@ def _summ(text: str, limit: int = 80) -> str:
 
 
 def _norm_text(s: str) -> str:
+    """Normalize string whitespace by collapsing and stripping."""
     return " ".join((s or "").split())
 
 
 def _text_sha1(s: str) -> str:
+    """Return the SHA-1 hash of normalized text as a hexadecimal string."""
 
     return hashlib.sha1(_norm_text(s).encode("utf-8")).hexdigest()
 
 
 def _area(b: list[float]) -> float:
+    """Compute the area of a bounding box, handling invalid or inverted inputs."""
     if not b or len(b) != 4:
         return 0.0
     return max(0.0, (b[2] - b[0])) * max(0.0, (b[3] - b[1]))
 
 
 def _aspect(b: list[float]) -> float:
+    """Return the aspect ratio of a bounding box defined by coordinates."""
     w = max(1e-6, (b[2] - b[0]))
     h = max(1e-6, (b[3] - b[1]))
     return w / h
@@ -108,6 +114,7 @@ def _detect_columns(
 
 
 def _assign_cols_and_span(bbox: List[float], columns: List[List[float]]) -> Tuple[List[int], bool]:
+    """Identify columns for a bounding box, detecting if it spans."""
     x0, _, x1, _ = [float(v) for v in (bbox or [0, 0, 0, 0])]
     col_ids: List[int] = []
     spans = False
@@ -130,6 +137,7 @@ def _assign_cols_and_span(bbox: List[float], columns: List[List[float]]) -> Tupl
 
 
 def _col_id_for(xc: float, columns: list[list[float]]) -> int:
+    """Return column index containing x-coordinate, defaulting to 0."""
     for i, (a, b) in enumerate(columns):
         if a <= xc <= b:
             return i
@@ -137,6 +145,7 @@ def _col_id_for(xc: float, columns: list[list[float]]) -> int:
 
 
 def _iou(a: list[float], b: list[float]) -> float:
+    """Calculate the Intersection over Union (IoU) for two bounding boxes."""
     try:
         ax0, ay0, ax1, ay1 = map(float, a)
         bx0, by0, bx1, by1 = map(float, b)
@@ -160,6 +169,7 @@ def _build_flow_stream(
     exclude_header_footer: bool,
     place_floats: str = "inline",
 ) -> str:
+    """Build a formatted flow stream from elements and column definitions."""
     lines: list[str] = ["[SECTION START]"]
     col_count = len(columns_grid) if columns_grid else 1
     lines.append(f"[COLUMNS {col_count}]")
@@ -170,6 +180,7 @@ def _build_flow_stream(
         by_col.setdefault(int(e.get("column_id", 0)), []).append(e)
 
     def _emit_elem(e):
+        """Emit a formatted string representation of an element."""
         gid = e.get("id") or "?"
         if e.get("kind") == "text":
             return f"[PARA id={gid}] {e.get('summary','')}"
@@ -211,6 +222,7 @@ def _build_flow_stream(
 
 
 def _collect_page_index_from_sections(sections: List[dict]) -> Dict[int, Dict[str, Any]]:
+    """Collect page index from sections, mapping page numbers to block data."""
     page_index: Dict[int, Dict[str, Any]] = {}
     for sec in sections or []:
         for b in sec.get("blocks") or []:
@@ -237,6 +249,7 @@ def _collect_page_index_from_sections(sections: List[dict]) -> Dict[int, Dict[st
 def _pymupdf_fill_missing_pages(
     page_index: Dict[int, Dict[str, Any]], source_pdf: Optional[Path]
 ) -> None:
+    """Fill missing pages in index from source PDF."""
     if (
         os.getenv("STAGE06B_PYMUPDF_FALLBACK", "").lower() not in ("1", "true", "yes", "y")
         or not source_pdf
@@ -278,6 +291,7 @@ def _pymupdf_fill_missing_pages(
 def _build_page_layout(
     page_index: Dict[int, Dict[str, Any]], *, min_gap_ratio: float, grid: int
 ) -> Dict[int, Dict[str, Any]]:
+    """Build a layout dictionary for pages based on their bounding boxes."""
     layout: Dict[int, Dict[str, Any]] = {}
     for pno, rec in page_index.items():
         page_bbox: List[float] = rec.get("page_bbox") or [0.0, 0.0, 1.0, 1.0]
@@ -313,6 +327,7 @@ def _build_section_sketch(
     base_results_dir: Optional[Path] = None,
     source_pdf: Optional[Path] = None,
 ) -> dict[str, Any]:
+    """Build a section sketch from provided parameters and layout options."""
     if page_layout is None:
         page_layout = {}
     first_page_idx = int(sec.get("page_start", sec.get("page_index", 0)) or 0)
@@ -385,6 +400,7 @@ def _build_section_sketch(
 
         # Normalize header string for logical grouping
         def _norm_hdr(h: str) -> str:
+            """Perform norm hdr operation."""
             s = " ".join(str(h or "").strip().lower().split())
             return s.replace(" ", "_")
 
@@ -600,6 +616,7 @@ def _build_section_sketch(
     if tables_for_section and len(tables_for_section) > 1:
 
         def _rows_cols(t: Dict[str, Any]) -> Tuple[int, int]:
+            """Extract row and column counts from a dictionary's pandas metrics."""
             m = t.get("pandas_metrics") or {}
             shp = m.get("shape") or [0, 0]
             try:
@@ -609,6 +626,7 @@ def _build_section_sketch(
                 raise
 
         def _h_iou(a: List[float], b: List[float]) -> float:
+            """Perform h iou operation."""
             try:
                 ax0, _, ax1, _ = a
                 bx0, _, bx1, _ = b
@@ -673,6 +691,7 @@ def _build_section_sketch(
         elements_sorted: list[dict[str, Any]],
         columns_map: dict[int, list[list[float]]],
     ) -> str:
+        """Build a descriptive DSL string for a document section."""
         lines: list[str] = []
         if pages:
             lines.append(
@@ -733,6 +752,7 @@ def _build_section_sketch(
 
     # ---- Build SKETCH_V2 (minimal, deterministic, prompt-friendly) ----
     def _union_bbox(elems: list[dict[str, Any]]) -> list[float]:
+        """Calculate the union bounding box for a list of elements."""
         x0 = y0 = float("inf")
         x1 = y1 = float("-inf")
         found = False
@@ -749,6 +769,7 @@ def _build_section_sketch(
         return [x0, y0, x1, y1] if found else [0.0, 0.0, 0.0, 0.0]
 
     def _page_window(elems: list[dict[str, Any]]) -> tuple[int, int]:
+        """Return the minimum and maximum page numbers from elements."""
         pages = [int(e.get("page", section_page_idx)) for e in elems]
         return (min(pages), max(pages)) if pages else (section_page_idx, section_page_idx)
 
@@ -781,6 +802,7 @@ def _build_section_sketch(
         raise
 
     def _obj_to_v2(e: dict[str, Any]) -> dict[str, Any]:
+        """Convert an object dictionary to a version 2 formatted dictionary."""
         sid = e.get("sketch_id") or e.get("id")
         out: dict[str, Any] = {
             "id": sid,
@@ -853,6 +875,7 @@ def _build_section_sketch(
         return out
 
     def _round_bbox(b):
+        """Round bounding box coordinates to two decimal places."""
         try:
             x0, y0, x1, y1 = [float(x) for x in b]
             return [round(x0, 2), round(y0, 2), round(x1, 2), round(y1, 2)]
@@ -949,9 +972,11 @@ def _build_section_sketch(
             raise RuntimeError("header propagation disabled")
 
         def _is_generic_hdr(h: str) -> bool:
+            """Check if string is non-empty and pipe-separated digits."""
             return bool(h) and all(tok.isdigit() for tok in h.split("|"))
 
         def _h_iou_bbox(a: list[float], b: list[float]) -> float:
+            """Calculate the Intersection over Union (IoU) of two bounding boxes."""
             try:
                 ax0, _, ax1, _ = a
                 bx0, _, bx1, _ = b
@@ -1179,8 +1204,8 @@ def _build_section_sketch_llm(
 
         from extractor.pipeline.utils.model_params import image_file_to_data_url
 
-        base = os.getenv("CHUTES_API_BASE", "").strip()
-        key = os.getenv("CHUTES_API_KEY", "").strip()
+        base = os.getenv("SCILLM_API_BASE", "http://localhost:4010").strip()
+        key = os.getenv("SCILLM_PROXY_KEY", "sk-dev-proxy-123").strip()
         if not (base and key):
             return None
         # Single-source VLM model only
@@ -1221,6 +1246,7 @@ def _build_section_sketch_llm(
         from scillm import parallel_acompletions_iter
 
         async def _do_vlm_call():
+            """Make VLM call, returning JSON object."""
             reqs = [
                 {
                     "model": "chutes/vlm",
@@ -1232,8 +1258,8 @@ def _build_section_sketch_llm(
                 }
             ]
 
-            api_key = os.getenv("CHUTES_API_KEY")
-            api_base = os.getenv("CHUTES_API_BASE", "https://llm.chutes.ai/v1")
+            api_key = os.getenv("SCILLM_PROXY_KEY", "sk-dev-proxy-123")
+            api_base = os.getenv("SCILLM_API_BASE", "http://localhost:4010")
 
             async for r in parallel_acompletions_iter(
                 reqs,
@@ -1437,6 +1463,7 @@ def run(input_path: str, output_path: str, **kwargs) -> dict[str, Any]:
         raise
 
     def _rect_intersects(a: list[float], b: list[float]) -> bool:
+        """Check if two rectangles intersect."""
         try:
             ax0, ay0, ax1, ay1 = map(float, a)
             bx0, by0, bx1, by1 = map(float, b)

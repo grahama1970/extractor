@@ -16,6 +16,7 @@ from extractor.pipeline.utils.reliability import log_stage_error
 PDF_LARGE_FONT_THRESHOLD: float = 14.0
 
 def get_pdf_large_font_threshold() -> float:
+    """Return PDF large font threshold from env or default."""
     import os
     try:
         v = os.getenv("SPARTA_PDF_FONT_LARGE")
@@ -81,6 +82,7 @@ except ImportError:
 import difflib as _difflib
 
 def _roman_to_int(roman: str) -> int:
+    """Convert Roman numeral string to its integer equivalent."""
     values = {"I": 1, "V": 5, "X": 10, "L": 50, "C": 100, "D": 500, "M": 1000}
     roman = roman.upper()
     total = 0
@@ -95,6 +97,7 @@ def _roman_to_int(roman: str) -> int:
     return total
 
 def _similarity_ratio(a: str, b: str) -> float:
+    """Compute similarity percentage between two strings."""
     a = a.strip().lower()
     b = b.strip().lower()
     if _HAVE_RAPIDFUZZ:
@@ -102,6 +105,7 @@ def _similarity_ratio(a: str, b: str) -> float:
     return float(_difflib.SequenceMatcher(None, a, b).ratio() * 100.0)
 
 def _fuzzy_in_set(title: str, candidates: Iterable[str], threshold: float = 92.0) -> bool:
+    """Check if a string matches any candidate with sufficient similarity."""
     t = (title or "").strip().lower()
     if not t:
         return False
@@ -115,6 +119,7 @@ def _fuzzy_in_set(title: str, candidates: Iterable[str], threshold: float = 92.0
 # -------------------------------
 
 def _count_depth_from_num(num: str) -> int:
+    """Calculate heading depth from outline number string."""
     if not num:
         return 1
     parts = [p for p in num.replace(")", "").split(".") if p]

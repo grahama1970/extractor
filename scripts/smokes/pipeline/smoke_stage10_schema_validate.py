@@ -21,6 +21,7 @@ app = typer.Typer(add_completion=False)
 
 
 def _find_latest(root: Path) -> Path | None:
+    """Find the most recently modified JSON file in the specified directory."""
     cands = sorted(
         root.rglob("10_arangodb_exporter/json_output/10_flattened_data.json"),
         key=lambda p: p.stat().st_mtime,
@@ -31,6 +32,7 @@ def _find_latest(root: Path) -> Path | None:
 
 @app.command()
 def main(root: Path = typer.Option(Path("data/results"))):
+    """Load and validate the latest Stage 10 flattened JSON data."""
     p = _find_latest(root)
     if not p or not p.exists():
         print("SKIP: no Stage 10 flattened JSON found")

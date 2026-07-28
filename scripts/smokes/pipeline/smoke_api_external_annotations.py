@@ -27,6 +27,7 @@ app = typer.Typer(
 
 
 def _wait_http(url: str, timeout: float = 25.0) -> None:
+    """Wait for an HTTP response from a specified URL within a timeout."""
     start = time.monotonic()
     while time.monotonic() - start < timeout:
         try:
@@ -42,6 +43,7 @@ def main(
     pdf: Path = typer.Option(Path("data/input/pipeline/BHT_CV32A65X_marked.pdf"), exists=True),
     port: int = typer.Option(8002),
 ):
+    """Load environment variables and set Python path for execution."""
     load_dotenv(find_dotenv() or None)
     import sys
 

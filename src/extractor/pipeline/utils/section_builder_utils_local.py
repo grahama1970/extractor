@@ -16,12 +16,14 @@ from extractor.pipeline.utils.sections.heuristics import _roman_to_int
 
 
 def normalize_section_number(value: Optional[str]) -> str:
+    """Normalize section number string by stripping whitespace and trailing periods."""
     if not value:
         return ""
     return str(value).strip().rstrip(".")
 
 
 def coerce_depth(depth: Any) -> List[int]:
+    """Convert depth value to integer list, ignoring invalid entries."""
     if isinstance(depth, list):
         normalized: List[int] = []
         for item in depth:
@@ -35,6 +37,7 @@ def coerce_depth(depth: Any) -> List[int]:
 
 
 def derive_parent_number(sec_num: str) -> Optional[str]:
+    """Extract parent section number from a hierarchical identifier."""
     trimmed = normalize_section_number(sec_num)
     if not trimmed:
         return None
@@ -45,6 +48,7 @@ def derive_parent_number(sec_num: str) -> Optional[str]:
 
 
 def normalize_breadcrumbs(value: Any) -> Tuple[List[Dict[str, Any]], List[str]]:
+    """Normalize breadcrumb data into nodes and title strings."""
     nodes: List[Dict[str, Any]] = []
     titles: List[str] = []
     if isinstance(value, list):
@@ -76,6 +80,7 @@ def normalize_breadcrumbs(value: Any) -> Tuple[List[Dict[str, Any]], List[str]]:
 
 
 def breadcrumb_label(section: Dict[str, Any], sec_num: str) -> str:
+    """Generate a breadcrumb label from section data and number."""
     meta = section.get("metadata") or {}
     display = section.get("display_title") or meta.get("title_display") or ""
     fallback = section.get("title") or ""
@@ -120,6 +125,7 @@ def analyze_section_numbering(text: str) -> Dict[str, Any]:
 
 
 def derive_section_depth(numbering_analysis: Dict[str, Any]) -> List[int]:
+    """Extract section depth from numbering analysis data."""
     depth: List[int] = []
     if not numbering_analysis or not numbering_analysis.get("has_numbering"):
         return depth
@@ -154,6 +160,7 @@ def derive_section_depth(numbering_analysis: Dict[str, Any]) -> List[int]:
 
 
 def extract_section_title(text: str) -> str:
+    """Extract the title text from a numbered section header."""
     text = (text or "").strip()
     if not text:
         return ""
@@ -168,6 +175,7 @@ def extract_section_title(text: str) -> str:
 
 
 def clean_section_title(text: str) -> str:
+    """Extract the main title line from a section header with optional breadcrumb."""
     text_lines = text.split("\n")
     if len(text_lines) > 1 and "<!-- SECTION_BREADCRUMB" in text_lines[-1]:
         return text_lines[0].strip()
@@ -175,6 +183,7 @@ def clean_section_title(text: str) -> str:
 
 
 def detect_header_level(text: str) -> int:
+    """Detect Markdown header level from leading hashes."""
     text = text.strip()
     if text.startswith("# "):
         return 1
@@ -207,6 +216,7 @@ def detect_header_level(text: str) -> int:
 
 
 def looks_like_header_text(text: str) -> bool:
+    """Check if text matches common document header patterns."""
     t = (text or "").strip()
     if not t:
         return False

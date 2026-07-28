@@ -5,12 +5,14 @@ from extractor.core.schema.unified_document import DocumentMetadata
 
 
 def test_ensure_local_source_passthrough(tmp_path, monkeypatch):
+    """Confirms `ensure_local_source` passes through local paths."""
     path, download = fetcher_bridge.ensure_local_source(tmp_path)
     assert path == tmp_path
     assert download is None
 
 
 def test_ensure_local_source_downloads_url(monkeypatch, tmp_path):
+    """Test local source download functionality with a mocked URL."""
     fake_path = tmp_path / "blob.bin"
     fake_path.write_text("hi", encoding="utf-8")
     fake_download = FetcherDownload(
@@ -30,6 +32,7 @@ def test_ensure_local_source_downloads_url(monkeypatch, tmp_path):
 
 
 def test_attach_fetcher_metadata(tmp_path):
+    """Attach metadata to a fetcher download instance."""
     metadata = DocumentMetadata()
     download = FetcherDownload(
         path=tmp_path / "blob.txt",

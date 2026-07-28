@@ -64,6 +64,7 @@ class FailureCollector:
     }
 
     def __init__(self, corpus_dir: Path):
+        """Initialize corpus processing directories and patterns."""
         self.corpus_dir = corpus_dir
         self.results_dir = corpus_dir / "results"
         self.patterns_file = corpus_dir / "failure_patterns.json"
@@ -218,6 +219,7 @@ class FailureCollector:
 
 
 def main():
+    """Parse command-line arguments for PDF extraction failure pattern collection."""
     parser = argparse.ArgumentParser(description="Collect PDF extraction failure patterns")
     parser.add_argument("--corpus", type=Path, required=True, help="Corpus directory")
     parser.add_argument("--watch", action="store_true", help="Watch mode - continuous monitoring")

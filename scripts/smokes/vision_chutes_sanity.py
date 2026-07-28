@@ -24,6 +24,7 @@ ART.mkdir(parents=True, exist_ok=True)
 def _http_request(
     method: str, url: str, api_key: str, payload: dict | None = None, timeout: float = 20.0
 ) -> dict:
+    """Send an authenticated HTTP request with payload, returning JSON."""
     data = None if payload is None else json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
         url,
@@ -41,6 +42,7 @@ def _http_request(
 def _http_chat_completion(
     api_base: str, api_key: str, payload: dict, timeout: float = 20.0
 ) -> dict:
+    """Return chat completion response from the API based on payload."""
     req = urllib.request.Request(
         f"{api_base.rstrip('/')}/chat/completions",
         data=json.dumps(payload).encode("utf-8"),
@@ -54,6 +56,7 @@ def _http_chat_completion(
 
 
 def _vision_needles() -> list[str]:
+    """Return a list of vision model identifiers."""
     return [
         "gpt-4o",
         "omni",
@@ -70,11 +73,13 @@ def _vision_needles() -> list[str]:
 
 
 def _is_vision_id(model_id: str) -> bool:
+    """Check if model ID is a vision model."""
     low = str(model_id).lower()
     return any(n in low for n in _vision_needles())
 
 
 def _pick_vision_model(models_obj: dict) -> Optional[str]:
+    """Return the first valid vision model ID from the given models."""
     ids = [
         x.get("id") for x in (models_obj.get("data") or []) if isinstance(x, dict) and x.get("id")
     ]
@@ -155,11 +160,11 @@ def main(
     except Exception:
         pass
     base = (
-        os.getenv("CHUTES_API_BASE") or os.getenv("OPENAI_BASE_URL") or os.getenv("OPENAI_API_BASE")
+        os.getenv("SCILLM_API_BASE", "http://localhost:4010") or os.getenv("OPENAI_BASE_URL") or os.getenv("OPENAI_API_BASE")
     )
-    key = os.getenv("CHUTES_API_KEY") or os.getenv("OPENAI_API_KEY")
+    key = os.getenv("SCILLM_PROXY_KEY", "sk-dev-proxy-123") or os.getenv("OPENAI_API_KEY")
     if not base or not key:
-        typer.echo("SKIP: Missing CHUTES/OPENAI base+key; set creds then rerun.")
+        typer.echo("SKIP: Missing SCILLM/OPENAI base+key; set creds then rerun.")
         raise typer.Exit(code=0)
 
     mdl = model or os.getenv("CHUTES_MODEL")

@@ -14,6 +14,7 @@ from typing import Any, Optional
 
 @dataclass
 class Check:
+    """Validate JSON data against specified conditions using a JSON pointer."""
     id: str
     path: str
     json_pointer: str  # e.g., "/sections"
@@ -24,6 +25,7 @@ class Check:
 
 
 def _load_config() -> dict[str, Any]:
+    """Load pipeline invariants from environment or default config file."""
     cfg_env = os.getenv("SPARTA_INVARIANTS") or os.getenv("PIPELINE_INVARIANTS")
     cfg_path = Path(cfg_env) if cfg_env else Path("config/pipeline_invariants.json")
     try:
@@ -34,6 +36,7 @@ def _load_config() -> dict[str, Any]:
 
 
 def _get_pointer(obj: Any, pointer: str) -> Any:
+    """Retrieve a value from a nested object using a JSON pointer."""
     if pointer in ("", "/"):
         return obj
     cur = obj
@@ -55,6 +58,7 @@ def _get_pointer(obj: Any, pointer: str) -> Any:
 
 
 def _compare(lhs: Any, op: str, rhs: Any) -> bool:
+    """Compare two values using the specified operator."""
     ops = {
         "==": lambda a, b: a == b,
         ">=": lambda a, b: a >= b,
@@ -67,6 +71,7 @@ def _compare(lhs: Any, op: str, rhs: Any) -> bool:
 
 
 def _compute_metric(value: Any, metric: str) -> Optional[Any]:
+    """Compute a metric based on the provided value and metric type."""
     if metric == "len":
         try:
             return len(value)  # type: ignore[arg-type]
@@ -85,6 +90,7 @@ def _compute_metric(value: Any, metric: str) -> Optional[Any]:
 
 
 def main() -> int:
+    """Perform main operation."""
     cfg = _load_config()
     out_dir = Path(cfg.get("defaults", {}).get("out_dir", "data/results/pipeline"))
     failures: list[dict[str, Any]] = []

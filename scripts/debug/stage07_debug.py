@@ -13,6 +13,7 @@ from extractor.pipeline.steps import _07_reflow_section as stage07
 
 
 def main() -> int:
+    """Parse arguments and execute stage 07."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--sections", type=Path, required=True)
     ap.add_argument("--tables", type=Path, required=True)

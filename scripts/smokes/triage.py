@@ -17,6 +17,7 @@ SMOKE_SCRIPTS = {
 
 
 def _run(cmd: list[str], env: dict | None = None) -> Tuple[int, str, str]:
+    """Run command, returning its exit code, stdout, and stderr."""
     p = subprocess.run(cmd, capture_output=True, text=True, env=env)
     return p.returncode, p.stdout, p.stderr
 
@@ -35,6 +36,7 @@ def _model_preference() -> str | None:
 
 
 def triage(target: str) -> int:
+    """Perform a smoke test for the target."""
     load_dotenv(find_dotenv())
     path = SMOKE_SCRIPTS.get(target)
     if not path or not path.exists():
@@ -95,6 +97,7 @@ def triage(target: str) -> int:
 
 
 def main():
+    """Handle command-line arguments and execute corresponding triage function."""
     if len(sys.argv) < 2:
         print(f"Usage: {Path(sys.argv[0]).name} <03-text|07-text|07-vision|09>")
         raise SystemExit(2)

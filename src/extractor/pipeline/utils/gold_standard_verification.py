@@ -43,6 +43,7 @@ def verify_pipeline():
 
     # Helper to check for files and load them
     def load_json(path_str):
+        """Load JSON from a file path, returning None on failure."""
         path = Path(path_str)
         if not path.exists():
             print(f"✗ Results file not found: {path}")

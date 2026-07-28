@@ -117,6 +117,7 @@ def register_fixture(
 
 
 def main():
+    """Register a testing fixture with specified PDF path and options."""
     parser = argparse.ArgumentParser(description="Register a fixture for testing")
     parser.add_argument("pdf_path", type=Path, help="Path to PDF file")
     parser.add_argument("--name", required=True, help="Fixture name")

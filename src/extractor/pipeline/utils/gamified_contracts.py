@@ -5,6 +5,7 @@ from pydantic import BaseModel, StrictBool, StrictFloat, StrictInt, StrictStr
 
 
 class IterMetrics(BaseModel):
+    """Return metrics for iteration including correctness and timings."""
     approach: StrictStr
     correctness: Dict[StrictStr, StrictBool]
     timings_ms: Dict[StrictStr, float]
@@ -13,12 +14,14 @@ class IterMetrics(BaseModel):
 
 
 class MutationInfo(BaseModel):
+    """Return mutation application status with flexible extra attributes."""
     applied: StrictBool
     # freeform extras allowed
     model_config = dict(extra="allow")
 
 
 class IterSummary(BaseModel):
+    """Represent a summary of a single iteration's results and metrics."""
     iter: StrictInt
     score: StrictFloat
     metrics: IterMetrics
@@ -28,6 +31,7 @@ class IterSummary(BaseModel):
 
 
 class DoneInfo(BaseModel):
+    """Return status and details of a completed operation."""
     ok: StrictBool
     variant: StrictStr
     best_score: Optional[StrictFloat] = None
@@ -35,6 +39,7 @@ class DoneInfo(BaseModel):
 
 
 class ApproachScore(BaseModel):
+    """Represent an approach's evaluation score and metrics."""
     correctness: Dict[StrictStr, StrictBool]
     timings_ms: Dict[StrictStr, float]
     robust: StrictBool
@@ -45,10 +50,12 @@ class ApproachScore(BaseModel):
 
 
 class Scorecard(BaseModel):
+    """Validate the winner against the available approaches in the scorecard."""
     scales: List[StrictStr]
     approaches: Dict[StrictStr, ApproachScore]
     winner: Optional[StrictStr] = None
 
     def validate_winner(self) -> None:
+        """Ensure winner is a key in approaches."""
         if self.winner and self.winner not in self.approaches:
             raise ValueError("winner must be a key in approaches when set")

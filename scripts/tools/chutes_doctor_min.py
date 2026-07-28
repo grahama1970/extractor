@@ -3,7 +3,7 @@
 Chutes Doctor (Minimal): Verifies the single pinned model returns JSON with 200.
 
 Env:
-- CHUTES_API_BASE, CHUTES_API_KEY, CHUTES_TEXT_MODEL
+- SCILLM_API_BASE, SCILLM_PROXY_KEY, CHUTES_TEXT_MODEL
 """
 from __future__ import annotations
 import os
@@ -19,6 +19,7 @@ except Exception as e:
 
 
 def env(name: str) -> str:
+    """Return the value of an environment variable or exit on missing."""
     v = os.environ.get(name, "").strip()
     if not v:
         print(f"env missing: {name}")
@@ -26,8 +27,8 @@ def env(name: str) -> str:
     return v
 
 
-base = env("CHUTES_API_BASE")
-key = env("CHUTES_API_KEY")
+base = os.environ.get("SCILLM_API_BASE", "http://localhost:4010")
+key = os.environ.get("SCILLM_PROXY_KEY", "sk-dev-proxy-123")
 mid = env("CHUTES_TEXT_MODEL")
 
 model_list = [
@@ -47,6 +48,7 @@ router = Router(model_list=model_list, num_retries=0, default_litellm_params={"t
 
 
 async def main() -> int:
+    """Return a JSON response from an asynchronous completion request."""
     try:
         out = await router.acompletion(
             model="chutes/text",

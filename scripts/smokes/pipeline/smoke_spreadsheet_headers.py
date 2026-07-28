@@ -25,6 +25,7 @@ app = typer.Typer(add_completion=False)
 def main(
     tmp_dir: Path = typer.Option(Path("data/results/structured_parity_smoke/spreadsheet_synth")),
 ):
+    """Create an Excel file with headers and sample data in a directory."""
     tmp_dir.mkdir(parents=True, exist_ok=True)
     xlsx_path = tmp_dir / "headers.xlsx"
     wb = Workbook()

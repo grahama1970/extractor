@@ -23,6 +23,7 @@ def main(
     pdf: Path = typer.Option(Path("data/input/pipeline/BHT_CV32A65X_marked.pdf"), exists=True),
     results: Path = typer.Option(Path("data/results/pipeline_smoke_offline"), "-o"),
 ):
+    """Run the offline smoke extraction pipeline for given PDF and results."""
     load_dotenv(find_dotenv() or None)
     cmd = [
         os.environ.get("PYTHON", "python"),

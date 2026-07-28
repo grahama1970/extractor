@@ -24,6 +24,7 @@ def test_litellm_call_stdin_smoke(tmp_path):
     reason="console script not installed or E2E disabled",
 )
 def test_litellm_call_file_smoke(tmp_path):
+    """Verify litellm-call script handles file input."""
     p = tmp_path / "prompts.txt"
     p.write_text("A\nB\n")
     cmd = ["litellm-call", "main", f"@{p}", "--no-progress"]

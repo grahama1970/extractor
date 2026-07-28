@@ -21,6 +21,7 @@ from typing import Dict, Any, List
 
 
 def main() -> int:
+    """Validate page table count against a minimum threshold."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--tables", required=True, help="Path to 05_tables.json")
     ap.add_argument("--page", type=int, required=True, help="0-based page index to check")

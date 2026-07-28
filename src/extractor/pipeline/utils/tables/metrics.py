@@ -409,6 +409,7 @@ def _fix_broken_words(text: str) -> str:
 
     # Fix general broken words (2-char trailing only) with stopword filter
     def _merge_broken(m: re.Match) -> str:
+        """Return the original string if conditions for merging are not met."""
         trailing = m.group(2)
         first = m.group(1)
         # Don't merge if trailing fragment is a common English word
@@ -595,6 +596,7 @@ def _fix_broken_words_with_stopwords(text: str, stopwords: frozenset) -> str:
 
     # Fix general broken words with provided stopword filter
     def _merge_broken(m: re.Match) -> str:
+        """Merge two word fragments conditionally based on rules."""
         trailing = m.group(2)
         first = m.group(1)
         # Don't merge if trailing fragment is in stopwords

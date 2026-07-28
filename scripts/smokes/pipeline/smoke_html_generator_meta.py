@@ -21,6 +21,7 @@ app = typer.Typer(add_completion=False)
 
 @app.command()
 def main(tmp_dir: Path = typer.Option(Path("data/results/structured_parity_smoke/html_synth"))):
+    """Generate a sample HTML file in a specified temporary directory."""
     tmp_dir.mkdir(parents=True, exist_ok=True)
     html_path = tmp_dir / "gen.html"
     html_path.write_text(

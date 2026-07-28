@@ -40,6 +40,7 @@ MAX_PAGE_NUM = 100000
 # ---------------------------------------------------------------------------
 
 def validate_int(value, default: int = 0, min_val: int = None, max_val: int = None, field_name: str = None) -> int:
+    """Validate and clamp an integer within specified min/max bounds."""
     if min_val is None:
         min_val = -2147483648
     if max_val is None:
@@ -56,6 +57,7 @@ def validate_int(value, default: int = 0, min_val: int = None, max_val: int = No
 
 
 def validate_bbox(bbox: list, block_id: str = None) -> list:
+    """Validate and clamp bounding box coordinates within defined limits."""
     if not bbox or len(bbox) != 4:
         return [0.0, 0.0, 0.0, 0.0]
     validated = []
@@ -76,12 +78,14 @@ def validate_bbox(bbox: list, block_id: str = None) -> list:
 
 
 def clean_text(text: str) -> str:
+    """Clean text by removing null characters and handling None."""
     if text is None:
         return ""
     return text.replace("\x00", "")
 
 
 def calculate_sort_order(page: int, x0: float, y0: float, page_width: float = 612.0) -> int:
+    """Calculate a sort order based on page and coordinates."""
     mid_page = page_width / 2
     column = 0 if x0 < mid_page else 1
     return int(page * 1_000_000 + column * 100_000 + y0)
@@ -92,6 +96,7 @@ def calculate_sort_order(page: int, x0: float, y0: float, page_width: float = 61
 # ---------------------------------------------------------------------------
 
 def _load_json(path: Path) -> Dict[str, Any]:
+    """Load JSON data from a file path, returning empty dict on failure."""
     if not path or not path.exists():
         return {}
     try:
@@ -107,6 +112,7 @@ def _load_json(path: Path) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 def _ingest_sections_and_blocks(sections_json: Path) -> Tuple[List[Dict], List[Dict]]:
+    """Ingest sections and blocks from a JSON file path."""
     data = _load_json(sections_json)
     if not data:
         return [], []
@@ -167,6 +173,7 @@ def _ingest_sections_and_blocks(sections_json: Path) -> Tuple[List[Dict], List[D
 # ---------------------------------------------------------------------------
 
 def _ingest_tables(tables_json: Path) -> List[Dict]:
+    """Ingest tables from JSON file, returning a list of table dicts."""
     data = _load_json(tables_json)
     if not data:
         return []
@@ -220,6 +227,19 @@ def _ingest_tables(tables_json: Path) -> List[Dict]:
         llm_desc = table.get("llm_description") or table.get("ai_description") or table.get("description")
         image_path = table.get("table_image_path")
 
+        # S05 quality metrics — carried through to S10 for ArangoDB storage
+        extraction_metrics = {}
+        if table.get("extraction_method"):
+            extraction_metrics["extraction_method"] = table["extraction_method"]
+        if table.get("fragmentation_score") is not None:
+            extraction_metrics["fragmentation_score"] = table["fragmentation_score"]
+        if table.get("pandas_metrics"):
+            extraction_metrics["pandas_metrics"] = table["pandas_metrics"]
+        if table.get("camelot_metrics"):
+            extraction_metrics["camelot_metrics"] = table["camelot_metrics"]
+        if table.get("strategy_history"):
+            extraction_metrics["strategy_history"] = table["strategy_history"]
+
         tables.append({
             "id": t_id,
             "page": page,
@@ -231,6 +251,7 @@ def _ingest_tables(tables_json: Path) -> List[Dict]:
             "llm_title": llm_title,
             "llm_description": llm_desc,
             "image_path": image_path,
+            "extraction_metrics": extraction_metrics,
         })
 
     tables.sort(key=lambda t: t["sort_order"])
@@ -242,6 +263,7 @@ def _ingest_tables(tables_json: Path) -> List[Dict]:
 # ---------------------------------------------------------------------------
 
 def _ingest_figures(figures_json: Path) -> List[Dict]:
+    """Ingest figures from JSON file."""
     data = _load_json(figures_json)
     if not data:
         return []
@@ -292,6 +314,7 @@ def _ingest_figures(figures_json: Path) -> List[Dict]:
 # ---------------------------------------------------------------------------
 
 def _ingest_annotations(annotations_json: Path) -> List[Dict]:
+    """Ingest annotations from a JSON file, returning a list of dicts."""
     data = _load_json(annotations_json)
     if not data:
         return []
@@ -313,6 +336,7 @@ def _ingest_annotations(annotations_json: Path) -> List[Dict]:
 
 
 def _ingest_toc_entries(marker_json: Path) -> List[Dict]:
+    """Ingest table of contents entries from a JSON file."""
     data = _load_json(marker_json)
     if not data:
         return []
@@ -451,10 +475,12 @@ def _suppress_overlapping_blocks(blocks: List[Dict], tables_json: Path) -> List[
 # ---------------------------------------------------------------------------
 
 def _box_overlap(ax0, ay0, ax1, ay1, bx0, by0, bx1, by1) -> float:
+    """Compute the intersection area of two axis-aligned boxes."""
     return max(0.0, min(ax1, bx1) - max(ax0, bx0)) * max(0.0, min(ay1, by1) - max(ay0, by0))
 
 
 def _box_area(x0, y0, x1, y1) -> float:
+    """Calculate the area of a rectangle defined by two corners."""
     return (x1 - x0) * (y1 - y0)
 
 
@@ -542,6 +568,7 @@ def _merge_contiguous_blocks(
         current_sort_base: int = 0
 
         def flush_text_buffer():
+            """Flush text buffer, merging and cleaning text."""
             nonlocal content_id, current_text_buffer, current_text_bboxes, current_page, current_sort_base
             if not current_text_buffer:
                 return
@@ -729,6 +756,7 @@ run = run_assemble_corpus
 
 
 def sanity() -> int:
+    """Return the result of the sanity check step."""
     return run_step_sanity(STEP_NAME)
 
 

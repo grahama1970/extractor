@@ -4,14 +4,17 @@ from pathlib import Path
 
 
 def _run(cmd):
+    """Execute a command, capturing stdout and stderr as text."""
     return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
 
 def _runs_set():
+    """Return a set of parent directory names from run instances."""
     return set(p.parent.name for p in Path("workspace/runs").glob("*/instances"))
 
 
 def test_emit_only_writes_launch_script(tmp_path: Path):
+    """Verify emit flag writes only launch script."""
     before = _runs_set()
     p = _run(
         [

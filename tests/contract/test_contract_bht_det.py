@@ -3,6 +3,7 @@ from pathlib import Path
 
 
 def test_bht_deterministic_contract():
+    """Validate BHT deterministic contract output."""
     base = Path("data/results/pipeline_det")
     assert base.exists(), "deterministic run output missing; run `make ci-det` first"
 

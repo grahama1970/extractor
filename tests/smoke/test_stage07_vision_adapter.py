@@ -14,6 +14,7 @@ RUN = os.getenv("RUN_S07_VISION_SMOKE") == "1"
 
 
 def _load_stage01_module():
+    """Load and execute the Stage 01 module from a specified file path."""
     file_path = Path("src/extractor/pipeline/steps/s01_annotation_processor.py").resolve()
     assert file_path.exists(), f"Missing Stage 01 script at {file_path}"
     spec = importlib.util.spec_from_file_location("stage01_module", str(file_path))
@@ -26,6 +27,7 @@ def _load_stage01_module():
 @pytest.mark.skipif(not RUN, reason="RUN_S07_VISION_SMOKE not set")
 @pytest.mark.asyncio
 async def test_stage07_vision_adapter_returns_json(tmp_path):
+    """Test vision adapter returns JSON output."""
     model = None
     if os.getenv("GEMINI_API_KEY"):
         model = os.getenv("LITELLM_DEFAULT_MODEL", "gemini/gemini-2.5-flash")

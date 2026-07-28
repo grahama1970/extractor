@@ -33,6 +33,7 @@ PREF_ORDER = {"human": 3, "llm": 2, "heuristic_auto": 1}
 
 
 def _prefer(a: dict[str, Any], b: dict[str, Any]) -> dict[str, Any]:
+    """Return the preferred dictionary based on label source and timestamp."""
     la = str(a.get("label_source") or "llm").lower()
     lb = str(b.get("label_source") or "llm").lower()
     sa = PREF_ORDER.get(la, 0)
@@ -59,6 +60,7 @@ def main(
         "human,llm,heuristic_auto", help="Comma-separated label_source whitelist"
     ),
 ) -> None:
+    """Execute the main command to process JSONL files and generate output."""
     input_dir.mkdir(parents=True, exist_ok=True)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     allow = {s.strip().lower() for s in include_sources.split(",") if s.strip()}

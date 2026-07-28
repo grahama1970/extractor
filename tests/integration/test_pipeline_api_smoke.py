@@ -7,6 +7,7 @@ import extractor.pipeline.api as api
 
 
 class DummyCompleted:
+    """Return a fixed return code for process completion status."""
     returncode = 0
 
 

@@ -1,3 +1,4 @@
+"""Lazy-loaded sentence-transformer embedder singleton for text similarity tasks."""
 from __future__ import annotations
 
 from typing import Any
@@ -8,6 +9,7 @@ _EMBEDDER: Any = None
 
 
 def ensure_embedder() -> Any:
+    """Load and cache a SentenceTransformer embedding model."""
     global _EMBEDDER
     if _EMBEDDER is None:
         try:

@@ -7,6 +7,7 @@ from typing import Any, Dict
 
 
 def _load(p: Path) -> Any:
+    """Load JSON from path, returning None on error."""
     try:
         return json.loads(p.read_text())
     except Exception:
@@ -14,6 +15,7 @@ def _load(p: Path) -> Any:
 
 
 def main(out_dir: str) -> int:
+    """Load JSON data from specified output directory and return status."""
     base = Path(out_dir)
     sec = _load(base / "04_section_builder/json_output/04_sections.json") or {}
     tab = _load(base / "05_table_extractor/json_output/05_tables.json") or {}

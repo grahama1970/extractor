@@ -12,6 +12,7 @@ from extractor.pipeline.steps import _09_section_summarizer as stage09
 
 
 def main() -> int:
+    """Parse command-line arguments for input, output, and settings."""
     ap = argparse.ArgumentParser()
     ap.add_argument(
         "--input", type=Path, required=True, help="07_reflowed.json or 08_theorems.json"

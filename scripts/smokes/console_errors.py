@@ -10,6 +10,7 @@ app = typer.Typer(add_completion=False)
 
 
 def discover_ws(cdp_origin: str, token: str | None) -> str:
+    """Return the WebSocket debugger URL from a CDP origin."""
     url = f"{cdp_origin.rstrip('/')}/json/version"
     if token:
         url += f"?token={token}"
@@ -28,6 +29,7 @@ def run(
         "scripts/artifacts/ui_screenshot.png", help="Path for screenshot"
     ),
 ):
+    """Run browser tests on a specified URL using Chrome DevTools Protocol."""
     artifacts_dir = pathlib.Path(screenshot).parent
     artifacts_dir.mkdir(parents=True, exist_ok=True)
 

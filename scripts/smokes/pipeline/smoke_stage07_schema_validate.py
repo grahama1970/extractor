@@ -20,6 +20,7 @@ app = typer.Typer(add_completion=False)
 
 
 def _find_latest(root: Path) -> Path | None:
+    """Return the most recent JSON file path from a directory."""
     cands = sorted(
         root.rglob("07_reflow_section/json_output/07_reflowed.json"),
         key=lambda p: p.stat().st_mtime,
@@ -30,6 +31,7 @@ def _find_latest(root: Path) -> Path | None:
 
 @app.command()
 def main(root: Path = typer.Option(Path("data/results"))):
+    """Load and validate Stage 07 JSON from the latest file."""
     p = _find_latest(root)
     if not p or not p.exists():
         print("SKIP: no Stage 07 reflowed JSON found")

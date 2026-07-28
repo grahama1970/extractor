@@ -178,11 +178,11 @@ class LiteLLMService(BaseService):
             self.litellm_base_url
             or os.getenv("OPENAI_BASE_URL")
             or os.getenv("OPENAI_API_BASE")
-            or os.getenv("CHUTES_API_BASE")
+            or os.getenv("SCILLM_API_BASE", "http://localhost:4001")
             or ""
         ).rstrip("/")
         api_key = (
-            self.litellm_api_key or os.getenv("OPENAI_API_KEY") or os.getenv("CHUTES_API_KEY") or ""
+            self.litellm_api_key or os.getenv("OPENAI_API_KEY") or os.getenv("SCILLM_PROXY_KEY", "sk-dev-proxy-123") or ""
         )
         if not api_base or not api_key:
             logger.error(

@@ -30,6 +30,7 @@ def main(
     prompt_version: str = typer.Option("header@0.1.0"),
     timeout: int = typer.Option(30),
 ):
+    """Load default model and options for the command-line interface."""
     try:
         # Load API keys from .env if present
         load_dotenv(find_dotenv())

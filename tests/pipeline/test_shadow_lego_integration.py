@@ -79,10 +79,12 @@ def tmp_data_root(tmp_path):
 
 @pytest.fixture
 def mock_training_dir(tmp_path):
+    """Return a mock training directory path for testing purposes."""
     return tmp_path / "training"
 
 
 class TestHarvestTransforms:
+    """Verify harvest transforms outcomes into a valid training JSONL file."""
     def test_harvest_transforms_outcomes_to_training_jsonl(self, tmp_data_root, tmp_path):
         """Verify harvest produces valid labels.jsonl with correct features."""
         from learn_datalake.orchestrator import harvest_strategy_outcomes
@@ -138,6 +140,7 @@ class TestHarvestTransforms:
 
 
 class TestTrainingGate:
+    """Test training gate's data sufficiency."""
     def test_training_gate_rejects_insufficient_data(self, tmp_path):
         """<200 examples should skip training."""
         from learn_datalake.orchestrator import train_strategy_classifier
@@ -159,6 +162,7 @@ class TestTrainingGate:
 
 
 class TestTrainingProduces:
+    """Validate model and metrics generation from training data."""
     def test_training_produces_joblib_and_metrics(self, tmp_path):
         """With enough data, training should produce model.joblib + metrics.json."""
         from learn_datalake.orchestrator import train_strategy_classifier
@@ -201,6 +205,7 @@ class TestTrainingProduces:
 
 
 class TestPromotionGate:
+    """Validate promotion gate behavior."""
     def test_promotion_gate_rejects_low_f1(self, tmp_path):
         """f1 < 0.85 should not promote."""
         from learn_datalake.orchestrator import check_promotion_gate
@@ -242,6 +247,7 @@ class TestPromotionGate:
 
 
 class TestStrategySelector:
+    """Validate assistant availability in the tier05 strategy selector."""
     def test_tier05_assistant_returns_none_when_unavailable(self):
         """When /assistant is not present, _tier05_assistant returns None."""
         from extractor.pipeline.utils.tables.strategy_selector import _tier05_assistant

@@ -65,6 +65,7 @@ LEGAL_HEADERS = [
 
 
 def _random_defense_rows(n: int) -> List[List[str]]:
+    """Generate random defense requirement rows with sequential IDs."""
     reqs = [f"SRD-{i:03d}" for i in range(1, n + 1)]
     descs = [
         "Operating Temperature", "Shock Resistance", "Vibration (Random)",
@@ -91,6 +92,7 @@ def _random_defense_rows(n: int) -> List[List[str]]:
 
 
 def _random_engineering_rows(n: int) -> List[List[str]]:
+    """Generate random engineering parameter rows."""
     params = [
         "Input Voltage", "Output Current", "Ripple", "Efficiency",
         "Dropout Voltage", "Quiescent Current", "Line Regulation",
@@ -110,6 +112,7 @@ def _random_engineering_rows(n: int) -> List[List[str]]:
 
 
 def _random_scientific_rows(n: int) -> List[List[str]]:
+    """Generate random scientific method performance rows."""
     methods = [
         "BERT-base", "RoBERTa-large", "GPT-2", "T5-small", "XLNet",
         "ALBERT", "DeBERTa", "ELECTRA", "Longformer", "BigBird",
@@ -126,6 +129,7 @@ def _random_scientific_rows(n: int) -> List[List[str]]:
 
 
 def _random_financial_rows(n: int) -> List[List[str]]:
+    """Generate random financial data rows with specified number of entries."""
     items = [
         "Revenue", "COGS", "Gross Profit", "R&D", "Sales & Marketing",
         "G&A", "Operating Income", "Interest", "Tax", "Net Income",
@@ -140,6 +144,7 @@ def _random_financial_rows(n: int) -> List[List[str]]:
 
 
 def _random_medical_rows(n: int) -> List[List[str]]:
+    """Generate random medical rows with drug names, routes, and frequencies."""
     drugs = ["Aspirin", "Metformin", "Lisinopril", "Atorvastatin", "Amoxicillin",
              "Omeprazole", "Losartan", "Gabapentin", "Hydrochlorothiazide", "Amlodipine"]
     routes = ["PO", "IV", "IM", "SC", "Topical"]
@@ -157,6 +162,7 @@ def _random_medical_rows(n: int) -> List[List[str]]:
 
 
 def _random_legal_rows(n: int) -> List[List[str]]:
+    """Generate random legal rows with control, version, and status data."""
     controls = [f"AC-{i}" for i in range(1, 30)]
     statuses = ["Implemented", "Planned", "Partial", "Not Applicable"]
     priorities = ["High", "Medium", "Low", "Critical"]
@@ -717,6 +723,7 @@ def extract_csv_from_s11(s11_path: Path) -> Optional[str]:
 
 
 def main():
+    """Validate cell-level accuracy and filter by domain if specified."""
     import argparse
     parser = argparse.ArgumentParser(description="Cell-level accuracy validator")
     parser.add_argument("--output-dir", type=Path,

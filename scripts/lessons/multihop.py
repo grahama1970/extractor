@@ -16,6 +16,7 @@ app = typer.Typer(add_completion=False)
 
 
 def resolve_key(col, title: str | None, scope: str | None) -> str | None:
+    """Resolve document key by title and scope."""
     if not title:
         return None
     cur = col.find({"title": title, "scope": scope or "tabbed"})
@@ -33,6 +34,7 @@ def multihop(
     limit: int = typer.Option(10, help="Top K neighbors to return"),
     json_out: bool = typer.Option(False, "--json", help="Output JSON"),
 ):
+    """Perform multihop operation."""
     db = get_db()
     lessons = db.collection("lessons")
     seed_key = key or resolve_key(lessons, title, scope)

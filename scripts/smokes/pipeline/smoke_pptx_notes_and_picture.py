@@ -28,6 +28,7 @@ app = typer.Typer(add_completion=False)
 
 @app.command()
 def main(tmp_dir: Path = typer.Option(Path("data/results/structured_parity_smoke/pptx_synth"))):
+    """Create a temporary directory and save a PNG file within it."""
     tmp_dir.mkdir(parents=True, exist_ok=True)
     pptx_path = tmp_dir / "notes_pic.pptx"
     png_path = tmp_dir / "tiny.png"

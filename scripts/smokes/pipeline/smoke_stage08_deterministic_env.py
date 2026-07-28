@@ -22,6 +22,7 @@ app = typer.Typer(add_completion=False)
 
 @app.command()
 def main():
+    """Ensure the Lean 4 environment is set up for testing."""
     import sys
 
     repo_src = (Path(__file__).resolve().parents[3] / "src").resolve()

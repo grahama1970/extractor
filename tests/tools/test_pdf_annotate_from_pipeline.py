@@ -17,6 +17,7 @@ def _load_legacy_module():
 
 
 def test_camelot_to_fitz_bbox_against_page_height():
+    """Validate bounding box conversion against page dimensions."""
     legacy = _load_legacy_module()
     page_rect = fitz.Rect(0, 0, 600, 800)
     bb = [50, 100, 300, 200]
@@ -25,6 +26,7 @@ def test_camelot_to_fitz_bbox_against_page_height():
 
 
 def test_put_box_fill_and_tab_creates_annotations(tmp_path):
+    """Test legacy `_put_box` creates annotations with fill and tab."""
     legacy = _load_legacy_module()
     # Create a one-page blank PDF
     out = tmp_path / "onepage.pdf"

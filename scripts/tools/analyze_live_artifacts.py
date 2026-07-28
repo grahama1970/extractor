@@ -16,10 +16,12 @@ from typing import Any, Dict, List
 
 
 def _load_json(p: Path) -> Any:
+    """Load JSON from path, returning None if file not found."""
     return json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
 
 
 def analyze(out: Path) -> Dict[str, Any]:
+    """Analyze data from a specified output path and generate a report."""
     report: Dict[str, Any] = {"run_dir": str(out)}
 
     # 04 sections
@@ -127,6 +129,7 @@ def analyze(out: Path) -> Dict[str, Any]:
 
 
 def write_reports(rep: Dict[str, Any]) -> None:
+    """Write reports to the output directory."""
     out_dir = Path("scripts/artifacts")
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "live_run_report.json").write_text(json.dumps(rep, indent=2), encoding="utf-8")

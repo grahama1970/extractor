@@ -19,6 +19,7 @@ app = typer.Typer(add_completion=False)
 
 
 def _load_items(p: Path) -> List[dict]:
+    """Load items from a JSON file, returning a list or empty list on failure."""
     data = json.loads(p.read_text())
     if isinstance(data, dict):
         return data.get("items") or []
@@ -39,6 +40,7 @@ def main(
         help="If set, upsert similar_knn edges into this DB (requires ARANGODB_URL/USERNAME/PASSWORD)",
     ),
 ):
+    """Generate edges JSON for similar items using a specified embedding model."""
     items = _load_items(stage10_flat)
     # Extract texts and ids
     ids: List[str] = []

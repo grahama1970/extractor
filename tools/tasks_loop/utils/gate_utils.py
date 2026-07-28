@@ -12,7 +12,6 @@ Usage in gates:
 """
 
 import json
-import duckdb
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
@@ -126,54 +125,6 @@ def assert_count(actual: int, expected: int, label: str, op: str = ">=") -> None
 
 
 # ---------------------------------------------------------------------------
-# DUCKDB ASSERTIONS
-# ---------------------------------------------------------------------------
-
-
-def assert_table_rows(
-    db_path: Union[str, Path],
-    table_name: str,
-    min_rows: int = 1,
-    con: Optional[duckdb.DuckDBPyConnection] = None,
-) -> int:
-    """Assert that a DuckDB table has at least min_rows.
-
-    Args:
-        db_path: Path to DuckDB file.
-        table_name: Name of table to check.
-        min_rows: Minimum required row count.
-        con: Optional existing connection (avoids lock issues).
-
-    Returns:
-        Actual row count.
-
-    Raises:
-        GateError: If table missing or too few rows.
-    """
-    should_close = False
-
-    if con is None:
-        db_path = Path(db_path)
-        if not db_path.exists():
-            raise GateError(f"Database not found: {db_path}")
-        con = duckdb.connect(str(db_path), read_only=True)
-        should_close = True
-
-    try:
-        try:
-            count = con.execute(f"SELECT count(*) FROM {table_name}").fetchone()[0]
-        except Exception:
-            raise GateError(f"Table '{table_name}' does not exist or cannot be queried")
-
-        if count < min_rows:
-            raise GateError(f"Table '{table_name}' has {count} rows, expected >= {min_rows}")
-
-        return count
-    finally:
-        if should_close:
-            con.close()
-
-
 # ---------------------------------------------------------------------------
 # GATE RUNNER HELPER
 # ---------------------------------------------------------------------------

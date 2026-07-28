@@ -67,8 +67,8 @@ async def _sc_chat(
 ):
     resp = await sc_acompletion(
         model=model,
-        api_base=os.getenv("CHUTES_API_BASE"),
-        api_key=os.getenv("CHUTES_API_KEY"),
+        api_base=os.getenv("SCILLM_API_BASE", "http://localhost:4010"),
+        api_key=os.getenv("SCILLM_PROXY_KEY", "sk-dev-proxy-123"),
         custom_llm_provider="openai",
         messages=messages,
         response_format={"type": "json_object"} if response_format == "json_object" else None,

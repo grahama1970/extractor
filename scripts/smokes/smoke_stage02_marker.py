@@ -16,6 +16,7 @@ app = typer.Typer(add_completion=False, help="Smoke: Stage 02 minimal block extr
 
 
 def _load_stage02():
+    """Load and return the Stage 02 module from a specified path."""
     p = Path("src/extractor/pipeline/steps/02_marker_extractor.py").resolve()
     spec = importlib.util.spec_from_file_location("stage02", str(p))
     if not spec or not spec.loader:
@@ -33,6 +34,7 @@ def main(
         help="Fixture PDF",
     )
 ):
+    """Process a marked PDF to extract and validate blocks."""
     try:
         load_dotenv(find_dotenv())
         mod = _load_stage02()

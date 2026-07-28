@@ -15,6 +15,7 @@ app = typer.Typer(add_completion=False)
 
 @app.command()
 def main(tmpdir: Path = typer.Option(Path("/tmp/extractor_smoke10"))):
+    """Initialize a minimal Lean4 output JSON structure."""
     tmpdir.mkdir(parents=True, exist_ok=True)
     # Minimal Lean4 OUT.json with analysis.used_lemmas
     out = {

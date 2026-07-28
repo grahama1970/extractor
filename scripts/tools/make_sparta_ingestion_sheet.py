@@ -34,6 +34,7 @@ app = typer.Typer(add_completion=False)
 
 
 def _read_json(p: Path) -> Dict[str, Any] | None:
+    """Load JSON from path, returning None on failure."""
     try:
         return json.loads(p.read_text(encoding="utf-8"))
     except Exception:
@@ -41,6 +42,7 @@ def _read_json(p: Path) -> Dict[str, Any] | None:
 
 
 def _count_list(obj: Dict[str, Any] | None, key: str) -> int:
+    """Count the number of items in a list from a dictionary key."""
     try:
         v = obj.get(key)
         return len(v or [])
@@ -49,11 +51,13 @@ def _count_list(obj: Dict[str, Any] | None, key: str) -> int:
 
 
 def _find_first(path: Path, rel: str) -> Optional[Path]:
+    """Locate the first existing file or directory at the specified relative path."""
     p = path / rel
     return p if p.exists() else None
 
 
 def _stat_or_none(p: Path) -> Optional[datetime]:
+    """Return modification time of path, or None on error."""
     try:
         return datetime.fromtimestamp(p.stat().st_mtime)
     except Exception:
@@ -61,6 +65,7 @@ def _stat_or_none(p: Path) -> Optional[datetime]:
 
 
 def _collect_row(run_dir: Path) -> Dict[str, Any]:
+    """Collect metadata for a run directory into a structured dictionary."""
     row: Dict[str, Any] = {
         "run_dir": str(run_dir),
         "doc_id": None,
@@ -182,6 +187,7 @@ def main(
         "scripts/artifacts/sparta_ingestion.xlsx", "--out", help="Output Excel path"
     ),
 ) -> None:
+    """Export pipeline run data to an Excel report."""
     runs: List[Path] = []
     # Prefer pipeline_iter/* runs; fall back to pipeline/*
     for pattern in ("pipeline_iter/*", "pipeline/*"):

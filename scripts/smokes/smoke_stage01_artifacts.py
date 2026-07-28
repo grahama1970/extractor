@@ -18,6 +18,7 @@ app = typer.Typer(add_completion=False, help="Smoke: Stage 01 artifacts exist (i
 
 
 def _load_stage01():
+    """Load and execute a Python module from a specified file path."""
     p = Path("src/extractor/pipeline/steps/s01_annotation_processor.py").resolve()
     spec = importlib.util.spec_from_file_location("stage01", str(p))
     if not spec or not spec.loader:
@@ -40,6 +41,7 @@ def main(
         Path("data/results/pipeline/smokes"), help="Base output directory"
     ),
 ):
+    """Execute the main command for processing a PDF file."""
     try:
         load_dotenv(find_dotenv())
         mod = _load_stage01()

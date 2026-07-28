@@ -22,6 +22,7 @@ app = typer.Typer(
 
 @app.command()
 def main(results: Path = typer.Option(Path("data/results/pipeline"), "-o")) -> None:
+    """Reflow document sections and store results."""
     load_dotenv(find_dotenv() or None)
     # Minimal reflowed sections
     reflow = {

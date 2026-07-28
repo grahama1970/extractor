@@ -25,6 +25,7 @@ app = typer.Typer(add_completion=False)
 
 
 def _load_flatten_function():
+    """Load and return a flatten function from a specified module path."""
     module_path = (
         Path(__file__).resolve().parents[3]
         / "src"
@@ -55,6 +56,7 @@ def main(
     results_dir: Path = typer.Option(Path("data/results/structured_parity_smoke/epub")),
     allowed_delta: int = typer.Option(5),
 ) -> None:
+    """Generate EPUB from PDF data and save results to specified directory."""
     flatten = _load_flatten_function()
     payload = json.loads(pdf_stage07.read_text())
     pdf_unified = build_unified_document_from_reflow(

@@ -24,11 +24,13 @@ except Exception:
 
 @dataclass
 class Probe:
+    """Define a data structure for a model and its provider."""
     model: str
     provider: str  # 'openai' | 'gemini' | 'moonshot'
 
 
 def strip_fences_and_crop(s: str) -> str:
+    """Strip code fences and crop a string to extract JSON content."""
     if not s:
         return s
     s2 = s.strip()
@@ -46,6 +48,7 @@ def strip_fences_and_crop(s: str) -> str:
 
 
 def parse_json(s: str) -> Optional[Dict[str, Any]]:
+    """Parse JSON string, returning None on failure."""
     try:
         return json.loads(strip_fences_and_crop(s))
     except Exception:
@@ -53,6 +56,7 @@ def parse_json(s: str) -> Optional[Dict[str, Any]]:
 
 
 async def try_chat(model: str, messages: List[Dict[str, Any]], **extra) -> str:
+    """Get chat completion content from a model."""
     resp = await acompletion(model=model, messages=messages, **extra)
     # 1) Standard path
     try:
@@ -100,6 +104,7 @@ async def try_chat(model: str, messages: List[Dict[str, Any]], **extra) -> str:
 async def run_openai(model: str, outdir: Path) -> Tuple[bool, str]:
     # Use the working pattern from gpt5_acompletion.py
     def _guess_mime(path: Path) -> str:
+        """Guess file MIME type from its extension."""
         ext = path.suffix.lower().lstrip(".")
         return {
             "png": "image/png",
@@ -112,6 +117,7 @@ async def run_openai(model: str, outdir: Path) -> Tuple[bool, str]:
         }.get(ext, "application/octet-stream")
 
     def _file_to_data_uri_tail(path: Path) -> str:
+        """Return a base64-encoded data URI from a file path."""
         import base64
 
         data = path.read_bytes()
@@ -119,6 +125,7 @@ async def run_openai(model: str, outdir: Path) -> Tuple[bool, str]:
         return f"{_guess_mime(path)};base64,{b64}"
 
     def images_to_mm_content(prompt_text: str, images: List[str]) -> List[Dict[str, Any]]:
+        """Build a list of content parts from text and image file paths."""
         parts: List[Dict[str, Any]] = [{"type": "text", "text": prompt_text}]
         for p in images:
             path = Path(p).expanduser().resolve()
@@ -173,6 +180,7 @@ async def run_openai(model: str, outdir: Path) -> Tuple[bool, str]:
 async def run_gemini(model: str, outdir: Path) -> Tuple[bool, str]:
     # Use the same standardized chat settings as OpenAI, BUT do NOT send response_format for Gemini Chat.
     def _guess_mime(path: Path) -> str:
+        """Guess MIME type from file extension."""
         ext = path.suffix.lower().lstrip(".")
         return {
             "png": "image/png",
@@ -185,6 +193,7 @@ async def run_gemini(model: str, outdir: Path) -> Tuple[bool, str]:
         }.get(ext, "application/octet-stream")
 
     def _file_to_data_uri_tail(path: Path) -> str:
+        """Return a base64-encoded data URI from a file path."""
         import base64
 
         data = path.read_bytes()
@@ -192,6 +201,7 @@ async def run_gemini(model: str, outdir: Path) -> Tuple[bool, str]:
         return f"{_guess_mime(path)};base64,{b64}"
 
     def images_to_mm_content(prompt_text: str, images: List[str]) -> List[Dict[str, Any]]:
+        """Build content list from prompt text and valid image file paths."""
         parts: List[Dict[str, Any]] = [{"type": "text", "text": prompt_text}]
         for p in images:
             path = Path(p).expanduser().resolve()
@@ -260,6 +270,7 @@ async def run_gemini(model: str, outdir: Path) -> Tuple[bool, str]:
 async def run_moonshot(model: str, outdir: Path) -> Tuple[bool, str]:
     # Same standardized chat settings as others
     def _guess_mime(path: Path) -> str:
+        """Guess the MIME type of a file path from its extension."""
         ext = path.suffix.lower().lstrip(".")
         return {
             "png": "image/png",
@@ -272,6 +283,7 @@ async def run_moonshot(model: str, outdir: Path) -> Tuple[bool, str]:
         }.get(ext, "application/octet-stream")
 
     def _file_to_data_uri_tail(path: Path) -> str:
+        """Convert file to base64-encoded data URI tail."""
         import base64
 
         data = path.read_bytes()
@@ -279,6 +291,7 @@ async def run_moonshot(model: str, outdir: Path) -> Tuple[bool, str]:
         return f"{_guess_mime(path)};base64,{b64}"
 
     def images_to_mm_content(prompt_text: str, images: List[str]) -> List[Dict[str, Any]]:
+        """Build multimodal content from text and image paths."""
         parts: List[Dict[str, Any]] = [{"type": "text", "text": prompt_text}]
         for p in images:
             path = Path(p).expanduser().resolve()
@@ -320,6 +333,7 @@ async def run_moonshot(model: str, outdir: Path) -> Tuple[bool, str]:
 
 
 async def main() -> None:
+    """Run chat evaluations for a defined set of AI models."""
     base = Path(__file__).parent
     outdir = base / "chat_runs"
     outdir.mkdir(parents=True, exist_ok=True)

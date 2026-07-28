@@ -40,8 +40,8 @@ async def chat_call(
     messages = _build_messages(with_image=bool(image_url))
     resp = await sc_acompletion(
         model=model,
-        api_base=os.getenv("CHUTES_API_BASE"),
-        api_key=os.getenv("CHUTES_API_KEY"),
+        api_base=os.getenv("SCILLM_API_BASE", "http://localhost:4001"),
+        api_key=os.getenv("SCILLM_PROXY_KEY", "sk-dev-proxy-123"),
         custom_llm_provider="openai",
         messages=messages,
         timeout=timeout,
@@ -55,8 +55,8 @@ async def chat_call(
         messages2 = _build_messages(with_image=False)
         resp2 = await sc_acompletion(
             model=model,
-            api_base=os.getenv("CHUTES_API_BASE"),
-            api_key=os.getenv("CHUTES_API_KEY"),
+            api_base=os.getenv("SCILLM_API_BASE", "http://localhost:4001"),
+            api_key=os.getenv("SCILLM_PROXY_KEY", "sk-dev-proxy-123"),
             custom_llm_provider="openai",
             messages=messages2,
             timeout=timeout,

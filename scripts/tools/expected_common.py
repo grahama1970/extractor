@@ -21,6 +21,7 @@ VOLATILE_KEYS = {"run_id", "stage_start_ts", "generated_at", "timestamp"}
 
 
 def _strip_volatile(obj):
+    """Strip volatile keys from a dictionary or list recursively."""
     if isinstance(obj, dict):
         return {k: _strip_volatile(v) for k, v in obj.items() if k not in VOLATILE_KEYS}
     if isinstance(obj, list):
@@ -29,11 +30,13 @@ def _strip_volatile(obj):
 
 
 def load_json(path: Path):
+    """Load JSON data from a specified file path."""
     with path.open("r", encoding="utf-8") as f:
         return json.load(f)
 
 
 def normalized_json(path: Path):
+    """Return a normalized JSON string from the specified file path."""
     data = _strip_volatile(load_json(path))
     # Stable string for comparisons
     return json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(",", ":"))

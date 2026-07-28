@@ -12,6 +12,7 @@ RESULTS_BASE = ROOT / "src" / "extractor" / "pipeline" / "poc_simplified" / "res
 
 
 def run(cmd: List[str]) -> None:
+    """Execute a command using subprocess and print it before running."""
     print(">>", " ".join(map(str, cmd)))
     subprocess.run(cmd, check=True)
 
@@ -226,6 +227,7 @@ def stage07():
 
 
 def main():
+    """Run smoke checks for specified pipeline stages with optional PDF input."""
     ap = argparse.ArgumentParser(description="Run smoke checks for pipeline stages 01–07.")
     ap.add_argument(
         "--stages",

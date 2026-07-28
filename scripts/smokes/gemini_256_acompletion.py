@@ -23,6 +23,7 @@ from litellm import Router
 
 
 def png_256x256_base64(color=(255, 255, 255, 255)) -> str:
+    """Return a base64-encoded PNG image of specified color."""
     from PIL import Image
 
     img = Image.new("RGBA", (256, 256), color=color)
@@ -32,6 +33,7 @@ def png_256x256_base64(color=(255, 255, 255, 255)) -> str:
 
 
 async def run_smoke() -> dict:
+    """Run a smoke test on the LiteLLM router configuration."""
     load_dotenv(find_dotenv())
 
     model = os.getenv("LITELLM_DEFAULT_MODEL", "gemini/gemini-2.5-flash")
@@ -77,6 +79,7 @@ async def run_smoke() -> dict:
 
 
 def main() -> int:
+    """Run smoke test and save report as JSON artifact."""
     out_dir = Path("scripts/artifacts")
     out_dir.mkdir(parents=True, exist_ok=True)
     report = asyncio.run(run_smoke())

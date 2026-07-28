@@ -28,7 +28,9 @@ from extractor.pipeline.utils.reliability import log_stage_error
 
 
 class PathEncoder(json.JSONEncoder):
+    """Convert Path objects to strings during JSON encoding."""
     def default(self, obj):
+        """Return string representation of Path objects or default behavior."""
         if isinstance(obj, Path):
             return str(obj)
         return super().default(obj)
@@ -264,6 +266,7 @@ def parse_json_strict(text: str) -> Any:
         raise ValueError("Response is not a single JSON object/array")
 
     def _forbid_constants(x: str):
+        """Raise ValueError for a forbidden constant in JSON."""
         raise ValueError(f"Forbidden constant in JSON: {x}")
 
     try:
@@ -274,6 +277,7 @@ def parse_json_strict(text: str) -> Any:
 
 
 def json_to_markdown(data, level=1, title_case=True):
+    """Build a Markdown string from input JSON data."""
     md = ""
     if isinstance(data, dict):
         for key, value in data.items():

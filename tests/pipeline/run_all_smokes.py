@@ -7,15 +7,18 @@ from typer.testing import CliRunner
 
 @pytest.fixture()
 def runner() -> CliRunner:
+    """Provide a CliRunner instance."""
     return CliRunner()
 
 
 def _touch_json(path: Path, obj) -> None:
+    """Create a JSON file at the specified path with the given object."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(obj))
 
 
 def _simulate_run_all(cmd: list[str], env: dict[str, str], results_dir: Path) -> None:
+    """Simulate execution of commands and manage result directories."""
     joined = " ".join(cmd)
     # Stage 01
     if "01_annotation_processor.py" in joined:
@@ -105,6 +108,7 @@ def _simulate_run_all(cmd: list[str], env: dict[str, str], results_dir: Path) ->
 
 
 def test_run_all_smoke(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, runner: CliRunner) -> None:
+    """Run all smoke tests for the extractor pipeline using a PDF input."""
     from extractor.pipeline import run_all
 
     # Create input PDF
@@ -113,6 +117,7 @@ def test_run_all_smoke(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, runner: 
     results_dir = tmp_path / "results"
 
     def fake_run(cmd: list[str], env: dict[str, str]):
+        """Perform fake run operation."""
         _simulate_run_all(cmd, env, results_dir)
 
     monkeypatch.setattr(run_all, "_run", fake_run)

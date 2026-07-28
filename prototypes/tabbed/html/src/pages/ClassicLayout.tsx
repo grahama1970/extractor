@@ -527,8 +527,8 @@ const ClassicLayout = () => {
 
       <div className="flex h-[calc(100vh-4rem)]">
         {/* Explorer Panel */}
-        <div className="w-80 border-r bg-card p-6 flex flex-col">
-          <h2 className="text-xl font-bold text-destructive mb-6 text-center">Explorer</h2>
+        <div className="w-80 border-r bg-sidebar p-6 flex flex-col">
+          <h2 className="text-xl font-bold text-muted-foreground mb-6 text-center tracking-wider">Explorer</h2>
 
           <div className="space-y-4 mb-4">
             <Button variant="outline" className="w-full justify-start">
@@ -889,7 +889,7 @@ const ClassicLayout = () => {
               {activeConflictId && <div data-testid="conflict-active" className="hidden" aria-hidden>active</div>}
             </div>
           )}
-          <h2 className="text-xl font-bold text-destructive mb-4 text-center">Annotation</h2>
+          <h2 className="text-xl font-bold text-muted-foreground mb-4 text-center tracking-wider">Annotation</h2>
           {/* Review Queue markers */}
           <div className="flex items-center justify-between mb-3">
             <span data-testid="status-badge" className="text-xs px-2 py-1 rounded bg-muted text-foreground">{status}</span>
@@ -917,7 +917,7 @@ const ClassicLayout = () => {
             <div className="flex-1 p-4 overflow-auto flex items-start justify-center">
               {doc ? (
                 <div
-                  className={`relative inline-block ${drawArmed ? "cursor-crosshair" : ""}`}
+                  className={`relative inline-block ring-1 ring-border/50 shadow-lg ${drawArmed ? "cursor-crosshair" : ""}`}
                   ref={overlayRef}
                   onPointerDown={(e) => {
                     if (!overlayRef.current) return;
@@ -1278,7 +1278,7 @@ const ClassicLayout = () => {
           }}
         />
         <div className="border-l bg-card p-6 flex flex-col" data-testid="inspector-pane" style={{ width: inspectorW }}>
-          <h2 className="text-xl font-bold text-destructive mb-4 text-center">Inspector</h2>
+          <h2 className="text-xl font-bold text-muted-foreground mb-4 text-center tracking-wider">Inspector</h2>
 
           <div className="space-y-5 flex-1">
             <div>

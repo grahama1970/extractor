@@ -64,8 +64,8 @@ async def call_reflow_llm(
             }
         ]
 
-        api_key = os.getenv("CHUTES_API_KEY")
-        api_base = os.getenv("CHUTES_API_BASE", "https://llm.chutes.ai/v1")
+        api_key = os.getenv("SCILLM_PROXY_KEY", "sk-dev-proxy-123")
+        api_base = os.getenv("SCILLM_API_BASE", "http://localhost:4010")
 
         async for r in parallel_acompletions_iter(
             reqs,

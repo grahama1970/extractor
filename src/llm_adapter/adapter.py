@@ -175,8 +175,8 @@ class LLMAdapter:
         try:
             import os as _os
 
-            ch_base = (_os.getenv("CHUTES_API_BASE") or "").strip()
-            ch_key = (_os.getenv("CHUTES_API_KEY") or "").strip()
+            ch_base = (_os.getenv("SCILLM_API_BASE", "http://localhost:4001") or "").strip()
+            ch_key = (_os.getenv("SCILLM_PROXY_KEY", "sk-dev-proxy-123") or "").strip()
             if ch_base:
                 kwargs.setdefault("custom_llm_provider", "openai_like")
                 kwargs.setdefault("api_base", ch_base)

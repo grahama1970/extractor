@@ -8,6 +8,7 @@ from typing import Any, Dict
 
 
 def _load(path: Path) -> Dict[str, Any] | None:
+    """Load JSON from a file path, returning None on failure."""
     if not path.exists():
         return None
     txt = path.read_text(encoding="utf-8", errors="ignore")
@@ -31,6 +32,7 @@ def _load(path: Path) -> Dict[str, Any] | None:
 
 
 def main() -> None:
+    """Load JSON data from specified paths based on command-line arguments."""
     base = (
         Path(sys.argv[1])
         if len(sys.argv) > 1
@@ -43,6 +45,7 @@ def main() -> None:
     compact = _load(compact_p) or {}
 
     def _blocks(obj: Dict[str, Any]) -> int:
+        """Return block count from reflowed_json, 0 if missing, -1 on error."""
         try:
             return int(len(((obj.get("reflowed_json") or {}).get("blocks") or [])))
         except Exception:

@@ -14,6 +14,7 @@ app = typer.Typer(help="Run a single validation episode against a variant URL an
 
 
 async def _post_json(url: str, payload: Dict[str, Any]) -> None:
+    """Post JSON payload to URL, logging errors."""
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post(url, json=payload, timeout=10) as resp:
@@ -32,6 +33,7 @@ async def _run_episode(
     tasks: List[Dict[str, Any]],
     screenshot_dir: Optional[Path],
 ) -> Dict[str, Any]:
+    """Execute an episode with specified tasks and capture results."""
     errors: List[str] = []
     warnings: List[str] = []
     t0 = time.monotonic()
@@ -115,6 +117,7 @@ async def _run_episode(
 
     # Score v1 (simple, deterministic)
     def clamp01(x: float) -> float:
+        """Clamp a float value between 0.0 and 1.0."""
         return max(0.0, min(1.0, x))
 
     # Tunables

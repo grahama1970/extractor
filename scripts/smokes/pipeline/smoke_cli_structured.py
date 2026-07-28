@@ -19,6 +19,7 @@ app = typer.Typer(add_completion=False)
 
 
 def _assert_stage_paths(root: Path, stem: str, stage07_dir: str) -> None:
+    """Check the existence of required stage output files."""
     s07 = root / stem / stage07_dir / "json_output" / "07_reflowed.json"
     s10 = root / stem / "10_arangodb_exporter" / "json_output" / "10_flattened_data.json"
     if not s07.exists() or not s10.exists():
@@ -36,6 +37,7 @@ def main(
     ),
     output_dir: Path = typer.Option(Path("data/results/cli_smokes/structured")),
 ):
+    """Execute the extraction command for HTML processing and output."""
     output_dir.mkdir(parents=True, exist_ok=True)
     cmd = [sys.executable, "-m", "src.cli", "extract", str(html_path), str(output_dir)]
     proc = subprocess.run(cmd)

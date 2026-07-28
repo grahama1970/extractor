@@ -120,10 +120,12 @@ def apply_layout_ordering(section: dict[str, Any], iou_threshold: float = 0.5) -
             order_lookup[str(elem["id"])] = i
 
     def _order_items(items: list[dict], kind: str) -> None:
+        """Order items by ID or spatial proximity."""
         if not items:
             return
 
         def get_order_key(item: dict) -> int:
+            """Return the integer order key for an item via ID or IoU matching."""
             item_id = item.get("id") or item.get(f"{kind}_id")
             if item_id and str(item_id) in order_lookup:
                 return order_lookup[str(item_id)]

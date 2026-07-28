@@ -52,6 +52,7 @@ SAMPLES: Dict[str, Path] = {
 
 
 def load_types(path: Path) -> Dict[str, int]:
+    """Load object type counts from a JSON file."""
     data = json.loads(path.read_text())
     counts: Dict[str, int] = {}
     for o in data:
@@ -69,6 +70,7 @@ def delta_ok(pdf_counts: Dict[str, int], other_counts: Dict[str, int]) -> bool:
 
 @app.command()
 def main(out_root: Path = typer.Option(Path("data/results/meta_parity"))):
+    """Generate metadata parity results and save to specified output directory."""
     if not BASE_PDF_10.exists():
         typer.echo(f"PDF baseline missing: {BASE_PDF_10}", err=True)
         raise typer.Exit(code=1)

@@ -4,6 +4,7 @@ from pathlib import Path
 
 
 def _run(cmd):
+    """Execute a command, capturing its output as text."""
     return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
 

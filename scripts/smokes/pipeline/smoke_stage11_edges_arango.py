@@ -16,6 +16,7 @@ app = typer.Typer(add_completion=False)
 
 
 def _cfg():
+    """Load ArangoDB connection config from environment, or None if password missing."""
     url = os.getenv("ARANGODB_URL", "http://localhost:8529")
     user = os.getenv("ARANGODB_USERNAME", os.getenv("ARANGODB_USER", "root"))
     pwd = os.getenv("ARANGODB_PASSWORD")
@@ -26,6 +27,7 @@ def _cfg():
 
 @app.command()
 def main(db_name: str = typer.Option("lean4_test", "--db")):
+    """Connect to ArangoDB and validate database existence."""
     cfg = _cfg()
     if not cfg:
         typer.secho("ARANGODB_* env not set; skipping", fg=typer.colors.YELLOW)

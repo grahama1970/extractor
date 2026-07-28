@@ -50,6 +50,7 @@ except ImportError:
     )
 
     def _tqdm_as_completed(tasks, total=None, desc: str | None = None):  # type: ignore[misc]
+        """Perform tqdm as completed operation."""
         return _asyncio.as_completed(tasks)
 
 
@@ -347,6 +348,7 @@ async def run_codex_exec(
     supervisor_exc: BaseException | None = None
 
     async def _poll_wait(interval: float) -> bool:
+        """Return True if process completes within the given interval."""
         try:
             await asyncio.wait_for(proc.wait(), timeout=interval)
             return True
@@ -512,6 +514,7 @@ async def run_codex_batch_jsonl(
     results: list[Optional[str]] = [None] * len(payloads)
 
     async def _one(i, p):
+        """Return the last line of output from an asynchronous execution."""
         async with sem:
             res = await run_codex_exec_jsonl(script_or_path, p, **kwargs)
             out_lines = (res.stdout or "").strip().splitlines()

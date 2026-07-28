@@ -24,18 +24,18 @@ import { usePersona } from "@/contexts/PersonaContext";
 
 // --- Verdict styling ---
 
-const VERDICT_STYLES: Record<string, { bg: string; border: string; text: string; icon: typeof AlertTriangle }> = {
-  FAIL: { bg: "bg-destructive/10", border: "border-destructive/30", text: "text-destructive", icon: XCircle },
-  WARN: { bg: "bg-yellow-500/10", border: "border-yellow-500/30", text: "text-yellow-600", icon: AlertTriangle },
-  PASS: { bg: "bg-green-500/10", border: "border-green-500/30", text: "text-green-600", icon: CheckCircle2 },
+const VERDICT_STYLES: Record<string, { bg: string; border: string; text: string; icon: typeof AlertTriangle; label: string }> = {
+  FAIL: { bg: "bg-red-600/10", border: "border-red-600/30", text: "text-red-600", icon: XCircle, label: "\u2715" },
+  WARN: { bg: "bg-amber-700/10", border: "border-amber-700/30", text: "text-amber-700", icon: AlertTriangle, label: "\u26A0" },
+  PASS: { bg: "bg-green-700/10", border: "border-green-700/30", text: "text-green-700", icon: CheckCircle2, label: "\u2713" },
 };
 
 function VerdictBadge({ verdict }: { verdict: string | null }) {
-  if (!verdict) return <Badge variant="outline" className="text-[10px]">N/A</Badge>;
+  if (!verdict) return <Badge variant="outline" className="text-xs font-semibold">N/A</Badge>;
   const style = VERDICT_STYLES[verdict] ?? VERDICT_STYLES.WARN;
   return (
-    <Badge variant="outline" className={`text-[10px] ${style.text} ${style.border}`}>
-      {verdict}
+    <Badge variant="outline" className={`text-xs font-semibold ${style.text} ${style.border}`}>
+      {style.label} {verdict}
     </Badge>
   );
 }
@@ -43,15 +43,15 @@ function VerdictBadge({ verdict }: { verdict: string | null }) {
 function ScoreBadge({ score }: { score: number | null }) {
   if (score === null) return <span className="text-muted-foreground text-xs">—</span>;
   const pct = Math.round(score * 100);
-  const color = score >= 0.88 ? "text-green-600" : score >= 0.65 ? "text-yellow-600" : "text-destructive";
+  const color = score >= 0.88 ? "text-green-700" : score >= 0.65 ? "text-amber-700" : "text-red-600";
   return <span className={`font-mono text-xs font-semibold ${color}`}>{pct}%</span>;
 }
 
 function GradeBadge({ grade }: { grade: string | null }) {
   if (!grade) return null;
-  const color = grade.startsWith("A") ? "bg-green-500" : grade === "B" ? "bg-yellow-500" : grade === "C" ? "bg-orange-500" : "bg-destructive";
+  const color = grade.startsWith("A") ? "bg-green-600" : grade === "B" ? "bg-amber-600" : grade === "C" ? "bg-orange-600" : "bg-destructive";
   return (
-    <span className={`inline-block px-1.5 py-0 rounded text-[10px] font-bold text-white ${color}`}>
+    <span className={`inline-block px-1.5 py-0 rounded text-xs font-bold font-mono text-white ${color}`}>
       {grade}
     </span>
   );
@@ -105,27 +105,27 @@ function TvQuarantine({ verdictCounts, total }: { verdictCounts: Record<string, 
       <div className="flex items-center gap-12">
         {/* FAIL — giant red */}
         <div className="text-center">
-          <XCircle className="h-12 w-12 text-red-500 mx-auto mb-2" />
-          <p className="text-8xl font-black text-red-500 tabular-nums">{failCount}</p>
-          <p className="text-xl text-red-400 font-semibold mt-1">FAIL</p>
+          <XCircle className="h-12 w-12 text-red-600 mx-auto mb-2" />
+          <p className="text-8xl font-black font-mono text-red-600 tabular-nums">{failCount}</p>
+          <p className="text-xl text-red-500 font-semibold mt-1">FAIL</p>
         </div>
 
         <div className="w-px h-32 bg-border" />
 
         {/* WARN — giant yellow */}
         <div className="text-center">
-          <AlertTriangle className="h-12 w-12 text-yellow-500 mx-auto mb-2" />
-          <p className="text-8xl font-black text-yellow-500 tabular-nums">{warnCount}</p>
-          <p className="text-xl text-yellow-400 font-semibold mt-1">WARN</p>
+          <AlertTriangle className="h-12 w-12 text-amber-600 mx-auto mb-2" />
+          <p className="text-8xl font-black font-mono text-amber-600 tabular-nums">{warnCount}</p>
+          <p className="text-xl text-amber-500 font-semibold mt-1">WARN</p>
         </div>
 
         <div className="w-px h-32 bg-border" />
 
         {/* PASS — giant green */}
         <div className="text-center">
-          <CheckCircle2 className="h-12 w-12 text-green-500 mx-auto mb-2" />
-          <p className="text-8xl font-black text-green-500 tabular-nums">{passCount}</p>
-          <p className="text-xl text-green-400 font-semibold mt-1">PASS</p>
+          <CheckCircle2 className="h-12 w-12 text-green-700 mx-auto mb-2" />
+          <p className="text-8xl font-black font-mono text-green-700 tabular-nums">{passCount}</p>
+          <p className="text-xl text-green-600 font-semibold mt-1">PASS</p>
         </div>
       </div>
 
@@ -246,7 +246,7 @@ export default function QuarantineView() {
       <div className="max-w-6xl mx-auto p-4 space-y-4">
         {/* Inline header */}
         <div className="flex items-center gap-3">
-          <h2 className="text-sm font-semibold">Quarantine Review</h2>
+          <h2 className="text-sm font-semibold tracking-wider uppercase">Quarantine Review</h2>
           <div className="flex-1" />
           <span className="text-xs text-muted-foreground">{total} runs</span>
           <Button variant="ghost" size="icon" className="h-7 w-7" onClick={loadRuns} aria-label="Refresh">
@@ -254,7 +254,7 @@ export default function QuarantineView() {
           </Button>
         </div>
         {/* Summary cards */}
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-3 gap-3" data-testid="verdict-summary">
           {(["FAIL", "WARN", "PASS"] as const).map((v) => {
             const style = VERDICT_STYLES[v];
             const Icon = style.icon;
@@ -262,6 +262,7 @@ export default function QuarantineView() {
             return (
               <button
                 key={v}
+                data-testid={`filter-${v.toLowerCase()}`}
                 onClick={() => toggleVerdictFilter(v)}
                 className={`p-3 rounded-lg border text-left transition-all ${style.bg} ${style.border} ${
                   active ? "ring-2 ring-offset-1" : "opacity-60"
@@ -269,7 +270,7 @@ export default function QuarantineView() {
               >
                 <div className="flex items-center gap-2">
                   <Icon className={`h-4 w-4 ${style.text}`} />
-                  <span className={`text-2xl font-bold ${style.text}`}>{verdictCounts[v]}</span>
+                  <span className={`text-2xl font-bold font-mono ${style.text}`}>{verdictCounts[v]}</span>
                 </div>
                 <span className="text-xs text-muted-foreground">{v} verdicts</span>
               </button>
@@ -282,6 +283,7 @@ export default function QuarantineView() {
           <div className="relative flex-1">
             <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
             <Input
+              data-testid="search-input"
               placeholder="Search by name or domain..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -293,6 +295,7 @@ export default function QuarantineView() {
             {(["score", "verdict", "stem", "domain"] as const).map((key) => (
               <Button
                 key={key}
+                data-testid={`sort-${key}`}
                 variant={sortBy === key ? "secondary" : "ghost"}
                 size="sm"
                 className="h-7 text-[10px] gap-1"
@@ -317,6 +320,7 @@ export default function QuarantineView() {
             <span className="text-xs font-semibold">{selectedStems.size} selected</span>
             <Separator orientation="vertical" className="h-5" />
             <Button
+              data-testid="bulk-approve"
               variant="outline" size="sm" className="h-7 text-[10px] gap-1"
               onClick={async () => {
                 try {
@@ -388,7 +392,8 @@ export default function QuarantineView() {
             return (
               <Card
                 key={run.stem}
-                className={`p-3 transition-all ${isSelected ? "ring-2 ring-primary" : ""}`}
+                data-testid="pdf-row"
+                className={`p-3 transition-all hover:bg-accent/50 cursor-pointer ${isSelected ? "ring-2 ring-primary" : ""}`}
               >
                 <div className="flex items-start gap-3">
                   {/* Checkbox */}
@@ -404,7 +409,7 @@ export default function QuarantineView() {
                     <div className="flex items-center gap-2">
                       <button
                         onClick={() => navigate(`/review?stem=${run.stem}&edit=true`)}
-                        className="font-medium text-sm truncate hover:underline text-left"
+                        className="font-medium font-mono text-sm truncate hover:underline text-left"
                       >
                         {run.stem}
                       </button>
@@ -413,7 +418,7 @@ export default function QuarantineView() {
                       <ScoreBadge score={run.overall_score} />
                     </div>
                     <div className="flex items-center gap-2 mt-0.5 text-[10px] text-muted-foreground">
-                      {run.page_count != null && <span>{run.page_count}p</span>}
+                      {run.page_count != null && <span className="font-mono">{run.page_count}p</span>}
                       {run.profile_domain && <Badge variant="outline" className="text-[9px] px-1 py-0">{run.profile_domain}</Badge>}
                       {run.has_tables && <span>Tables</span>}
                       {run.has_figures && <span>Figures</span>}
@@ -448,6 +453,7 @@ export default function QuarantineView() {
                   {/* Actions */}
                   <div className="flex items-center gap-1 flex-shrink-0">
                     <Button
+                      data-testid="expand-scores"
                       variant="ghost" size="sm" className="h-7 text-[10px]"
                       onClick={() => handleExpandScores(run.stem)}
                       disabled={isLoadingScores}
@@ -455,12 +461,14 @@ export default function QuarantineView() {
                       {isLoadingScores ? <Loader2 className="h-3 w-3 animate-spin" /> : scores ? "Hide" : "Scores"}
                     </Button>
                     <Button
+                      data-testid="review-btn"
                       variant="outline" size="sm" className="h-7 text-[10px]"
                       onClick={() => navigate(`/review?stem=${run.stem}`)}
                     >
                       View
                     </Button>
                     <Button
+                      data-testid="edit-btn"
                       size="sm" className="h-7 text-[10px]"
                       onClick={() => navigate(`/review?stem=${run.stem}&edit=true`)}
                     >
@@ -474,9 +482,12 @@ export default function QuarantineView() {
         </div>
 
         {!loading && filtered.length === 0 && (
-          <div className="text-center py-12 text-muted-foreground">
-            <CheckCircle2 className="h-8 w-8 mx-auto mb-2 text-green-500" />
-            <p className="text-sm">No quarantined PDFs match your filters</p>
+          <div className="flex items-center justify-center py-16">
+            <div className="rounded-xl bg-card border border-border px-8 py-10 text-center max-w-sm">
+              <CheckCircle2 className="h-10 w-10 mx-auto mb-3 text-green-700" />
+              <p className="text-sm font-medium text-foreground mb-1">Queue clear</p>
+              <p className="text-xs text-muted-foreground">No quarantined PDFs match your filters</p>
+            </div>
           </div>
         )}
       </div>

@@ -35,6 +35,7 @@ REQ = {
 
 
 async def main():
+    """Execute a single prove sanity check using certainly_prove."""
     print("Running single prove sanity via certainly_prove ...")
     try:
         res = await asyncio.wait_for(
@@ -61,6 +62,7 @@ async def main():
 
     # Normalize result to JSON for display
     def _to_jsonable(obj):
+        """Return object's `__dict__` for custom types, else the object."""
         if hasattr(obj, "__dict__"):
             return obj.__dict__
         return obj

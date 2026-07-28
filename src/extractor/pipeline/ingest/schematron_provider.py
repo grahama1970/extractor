@@ -104,8 +104,8 @@ class SchematronConfig(BaseModel):
     # Auto-detected from api_base if not set
     provider: Optional[str] = os.getenv("SCHEMATRON_PROVIDER")
     vision_enabled: bool = True
-    vision_api_base: Optional[str] = os.getenv("CHUTES_API_BASE") or os.getenv("OPENAI_API_BASE")
-    vision_api_key: Optional[str] = os.getenv("CHUTES_API_KEY") or os.getenv("OPENAI_API_KEY")
+    vision_api_base: Optional[str] = os.getenv("SCILLM_API_BASE", "http://localhost:4010") or os.getenv("OPENAI_API_BASE")
+    vision_api_key: Optional[str] = os.getenv("SCILLM_PROXY_KEY", "sk-dev-proxy-123") or os.getenv("OPENAI_API_KEY")
     vision_model: str = os.getenv("CHUTES_VLM_MODEL") or "gpt-4o-mini"
     max_attempts: int = 3
     timeout_s: float = 120.0

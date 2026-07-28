@@ -40,6 +40,7 @@ STEP_NAME = "04a_layout_audit"
 
 
 def _read_json(path: Path) -> Dict[str, Any]:
+    """Return JSON data from a file path or an empty dict on failure."""
     try:
         if path.exists():
             return json.loads(path.read_text(encoding="utf-8"))
@@ -57,6 +58,7 @@ def _add_check(
     reason: str | None = None,
     **meta: Any,
 ) -> None:
+    """Add a check result to the list with optional metadata."""
     payload: Dict[str, Any] = {
         "section_title": section_title,
         "ok": bool(ok),
@@ -79,6 +81,7 @@ def run(
     results_root: Path | str = Path("data/results/pipeline"),
     preset_config: Optional[Dict[str, Any]] = None,
 ) -> Path:
+    """Create output directories for a pipeline step."""
     root = Path(results_root)
     stage_dir = root / STEP_NAME
     json_dir = stage_dir / "json_output"
@@ -240,6 +243,7 @@ def run(
 
 
 def sanity() -> int:
+    """Run sanity check for the step."""
     return run_step_sanity(STEP_NAME)
 
 

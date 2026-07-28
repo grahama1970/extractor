@@ -12,6 +12,7 @@ from pathlib import Path
 
 
 def apply_step02(data: dict, corr: dict):
+    """Apply corrections to specified block in the data dictionary."""
     blocks = data.get("blocks", [])
     idx = corr["idx"]
     if 0 <= idx < len(blocks):
@@ -33,6 +34,7 @@ def apply_step02(data: dict, corr: dict):
 
 
 def apply_step05(data: dict, corr: dict):
+    """Update a table's title and bounding box offset from corrections."""
     tables = data.get("tables", [])
     idx = corr["idx"]
     if 0 <= idx < len(tables):
@@ -53,6 +55,7 @@ def apply_step05(data: dict, corr: dict):
 
 
 def apply_step06(data: dict, corr: dict):
+    """Apply title and bbox corrections to a specific figure."""
     figs = data.get("figures", [])
     idx = corr["idx"]
     if 0 <= idx < len(figs):
@@ -80,6 +83,7 @@ APPLIERS = {
 
 
 def main() -> int:
+    """Apply visual review corrections to pipeline JSON outputs."""
     ap = argparse.ArgumentParser(
         description="Apply visual review corrections to pipeline JSON outputs"
     )

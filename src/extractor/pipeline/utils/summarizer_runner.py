@@ -32,6 +32,7 @@ console = Console()
 
 
 def sanity() -> int:
+    """Return the result of the sanity check step."""
     return run_step_sanity(STEP_NAME)
 
 
@@ -59,6 +60,7 @@ def _choice_content(resp: Any) -> Optional[str]:
 
 
 def _extract_usage(resp: Any) -> Dict[str, Any]:
+    """Extract usage information from a response object or dictionary."""
     usage_obj = getattr(resp, "usage", None)
     if usage_obj is None and isinstance(resp, dict):
         usage_obj = resp.get("usage")
@@ -74,6 +76,7 @@ def _extract_usage(resp: Any) -> Dict[str, Any]:
 
 
 def _served_model(resp: Any, fallback: str) -> str:
+    """Retrieve model or ID from response, defaulting to fallback."""
     if isinstance(resp, dict):
         return resp.get("model") or resp.get("id") or fallback
     return getattr(resp, "model", None) or getattr(resp, "id", None) or fallback
@@ -94,8 +97,8 @@ async def _direct_scillm_summary_call(
     try:
         resp = await _sc_acompletion(
             model=os.environ.get("CHUTES_TEXT_MODEL", ""),
-            api_base=os.environ.get("CHUTES_API_BASE", ""),
-            api_key=os.environ.get("CHUTES_API_KEY", ""),
+            api_base=os.environ.get("SCILLM_API_BASE", "http://localhost:4010"),
+            api_key=os.environ.get("SCILLM_PROXY_KEY", "sk-dev-proxy-123"),
             custom_llm_provider="openai_like",
             messages=messages,
             response_format=response_format or {"type": "json_object"},
@@ -327,6 +330,7 @@ async def create_checkpoint_summary(
     system_guard = JSON_SYSTEM_GUARD
 
     async def _call_once_async():
+        """Execute an asynchronous call to a text completion model."""
         t0 = time.monotonic()
         error: Optional[str] = None
         error_class: Optional[str] = None

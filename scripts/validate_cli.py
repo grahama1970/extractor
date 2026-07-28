@@ -17,6 +17,7 @@ app = typer.Typer(help="Validate a CLI program against tasks; emit score and pos
 
 
 async def _post_json(url: str, payload: Dict[str, Any]) -> None:
+    """Post JSON payload to URL asynchronously, ignoring errors."""
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post(url, json=payload, timeout=10) as resp:
@@ -26,12 +27,14 @@ async def _post_json(url: str, payload: Dict[str, Any]) -> None:
 
 
 def _clamp01(x: float) -> float:
+    """Clamp a float value between 0.0 and 1.0."""
     return max(0.0, min(1.0, x))
 
 
 def _run_one(
     cmd: str, cwd: Optional[Path], env: Optional[Dict[str, str]], timeout_s: float
 ) -> Dict[str, Any]:
+    """Execute a shell command with specified working directory, environment, and timeout."""
     t0 = time.monotonic()
     try:
         proc = subprocess.run(
@@ -67,6 +70,7 @@ async def _run_episode(
     substitutions: Dict[str, str],
     cwd: Optional[Path],
 ) -> Dict[str, Any]:
+    """Execute tasks for an episode, returning aggregated results."""
     outputs: List[Dict[str, Any]] = []
     timings: List[float] = []
     successes = 0
@@ -173,6 +177,7 @@ def run(
     ),
     cwd: Optional[Path] = typer.Option(None, help="Working directory for commands"),
 ):
+    """Run a simulation with specified tasks and identifiers."""
     tasks = json.loads(Path(tasks_file).read_text())
     if isinstance(tasks, dict) and "tasks" in tasks:
         tasks = tasks["tasks"]

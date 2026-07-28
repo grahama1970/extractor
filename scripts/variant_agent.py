@@ -19,6 +19,7 @@ from typing import Any, Dict, Optional, List
 
 
 def _post_json(url: str, payload: Dict[str, Any]) -> None:
+    """Post JSON payload to URL, silently handling errors."""
     try:
         import urllib.request
 
@@ -34,6 +35,7 @@ def _post_json(url: str, payload: Dict[str, Any]) -> None:
 
 
 def _function_exists(module_path: Path, func_name: str) -> bool:
+    """Check if a function exists in a given module file."""
     try:
         txt = module_path.read_text(encoding="utf-8")
     except Exception:
@@ -43,6 +45,7 @@ def _function_exists(module_path: Path, func_name: str) -> bool:
 
 
 def _append_code(module_path: Path, code: str) -> None:
+    """Append code to a file, creating it if missing."""
     module_path.parent.mkdir(parents=True, exist_ok=True)
     if not module_path.exists():
         module_path.write_text(code.strip() + "\n", encoding="utf-8")
@@ -52,6 +55,7 @@ def _append_code(module_path: Path, code: str) -> None:
 
 
 def _template_for(approach: str) -> Optional[str]:
+    """Generate a function template for a specified approach."""
     if approach == "mul_shift_add":
         return (
             "def mul_shift_add(a: int, b: int) -> int:\n"
@@ -134,6 +138,7 @@ def _template_for(approach: str) -> Optional[str]:
 def _synthesize_if_missing(
     approach: str, variants_path: Path, prompt_file: Optional[Path], api_base: str, run_id: str
 ) -> None:
+    """Synthesize and append code if it is missing for the approach."""
     if _function_exists(variants_path, approach):
         return
     code = _template_for(approach)
@@ -194,6 +199,7 @@ def _extract_function_block(text: str, func_name: str) -> tuple[int, int]:
 
 
 def _replace_function(module_path: Path, func_name: str, new_code: str) -> None:
+    """Replace a function's code in a module with new code."""
     try:
         src = module_path.read_text(encoding="utf-8")
     except Exception:
@@ -299,6 +305,7 @@ def _score_single_variant(metrics: Dict[str, Any]) -> float:
 
 
 def main():
+    """Parse command-line arguments for the application configuration."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--approach", required=True)
     ap.add_argument("--bench", required=True)
@@ -323,6 +330,7 @@ def main():
     epi_url = api_base + "/ingest/episode"
 
     def log(stream: str, msg: str, meta: Optional[Dict[str, Any]] = None):
+        """Send structured log messages to the endpoint."""
         _post_json(
             log_url,
             {

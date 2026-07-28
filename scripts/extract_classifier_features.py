@@ -139,6 +139,7 @@ def derive_label(result: dict) -> str:
 
 
 def main():
+    """Parse command-line arguments for PDF feature extraction."""
     parser = argparse.ArgumentParser(description="Extract PDF features for classifier training")
     parser.add_argument("--corpus", type=Path, required=True, help="Corpus directory")
     parser.add_argument("--output", type=Path, required=True, help="Output directory for features")

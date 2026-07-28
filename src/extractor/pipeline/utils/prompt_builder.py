@@ -60,6 +60,7 @@ def format_block_text(block: Optional[Dict[str, Any]]) -> str:
 
 
 def _signals(b: Optional[Dict[str, Any]]) -> str:
+    """Extract font and confidence attributes from a dictionary."""
     if not b:
         return ""
     fsf = b.get("first_span_font") or {}
@@ -102,6 +103,7 @@ def build_llm_context(
     below_block: Optional[Dict[str, Any]],
     human_annotations_summary: Optional[str] = None,
 ) -> str:
+    """Generate LLM context from surrounding blocks and annotations."""
     target_text = format_block_text(target_block)
     above_text = format_block_text(above_block)
     below_text = format_block_text(below_block)

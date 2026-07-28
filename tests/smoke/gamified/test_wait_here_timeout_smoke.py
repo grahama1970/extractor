@@ -6,6 +6,7 @@ from pathlib import Path
 
 
 def _run(cmd: list[str]) -> subprocess.CompletedProcess:
+    """Run an external command, capturing its stdout and stderr."""
     return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
 

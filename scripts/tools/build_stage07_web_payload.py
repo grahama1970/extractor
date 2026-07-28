@@ -15,6 +15,7 @@ GOLD_06 = ROOT / "data/gold_standards/pipeline/006_figure_extractor_gs.json"
 
 
 def choose_section(payload: dict) -> dict:
+    """Return the first section from the payload dictionary."""
     secs = (payload or {}).get("sections") or []
     if not secs:
         raise SystemExit("No sections available to build payload")
@@ -22,6 +23,7 @@ def choose_section(payload: dict) -> dict:
 
 
 def section_json_for_prompt(sec: dict) -> dict:
+    """Return a structured dictionary of section attributes from input."""
     out: dict = {
         "id": sec.get("id"),
         "title": sec.get("title"),
@@ -43,6 +45,7 @@ def section_json_for_prompt(sec: dict) -> dict:
 
 
 def find_section_image(sec: dict) -> Path | None:
+    """Locate the image file associated with a section dictionary."""
     out_dir = ROOT / "data/results/pipeline/04_section_builder/visual_output"
     candidates: list[Path] = []
     sid = sec.get("id")
@@ -71,6 +74,7 @@ def find_section_image(sec: dict) -> Path | None:
 
 
 def main() -> None:
+    """Load environment variables and JSON data, prioritizing real results over samples."""
     load_dotenv(find_dotenv(usecwd=True) or None)
 
     # Load pre-step07 JSON (prefer real results; fallback to gold sample)
@@ -115,6 +119,7 @@ def main() -> None:
     sec_id = sec.get("id")
 
     def table_snippets(max_items: int = 2) -> list[dict]:
+        """Return table snippets filtered by section ID and limited by count."""
         items = []
         for t in (tables_payload.get("tables") or [])[:50]:
             if sec_id and t.get("section_id") and t.get("section_id") != sec_id:
@@ -137,6 +142,7 @@ def main() -> None:
         return items
 
     def figure_snippets(max_items: int = 2) -> list[dict]:
+        """Extract figure metadata up to a specified limit."""
         items = []
         for f in (figures_payload.get("figures") or [])[:50]:
             if sec_id and f.get("section_id") and f.get("section_id") != sec_id:

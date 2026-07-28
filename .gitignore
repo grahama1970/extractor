@@ -330,6 +330,10 @@ deprecated/
 test_validation/
 *.duckdb
 
+# ML training checkpoints and generated figures
+checkpoints/
+figures/
+
 # Debug files
 debug_*.py
 debug_*.json

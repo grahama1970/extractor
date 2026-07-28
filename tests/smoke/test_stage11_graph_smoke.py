@@ -13,6 +13,7 @@ def _load_mod():
     stub = types.ModuleType("extractor.pipeline.utils.litellm_call")
 
     def _noop(*args, **kwargs):
+        """Return an empty list, as a no-operation."""
         return []
 
     stub.litellm_call = _noop  # type: ignore[attr-defined]
@@ -22,14 +23,18 @@ def _load_mod():
         faiss_stub = types.ModuleType("faiss")
 
         class IndexFlatIP:  # noqa: N801
+            """Manage a flat vector index."""
             def __init__(self, d):
+                """Initialize an instance with a dictionary and total count."""
                 self.d = d
                 self.ntotal = 0
 
             def add(self, arr):
+                """Add array length to the total count."""
                 self.ntotal += len(arr)
 
         def normalize_L2(x):
+            """Normalize the input vector using the L2 norm."""
             return x
 
         faiss_stub.IndexFlatIP = IndexFlatIP  # type: ignore[attr-defined]
@@ -45,6 +50,7 @@ def _load_mod():
 
 
 def test_hierarchy_and_weights():
+    """Validate hierarchy distance and combined weight calculations."""
     mod = _load_mod()
     dist = mod.calculate_hierarchy_distance(
         {"source_pdf": "a.pdf", "section_level": 1, "section_breadcrumbs": ["A"]},
@@ -56,6 +62,7 @@ def test_hierarchy_and_weights():
 
 
 def test_faiss_optional_build():
+    """Skip test if FAISS is not installed, otherwise build FAISS index."""
     mod = _load_mod()
     if getattr(mod, "_HAVE_FAISS", False):
         embs = np.random.rand(5, 16).astype("float32")

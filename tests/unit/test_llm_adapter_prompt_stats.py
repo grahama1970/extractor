@@ -8,6 +8,7 @@ from llm_adapter.adapter import LLMAdapter
 
 
 def test_prompt_stats_counts_plain_strings():
+    """Verifies prompt stats count characters and messages from plain strings."""
     messages = [
         {"role": "user", "content": "hello"},
         {"role": "assistant", "content": "world"},
@@ -19,6 +20,7 @@ def test_prompt_stats_counts_plain_strings():
 
 
 def test_prompt_stats_skips_type_metadata():
+    """Verify prompt stats calculation skips type metadata."""
     messages = [
         {
             "role": "user",
@@ -36,6 +38,7 @@ def test_prompt_stats_skips_type_metadata():
 
 
 def test_prompt_stats_handles_nested_collections():
+    """Test prompt stats processing of nested message collections."""
     messages = [
         {
             "role": "user",

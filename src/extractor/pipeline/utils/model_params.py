@@ -8,6 +8,7 @@ from typing import Any, Dict, List
 
 
 def image_file_to_data_url(path: Path) -> str:
+    """Return data URL for image file."""
     mime = {
         ".png": "image/png",
         ".jpg": "image/jpeg",
@@ -25,6 +26,7 @@ def image_file_to_data_url(path: Path) -> str:
 def build_chat_messages(
     system_text: str, user_text: str, image_data_url: str | None
 ) -> List[Dict[str, Any]]:
+    """Build chat message structures from system and user inputs."""
     parts: List[Dict[str, Any]] = [{"type": "text", "text": user_text}]
     if image_data_url:
         parts.append({"type": "image_url", "image_url": {"url": image_data_url}})

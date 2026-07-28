@@ -32,6 +32,7 @@ app = typer.Typer(add_completion=False)
 
 @app.command()
 def main():
+    """Create output directories and prepare a debug bundle for processing."""
     out_dir = Path("data/results/cli_smokes/schema_invariants").resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
 

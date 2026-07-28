@@ -52,6 +52,7 @@ def extract_one(pdf_path: Path, out_dir: Path) -> dict:
 
 
 def main():
+    """Parse command-line arguments and prepare PDF files for processing."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--limit", type=int, default=0, help="0 = all")

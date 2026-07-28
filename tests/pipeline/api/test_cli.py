@@ -10,6 +10,7 @@ import extractor.pipeline.api as api
 
 @pytest.fixture()
 def runner() -> CliRunner:
+    """Return a CliRunner instance for testing command-line interfaces."""
     return CliRunner()
 
 
@@ -52,10 +53,12 @@ def test_cli_run_json(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, runner: C
 
     # Monkeypatch _run to simulate side effects instead of executing real scripts
     def fake_run(cmd: List[str], cwd=None, env=None) -> None:
+        """Simulate running a command with optional working directory and environment."""
         _simulate_stage_outputs(cmd, tmp_path)
 
     # Monkeypatch _find_clean_pdf to return our dummy
     def fake_find(anno_dir: Path) -> Path:
+        """Return the first PDF file matching the pattern *_clean.pdf."""
         return next(anno_dir.glob("*_clean.pdf"))
 
     monkeypatch.setattr(api, "_run", fake_run)
@@ -75,13 +78,16 @@ def test_cli_run_json(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, runner: C
 def test_cli_run_text_output(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, runner: CliRunner
 ) -> None:
+    """Tests CLI command text output via simulated run."""
     pdf = tmp_path / "input.pdf"
     pdf.write_bytes(b"%PDF-1.4\n%")
 
     def fake_run(cmd: List[str], cwd=None, env=None) -> None:
+        """Simulate execution of a command with specified working directory."""
         _simulate_stage_outputs(cmd, tmp_path)
 
     def fake_find(anno_dir: Path) -> Path:
+        """Return the first clean PDF from directory."""
         return next(anno_dir.glob("*_clean.pdf"))
 
     monkeypatch.setattr(api, "_run", fake_run)

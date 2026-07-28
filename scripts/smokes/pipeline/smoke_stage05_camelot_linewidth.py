@@ -23,6 +23,7 @@ app = typer.Typer(
 
 
 def _prepare_inputs(_: Path) -> Path:
+    """Return the path of the original PDF after validation."""
     pdf_path = Path("data/input/pipeline/BHT CV32A65X_original.pdf")
     if not pdf_path.exists():
         raise SystemExit(f"Original PDF not found: {pdf_path}")
@@ -30,6 +31,7 @@ def _prepare_inputs(_: Path) -> Path:
 
 
 def run_smoke(results: Path, pages: str, line_scale: int) -> None:
+    """Extract tables from a PDF using specified pages and line scale."""
     load_dotenv(find_dotenv(usecwd=True) or None)
     pdf_path = _prepare_inputs(results)
 
@@ -83,6 +85,7 @@ def main(
     pages: str = typer.Option("1-2", help="Pages to sample for Camelot extraction"),
     line_scale: int = typer.Option(15, help="Camelot lattice line_scale value"),
 ):
+    """Run a smoke test for Camelot PDF extraction."""
     run_smoke(results, pages, line_scale)
 
 

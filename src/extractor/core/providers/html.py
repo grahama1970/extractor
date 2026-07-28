@@ -268,8 +268,50 @@ class HTMLProvider:
             format_metadata["generator"] = gen_meta.get("content")
 
         format_metadata["file_type"] = "html"  # Add file type for consistency
+
+        # Extract TOC from headings
+        toc = self._extract_toc(soup)
+        if toc:
+            format_metadata["toc"] = toc
+
         metadata.format_metadata = format_metadata
         return metadata
+
+    def _extract_toc(self, soup: BeautifulSoup) -> Optional[List[Dict[str, Any]]]:
+        """Extract Table of Contents from HTML headings.
+
+        Scans all h1-h6 heading elements to build a structured TOC.
+        This provides parity with PDF and DOCX TOC extraction.
+
+        Args:
+            soup: BeautifulSoup parsed HTML document
+
+        Returns:
+            List of TOC entries with title, level, and optional id/anchor,
+            or None if no headings found.
+        """
+        toc_entries: List[Dict[str, Any]] = []
+
+        for heading in soup.find_all(["h1", "h2", "h3", "h4", "h5", "h6"]):
+            level = int(heading.name[1])  # h1 -> 1, h2 -> 2, etc.
+            text = heading.get_text(strip=True)
+
+            if not text:
+                continue
+
+            entry: Dict[str, Any] = {
+                "title": text,
+                "level": level,
+            }
+
+            # Include id attribute if present (for anchor linking)
+            heading_id = heading.get("id")
+            if heading_id:
+                entry["id"] = heading_id
+
+            toc_entries.append(entry)
+
+        return toc_entries if toc_entries else None
 
     def _extract_blocks(self, soup: BeautifulSoup) -> List[BaseBlock]:
         """Extract all content blocks from HTML"""

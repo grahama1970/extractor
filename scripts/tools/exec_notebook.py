@@ -22,6 +22,7 @@ from nbconvert import HTMLExporter
 
 
 def main(argv: list[str]) -> int:
+    """Validate command-line arguments and execute a Jupyter notebook."""
     if len(argv) != 3:
         print("usage: exec_notebook.py <in.ipynb> <out.html>")
         return 2

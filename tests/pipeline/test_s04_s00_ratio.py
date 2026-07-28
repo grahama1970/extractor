@@ -7,6 +7,7 @@ from extractor.pipeline.steps.s04_section_builder import _compute_s00_s04_ratio
 
 
 class TestS04S00Ratio:
+    """Write a mock S00 profile.json in the specified directory structure."""
     def _write_profile(self, tmp_path: Path, estimated: int = 50,
                        regex: int = 30, font: int = 50) -> Path:
         """Write a mock S00 profile.json under the expected directory structure."""

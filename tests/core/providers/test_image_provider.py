@@ -23,7 +23,7 @@ def sample_image(tmp_path: Path) -> Path:
 
 def test_image_provider_basic_extraction(sample_image: Path):
     """Test basic extraction without VLM or OCR (no API key)."""
-    with patch.dict(os.environ, {"CHUTES_API_KEY": ""}, clear=False):
+    with patch.dict(os.environ, {"SCILLM_PROXY_KEY": ""}, clear=False):
         provider = ImageProvider(config={"use_vlm": False, "use_ocr": False})
         doc = provider.extract_document(sample_image)
 
@@ -34,7 +34,7 @@ def test_image_provider_basic_extraction(sample_image: Path):
 
 def test_image_provider_legacy_pattern(sample_image: Path):
     """Test legacy initialization pattern: ImageProvider(filepath)."""
-    with patch.dict(os.environ, {"CHUTES_API_KEY": ""}, clear=False):
+    with patch.dict(os.environ, {"SCILLM_PROXY_KEY": ""}, clear=False):
         provider = ImageProvider(str(sample_image), config={"use_vlm": False, "use_ocr": False})
         doc = provider.extract_document()
 
@@ -93,7 +93,7 @@ def test_image_provider_multiframe_tiff(tmp_path: Path):
     frames = [Image.new("RGB", (50, 50), color=c) for c in ["red", "green", "blue"]]
     frames[0].save(tiff_path, save_all=True, append_images=frames[1:])
 
-    with patch.dict(os.environ, {"CHUTES_API_KEY": ""}, clear=False):
+    with patch.dict(os.environ, {"SCILLM_PROXY_KEY": ""}, clear=False):
         provider = ImageProvider(config={"use_vlm": False, "use_ocr": False})
         doc = provider.extract_document(tiff_path)
 
@@ -104,7 +104,7 @@ def test_image_provider_multiframe_tiff(tmp_path: Path):
 
 def test_image_provider_context_manager(sample_image: Path):
     """Test ImageProvider works as context manager."""
-    with patch.dict(os.environ, {"CHUTES_API_KEY": ""}, clear=False):
+    with patch.dict(os.environ, {"SCILLM_PROXY_KEY": ""}, clear=False):
         with ImageProvider(
             str(sample_image), config={"use_vlm": False, "use_ocr": False}
         ) as provider:

@@ -1,3 +1,4 @@
+"""Load and cache prompt definitions from JSON files in the pipeline prompts directory."""
 from __future__ import annotations
 
 import json
@@ -9,6 +10,7 @@ PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
 
 
 class PromptLoadError(RuntimeError):
+    """Signal failure to load a prompt."""
     pass
 
 

@@ -28,6 +28,7 @@ app = typer.Typer(add_completion=False)
 
 
 def _load_flatten_function():
+    """Load and return the ArangoDB exporter's flatten function."""
     module_path = (
         Path(__file__).resolve().parents[3]
         / "src"

@@ -12,6 +12,7 @@ from extractor.pipeline.steps import _11_arango_create_graph as stage11
 
 
 def main() -> int:
+    """Run document processing pipeline using command-line arguments."""
     ap = argparse.ArgumentParser()
     ap.add_argument(
         "--bundle", type=Path, required=True, help="Bundle with documents[] (flattened pdf_objects)"

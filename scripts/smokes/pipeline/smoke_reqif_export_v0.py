@@ -29,6 +29,7 @@ app = typer.Typer(add_completion=False)
 
 
 def _synthetic_stage10(flattened_path: Path) -> None:
+    """Generate synthetic document objects and write to path."""
     data = [
         {
             "_key": "obj-0001",
@@ -53,6 +54,7 @@ def _synthetic_stage10(flattened_path: Path) -> None:
 def main(
     out_dir: Path = Path("scripts/artifacts"),
 ):
+    """Generate and export synthetic data to ReqIF."""
     out_dir.mkdir(parents=True, exist_ok=True)
     stage10 = out_dir / "synthetic_stage10_flattened.json"
     _synthetic_stage10(stage10)

@@ -22,6 +22,7 @@ app = typer.Typer(
 
 
 def _write_sections(path: Path) -> None:
+    """Write sections dictionary to path."""
     data = {
         "sections": [
             {
@@ -68,6 +69,7 @@ def main(
         help="Scratch pipeline directory for generated artifacts.",
     )
 ) -> None:
+    """Clear and prepare pipeline directory for artifact generation."""
     if results.exists():
         shutil.rmtree(results)
     sections_dir = results / "04_section_builder" / "json_output"

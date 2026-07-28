@@ -29,17 +29,20 @@ PDF_DEFAULT = Path(
 
 
 def write_json(p: Path, obj: Any) -> Path:
+    """Write object to path as JSON, creating parent directories."""
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps(obj, indent=2, ensure_ascii=False))
     return p
 
 
 def main() -> None:
+    """Execute pipeline steps by dynamically importing modules from specified paths."""
     summary = {"stages": []}
     # Import step modules directly from file paths to avoid alias issues
     import importlib.util as _ilu
 
     def _load(step_file: str, as_name: str):
+        """Load a module from a specified file path and name."""
         p = Path("src/extractor/pipeline/steps") / step_file
         modname = f"smoke.{as_name}"
         spec = _ilu.spec_from_file_location(modname, str(p))

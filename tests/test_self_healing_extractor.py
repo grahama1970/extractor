@@ -30,66 +30,79 @@ class TestFileTypeDetection:
     """Tests for _detect_file_type function."""
 
     def test_detect_pdf(self, tmp_path):
+        """Detect the file type of a given PDF file."""
         pdf_file = tmp_path / "test.pdf"
         pdf_file.touch()
         assert _detect_file_type(pdf_file) == "pdf"
 
     def test_detect_docx(self, tmp_path):
+        """Test DOCX file type detection."""
         docx_file = tmp_path / "test.docx"
         docx_file.touch()
         assert _detect_file_type(docx_file) == "docx"
 
     def test_detect_html(self, tmp_path):
+        """Detect the file type of a given HTML file."""
         html_file = tmp_path / "test.html"
         html_file.write_text("<!DOCTYPE html><html><body>Test</body></html>")
         assert _detect_file_type(html_file) == "html"
 
     def test_detect_xml(self, tmp_path):
+        """Detect the file type of a given XML file."""
         xml_file = tmp_path / "test.xml"
         xml_file.write_text("<?xml version='1.0'?><root><item>Test</item></root>")
         assert _detect_file_type(xml_file) == "xml"
 
     def test_detect_markdown(self, tmp_path):
+        """Detect the file type of a given markdown file."""
         md_file = tmp_path / "test.md"
         md_file.touch()
         assert _detect_file_type(md_file) == "markdown"
 
     def test_detect_json(self, tmp_path):
+        """Detect the file type of a given JSON file."""
         json_file = tmp_path / "test.json"
         json_file.write_text('{"key": "value"}')
         assert _detect_file_type(json_file) == "json"
 
     def test_detect_txt(self, tmp_path):
+        """Detect the file type of a given file path."""
         txt_file = tmp_path / "test.txt"
         txt_file.touch()
         assert _detect_file_type(txt_file) == "txt"
 
     def test_detect_image_png(self, tmp_path):
+        """Test image file type detection for PNG."""
         img_file = tmp_path / "test.png"
         img_file.touch()
         assert _detect_file_type(img_file) == "image"
 
     def test_detect_spreadsheet(self, tmp_path):
+        """Test spreadsheet file type detection."""
         xlsx_file = tmp_path / "test.xlsx"
         xlsx_file.touch()
         assert _detect_file_type(xlsx_file) == "spreadsheet"
 
     def test_detect_pptx(self, tmp_path):
+        """Detect the file type of a given PowerPoint file."""
         pptx_file = tmp_path / "test.pptx"
         pptx_file.touch()
         assert _detect_file_type(pptx_file) == "pptx"
 
     def test_detect_epub(self, tmp_path):
+        """Test EPUB file type detection."""
         epub_file = tmp_path / "test.epub"
         epub_file.touch()
         assert _detect_file_type(epub_file) == "epub"
 
     def test_detect_rst(self, tmp_path):
+        """Verify correct detection of RST files."""
         rst_file = tmp_path / "test.rst"
         rst_file.touch()
         assert _detect_file_type(rst_file) == "rst"
 
     def test_detect_unknown_falls_back_to_content(self, tmp_path):
+        """Test file type detection falls back to content for unknown extensions."""
         unknown_file = tmp_path / "test.xyz"
         unknown_file.write_text('{"json": true}')
         # Should detect as json based on content
@@ -100,34 +113,42 @@ class TestErrorClassification:
     """Tests for _classify_error function."""
 
     def test_classify_file_data_error(self):
+        """Classify an error message to extract the error type."""
         error = Exception("FileDataError: cannot open document")
         assert _classify_error(error) == "FileDataError"
 
     def test_classify_empty_file_error(self):
+        """Test classification of an EmptyFileError."""
         error = Exception("EmptyFileError: file has zero bytes")
         assert _classify_error(error) == "EmptyFileError"
 
     def test_classify_password_protected(self):
+        """Test classification of a password-protected error."""
         error = Exception("Document is password protected")
         assert _classify_error(error) == "password_protected"
 
     def test_classify_bad_zip(self):
+        """Classify an error type from a given exception."""
         error = Exception("BadZipFile: not a valid ZIP")
         assert _classify_error(error) == "BadZipFile"
 
     def test_classify_encoding_error(self):
+        """Tests classification of an encoding error."""
         error = Exception("UnicodeDecodeError: codec can't decode")
         assert _classify_error(error) == "encoding_error"
 
     def test_classify_timeout(self):
+        """Test classification of a timeout error."""
         error = Exception("Operation timed out after 60 seconds")
         assert _classify_error(error) == "timeout"
 
     def test_classify_memory_error(self):
+        """Classify an exception as a memory error."""
         error = Exception("Out of memory allocating buffer")
         assert _classify_error(error) == "memory_error"
 
     def test_classify_unknown(self):
+        """Verify _classify_error returns 'unknown' for generic errors."""
         error = Exception("Some completely unknown error")
         assert _classify_error(error) == "unknown"
 
@@ -136,22 +157,27 @@ class TestFixStrategy:
     """Tests for _get_fix_strategy function."""
 
     def test_strategy_for_file_data_error(self):
+        """Test the fix strategy for FileDataError."""
         strategy = _get_fix_strategy("FileDataError")
         assert strategy == "decrypt_or_repair"
 
     def test_strategy_for_scanned_pdf(self):
+        """Test the fix strategy for 'scanned_no_ocr' documents."""
         strategy = _get_fix_strategy("scanned_no_ocr")
         assert strategy == "apply_ocr"
 
     def test_strategy_for_bad_zip(self):
+        """Confirms 'repair_zip' is the fix strategy for 'BadZipFile'."""
         strategy = _get_fix_strategy("BadZipFile")
         assert strategy == "repair_zip"
 
     def test_strategy_for_encoding(self):
+        """Validate encoding error strategy is 'detect_and_reencode'."""
         strategy = _get_fix_strategy("encoding_error")
         assert strategy == "detect_and_reencode"
 
     def test_strategy_uses_known_fix_if_provided(self):
+        """Return a fix strategy based on known fix if provided."""
         strategy = _get_fix_strategy("unknown", known_fix="custom_fix")
         assert strategy == "custom_fix"
 
@@ -165,6 +191,7 @@ class TestExtraction:
     """Tests for the main extract function."""
 
     def test_file_not_found(self, tmp_path):
+        """Verify file not found error when extracting."""
         nonexistent = tmp_path / "does_not_exist.pdf"
         result = extract(nonexistent, max_retries=1, use_memory=False, ask_on_failure=False)
 
@@ -173,6 +200,7 @@ class TestExtraction:
         assert "not found" in result.error.lower()
 
     def test_extract_markdown_success(self, tmp_path):
+        """Test successful markdown content extraction."""
         md_file = tmp_path / "test.md"
         md_file.write_text("# Title\n\nParagraph content here.")
 
@@ -184,6 +212,7 @@ class TestExtraction:
         assert result.attempts == 1
 
     def test_extract_html_success(self, tmp_path):
+        """Tests successful HTML extraction from a file."""
         html_file = tmp_path / "test.html"
         html_file.write_text("""<!DOCTYPE html>
 <html><body>
@@ -198,6 +227,7 @@ class TestExtraction:
         assert result.content.get("block_count", 0) > 0
 
     def test_extract_json_success(self, tmp_path):
+        """Verify successful JSON extraction from a file."""
         json_file = tmp_path / "test.json"
         json_file.write_text('{"title": "Test", "items": [1, 2, 3]}')
 
@@ -207,6 +237,7 @@ class TestExtraction:
         assert result.file_type == "json"
 
     def test_extract_txt_success(self, tmp_path):
+        """Test successful extraction of a text file."""
         txt_file = tmp_path / "test.txt"
         txt_file.write_text("Line 1\nLine 2\nLine 3")
 
@@ -216,6 +247,7 @@ class TestExtraction:
         assert result.file_type == "txt"
 
     def test_extraction_result_structure(self, tmp_path):
+        """Verify extraction result structure."""
         md_file = tmp_path / "test.md"
         md_file.write_text("# Test")
 
@@ -235,6 +267,7 @@ class TestUnifiedFormat:
     """Tests for _to_unified_format function."""
 
     def test_converts_model_dump(self):
+        """Convert model data to a unified format for specified file type."""
         mock_doc = MagicMock()
         mock_doc.model_dump.return_value = {
             "blocks": [{"type": "text", "text": "content"}]
@@ -247,6 +280,7 @@ class TestUnifiedFormat:
         assert "extracted_at" in result
 
     def test_converts_dict_directly(self):
+        """Convert a dictionary to a unified format based on file type."""
         data = {"blocks": [{"type": "heading", "text": "Title"}]}
 
         result = _to_unified_format(data, "html")
@@ -255,6 +289,7 @@ class TestUnifiedFormat:
         assert len(result["blocks"]) >= 1
 
     def test_normalizes_block_types_to_lowercase(self):
+        """Normalize block types to lowercase in the provided data structure."""
         data = {"blocks": [{"type": "Text", "text": "content"}]}
 
         result = _to_unified_format(data, "pdf")
@@ -269,12 +304,14 @@ class TestErrorPatterns:
     """Tests for ERROR_PATTERNS registry."""
 
     def test_all_patterns_have_required_keys(self):
+        """Check all error patterns for required keys."""
         for name, pattern in ERROR_PATTERNS.items():
             assert "description" in pattern, f"{name} missing description"
             assert "fix_strategy" in pattern, f"{name} missing fix_strategy"
             assert "recoverable" in pattern, f"{name} missing recoverable"
 
     def test_known_patterns_exist(self):
+        """Assert known error patterns are registered."""
         expected = [
             "FileDataError",
             "EmptyFileError",

@@ -48,6 +48,7 @@ DEFAULT_FILES = [
 
 
 def read_text_file(path: Path) -> str:
+    """Read text file content, replacing tabs and handling errors."""
     try:
         txt = path.read_text(encoding="utf-8", errors="replace")
         return txt.replace("\t", "    ")
@@ -58,6 +59,7 @@ def read_text_file(path: Path) -> str:
 
 
 def default_notes(files: list[str]) -> str:
+    """Generate UX review notes with timestamp, scope, route, and file list."""
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     return (
         "# UX Review Notes (Tabbed Classic)\n\n"
@@ -95,6 +97,7 @@ def default_notes(files: list[str]) -> str:
 
 
 def build_bundle(out_path: Path, files: list[str], notes_text: str) -> None:
+    """Build a bundle file with UX review notes and files."""
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with out_path.open("w", encoding="utf-8") as f:
         f.write("===== BEGIN UX REVIEW NOTES =====\n")
@@ -109,6 +112,7 @@ def build_bundle(out_path: Path, files: list[str], notes_text: str) -> None:
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
+    """Parse command-line arguments for review bundle generation."""
     ap = argparse.ArgumentParser(description="Generate a single-file review bundle with notes.")
     ap.add_argument(
         "--out",
@@ -135,6 +139,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 
 def main(argv: list[str]) -> int:
+    """Parse command-line arguments and manage output file processing."""
     ns = parse_args(argv)
     files = ns.files
     out_path = Path(ns.out)

@@ -12,6 +12,7 @@ from extractor.pipeline.steps import _12_insert_annotations as stage12
 
 
 def main() -> int:
+    """Process annotations with stage12, saving results to output."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--annotations", type=Path, required=True, help="01_annotations.json path")
     ap.add_argument("--out", type=Path, required=True, help="Results root (pipeline)")

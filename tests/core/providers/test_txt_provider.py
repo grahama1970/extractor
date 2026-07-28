@@ -10,6 +10,7 @@ from extractor.core.schema.unified_document import SourceType
 
 @pytest.fixture
 def provider():
+    """Return an instance of the TXTProvider class."""
     return TXTProvider()
 
 

@@ -13,6 +13,7 @@ from extractor.pipeline.steps import _01_annotation_processor as stage01
 
 
 def main() -> int:
+    """Parse command-line arguments for PDF processing and output paths."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--pdf", type=Path, required=True, help="Input PDF path")
     ap.add_argument("--out", type=Path, required=True, help="Results root (pipeline)")

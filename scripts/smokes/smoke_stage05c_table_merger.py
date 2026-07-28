@@ -22,6 +22,7 @@ app = typer.Typer(
 
 
 def _tables_payload() -> dict:
+    """Return table data with indices, bounding box, and structured content."""
     return {
         "tables": [
             {
@@ -57,6 +58,7 @@ def main(
         help="Scratch pipeline directory for Stage 05c.",
     )
 ) -> None:
+    """Prepare pipeline results directory for stage 05c."""
     if results.exists():
         shutil.rmtree(results)
     stage_root = results

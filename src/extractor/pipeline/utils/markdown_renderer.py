@@ -12,6 +12,7 @@ class MarkdownRenderer:
     """
 
     def __init__(self, proofs_map: Dict[str, Any] = None, pipeline_dir: Path = None):
+        """Initialize an object with a proofs map and pipeline directory."""
         self.proofs_map = proofs_map or {}
         self.pipeline_dir = pipeline_dir
 
@@ -138,6 +139,7 @@ class MarkdownRenderer:
         return lines
 
     def render_text(self, content: str) -> List[str]:
+        """Return stripped content and an empty string in a list, if non-empty."""
         if content and content.strip():
             return [content.strip(), ""]
         return []
@@ -153,6 +155,7 @@ class MarkdownRenderer:
         return []
 
     def render_table(self, content: str, meta: Dict[str, Any]) -> List[str]:
+        """Render a markdown table with title and description."""
         lines = []
         title = meta.get("title") or "Table"
         desc = meta.get("desc") or ""
@@ -194,6 +197,7 @@ class MarkdownRenderer:
         return lines
 
     def render_requirement(self, content: str, meta: Dict[str, Any], asset_id: str) -> List[str]:
+        """Render formatted requirement lines."""
         lines = []
         req_id = meta.get("req_id") or "REQ-UNKNOWN"
         citation = meta.get("citation") or ""

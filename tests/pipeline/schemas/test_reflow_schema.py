@@ -17,27 +17,35 @@ from extractor.pipeline.schemas.reflow import (
 
 
 class TestParagraphBlock:
+    """Validates ParagraphBlock instantiation and text requirement."""
     def test_valid_paragraph(self):
+        """Tests ParagraphBlock creation with valid text."""
         block = ParagraphBlock(type="paragraph", text="Hello world")
         assert block.text == "Hello world"
 
     def test_missing_text_fails(self):
+        """Verify ParagraphBlock creation fails without text."""
         with pytest.raises(ValidationError):
             ParagraphBlock(type="paragraph")
 
 
 class TestListBlock:
+    """Validate the contents of a ListBlock for correct structure."""
     def test_valid_list(self):
+        """Validate the length of items in a ListBlock instance."""
         block = ListBlock(type="list", items=["a", "b", "c"])
         assert len(block.items) == 3
 
     def test_empty_list_allowed(self):
+        """Test that an empty list is allowed in a ListBlock."""
         block = ListBlock(type="list", items=[])
         assert block.items == []
 
 
 class TestTableBlock:
+    """Validate table structure and ensure row-column consistency."""
     def test_valid_table(self):
+        """Verify TableBlock correctly stores provided rows."""
         block = TableBlock(
             type="table",
             id="t1",
@@ -48,6 +56,7 @@ class TestTableBlock:
         assert len(block.rows) == 2
 
     def test_row_column_mismatch_fails(self):
+        """Validate table row and column count consistency on creation."""
         with pytest.raises(ValidationError) as exc_info:
             TableBlock(
                 type="table",
@@ -58,6 +67,7 @@ class TestTableBlock:
         assert "cells" in str(exc_info.value)
 
     def test_optional_title(self):
+        """Verifies TableBlock title is None by default."""
         block = TableBlock(
             type="table",
             id="t1",
@@ -68,7 +78,9 @@ class TestTableBlock:
 
 
 class TestFigureBlock:
+    """Validate properties of a FigureBlock instance."""
     def test_valid_figure(self):
+        """Validate the properties of a FigureBlock instance."""
         block = FigureBlock(
             type="figure",
             id="f1",
@@ -78,16 +90,20 @@ class TestFigureBlock:
         assert block.image_ref == "path/to/image.png"
 
     def test_optional_caption(self):
+        """Return the caption of a FigureBlock or None if absent."""
         block = FigureBlock(type="figure", id="f1", image_ref="img.png")
         assert block.caption is None
 
 
 class TestReflowedJson:
+    """Represent a document's content as a sequence of typed blocks."""
     def test_empty_blocks(self):
+        """Test ReflowedJson initialization with empty blocks."""
         rj = ReflowedJson(title=None, blocks=[])
         assert rj.blocks == []
 
     def test_mixed_blocks(self):
+        """Test mixed block types in ReflowedJson."""
         rj = ReflowedJson(
             title="Test Section",
             blocks=[
@@ -101,7 +117,9 @@ class TestReflowedJson:
 
 
 class TestReflowOutput:
+    """Represent the output of a document reflow process."""
     def test_full_valid_output(self):
+        """Test ReflowOutput model with full valid data."""
         data = {
             "reflowed_json": {"title": "Intro", "blocks": []},
             "ocr_corrections": {"teh": "the"},
@@ -114,28 +132,34 @@ class TestReflowOutput:
         assert output.ocr_corrections["teh"] == "the"
 
     def test_minimal_valid_output(self):
+        """Test ReflowOutput model's minimal valid output."""
         data = {"reflowed_json": {"blocks": []}}
         output = ReflowOutput.model_validate(data)
         assert output.summary == ""
         assert output.confidence == 1.0
 
     def test_confidence_out_of_range_fails(self):
+        """Validate model input and raise error for out-of-range confidence."""
         with pytest.raises(ValidationError):
             ReflowOutput.model_validate({"reflowed_json": {"blocks": []}, "confidence": 1.5})
 
     def test_negative_confidence_fails(self):
+        """Assert ReflowOutput validation fails with negative confidence."""
         with pytest.raises(ValidationError):
             ReflowOutput.model_validate({"reflowed_json": {"blocks": []}, "confidence": -0.1})
 
 
 class TestValidateReflowOutput:
+    """Validate reflow output structure and return results."""
     def test_valid_returns_output(self):
+        """Tests `validate_reflow_output` returns valid output and no error."""
         data = {"reflowed_json": {"blocks": []}}
         output, error = validate_reflow_output(data)
         assert output is not None
         assert error is None
 
     def test_invalid_returns_error(self):
+        """Assert error on invalid reflow output data."""
         data = {"wrong_key": "value"}
         output, error = validate_reflow_output(data)
         assert output is None

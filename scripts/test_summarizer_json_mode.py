@@ -33,6 +33,7 @@ try:
 except Exception:
     # Fallback: simple loader
     def clean_json_string(content, return_dict=False):
+        """Load JSON string, returning object or original content."""
         try:
             obj = json.loads(content)
             return obj if return_dict else content
@@ -41,6 +42,7 @@ except Exception:
 
 
 async def test_summarize(section: dict, *, model: str, strict_json: bool) -> dict:
+    """Summarize a document section and extract key concepts."""
     base_text = (
         section.get("reflowed_text") or section.get("merged_text") or section.get("raw_text") or ""
     )
@@ -93,6 +95,7 @@ async def test_summarize(section: dict, *, model: str, strict_json: bool) -> dic
 
 
 def main():
+    """Parse command-line arguments for the application configuration."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--sections", required=False, help="Path to 07_reflowed.json (optional)")
     ap.add_argument("--index", type=int, default=0, help="Section index in reflowed_sections")

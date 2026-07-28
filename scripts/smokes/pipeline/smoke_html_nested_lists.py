@@ -21,6 +21,7 @@ app = typer.Typer(add_completion=False)
 
 @app.command()
 def main(tmp_dir: Path = typer.Option(Path("data/results/structured_parity_smoke/html_synth"))):
+    """Create a temporary directory and write an HTML file to it."""
     tmp_dir.mkdir(parents=True, exist_ok=True)
     html_path = tmp_dir / "nested_lists.html"
     html_path.write_text(

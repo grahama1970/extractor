@@ -22,6 +22,7 @@ app = typer.Typer(add_completion=False, help="Stage 07 strict table block smoke"
 
 
 def _ensure_stage07(results: Path) -> None:
+    """Validate inputs and configure environment for stage 07."""
     sec = results / "04_section_builder/json_output/04_sections.json"
     tab = results / "05_table_extractor/json_output/05_tables.json"
     fig = results / "06_figure_extractor/json_output/06_figures.json"
@@ -59,6 +60,7 @@ def _ensure_stage07(results: Path) -> None:
 
 
 def run_smoke(results: Path) -> None:
+    """Load environment variables and process JSON results for smoke testing."""
     load_dotenv(find_dotenv(usecwd=True) or None)
     os.environ.setdefault("LITELLM_HTTPX", "1")
     os.environ.setdefault("LITELLM_DEBUG", "1")
@@ -126,6 +128,7 @@ def run_smoke(results: Path) -> None:
 
 @app.command()
 def main(results: Path = typer.Option(Path("data/results/pipeline"), "--results")):
+    """Run a smoke test to the results path."""
     run_smoke(results)
 
 

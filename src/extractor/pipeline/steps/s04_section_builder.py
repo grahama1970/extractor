@@ -797,6 +797,7 @@ def summarize_suspicious_from_verified(blocks: list[dict], sections: list[dict])
     }
 
 def _append_diag(section: dict, severity: str, code: str, message: str, context: dict) -> None:
+    """Append a diagnostic event to a section's metadata."""
     try:
         md = section.setdefault("metadata", {})
         diags = md.setdefault("diagnostics", [])

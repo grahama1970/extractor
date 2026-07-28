@@ -8,11 +8,14 @@ from tools.contract_loop.manifest import Manifest
 
 
 class TestManifest(unittest.TestCase):
+    """Run unit tests for directory hash functionality."""
     def setUp(self):
+        """Create a temporary directory and store its path."""
         self.tmp = tempfile.mkdtemp()
         self.out = Path(self.tmp)
 
     def tearDown(self):
+        """Remove the temporary directory."""
         shutil.rmtree(self.tmp)
 
     def test_dir_hash(self):
@@ -37,6 +40,7 @@ class TestManifest(unittest.TestCase):
         self.assertNotEqual(h1, h3)
 
     def test_add_attempt(self):
+        """Validate the addition of a step attempt in a manifest."""
         d = self.out / "out_artifacts"
         d.mkdir()
         (d / "file.txt").write_text("stuff")

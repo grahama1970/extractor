@@ -31,6 +31,7 @@ app = typer.Typer(add_completion=False, help="Smoke: Stage 07 complex CLI strict
 
 
 def run_smoke(results: Path) -> None:
+    """Run a smoke test, preparing environment and upstream artifacts."""
     load_dotenv(find_dotenv(usecwd=True) or None)
     os.environ.setdefault("LITELLM_HTTPX", "1")
     os.environ.setdefault("LITELLM_DEBUG", "1")
@@ -93,6 +94,7 @@ def run_smoke(results: Path) -> None:
 
 @app.command()
 def main(results: Path = typer.Option(Path("data/results/pipeline"), "--results")):
+    """Run smoke test using results path."""
     run_smoke(results)
 
 

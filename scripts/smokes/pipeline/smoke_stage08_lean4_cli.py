@@ -36,6 +36,7 @@ def main(
         Path("/home/graham/workspace/experiments/lean4/src/lean4_prover/cli_mini.py")
     ),
 ):
+    """Run Lean4 CLI to process PDF, saving results."""
     if not lean4_cli.exists():
         print("SKIP: Lean4 CLI not found; skipping prove smoke.")
         raise typer.Exit(0)

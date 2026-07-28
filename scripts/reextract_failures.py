@@ -124,6 +124,7 @@ def reextract_pdf(pdf_path: str, source: str, timeout: int) -> dict:
 
 
 def main():
+    """Parse command-line arguments for PDF re-extraction options."""
     import argparse
     parser = argparse.ArgumentParser(description="Re-extract failed PDFs")
     parser.add_argument("--dry-run", action="store_true", help="Show what would be done")

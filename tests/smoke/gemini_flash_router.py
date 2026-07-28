@@ -8,6 +8,7 @@ initialize_litellm_cache()
 
 
 def encode_image(image_path: str):
+    """Encode image file to base64 string."""
     import base64
 
     with open(image_path, "rb") as image_file:

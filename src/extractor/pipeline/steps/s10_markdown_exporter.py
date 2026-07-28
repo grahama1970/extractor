@@ -29,6 +29,7 @@ STEP_NAME = "10_markdown_exporter"
 
 
 def sanity() -> int:
+    """Run sanity check for the current step."""
     return run_step_sanity(STEP_NAME)
 
 

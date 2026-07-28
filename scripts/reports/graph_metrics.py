@@ -17,6 +17,7 @@ app = typer.Typer(add_completion=False)
 
 
 def _conn():
+    """Retrieve ArangoDB connection details from environment variables."""
     url = os.getenv("ARANGODB_URL", "http://localhost:8529")
     user = os.getenv("ARANGODB_USERNAME", os.getenv("ARANGODB_USER", "root"))
     pwd = os.getenv("ARANGODB_PASSWORD")
@@ -28,6 +29,7 @@ def _conn():
 
 @app.command()
 def main(db: str = typer.Option("lean4_prod", "--db")):
+    """Connect to ArangoDB and retrieve collection counts."""
     url, user, pwd = _conn()
     client = ArangoClient(hosts=url)
     adb = client.db(db, username=user, password=pwd)

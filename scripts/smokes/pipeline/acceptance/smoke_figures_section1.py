@@ -23,6 +23,7 @@ OUT = Path("data/results/with_requirements_figures")
 
 
 def ensure_stage07() -> Path:
+    """Ensure reflowed JSON exists, returning its path."""
     OUT.mkdir(parents=True, exist_ok=True)
     p07 = OUT / "07_reflow_section/json_output/07_reflowed.json"
     if p07.exists():
@@ -44,6 +45,7 @@ def ensure_stage07() -> Path:
 
 @app.command()
 def main():
+    """Count figures in the first section of a reflowed document."""
     p07 = ensure_stage07()
     d = json.loads(p07.read_text())
     secs = d.get("reflowed_sections", [])

@@ -1,3 +1,4 @@
+"""Image validation, extraction from text, caching, and base64 encoding utilities."""
 from __future__ import annotations
 
 import base64
@@ -21,6 +22,7 @@ IMAGE_EXT = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tiff", ".webp"}
 
 
 def _get_cache_dir(explicit_dir: Optional[str] = None) -> Optional[Path]:
+    """Return cache directory path, creating it if missing."""
     d = explicit_dir or os.getenv("LITELLM_IMAGE_CACHE_DIR")
     if not d:
         return None
@@ -35,6 +37,7 @@ def _get_cache_dir(explicit_dir: Optional[str] = None) -> Optional[Path]:
 
 
 def safe_image(path: Path) -> bool:
+    """Validate image file existence, extension, and integrity."""
     try:
         return (
             path.exists() and path.suffix.lower() in IMAGE_EXT and Image.open(path).verify() is None
@@ -83,6 +86,7 @@ def extract_images(text: str) -> Tuple[List[str], str]:
 
 
 def _hash_key(s: str) -> str:
+    """Compute SHA1 hash of a UTF-8 encoded string."""
     return hashlib.sha1(s.encode("utf-8")).hexdigest()
 
 

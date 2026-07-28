@@ -39,6 +39,7 @@ MODEL = os.getenv("CHUTES_VLM_MODEL", "chutes/vlm")
 
 
 def sanity() -> int:
+    """Return the result of the sanity check step."""
     return run_step_sanity(STEP_NAME)
 
 
@@ -118,8 +119,8 @@ async def process_tables(tables: List[Dict[str, Any]], output_dir: Path) -> List
 
     logger.info(f"Describing {len(requests)} tables with {MODEL} (concurrency={CONCURRENCY})...")
 
-    api_key = os.getenv("CHUTES_API_KEY")
-    api_base = os.getenv("CHUTES_API_BASE", "https://llm.chutes.ai/v1")
+    api_key = os.getenv("SCILLM_PROXY_KEY", "sk-dev-proxy-123")
+    api_base = os.getenv("SCILLM_API_BASE", "http://localhost:4010")
 
     async for result in parallel_acompletions_iter(
         requests,
@@ -170,6 +171,7 @@ def run(
     skip_descriptions: bool = False,
     preset_config: Optional[Dict[str, Any]] = None,
 ) -> Path:
+    """Generate VLM table descriptions from stage 05 data."""
 
     if skip_descriptions:
         logger.info("Skipping VLM table descriptions (requested).")

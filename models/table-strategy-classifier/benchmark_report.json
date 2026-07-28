@@ -2,8 +2,8 @@
   "status": "ok",
   "selected_backbone": "gradient_boosting",
   "selected_metrics": {
-    "macro_f1": 0.8631313242078529,
-    "accuracy": 0.9973614775725593
+    "macro_f1": 0.9963128461329901,
+    "accuracy": 0.9983525535420099
   },
   "model_path": "/home/graham/workspace/experiments/extractor/models/table-strategy-classifier/model.joblib",
   "source": {
@@ -14,31 +14,31 @@
     {
       "backbone": "gradient_boosting",
       "status": "ok",
-      "accuracy": 0.9973614775725593,
-      "macro_f1": 0.8631313242078529,
-      "train_samples": 6435,
-      "val_samples": 1137,
-      "num_classes": 10,
+      "accuracy": 0.9983525535420099,
+      "macro_f1": 0.9963128461329901,
+      "train_samples": 20627,
+      "val_samples": 3642,
+      "num_classes": 9,
       "feature_count": 21
     },
     {
       "backbone": "random_forest",
       "status": "ok",
-      "accuracy": 0.9964819700967458,
-      "macro_f1": 0.7881818768966957,
-      "train_samples": 6435,
-      "val_samples": 1137,
-      "num_classes": 10,
+      "accuracy": 0.9978034047226798,
+      "macro_f1": 0.9917164194225006,
+      "train_samples": 20627,
+      "val_samples": 3642,
+      "num_classes": 9,
       "feature_count": 21
     },
     {
       "backbone": "logistic_regression",
       "status": "ok",
-      "accuracy": 0.9894459102902374,
-      "macro_f1": 0.6640763013933229,
-      "train_samples": 6435,
-      "val_samples": 1137,
-      "num_classes": 10,
+      "accuracy": 0.9967051070840197,
+      "macro_f1": 0.9872040614917653,
+      "train_samples": 20627,
+      "val_samples": 3642,
+      "num_classes": 9,
       "feature_count": 21
     }
   ],

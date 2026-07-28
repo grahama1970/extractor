@@ -21,6 +21,7 @@ app = typer.Typer(add_completion=False)
 
 
 def extract_bullets_inherit(text: str) -> list[str]:
+    """Extract bullet points with preceding modal verbs from text."""
     lines = [l.strip() for l in text.splitlines() if l.strip()]
     out: list[str] = []
     modal = None
@@ -37,6 +38,7 @@ def extract_bullets_inherit(text: str) -> list[str]:
 
 @app.command()
 def main():
+    """Run Lean4 CLI and process extracted requirements from text."""
     lean_cli = Path("/home/graham/workspace/experiments/lean4/src/lean4_prover/cli_mini.py")
     if not lean_cli.exists():
         print("SKIP: Lean4 CLI not found")

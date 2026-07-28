@@ -18,6 +18,7 @@ app = typer.Typer(add_completion=False)
 
 
 def _conn():
+    """Retrieve ArangoDB connection parameters, validating password."""
     url = os.getenv("ARANGODB_URL", "http://localhost:8529")
     user = os.getenv("ARANGODB_USERNAME", os.getenv("ARANGODB_USER", "root"))
     pwd = os.getenv("ARANGODB_PASSWORD")
@@ -34,6 +35,7 @@ def main(
     params: str = typer.Option("{}", "--params", help="JSON string of bind vars"),
     pretty: bool = typer.Option(True, "--pretty/--raw"),
 ):
+    """Execute a database query using provided parameters and options."""
     url, user, pwd = _conn()
     client = ArangoClient(hosts=url)
     db = client.db(database, username=user, password=pwd)

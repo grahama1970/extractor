@@ -20,6 +20,7 @@ app = typer.Typer(add_completion=False, help="Smoke: Stage 10 skip-embeddings + 
 
 @app.command()
 def main(results: Path = typer.Option(Path("data/results/pipeline"), "-o")) -> None:
+    """Run Stage 07 reflow pipeline, saving results."""
     load_dotenv(find_dotenv() or None)
 
     # Minimal Stage 07 reflowed payload

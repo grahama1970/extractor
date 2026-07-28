@@ -129,23 +129,27 @@ def compute_table_merges(
     merged_lookup_by_sig: dict[Tuple[str, Tuple[int, ...]], dict[str, Any]] = {}
 
     def _norm_columns(t: dict[str, Any]) -> List[str]:
+        """Normalize and return a list of column names from a dictionary."""
         pm = t.get("pandas_metrics") or {}
         cols = pm.get("columns") or t.get("columns") or []
         return [str(c).strip().lower() for c in cols if str(c).strip()]
 
     def _sig_no_pages(t: dict[str, Any]) -> dict[str, Any]:
+        """Return normalized columns and metadata from the input dictionary."""
         cols_norm = _norm_columns(t)
         ncol = len(cols_norm) if cols_norm else t.get("ncol")
         title = (t.get("title") or t.get("header_norm") or "").strip()
         return {"columns": cols_norm, "ncol": ncol, "title": title}
 
     def _page_idx(t: dict[str, Any]) -> Optional[int]:
+        """Return the page index from a dictionary, defaulting to zero."""
         try:
             return int(t.get("page_index", t.get("page", 0)) or 0)
         except Exception:
             return None
 
     def _logical_key(signature: dict[str, Any]) -> str:
+        """Generate a 16-character SHA-256 hash from a signature dictionary."""
         payload = json.dumps(signature, sort_keys=True, ensure_ascii=False)
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
 
@@ -159,6 +163,7 @@ def compute_table_merges(
         sig_groups.setdefault(sig_key, []).append(t)
 
     def _process_run(items: list[dict[str, Any]], base_sig: dict[str, Any]) -> None:
+        """Process a run of items, extracting title and validating pages."""
         if len(items) < 2:
             return
         pages = sorted({p for p in (_page_idx(it) for it in items) if p is not None})
@@ -258,6 +263,7 @@ def build_table_block_from_stage05(table: dict[str, Any]) -> dict[str, Any] | No
         confidence["density"] = None
 
     def _norm_hdr(h: str) -> str:
+        """Normalize a header string by converting to lowercase and replacing spaces."""
         s = " ".join(str(h or "").strip().lower().split())
         return s.replace(" ", "_")
 

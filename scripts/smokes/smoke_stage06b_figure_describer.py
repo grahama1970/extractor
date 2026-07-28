@@ -28,6 +28,7 @@ _PNG_BYTES = base64.b64decode(
 
 
 def _setup_fixture(root: Path) -> Path:
+    """Create and configure directories and files for fixture setup."""
     figures_dir = root / "06_figure_extractor"
     json_dir = figures_dir / "json_output"
     json_dir.mkdir(parents=True, exist_ok=True)
@@ -63,6 +64,7 @@ def main(
         help="Scratch pipeline directory for Stage 06b sanity.",
     )
 ) -> None:
+    """Remove existing results directory and set up a new fixture."""
     if results.exists():
         shutil.rmtree(results)
     stage06_dir = _setup_fixture(results)

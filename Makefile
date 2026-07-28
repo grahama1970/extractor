@@ -273,15 +273,13 @@ ux-health:
 # Excludes tests/fixtures/generated/ (Camelot table tests take ~40s alone)
 smokes-cli:
 	@echo "Running CLI smokes (fast subset, quality gate compatible)..."
-	. .venv/bin/activate 2>/dev/null || true; \
-	python -m pytest tests/fixtures/hardens_patterns/ tests/core/providers/ tests/pipeline/schemas/ -q -x --tb=short
+	PYTHONPATH=src /usr/bin/python3 -m pytest tests/fixtures/hardens_patterns/ tests/core/providers/ tests/pipeline/schemas/ -q -x --tb=short
 	@echo "CLI smokes: PASS"
 
 # Full test suite (no time limit)
 smokes-cli-full:
 	@echo "Running full CLI test suite..."
-	. .venv/bin/activate 2>/dev/null || true; \
-	python -m pytest tests/ -q --tb=short
+	PYTHONPATH=src /usr/bin/python3 -m pytest tests/ -q --tb=short
 	@echo "Full CLI smokes: PASS"
 
 smokes:

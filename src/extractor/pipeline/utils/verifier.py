@@ -1,3 +1,4 @@
+"""LLM-based vision verification of suspicious section headers using image context."""
 from __future__ import annotations
 
 from extractor.pipeline.utils.reliability import log_stage_error
@@ -36,8 +37,8 @@ async def verify_header_with_llm(image_b64: str, context_text: str, model: str) 
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": user_content},
     ]
-    ch_base = os.getenv("CHUTES_API_BASE")
-    ch_key = os.getenv("CHUTES_API_KEY")
+    ch_base = os.getenv("SCILLM_API_BASE", "http://localhost:4010")
+    ch_key = os.getenv("SCILLM_PROXY_KEY", "sk-dev-proxy-123")
     resp = await sc_acompletion(
         model=model,
         api_base=ch_base,

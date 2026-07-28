@@ -11,16 +11,19 @@ API_BASE = os.getenv("LESSONS_API_BASE", "http://127.0.0.1:8001")
 
 
 def _get(url: str, **params):
+    """Retrieve HTTP response from a specified URL with parameters."""
     r = httpx.get(f"{API_BASE}{url}", params=params, timeout=10.0)
     return r
 
 
 def _post(url: str, payload: dict):
+    """Post JSON payload to a specified URL and return the response."""
     r = httpx.post(f"{API_BASE}{url}", json=payload, timeout=15.0)
     return r
 
 
 def _server_up() -> bool:
+    """Validate API server responsiveness."""
     try:
         r = httpx.get(f"{API_BASE}/api/build", timeout=3.0)
         return r.status_code == 200
@@ -30,6 +33,7 @@ def _server_up() -> bool:
 
 @pytest.mark.skipif(not _server_up(), reason="Lessons API not running; start ./scripts/dev.sh")
 def test_http_edge_lifecycle():
+    """Skip test if the Lessons API server is not running."""
     ts = int(time.time())
     title_a = f"DEMO[http] A {ts}"
     title_b = f"DEMO[http] B {ts}"
@@ -95,6 +99,7 @@ def test_http_edge_lifecycle():
 
 @pytest.mark.skipif(not _server_up(), reason="Lessons API not running; start ./scripts/dev.sh")
 def test_http_edge_reject_and_rejected_pairs_present():
+    """Test HTTP rejection of lesson pairs and their presence."""
     ts = int(time.time())
     title_c = f"DEMO[http-reject] C {ts}"
     title_d = f"DEMO[http-reject] D {ts}"

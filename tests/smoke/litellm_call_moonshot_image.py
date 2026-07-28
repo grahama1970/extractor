@@ -12,11 +12,13 @@ initialize_litellm_cache()
 
 
 def encode_image(image_path: str) -> str:
+    """Encode image file to base64 string."""
     with open(image_path, "rb") as f:
         return base64.b64encode(f.read()).decode("utf-8")
 
 
 async def main():
+    """Query a VLM with an image loaded from path."""
     image_path = os.getenv("SMOKE_IMAGE_PATH", "tests/stage07_manual/images/smoke/panda.png")
     b64 = encode_image(image_path)
     # model = os.getenv('LITELLM_VLM_MODEL', 'gemini/gemini-2.5-flash')

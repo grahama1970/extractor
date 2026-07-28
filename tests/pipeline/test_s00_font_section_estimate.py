@@ -59,6 +59,7 @@ def _make_pdf(tmp_path: Path, body_size: float = 10.0, heading_size: float = 14.
 
 @pytest.mark.skipif(not HAS_FITZ, reason="PyMuPDF (fitz) not available")
 class TestFontSectionEstimate:
+    """Test section estimation by font size for headings."""
     def test_detects_headings_by_size(self, tmp_path):
         """Headings at 14pt with 10pt body should be detected."""
         pdf = _make_pdf(tmp_path, body_size=10.0, heading_size=14.0, num_headings=5)
@@ -182,6 +183,7 @@ class TestBoldOnlyHeadingDetection:
 
 
 class TestBuildHierarchy:
+    """Test hierarchy building from combined estimates."""
     def test_max_of_regex_and_font(self):
         """Combined estimate should be max(regex, font)."""
         analysis = {

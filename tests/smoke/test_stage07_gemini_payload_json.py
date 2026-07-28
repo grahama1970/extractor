@@ -4,14 +4,19 @@ from pathlib import Path
 
 
 class _Recorder:
+    """Record model completion call arguments."""
     def __init__(self):
+        """Prepare instance for tracking calls."""
         self.calls = []
 
     async def acompletion(self, *, model, messages, **kwargs):
+        """Record and simulate an asynchronous model completion."""
         self.calls.append({"model": model, "messages": messages, "kwargs": kwargs})
 
         class _Resp:
+            """Builds a simulated API response object from input text."""
             def __init__(self, text: str):
+                """Initialize an object with usage metrics and choices based on text."""
                 self.usage = {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
                 self._hidden_params = {"response_cost": 0.0, "cache_hit": False}
                 self.choices = [
@@ -38,6 +43,7 @@ class _Recorder:
 
 
 def _mk_png(p: Path):
+    """Write a PNG file from a base64-encoded string."""
     import base64
 
     p.write_bytes(

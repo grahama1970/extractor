@@ -40,6 +40,7 @@ def test_idle_timeout_triggers_without_overall_timeout(tmp_path):
     out_chunks = []
 
     def on_out(b: bytes):
+        """Append bytes to the output chunks list."""
         out_chunks.append(b)
 
     res = asyncio.run(

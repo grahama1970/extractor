@@ -24,6 +24,7 @@ from extractor.pipeline.steps import _06_figure_extractor as stage06
 
 
 def main() -> int:
+    """Parse command-line arguments for stage processing inputs and outputs."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--bundle", type=Path, help="Stage06 bundle JSON")
     ap.add_argument("--stage02", type=Path, help="02_marker_blocks.json")

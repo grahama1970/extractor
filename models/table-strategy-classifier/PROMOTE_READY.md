@@ -1,7 +1,7 @@
 # Strategy Classifier Ready for Promotion
 
-- **macro_f1**: 0.8631 (threshold: 0.85)
-- **n_samples**: 7572 (threshold: 500)
+- **macro_f1**: 0.9963 (threshold: 0.85)
+- **n_samples**: 24269 (threshold: 500)
 
 To promote from shadow to active:
 ```bash

@@ -37,6 +37,7 @@ RELF = OUT / "07_reflow_section/json_output/07_reflowed.json"
 
 
 def ensure_stage07() -> None:
+    """Ensure stage 07 is complete, extracting data if needed."""
     OUT.mkdir(parents=True, exist_ok=True)
     if RELF.exists():
         return
@@ -68,6 +69,7 @@ def df_from_maybe_dict(obj: Any) -> pd.DataFrame | None:
 
 
 def constraints_from_df(df: pd.DataFrame) -> List[str]:
+    """Extract constraints from a DataFrame as a list of strings."""
     cons: List[str] = []
     cols = {c.strip().lower(): c for c in df.columns}
     # Pattern 1: Param + Constraint
@@ -116,6 +118,7 @@ def constraints_from_df(df: pd.DataFrame) -> List[str]:
 
 
 def extract_table_constraints(reflow_path: Path) -> List[Dict[str, Any]]:
+    """Extract table constraints from reflowed JSON."""
     data = json.loads(reflow_path.read_text())
     sections = data.get("reflowed_sections", [])
     items: List[Dict[str, Any]] = []
@@ -157,6 +160,7 @@ def extract_table_constraints(reflow_path: Path) -> List[Dict[str, Any]]:
 
 @app.command()
 def main():
+    """Check for the existence of the Lean4 CLI and required stages."""
     lean_cli = Path("/home/graham/workspace/experiments/lean4/src/lean4_prover/cli_mini.py")
     if not lean_cli.exists():
         print("SKIP: Lean4 CLI not found; install first.")

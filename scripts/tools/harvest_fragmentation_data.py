@@ -231,6 +231,7 @@ def harvest(
     corpus_root: str = "/mnt/storage12tb/extractor_corpus/results",
     output_path: str = "/home/graham/workspace/experiments/pi-mono/.pi/skills/create-table-classifier/data/fragmentation_features.jsonl",
 ) -> None:
+    """Harvest JSON table data from specified corpus directory."""
     pattern = os.path.join(corpus_root, "*", "05_table_extractor", "json_output", "05_tables.json")
     files = sorted(glob.glob(pattern))
     print(f"[harvest] Found {len(files)} S05 output files")

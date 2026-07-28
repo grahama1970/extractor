@@ -209,7 +209,7 @@ PRESET_REGISTRY = {   'archive_scanned': {   'category': 'Historical',
 COMPLEXITY_THRESHOLDS = {'has_math': True, 'min_complexity': 2, 'multi_column': True, 'page_count': 50, 'table_count': 3}
 
 # LLM Service Configuration (for accurate mode)
-LLM_CONFIG = {   'api_key_env': 'CHUTES_API_KEY',
-    'base_url': 'https://llm.chutes.ai/v1',
+LLM_CONFIG = {   'api_key_env': 'SCILLM_PROXY_KEY',
+    'base_url': 'http://localhost:4010',
     'model': 'deepseek-ai/DeepSeek-V3',
     'service': 'marker.services.openai.OpenAIService'}

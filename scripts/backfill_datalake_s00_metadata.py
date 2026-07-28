@@ -70,6 +70,7 @@ def find_profiles(corpus_dir: Path):
 
 
 def main():
+    """Backfill datalake_docs with S00 metadata from the specified corpus."""
     parser = argparse.ArgumentParser(description="Backfill datalake_docs with S00 metadata")
     parser.add_argument("corpus_dir", type=Path, help="Path to extractor corpus")
     parser.add_argument("--dry-run", action="store_true", help="Print what would be updated")

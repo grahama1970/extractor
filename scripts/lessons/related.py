@@ -15,6 +15,7 @@ app = typer.Typer(add_completion=False)
 
 
 def resolve_key(col, title: str | None, scope: str | None) -> str | None:
+    """Resolve document key from collection based on title and scope."""
     if not title:
         return None
     cur = col.find({"title": title, "scope": scope or "tabbed"})
@@ -31,6 +32,7 @@ def related(
     k: int = typer.Option(10, help="Limit"),
     json_out: bool = typer.Option(False, "--json", help="JSON output"),
 ):
+    """Retrieve related lessons based on a specified key or title."""
     db = get_db()
     lessons = db.collection("lessons")
     edges = db.collection("lesson_edges")

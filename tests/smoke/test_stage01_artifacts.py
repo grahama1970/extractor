@@ -30,6 +30,7 @@ except Exception:
 @pytest.mark.skipif(not _has_tenacity, reason="tenacity not installed")
 @pytest.mark.skipif(not _has_pymupdf, reason="PyMuPDF not installed")
 def test_stage01_saves_images_and_clean_pdf(tmp_path):
+    """Test image saving and PDF cleaning functionality in stage one."""
     mod = _load_stage01_module()
 
     pdf_path = Path("data/input/pipeline/BHT_CV32A65X_marked.pdf").resolve()

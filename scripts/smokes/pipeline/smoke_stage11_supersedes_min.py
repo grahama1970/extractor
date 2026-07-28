@@ -29,6 +29,7 @@ app = typer.Typer(add_completion=False)
 
 @app.command()
 def main():
+    """Execute CLI command to process and store graph data in specified directories."""
     out_dir = Path("data/results/cli_smokes/supersedes").resolve()
     stage11 = out_dir / "11_arango_create_graph/json_output"
     tmp = out_dir / "tmp"

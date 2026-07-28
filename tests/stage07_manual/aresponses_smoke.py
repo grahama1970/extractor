@@ -20,16 +20,19 @@ load_dotenv(find_dotenv(), override=False)
 
 @dataclass
 class Probe:
+    """Define an AI model and its associated provider."""
     model: str
     provider: str  # 'openai' | 'gemini' | 'moonshot'
 
 
 def load_section_image_b64() -> str:
+    """Load section image as a base64 data URI string."""
     img = (Path(__file__).parent / "images" / "section.png").read_bytes()
     return f"data:image/png;base64,{base64.b64encode(img).decode('utf-8')}"
 
 
 def extract_text(resp: Any) -> str:
+    """Extract text content from a response object."""
     out = getattr(resp, "output", None)
     if out is None and isinstance(resp, dict):
         out = resp.get("output")
@@ -49,6 +52,7 @@ def extract_text(resp: Any) -> str:
 
 
 def try_parse_json(text: str) -> Optional[Dict[str, Any]]:
+    """Try to parse a JSON string and return a dictionary or None."""
     s = (text or "").strip()
     # strip common code fences
     if s.startswith("```"):
@@ -106,6 +110,7 @@ async def try_openai(model: str, items: List[Dict[str, Any]], sys_text: str) -> 
 
 
 async def try_gemini(model: str, items: List[Dict[str, Any]], sys_text: str) -> Tuple[str, str]:
+    """Query Gemini model and extract text from its response."""
     kwargs = {
         "model": model,
         "input": [{"role": "user", "content": items}],
@@ -118,6 +123,7 @@ async def try_gemini(model: str, items: List[Dict[str, Any]], sys_text: str) -> 
 
 
 async def try_moonshot(model: str, items: List[Dict[str, Any]], sys_text: str) -> Tuple[str, str]:
+    """Return extracted text and instructions from a model response."""
     kwargs = {
         "model": model,
         "input": [{"role": "user", "content": items}],
@@ -129,6 +135,7 @@ async def try_moonshot(model: str, items: List[Dict[str, Any]], sys_text: str) -
 
 
 async def main() -> None:
+    """Return a JSON object with specified keys from the processed image."""
     section_img = load_section_image_b64()
     # Stage-07 style minimal system instruction
     sys_text = (

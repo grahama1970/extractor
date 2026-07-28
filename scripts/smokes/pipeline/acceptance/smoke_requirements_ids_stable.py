@@ -23,6 +23,7 @@ OUT = Path("data/results/with_requirements_idstable")
 
 
 def ids_from(out: Path) -> set[str]:
+    """Extract IDs from requirements JSON file."""
     p = out / "07_requirements_miner/json_output/07_requirements.json"
     d = json.loads(p.read_text())
     return {str(r.get("id")) for r in d.get("requirements") or []}
@@ -30,6 +31,7 @@ def ids_from(out: Path) -> set[str]:
 
 @app.command()
 def main():
+    """Run extraction process using specified Python script and mode."""
     OUT.mkdir(parents=True, exist_ok=True)
     # First run
     rc = subprocess.run(

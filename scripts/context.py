@@ -42,6 +42,7 @@ def run_git(*args: str, check: bool = True) -> str:
 
 
 def git_object_exists(ref: str) -> bool:
+    """Check if a Git object exists for the given reference."""
     try:
         run_git("rev-parse", ref, check=True)
         return True
@@ -50,6 +51,7 @@ def git_object_exists(ref: str) -> bool:
 
 
 def discover_session(repo_root: str, requested: Optional[str]) -> str:
+    """Discover the active session from environment or default configuration."""
     if requested:
         return requested
 
@@ -59,6 +61,7 @@ def discover_session(repo_root: str, requested: Optional[str]) -> str:
         return "default"
 
     def latest(path_list: list[Path]) -> Optional[Path]:
+        """Return the most recently modified path from a list."""
         return max(path_list, key=lambda p: p.stat().st_mtime) if path_list else None
 
     candidates = []
@@ -74,6 +77,7 @@ def discover_session(repo_root: str, requested: Optional[str]) -> str:
 
 
 def gather_git_snapshot() -> dict[str, str]:
+    """Gather current Git repository snapshot details."""
     repo_root = run_git("rev-parse", "--show-toplevel")
     branch = run_git("rev-parse", "--abbrev-ref", "HEAD") or "unknown"
     status = run_git("status", "--short")
@@ -96,6 +100,7 @@ def gather_git_snapshot() -> dict[str, str]:
 
 
 def build_prompt(snapshot: dict[str, str], session_id: str) -> str:
+    """Build a formatted prompt string using a git snapshot and session ID."""
     timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
     return f"""You are my coding-session scribe.
 
@@ -142,6 +147,7 @@ _Last updated: {timestamp} · Branch: {snapshot['branch']} · Session: {session_
 
 
 def tail_file(path: Path, max_lines: int = 80) -> str:
+    """Return last lines from file path, up to max_lines, or empty string on error."""
     try:
         with path.open("r", encoding="utf-8", errors="ignore") as handle:
             tail = deque(handle, maxlen=max_lines)
@@ -151,6 +157,7 @@ def tail_file(path: Path, max_lines: int = 80) -> str:
 
 
 def call_codex(prompt: str, session_id: str, output_path: Path) -> None:
+    """Execute Codex CLI with prompt and session ID, saving output to specified path."""
     codex_cli = os.environ.get("CODEX_CLI", "codex")
     out_dir = output_path.parent
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -204,6 +211,7 @@ def call_codex(prompt: str, session_id: str, output_path: Path) -> None:
 
 
 def main() -> None:
+    """Generate CONTEXT.md via Codex CLI."""
     if os.environ.get("CODEX_CONTEXT_DISABLE", "").lower() in {"1", "true", "yes", "y"}:
         print("Skipping CONTEXT.md generation (CODEX_CONTEXT_DISABLE=1).")
         return

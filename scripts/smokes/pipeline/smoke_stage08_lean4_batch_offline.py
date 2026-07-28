@@ -39,6 +39,7 @@ def main(
     ),
     tmpdir: Path = typer.Option(Path("/tmp/lean4_smoke_stage08")),
 ):
+    """Run Lean4 CLI process with temporary directory."""
     tmpdir.mkdir(parents=True, exist_ok=True)
     input_json = tmpdir / "in.json"
     output_json = tmpdir / "out.json"

@@ -24,6 +24,7 @@ def main(
     results: Path = typer.Option(Path("data/results/pipeline_happy_smoke"), "-o"),
     arango_db: str = typer.Option("pdf_knowledge_base_test"),
 ):
+    """Load environment variables and set Python path for execution."""
     load_dotenv(find_dotenv() or None)
     env = os.environ.copy()
     env.setdefault("PYTHONPATH", str(Path.cwd() / "src"))

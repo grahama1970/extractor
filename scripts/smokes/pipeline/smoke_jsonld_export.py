@@ -21,6 +21,7 @@ app = typer.Typer(add_completion=False)
 
 @app.command()
 def main():
+    """Export JSON-LD data for CLI smoke testing."""
     import sys
 
     repo_src = (Path(__file__).resolve().parents[3] / "src").resolve()

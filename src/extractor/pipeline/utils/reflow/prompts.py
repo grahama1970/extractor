@@ -176,6 +176,7 @@ def build_compact_prompt_simple(
             used_idx.add(disp_idx)
 
         def _r2(x):
+            """Return a rounded float to two decimal places or original input."""
             try:
                 return round(float(x), 2)
             except Exception:

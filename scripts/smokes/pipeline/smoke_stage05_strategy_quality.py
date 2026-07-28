@@ -22,6 +22,7 @@ TABLE_JSON = Path("05_table_extractor/json_output/05_tables.json")
 
 
 def ensure_stage05(results_root: Path) -> Path:
+    """Ensure Stage 05 JSON exists by running pipeline if missing."""
     target = results_root / TABLE_JSON
     if target.exists():
         return target
@@ -34,6 +35,7 @@ def ensure_stage05(results_root: Path) -> Path:
 
 
 def detect_fragmentation(entry: dict, columns: list[str]) -> list[dict[str, str]]:
+    """Detect fragmentation issues in specified columns of a DataFrame."""
     issues = []
     df = entry.get("pandas_df") or []
     for row_idx, row in enumerate(df):
@@ -51,6 +53,7 @@ def detect_fragmentation(entry: dict, columns: list[str]) -> list[dict[str, str]
 
 
 def run_smoke(results: Path) -> None:
+    """Detect fragmentation issues in table data from results."""
     load_dotenv(find_dotenv(usecwd=True) or None)
     table_path = ensure_stage05(results)
     tables_data = json.loads(table_path.read_text(encoding="utf-8"))
@@ -92,6 +95,7 @@ def run_smoke(results: Path) -> None:
 
 @app.command()
 def main(results: Path = typer.Option(Path("data/results/pipeline"), "--results")) -> None:
+    """Run the smoke test using the specified results path."""
     run_smoke(results)
 
 

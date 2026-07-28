@@ -42,6 +42,7 @@ app = typer.Typer(add_completion=False)
 
 
 def _ts_id(prefix: str = "show") -> str:
+    """Build an ID string from a prefix and current timestamp."""
     return f"{prefix}-{time.strftime('%Y%m%d-%H%M%S')}"
 
 

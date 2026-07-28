@@ -14,10 +14,12 @@ from typing import Any, Dict
 
 
 def run(mode: str) -> Dict[str, Any]:
+    """Return a dictionary containing the mode and status flags."""
     return {"mode": mode, "ok": True, "skip": "SciLLM-only; litellm parallel smoke deprecated"}
 
 
 def main() -> None:
+    """Parse command-line arguments and print JSON output."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--mode", required=False, default="helper", choices=["helper", "legacy"])
     args = ap.parse_args()

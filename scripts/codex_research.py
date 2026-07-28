@@ -17,6 +17,7 @@ app = typer.Typer(
 
 
 async def _post_log(api_base: Optional[str], payload: dict) -> None:
+    """Post a log payload to the specified API endpoint asynchronously."""
     if not api_base:
         return
     try:
@@ -49,6 +50,7 @@ def run(
         None, help="Optional directory to write docs summaries (Context7) as individual JSON files"
     ),
 ):
+    """Execute research task with optional context and logging parameters."""
     ctx_text = ""
     if context_file and context_file.exists():
         try:

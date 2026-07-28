@@ -24,7 +24,7 @@ import { usePersona } from "@/contexts/PersonaContext";
 // --- Color map (matches render_annotated_pdf.py) ---
 const TYPE_COLORS: Record<string, string> = {
   SectionHeader: "rgba(242, 115, 26, 0.6)",
-  Text: "rgba(150, 150, 150, 0.3)",
+  Text: "rgba(100, 100, 100, 0.5)",
   Table: "rgba(26, 153, 242, 0.6)",
   Figure: "rgba(26, 204, 102, 0.6)",
   Equation: "rgba(153, 26, 242, 0.6)",
@@ -127,18 +127,18 @@ function RunBrowser({
             role="listitem"
             onClick={() => onSelect(run)}
             className={`w-full text-left px-3 py-2 border-b text-xs hover:bg-accent/50 transition-colors ${
-              selectedStem === run.stem ? "bg-accent" : ""
+              selectedStem === run.stem ? "bg-accent border-l-2 border-l-primary" : ""
             }`}
             aria-current={selectedStem === run.stem ? "true" : undefined}
           >
             <div className="flex items-center gap-1.5">
-              <span className="font-medium truncate flex-1">{run.stem}</span>
+              <span className="font-medium font-mono truncate flex-1">{run.stem}</span>
               {run.is_blacklisted && (
                 <AlertTriangle className="h-3 w-3 text-destructive flex-shrink-0" aria-label="Blacklisted" />
               )}
             </div>
             <div className="flex items-center gap-2 mt-0.5 text-muted-foreground">
-              {run.page_count != null && <span>{run.page_count}p</span>}
+              {run.page_count != null && <span className="font-mono">{run.page_count}p</span>}
               {run.has_blocks && <FileText className="h-3 w-3" aria-label="Has blocks" />}
               {run.has_tables && <Table2 className="h-3 w-3" aria-label="Has tables" />}
               {run.has_figures && <ImageIcon className="h-3 w-3" aria-label="Has figures" />}
@@ -261,7 +261,7 @@ function AgentNotesPanel({ agentNotes }: { agentNotes: AgentNote[] }) {
           <Badge variant="destructive" className="text-[10px] px-1 py-0">{errorCount} error{errorCount !== 1 ? "s" : ""}</Badge>
         )}
         {warnCount > 0 && (
-          <Badge variant="outline" className="text-[10px] px-1 py-0 border-yellow-500 text-yellow-600">{warnCount} warn</Badge>
+          <Badge variant="outline" className="text-[10px] px-1 py-0 border-amber-700 text-amber-700">{warnCount} warn</Badge>
         )}
       </div>
       <div className="space-y-1.5 max-h-60 overflow-y-auto" role="list" aria-label="Agent diagnostic notes">
@@ -371,13 +371,13 @@ function Inspector({
             {box.stage && (
               <div>
                 <dt className="text-muted-foreground">Pipeline Stage</dt>
-                <dd>S{box.stage}</dd>
+                <dd className="font-mono">S{box.stage}</dd>
               </div>
             )}
             {box.confidence != null && (
               <div>
                 <dt className="text-muted-foreground">Confidence</dt>
-                <dd>{(box.confidence * 100).toFixed(0)}%</dd>
+                <dd className="font-mono">{(box.confidence * 100).toFixed(0)}%</dd>
               </div>
             )}
             {box.title && (
@@ -441,13 +441,13 @@ function Inspector({
 function ScoresPanel({ scores }: { scores: RunScores | null }) {
   if (!scores) return null;
   const { overall, dimensions, issues } = scores;
-  const gradeColor = overall.grade?.startsWith("A") ? "text-green-600" : overall.grade === "B" ? "text-yellow-600" : "text-destructive";
+  const gradeColor = overall.grade?.startsWith("A") ? "text-green-700" : overall.grade === "B" ? "text-amber-700" : "text-red-600";
   return (
     <div className="space-y-2">
       <h3 className="text-sm font-semibold">Quality Scores</h3>
       <div className="flex items-center gap-2">
         <span className={`text-lg font-bold ${gradeColor}`}>{overall.grade}</span>
-        <span className="text-sm font-mono">{Math.round(overall.score * 100)}%</span>
+        <span className="text-sm font-mono font-semibold">{Math.round(overall.score * 100)}%</span>
         <Badge variant={overall.verdict === "PASS" ? "outline" : "destructive"} className="text-[10px]">
           {overall.verdict}
         </Badge>

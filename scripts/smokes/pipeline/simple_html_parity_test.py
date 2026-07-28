@@ -59,6 +59,7 @@ def test_html_pdf_parity(pdf_file: Path, html_file: Path, tolerance: int = 2) ->
 
 
 def main():
+    """Run a parity test between HTML and PDF files."""
     pdf_default = "data/input/pipeline/BHT_CV32A65X_with_requirements_noannots.pdf"
     html_default = "data/input/pipeline/indexed/test_document.html"
 

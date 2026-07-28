@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional
 
 @dataclass
 class RouterParallelRequest:
+    """Create a request for parallel processing with model and messages."""
     model: str
     messages: List[Dict[str, Any]]
     kwargs: Optional[Dict[str, Any]] = None
@@ -24,6 +25,7 @@ class RouterParallelRequest:
 
 @dataclass
 class RouterParallelResult:
+    """Encapsulate the result of a parallel router request."""
     index: int
     request: RouterParallelRequest
     response: Optional[Any] = None
@@ -38,6 +40,7 @@ async def _run_one(
     return_exceptions: bool,
     batch_id: str,
 ) -> RouterParallelResult:
+    """Execute one parallel request, adding metadata and capturing exceptions."""
     async with sem:
         try:
             merged_kwargs = dict(req.kwargs or {})
@@ -62,6 +65,7 @@ async def _run_one(
 
 
 async def gather_parallel_acompletions(*args, **kwargs):  # pragma: no cover
+    """Raise an error indicating deprecation of parallel_acompletions."""
     raise RuntimeError(
         "vendor_parallel_acompletion is deprecated. Use scillm.Router.parallel_acompletions instead."
     )
@@ -74,6 +78,7 @@ async def _iter_worker(
     return_exceptions: bool,
     queue: "asyncio.Queue[Any]",
 ):
+    """Execute multiple asynchronous requests with controlled concurrency."""
     sem = asyncio.Semaphore(concurrency)
     batch_id = uuid.uuid4().hex
     tasks = [
@@ -95,6 +100,7 @@ async def _iter_worker(
 
 
 async def iter_parallel_acompletions(*args, **kwargs):  # pragma: no cover
+    """Raise error for deprecated function, directing to new one."""
     raise RuntimeError(
         "vendor_parallel_acompletion is deprecated. Use scillm.Router.parallel_acompletions instead."
     )

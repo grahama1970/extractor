@@ -25,6 +25,7 @@ app = typer.Typer(add_completion=False)
 
 
 def _load_flatten_function():
+    """Load the flatten function from the ArangoDB exporter module."""
     module_path = (
         Path(__file__).resolve().parents[3]
         / "src"
@@ -55,6 +56,7 @@ def main(
     results_dir: Path = typer.Option(Path("data/results/structured_parity_smoke/spreadsheet")),
     allowed_delta: int = typer.Option(5),
 ) -> None:
+    """Execute the main command for processing PDF and Excel files."""
     flatten = _load_flatten_function()
     payload = json.loads(pdf_stage07.read_text())
     pdf_unified = build_unified_document_from_reflow(

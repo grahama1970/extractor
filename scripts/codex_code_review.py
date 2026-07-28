@@ -15,6 +15,7 @@ app = typer.Typer(
 
 
 def _read_files(paths: List[Path], max_chars: int = 80000) -> str:
+    """Collect text from files, adding headers and respecting max chars."""
     parts: List[str] = []
     used = 0
     for p in paths:
@@ -33,6 +34,7 @@ def _read_files(paths: List[Path], max_chars: int = 80000) -> str:
 
 
 async def _post_log(api_base: Optional[str], payload: dict) -> None:
+    """Post a log payload to the specified API endpoint asynchronously."""
     if not api_base:
         return
     try:
@@ -55,6 +57,7 @@ def run(
     yolo: bool = typer.Option(True, help="--dangerously-bypass-approvals-and-sandbox"),
     sandbox: Optional[str] = typer.Option(None, help="--sandbox value"),
 ):
+    """Execute codex command on input files with run parameters."""
     persona = (
         "You are an expert-level llm agent architect and senior developer, specializing in production-readiness, "
         "system reliability, and maintainability. Perform a comprehensive code review."

@@ -102,6 +102,7 @@ async def litellm_call(prompts: List[Any], **kwargs) -> List[str]:
 
 
 def _looks_like_json(s: str) -> bool:
+    """Check if a string is a valid JSON format."""
     s2 = s.strip()
     if not s2:
         return False
@@ -117,11 +118,13 @@ def _looks_like_json(s: str) -> bool:
 
 
 def _read_stdin_lines() -> List[str]:
+    """Read non-empty lines from standard input."""
     data = sys.stdin.read()
     return [line for line in data.splitlines() if line.strip()]
 
 
 def build_cli() -> typer.Typer:
+    """Build a LiteLLM-compatible CLI wrapper with optional JSON wrapping."""
     app = typer.Typer(add_completion=False, help="LiteLLM-compatible CLI wrapper (SciLLM-backed)")
 
     @app.command()
@@ -190,6 +193,7 @@ def build_cli() -> typer.Typer:
 
 
 def cli_main() -> None:
+    """Execute the command-line interface."""
     build_cli()()
 
 

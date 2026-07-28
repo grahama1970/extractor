@@ -88,41 +88,67 @@ All colors MUST be HSL.
   }
 
   .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
+    /* EmbryStyle surface colors (distance.css canonical source) */
+    --background: 0 0% 4%;           /* #0a0a0a --color-bg */
+    --foreground: 0 0% 98%;          /* #fafafa --color-text */
 
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
+    --card: 0 0% 9%;                 /* #171717 --color-surface */
+    --card-foreground: 0 0% 98%;
 
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
+    --popover: 0 0% 9%;              /* #171717 --color-surface */
+    --popover-foreground: 0 0% 98%;
 
-    --primary: 210 40% 98%;
-    --primary-foreground: 222.2 47.4% 11.2%;
+    --primary: 217 91% 60%;          /* #3b82f6 --embry-status-info */
+    --primary-foreground: 0 0% 100%;
 
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
+    --secondary: 0 0% 15%;           /* #262626 --color-surface-elevated */
+    --secondary-foreground: 0 0% 98%;
 
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
+    --muted: 0 0% 15%;              /* #262626 --color-surface-elevated */
+    --muted-foreground: 0 0% 64%;   /* #a3a3a3 --color-text-muted */
 
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
+    --accent: 0 0% 15%;             /* #262626 --color-surface-elevated */
+    --accent-foreground: 0 0% 98%;
 
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
+    --destructive: 0 84% 60%;       /* #ef4444 --embry-status-critical */
+    --destructive-foreground: 0 0% 100%;
 
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 212.7 26.8% 83.9%;
-    --sidebar-background: 240 5.9% 10%;
-    --sidebar-foreground: 240 4.8% 95.9%;
-    --sidebar-primary: 224.3 76.3% 48%;
+    --border: 0 0% 25%;             /* #404040 --color-border */
+    --input: 0 0% 25%;              /* #404040 --color-border */
+    --ring: 217 91% 60%;            /* #3b82f6 --embry-status-info */
+
+    --sidebar-background: 0 0% 9%;  /* --color-surface */
+    --sidebar-foreground: 0 0% 98%;
+    --sidebar-primary: 217 91% 60%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 240 3.7% 15.9%;
-    --sidebar-accent-foreground: 240 4.8% 95.9%;
-    --sidebar-border: 240 3.7% 15.9%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
+    --sidebar-accent: 0 0% 15%;
+    --sidebar-accent-foreground: 0 0% 98%;
+    --sidebar-border: 0 0% 25%;
+    --sidebar-ring: 217 91% 60%;
+
+    /* PDF Annotation colors — EmbryStyle status palette */
+    --annotation-section: 0 84% 60%;   /* #ef4444 critical red */
+    --annotation-table: 217 91% 60%;   /* #3b82f6 info blue */
+    --annotation-figure: 142 71% 45%;  /* #22c55e ok green */
+    --annotation-text: 48 96% 47%;     /* #eab308 warning amber */
+
+    /* Status colors — EmbryStyle */
+    --status-pending: 48 96% 53%;      /* --embry-status-warning — boosted lightness for 4.5:1 on dark bg */
+    --status-complete: 142 71% 45%;    /* --embry-status-ok */
+    --status-error: 0 84% 60%;        /* --embry-status-critical */
+
+    /* Interface colors */
+    --panel-bg: 0 0% 9%;              /* --color-surface */
+    --viewer-bg: 0 0% 4%;             /* --color-bg */
+    --toolbar-bg: 0 0% 9%;            /* --color-surface */
+
+    /* Shadows — dark mode needs stronger shadows */
+    --shadow-panel: 0 10px 25px -5px rgba(0, 0, 0, 0.4);
+    --shadow-toolbar: 0 4px 12px -2px rgba(0, 0, 0, 0.3);
+    --shadow-annotation: 0 0 0 2px hsl(217 91% 60% / 0.3);
+
+    /* EmbryStyle typography */
+    --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
   }
 }
 
@@ -134,12 +160,44 @@ All colors MUST be HSL.
   body {
     @apply bg-background text-foreground;
   }
+
+  /* Finding #1: Global focus-visible ring for keyboard accessibility */
+  button:focus-visible,
+  [role="button"]:focus-visible,
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible,
+  a:focus-visible,
+  [tabindex]:focus-visible {
+    @apply ring-2 ring-ring/50 outline-none;
+  }
+}
+
+/* Finding #8: Micro-interactions — subtle press feedback on buttons */
+button:active:not(:disabled),
+[role="button"]:active:not(:disabled) {
+  transform: scale(0.97);
+  transition: transform 0.1s ease;
 }
 
 /* Persona accent utilities */
 .text-persona { color: hsl(var(--persona-accent)); }
 .bg-persona { background-color: hsl(var(--persona-accent)); }
 .border-persona { border-color: hsl(var(--persona-accent)); }
+
+/* Monospace font for data identifiers (PDF hashes, control IDs, scores) */
+.font-mono { font-family: var(--font-mono, 'JetBrains Mono', 'Fira Code', monospace); }
+
+/* NVIS HUD annotation overrides — MIL-STD-3009 compliant */
+[data-distance="hud"] {
+  --annotation-section: 0 100% 50%;   /* #ff0000 hostile red */
+  --annotation-table: 80 100% 50%;    /* #80ff00 NVIS yellow-green */
+  --annotation-figure: 120 100% 40%;  /* #00cc00 NVIS green */
+  --annotation-text: 120 100% 50%;    /* #00ff00 NVIS primary green */
+  --status-pending: 80 100% 50%;      /* NVIS yellow-green */
+  --status-complete: 120 100% 40%;    /* NVIS green */
+  --status-error: 0 100% 50%;        /* NVIS red */
+}
 
 /* iOS safe-area bottom padding */
 .safe-bottom { padding-bottom: env(safe-area-inset-bottom); }

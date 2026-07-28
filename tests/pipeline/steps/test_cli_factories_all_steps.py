@@ -23,7 +23,7 @@ LIBRARY_ONLY_STEPS: List[str] = [
     "s05_table_extractor",
     "s06_figure_extractor",
     "s06b_figure_describer",
-    "s07_duckdb_ingest",
+    "s07_json_assembler",
     "s08_extract_requirements",
     "s08_lean4_theorem_prover",
     "s09_section_summarizer",
@@ -34,6 +34,7 @@ LIBRARY_ONLY_STEPS: List[str] = [
 
 @pytest.fixture()
 def runner() -> CliRunner:
+    """Return a Click CLI test runner."""
     return CliRunner()
 
 

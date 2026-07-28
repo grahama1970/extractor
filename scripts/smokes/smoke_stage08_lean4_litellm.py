@@ -27,6 +27,7 @@ def main(
     timeout: int = typer.Option(40, "--timeout"),
     model: str | None = typer.Option(None, "--model", "-m"),
 ):
+    """Run the main application with optional timeout and model parameters."""
     try:
         load_dotenv(find_dotenv(usecwd=True) or None)
         os.environ.setdefault("LITELLM_HTTPX", "1")

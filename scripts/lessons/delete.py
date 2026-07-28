@@ -20,6 +20,7 @@ def delete(
     title: str = typer.Option("", help="Alternatively specify title + scope"),
     scope: str = typer.Option("", help="Scope for title-based delete"),
 ):
+    """Delete a lesson by key or title and scope."""
     db = get_db()
     col = db.collection("lessons")
     if key:

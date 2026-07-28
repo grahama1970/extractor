@@ -1,8 +1,8 @@
 from scillm import completion
 import os
 
-base = os.environ["CHUTES_API_BASE"]  # must end with /v1
-key = os.environ["CHUTES_API_KEY"]
+base = os.environ.get("SCILLM_API_BASE", "http://localhost:4010")  # must end with /v1
+key = os.environ.get("SCILLM_PROXY_KEY", "sk-dev-proxy-123")
 _mid = open("scripts/artifacts/chutes_models_ids.txt", "r", encoding="utf-8").read().splitlines()[0]
 model = _mid if _mid.startswith("openai/") else f"openai/{_mid}"
 

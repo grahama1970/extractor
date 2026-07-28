@@ -12,7 +12,9 @@ from extractor.pipeline.schemas.llm_call import (
 
 
 class TestLLMCallRecord:
+    """Validate the success of an LLM call record."""
     def test_valid_success_record(self):
+        """Verify a valid successful LLM call record."""
         record = LLMCallRecord(
             ts="2024-12-22T09:00:00Z",
             stage="07_reflow_section",
@@ -29,6 +31,7 @@ class TestLLMCallRecord:
         assert record.error_class is None
 
     def test_valid_error_record(self):
+        """Validate the success status of an LLM call record."""
         record = LLMCallRecord(
             ts="2024-12-22T09:00:00Z",
             stage="09_section_summarizer",
@@ -43,6 +46,7 @@ class TestLLMCallRecord:
         assert record.error_class == "parse_fail"
 
     def test_minimal_record(self):
+        """Verify LLMCallRecord's default optional attribute values."""
         record = LLMCallRecord(
             ts="2024-12-22T09:00:00Z",
             stage="03_suspicious_headers",
@@ -85,6 +89,7 @@ class TestLLMCallRecord:
             )
 
     def test_extra_fields_forbidden(self):
+        """Test LLMCallRecord forbids extra fields."""
         with pytest.raises(ValidationError):
             LLMCallRecord(
                 ts="2024-12-22T09:00:00Z",
@@ -97,6 +102,7 @@ class TestLLMCallRecord:
             )
 
     def test_missing_required_fields(self):
+        """Raise a ValidationError for missing required fields in LLMCallRecord."""
         with pytest.raises(ValidationError):
             LLMCallRecord(
                 ts="2024-12-22T09:00:00Z",
@@ -106,7 +112,9 @@ class TestLLMCallRecord:
 
 
 class TestValidateLLMCallRecord:
+    """Test LLM call record data validation."""
     def test_valid_returns_record(self):
+        """Test valid LLM call record returns a record."""
         data = {
             "ts": "2024-12-22T09:00:00Z",
             "stage": "07_reflow_section",
@@ -120,6 +128,7 @@ class TestValidateLLMCallRecord:
         assert error is None
 
     def test_invalid_returns_error(self):
+        """Verify invalid LLM call record data returns an error."""
         data = {"stage": "test"}  # Missing required fields
         record, error = validate_llm_call_record(data)
         assert record is None
@@ -127,7 +136,9 @@ class TestValidateLLMCallRecord:
 
 
 class TestModelDumpExcludeNone:
+    """Test model_dump excludes None fields from serialization."""
     def test_exclude_none_compact(self):
+        """Dump model attributes excluding None values."""
         record = LLMCallRecord(
             ts="2024-12-22T09:00:00Z",
             stage="07_reflow_section",

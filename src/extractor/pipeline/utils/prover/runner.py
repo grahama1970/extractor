@@ -40,6 +40,7 @@ try:
 except Exception:
 
     def certainly_prove(*args, **kwargs):
+        """Indicate unavailable SciLLM extras/providers."""
         raise RuntimeError("SciLLM extras/providers unavailable in this environment")
 
 
@@ -49,6 +50,7 @@ except Exception:
 
     @dataclass
     class ProofResult:
+        """Represent the result of a Lean proof attempt."""
         success: bool
         lean_code: str
         stdout: str
@@ -59,6 +61,7 @@ except Exception:
         proof_output: str | None = None
 
     async def generate_lean_code(requirement: str, strategy):
+        """Generate lean code snippet from requirement and strategy."""
         return (
             f"-- requirement: {requirement}\n"
             f"-- strategy: {getattr(strategy, 'validation_approach', 'unknown')}\n"
@@ -76,6 +79,7 @@ console = Console(stderr=True)
 
 
 def sanity() -> int:
+    """Run sanity check for Lean 4 theorem prover step."""
     return run_step_sanity("08_lean4_theorem_prover")
 
 
@@ -401,6 +405,7 @@ def debug_bundle(
 
 
 def _cli() -> int:
+    """Parse command-line arguments for the Lean4 theorem prover."""
     import argparse
 
     parser = argparse.ArgumentParser(
@@ -516,6 +521,7 @@ async def identify_requirements_in_section(
 
             # SciLLM Router call (paved path, no manual headers)
             async def _do_scillm():
+                """Log request details for model processing."""
                 logger.info(
                     "req_extract.call",
                     extra={
@@ -547,8 +553,8 @@ async def identify_requirements_in_section(
                         }
                     ]
 
-                    api_key = os.getenv("CHUTES_API_KEY")
-                    api_base = os.getenv("CHUTES_API_BASE", "https://llm.chutes.ai/v1")
+                    api_key = os.getenv("SCILLM_PROXY_KEY", "sk-dev-proxy-123")
+                    api_base = os.getenv("SCILLM_API_BASE", "http://localhost:4010")
 
                     async for r in parallel_acompletions_iter(
                         reqs,
@@ -751,10 +757,11 @@ async def prove_requirement(requirement: str, strategy: Any):
     # Remote prover via scillm (certainly/lean4) when enabled
     try:
         if os.getenv("LEAN4_REMOTE", "1").lower() in ("1", "true", "yes", "y"):
-            ch_base = os.getenv("CHUTES_API_BASE", "").strip()
-            ch_key = os.getenv("CHUTES_API_KEY", "").strip()
+            ch_base = os.getenv("SCILLM_API_BASE", "http://localhost:4010").strip()
+            ch_key = os.getenv("SCILLM_PROXY_KEY", "sk-dev-proxy-123").strip()
 
             async def _do_scillm_prover():
+                """Perform parallel scillm prover completions."""
                 from scillm import parallel_acompletions_iter
 
                 _t0 = time.time()
@@ -1136,6 +1143,7 @@ async def process_reflowed_sections(
     try:
         # Build requirement texts (ignore constraints for the bridge v1)
         def _is_high_quality(text: str) -> bool:
+            """Determine if text meets high-quality requirement criteria."""
             import re as _re
 
             t = (text or "").strip()

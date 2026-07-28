@@ -31,6 +31,7 @@ app = typer.Typer(add_completion=False, help="Smoke: Stage 07 medium (one image)
 
 
 def _load_stage07():
+    """Load and execute the Stage 07 module from a specified file path."""
     import importlib.util
 
     p = Path("src/extractor/pipeline/steps/07_reflow_section.py").resolve()
@@ -43,6 +44,7 @@ def _load_stage07():
 
 
 def run_smoke(results: Path) -> None:
+    """Set up environment and execute a smoke test for the application."""
     load_dotenv(find_dotenv(usecwd=True) or None)
     os.environ.setdefault("LITELLM_HTTPX", "1")
     os.environ.setdefault("LITELLM_DEBUG", "1")
@@ -74,6 +76,7 @@ def run_smoke(results: Path) -> None:
         raise SystemExit("No sections to reflow")
 
     async def run_once():
+        """Execute a single reflow of the first section using an LLM."""
         return await reflow_section_with_llm(
             sections[0], results, include_images=True, allow_fallback=False
         )
@@ -91,6 +94,7 @@ def run_smoke(results: Path) -> None:
 
 @app.command()
 def main(results: Path = typer.Option(Path("data/results/pipeline"), "--results")):
+    """Run the smoke test using the specified results path."""
     run_smoke(results)
 
 

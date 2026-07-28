@@ -17,6 +17,7 @@ app = typer.Typer(add_completion=False, help="Smoke: Stage 06 figure extract (of
 
 
 def _load_stage06():
+    """Load and execute the Stage 06 module from a specified path."""
     p = Path("src/extractor/pipeline/steps/06_figure_extractor.py").resolve()
     spec = importlib.util.spec_from_file_location("stage06", str(p))
     if not spec or not spec.loader:
@@ -30,6 +31,7 @@ def _load_stage06():
 def main(
     input_pdf: Path = typer.Option(Path("data/input/pipeline/BHT_CV32A65X_marked.pdf"), exists=True)
 ):
+    """Extract and describe figures from a marked PDF file."""
     try:
         load_dotenv(find_dotenv())
         import asyncio

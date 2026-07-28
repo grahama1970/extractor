@@ -65,6 +65,7 @@ console = Console()
 
 
 def sanity() -> int:
+    """Run a sanity check and return the result as an integer."""
     return run_step_sanity("07_reflow_section")
 
 
@@ -106,7 +107,7 @@ def run(
             require_scillm_preflight()
         except RuntimeError as exc:
             console.print(
-                f"[red]Stage 07 SciLLM preflight failed: {exc}. Set CHUTES_API_BASE/CHUTES_API_KEY or use --summary-only.[/red]"
+                f"[red]Stage 07 SciLLM preflight failed: {exc}. Set SCILLM_API_BASE/SCILLM_PROXY_KEY or use --summary-only.[/red]"
             )
             raise
         except Exception as exc:
@@ -455,6 +456,7 @@ def run(
     else:
 
         async def run_tasks_first():
+            """Build and run initial tasks for processing sections."""
             tasks = []
             for s in sections_to_process:
                 use_images = include_images
@@ -584,6 +586,7 @@ def run(
         if merged_lookup_by_id or merged_lookup_by_sig:
 
             def _sig_no_pages_local(t: dict[str, Any]) -> dict[str, Any]:
+                """Extract normalized column names and title from input dictionary."""
                 cols = (t.get("pandas_metrics") or {}).get("columns") or t.get("columns") or []
                 cols_norm = [str(c).strip().lower() for c in cols if str(c).strip()]
                 ncol = len(cols_norm) if cols_norm else t.get("ncol")
@@ -591,6 +594,7 @@ def run(
                 return {"columns": cols_norm, "ncol": ncol, "title": title}
 
             def _page_idx_local(t: dict[str, Any]) -> Optional[int]:
+                """Return the page index from a dictionary, defaulting to zero."""
                 try:
                     return int(t.get("page_index", t.get("page", 0)) or 0)
                 except Exception:
@@ -1035,6 +1039,7 @@ def run(
                 lat_sorted = sorted(lat)
 
                 def _pct(p: float) -> float:
+                    """Extract value from sorted list at the specified percentile `p`."""
                     if not lat_sorted:
                         return 0.0
                     idx = int(max(0, min(len(lat_sorted) - 1, round(p * (len(lat_sorted) - 1)))))

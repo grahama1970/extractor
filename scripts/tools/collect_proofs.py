@@ -6,6 +6,7 @@ import sys
 
 
 def collect(results_root: Path, dest_root: Path) -> None:
+    """Collect results from a source directory into a destination directory."""
     dest_root.mkdir(parents=True, exist_ok=True)
     for stage_dir in results_root.iterdir():
         if not stage_dir.is_dir():

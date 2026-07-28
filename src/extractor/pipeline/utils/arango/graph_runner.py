@@ -50,10 +50,12 @@ GRAPH_SIM_THRESHOLD = float(os.getenv("GRAPH_SIM_THRESHOLD", "0.55"))
 
 
 def sanity() -> int:
+    """Run sanity check for ArangoDB graph creation."""
     return run_step_sanity("11_arango_create_graph")
 
 
 def _vertex_id(doc: dict[str, Any]) -> str | None:
+    """Return a vertex ID from a document or None if not found."""
     vid = doc.get("_id")
     if isinstance(vid, str) and vid:
         return vid
@@ -70,6 +72,7 @@ def _edge(
     rel_type: str,
     score: float | None = None,
 ) -> dict[str, Any] | None:
+    """Builds an edge dictionary from valid, distinct vertex documents."""
     v_from = _vertex_id(doc_from)
     v_to = _vertex_id(doc_to)
     if not v_from or not v_to or v_from == v_to:
@@ -81,32 +84,39 @@ def _edge(
 
 
 def _conflict_edges_from_docs(_: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return conflict edges from a list of document dictionaries."""
     return []
 
 
 def _duplicates_edges_from_docs(_: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return an empty list of duplicate edges from document data."""
     return []
 
 
 def _contradicts_edges_from_docs(_: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Perform contradicts edges from docs operation."""
     return []
 
 
 def _proves_edges_from_docs(
     docs: list[dict[str, Any]], proved_section_ids: set
 ) -> list[dict[str, Any]]:
+    """Return edges from documents based on proved section IDs."""
     return []
 
 
 def _supersedes_edges_from_docs(_: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return an empty list of superseded edges from document data."""
     return []
 
 
 def _refers_to_edges_from_docs(_: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return an empty list of edge references from document data."""
     return []
 
 
 def _validate_edges(edges: list[dict[str, Any]]) -> dict[str, Any]:
+    """Summarize edges by type and total count."""
     by_type: dict[str, int] = {}
     for e in edges:
         t = str(e.get("type") or "unknown")
@@ -115,6 +125,7 @@ def _validate_edges(edges: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _save_summary(output_dir: Path, summary: dict[str, Any]) -> None:
+    """Save summary dictionary as JSON to output directory."""
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "11_graph_summary.json").write_text(json.dumps(summary, indent=2))
 
@@ -122,6 +133,7 @@ def _save_summary(output_dir: Path, summary: dict[str, Any]) -> None:
 def ensure_graph_and_edge_collection(
     db, graph_name: str, edge_collection: str, vertex_collection: str
 ):
+    """Ensure graph and edge collections exist in the database."""
     if db is None:
         return edge_collection
     if not db.has_collection(vertex_collection):
@@ -144,6 +156,7 @@ def ensure_graph_and_edge_collection(
 
 
 def build_faiss_index(embeddings: NDArray[np.float32]):
+    """Build a FAISS index from normalized embeddings."""
     emb = embeddings.astype("float32", copy=True)
     norms = np.linalg.norm(emb, axis=1, keepdims=True) + 1e-12
     emb = emb / norms
@@ -156,6 +169,7 @@ def build_faiss_index(embeddings: NDArray[np.float32]):
 
 
 def index_search(index_obj, query_embedding: NDArray[np.float32], k: int):
+    """Search index for top K similar items to query embeddings."""
     kind, idx = index_obj
     if kind == "faiss":
         _, fa = index_obj
@@ -181,6 +195,7 @@ def find_and_create_relationships(
     edge_collection: str | None,
     proved_section_ids: set | None = None,
 ) -> list[dict[str, Any]]:
+    """Create relationships between documents based on similarity embeddings."""
     if embeddings.size == 0:
         return []
     emb = embeddings.astype("float32", copy=False)

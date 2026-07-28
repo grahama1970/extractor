@@ -201,6 +201,7 @@ def ensure_requirements_metadata_column(repo) -> None:
 
 
 def _load_section_bbox_map(pipeline_dir: Path) -> Dict[str, Dict[str, Any]]:
+    """Load section bounding box data from a JSON file in a directory."""
     sections_json = pipeline_dir / "04_section_builder" / "json_output" / "04_sections.json"
     if not sections_json.exists():
         return {}
@@ -221,6 +222,7 @@ def _match_bbox_from_blocks(
     citation: str,
     blocks: List[Tuple[Any, Any, Any, Any, Any, Any]],
 ) -> Tuple[int, List[float]] | None:
+    """Find page and bounding box for citation in blocks."""
     needle = (citation or "").strip().lower()
     if not needle:
         return None
@@ -246,6 +248,7 @@ def _match_bbox_from_tables(
     citation: str,
     tables: List[Tuple[Any, Any, Any, Any, Any, Any]],
 ) -> Tuple[int, List[float]] | None:
+    """Match a citation to bounding boxes from provided tables."""
     needle = (citation or "").strip().lower()
     if not needle:
         return None
@@ -278,6 +281,7 @@ def _resolve_requirement_bbox(
     section_map: Dict[str, Dict[str, Any]],
     debug: bool,
 ) -> Tuple[int, List[float], str]:
+    """Resolve bounding box for a citation or section identifier."""
     if is_table_row:
         match = _match_bbox_from_tables(citation, tables)
         if match:
@@ -604,8 +608,8 @@ async def process_sections_batch(
        - Handle high variability in input formats.
     """
 
-    api_key = os.getenv("CHUTES_API_KEY")
-    api_base = os.getenv("CHUTES_API_BASE", "https://llm.chutes.ai/v1")
+    api_key = os.getenv("SCILLM_PROXY_KEY", "sk-dev-proxy-123")
+    api_base = os.getenv("SCILLM_API_BASE", "http://localhost:4010")
     profile = profile or {}
 
     requests = []
@@ -707,6 +711,7 @@ async def process_sections_batch(
 
         # Helper for fuzzy matching
         def normalize(t):
+            """Normalize string by lowercasing and collapsing whitespace."""
             return re.sub(r"\s+", " ", t.lower().strip())
 
         llm_texts = {normalize(r.get("text", "")) for r in extracted}

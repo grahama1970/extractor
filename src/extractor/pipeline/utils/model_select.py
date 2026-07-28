@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
+"""Canonical model selection from environment variables for VLM and text stages."""
 from __future__ import annotations
 
 import os
 
 
 class ModelSelectionError(RuntimeError):
+    """Handle model selection errors during runtime."""
     pass
 
 
 def _get_env(name: str) -> str:
+    """Fetch environment variable or raise if missing or empty."""
     v = (os.getenv(name) or "").strip()
     if not v:
         raise ModelSelectionError(f"Required env {name} is not set or empty")

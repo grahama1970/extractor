@@ -21,6 +21,7 @@ STEP_DIR = {
 
 
 def _diff(a: Path, b: Path, *, threshold: int = 10) -> tuple[bool, int]:
+    """Return a tuple indicating if two images differ significantly."""
     ia = Image.open(a).convert("RGB")
     ib = Image.open(b).convert("RGB")
     if ia.size != ib.size:
@@ -36,6 +37,7 @@ def _diff(a: Path, b: Path, *, threshold: int = 10) -> tuple[bool, int]:
 
 
 def main() -> int:
+    """Compare two visual directories per-step using specified parameters."""
     ap = argparse.ArgumentParser(description="Compare two visual directories per-step")
     ap.add_argument("--expected", required=True, type=Path)
     ap.add_argument("--actual", required=True, type=Path)

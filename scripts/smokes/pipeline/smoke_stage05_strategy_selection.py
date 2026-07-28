@@ -25,6 +25,7 @@ SANITIZED_TOKENS = ["\n", "  "]
 
 
 def ensure_stage05_tables(results_root: Path) -> Path:
+    """Ensure stage 05 tables exist in the results directory."""
     root_path = Path(str(results_root))
     target = root_path / TABLE_PATH
     if target.exists():
@@ -48,12 +49,14 @@ def ensure_stage05_tables(results_root: Path) -> Path:
 
 
 def has_split_tokens(row: Dict[str, str]) -> bool:
+    """Check if any cell in the row contains split tokens."""
     values = row.values() if isinstance(row, dict) else row
     return any(any(tok in str(cell) for tok in SANITIZED_TOKENS) for cell in values)
 
 
 @app.command()
 def main(results: Path = typer.Option(Path("data/results/pipeline"), "--results")) -> None:
+    """Process pipeline results and validate table entries for issues."""
     load_dotenv(find_dotenv(usecwd=True) or None)
     target = ensure_stage05_tables(results)
     tables = json.loads(target.read_text(encoding="utf-8"))

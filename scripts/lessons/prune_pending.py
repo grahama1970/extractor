@@ -11,6 +11,7 @@ from scripts.lessons.arango_client import get_db
 
 
 def main():
+    """Remove pending related lesson edges from the database."""
     db = get_db()
     aql = """
     FOR e IN lesson_edges

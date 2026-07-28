@@ -12,6 +12,7 @@ from extractor.pipeline.steps import _03_suspicious_headers as stage03
 
 
 def main() -> int:
+    """Parse command-line arguments for bundle and output paths."""
     ap = argparse.ArgumentParser()
     ap.add_argument(
         "--bundle", type=Path, required=True, help="Bundle with marker_blocks + clean_pdf"

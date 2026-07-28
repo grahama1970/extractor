@@ -14,6 +14,8 @@ What this stage does (read before editing)
         3) container compiles each in Lean4,
         4) pick a compiling candidate (or return failure with compiler feedback).
     * OR external CLI if `LEAN4_CLI_CMD` is set (stdin/file JSON/JSONL contracts).
+    * OR lean-interact `AutoLeanServer` (v0.11.1+) when `LEAN4_USE_LEAN_INTERACT=1`.
+      Manages its own Lean REPL binary — no Docker container needed.
 - Output: 08_theorems.json (proof results, diagnostics).
 
 Paved-path + safety
@@ -62,9 +64,45 @@ MAX_CONCURRENT_PROOFS = int(os.getenv("MAX_CONCURRENT_LEAN4_CALLS", 1))
 LEAN4_CLI_CMD = os.getenv("LEAN4_CLI_CMD", "").strip()
 # Max theorems to prove (0 = unlimited, useful for testing)
 MAX_THEOREMS = int(os.getenv("LEAN4_MAX_THEOREMS", 0))
+# lean-interact: set LEAN4_USE_LEAN_INTERACT=1 to use lean-interact instead of Docker
+USE_LEAN_INTERACT = os.getenv("LEAN4_USE_LEAN_INTERACT", "0").strip() == "1"
+
+
+def _compile_via_lean_interact(code: str, timeout: float = 60.0) -> dict:
+    """Compile Lean4 code via the lean4-prove HTTP service.
+
+    Calls the shared compilation daemon (default: http://localhost:8604)
+    instead of spawning a local lean-interact REPL per call.
+    No lean-interact import needed — the service handles pool management.
+    """
+    import httpx
+
+    base = os.getenv("LEAN4_SERVICE_URL", "http://localhost:8604")
+    try:
+        resp = httpx.post(
+            f"{base}/compile",
+            json={"code": code, "timeout": timeout},
+            timeout=timeout + 10,
+        )
+        data = resp.json()
+        return {
+            "ok": data["success"],
+            "success": data["success"],
+            "error": data.get("error"),
+            "lean_code": code,
+            "stdout": data.get("stdout", ""),
+        }
+    except Exception as e:
+        return {
+            "ok": False,
+            "success": False,
+            "error": f"lean4-prove service error: {e}",
+            "lean_code": code,
+        }
 
 
 def sanity() -> int:
+    """Run sanity check for the given step."""
     return run_step_sanity(STEP_NAME)
 
 

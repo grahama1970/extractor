@@ -20,6 +20,7 @@ def tmp_pdf_dir(tmp_path: Path) -> Path:
 
 
 def _run_stage(tmp_path: Path, blocks: list[dict]) -> dict:
+    """Run stage 03 with blocks, returning its parsed JSON output."""
     input_json = tmp_path / "02_marker_blocks.json"
     input_json.write_text(json.dumps({"blocks": blocks}, indent=2))
     out_dir = tmp_path / "out"
@@ -33,6 +34,7 @@ def _run_stage(tmp_path: Path, blocks: list[dict]) -> dict:
 
 
 def test_bullet_header_demoted_offline(tmp_path: Path, tmp_pdf_dir: Path):
+    """Tests offline demotion of bulleted headers to text."""
     blocks = [
         {
             "block_type": "SectionHeader",
@@ -50,6 +52,7 @@ def test_bullet_header_demoted_offline(tmp_path: Path, tmp_pdf_dir: Path):
 
 
 def test_numbered_header_kept_offline(tmp_path: Path, tmp_pdf_dir: Path):
+    """Verify numbered header is kept offline."""
     blocks = [
         {
             "block_type": "SectionHeader",

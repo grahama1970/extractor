@@ -28,6 +28,7 @@ def main(
         False, "--remove-links/--keep-links", help="Also remove link annotations (URIs)"
     ),
 ):
+    """Process an input PDF to remove annotations and optionally links."""
     try:
         import fitz  # PyMuPDF
     except Exception as e:

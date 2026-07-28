@@ -8,6 +8,7 @@ from extractor.pipeline.steps.s04_section_builder import (
 
 
 def test_filter_toc_noise():
+    """Filter sections resembling table of contents entries."""
     sections = [
         {"title": "Valid Section", "content": "This is normal content without dots."},
         {"title": "TOC Noise", "content": "Chapter 1 ........................ 5"},
@@ -19,6 +20,7 @@ def test_filter_toc_noise():
     assert "TOC Noise" not in [s["title"] for s in filtered]
 
 def test_merge_short_sections():
+    """Test merging short sections into longer content blocks."""
     sections = [
         {"title": "Section 1", "content": "This is a long-ish section content. " * 10, "pages": [1]},
         {"title": "Bullet 1", "content": "Short bullet point 1", "pages": [1]},

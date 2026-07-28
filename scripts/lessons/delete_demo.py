@@ -16,6 +16,7 @@ app = typer.Typer(add_completion=False)
 
 @app.command()
 def delete(demo_batch: str = typer.Option("", help="Optional demo batch id to narrow deletion")):
+    """Delete demo lessons, optionally by batch ID."""
     db = get_db()
     if demo_batch:
         aql = "FOR d IN lessons FILTER d.demo==true AND d.demo_batch==@b REMOVE d IN lessons RETURN OLD._key"

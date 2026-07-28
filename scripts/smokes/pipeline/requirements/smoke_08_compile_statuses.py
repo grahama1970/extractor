@@ -26,6 +26,7 @@ OUT = Path("data/results/with_requirements_prove")
 
 @app.command()
 def main():
+    """Run the extractor CLI to process PDF and generate enriched JSON output."""
     OUT.mkdir(parents=True, exist_ok=True)
     cmd = [
         "/home/graham/workspace/experiments/extractor/.venv/bin/python",

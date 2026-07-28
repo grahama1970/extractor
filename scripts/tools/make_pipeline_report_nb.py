@@ -11,14 +11,17 @@ from pathlib import Path
 
 
 def md(text: str):
+    """Create a new markdown cell from text."""
     return nbf.v4.new_markdown_cell(text)
 
 
 def code(src: str):
+    """Create a new Jupyter Notebook code cell from source."""
     return nbf.v4.new_code_cell(src)
 
 
 def main() -> int:
+    """Create a Jupyter notebook with a verification report structure."""
     nb = nbf.v4.new_notebook()
     nb.cells = [
         md(

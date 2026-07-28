@@ -8,6 +8,8 @@
 #   "python-dotenv>=1.0.0",
 # ]
 # ///
+"""FastAPI bridge server that accepts annotated regions from the Tabbed UI and invokes the document extraction pipeline."""
+
 from __future__ import annotations
 
 import os
@@ -30,6 +32,7 @@ except Exception as e:
 
 
 class Box(BaseModel):
+    """Define a rectangular box with position and dimensions."""
     id: Optional[str] = None
     type: str
     instanceId: Optional[str] = None
@@ -40,6 +43,7 @@ class Box(BaseModel):
 
 
 class RunExternalRequest(BaseModel):
+    """Manage parameters for running external requests with PDF data."""
     pdf_path: Optional[str] = None
     pdf_rel: Optional[str] = None
     boxes_by_page: Dict[int, List[Box]] = Field(default_factory=dict)
@@ -61,6 +65,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 def _resolve_pdf(req: RunExternalRequest) -> Path:
+    """Resolve PDF path from request, validating existence."""
     if req.pdf_path:
         p = Path(req.pdf_path).expanduser().resolve()
         if not p.exists():
@@ -81,6 +86,7 @@ def _resolve_pdf(req: RunExternalRequest) -> Path:
 
 
 def _to_pipeline_annotations(pdf: Path, boxes_by_page: Dict[int, List[Box]]) -> Dict:
+    """Extract pipeline annotations from PDF based on page box data."""
     doc = fitz.open(str(pdf))
     annotations: List[Dict] = []
     for page_key, boxes in boxes_by_page.items():
@@ -139,6 +145,7 @@ def _to_pipeline_annotations(pdf: Path, boxes_by_page: Dict[int, List[Box]]) -> 
 
 @app.post("/api/pipeline/run-external")
 def run_external(req: RunExternalRequest):
+    """Run an external pipeline, generating structured results."""
     pdf = _resolve_pdf(req)
     results = Path(req.results_dir or (Path("data/results") / f"pipeline_ui_{os.getpid()}"))
     results.mkdir(parents=True, exist_ok=True)
@@ -203,6 +210,7 @@ def run_external(req: RunExternalRequest):
 
 @app.get("/api/artifacts/file")
 def get_artifact_file(path: str):
+    """Return a file response for a valid artifact path."""
     p = Path(path)
     if not p.exists() or not p.is_file():
         raise HTTPException(404, f"File not found: {p}")

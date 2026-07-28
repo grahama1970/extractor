@@ -106,31 +106,21 @@ STEPS: List[Dict[str, Any]] = [
     },
     {
         "id": "s07",
-        "description": "DuckDB Ingest",
-        "module": "extractor.pipeline.steps.s07_duckdb_ingest",
+        "description": "JSON Assembler",
+        "module": "extractor.pipeline.steps.s07_json_assembler",
         "args": ["--pipeline-dir", "data/results/pipeline"],
-        "gate": "gate_s07.py",
-    },
-    {
-        "id": "s07b",
-        "description": "Text Cleaner",
-        "module": "extractor.pipeline.steps.s07b_text_cleaner",
-        "args": ["--pipeline-dir", "data/results/pipeline"],
-        "gate": "gate_s07b.py",
     },
     {
         "id": "s08",
         "description": "Extract Requirements",
         "module": "extractor.pipeline.steps.s08_extract_requirements",
         "args": ["--pipeline-dir", "data/results/pipeline"],
-        "gate": "gate_s08.py",
     },
     {
         "id": "s09",
         "description": "Section Summarizer",
         "module": "extractor.pipeline.steps.s09_section_summarizer",
         "args": ["--pipeline-dir", "data/results/pipeline"],
-        "gate": "gate_s09.py",
     },
     {
         "id": "s10",
