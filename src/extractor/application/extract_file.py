@@ -5,9 +5,9 @@ from __future__ import annotations
 import hashlib
 import json
 import time
+from dataclasses import dataclass, field
 from pathlib import Path
 
-from extractor.core.providers.pdf import PdfProvider
 from extractor.core.providers.registry import provider_from_filepath, supports_filepath
 from extractor.core.schema.extraction_result import (
     ArtifactRef,
@@ -25,6 +25,24 @@ from extractor.core.schema.unified_document import (
     SourceType,
     UnifiedDocument,
 )
+
+
+PDF_OXIDE_PIN = "5b0538cb94f8c27b3f3f33411b4a9267dc98a022"
+
+
+@dataclass
+class ExtractedPayload:
+    """Provider output plus normalized facade metadata."""
+
+    unified: UnifiedDocument
+    artifacts: list[ArtifactRef] = field(default_factory=list)
+    provider: str | None = None
+    engine: str | None = None
+    diagnostics_extra: dict[str, object] = field(default_factory=dict)
+
+
+class PdfOxideUnavailable(RuntimeError):
+    """Raised when the canonical PDF engine is unavailable or incompatible."""
 
 
 def extract_file(
@@ -81,7 +99,7 @@ def extract_file(
         )
 
     try:
-        unified = _extract_unified(source, detected_format, offline=offline)
+        payload = _extract_unified(source, detected_format, run_dir=run_dir, offline=offline)
     except Exception as exc:
         return _failure_result(
             source=source,
@@ -92,8 +110,8 @@ def extract_file(
             started=started,
         )
 
-    artifact = _write_unified_artifact(unified, run_dir)
-    counts = _counts_from_unified(unified)
+    artifact = _write_unified_artifact(payload.unified, run_dir)
+    counts = _counts_from_unified(payload.unified)
     result = ExtractionResult(
         status=ExtractionStatus.COMPLETE,
         source_path=str(source),
@@ -101,13 +119,13 @@ def extract_file(
         detected_format=detected_format,
         output_dir=str(run_dir),
         counts=counts,
-        artifacts=[artifact],
+        artifacts=[artifact, *payload.artifacts],
         diagnostics=ExtractionDiagnostics(
             route="provider_registry",
-            provider=provider_from_filepath(str(source)).__name__,
-            engine="native_provider",
+            provider=payload.provider or provider_from_filepath(str(source)).__name__,
+            engine=payload.engine or "native_provider",
             timings_ms={"total": int((time.monotonic() - started) * 1000)},
-            extra={"offline": offline},
+            extra={"offline": offline, **payload.diagnostics_extra},
         ),
     )
     result.write_json(run_dir / "extractor_result.json")
@@ -148,9 +166,15 @@ def _canonical_format(ext: str) -> str:
     return ext or "unknown"
 
 
-def _extract_unified(source: Path, detected_format: str, *, offline: bool) -> UnifiedDocument:
+def _extract_unified(
+    source: Path,
+    detected_format: str,
+    *,
+    run_dir: Path,
+    offline: bool,
+) -> ExtractedPayload:
     if detected_format == "pdf":
-        return _extract_pdf_unified(source)
+        return _extract_pdf_oxide(source, run_dir=run_dir)
 
     provider_cls = provider_from_filepath(str(source))
     try:
@@ -159,49 +183,167 @@ def _extract_unified(source: Path, detected_format: str, *, offline: bool) -> Un
         provider = provider_cls(str(source))
     unified = provider.extract_document(str(source))
     if hasattr(unified, "model_dump"):
-        return unified
-    return UnifiedDocument(
-        id=source.stem,
-        source_type=_source_type_for(detected_format),
-        source_path=str(source),
-        blocks=[
-            BaseBlock(
-                id="raw-0",
-                type=BlockType.PARAGRAPH,
-                content=json.dumps(unified, default=str) if not isinstance(unified, str) else unified,
-            )
-        ],
-        metadata=DocumentMetadata(file_hash=_sha256(source), page_count=1),
+        return ExtractedPayload(
+            unified=unified,
+            provider=provider_cls.__name__,
+            engine="native_provider",
+            diagnostics_extra={"offline": offline},
+        )
+    return ExtractedPayload(
+        unified=UnifiedDocument(
+            id=source.stem,
+            source_type=_source_type_for(detected_format),
+            source_path=str(source),
+            blocks=[
+                BaseBlock(
+                    id="raw-0",
+                    type=BlockType.PARAGRAPH,
+                    content=json.dumps(unified, default=str) if not isinstance(unified, str) else unified,
+                )
+            ],
+            metadata=DocumentMetadata(file_hash=_sha256(source), page_count=1),
+        ),
+        provider=provider_cls.__name__,
+        engine="native_provider",
+        diagnostics_extra={"offline": offline},
     )
 
 
-def _extract_pdf_unified(source: Path) -> UnifiedDocument:
-    provider = PdfProvider(str(source), config={"disable_path_validation": True})
+def _extract_pdf_oxide(source: Path, *, run_dir: Path) -> ExtractedPayload:
+    try:
+        import pdf_oxide
+        from pdf_oxide import PipelineConfig
+    except Exception as exc:  # pragma: no cover - exercised in dependency-boundary tests
+        raise PdfOxideUnavailable(
+            "pdf_oxide is not importable; install the pinned pdf_oxide dependency."
+        ) from exc
+
+    config = PipelineConfig(sync_to_arango=False, features=[])
+    result = pdf_oxide.extract_pdf(str(source), config)
+    raw_artifact = _write_json_artifact(
+        result.to_dict(),
+        run_dir / "artifacts" / "pdf_oxide.json",
+        kind="pdf_oxide_result",
+    )
+
     blocks: list[BaseBlock] = []
-    for page_index, lines in sorted(provider.page_lines.items()):
-        for line_index, line in enumerate(lines):
-            text = getattr(line, "raw_text", "")
-            if not text:
-                continue
-            blocks.append(
-                BaseBlock(
-                    id=f"pdf-page-{page_index + 1}-line-{line_index + 1}",
-                    type=BlockType.PARAGRAPH,
-                    content=str(text).strip(),
-                    metadata=BlockMetadata(page_number=page_index + 1),
-                )
+    for index, block in enumerate(result.blocks):
+        text = str(block.get("text", "")).strip()
+        if not text:
+            continue
+        blocks.append(
+            BaseBlock(
+                id=str(block.get("id") or f"pdf-oxide-block-{index + 1}"),
+                type=_block_type_from_pdf_oxide(block.get("type")),
+                content=text,
+                metadata=BlockMetadata(
+                    page_number=int(block.get("page", 0)) + 1,
+                    bbox=_bbox_from_pdf_oxide(block.get("bbox")),
+                    attributes={
+                        "font_size": block.get("font_size"),
+                        "is_bold": block.get("is_bold"),
+                        "header_level": block.get("header_level"),
+                        "section_id": block.get("section_id"),
+                    },
+                ),
             )
-    return UnifiedDocument(
-        id=source.stem,
-        source_type=SourceType.PDF,
-        source_path=str(source),
-        blocks=blocks,
-        metadata=DocumentMetadata(
-            title=source.stem,
-            file_hash=_sha256(source),
-            page_count=len(provider),
-            extraction_method="pdf_provider_low_level",
+        )
+
+    for index, table in enumerate(result.tables):
+        blocks.append(
+            BaseBlock(
+                id=str(table.get("id") or f"pdf-oxide-table-{index + 1}"),
+                type=BlockType.TABLE,
+                content=table.get("data", []),
+                metadata=BlockMetadata(
+                    page_number=int(table.get("page", 0)) + 1,
+                    bbox=_bbox_from_pdf_oxide(table.get("bbox")),
+                    attributes={
+                        "rows": table.get("rows"),
+                        "cols": table.get("cols"),
+                        "accuracy": table.get("accuracy"),
+                        "flavor": table.get("flavor"),
+                        "section_id": table.get("section_id"),
+                        "extraction_method": table.get("extraction_method"),
+                    },
+                ),
+            )
+        )
+
+    for index, figure in enumerate(result.figures):
+        blocks.append(
+            BaseBlock(
+                id=str(figure.get("id") or f"pdf-oxide-figure-{index + 1}"),
+                type=BlockType.FIGURE,
+                content=figure,
+                metadata=BlockMetadata(
+                    page_number=int(figure.get("page", 0)) + 1,
+                    bbox=_bbox_from_pdf_oxide(figure.get("bbox")),
+                    attributes={"extraction_method": "pdf_oxide"},
+                ),
+            )
+        )
+
+    metadata = dict(result.metadata)
+    metadata["pdf_oxide"] = {
+        "version": getattr(pdf_oxide, "__version__", None),
+        "dependency_pin": PDF_OXIDE_PIN,
+        "raw_artifact": raw_artifact.path,
+        "raw_artifact_sha256": raw_artifact.sha256,
+    }
+
+    return ExtractedPayload(
+        unified=UnifiedDocument(
+            id=source.stem,
+            source_type=SourceType.PDF,
+            source_path=str(source),
+            blocks=blocks,
+            metadata=DocumentMetadata(
+                title=source.stem,
+                file_hash=_sha256(source),
+                page_count=result.page_count,
+                extraction_method="pdf_oxide",
+                format_metadata=metadata,
+            ),
         ),
+        artifacts=[raw_artifact],
+        provider="PdfProvider",
+        engine="pdf_oxide",
+        diagnostics_extra={
+            "pdf_oxide_version": getattr(pdf_oxide, "__version__", None),
+            "pdf_oxide_dependency_pin": PDF_OXIDE_PIN,
+            "pdf_oxide_output_sha256": raw_artifact.sha256,
+            "pdf_oxide_timings": dict(result.timings),
+        },
+    )
+
+
+def _block_type_from_pdf_oxide(raw_type: object) -> BlockType:
+    value = str(raw_type or "").lower()
+    if value in {"title", "heading", "header", "sectionheader"}:
+        return BlockType.HEADING
+    if value == "table":
+        return BlockType.TABLE
+    if value in {"figure", "image", "picture"}:
+        return BlockType.FIGURE
+    return BlockType.PARAGRAPH
+
+
+def _bbox_from_pdf_oxide(raw_bbox: object) -> list[float] | None:
+    if not isinstance(raw_bbox, (list, tuple)) or len(raw_bbox) != 4:
+        return None
+    return [float(value) for value in raw_bbox]
+
+
+def _write_json_artifact(payload: object, path: Path, *, kind: str) -> ArtifactRef:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
+    data = path.read_bytes()
+    return ArtifactRef(
+        kind=kind,
+        path=str(path),
+        sha256=hashlib.sha256(data).hexdigest(),
+        size_bytes=len(data),
     )
 
 

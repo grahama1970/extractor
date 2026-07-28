@@ -17,6 +17,7 @@ dependencies = [
  "rapidfuzz>=3.8.1,<4",
  "regex>=2024.4.28,<2025",
  "pdftext~=0.6.2",
+ "pdf_oxide @ git+https://github.com/grahama1970/pdf_oxide.git@5b0538cb94f8c27b3f3f33411b4a9267dc98a022",
  "markdownify<0.13",
  "click>=8.1.7,<9",
  "typer>=0.16.0",
