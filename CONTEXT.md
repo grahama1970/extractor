@@ -1,36 +1,60 @@
-# CONTEXT — extractor pipeline hardening
+# CONTEXT - Extractor Current Agent State
 
-_Last updated: 2026-02-11T14:25:18+00:00 · Branch: main · Session: default_
+Last updated: 2026-07-28
 
-## 1. Active goal
-- Stabilize recent pipeline changes centered on PDF decryption, section-builder merge fixes, and provider API alignment, then validate with targeted tests.
+## Active Goal
 
-## 2. Repo / branch
-- Repo root: /home/graham/workspace/experiments/extractor
-- Branch: main
+Iterate through extractor tickets until every applicable ticket is resolved or closed with
+deterministic proof.
 
-## 3. Recent work
-- Latest commits include: fix to prevent hierarchical section merges, PDF auto-decrypt support, ImageProvider API standardization, and SciLLM preset/paved-path compliance.
-- Diff stats highlight large edits in `src/extractor/pipeline/run_pipeline.py`, `src/extractor/pipeline/steps/s04_section_builder.py`, and `src/extractor/core/providers/image.py`, plus a new `src/extractor/pipeline/utils/pdf_decrypt.py` with new tests.
-- Working tree is extremely dirty with widespread modifications across pipeline steps, utils, scripts, tests, and prototypes; many new files are untracked. This needs triage before reliable validation.
+## Current Contract
 
-## 4. TODO (next 60–90 minutes)
-- [ ] Triage the massive working tree: identify which changes are intentional vs. incidental, and scope what should be staged or deferred.
-- [ ] Run targeted tests for PDF decryption and section-builder behavior to confirm the recent fixes.
-- [ ] Verify ImageProvider API changes at key call sites in providers/pipeline steps.
-- [ ] Do a quick lint/typecheck pass (or at least run ruff + mypy on touched modules) to catch obvious regressions.
-- [ ] Update docs/CHANGELOG/CONTEXT if the intent of the pipeline changes has shifted.
+Extractor exposes one normal project-agent command:
 
-## 5. Commands to re-run
 ```bash
-source .venv/bin/activate && \
-set -a && [ -f .env ] && source .env && set +a
-pytest -q tests/pipeline/test_pdf_decrypt.py
-pytest -q tests/pipeline/test_04_section_builder_minimal.py
-ruff check .
-mypy src
-scripts/context.py
+uv run extractor extract \
+  data/input/twins/preset_twin/preset_twin.pdf \
+  --out local/extractor-run \
+  --offline \
+  --format json
 ```
 
-## 6. How to restart this thread
-- Next prompt: “Pick up from CONTEXT.md and triage the working tree, then validate the PDF decryption and section-builder fixes with targeted tests.”
+Normal callers do not choose engines, modes, presets, strategies, providers, Tau DAGs, or
+pipeline stages. Extractor routes supported files and emits one `extractor.result.v1`
+envelope.
+
+## Current Proof Baseline
+
+The latest deterministic gate is:
+
+```bash
+uv run python scripts/check_docs_contract.py
+bash scripts/ci_core.sh
+```
+
+Issue #31 added `scripts/ci_core.sh`, which performs full collection, selected contract
+tests, wheel build, clean venv install, clean installed PDF/DOCX extraction, and skill
+wrapper delegation to the installed command.
+
+## Active Implementation Paths
+
+- Canonical CLI: `src/extractor/cli_app.py`
+- Extraction facade: `src/extractor/application/extract_file.py`
+- Provider registry: `src/extractor/core/providers/registry.py`
+- PDF engine boundary: `src/extractor/core/providers/pdf.py`
+- Result envelope and validation: `src/extractor/core/schema/extraction_result.py`
+- Clean install gate: `scripts/ci_core.sh`
+- Documentation gate: `scripts/check_docs_contract.py`
+
+## Known Non-Claims
+
+- Live provider/model enrichment is not established by the offline gates.
+- Database export readiness is not established by the offline gates.
+- Historical parity and performance numbers are not release claims unless tied to frozen
+  benchmark manifests.
+- Legacy pipeline stage commands remain maintainer diagnostics, not normal usage.
+
+## Working Tree Note
+
+This repository may contain unrelated local generated files under `local/`, `prototypes/`,
+and ingestion state paths. Do not stage unrelated files when closing extractor tickets.
