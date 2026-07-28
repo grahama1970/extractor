@@ -96,6 +96,21 @@ _PROVIDER_MAP: dict[str, Type] = {
     "pdf": PdfProvider,
 }
 
+
+SUPPORTED_EXTENSIONS = frozenset(_PROVIDER_MAP)
+
+
+def supports_filepath(filepath: str) -> bool:
+    """Return whether the registry has an explicit provider for this path."""
+
+    return Path(filepath).suffix.lower().lstrip(".") in SUPPORTED_EXTENSIONS
+
+
+def supported_extensions() -> list[str]:
+    """Return sorted extensions explicitly handled by the provider registry."""
+
+    return sorted(SUPPORTED_EXTENSIONS)
+
 # Schematron enhances HTML extraction but NEVER replaces it.
 # If Schematron fails (API down, bad output), we fall back to native HTMLProvider.
 # The registry maps to a wrapper that handles this fallback chain.

@@ -32,8 +32,8 @@ from typing import Any, Dict, Type
 import typer
 from loguru import logger
 
-from extractor.core.providers.registry import provider_from_filepath
-from extractor.core.providers.pdf import PdfProvider
+from extractor import __version__
+from extractor.application.extract_file import extract_file
 from extractor.fast_extract.pymupdf_fast import extract_fast_text
 from extractor.core.schema.unified_document import HierarchyNode
 
@@ -45,7 +45,7 @@ from extractor.pipeline.steps import s10_arangodb_exporter as s10
 
 app = typer.Typer(
     name="extractor",
-    help="Unified document extractor (fast PDF, accurate PDF, structured formats)",
+    help="Extract supported files through the canonical Extractor facade",
     add_completion=False,
 )
 
@@ -53,6 +53,18 @@ app = typer.Typer(
 class Mode(str, Enum):
     fast = "fast"
     accurate = "accurate"
+
+
+class OutputFormat(str, Enum):
+    json = "json"
+    markdown = "markdown"
+
+
+@app.command("version")
+def version() -> None:
+    """Print the installed Extractor package version."""
+
+    typer.echo(__version__)
 
 
 # Helpers ----------------------------------------------------------------
@@ -276,64 +288,48 @@ def extract(
     input_file: Path = typer.Argument(
         ..., exists=True, file_okay=True, dir_okay=False, readable=True, help="Input document"
     ),
-    output_dir: Path = typer.Argument(..., help="Output directory for artifacts"),
-    mode: Mode = typer.Option(Mode.accurate, "--mode", help="PDF only: fast or accurate"),
-    prove: bool = typer.Option(False, "--prove", help="Enable Lean4 proving (accurate PDF only)"),
-    fast_sections: bool = typer.Option(
-        False,
-        "--fast-section",
-        "--fast-sections",
-        help="Fast PDF only: add heuristic section hints (light heading regex)",
+    output_dir: Path | None = typer.Option(
+        None,
+        "--out",
+        "-o",
+        help="Output directory for the extraction result and artifacts",
     ),
-    log_walkthrough: bool = typer.Option(
+    offline: bool = typer.Option(
         False,
-        "--log-walkthrough",
-        help="Append a short run note to walkthrough.md (PDF only)",
+        "--offline",
+        help="Disable optional network/model enrichment and use deterministic extraction only",
+    ),
+    output_format: OutputFormat = typer.Option(
+        OutputFormat.json,
+        "--format",
+        help="Presentation format for stdout",
     ),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose logging"),
 ):
-    """Unified extraction entrypoint (PDF + structured formats)."""
+    """Extract one supported file and emit an extractor.result.v1 envelope."""
 
     if verbose:
         logger.remove()
         logger.add(sys.stderr, level="DEBUG")
 
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    provider_cls = provider_from_filepath(str(input_file))
-
-    # PDF branch -------------------------------------------------------
-    if provider_cls is PdfProvider:
-        if mode == Mode.fast:
-            out = _run_pdf_fast(input_file, output_dir, with_sections=fast_sections)
-            if log_walkthrough:
-                _append_walkthrough(
-                    pdf=input_file, out_dir=output_dir, mode="fast", fast_sections=fast_sections
-                )
-            typer.echo(f"✓ Fast PDF extraction → {out}")
-            raise typer.Exit(0)
-
-        if fast_sections:
-            typer.echo("[yellow]--fast-section applies only to --mode fast (ignored).[/yellow]")
-
-        typer.echo("Running accurate PDF pipeline (offline-friendly)…")
-        _run_pipeline_accurate(input_file, output_dir, prove)
-        if log_walkthrough:
-            _append_walkthrough(
-                pdf=input_file, out_dir=output_dir, mode="accurate", fast_sections=False
+    result = extract_file(input_file, output_dir=output_dir, offline=offline)
+    if output_format is OutputFormat.markdown:
+        typer.echo(
+            "\n".join(
+                [
+                    f"# Extraction {result.status.value}",
+                    "",
+                    f"- schema: `{result.schema_version}`",
+                    f"- source: `{result.source_path}`",
+                    f"- output: `{result.output_dir}`",
+                    f"- blocks: `{result.counts.blocks}`",
+                    f"- artifacts: `{len(result.artifacts)}`",
+                ]
             )
-        typer.echo(f"✓ Accurate PDF extraction → {output_dir}")
-        raise typer.Exit(0)
-
-    # Structured branch ------------------------------------------------
-    try:
-        paths = _run_structured(provider_cls, input_file, output_dir)
-        typer.echo("✓ Structured extraction complete")
-        for label, path in paths.items():
-            typer.echo(f"  {label}: {path}")
-    except Exception as e:  # pragma: no cover - surfaced to user
-        typer.echo(f"Extraction failed: {e}", err=True)
-        raise typer.Exit(1)
+        )
+    else:
+        typer.echo(result.model_dump_json(indent=2))
+    raise typer.Exit(0 if result.ok else 1)
 
 
 # Entrypoint -------------------------------------------------------------

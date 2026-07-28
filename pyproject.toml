@@ -182,6 +182,7 @@ Repository = "https://github.com/grahama1970/extractor"
 Forked-From = "https://github.com/VikParuchuri/marker"
 
 [project.scripts]
+extractor = "cli:app"
 extractor-cli = "extractor.cli.main:app"                     # legacy umbrella CLI (kept for compat)
 extractor_single = "extractor.core.scripts.convert_single:convert_single_cli"
 extractor_chunk_convert = "extractor.core.scripts.chunk_convert:chunk_convert_cli"
