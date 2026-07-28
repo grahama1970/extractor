@@ -23,7 +23,6 @@ dependencies = [
  "typer>=0.16.0",
  "markdown2>=2.5.2,<3",
  "filetype>=1.2.0,<2",
- "pre-commit>=4.2.0,<5",
  "tree-sitter>=0.23.2",
  "asyncio>=3.4.3,<4",
  "json-repair>=0.44.1",
@@ -39,11 +38,8 @@ dependencies = [
  "xlsxwriter>=3.2.0,!=3.2.3",
  "defusedxml>=0.7.1",
  "aiohttp>=3.11.18",
- "python-arango>=8.2.0",
- "redis>=6.2.0",
  "structlog>=24.0.0",
  "rich>=13.0.0",
- "pytest-asyncio>=0.24.0",
  "camelot-py>=1.0.9",
  "tenacity>=9.1.2",
  "pyperclip>=1.9.0",
@@ -63,22 +59,11 @@ dependencies = [
  # Gate the local 'certainly' package (which pulls faiss-gpu) to Python < 3.11
  # On Python >= 3.11 use faiss-cpu instead (see markers above)
  "pdfplumber>=0.11.7",
- "ruff>=0.13.0",
- # SciLLM (fork) via GitHub; pairs with litellm runtime API
- # Note: [certainly] extra removed from core deps - install 'prover' extra if needed
- "scillm @ git+https://github.com/grahama1970/scillm.git",
- "urlextract>=1.9.0",
- "strip_tags>=0.6",
- "sentence-transformers>=5.0.0",
- "pyflakes>=3.4.0",
- # Shared web-ingestion toolkit
- "fetcher @ git+https://github.com/grahama1970/fetcher.git",
- "nvidia-ml-py>=12.0.0", # Official NVIDIA ML Python bindings (replaces deprecated pynvml)
- "faiss-cpu>=1.12.0",
  "nltk>=3.9.2",
  "joblib>=1.3.0",
  "scipy>=1.11.0",
  "httpx>=0.28.0",
+ "requests>=2.32.0,<3",
 ]
 [[project.authors]]
 name = "Graham Anderson"
@@ -93,8 +78,12 @@ dev = [
  "uvicorn>=0.33.0",
  "python-multipart>=0.0.16,<0.0.20",
  "pytest>=8.3.3,<9",
+ "pytest-asyncio>=0.24.0",
  "pytest-mock>=3.14.0,<4",
  "pytest-json-report>=1.5.0,<2",
+ "ruff>=0.13.0",
+ "pyflakes>=3.4.0",
+ "pre-commit>=4.2.0,<5",
  "apted==1.0.3",
  "distance==0.1.3",
  "lxml==5.3.0",
@@ -106,6 +95,16 @@ dev = [
  "types-requests>=2.32.0.20241016",
  "types-PyYAML>=6.0.12.20241221",
  "types-docutils>=0.21.0.20241020",
+ "python-arango>=8.2.0",
+ "redis>=6.2.0",
+ "scillm @ git+https://github.com/grahama1970/scillm.git",
+ "fetcher @ git+https://github.com/grahama1970/fetcher.git",
+ "sentence-transformers>=5.0.0",
+ "faiss-cpu>=1.12.0",
+ "nvidia-ml-py>=12.0.0",
+ "urlextract>=1.9.0",
+ "strip_tags>=0.6",
+ "pymupdf>=1.26.1",
 ]
 
 [build-system]
@@ -114,6 +113,17 @@ build-backend = "hatchling.build"
 
 [project.optional-dependencies]
 full = [ "mammoth>=1.9.0,<2", "openpyxl>=3.1.5,<4", "python-pptx>=1.0.2,<2", "ebooklib>=0.18,<0.19", "weasyprint~=63.1",]
+providers = [
+  "python-arango>=8.2.0",
+  "redis>=6.2.0",
+  "scillm @ git+https://github.com/grahama1970/scillm.git",
+  "fetcher @ git+https://github.com/grahama1970/fetcher.git",
+  "sentence-transformers>=5.0.0",
+  "faiss-cpu>=1.12.0",
+  "nvidia-ml-py>=12.0.0",
+  "urlextract>=1.9.0",
+  "strip_tags>=0.6",
+]
 # Minimal runtime deps to run Python smokes without heavy dev extras / GPU wheels
 smokes = [
   # SciLLM already in core deps; keep smokes lean
@@ -183,7 +193,7 @@ Repository = "https://github.com/grahama1970/extractor"
 Forked-From = "https://github.com/VikParuchuri/marker"
 
 [project.scripts]
-extractor = "cli:app"
+extractor = "extractor.cli_app:app"
 extractor-cli = "extractor.cli.main:app"                     # legacy umbrella CLI (kept for compat)
 extractor_single = "extractor.core.scripts.convert_single:convert_single_cli"
 extractor_chunk_convert = "extractor.core.scripts.chunk_convert:chunk_convert_cli"
@@ -231,6 +241,9 @@ include = [
   "src/extractor/pipeline/prompts/**/*.json",
   "memory",
 ]
+exclude = [
+  "src/extractor/pipeline/gold_standards/input",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = [ "src/extractor", "memory",]
@@ -238,6 +251,9 @@ include = [
   "src/extractor/core/scripts/*.sh",
   "src/extractor/core/scripts/*.html",
   "src/extractor/pipeline/prompts/**/*.json",
+]
+exclude = [
+  "src/extractor/pipeline/gold_standards/input",
 ]
 
 [tool.black]

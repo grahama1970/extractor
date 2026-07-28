@@ -13,21 +13,35 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Python
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.11'
 
-      - name: Install formatters
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Sync dependencies
+        run: uv sync --frozen --group dev
+
+      - name: Ruff ratchet
         run: |
-          python -m pip install --upgrade pip
-          pip install ruff black
+          uv run ruff check \
+            src/extractor/cli_app.py \
+            src/extractor/application \
+            src/extractor/integrations/tau.py \
+            tests/contracts/test_agent_skill_wrapper.py \
+            tests/contracts/test_clean_install_contract.py \
+            tests/contracts/test_console_entrypoint.py \
+            tests/contracts/test_dependency_boundaries.py
 
-      - name: Ruff (src/extractor only)
-        run: ruff check src/extractor
+      - name: Shell syntax
+        run: |
+          bash -n scripts/ci_core.sh
+          bash -n scripts/prove_agent_skill_wrapper.sh
 
-      - name: Black (check src/extractor)
-        run: black --check src/extractor
+      - name: Core clean-install contract
+        run: bash scripts/ci_core.sh
 
       - name: Upload lint artifacts (if any)
         if: failure()
@@ -37,4 +51,3 @@ jobs:
           path: |
             .
           if-no-files-found: ignore
-

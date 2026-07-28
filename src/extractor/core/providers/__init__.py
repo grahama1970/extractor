@@ -20,7 +20,7 @@ Example Usage:
 """
 
 from functools import lru_cache
-from typing import List, Optional, Dict, Any
+from typing import TYPE_CHECKING, List, Optional, Dict, Any
 
 from PIL import Image
 from pydantic import BaseModel
@@ -37,8 +37,10 @@ from extractor.core.logger import configure_logging
 from extractor.core.schema.polygon import PolygonBox
 from extractor.core.schema.text import Span
 from extractor.core.schema.text.line import Line
-from extractor.core.settings import settings
 from extractor.core.util import assign_config
+
+if TYPE_CHECKING:
+    from extractor.core.schema.unified_document import UnifiedDocument
 
 configure_logging()
 
@@ -182,6 +184,7 @@ class BaseProvider:
         Raises:
             ValueError: If font settings are not properly configured
         """
+        from extractor.core.settings import settings
         from weasyprint import CSS
         from weasyprint.text.fonts import FontConfiguration
 

@@ -34,11 +34,6 @@ from loguru import logger
 
 from extractor import __version__
 from extractor.application.extract_file import extract_file
-from extractor.fast_extract.pymupdf_fast import extract_fast_text
-from extractor.core.schema.unified_document import HierarchyNode
-
-# Stage 10 flatten helper (imported once; can be monkeypatched in tests)
-from extractor.pipeline.steps import s10_arangodb_exporter as s10
 
 # Typer app --------------------------------------------------------------
 
@@ -84,6 +79,7 @@ def _run_pipeline_accurate(pdf: Path, out_dir: Path, prove: bool) -> None:
     """
 
     from extractor.pipeline import run_pipeline
+    from extractor.pipeline.steps import s10_arangodb_exporter as s10
 
     args = [
         "--pdf",
@@ -163,6 +159,8 @@ def _detect_fast_sections(pages: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
 
 
 def _run_pdf_fast(pdf: Path, out_dir: Path, with_sections: bool) -> Path:
+    from extractor.fast_extract.pymupdf_fast import extract_fast_text
+
     data = extract_fast_text(str(pdf))
     if with_sections:
         data["fast_sections"] = _detect_fast_sections(data.get("pages", []))
@@ -257,6 +255,8 @@ def _flatten_unified(unified_doc: Dict[str, Any], source: Path, target_root: Pat
 
 
 def _run_structured(provider_cls: Type, input_file: Path, out_dir: Path) -> Dict[str, Path]:
+    from extractor.core.schema.unified_document import HierarchyNode
+
     # Most providers accept no positional args; PdfProvider is handled earlier.
     provider = provider_cls()
     unified = provider.extract_document(str(input_file))

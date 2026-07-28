@@ -17,13 +17,17 @@ Example Usage:
 >>> # Add usage examples
 """
 
-from typing import Optional
+from typing import Any, Optional
 
+import os
 from dotenv import find_dotenv
 from pydantic import computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
-import torch
-import os
+
+try:
+    import torch
+except ImportError:  # pragma: no cover - exercised by clean base installs
+    torch = None  # type: ignore[assignment]
 
 
 class Settings(BaseSettings):
@@ -58,21 +62,22 @@ class Settings(BaseSettings):
         if self.TORCH_DEVICE is not None:
             return self.TORCH_DEVICE
 
-        if torch.cuda.is_available():
+        if torch is not None and torch.cuda.is_available():
             return "cuda"
 
-        if torch.backends.mps.is_available():
+        if torch is not None and torch.backends.mps.is_available():
             return "mps"
 
         return "cpu"
 
     @computed_field
     @property
-    def MODEL_DTYPE(self) -> torch.dtype:
-        if self.TORCH_DEVICE_MODEL == "cuda":
+    def MODEL_DTYPE(self) -> Any:
+        if torch is not None and self.TORCH_DEVICE_MODEL == "cuda":
             return torch.bfloat16
-        else:
+        if torch is not None:
             return torch.float32
+        return "float32"
 
 
 settings = Settings()
