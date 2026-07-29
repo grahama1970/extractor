@@ -101,7 +101,7 @@ Based on [OpenAI Prompting Guide](https://cookbook.openai.com/examples/gpt-5/gpt
 - Preflight: use `scillm.paved.list_models_openai_like` + `scillm.paved.sanity_preflight` (short‑wall, parallel). Do not use raw HTTP in code.
 - JSON mode: `response_format={"type":"json_object"}`, temp=0, strict “no fences/extra keys”. Accept dict or string; normalize to dict.
 - Logging: write per‑attempt `timings.jsonl` (served_model, tokens, latency_ms, outcome) and `timings_summary.json` per stage.
-- No bespoke wrappers: centralize in `extractor/pipeline/utils/scillm_router.py`. No stage‑local clients.
+- No bespoke wrappers: centralize in `src/extractor/pipeline/utils/scillm_router.py`. No stage-local clients.
 
 References (local)
 - QUICKSTART: `/home/graham/workspace/experiments/litellm/QUICKSTART.md`
@@ -265,7 +265,7 @@ When the agent needs to run backend/front‑end servers for thorough E2E (CDP/Pu
 
 - Ports: VS Code auto‑forwards `8080` (Vite) and `8000` (FastAPI). See `.vscode/settings.json`.
 
-- WebSocket testing: prefer `npm run dev` (Vite dev server) because `vite preview` does not proxy WS by default. In dev, WS `/ws/*` is proxied to the backend in `vite.config.ts`.
+- WebSocket testing: prefer `npm run dev` (Vite dev server) because `vite preview` does not proxy WS by default. In dev, WS `/ws/*` is proxied to the backend in `prototypes/tabbed/html/vite.config.ts`.
 
 - Puppeteer/CDP debugging:
   - Point tests at your live dev servers (e.g., `BASE_URL=http://127.0.0.1:8080/main node scripts/ux_smoke_ws.mjs`).
@@ -352,7 +352,7 @@ Use this system as follows for every UI/API change in the `prototypes/tabbed` ap
 Rules
 - Always add/extend at least one smoke per issue.
 - Never mark an issue “done” without artifacts from `scripts/artifacts/` and a passing smoke.
-- Keep the UI non‑blocking when possible (use the ShadCN loader components in `components/ui/loader.tsx`).
+- Keep the UI non-blocking when possible (use the ShadCN loader components in `prototypes/tabbed/html/src/components/ui/loader.tsx`).
 
 Quick commands
 - `make dev`, `make smokes`, `make ci`, `make scaffold ISSUE=008 TITLE="toolbar"`, `make smoke-issue ISSUE=008`.
@@ -473,14 +473,15 @@ References
     - Prefer Git-aware defaults (no `--no-respect-gitignore`) to avoid bundling build outputs.
     - Adjust `--max-total-bytes`/`--max-file-bytes` if the bundle is too large; keep sizes practical for the target model.
 * **Structure**:
-  * `src/lean4_prover/` → core Python
-  * `frontend/` → React + TypeScript + Vite
-  * `tests/`, `docs/`, `scripts/`, `workspace/`
-* **Frontend**:
+  * `src/extractor/` -> core Python package and CLI entrypoints
+  * `prototypes/tabbed/html/` -> React + TypeScript + Vite prototype UI
+  * `prototypes/tabbed/api/` -> FastAPI prototype backend helpers
+  * `tests/`, `docs/`, `scripts/`, `tools/`
+* **Frontend Prototype**:
   ```bash
-  cd frontend && npm run dev | build | preview
+  cd prototypes/tabbed/html && npm run dev | build | preview
   ```
-* **Lean/Docker**:
+* **Docker/Compose**:
   ```bash
   docker compose up -d --build
   ```
