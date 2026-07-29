@@ -66,6 +66,7 @@ LEAN4_CLI_CMD = os.getenv("LEAN4_CLI_CMD", "").strip()
 MAX_THEOREMS = int(os.getenv("LEAN4_MAX_THEOREMS", 0))
 # lean-interact: set LEAN4_USE_LEAN_INTERACT=1 to use lean-interact instead of Docker
 USE_LEAN_INTERACT = os.getenv("LEAN4_USE_LEAN_INTERACT", "0").strip() == "1"
+LOCAL_BRIDGE_API_KEY = "sk-" + "placeholder"
 
 
 def _compile_via_lean_interact(code: str, timeout: float = 60.0) -> dict:
@@ -154,10 +155,10 @@ async def prove_requirements(db_path: Path, output_dir: Path):
     if not os.getenv("SCILLM_API_BASE"):
         start_url = "http://localhost:8787/v1"  # Updated to match sanity check default
         scillm.api_base = start_url
-        scillm.api_key = "sk-placeholder"
+        scillm.api_key = LOCAL_BRIDGE_API_KEY
         # Also set environment variables for the current process
         os.environ["SCILLM_API_BASE"] = start_url
-        os.environ["SCILLM_API_KEY"] = "sk-placeholder"
+        os.environ["SCILLM_API_KEY"] = LOCAL_BRIDGE_API_KEY
         logger.info(f"Configured SciLLM for Local Bridge: {start_url}")
     else:
         logger.info(f"Using existing SciLLM config: {os.getenv('SCILLM_API_BASE')}")

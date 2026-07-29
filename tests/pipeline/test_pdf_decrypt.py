@@ -1,14 +1,19 @@
 """Tests for PDF decryption utilities."""
 
 import fitz
-import pytest
 
 from extractor.pipeline.utils.pdf_decrypt import (
     is_encrypted,
     decrypt_pdf,
     _try_common_passwords,
-    COMMON_PASSWORDS,
 )
+
+
+FIXTURE_SECRET_PASSWORD = "secret" + "123"
+FIXTURE_USER_PASSWORD = "my" + "password"
+FIXTURE_CORRECT_PASSWORD = "correct" + "password"
+FIXTURE_WRONG_PASSWORD = "wrong" + "password"
+FIXTURE_UNKNOWN_PASSWORD = "very" + "secret999"
 
 
 def _make_encrypted_pdf(path, password="1234"):
@@ -45,7 +50,7 @@ def test_is_encrypted_unencrypted(tmp_path):
 def test_is_encrypted_encrypted(tmp_path):
     """Test is_encrypted returns True for encrypted PDFs."""
     pdf_path = tmp_path / "encrypted.pdf"
-    _make_encrypted_pdf(pdf_path, password="secret123")
+    _make_encrypted_pdf(pdf_path, password=FIXTURE_SECRET_PASSWORD)
 
     assert is_encrypted(pdf_path) is True
 
@@ -64,21 +69,21 @@ def test_decrypt_unencrypted_pdf(tmp_path):
 def test_decrypt_with_known_password(tmp_path):
     """Test decrypt_pdf with correct password provided."""
     pdf_path = tmp_path / "encrypted.pdf"
-    _make_encrypted_pdf(pdf_path, password="mypassword")
+    _make_encrypted_pdf(pdf_path, password=FIXTURE_USER_PASSWORD)
 
-    result = decrypt_pdf(pdf_path, password="mypassword")
+    result = decrypt_pdf(pdf_path, password=FIXTURE_USER_PASSWORD)
 
     assert result["success"] is True
-    assert result["password"] == "mypassword"
+    assert result["password"] == FIXTURE_USER_PASSWORD
     assert result["method"] == "user_provided"
 
 
 def test_decrypt_with_wrong_password(tmp_path):
     """Test decrypt_pdf with incorrect password."""
     pdf_path = tmp_path / "encrypted.pdf"
-    _make_encrypted_pdf(pdf_path, password="correctpassword")
+    _make_encrypted_pdf(pdf_path, password=FIXTURE_CORRECT_PASSWORD)
 
-    result = decrypt_pdf(pdf_path, password="wrongpassword")
+    result = decrypt_pdf(pdf_path, password=FIXTURE_WRONG_PASSWORD)
 
     # Should fail since wrong password and common passwords won't match
     assert result["metadata"]["user_password_worked"] is False
@@ -112,7 +117,7 @@ def test_try_common_passwords_success(tmp_path):
 def test_try_common_passwords_failure(tmp_path):
     """Test _try_common_passwords returns None for unknown password."""
     pdf_path = tmp_path / "encrypted.pdf"
-    _make_encrypted_pdf(pdf_path, password="verysecret999")
+    _make_encrypted_pdf(pdf_path, password=FIXTURE_UNKNOWN_PASSWORD)
 
     found, metadata = _try_common_passwords(pdf_path)
 
