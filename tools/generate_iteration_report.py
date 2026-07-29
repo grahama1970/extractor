@@ -97,7 +97,7 @@ def generate_report(log_path, results_root):
                         entry["score"] = pdf_score
                         total_batch_score += pdf_score
                         found_count += 1
-                except:
+                except (OSError, ValueError, TypeError, AttributeError):
                     pass
 
     # Print Summary Report

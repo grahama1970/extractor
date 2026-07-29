@@ -132,8 +132,8 @@ class FontHeaderProcessor(BaseProcessor):
                                 if span.font and span.font_size:
                                     fonts.append(span.font)
                                     font_sizes.append(float(span.font_size))
-                    except:
-                        pass
+                    except Exception as exc:
+                        logger.warning(f"Could not read span font data for block: {exc}")
 
                 # Fourth try: Check the page's span data directly
                 if not fonts:

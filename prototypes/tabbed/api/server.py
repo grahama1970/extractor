@@ -21,8 +21,7 @@ import os
 import subprocess
 import shutil
 import datetime
-import base64
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import sys
 
 from fastapi import FastAPI, BackgroundTasks, HTTPException
@@ -33,14 +32,13 @@ import time
 import tempfile
 import zipfile
 from pathlib import Path
-from typing import Optional
 from pydantic import BaseModel, Field
-from typing import Dict, List
 
 try:
     from extractor.pipeline.utils.embeddings import ensure_embedder  # type: ignore
 except Exception:
-    ensure_embedder = lambda: None  # fallback
+    def ensure_embedder():
+        return None
 
 
 def _ensure_pdf_objects_view(db) -> str:
@@ -974,7 +972,7 @@ def _to_pipeline_annotations(pdf: Path, boxes_by_page: Dict[str, List[Dict[str, 
     for page_key, boxes in boxes_by_page.items():
         try:
             page_index = int(page_key)
-        except:
+        except (TypeError, ValueError):
             continue
         zero_based = max(0, page_index - 1)
         if zero_based >= len(doc):
@@ -1353,7 +1351,8 @@ async def http_generate(payload: Dict[str, Any]):
         if image:
             # Support data URLs by writing to a temporary file
             if isinstance(image, str) and image.startswith("data:image/") and "," in image:
-                import base64, tempfile
+                import base64
+                import tempfile
 
                 header, b64 = image.split(",", 1)
                 ext = "png"

@@ -103,8 +103,6 @@ def _estimate_timeout(pdf_path: Path, page_count: int = 10, has_tables: bool = T
         "nist": 1.2,
     }
     source_multiplier = SOURCE_MULTIPLIERS.get(source, 1.0)
-    size_mb = pdf_path.stat().st_size / (1024 * 1024) if pdf_path.exists() else 1.0
-
     # Base: 120s + 2s/page + 30s per estimated table page
     table_pages = max(1, page_count // 5) if has_tables else 0
     base = 120 + page_count * 2 + table_pages * 30
@@ -322,8 +320,8 @@ class ContinuousLearningDaemon:
                                 qs = data["quality_summary"]
                                 result["params_used"] = qs.get("params_used", {})
                                 result["param_source"] = qs.get("param_source")
-                        except:
-                            pass
+                        except (json.JSONDecodeError, OSError, AttributeError, TypeError) as exc:
+                            logger.warning(f"Could not read table metrics from {s05_tables}: {exc}")
 
                     # Count figures from S06 output
                     s06_dir = output_dir / "06_figure_extractor"
@@ -334,10 +332,10 @@ class ContinuousLearningDaemon:
                                 data = json.loads(ff.read_text())
                                 figs = data if isinstance(data, list) else data.get("figures", [])
                                 result["figures"] += len(figs) if isinstance(figs, list) else 0
-                            except:
-                                pass
+                            except (json.JSONDecodeError, OSError, AttributeError, TypeError) as exc:
+                                logger.warning(f"Could not read figure metrics from {ff}: {exc}")
                 except Exception as e:
-                    logger.debug(f"Error reading metrics from output: {e}")
+                    logger.error(f"Error reading metrics from output: {e}")
 
                 # Check for table fragmentation if tables found
                 if result["tables"] > 0:
@@ -491,8 +489,8 @@ class ContinuousLearningDaemon:
                             match = re.search(r"fragmentation[:\s]+(\d+)", line.lower())
                             if match:
                                 result["fragmentation"] = int(match.group(1))
-                        except:
-                            pass
+                        except (AttributeError, ValueError) as exc:
+                            logger.warning(f"Could not parse fragmentation output line: {exc}")
             else:
                 result["error"] = proc.stderr[:500] if proc.stderr else "Unknown error"
 
@@ -774,7 +772,7 @@ class ContinuousLearningDaemon:
                 solution = f"Extraction produced {frag}% fragmentation with {table_count} tables.{param_str} Consider different extraction parameters."
 
             if tune_result.get("success"):
-                solution += f" Debug-table tuning completed."
+                solution += " Debug-table tuning completed."
 
             # Store via curl to /memory
             payload = json.dumps({

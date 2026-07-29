@@ -168,7 +168,8 @@ class SuspiciousHeaderFixer(BaseProcessor):
                 try:
                     # Pass document to get text from structure
                     text = b.raw_text(document).strip()
-                except:
+                except Exception as exc:
+                    logger.warning(f"Could not read raw text for header candidate: {exc}")
                     text = ""
 
             # If block has no text but has structure, it will get text later

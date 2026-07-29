@@ -264,7 +264,8 @@ class ArangoDBCommands(CommandGroup):
                         coll = db.collection(coll_name)
                         count = coll.count()
                         print(f"  {coll_name}: {count:,} items")
-                    except:
+                    except Exception as exc:
+                        logger.warning(f"Could not read collection stats for {coll_name}: {exc}")
                         print(f"  {coll_name}: Not found")
 
                 # Get block type distribution

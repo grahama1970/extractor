@@ -252,7 +252,7 @@ def is_valid_path(value) -> bool:
 
         Path(value).resolve()
         return True
-    except:
+    except (OSError, RuntimeError, ValueError):
         return False
 
 

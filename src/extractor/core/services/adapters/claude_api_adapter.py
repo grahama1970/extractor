@@ -214,7 +214,7 @@ class ClaudeAPIAdapter:
                 try:
                     parsed = json.loads(result_data)
                     return response_schema(**parsed)
-                except:
+                except (json.JSONDecodeError, TypeError):
                     # Create minimal valid response
                     return response_schema()
             else:
