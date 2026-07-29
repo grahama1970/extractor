@@ -3,14 +3,18 @@ from __future__ import annotations
 import base64
 import os
 import sys
+from pathlib import Path
+
 import httpx
 
 # Ensure extractor/src is first regardless of current working directory
-_extractor_src = "/home/graham/workspace/experiments/extractor/src"
+_extractor_src = str(Path(__file__).resolve().parents[2] / "src")
 if _extractor_src not in sys.path:
     sys.path.insert(0, _extractor_src)
 # Optionally append litellm dev path (after extractor)
-_litellm_dev = "/home/graham/workspace/experiments/litellm"
+_litellm_dev = str(
+    Path(os.environ.get("SCILLM_DEV_ROOT", Path.home() / "workspace/experiments/litellm"))
+)
 if os.path.isdir(_litellm_dev) and _litellm_dev not in sys.path:
     sys.path.append(_litellm_dev)
 from scillm import completion

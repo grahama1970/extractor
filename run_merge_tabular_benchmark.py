@@ -9,6 +9,7 @@ logistic_regression, reports metrics, and saves the best model.
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -32,12 +33,18 @@ from sklearn.preprocessing import StandardScaler
 # ---------------------------------------------------------------------------
 
 DATA_PATH = Path(
-    "/home/graham/workspace/experiments/pi-mono/.pi/skills/"
-    "create-table-classifier/data/merge_features.jsonl"
+    os.environ.get(
+        "MERGE_FEATURES_PATH",
+        Path.home()
+        / "workspace/experiments/pi-mono/.pi/skills/create-table-classifier/data/merge_features.jsonl",
+    )
 )
 MODEL_OUTPUT_DIR = Path(
-    "/home/graham/workspace/experiments/pi-mono/.pi/skills/"
-    "create-table-classifier/models/merge-classifier-tabular"
+    os.environ.get(
+        "MERGE_CLASSIFIER_MODEL_DIR",
+        Path.home()
+        / "workspace/experiments/pi-mono/.pi/skills/create-table-classifier/models/merge-classifier-tabular",
+    )
 )
 
 FEATURE_COLS = [

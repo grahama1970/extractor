@@ -12,6 +12,7 @@ Runs the accurate pipeline for the BHT fixture (miner auto-runs) and asserts >=1
 Writes scripts/artifacts/req_miner_sentences.json
 """
 from __future__ import annotations
+import sys
 
 import json
 from pathlib import Path
@@ -31,7 +32,7 @@ def ensure_pipeline() -> Path:
     if req_json.exists():
         return req_json
     cmd = [
-        "/home/graham/workspace/experiments/extractor/.venv/bin/python",
+        sys.executable,
         "-m",
         "src.cli",
         "extract",

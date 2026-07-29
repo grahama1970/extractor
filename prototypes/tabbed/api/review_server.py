@@ -51,6 +51,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+PI_SKILLS_ROOT = Path(
+    os.environ.get("PI_SKILLS_ROOT", Path.home() / "workspace/experiments/pi-mono/.pi/skills")
+)
+
 # Mount agent endpoint router for 5ft voice canvas
 try:
     from agent_endpoint import router as agent_router, flush_all_sessions_sync
@@ -69,7 +73,7 @@ except ImportError:
 EXTRACTED_RUNS_NVME = Path(
     os.environ.get(
         "EXTRACTED_RUNS_NVME",
-        "/home/graham/workspace/experiments/pi-mono/.pi/skills/review-pdf/extracted_runs_staging",
+        PI_SKILLS_ROOT / "review-pdf/extracted_runs_staging",
     )
 )
 EXTRACTED_RUNS_HDD = Path(
@@ -84,7 +88,7 @@ CORPUS_ROOT = Path(
 CORRECTIONS_DIR = Path(
     os.environ.get(
         "CORRECTIONS_DIR",
-        "/home/graham/workspace/experiments/pi-mono/.pi/skills/learn-datalake/state/corrections",
+        PI_SKILLS_ROOT / "learn-datalake/state/corrections",
     )
 )
 CORRECTIONS_DIR.mkdir(parents=True, exist_ok=True)
@@ -92,26 +96,26 @@ CORRECTIONS_DIR.mkdir(parents=True, exist_ok=True)
 SHADOW_DIR = Path(
     os.environ.get(
         "SHADOW_DIR",
-        "/home/graham/workspace/experiments/pi-mono/.pi/skills/learn-datalake/state/shadow",
+        PI_SKILLS_ROOT / "learn-datalake/state/shadow",
     )
 )
 
 BLACKLIST_PATH = Path(
     os.environ.get(
         "BLACKLIST_PATH",
-        "/home/graham/workspace/experiments/pi-mono/.pi/skills/learn-datalake/state/failed_pdf_blacklist.jsonl",
+        PI_SKILLS_ROOT / "learn-datalake/state/failed_pdf_blacklist.jsonl",
     )
 )
 STATE_DIR = Path(
     os.environ.get(
         "STATE_DIR",
-        "/home/graham/workspace/experiments/pi-mono/.pi/skills/learn-datalake/state",
+        PI_SKILLS_ROOT / "learn-datalake/state",
     )
 )
 REPORTS_DIR = Path(
     os.environ.get(
         "REPORTS_DIR",
-        "/home/graham/workspace/experiments/pi-mono/.pi/skills/review-pdf/reports",
+        PI_SKILLS_ROOT / "review-pdf/reports",
     )
 )
 

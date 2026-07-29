@@ -18,6 +18,7 @@
 Skips gracefully when the Lean4 CLI is not available.
 """
 from __future__ import annotations
+import os
 
 import json
 from pathlib import Path
@@ -33,7 +34,7 @@ def main(
     pdf: Path = typer.Option(Path("data/input/pipeline/BHT_CV32A65X_marked.pdf"), exists=True),
     out_dir: Path = typer.Option(Path("data/results/cli_smokes/lean4_prove")),
     lean4_cli: Path = typer.Option(
-        Path("/home/graham/workspace/experiments/lean4/src/lean4_prover/cli_mini.py")
+        Path(os.environ.get("LEAN4_CLI", Path.home() / "workspace/experiments/lean4/src/lean4_prover/cli_mini.py"))
     ),
 ):
     """Run Lean4 CLI to process PDF, saving results."""

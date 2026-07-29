@@ -446,7 +446,8 @@ if __name__ == "__main__":
 
     # Test 1: Convert the actual research paper PDF
     print("\n📝 Test 1: Convert Real Research Paper (2505.03335v2.pdf)")
-    test_pdf_path = "/home/graham/workspace/experiments/extractor/data/input/2505.03335v2.pdf"
+    repo_root = Path(__file__).resolve().parents[4]
+    test_pdf_path = str(repo_root / "data/input/2505.03335v2.pdf")
 
     if os.path.exists(test_pdf_path):
         try:
@@ -504,9 +505,9 @@ if __name__ == "__main__":
     # Test 3: Compare with other format extractions
     print("\n📝 Test 3: Check Other Format Files")
     other_formats = [
-        "/home/graham/workspace/experiments/extractor/data/input/2505.03335v2.docx",
-        "/home/graham/workspace/experiments/extractor/data/input/2505.03335v2.md",
-        "/home/graham/workspace/experiments/extractor/data/input/2505.03335v2_extracted.txt",
+        str(repo_root / "data/input/2505.03335v2.docx"),
+        str(repo_root / "data/input/2505.03335v2.md"),
+        str(repo_root / "data/input/2505.03335v2_extracted.txt"),
     ]
 
     for file_path in other_formats:

@@ -39,7 +39,12 @@ app = typer.Typer(help="Build diverse PDF corpus for extractor training")
 # Fetcher Integration - Use /fetcher skill for robust downloads
 # =============================================================================
 
-FETCHER_SCRIPT = Path("/home/graham/workspace/experiments/pi-mono/.pi/skills/fetcher/run.sh")
+FETCHER_SCRIPT = Path(
+    os.environ.get(
+        "FETCHER_SCRIPT",
+        Path.home() / "workspace/experiments/pi-mono/.pi/skills/fetcher/run.sh",
+    )
+)
 
 
 def use_fetcher_for_download(url: str, output_path: Path, timeout: int = 120) -> bool:

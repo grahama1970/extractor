@@ -18,6 +18,7 @@ Acceptance (offline):
 - Summary + extracted constraints saved to scripts/artifacts/
 """
 from __future__ import annotations
+import sys
 
 import json
 import os
@@ -42,7 +43,7 @@ def ensure_stage07() -> None:
     if RELF.exists():
         return
     cmd = [
-        "/home/graham/workspace/experiments/extractor/.venv/bin/python",
+        sys.executable,
         "-m",
         "src.cli",
         "extract",
@@ -161,7 +162,7 @@ def extract_table_constraints(reflow_path: Path) -> List[Dict[str, Any]]:
 @app.command()
 def main():
     """Check for the existence of the Lean4 CLI and required stages."""
-    lean_cli = Path("/home/graham/workspace/experiments/lean4/src/lean4_prover/cli_mini.py")
+    lean_cli = Path(os.environ.get("LEAN4_CLI", Path.home() / "workspace/experiments/lean4/src/lean4_prover/cli_mini.py"))
     if not lean_cli.exists():
         print("SKIP: Lean4 CLI not found; install first.")
         raise typer.Exit(0)
@@ -185,7 +186,7 @@ def main():
     tmp_out = Path("/tmp/lean_table_merge_out.json")
 
     cmd = [
-        "/home/graham/workspace/experiments/extractor/.venv/bin/python",
+        sys.executable,
         str(lean_cli),
         "batch",
         "--input-file",
@@ -198,7 +199,7 @@ def main():
         "1",
     ]
     env = os.environ.copy()
-    env["PYTHONPATH"] = "/home/graham/workspace/experiments/lean4/src:" + env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = str(Path(os.environ.get("LEAN4_SRC", Path.home() / "workspace/experiments/lean4/src"))) + ":" + env.get("PYTHONPATH", "")
     rc = subprocess.run(cmd, env=env).returncode
     if rc != 0 or not tmp_out.exists():
         typer.echo("Lean4 batch failed on merged table constraints", err=True)

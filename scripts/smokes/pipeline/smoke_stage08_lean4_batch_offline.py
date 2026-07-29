@@ -21,6 +21,7 @@ Checks that the Lean4 CLI produces a valid OUT.json object with proof_results an
 section mapping. Uses --deterministic --no-llm to avoid network dependence.
 """
 from __future__ import annotations
+import sys
 
 import json
 import os
@@ -34,7 +35,7 @@ app = typer.Typer(add_completion=False)
 @app.command()
 def main(
     lean4_cli: str = typer.Option(
-        "python /home/graham/workspace/experiments/lean4/src/lean4_prover/cli_mini.py",
+        os.environ.get("LEAN4_CLI_CMD", f"{sys.executable} {Path(os.environ.get('LEAN4_CLI', Path.home() / 'workspace/experiments/lean4/src/lean4_prover/cli_mini.py'))}"),
         help="Lean4 batch CLI entry (module or script path)",
     ),
     tmpdir: Path = typer.Option(Path("/tmp/lean4_smoke_stage08")),
@@ -65,7 +66,7 @@ def main(
 
     env = os.environ.copy()
     # Ensure lean4_prover is importable when calling the module path directly
-    env.setdefault("PYTHONPATH", "/home/graham/workspace/experiments/lean4/src")
+    env.setdefault("PYTHONPATH", str(Path(os.environ.get("LEAN4_SRC", Path.home() / "workspace/experiments/lean4/src"))))
     rc = subprocess.run(cmd, shell=True, env=env).returncode
     if rc != 0:
         typer.secho(f"Lean4 CLI failed: rc={rc}", fg=typer.colors.RED)

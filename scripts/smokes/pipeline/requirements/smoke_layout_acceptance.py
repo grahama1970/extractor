@@ -12,6 +12,7 @@ Default behavior is non-strict: writes a diff summary artifact and exits 0.
 Set ACCEPT_STRICT=1 to make mismatches fail with exit code 1.
 """
 from __future__ import annotations
+import sys
 
 import json
 import os
@@ -61,7 +62,7 @@ def run_extract(pdf: Path, out_dir: Path) -> Path:
     if p07.exists():
         return p07
     cmd = [
-        "/home/graham/workspace/experiments/extractor/.venv/bin/python",
+        sys.executable,
         "-m",
         "src.cli",
         "extract",

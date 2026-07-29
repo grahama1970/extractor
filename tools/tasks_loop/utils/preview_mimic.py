@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import os
 import fitz  # PyMuPDF
 from pathlib import Path
 from generate_scale_fixture import create_scale_fixture
@@ -8,7 +9,12 @@ from generate_scale_fixture import create_scale_fixture
 FILE_ROOT = Path(__file__).resolve().parent
 PROJECT_ROOT = FILE_ROOT.parent.parent.parent
 # Artifacts are in ~/.gemini
-ARTIFACTS_DIR = Path("/home/graham/.gemini/antigravity/brain/e798a01e-b43d-4bf8-8404-0a8308348507")
+ARTIFACTS_DIR = Path(
+    os.environ.get(
+        "ANTIGRAVITY_ARTIFACTS_DIR",
+        Path.home() / ".gemini/antigravity/brain/e798a01e-b43d-4bf8-8404-0a8308348507",
+    )
+)
 
 
 def generate_preview(config_path: Path, output_name: str, seed: int = 42):

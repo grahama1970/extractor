@@ -12,6 +12,7 @@
 Skips if the Lean4 CLI is not available at the default path.
 """
 from __future__ import annotations
+import os
 
 import json
 from pathlib import Path
@@ -41,7 +42,7 @@ def main(
     pdf: Path = typer.Option(Path("data/input/pipeline/BHT_CV32A65X_marked.pdf"), exists=True)
 ):
     """Check for the existence of the Lean4 CLI and exit if missing."""
-    lean_cli = Path("/home/graham/workspace/experiments/lean4/src/lean4_prover/cli_mini.py")
+    lean_cli = Path(os.environ.get("LEAN4_CLI", Path.home() / "workspace/experiments/lean4/src/lean4_prover/cli_mini.py"))
     if not lean_cli.exists():
         print("SKIP: Lean4 CLI not found; skipping RTM lean4_status smoke.")
         raise typer.Exit(0)

@@ -5,9 +5,9 @@ After=network.target
 [Service]
 Type=simple
 User=graham
-WorkingDirectory=/home/graham/workspace/experiments/extractor
-Environment=PATH=/home/graham/workspace/experiments/extractor/.venv/bin:/usr/local/bin:/usr/bin:/bin
-ExecStart=/home/graham/workspace/experiments/extractor/.venv/bin/python scripts/pdf_learning_daemon.py \
+WorkingDirectory=%h/workspace/experiments/extractor
+Environment=PATH=%h/workspace/experiments/extractor/.venv/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/workspace/experiments/extractor/.venv/bin/python scripts/pdf_learning_daemon.py \
     --corpus /mnt/storage12tb/extractor_corpus \
     --interval 300
 Restart=always

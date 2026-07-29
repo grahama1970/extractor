@@ -11,6 +11,7 @@ Skips if the local Lean4 CLI is not found. This does not execute a proof; it
 verifies that the flag appears in the help output for operator confidence.
 """
 from __future__ import annotations
+import os
 
 import json
 from pathlib import Path
@@ -24,7 +25,7 @@ app = typer.Typer(add_completion=False)
 @app.command()
 def main():
     """Check for Lean4 CLI existence and display help information."""
-    cli = Path("/home/graham/workspace/experiments/lean4/src/lean4_prover/cli_mini.py")
+    cli = Path(os.environ.get("LEAN4_CLI", Path.home() / "workspace/experiments/lean4/src/lean4_prover/cli_mini.py"))
     if not cli.exists():
         print("SKIP: Lean4 CLI not found; skipping help check.")
         raise typer.Exit(0)

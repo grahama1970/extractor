@@ -9,6 +9,7 @@
 Acceptance: run_summary contains requirements counts (after Stage 14)
 """
 from __future__ import annotations
+import sys
 
 import json
 from pathlib import Path
@@ -27,7 +28,7 @@ def main():
     OUT.mkdir(parents=True, exist_ok=True)
     rc = subprocess.run(
         [
-            "/home/graham/workspace/experiments/extractor/.venv/bin/python",
+            sys.executable,
             "-m",
             "src.cli",
             "extract",

@@ -14,6 +14,7 @@ from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
 from loguru import logger
 import markdown2
+from pathlib import Path
 
 # In a real project, these would be in a shared schema file
 
@@ -44,11 +45,16 @@ async def call_claude_subprocess(
 
     # Set up environment with proper PATH
     env = os.environ.copy()
-    env["PATH"] = "/usr/bin:/bin:/usr/local/bin:/home/graham/.bun/bin:" + env.get("PATH", "")
-    env["BUN_INSTALL"] = "/home/graham/.bun"
+    bun_install = Path(os.environ.get("BUN_INSTALL", Path.home() / ".bun"))
+    env["PATH"] = f"/usr/bin:/bin:/usr/local/bin:{bun_install / 'bin'}:" + env.get("PATH", "")
+    env["BUN_INSTALL"] = str(bun_install)
 
     # Use correct claude -p syntax (NOT --print)
-    cmd = ["/home/graham/.bun/bin/claude", "-p", "--dangerously-skip-permissions"]
+    cmd = [
+        str(Path(os.environ.get("CLAUDE_CLI", bun_install / "bin/claude"))),
+        "-p",
+        "--dangerously-skip-permissions",
+    ]
 
     try:
         # Create subprocess with proper stream handling

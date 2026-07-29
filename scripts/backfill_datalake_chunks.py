@@ -28,10 +28,18 @@ os.environ["SYNC_TO_MEMORY"] = "1"
 
 def find_all_run_dirs():
     """Find all extracted run directories across all locations."""
+    pi_skills_root = Path(
+        os.environ.get("PI_SKILLS_ROOT", Path.home() / "workspace/experiments/pi-mono/.pi/skills")
+    )
     dirs = []
     locations = [
-        Path("/home/graham/workspace/experiments/pi-mono/.pi/skills/review-pdf/extracted_runs_staging"),
-        Path("/home/graham/workspace/experiments/pi-mono/.pi/skills/review-pdf/extracted_runs"),
+        Path(
+            os.environ.get(
+                "REVIEW_PDF_RUNS_STAGING",
+                pi_skills_root / "review-pdf/extracted_runs_staging",
+            )
+        ),
+        Path(os.environ.get("REVIEW_PDF_RUNS", pi_skills_root / "review-pdf/extracted_runs")),
         Path("/mnt/storage12tb/skills/review-pdf/extracted_runs"),
     ]
     for loc in locations:

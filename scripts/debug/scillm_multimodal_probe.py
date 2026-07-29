@@ -15,7 +15,7 @@ Usage (env):
 
 Notes
 - If SciLLM is not installed into this venv, set SCILLM_PY_PATH to the repo path
-  (e.g., /home/graham/workspace/experiments/litellm) and the script will add it to sys.path.
+  (e.g., ~/workspace/experiments/litellm) and the script will add it to sys.path.
 - Model ID: pass --model-id or let the script fetch /v1/models and pick the first VLM‑looking id.
 """
 from __future__ import annotations

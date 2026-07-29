@@ -12,6 +12,7 @@ This checks the environment builder used by pipeline-run-all so we don't
 depend on the Lean4 installation to validate the flag threading.
 """
 from __future__ import annotations
+import os
 
 import json
 from pathlib import Path
@@ -34,7 +35,7 @@ def main():
     results_dir.mkdir(parents=True, exist_ok=True)
 
     # Use the default local CLI path; the function only formats the command string
-    lean_cli = "python /home/graham/workspace/experiments/lean4/src/lean4_prover/cli_mini.py"
+    lean_cli = os.environ.get("LEAN4_CLI_CMD", f"{sys.executable} {Path(os.environ.get('LEAN4_CLI', Path.home() / 'workspace/experiments/lean4/src/lean4_prover/cli_mini.py'))}")
 
     env = _ensure_env(
         {},

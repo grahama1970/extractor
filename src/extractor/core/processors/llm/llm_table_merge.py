@@ -19,6 +19,8 @@ Example Usage:
 """
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import os
+from pathlib import Path
 from typing import Annotated, List, Tuple, Literal
 
 from pydantic import BaseModel
@@ -36,7 +38,15 @@ import json
 
 # Direct ArangoDB connection - NO MORE DUMMY FUNCTIONS!
 ARANGO_WORKER_PATH = (
-    "/home/graham/workspace/experiments/cc_executor/.claude/agents/workers/arango_tools_worker.py"
+    str(
+        Path(
+            os.environ.get(
+                "ARANGO_WORKER_PATH",
+                Path.home()
+                / "workspace/experiments/cc_executor/.claude/agents/workers/arango_tools_worker.py",
+            )
+        )
+    )
 )
 
 

@@ -38,16 +38,19 @@ app.add_middleware(
 )
 
 MEMORY_SERVICE_URL = os.environ.get("MEMORY_SERVICE_URL", "http://127.0.0.1:8601")
+PI_SKILLS_ROOT = Path(
+    os.environ.get("PI_SKILLS_ROOT", Path.home() / "workspace/experiments/pi-mono/.pi/skills")
+)
 STATE_DIR = Path(
     os.environ.get(
         "STATE_DIR",
-        "/home/graham/workspace/experiments/pi-mono/.pi/skills/learn-datalake/state",
+        PI_SKILLS_ROOT / "learn-datalake/state",
     )
 )
 TASK_MONITOR_DIR = STATE_DIR / "task_monitor"
 SHADOW_DIR = Path(os.environ.get(
     "SHADOW_DIR",
-    "/home/graham/workspace/experiments/pi-mono/.pi/skills/learn-datalake/state/shadow",
+    STATE_DIR / "shadow",
 ))
 
 

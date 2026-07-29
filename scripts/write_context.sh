@@ -32,7 +32,7 @@ cat > "$ROOT/CONTEXT.md" <<'EOF'
 - XLSX simple mode (`XLSX_SIMPLE_MODE=1`) is structure-first; parity not enforced.
 
 ## Update scillm
-- Dependency is pinned to `scillm @ file:///home/graham/workspace/experiments/litellm`.
+- Dependency is pinned to `scillm @ file://$HOME/workspace/experiments/litellm`.
 - Update with one command from repo root:
   ```bash
   scripts/update_scillm.sh

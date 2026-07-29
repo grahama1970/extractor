@@ -266,7 +266,7 @@ def main():
     """Parse command-line arguments for a continuous PDF learning daemon."""
     parser = argparse.ArgumentParser(description="Continuous PDF Learning Daemon")
     parser.add_argument("--corpus", type=Path, required=True, help="Corpus directory")
-    parser.add_argument("--extractor", type=Path, default=Path("/home/graham/workspace/experiments/extractor"),
+    parser.add_argument("--extractor", type=Path, default=Path(__file__).resolve().parents[1],
                         help="Extractor project directory")
     parser.add_argument("--interval", type=int, default=300, help="Check interval in seconds")
     args = parser.parse_args()

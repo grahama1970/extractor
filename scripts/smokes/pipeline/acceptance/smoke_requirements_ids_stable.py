@@ -10,6 +10,7 @@ Acceptance: requirement IDs stable across resume runs
 Run accurate twice into the same OUT with --resume and compare IDs set.
 """
 from __future__ import annotations
+import sys
 
 import json
 from pathlib import Path
@@ -36,7 +37,7 @@ def main():
     # First run
     rc = subprocess.run(
         [
-            "/home/graham/workspace/experiments/extractor/.venv/bin/python",
+            sys.executable,
             "-m",
             "src.cli",
             "extract",
@@ -52,7 +53,7 @@ def main():
     # Resume run (should skip miner and preserve IDs)
     rc = subprocess.run(
         [
-            "/home/graham/workspace/experiments/extractor/.venv/bin/python",
+            sys.executable,
             "-m",
             "extractor.pipeline.run_all",
             "--pdf",

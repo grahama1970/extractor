@@ -116,7 +116,7 @@ def restart_downloads():
     print(f"[{datetime.now():%H:%M:%S}] Restarting corpus builder...")
     subprocess.Popen(
         [sys.executable, "scripts/corpus_builder.py", "download", "--source", "all", "--count", "4000"],
-        cwd="/home/graham/workspace/experiments/extractor",
+        cwd=str(Path(__file__).resolve().parents[1]),
         stdout=open("/tmp/dl_all.log", "a"),
         stderr=subprocess.STDOUT,
         start_new_session=True,

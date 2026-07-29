@@ -438,7 +438,7 @@ if __name__ == "__main__":
 
         # Test 4: Test Unified Extraction
         print("\n📝 Test 4: Unified Extraction Test")
-        test_pdf = "/home/graham/workspace/experiments/extractor/data/input/2505.03335v2.pdf"
+        test_pdf = str(Path(__file__).resolve().parents[3] / "data/input/2505.03335v2.pdf")
         if os.path.exists(test_pdf):
             try:
                 from extractor import extract_to_unified_json

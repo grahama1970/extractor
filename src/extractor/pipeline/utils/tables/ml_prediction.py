@@ -69,7 +69,10 @@ STRATEGY_PREDICTOR_CONFIDENCE_THRESHOLD = float(
 )
 STRATEGY_PREDICTOR_MODEL_PATH = os.getenv(
     "STRATEGY_PREDICTOR_MODEL_PATH",
-    "/home/graham/workspace/experiments/pi-mono/.pi/skills/create-table-classifier/models/table-classifier-ensemble-final",
+    str(
+        Path.home()
+        / "workspace/experiments/pi-mono/.pi/skills/create-table-classifier/models/table-classifier-ensemble-final"
+    ),
 )
 
 # Global predictor instance (lazy loaded)

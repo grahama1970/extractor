@@ -19,7 +19,8 @@ export LITELLM_ATTACH_SESSION=true
 # Dedicated test DB per session
 export ARANGO_DATABASE="pdf_knowledge_base_test_${SID}"
 # Wire Lean4 CLI for full proving (file I/O style)
-export LEAN4_CLI_CMD="python /home/graham/workspace/experiments/lean4/src/lean4_prover/cli_mini.py batch --input-file {input_json} --output-file {output_json}"
+LEAN4_ROOT="${LEAN4_ROOT:-$HOME/workspace/experiments/lean4}"
+export LEAN4_CLI_CMD="${LEAN4_PYTHON:-python} $LEAN4_ROOT/src/lean4_prover/cli_mini.py batch --input-file {input_json} --output-file {output_json}"
 ANN_JSON="$OUT/01_annotation_processor/json_output/01_annotations.json"
 BLOCKS_JSON="$OUT/02_marker_extractor/json_output/02_marker_blocks.json"
 VERIFIED_JSON="$OUT/03_suspicious_headers/json_output/03_verified_blocks.json"

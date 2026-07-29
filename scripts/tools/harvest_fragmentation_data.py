@@ -20,6 +20,7 @@ import json
 import os
 import re
 import sys
+from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "src"))
 
@@ -229,7 +230,10 @@ def extract_features(raw_cell: str, use_conservative_label: bool = True) -> dict
 
 def harvest(
     corpus_root: str = "/mnt/storage12tb/extractor_corpus/results",
-    output_path: str = "/home/graham/workspace/experiments/pi-mono/.pi/skills/create-table-classifier/data/fragmentation_features.jsonl",
+    output_path: str = str(
+        Path.home()
+        / "workspace/experiments/pi-mono/.pi/skills/create-table-classifier/data/fragmentation_features.jsonl"
+    ),
 ) -> None:
     """Harvest JSON table data from specified corpus directory."""
     pattern = os.path.join(corpus_root, "*", "05_table_extractor", "json_output", "05_tables.json")

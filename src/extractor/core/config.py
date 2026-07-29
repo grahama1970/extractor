@@ -21,9 +21,9 @@ class ExtractionConfig(BaseSettings):
 
     # Security settings
     allowed_dirs: List[Path] = Field(
-        default=[
-            Path("/home/graham/workspace/experiments/extractor/proof_of_concept"),
-            Path("/home/graham/workspace/experiments/extractor/tmp"),
+        default_factory=lambda: [
+            Path.cwd() / "proof_of_concept",
+            Path.cwd() / "tmp",
             Path("/tmp"),
         ],
         description="Directories allowed for PDF processing",

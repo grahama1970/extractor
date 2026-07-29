@@ -8,8 +8,8 @@ Verifies the fixes for:
 2. Table Header Quality (LLM Assist fallback)
 """
 
-import os
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -29,7 +29,11 @@ PILOT_IDS = [
 ]
 
 SPARTA_ROOT = Path(
-    "/home/graham/workspace/experiments/sparta/data/runs/run-2025-12-18_144426-2eb428c/extractor_output"
+    os.environ.get(
+        "SPARTA_EXTRACTOR_OUTPUT",
+        Path.home()
+        / "workspace/experiments/sparta/data/runs/run-2025-12-18_144426-2eb428c/extractor_output",
+    )
 )
 OUTPUT_BASE = Path("data/pilot_run_results")
 EXTRACTOR_RUN_SH = Path(".agents/skills/extractor/run.sh").resolve()

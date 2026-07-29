@@ -13,6 +13,8 @@ This isolates pre-prover extraction for plain sentences containing modal verbs
 and validates the Lean4 CLI integration with --deterministic/--no-llm.
 """
 from __future__ import annotations
+import os
+import sys
 
 import json
 import re
@@ -37,7 +39,7 @@ def extract_shall_sentences(text: str) -> list[str]:
 @app.command()
 def main():
     """Run the CLI application, skipping if Lean4 prover is absent."""
-    lean_cli = Path("/home/graham/workspace/experiments/lean4/src/lean4_prover/cli_mini.py")
+    lean_cli = Path(os.environ.get("LEAN4_CLI", Path.home() / "workspace/experiments/lean4/src/lean4_prover/cli_mini.py"))
     if not lean_cli.exists():
         print("SKIP: Lean4 CLI not found; install lean4_prover first.")
         raise typer.Exit(0)
@@ -58,7 +60,7 @@ def main():
     out = Path("/tmp/lean_shall_out.json")
 
     cmd = [
-        "/home/graham/workspace/experiments/extractor/.venv/bin/python",
+        sys.executable,
         str(lean_cli),
         "batch",
         "--input-file",
@@ -71,7 +73,7 @@ def main():
         "1",
     ]
     env = __import__("os").environ.copy()
-    env["PYTHONPATH"] = "/home/graham/workspace/experiments/lean4/src:" + env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = str(Path(os.environ.get("LEAN4_SRC", Path.home() / "workspace/experiments/lean4/src"))) + ":" + env.get("PYTHONPATH", "")
     rc = subprocess.run(cmd, env=env).returncode
     if rc != 0 or not out.exists():
         typer.echo("Lean4 batch failed", err=True)

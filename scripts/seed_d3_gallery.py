@@ -13,6 +13,7 @@ Usage:
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 from datetime import datetime, timezone
@@ -43,7 +44,12 @@ try:
     sys.path.insert(
         0,
         str(
-            Path("/home/graham/workspace/experiments/pi-mono/.pi/skills/figure-lab")
+            Path(
+                os.environ.get(
+                    "FIGURE_LAB_ROOT",
+                    Path.home() / "workspace/experiments/pi-mono/.pi/skills/figure-lab",
+                )
+            )
         ),
     )
     from figure_lab.chart_generators import (

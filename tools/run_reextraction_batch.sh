@@ -32,7 +32,7 @@ while IFS= read -r PDF_REL_PATH || [ -n "$PDF_REL_PATH" ]; do
     # We enable requirement proving and PDF annotation.
     # We enable the ML-based strategy predictor for tables.
     export USE_STRATEGY_PREDICTOR=true
-    export STRATEGY_PREDICTOR_MODEL_PATH="/home/graham/workspace/experiments/pi-mono/.pi/skills/create-table-classifier/models/table-classifier-ensemble-final"
+    export STRATEGY_PREDICTOR_MODEL_PATH="${STRATEGY_PREDICTOR_MODEL_PATH:-$HOME/workspace/experiments/pi-mono/.pi/skills/create-table-classifier/models/table-classifier-ensemble-final}"
     export SCILLM_MODEL="PLACEHOLDER_M7"
     
     uv run python3 -m extractor.pipeline \

@@ -14,6 +14,7 @@ Uses the simple claude_p_with_timeout function from extract_pdf_pipeline.py
 
 import json
 import subprocess
+from pathlib import Path
 from typing import Dict, List, Any
 from loguru import logger
 import sys
@@ -177,7 +178,8 @@ Focus on:
             prompt = self.create_analysis_prompt(batch, annotations)
 
             # Save prompt for inspection
-            prompt_file = f"/home/graham/workspace/experiments/extractor/tmp/suspicious_batch_{i+1}_prompt.txt"
+            prompt_file = Path("tmp") / f"suspicious_batch_{i+1}_prompt.txt"
+            prompt_file.parent.mkdir(parents=True, exist_ok=True)
             with open(prompt_file, "w") as f:
                 f.write(prompt)
 
@@ -238,7 +240,8 @@ def main():
     }
 
     # Save test data
-    test_file = "/home/graham/workspace/experiments/extractor/tmp/test_blocks_for_jq.json"
+    test_file = Path("tmp") / "test_blocks_for_jq.json"
+    test_file.parent.mkdir(parents=True, exist_ok=True)
     with open(test_file, "w") as f:
         json.dump(test_blocks, f, indent=2)
 
@@ -252,7 +255,7 @@ def main():
     analyzer = SuspiciousBlockAnalyzer()
     import asyncio
 
-    decisions = asyncio.run(analyzer.analyze_suspicious_blocks(test_file, annotations))
+    decisions = asyncio.run(analyzer.analyze_suspicious_blocks(str(test_file), annotations))
 
     # Show results
     logger.info("\n=== Analysis Decisions ===")
@@ -267,7 +270,7 @@ def debug_function():
     """Test jq extraction directly."""
 
     # Test jq command
-    test_file = "/home/graham/workspace/experiments/extractor/tmp/test_blocks_for_jq.json"
+    test_file = Path("tmp") / "test_blocks_for_jq.json"
 
     # Direct jq test
     jq_command = """

@@ -10,6 +10,7 @@ Acceptance: Section 2 has 3 tables total (1 merged, 2 non-merged) and tables car
 This checks Stage 07 section tables list and counts non-empty caption/title fields.
 """
 from __future__ import annotations
+import sys
 
 import json
 import os
@@ -30,7 +31,7 @@ def ensure_stage07() -> Path:
     if p07.exists():
         return p07
     cmd = [
-        "/home/graham/workspace/experiments/extractor/.venv/bin/python",
+        sys.executable,
         "-m",
         "src.cli",
         "extract",
@@ -82,7 +83,7 @@ def main():
     )
     strict = os.getenv("ACCEPT_STRICT", "").lower() in {"1", "true", "yes", "y"}
     if strict:
-        if len(tables) != 3 or titled != 3:
+        if len(agg_tables) != 3 or titled != 3:
             typer.echo("Section 2 tables/titles mismatch", err=True)
             raise typer.Exit(1)
     print(json.dumps(report, indent=2))

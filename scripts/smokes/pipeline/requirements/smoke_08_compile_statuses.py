@@ -12,6 +12,7 @@ Runs the pipeline with --prove to ensure 08_requirements_enriched.json is presen
 Writes scripts/artifacts/req_compile_status.json with counts by status.
 """
 from __future__ import annotations
+import sys
 
 import json
 from pathlib import Path
@@ -29,7 +30,7 @@ def main():
     """Run the extractor CLI to process PDF and generate enriched JSON output."""
     OUT.mkdir(parents=True, exist_ok=True)
     cmd = [
-        "/home/graham/workspace/experiments/extractor/.venv/bin/python",
+        sys.executable,
         "-m",
         "src.cli",
         "extract",

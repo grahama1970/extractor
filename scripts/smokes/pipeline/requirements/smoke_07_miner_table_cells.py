@@ -11,6 +11,7 @@ Ensures the miner runs and reports the count of table_cell-derived requirements 
 Writes scripts/artifacts/req_miner_table.json
 """
 from __future__ import annotations
+import sys
 
 import json
 from pathlib import Path
@@ -30,7 +31,7 @@ def ensure_pipeline() -> Path:
     if req_json.exists():
         return req_json
     cmd = [
-        "/home/graham/workspace/experiments/extractor/.venv/bin/python",
+        sys.executable,
         "-m",
         "src.cli",
         "extract",

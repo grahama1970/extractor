@@ -11,6 +11,7 @@ Acceptance: Top-level sections count and titles from Stage 07.
 Writes a summary and titles list; optional strict mode via ACCEPT_STRICT=1.
 """
 from __future__ import annotations
+import sys
 
 import json
 import os
@@ -31,7 +32,7 @@ def ensure_stage07() -> Path:
     if p07.exists():
         return p07
     cmd = [
-        "/home/graham/workspace/experiments/extractor/.venv/bin/python",
+        sys.executable,
         "-m",
         "src.cli",
         "extract",

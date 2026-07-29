@@ -12,13 +12,26 @@ import json
 import os
 import sys
 import warnings
+from pathlib import Path
 
 import numpy as np
 
 warnings.filterwarnings("ignore")
 
-DATA_PATH = "/home/graham/workspace/experiments/pi-mono/.pi/skills/create-table-classifier/data/fragmentation_features.jsonl"
-MODEL_DIR = "/home/graham/workspace/experiments/pi-mono/.pi/skills/create-table-classifier/models/fragmentation-repair"
+DATA_PATH = os.environ.get(
+    "FRAGMENTATION_FEATURES_PATH",
+    str(
+        Path.home()
+        / "workspace/experiments/pi-mono/.pi/skills/create-table-classifier/data/fragmentation_features.jsonl"
+    ),
+)
+MODEL_DIR = os.environ.get(
+    "FRAGMENTATION_MODEL_DIR",
+    str(
+        Path.home()
+        / "workspace/experiments/pi-mono/.pi/skills/create-table-classifier/models/fragmentation-repair"
+    ),
+)
 
 NUMERIC_FEATURES = [
     "cell_len", "num_spaces", "num_words", "left_word_len", "right_word_len",

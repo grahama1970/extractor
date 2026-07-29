@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PROJECT="/home/graham/workspace/experiments/extractor"
-SKILLS_SRC="/home/graham/workspace/experiments/pi-mono/.pi/skills"
+PROJECT="${PROJECT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+SKILLS_SRC="${PI_SKILLS_ROOT:-$HOME/workspace/experiments/pi-mono/.pi/skills}"
 SKILLS_DST="$PROJECT/.claude/skills"
 
 # Remove blanket symlink
